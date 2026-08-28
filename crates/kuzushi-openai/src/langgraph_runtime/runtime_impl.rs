@@ -3,12 +3,16 @@ use async_trait::async_trait;
 use kuzushi_core::{
     runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl, AgentQueryRequest,
     AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentToolLoopRequest,
-    LoopHistoryEntry, ModelTokenUsage, Observed, RuntimeFailure, RuntimeFailureClass,
-    RuntimeFailureMetadata, ScanCancellation, TriageOutcome, TriageRequest,
+    AgentToolPolicyAuthorization, AgentToolPolicyReceipt, LoopHistoryEntry, ModelTokenUsage,
+    Observed, RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata, ScanCancellation,
+    TriageOutcome, TriageRequest,
 };
 
-use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
-use super::bridge_process::{bridge_runtime_failure, run_bridge};
+use super::bridge_payloads::{
+    BridgeRequest, BridgeResponse, ToolPolicyHandshakeBridgeRequest,
+    ToolPolicyHandshakeBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+};
+use super::bridge_process::{bridge_runtime_failure, run_bridge, run_tool_policy_handshake_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
@@ -32,6 +36,19 @@ impl AgentRuntime for LangGraphRuntime {
         self.validated_model_credential(model).map(|_| ())
     }
 
+    fn authorize_tool_policy_blocking(
+        &self,
+        authorization: &AgentToolPolicyAuthorization,
+    ) -> Result<AgentToolPolicyReceipt> {
+        let request = ToolPolicyHandshakeBridgeRequest {
+            protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+            envelope_type: "tool-policy-handshake",
+            authorization: authorization.clone(),
+        };
+        let response = run_tool_policy_handshake_bridge(&self.command, &request)?;
+        tool_policy_receipt(response, authorization)
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         self.query_observed_blocking(request)
             .map(Observed::into_value)
@@ -41,15 +58,7 @@ impl AgentRuntime for LangGraphRuntime {
         &self,
         request: AgentQueryRequest,
     ) -> Result<Observed<AgentQueryResponse>> {
-        let model = request.model.clone();
-        let credential = self.credential_for_model(&request.model)?;
-        let bridge_request = bridge_request_from(self, request, credential);
-        let response = run_bridge_with_transport_retries(
-            &self.command,
-            bridge_request,
-            self.cancellation.as_ref(),
-            &self.retry,
-        )?;
+        let (response, model) = self.run_query_bridge(request, None)?;
         observed_agent_response_from_bridge(response, &model)?
             .try_map(AgentQueryResponse::validate_cost)
     }
@@ -133,10 +142,146 @@ impl AgentRuntime for LangGraphRuntime {
     }
 }
 
+fn tool_policy_receipt(
+    response: ToolPolicyHandshakeBridgeResponse,
+    authorization: &AgentToolPolicyAuthorization,
+) -> Result<AgentToolPolicyReceipt> {
+    if !response.ok {
+        return Err(bridge_runtime_failure(
+            response.error_class.as_deref(),
+            response.status,
+            response.error.as_deref(),
+            response.detail.as_deref(),
+        ));
+    }
+    let receipt = response
+        .acknowledgement
+        .context("Ask bridge omitted its tool-policy acknowledgement")?;
+    receipt.validate_for(authorization)?;
+    Ok(receipt)
+}
+
+fn execution_tool_policy_receipt(
+    response: &BridgeResponse,
+    authorization: &AgentToolPolicyAuthorization,
+) -> Result<AgentToolPolicyReceipt> {
+    let receipt = response
+        .tool_policy_acknowledgement
+        .clone()
+        .context("executing Ask bridge omitted its tool-policy acknowledgement")?;
+    receipt.validate_for(authorization)?;
+    Ok(receipt)
+}
+
+#[cfg(test)]
+mod tool_policy_receipt_tests {
+    use super::*;
+
+    fn authorization() -> AgentToolPolicyAuthorization {
+        let target = tempfile::tempdir().unwrap();
+        AgentToolPolicyAuthorization::read_only_ask(target.path()).unwrap()
+    }
+
+    fn response(
+        acknowledgement: Option<AgentToolPolicyReceipt>,
+    ) -> ToolPolicyHandshakeBridgeResponse {
+        ToolPolicyHandshakeBridgeResponse {
+            ok: true,
+            acknowledgement,
+            error: None,
+            error_class: None,
+            detail: None,
+            status: None,
+        }
+    }
+
+    #[test]
+    fn missing_bridge_acknowledgement_fails_closed() {
+        let error = tool_policy_receipt(response(None), &authorization())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("omitted its tool-policy acknowledgement"));
+    }
+
+    #[test]
+    fn mismatched_effective_tools_fail_closed() {
+        let authorization = authorization();
+        let receipt = AgentToolPolicyReceipt {
+            protocol_version: authorization.protocol_version,
+            policy_id: authorization.policy_id.clone(),
+            effective_tools: vec!["Read".to_string(), "Write".to_string()],
+            read_roots: authorization.policy.mcp_read_roots.clone(),
+            write_shell_tools_mounted: true,
+            mcp_tools_mounted: false,
+        };
+
+        assert!(tool_policy_receipt(response(Some(receipt)), &authorization).is_err());
+    }
+
+    #[test]
+    fn executing_query_without_acknowledgement_fails_closed() {
+        let response: BridgeResponse = serde_json::from_value(serde_json::json!({
+            "ok": true,
+            "text": "answer",
+            "structured": null,
+            "error": null
+        }))
+        .unwrap();
+
+        let error = execution_tool_policy_receipt(&response, &authorization())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("executing Ask bridge omitted"));
+    }
+
+    #[test]
+    fn authorized_query_returns_receipt_from_its_executing_process() {
+        let target = tempfile::tempdir().unwrap();
+        let authorization = AgentToolPolicyAuthorization::read_only_ask(target.path()).unwrap();
+        let script = r#"let b='';process.stdin.on('data',c=>b+=c);process.stdin.on('end',()=>{let r=JSON.parse(b),a=r.authorization;process.stdout.write(JSON.stringify({ok:true,text:'bound',structured:null,error:null,toolPolicyAcknowledgement:{protocolVersion:a.protocolVersion,policyId:a.policyId,effectiveTools:a.policy.tools,readRoots:a.policy.mcpReadRoots,writeShellToolsMounted:false,mcpToolsMounted:false}}))})"#;
+        let config = kuzushi_core::RuntimeConfig {
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            langgraph_bridge_command: Some(vec![
+                "node".to_string(),
+                "-e".to_string(),
+                script.to_string(),
+            ]),
+            ..kuzushi_core::RuntimeConfig::default()
+        };
+        let runtime = LangGraphRuntime::from_runtime_config(&config, target.path()).unwrap();
+        let request =
+            AgentQueryRequest::new("openai:gpt-test", target.path(), "system", "question")
+                .with_tool_policy(authorization.policy.clone());
+
+        let (response, receipt) = runtime
+            .query_authorized_observed_blocking(request, &authorization)
+            .unwrap();
+
+        assert_eq!(response.value.text, "bound");
+        assert_eq!(
+            receipt,
+            AgentToolPolicyReceipt {
+                protocol_version: kuzushi_core::runtime::READ_ONLY_ASK_POLICY_PROTOCOL_VERSION,
+                policy_id: kuzushi_core::runtime::READ_ONLY_ASK_POLICY_ID.to_string(),
+                effective_tools: kuzushi_core::runtime::READ_ONLY_ASK_TOOLS
+                    .iter()
+                    .map(|tool| (*tool).to_string())
+                    .collect(),
+                read_roots: vec![target.path().canonicalize().unwrap()],
+                write_shell_tools_mounted: false,
+                mcp_tools_mounted: false,
+            }
+        );
+    }
+}
+
 fn bridge_request_from(
     runtime: &LangGraphRuntime,
     request: AgentQueryRequest,
     credential: ModelCredential,
+    authorization: Option<AgentToolPolicyAuthorization>,
 ) -> BridgeRequest {
     let thinking_level = request
         .thinking_level
@@ -156,6 +301,7 @@ fn bridge_request_from(
         thinking_level,
         max_output_tokens: request.max_output_tokens,
         tool_policy: request.tool_policy,
+        authorization,
         runtime_options: request.runtime_options,
         temperature: request.temperature,
     }
@@ -271,6 +417,35 @@ pub(crate) struct ModelCredential {
 }
 
 impl LangGraphRuntime {
+    pub fn query_authorized_observed_blocking(
+        &self,
+        request: AgentQueryRequest,
+        authorization: &AgentToolPolicyAuthorization,
+    ) -> Result<(Observed<AgentQueryResponse>, AgentToolPolicyReceipt)> {
+        let (response, model) = self.run_query_bridge(request, Some(authorization.clone()))?;
+        let receipt = execution_tool_policy_receipt(&response, authorization)?;
+        let observed = observed_agent_response_from_bridge(response, &model)?
+            .try_map(AgentQueryResponse::validate_cost)?;
+        Ok((observed, receipt))
+    }
+
+    fn run_query_bridge(
+        &self,
+        request: AgentQueryRequest,
+        authorization: Option<AgentToolPolicyAuthorization>,
+    ) -> Result<(BridgeResponse, String)> {
+        let model = request.model.clone();
+        let credential = self.credential_for_model(&request.model)?;
+        let request = bridge_request_from(self, request, credential, authorization);
+        let response = run_bridge_with_transport_retries(
+            &self.command,
+            request,
+            self.cancellation.as_ref(),
+            &self.retry,
+        )?;
+        Ok((response, model))
+    }
+
     pub(crate) fn credential_for_model(&self, model: &str) -> Result<ModelCredential> {
         let env = kuzushi_core::runtime::bridge_api_key_env_for_model(model, &self.api_key_env)?;
         let value = if env == self.api_key_env {

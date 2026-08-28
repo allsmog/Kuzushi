@@ -308,8 +308,7 @@ fn explicit_context_snippet(
     module_id: &str,
     title: &str,
 ) -> Option<ArtifactKnowledgeSnippet> {
-    let path = target.join(source_path);
-    let body = crate::bounded_file::read_utf8_text_within(target, &path, 2 * 1024 * 1024).ok()?;
+    let body = load_context_snippet_body(target, source_path)?;
     let snippet_limit = if source_path.ends_with("threat-leads.md") {
         5000
     } else {
@@ -332,6 +331,17 @@ fn explicit_context_snippet(
         snippet,
         refs: Vec::new(),
     })
+}
+
+fn load_context_snippet_body(target: &Path, source_path: &str) -> Option<String> {
+    if source_path == persistent_threat_model_source_path(target) {
+        let document = crate::capabilities::try_load_persistent_threat_model(target)
+            .ok()
+            .flatten()?;
+        return serde_json::to_string(&document).ok();
+    }
+    let path = target.join(source_path);
+    crate::bounded_file::read_utf8_text_within(target, &path, 2 * 1024 * 1024).ok()
 }
 
 fn unique_carlini_context_snippets(

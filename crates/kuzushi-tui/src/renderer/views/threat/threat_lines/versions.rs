@@ -84,6 +84,8 @@ mod tests {
             created_at: "1000".to_string(),
             source: "build".to_string(),
             run_id: Some("run-9".to_string()),
+            model_id: None,
+            revision_id: None,
             methodology: "stride".to_string(),
             threat_count: 15,
             sha256: format!("sha256:{sha}"),

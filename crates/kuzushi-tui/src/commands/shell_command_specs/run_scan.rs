@@ -39,10 +39,16 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         description: "import an external reconnaissance export through the registered recon tool",
     },
     ShellCommandSpec {
-        command: "ask <question>",
+        command: "ask [--whole-model] <question>",
         aliases: &["/ask <question>", "?text"],
         category: ShellCommandCategory::RunScan,
-        description: "explicit agent question (stays on the current view)",
+        description: "ask inline with bounded screen context; --whole-model attaches the map",
+    },
+    ShellCommandSpec {
+        command: "ask cancel",
+        aliases: &["/ask cancel"],
+        category: ShellCommandCategory::RunScan,
+        description: "cancel only the active Ask and preserve a concurrent run",
     },
     ShellCommandSpec {
         command: "queue <tool|verb>",

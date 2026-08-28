@@ -58,14 +58,8 @@ fn setup_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     ) {
         return choice_picker_keybindings(app);
     }
-    if app.router.setup().editor() == Some(crate::app::SetupEditor::Budget) {
-        return vec![
-            bind("type", "budget USD"),
-            bind("Backspace", "delete"),
-            bind("Delete", "unset"),
-            bind("Enter", "save"),
-            bind("Esc", "cancel"),
-        ];
+    if let Some(bindings) = setup_value_editor_keybindings(app) {
+        return bindings;
     }
     vec![
         bind("↑/↓", "move"),
@@ -73,6 +67,37 @@ fn setup_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("Enter", "open/start"),
         bind("Esc", "workbench"),
         bind("Ctrl+C", "exit"),
+    ]
+}
+
+fn setup_value_editor_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if app.router.setup().editor() == Some(crate::app::SetupEditor::ThreatModel) {
+        return Some(map_run_config_keybindings(app));
+    }
+    (app.router.setup().editor() == Some(crate::app::SetupEditor::Budget)).then(|| {
+        vec![
+            bind("type", "budget USD"),
+            bind("Backspace", "delete"),
+            bind("Delete", "unset"),
+            bind("Enter", "save"),
+            bind("Esc", "cancel"),
+        ]
+    })
+}
+
+fn map_run_config_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if app.router.setup().map_run_config().edit().is_some() {
+        return vec![
+            bind("type", "comma-separated values"),
+            bind("Backspace", "delete"),
+            bind("Enter", "save"),
+            bind("Esc", "cancel"),
+        ];
+    }
+    vec![
+        bind("j/k/↑/↓", "row"),
+        bind("Enter/Space", "cycle/edit"),
+        bind("Esc", "return to Setup"),
     ]
 }
 
@@ -384,6 +409,7 @@ fn push_scene_cycle_and_exit(bindings: &mut Vec<FooterKeybinding>, app: &ShellAp
 fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     if app.router.scene().dfd_focused() {
         bindings.push(bind("j/k/↑/↓", "context"));
+        bindings.push(bind("g", "regenerate scope"));
         bindings.push(bind("Enter", "topology"));
         bindings.push(bind("Esc", "collapse"));
         bindings.push(bind("q", "leave"));
@@ -401,6 +427,7 @@ fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
         return;
     }
     bindings.push(bind("j/k/↑/↓", "select"));
+    bindings.push(bind("g", "regenerate scope"));
     if model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild {
         bindings.push(bind("Enter", "rebuild linked context"));
     } else {

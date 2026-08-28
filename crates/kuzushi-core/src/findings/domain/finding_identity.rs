@@ -3,6 +3,53 @@ use std::path::Path;
 
 use super::{extract_cwe, normalize_cwe, Finding};
 
+/// Evidence basis used to decide whether a durable identity is safe to fold
+/// or propagate across observations. This is intentionally separate from the
+/// legacy match tier: `stable_fp` covered both source-backed and file-only
+/// structural identities and therefore cannot authorize an identity-wide
+/// decision by itself.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingIdentityBasis {
+    ExactProducerFingerprint,
+    CrossRunDedupKey,
+    SourceLocator,
+    FileFallback,
+}
+
+impl FindingIdentityBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExactProducerFingerprint => "exact_producer_fingerprint",
+            Self::CrossRunDedupKey => "cross_run_dedup_key",
+            Self::SourceLocator => "source_locator",
+            Self::FileFallback => "file_fallback",
+        }
+    }
+
+    pub fn is_strong(self) -> bool {
+        !matches!(self, Self::FileFallback)
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        Some(match value.trim() {
+            "exact_producer_fingerprint" => Self::ExactProducerFingerprint,
+            "cross_run_dedup_key" => Self::CrossRunDedupKey,
+            "source_locator" => Self::SourceLocator,
+            "file_fallback" => Self::FileFallback,
+            _ => return None,
+        })
+    }
+
+    fn from_legacy_match_tier(raw: Option<&str>) -> Self {
+        match raw {
+            Some("dedup_key_cross_run") => Self::CrossRunDedupKey,
+            _ => Self::FileFallback,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingIdentityMatchTier {
@@ -28,12 +75,14 @@ impl FindingIdentityMatchTier {
 pub(crate) struct FindingIdentityKey {
     pub key: String,
     pub match_tier: FindingIdentityMatchTier,
+    pub basis: FindingIdentityBasis,
 }
 
 pub(crate) struct FindingIdentityInput<'a> {
     pub rule_id: &'a str,
     pub file_path: &'a str,
-    pub source_locator: Option<&'a str>,
+    pub symbol_locator: Option<&'a str>,
+    pub source_hint: Option<&'a str>,
 }
 
 #[cfg(test)]
@@ -41,7 +90,8 @@ pub(crate) fn finding_identity_key_for_finding(finding: &Finding) -> FindingIden
     finding_identity_key_for_input(FindingIdentityInput {
         rule_id: &finding.rule_id,
         file_path: &finding.file_path,
-        source_locator: None,
+        symbol_locator: finding.defensible_source_locator().as_deref(),
+        source_hint: None,
     })
 }
 
@@ -49,20 +99,39 @@ pub(crate) fn finding_identity_key_for_finding_at_target(
     finding: &Finding,
     target_root: &Path,
 ) -> FindingIdentityKey {
-    let source_locator = host_source_locator(target_root, finding);
+    let source_hint = host_source_hint(target_root, finding);
+    let symbol_locator = finding.defensible_source_locator();
     finding_identity_key_for_input(FindingIdentityInput {
         rule_id: &finding.rule_id,
         file_path: &finding.file_path,
-        source_locator: source_locator.as_deref(),
+        symbol_locator: symbol_locator.as_deref(),
+        source_hint: source_hint.as_deref(),
     })
 }
 
 pub(crate) fn finding_identity_key_for_input(
     input: FindingIdentityInput<'_>,
 ) -> FindingIdentityKey {
+    let basis = if input.symbol_locator.is_some() {
+        FindingIdentityBasis::SourceLocator
+    } else {
+        FindingIdentityBasis::FileFallback
+    };
     FindingIdentityKey {
         key: stable_identity_key(&input),
         match_tier: FindingIdentityMatchTier::StableFingerprint,
+        basis,
+    }
+}
+
+impl Finding {
+    /// Returns an explicit persisted basis when available. Legacy findings
+    /// are derived conservatively: only the old cross-run tier proves its
+    /// basis; the broad `stable_fp` tier becomes file fallback.
+    pub fn effective_identity_basis(&self) -> FindingIdentityBasis {
+        self.identity_basis.unwrap_or_else(|| {
+            FindingIdentityBasis::from_legacy_match_tier(self.identity_match_tier.as_deref())
+        })
     }
 }
 
@@ -80,24 +149,29 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
 /// safely decide review/proof continuity.
 ///
 /// When the cited target source is available, the host reads the cited line and
-/// uses its normalized content as a line-number-independent structural locus.
-/// That keeps two sinks of the same weakness in one file distinct while
-/// surviving insertions above either sink. If source is unavailable, the
-/// honest fallback is the structured weakness and normalized file path.
+/// uses its normalized content as a line-number-independent identity hint.
+/// Different statements usually mint different keys, but identical statements
+/// remain ambiguous and the resulting basis stays
+/// [`FindingIdentityBasis::FileFallback`]. If source is unavailable, the
+/// fallback is the structured weakness and normalized file path.
 /// Existing exact-fingerprint/dedup identities are considered before this
 /// fallback, so stored identities are not rewritten.
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
     let weakness = weakness_key(input.rule_id);
     let file_path = crate::identity::finding_identity::normalize_path(input.file_path);
+    let identity_scope = input
+        .symbol_locator
+        .map(|symbol| format!("{file_path}#{symbol}"))
+        .unwrap_or(file_path);
     crate::identity::compute_stable_fp_v3(crate::identity::StableFindingInput {
         tool_family: "kuzushi",
         rule_id: &weakness,
         language: None,
         parser_version: None,
         normalizer_version: None,
-        symbol_path_or_rename_group: Some(&file_path),
+        symbol_path_or_rename_group: Some(&identity_scope),
         ast_locus_hash: None,
-        normalized_snippet: input.source_locator.unwrap_or("file"),
+        normalized_snippet: input.source_hint.unwrap_or("file"),
         local_context_hash: None,
         disambiguator: None,
     })
@@ -114,13 +188,13 @@ fn weakness_key(rule_id: &str) -> String {
         })
 }
 
-fn host_source_locator(target_root: &Path, finding: &Finding) -> Option<String> {
+fn host_source_hint(target_root: &Path, finding: &Finding) -> Option<String> {
     if finding.start_line == 0 {
         return None;
     }
     let path = super::safe_target_path(target_root, &finding.file_path)?;
-    let source = crate::bounded_file::read_utf8_text_within(target_root, &path, 8 * 1024 * 1024)
-        .ok()?;
+    let source =
+        crate::bounded_file::read_utf8_text_within(target_root, &path, 8 * 1024 * 1024).ok()?;
     source
         .lines()
         .nth(finding.start_line.saturating_sub(1) as usize)
@@ -240,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn host_source_content_distinguishes_same_rule_findings() {
+    fn host_source_hint_distinguishes_different_statements_but_stays_weak() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src")).unwrap();
         std::fs::write(
@@ -254,6 +328,10 @@ mod tests {
         assert_ne!(
             finding_identity_key_for_finding_at_target(&first, temp.path()).key,
             finding_identity_key_for_finding_at_target(&second, temp.path()).key
+        );
+        assert_eq!(
+            finding_identity_key_for_finding_at_target(&first, temp.path()).basis,
+            FindingIdentityBasis::FileFallback
         );
     }
 
@@ -280,6 +358,38 @@ mod tests {
     }
 
     #[test]
+    fn only_a_qualified_persistable_symbol_mints_source_locator_basis() {
+        let mut qualified = finding("query sink", 10);
+        qualified.symbol_locator = Some("crate::db::execute".to_string());
+        let mut other = qualified.clone();
+        other.symbol_locator = Some("crate::db::prepare".to_string());
+        let mut unqualified = qualified.clone();
+        unqualified.symbol_locator = Some("execute".to_string());
+
+        let qualified_key = finding_identity_key_for_finding(&qualified);
+        assert_eq!(qualified_key.basis, FindingIdentityBasis::SourceLocator);
+        assert_ne!(
+            qualified_key.key,
+            finding_identity_key_for_finding(&other).key
+        );
+        assert_eq!(
+            finding_identity_key_for_finding(&unqualified).basis,
+            FindingIdentityBasis::FileFallback
+        );
+    }
+
+    #[test]
+    fn placeholder_symbol_never_upgrades_file_fallback_identity() {
+        let mut finding = finding("query sink", 10);
+        finding.symbol_locator = Some("<unknown>".to_string());
+
+        assert_eq!(
+            finding_identity_key_for_finding(&finding).basis,
+            FindingIdentityBasis::FileFallback
+        );
+    }
+
+    #[test]
     fn prose_only_cwe_mentions_do_not_change_identity() {
         let mut first = finding("query sink CWE-89", 10);
         first.rule_id = "db.query-sink".to_string();
@@ -291,6 +401,22 @@ mod tests {
         assert_eq!(
             finding_identity_key_for_finding(&first).key,
             finding_identity_key_for_finding(&second).key
+        );
+    }
+
+    #[test]
+    fn ambiguous_legacy_stable_tier_derives_as_file_fallback() {
+        let mut legacy = finding("query sink", 10);
+        legacy.identity_match_tier = Some("stable_fp".to_string());
+        assert_eq!(
+            legacy.effective_identity_basis(),
+            FindingIdentityBasis::FileFallback
+        );
+
+        legacy.identity_match_tier = Some("dedup_key_cross_run".to_string());
+        assert_eq!(
+            legacy.effective_identity_basis(),
+            FindingIdentityBasis::CrossRunDedupKey
         );
     }
 }

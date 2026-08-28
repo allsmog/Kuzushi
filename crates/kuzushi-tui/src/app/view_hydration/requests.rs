@@ -275,9 +275,12 @@ fn append_threat_model_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
-    keys.push(ViewHydrationKey::JsonFile {
-        path: kuzushi_core::capabilities::persistent_threat_model_path(target),
-    });
+    keys.extend([
+        ViewHydrationKey::ThreatModelStore,
+        ViewHydrationKey::JsonFile {
+            path: kuzushi_core::capabilities::persistent_threat_model_path(target),
+        },
+    ]);
 }
 
 fn append_entry_point_catalog_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {

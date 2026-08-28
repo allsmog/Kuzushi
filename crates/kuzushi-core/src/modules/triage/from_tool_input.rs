@@ -8,6 +8,28 @@ pub(in crate::modules) enum TriageScope {
     All,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::modules) enum IdentityReconcilePolicy {
+    Auto,
+    Off,
+}
+
+impl IdentityReconcilePolicy {
+    pub(in crate::modules) fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Off => "off",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::modules) enum ModelDedupePolicy {
+    Off,
+    Manual,
+    Auto,
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) fingerprints: Option<Vec<String>>,
@@ -24,11 +46,17 @@ pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) stage2_tier: ModelTier,
     pub(in crate::modules) model: Option<String>,
     pub(in crate::modules) retriage: bool,
+    pub(in crate::modules) identity_reconcile: IdentityReconcilePolicy,
+    pub(in crate::modules) model_dedupe: ModelDedupePolicy,
     pub(in crate::modules) votes: usize,
     pub(in crate::modules) deep_tuning: DeepTriageTuning,
     /// Stable-key → reviewer-feedback note from stored suppressions.
     /// Populated during run preparation, never parsed from tool input.
     pub(in crate::modules) suppression_feedback: std::collections::BTreeMap<String, String>,
+    /// Fingerprint → human-reviewed, shrunken advisory prior. Populated from
+    /// persisted review history during run preparation; never tool input.
+    pub(in crate::modules) reviewed_refutation_priors:
+        std::collections::BTreeMap<String, crate::findings::ReviewedRefutationPrior>,
 }
 
 /// Optional deep-auditor tuning for bulk deep triage, read from the same
@@ -87,10 +115,34 @@ impl TriageRunInput {
             stage2_tier: parse_triage_stage2_tier(input)?,
             model: optional_nonempty_string(input, "model")?,
             retriage: parse_triage_retriage(input),
+            identity_reconcile: parse_identity_reconcile(input)?,
+            model_dedupe: parse_model_dedupe(input)?,
             votes: parse_triage_votes(input)?,
             deep_tuning: parse_deep_triage_tuning(input)?,
             suppression_feedback: std::collections::BTreeMap::new(),
+            reviewed_refutation_priors: std::collections::BTreeMap::new(),
         })
+    }
+}
+
+fn parse_identity_reconcile(input: &Value) -> Result<IdentityReconcilePolicy> {
+    match input.get("identityReconcile").and_then(Value::as_str) {
+        Some("auto") => Ok(IdentityReconcilePolicy::Auto),
+        None | Some("off") => Ok(IdentityReconcilePolicy::Off),
+        Some(value) => {
+            anyhow::bail!("triage:run identityReconcile must be auto or off, got {value:?}")
+        }
+    }
+}
+
+fn parse_model_dedupe(input: &Value) -> Result<ModelDedupePolicy> {
+    match input.get("modelDedupe").and_then(Value::as_str) {
+        None | Some("off") => Ok(ModelDedupePolicy::Off),
+        Some("manual") => Ok(ModelDedupePolicy::Manual),
+        Some("auto") => Ok(ModelDedupePolicy::Auto),
+        Some(value) => {
+            anyhow::bail!("triage:run modelDedupe must be off, manual, or auto, got {value:?}")
+        }
     }
 }
 

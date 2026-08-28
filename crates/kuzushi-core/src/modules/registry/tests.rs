@@ -139,6 +139,22 @@ mod tests {
     }
 
     #[test]
+    fn threat_model_design_doc_alias_prepares_as_canonical_string_list() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let prepared = registry
+            .prepare_tool_input(
+                "threat-model:build",
+                json!({"designDoc": "architecture.md"}),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(prepared["designDocs"], json!(["architecture.md"]));
+        assert_eq!(prepared.get("designDoc"), None);
+    }
+
+    #[test]
     fn secret_scan_integer_ranges_reject_silent_rewrites() {
         let registry = ModuleRegistry::with_v2_builtins();
 
@@ -192,6 +208,40 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("taintTools"), "{error}");
+    }
+
+    #[test]
+    fn triage_reconciliation_policies_are_canonical_descriptor_inputs() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let defaults = registry
+            .prepare_tool_input("triage:run", json!({}), None)
+            .unwrap();
+        assert!(defaults.get("identityReconcile").is_none());
+        assert_eq!(defaults["modelDedupe"], json!("off"));
+
+        let aliases = registry
+            .prepare_tool_input(
+                "triage:run",
+                json!({"identity_reconcile": "off", "model_dedupe": "manual"}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(aliases["identityReconcile"], json!("off"));
+        assert_eq!(aliases["modelDedupe"], json!("manual"));
+        assert!(aliases.get("identity_reconcile").is_none());
+        assert!(aliases.get("model_dedupe").is_none());
+
+        for (key, value) in [("identityReconcile", "aggressive"), ("modelDedupe", "yes")] {
+            let input = serde_json::Value::Object(
+                [(key.to_string(), json!(value))].into_iter().collect(),
+            );
+            let error = registry
+                .prepare_tool_input("triage:run", input, None)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(key), "{error}");
+        }
     }
 
     #[test]

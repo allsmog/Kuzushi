@@ -39,6 +39,7 @@ pub(crate) struct ClearedAgentRun {
     pub(crate) run_id: Option<String>,
     pub(crate) started_secs: u64,
     pub(crate) artifact_target: Option<PathBuf>,
+    pub(crate) auxiliary_read_only: bool,
 }
 
 impl RuntimeState {

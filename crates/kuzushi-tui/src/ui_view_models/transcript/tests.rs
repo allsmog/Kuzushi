@@ -110,6 +110,24 @@ fn plain_command_result_model_formats_command_and_log_rows() {
 }
 
 #[test]
+fn plain_result_preserves_triage_refutation_denominators() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.replace_log_for_test(vec![log_line(
+        "result",
+        "Cross-tool candidates: 1 cluster(s), report only\nReviewed refutation (human): 82% (9/11 reviewed; 11/37 emitted)",
+        1,
+    )]);
+
+    let model = plain_command_result_model(&app, "run triage:run", 0);
+
+    assert!(model
+        .rows
+        .iter()
+        .any(|row| row.contains("9/11 reviewed; 11/37 emitted")));
+    assert!(model.rows.iter().any(|row| row.contains("report only")));
+}
+
+#[test]
 fn transcript_model_keeps_empty_log_body_as_one_row() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.replace_log_for_test(vec![log_line("system", "", 0)]);

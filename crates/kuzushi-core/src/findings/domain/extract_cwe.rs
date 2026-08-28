@@ -83,6 +83,16 @@ impl Finding {
         self
     }
 
+    pub fn with_symbol_locator(mut self, locator: impl Into<String>) -> Self {
+        self.symbol_locator = Some(locator.into());
+        self
+    }
+
+    pub fn with_rule_version(mut self, version: impl Into<String>) -> Self {
+        self.rule_version = Some(version.into());
+        self
+    }
+
     pub fn with_evidence(mut self, evidence: Vec<FindingEvidence>) -> Self {
         self.evidence = evidence;
         self

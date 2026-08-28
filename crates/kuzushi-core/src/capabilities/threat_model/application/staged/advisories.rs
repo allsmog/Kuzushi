@@ -23,7 +23,7 @@ pub(crate) fn fetch_osv_advisories(input: &BuildInput) -> Result<Vec<AdvisoryRec
     }
     let mut packages = fixture_package_queries(input.advisory_fixtures.as_ref());
     packages.extend(
-        direct_dependencies(&input.target)?
+        direct_dependencies(input.analysis_root())?
             .into_iter()
             .map(
                 |(ecosystem, name)| crate::capabilities::threat_intel::OsvPackageQuery {
@@ -171,12 +171,16 @@ mod tests {
         fixtures: Option<Value>,
     ) -> BuildInput {
         BuildInput {
-            target: temp.to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: temp.to_path_buf(),
+                analysis_root: temp.to_path_buf(),
+                scope: None,
+            },
             repo_name: "t".to_string(),
             methodology: "stride".to_string(),
             sources: vec![],
             seeds: vec![],
-            design_doc: None,
+            design_docs: Vec::new(),
             slice: "all".to_string(),
             stages: vec![],
             output_dir: ".kuzushi/tm".to_string(),
@@ -200,6 +204,7 @@ mod tests {
             offline,
             advisory_fixtures: fixtures,
             vulns: Vec::new(),
+            ..Default::default()
         }
     }
 

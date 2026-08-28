@@ -34,7 +34,7 @@ pub(crate) async fn dispatch_command(
                 argv,
             },
         ),
-        scan @ Command::Scan { .. } => dispatch_scan_command(scan, default_target).await,
+        scan @ Command::Scan(_) => dispatch_scan_command(scan, default_target).await,
         investigate @ Command::Investigate(_) => {
             dispatch_investigate_command(investigate, default_target).await
         }
@@ -55,47 +55,79 @@ fn reject_session_persistence_flag_for_command(
 }
 
 async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {
-    let Command::Scan {
-        target,
-        mode,
-        tasks,
-        triage,
-        json,
-        ci,
-        budget,
-        shard,
-        shard_manifest,
-        paths,
-        since,
-        include_worktree,
-        fail_on,
-        sarif,
-    } = command
-    else {
+    let request = scan_dispatch_request(command, default_target)?;
+    anyhow::ensure!(
+        request.trials != 1 || request.workers == 1,
+        "--workers only applies when --trials is at least 2"
+    );
+    if request.trials != 1 {
+        return crate::application::scan_batch::scan_batch_command(request).await;
+    }
+    dispatch_single_scan(request).await
+}
+
+fn scan_dispatch_request(
+    command: Command,
+    default_target: Option<PathBuf>,
+) -> Result<crate::application::scan_batch::ScanBatchRequest> {
+    let Command::Scan(args) = command else {
         unreachable!("non-scan command routed to scan dispatcher")
     };
-    let target = require_cli_target("scan", target, default_target)?;
-    let gate = crate::application::scan_gate::ScanGatePolicy {
-        fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
-        sarif,
-    };
-    let scope = crate::application::scan::ScanScopeArgs {
+    let target = require_cli_target("scan", args.target, default_target)?;
+    Ok(crate::application::scan_batch::ScanBatchRequest {
+        target,
+        mode: args.mode,
+        tasks: args.tasks,
+        triage: args.triage,
+        json: args.json,
+        ci: args.ci,
+        budget: args.budget,
+        scope: scan_scope(args.shard, args.shard_manifest, args.paths),
+        since: args.since,
+        include_worktree: args.include_worktree,
+        gate: scan_gate(args.fail_on, args.sarif),
+        trials: args.trials,
+        workers: args.workers,
+    })
+}
+
+fn scan_scope(
+    shard: Option<String>,
+    shard_manifest: Option<PathBuf>,
+    paths: Vec<String>,
+) -> crate::application::scan::ScanScopeArgs {
+    crate::application::scan::ScanScopeArgs {
         shard,
         shard_manifest,
         paths,
-    };
+    }
+}
+
+fn scan_gate(
+    fail_on: Option<crate::command::FailOnArg>,
+    sarif: Option<PathBuf>,
+) -> crate::application::scan_gate::ScanGatePolicy {
+    crate::application::scan_gate::ScanGatePolicy {
+        fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
+        sarif,
+    }
+}
+
+async fn dispatch_single_scan(
+    request: crate::application::scan_batch::ScanBatchRequest,
+) -> Result<()> {
     scan_command(
-        target,
-        mode,
-        tasks,
-        triage,
-        json,
-        ci,
-        budget,
-        scope,
-        since,
-        include_worktree,
-        gate,
+        request.target,
+        request.mode,
+        request.tasks,
+        request.triage,
+        request.json,
+        request.ci,
+        request.budget,
+        request.scope,
+        request.since,
+        request.include_worktree,
+        request.gate,
     )
     .await
 }
@@ -139,7 +171,7 @@ fn reject_dynamic_load_for_command(command: &Command, specifiers: &[String]) -> 
     if specifiers.is_empty() || matches!(command, Command::Shell { .. } | Command::Run { .. }) {
         return Ok(());
     }
-    if matches!(command, Command::Scan { .. } | Command::Investigate(_)) {
+    if matches!(command, Command::Scan(_) | Command::Investigate(_)) {
         anyhow::bail!(
             "--load is supported by shell and `kuzushi run`, not scan or investigate. Next: invoke the trusted dynamic tool with `kuzushi --load <specifier> run <module:tool>`."
         );
@@ -165,7 +197,7 @@ mod tests {
 
     #[test]
     fn scan_rejects_dynamic_load_instead_of_silently_discarding_it() {
-        let command = Command::Scan {
+        let command = Command::Scan(crate::command::ScanArgs {
             target: None,
             mode: None,
             tasks: Vec::new(),
@@ -180,7 +212,9 @@ mod tests {
             include_worktree: false,
             fail_on: None,
             sarif: None,
-        };
+            trials: 1,
+            workers: 1,
+        });
         let error = reject_dynamic_load_for_command(&command, &dynamic_specifier())
             .unwrap_err()
             .to_string();
@@ -222,6 +256,7 @@ mod tests {
                 command: SessionsCommand::List { json: false },
             },
             Command::Findings {
+                command: None,
                 limit: 50,
                 severity: Vec::new(),
                 verdict: Vec::new(),
@@ -419,7 +454,7 @@ async fn dispatch_non_scan_command(
         }
         Command::Mcp { command } => mcp_command(command).await,
         Command::Demo { json } => crate::application::demo::demo_command(json).await,
-        Command::Shell { .. } | Command::Scan { .. } | Command::Investigate(_) => {
+        Command::Shell { .. } | Command::Scan(_) | Command::Investigate(_) => {
             unreachable!("handled before dispatch")
         }
     }

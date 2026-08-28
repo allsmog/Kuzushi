@@ -146,6 +146,9 @@ pub(crate) struct EngagementHeaderModel {
     pub(crate) target: String,
     pub(crate) context: String,
     pub(crate) model: String,
+    /// Active immutable threat-model lineage/revision chip. Present only on
+    /// Map so it cannot be confused with the configured runtime model.
+    pub(crate) threat_model: Option<String>,
     pub(crate) module: String,
     pub(crate) cost_usd: f64,
     pub(crate) cost_complete: bool,
@@ -168,6 +171,7 @@ pub(crate) struct MapPhaseModel {
     pub(crate) worklist: WorklistViewModel,
     pub(crate) next_scans: NextScansState,
     pub(crate) dfd: DfdModel,
+    pub(crate) threat_model_freshness: super::ThreatModelFreshnessModel,
     pub(crate) empty_hint: Option<String>,
     /// Set on very large, still-undecomposed repositories: the NEXT ACTION
     /// card recommends module decomposition before threat-model generation.
@@ -485,6 +489,9 @@ fn engagement_header_model(
         target: context.target,
         context: context_state,
         model,
+        threat_model: (phase == WorkflowPhase::Map)
+            .then(|| super::threat_model_picker(app).header_chip())
+            .flatten(),
         module: active_module_label(app),
         cost_usd: app.session().session_cost_usd(),
         cost_complete: app.session().cost_accounting_is_complete(),

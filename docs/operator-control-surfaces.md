@@ -128,6 +128,37 @@ is still required for workspace-backed state.
 scan-gate policy, then go through the same preparation path as
 `kuzushi run sast:scan` where they are tool input.
 
+`kuzushi scan --trials N --workers W` compiles that canonical prepared input
+into a dedicated `scan-batch` campaign. Trials are logical samples; dispatcher
+retries remain attempts within a trial and never increase occurrence. The plan
+freezes its equivalence key, exact threat-model revision, requested/effective
+worker count, resource-safety decision, and gate policy before the first child
+launches. Unknown or workspace-exclusive resource claims clamp the batch to
+one worker with a named reason. The controller emits one identity-folded SARIF
+and one final gate receipt after folding the available trial outcomes. A
+dispatcher failure remains an operational error even when the security gate
+would also fail. Inspect a batch with `kuzushi findings batch <batch-id>
+[--json]`; run the read-only migration audit with `kuzushi findings
+identity-audit [--json]`.
+
+The identity audit's JSON envelope is content-bound by `reportSha256` and
+`corpusWatermark`. To authorize basis-aware defaults, author a request matching
+`schemas/finding-identity-audit-approval-request.schema.json` and run:
+
+```sh
+kuzushi --target /repo findings identity-audit approve --from approval.json
+```
+
+Every suspicious `identityId` needs an `accepted` or `fixed` disposition and a
+nonempty rationale. The receipt is written atomically to the operator-owned
+`$HOME/.kuzushi/v3/identity-audit-approvals/` store and is valid only for the
+canonical target and exact current audit/corpus digests. Target-local receipts
+are ignored. Missing, stale, mismatched, malformed, or incomplete approval
+keeps omitted `identityFold` at `legacy` and omitted `identityReconcile` at
+`off`; valid approval promotes those omitted defaults to `safe` and `auto`.
+Supplying either descriptor option explicitly is the documented operator
+override. `modelDedupe` remains `off` by default.
+
 Global `--load <specifier>` is supported for shell and headless `run`.
 For local file/path modules, trust is digest-pinned in `kuzushi.lock`: approve
 the exact resolved bundle with `kuzushi kwp approve <specifier>` before
@@ -202,6 +233,31 @@ truth.
   name an explicitly selected compatible model with its actual API-key, OAuth,
   or session credential. An unset budget is `not enforced`; a set budget must
   be positive and remain within the configured hard ceiling.
+- The Map setup row owns methodology, whole-repository versus bound leaf
+  scopes, bounded all-scope expansion, design-document paths, and operator
+  context. These are descriptor options, so headless and shell dispatch
+  prepare the same input. Scoped work keeps the workspace root (artifacts and
+  model store) separate from the canonical descendant analysis root (source
+  evidence).
+- `threats models` lists immutable lineages; `threats activate
+  <model-id>[@<revision-id>]` changes only the active pointer; `threats
+  revisions <model-id>` lists content history; and `threats restore
+  <revision-id>` creates a revision from historical content. A divergent
+  hand-edited compatibility mirror blocks activation until the operator
+  explicitly adopts or discards it.
+- `scan batch [--prior-run <run-id>]` opens the repeated-scan configurator.
+  Cost appears only when backed by the named completed `sast:scan` receipt.
+  Launch delegates to the detached campaign dispatcher; `batch <batch-id>`
+  opens its occurrence report and scopes Review, while `batch clear` removes
+  that presentation filter.
+- `ask <question>` and `threats ask <question>` answer in the existing inline
+  transcript. Threat questions attach the smallest current scene slice;
+  `--whole-model` is explicit. Target/model text and assistant history are
+  byte-bounded and fenced as untrusted content. History is reused only while
+  target, worktree identity, exact model reference, and policy version match.
+  An Ask may run beside one scan only after the bridge acknowledges its narrow
+  read-only policy, effective tools, and read roots; no acknowledgement means
+  no concurrent start.
 - `workbench` opens the five-page Map/Scan/Review/Prove/Fix ring. `Shift+Tab`
   cycles pages while preserving the shared draft and cursor; Navigate-mode
   `1..5` selects directly. The selected interaction mode and durable reality

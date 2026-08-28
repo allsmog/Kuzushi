@@ -115,10 +115,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.target, Some(PathBuf::from("/tmp/global-target")));
-        let Some(Command::Scan { target, .. }) = cli.command else {
+        let Some(Command::Scan(args)) = cli.command else {
             panic!("expected scan command");
         };
-        assert_eq!(target, Some(PathBuf::from("/tmp/command-target")));
+        assert_eq!(args.target, Some(PathBuf::from("/tmp/command-target")));
     }
 
     #[test]
@@ -279,6 +279,115 @@ mod tests {
         assert_eq!(completeness, vec!["open"]);
         assert_eq!(status, vec!["seen"]);
         assert!(verdict.is_empty());
+    }
+
+    #[test]
+    fn findings_cli_parses_scan_batch_report_subcommand() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "findings",
+            "batch",
+            "batch-1234",
+            "--json",
+        ])
+        .unwrap();
+
+        let Some(Command::Findings {
+            command: Some(crate::command::FindingsCommand::Batch { batch_id, json }),
+            ..
+        }) = cli.command
+        else {
+            panic!("expected findings batch command");
+        };
+        assert_eq!(batch_id, "batch-1234");
+        assert!(json);
+    }
+
+    #[test]
+    fn findings_cli_parses_read_only_identity_audit() {
+        let cli =
+            crate::cli::Cli::try_parse_from(["kuzushi", "findings", "identity-audit", "--json"])
+                .unwrap();
+
+        let Some(Command::Findings {
+            command: Some(crate::command::FindingsCommand::IdentityAudit { action: None, json }),
+            ..
+        }) = cli.command
+        else {
+            panic!("expected findings identity-audit command");
+        };
+        assert!(json);
+    }
+
+    #[test]
+    fn findings_cli_parses_identity_audit_approval() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "findings",
+            "identity-audit",
+            "approve",
+            "--from",
+            "approval.json",
+            "--json",
+        ])
+        .unwrap();
+
+        let Some(Command::Findings {
+            command:
+                Some(crate::command::FindingsCommand::IdentityAudit {
+                    action: Some(crate::command::IdentityAuditCommand::Approve { input, json }),
+                    ..
+                }),
+            ..
+        }) = cli.command
+        else {
+            panic!("expected findings identity-audit approve command");
+        };
+        assert_eq!(input, std::path::PathBuf::from("approval.json"));
+        assert!(json);
+    }
+
+    #[test]
+    fn scan_trials_accepts_compatibility_aliases() {
+        for flag in ["--trials", "--attempts", "--samples"] {
+            let cli = crate::cli::Cli::try_parse_from(["kuzushi", "scan", flag, "3"]).unwrap();
+            let Some(Command::Scan(args)) = cli.command else {
+                panic!("expected scan command for {flag}");
+            };
+            assert_eq!(args.trials, 3, "{flag}");
+        }
+    }
+
+    #[test]
+    fn scan_batch_parses_requested_workers() {
+        let cli =
+            crate::cli::Cli::try_parse_from(["kuzushi", "scan", "--trials", "3", "--workers", "2"])
+                .unwrap();
+        let Some(Command::Scan(args)) = cli.command else {
+            panic!("expected scan batch command");
+        };
+        assert_eq!((args.trials, args.workers), (3, 2));
+    }
+
+    #[test]
+    fn campaign_batch_parses_the_detached_controller_surface() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "campaign",
+            "batch",
+            "batch-1234",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Command::Campaign {
+            command: crate::command::CampaignCommand::Batch { batch_id, json, ci },
+        }) = cli.command
+        else {
+            panic!("expected campaign batch controller command");
+        };
+        assert_eq!(batch_id, "batch-1234");
+        assert!(json);
+        assert!(!ci);
     }
 
     #[test]

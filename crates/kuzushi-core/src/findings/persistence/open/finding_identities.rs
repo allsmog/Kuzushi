@@ -4,6 +4,7 @@ use super::*;
 pub(in crate::findings::persistence::open) struct FindingIdentityAssignment {
     pub identity_id: String,
     pub match_tier: FindingIdentityMatchTier,
+    pub basis: FindingIdentityBasis,
 }
 
 /// Bound on how many prior-run rows are inspected for one identity reuse
@@ -38,6 +39,7 @@ impl FindingStore {
         let assignment = FindingIdentityAssignment {
             identity_id,
             match_tier: identity_key.match_tier,
+            basis: identity_key.basis,
         };
         Ok(assignment)
     }
@@ -64,6 +66,7 @@ impl FindingStore {
         Ok(identity_id.map(|identity_id| FindingIdentityAssignment {
             identity_id,
             match_tier: FindingIdentityMatchTier::StableFingerprint,
+            basis: FindingIdentityBasis::ExactProducerFingerprint,
         }))
     }
 
@@ -90,6 +93,7 @@ impl FindingStore {
         Ok(identity_id.map(|identity_id| FindingIdentityAssignment {
             identity_id,
             match_tier: FindingIdentityMatchTier::DedupKeyCrossRun,
+            basis: FindingIdentityBasis::CrossRunDedupKey,
         }))
     }
 }
@@ -165,6 +169,9 @@ fn reusable_prior_identity(
     if normalized_identity_file(&prior.file_path) != normalized_identity_file(&incoming.file_path) {
         return false;
     }
+    if !prior.has_compatible_symbol_locator(incoming) {
+        return false;
+    }
     let stable_key = prior
         .identity_id
         .as_deref()
@@ -213,4 +220,32 @@ fn scan_identity_context(conn: &Connection, scan_id: &str) -> Result<ScanIdentit
         },
     )
     .with_context(|| format!("scan run {scan_id:?} is required before finding identity assignment"))
+}
+
+#[cfg(test)]
+mod symbol_compatibility_tests {
+    use super::*;
+
+    fn finding(symbol: Option<&str>) -> Finding {
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "CWE-89",
+            "src/db.rs",
+            10,
+            Some(10),
+            crate::findings::Severity::High,
+            "candidate",
+        );
+        finding.symbol_locator = symbol.map(str::to_string);
+        finding
+    }
+
+    #[test]
+    fn old_fingerprint_or_dedup_identity_cannot_swallow_a_different_symbol() {
+        assert!(finding(Some("crate::db::execute"))
+            .has_compatible_symbol_locator(&finding(Some("crate::db::execute"))));
+        assert!(!finding(Some("crate::db::execute"))
+            .has_compatible_symbol_locator(&finding(Some("crate::db::prepare"))));
+        assert!(!finding(None).has_compatible_symbol_locator(&finding(Some("crate::db::execute"))));
+    }
 }

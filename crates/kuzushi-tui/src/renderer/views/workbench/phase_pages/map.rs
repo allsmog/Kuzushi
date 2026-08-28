@@ -149,10 +149,11 @@ fn map_artifact_status_line(model: &MapPhaseModel, width: usize) -> Line<'static
         .map(|details| details.files.as_str())
         .unwrap_or("context inventory unavailable");
     let status = format!(
-        "{} · {} · context:{} · {} · {} nodes · {} flows",
+        "{} · {} · context:{} · threat-model:{} · {} · {} nodes · {} flows",
         model.project.scope_label,
         model.project.revision_label,
         model.context.state,
+        model.threat_model_freshness.verdict,
         files,
         model.dfd.nodes.len(),
         model.dfd.flows.len(),
@@ -189,12 +190,26 @@ fn map_action_card_lines(
     if let Some(hint) = model.decompose_first.as_deref() {
         return ("NEXT ACTION", decompose_first_lines(hint, width));
     }
+    map_evidence_action(model, width).unwrap_or_else(|| ready_map_lines(model, width))
+}
+
+fn map_evidence_action(
+    model: &MapPhaseModel,
+    width: usize,
+) -> Option<(&'static str, Vec<Line<'static>>)> {
     if model.dfd.empty_hint.is_some() || model.empty_hint.is_some() {
-        return ("NEXT ACTION", missing_threat_model_lines(model, width));
+        return Some(("NEXT ACTION", missing_threat_model_lines(model, width)));
+    }
+    if model.threat_model_freshness.requires_attention {
+        return Some(("NEXT ACTION", stale_threat_model_lines(model, width)));
     }
     if model.context.state.eq_ignore_ascii_case("stale") {
-        return ("NEXT ACTION", stale_threat_model_lines(model, width));
+        return Some(("NEXT ACTION", stale_context_lines(model, width)));
     }
+    None
+}
+
+fn ready_map_lines(model: &MapPhaseModel, width: usize) -> (&'static str, Vec<Line<'static>>) {
     let mut lines = vec![Line::styled(
         fit(&context_status_line(model), width),
         artifact_state_style(model.context.state),
@@ -233,9 +248,18 @@ fn missing_threat_model_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'
 }
 
 fn stale_threat_model_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if model.threat_model_freshness.verdict == "manual edit" {
+        return divergent_mirror_lines(model, width);
+    }
     vec![
         Line::styled(
-            fit("⚠ threat model stale — refine recommended", width),
+            fit(
+                &format!(
+                    "⚠ threat model {} — verify or refine recommended",
+                    model.threat_model_freshness.verdict
+                ),
+                width,
+            ),
             theme::warn(),
         ),
         Line::styled(
@@ -245,6 +269,49 @@ fn stale_threat_model_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'st
         Line::from(vec![
             Span::styled("▸ Enter refine threat model", theme::accent()),
             Span::styled("   keeps threat ids stable", theme::muted()),
+        ]),
+    ]
+}
+
+fn divergent_mirror_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::styled(
+            fit("⚠ compatibility mirror has unadopted manual edits", width),
+            theme::warn(),
+        ),
+        Line::styled(
+            fit(&context_status_line(model), width),
+            artifact_state_style(model.context.state),
+        ),
+        Line::styled(
+            fit(
+                "next: inspect diff · adopt edits · discard only with explicit force",
+                width,
+            ),
+            theme::accent(),
+        ),
+    ]
+}
+
+fn stale_context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::styled(
+            fit("⚠ repository context stale — refresh recommended", width),
+            theme::warn(),
+        ),
+        Line::styled(
+            fit(
+                &format!(
+                    "threat-model verdict remains {} until its own verification changes",
+                    model.threat_model_freshness.verdict
+                ),
+                width,
+            ),
+            theme::muted(),
+        ),
+        Line::from(vec![
+            Span::styled("▸ Enter refresh context", theme::accent()),
+            Span::styled("   threat model is not relabeled", theme::muted()),
         ]),
     ]
 }
@@ -790,6 +857,60 @@ mod next_scan_tests {
         .to_string();
         assert!(long.contains("scope:services/identity/authorization"));
         assert!(long.contains("rev:feature/long-lived-security-branch"));
+    }
+
+    #[test]
+    fn stale_context_does_not_relabel_a_verified_threat_model() {
+        let mut map = map_fixture();
+        map.context.state = "stale";
+        map.threat_model_freshness = crate::ui_view_models::ThreatModelFreshnessModel {
+            verdict: "verified".to_string(),
+            document_sha256: Some("sha256:model".to_string()),
+            current_sha256: Some("sha256:model".to_string()),
+            requires_attention: false,
+        };
+
+        let rendered = text(&stale_context_lines(&map, 100));
+
+        assert!(rendered.contains("repository context stale"), "{rendered}");
+        assert!(rendered.contains("verdict remains verified"), "{rendered}");
+        assert!(!rendered.contains("threat model stale"), "{rendered}");
+    }
+
+    #[test]
+    fn threat_model_action_uses_the_document_verdict() {
+        let mut map = map_fixture();
+        map.context.state = "present";
+        map.threat_model_freshness = crate::ui_view_models::ThreatModelFreshnessModel {
+            verdict: "failed".to_string(),
+            document_sha256: Some("sha256:model".to_string()),
+            current_sha256: Some("sha256:model".to_string()),
+            requires_attention: true,
+        };
+
+        let rendered = text(&stale_threat_model_lines(&map, 100));
+
+        assert!(rendered.contains("threat model failed"), "{rendered}");
+        assert!(!rendered.contains("context stale"), "{rendered}");
+    }
+
+    #[test]
+    fn manual_mirror_edit_offers_only_explicit_reconciliation_actions() {
+        let mut map = map_fixture();
+        map.threat_model_freshness = crate::ui_view_models::ThreatModelFreshnessModel {
+            verdict: "manual edit".to_string(),
+            document_sha256: Some("sha256:active".to_string()),
+            current_sha256: Some("sha256:edited".to_string()),
+            requires_attention: true,
+        };
+
+        let rendered = text(&stale_threat_model_lines(&map, 100));
+
+        assert!(rendered.contains("unadopted manual edits"), "{rendered}");
+        assert!(rendered.contains("inspect diff"), "{rendered}");
+        assert!(rendered.contains("adopt edits"), "{rendered}");
+        assert!(rendered.contains("explicit force"), "{rendered}");
+        assert!(!rendered.contains("refine"), "{rendered}");
     }
 
     fn map_fixture() -> MapPhaseModel {

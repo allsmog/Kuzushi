@@ -18,7 +18,11 @@ pub(super) struct RetirementCoverage {
 }
 
 impl RetirementCoverage {
-    pub(super) fn load(store: &FindingStore, base_run_id: &str, compare_run_id: &str) -> Result<Self> {
+    pub(super) fn load(
+        store: &FindingStore,
+        base_run_id: &str,
+        compare_run_id: &str,
+    ) -> Result<Self> {
         // Both ids must name runs this target actually recorded; an unrecorded
         // id would otherwise read as an empty side and forge a plausible diff.
         let base_status = require_recorded_run_status(store, base_run_id, "base")?;
@@ -172,7 +176,14 @@ fn classify_compare_side(
     } else {
         ScanComparisonClass::New
     };
-    compared(key, finding, class, None, before, Some(ScanFindingSignature::of(finding)))
+    compared(
+        key,
+        finding,
+        class,
+        None,
+        before,
+        Some(ScanFindingSignature::of(finding)),
+    )
 }
 
 fn classify_base_only(
@@ -184,7 +195,14 @@ fn classify_base_only(
         None => (ScanComparisonClass::Resolved, None),
         Some(reason) => (ScanComparisonClass::NotRescanned, Some(reason)),
     };
-    compared(key, finding, class, reason, Some(ScanFindingSignature::of(finding)), None)
+    compared(
+        key,
+        finding,
+        class,
+        reason,
+        Some(ScanFindingSignature::of(finding)),
+        None,
+    )
 }
 
 fn compared(

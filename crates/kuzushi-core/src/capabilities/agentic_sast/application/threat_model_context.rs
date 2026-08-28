@@ -15,16 +15,16 @@ pub(crate) struct PromptEnrichment {
 }
 
 impl PromptEnrichment {
-    pub(crate) fn for_run(target: &Path, tool_policy: &AgentToolPolicy) -> Self {
-        Self {
-            threat_context: threat_model_scan_context(target),
+    pub(crate) fn for_run(target: &Path, tool_policy: &AgentToolPolicy) -> Result<Self> {
+        Ok(Self {
+            threat_context: threat_model_scan_context(target)?,
             context_enrichment: context_enrichment_scan_context(target),
             attached_mcps: tool_policy
                 .mcps_attached
                 .iter()
                 .map(|attachment| attachment.name.clone())
                 .collect(),
-        }
+        })
     }
 }
 
@@ -119,16 +119,22 @@ fn first_evidence_suffix(claim: &Value) -> String {
 }
 
 /// Compact digest of the persisted threat model for the scan prompt. The
-/// scan stays runnable without one: a missing or malformed artifact yields
-/// None and the hunt proceeds uninformed. A stale or verification-failed
-/// document keeps its digest but leads with an honesty warning.
-pub(crate) fn threat_model_scan_context(target: &Path) -> Option<String> {
-    let document = crate::capabilities::threat_model::load_persistent_threat_model(target)?;
-    let digest = render_threat_model_digest(&document)?;
-    match crate::capabilities::threat_model::verification_warning(&document, target) {
+/// scan stays runnable without one. Store corruption remains a hard integrity
+/// error; a stale or verification-failed document keeps its digest but leads
+/// with an honesty warning.
+pub(crate) fn threat_model_scan_context(target: &Path) -> Result<Option<String>> {
+    let Some(document) =
+        crate::capabilities::threat_model::try_load_persistent_threat_model(target)?
+    else {
+        return Ok(None);
+    };
+    let Some(digest) = render_threat_model_digest(&document) else {
+        return Ok(None);
+    };
+    Ok(match crate::capabilities::threat_model::verification_warning(&document, target) {
         Some(warning) => Some(format!("{warning}\n\n{digest}")),
         None => Some(digest),
-    }
+    })
 }
 
 pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
@@ -295,5 +301,34 @@ mod tests {
             digest,
             "- middleware: operator guard · requires an operator token · src/auth.rs:42"
         );
+    }
+
+    #[test]
+    fn scan_context_propagates_active_object_integrity_errors() {
+        let target = tempfile::tempdir().unwrap();
+        crate::capabilities::threat_model::save_persistent_threat_model(
+            target.path(),
+            &json!({
+                "methodology": "stride",
+                "threats": [{"title": "command execution"}]
+            }),
+            true,
+        )
+        .unwrap();
+        crate::capabilities::threat_model::open_writable_threat_model_store(target.path())
+            .unwrap();
+        let active = crate::capabilities::threat_model::load_active_threat_model(target.path())
+            .unwrap()
+            .unwrap();
+        let object = crate::capabilities::threat_model::threat_model_object_path(
+            target.path(),
+            &active.model_ref.sha256,
+        )
+        .unwrap();
+        std::fs::write(object, b"{}").unwrap();
+
+        let error = threat_model_scan_context(target.path()).unwrap_err();
+
+        assert!(error.to_string().contains("failed SHA verification"));
     }
 }

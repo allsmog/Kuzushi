@@ -1370,6 +1370,158 @@ fn renders_threat_view_navigation() {
 }
 
 #[test]
+fn threat_model_picker_has_tty_and_plain_content_parity() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+    let scope =
+        kuzushi_core::capabilities::threat_model::current_scope_ref_for_path(temp.path(), ".")
+            .unwrap()
+            .unwrap();
+    let document = serde_json::json!({
+        "version": "2.0",
+        "methodology": "pasta",
+        "dfd": {"nodes": [{"id": "app"}], "flows": [], "trustBoundaries": []},
+        "threats": [],
+        "summary": {},
+        "verification": {"verdict": "verified"}
+    });
+    kuzushi_core::capabilities::threat_model::commit_threat_model_revision(
+        temp.path(),
+        &document,
+        kuzushi_core::capabilities::threat_model::ThreatModelCommit {
+            model_id: None,
+            new_model: false,
+            label: "Root PASTA".to_string(),
+            scope,
+            methodology: "pasta".to_string(),
+            source: kuzushi_core::capabilities::threat_model::ThreatModelRevisionSource::Build,
+            source_revision_id: None,
+            run_id: None,
+            activate: Some(true),
+            actor: "test".to_string(),
+        },
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.router.threat_mut().open(ThreatView::Models);
+    app.set_shell_view(ShellView::Threat);
+    app.hydrate_active_view_blocking();
+
+    let backend = TestBackend::new(132, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let tty = format!("{:?}", terminal.backend().buffer());
+    let plain = render_plain_app(&app, 132);
+
+    for text in ["Root PASTA", "pasta", "verified", "m next · M previous"] {
+        assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
+        assert!(plain.contains(text), "plain missing {text:?}: {plain}");
+    }
+}
+
+#[test]
+fn scan_batch_config_has_tty_and_plain_content_parity() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.router.campaign_mut().batch_scan_config =
+        Some(crate::app::BatchScanConfig::load(target.path(), None));
+    app.set_shell_view(ShellView::Campaign);
+
+    let backend = TestBackend::new(132, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let tty = format!("{:?}", terminal.backend().buffer());
+    let plain = render_plain_app(&app, 132);
+
+    for text in [
+        "SCAN BATCH",
+        "Logical trials",
+        "requested 1",
+        "effective 1",
+        "cost not estimated",
+        "detached campaign dispatcher",
+    ] {
+        assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
+        assert!(plain.contains(text), "plain missing {text:?}: {plain}");
+    }
+}
+
+#[test]
+fn scan_batch_results_have_tty_and_plain_content_parity() {
+    use kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot;
+    use kuzushi_core::findings::{BatchOccurrenceReport, BatchOccurrenceRow, IdentityFoldPolicy};
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Campaign);
+    let deck = app.router.campaign_mut();
+    deck.detail = true;
+    deck.active_batch_id = Some("batch-parity".to_string());
+    deck.campaigns = vec![CampaignSnapshot {
+        campaign_id: "batch-parity".to_string(),
+        kind: Some("scan-batch".to_string()),
+        requested_workers: Some(4),
+        effective_workers: Some(2),
+        parallel_safety_reason: Some("shared read".to_string()),
+        tool: Some("sast:scan".to_string()),
+        created_at_ms: None,
+        paused_until_ms: None,
+        budget_usd: None,
+        job_budget_usd: None,
+        fill_gaps: false,
+        skipped_covered_cells: None,
+        total_cost_usd: 0.0,
+        provider_spend_unresolved: false,
+        jobs: Vec::new(),
+    }];
+    deck.active_batch_report = Some(BatchOccurrenceReport {
+        schema_version: 1,
+        batch_id: "batch-parity".to_string(),
+        equivalence_key: "eq-parity".to_string(),
+        identity_fold: IdentityFoldPolicy::Safe,
+        planned: 4,
+        completed: 3,
+        failed: 1,
+        pending: 0,
+        gate: None,
+        trials: Vec::new(),
+        rows: vec![BatchOccurrenceRow {
+            fold_key: "finding-parity".to_string(),
+            identity_id: None,
+            identity_basis: None,
+            seen: 2,
+            completed: 3,
+            planned: 4,
+            failed: 1,
+            severities: vec!["high".to_string()],
+            locations: vec!["src/auth.rs:7".to_string()],
+            titles: vec!["auth bypass".to_string()],
+            fingerprints: vec!["finding-parity".to_string()],
+            run_ids: vec!["run-1".to_string()],
+            representative_fingerprint: "finding-parity".to_string(),
+            representative_title: "auth bypass".to_string(),
+            representative_severity: "high".to_string(),
+            representative_location: "src/auth.rs:7".to_string(),
+        }],
+    });
+
+    let backend = TestBackend::new(132, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let tty = format!("{:?}", terminal.backend().buffer());
+    let plain = render_plain_app(&app, 132);
+    for text in [
+        "BATCH batch-parity",
+        "BATCH OCCURRENCE",
+        "seen 2 / completed 3",
+        "runs run-1",
+    ] {
+        assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
+        assert!(plain.contains(text), "plain missing {text:?}: {plain}");
+    }
+}
+
+#[test]
 fn renders_pending_threat_patch_card() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3213,6 +3365,9 @@ fn failure_handoff_view_renders_current_context() {
         run_id: None,
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
             failed_stage: "semgrep:scan".to_string(),
             cause: "semgrep binary missing".to_string(),
@@ -5773,6 +5928,9 @@ fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
         run_id: None,
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     };
@@ -6074,14 +6232,7 @@ fn workbench_keystroke_to_paint_reuses_large_findings_projection() {
     let initial = format!("{:?}", terminal.backend().buffer());
     assert!(initial.contains("▸F-0001"), "{initial}");
 
-    let cache_key = crate::app::VisibleFindingsCacheKey::from_app_parts(
-        app.findings_revision(),
-        app.review_decisions_revision(),
-        None,
-        None,
-        None,
-        None,
-    );
+    let cache_key = crate::ui_view_models::visible_findings_cache_key(&app);
     let projection_before = app
         .workbench_cache()
         .borrow()

@@ -75,11 +75,13 @@ pub use crate::runtime::{
     plan_contains, prompt_pair_hash, run_tool_loop, run_tool_loop_observed,
     try_mcp_attachment_plan_for_target, AgentLoopOutcome, AgentLoopStep, AgentQueryControl,
     AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
-    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    McpArtifactSpec, McpAttachment, ModelTier, ModelTokenUsage, Observed, RuntimeFailure,
-    RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
-    ToolResult, TracedRuntime, TriageRequest, INTERACTION_REQUIRED_CODE, MCP_ARTIFACT_TABLE,
-    MCP_CONSTANT_NAMES, REQUEST_USER_INPUT_TOOL_NAME,
+    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy,
+    AgentToolPolicyAuthorization, AgentToolPolicyReceipt, LoopHistoryEntry, McpArtifactSpec,
+    McpAttachment, ModelTier, ModelTokenUsage, Observed, RuntimeFailure, RuntimeFailureClass,
+    RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult,
+    TracedRuntime, TriageRequest, INTERACTION_REQUIRED_CODE, MCP_ARTIFACT_TABLE,
+    MCP_CONSTANT_NAMES, READ_ONLY_ASK_POLICY_ID, READ_ONLY_ASK_POLICY_PROTOCOL_VERSION,
+    READ_ONLY_ASK_TOOLS, REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use crate::strategy::{
     append_strategy_correction, append_strategy_proposal, apply_strategy_corrections,

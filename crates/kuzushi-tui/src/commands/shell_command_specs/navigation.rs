@@ -109,7 +109,25 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "scan",
         aliases: &["/scan", "/sc"],
         category: ShellCommandCategory::Navigation,
-        description: "open the Scan planner; `scan since <ref> [--include-worktree]` runs a changed-file scan",
+        description: "open the Scan phase planner",
+    },
+    ShellCommandSpec {
+        command: "scan batch",
+        aliases: &["/scan batch", "scan batch --prior-run <runId>"],
+        category: ShellCommandCategory::Navigation,
+        description: "configure repeated logical scan trials, optionally costed from a prior run",
+    },
+    ShellCommandSpec {
+        command: "batch <id>",
+        aliases: &["/batch <id>"],
+        category: ShellCommandCategory::Navigation,
+        description: "open one scan batch's occurrence results and gate receipt",
+    },
+    ShellCommandSpec {
+        command: "batch clear",
+        aliases: &["/batch clear"],
+        category: ShellCommandCategory::Navigation,
+        description: "clear the active scan-batch results scope",
     },
     ShellCommandSpec {
         command: "review",

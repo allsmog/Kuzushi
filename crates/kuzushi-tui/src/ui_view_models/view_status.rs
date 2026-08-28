@@ -31,6 +31,7 @@ fn setup_view_status(app: &ShellApp) -> String {
             crate::app::auth_provider_label(app.router.auth_picker().provider())
         ),
         Some(crate::app::SetupEditor::Plan) => "setup:map-plan".to_string(),
+        Some(crate::app::SetupEditor::ThreatModel) => "setup:threat-model".to_string(),
         Some(crate::app::SetupEditor::Prompt) => "setup:prompt".to_string(),
         Some(crate::app::SetupEditor::Budget) => "setup:budget".to_string(),
         Some(crate::app::SetupEditor::Target) => "setup:target".to_string(),
@@ -135,6 +136,7 @@ fn threat_view_slug(view: ThreatView) -> &'static str {
         ThreatView::Stories => "stories",
         ThreatView::Scope => "scope",
         ThreatView::Summary => "summary",
+        ThreatView::Models => "models",
         ThreatView::Versions => "versions",
     }
 }

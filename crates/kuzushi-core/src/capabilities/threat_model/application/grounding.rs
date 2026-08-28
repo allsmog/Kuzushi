@@ -24,9 +24,16 @@ pub(crate) fn load_prompt_grounding(
     input: &BuildInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PromptGrounding> {
-    let catalog = load_entry_point_catalog(input)?;
-    let (surfaces, records_selected) =
-        prompt_grounding_surfaces(&input.target, input.max_elements, catalog.catalog.as_ref())?;
+    let scoped = is_non_root_scope(input);
+    let catalog = if scoped {
+        disabled_catalog_resolution(input)
+    } else {
+        load_entry_point_catalog(input)?
+    };
+    let catalog_rows = (!scoped).then_some(catalog.catalog.as_ref()).flatten();
+    let (mut surfaces, records_selected) =
+        prompt_grounding_surfaces(input.analysis_root(), input.max_elements, catalog_rows)?;
+    rebase_grounding_surfaces(input, &mut surfaces);
     let entry_point_catalog = catalog_grounding(
         &catalog,
         records_selected,
@@ -35,9 +42,34 @@ pub(crate) fn load_prompt_grounding(
     );
     Ok(PromptGrounding {
         surfaces,
-        confirmed_findings: confirmed_finding_rows(ctx)?,
+        confirmed_findings: confirmed_finding_rows(input, ctx)?,
         entry_point_catalog,
     })
+}
+
+fn is_non_root_scope(input: &BuildInput) -> bool {
+    input
+        .roots
+        .scope
+        .as_ref()
+        .is_some_and(|scope| scope.rel_path != Path::new("."))
+}
+
+fn rebase_grounding_surfaces(input: &BuildInput, surfaces: &mut [AttackSurface]) {
+    let Some(scope) = input.roots.scope.as_ref() else {
+        return;
+    };
+    if scope.rel_path == Path::new(".") {
+        return;
+    }
+    for surface in surfaces {
+        surface.path = scope
+            .rel_path
+            .join(&surface.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        surface.id = crate::workspace::attack_surface::attack_surface_id(surface);
+    }
 }
 
 fn load_entry_point_catalog(
@@ -47,7 +79,9 @@ fn load_entry_point_catalog(
         return Ok(disabled_catalog_resolution(input));
     }
     if input.context_mode == "off" {
-        return crate::capabilities::entry_points::load_explicit_entry_point_catalog(&input.target);
+        return crate::capabilities::entry_points::load_explicit_entry_point_catalog(
+            input.workspace_root(),
+        );
     }
     load_current_or_explicit_catalog(input)
 }
@@ -65,9 +99,13 @@ fn load_current_or_explicit_catalog(
     input: &BuildInput,
 ) -> Result<crate::capabilities::entry_points::EntryPointCatalogResolution> {
     let resolution =
-        crate::capabilities::entry_points::ensure_current_entry_point_catalog(&input.target)?;
+        crate::capabilities::entry_points::ensure_current_entry_point_catalog(
+            input.workspace_root(),
+        )?;
     if resolution.catalog.is_none() && has_catalog_source(input, "entry-points") {
-        return crate::capabilities::entry_points::load_explicit_entry_point_catalog(&input.target);
+        return crate::capabilities::entry_points::load_explicit_entry_point_catalog(
+            input.workspace_root(),
+        );
     }
     Ok(resolution)
 }
@@ -77,8 +115,13 @@ fn disabled_catalog_resolution(
 ) -> crate::capabilities::entry_points::EntryPointCatalogResolution {
     crate::capabilities::entry_points::EntryPointCatalogResolution {
         catalog: None,
-        status: "disabled".to_string(),
-        path: crate::workspace::workspace_state_root(&input.target).join("entry-points.json"),
+        status: if is_non_root_scope(input) {
+            "scoped-derived".to_string()
+        } else {
+            "disabled".to_string()
+        },
+        path: crate::workspace::workspace_state_root(input.workspace_root())
+            .join("entry-points.json"),
     }
 }
 
@@ -515,7 +558,10 @@ fn next_within_file_cap(
     None
 }
 
-fn confirmed_finding_rows(ctx: &ToolExecutionContext<'_>) -> Result<Vec<ConfirmedFindingRow>> {
+fn confirmed_finding_rows(
+    input: &BuildInput,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Vec<ConfirmedFindingRow>> {
     let Some(store) = ctx.findings_store else {
         return Ok(Vec::new());
     };
@@ -525,13 +571,27 @@ fn confirmed_finding_rows(ctx: &ToolExecutionContext<'_>) -> Result<Vec<Confirme
     // them differently.
     let filter = FindingListFilter {
         confidence: vec![ProofConfidence::Confirmed, ProofConfidence::Likely],
-        limit: MAX_CONFIRMED_FINDING_ROWS,
+        limit: usize::MAX,
         ..Default::default()
     };
     let report = store
         .list_findings_filtered(&filter)
         .context("threat-model grounding: confirmed-findings query failed")?;
-    Ok(report.findings.into_iter().map(confirmed_row).collect())
+    Ok(report
+        .findings
+        .into_iter()
+        .filter(|finding| finding_belongs_to_analysis_root(input, finding))
+        .take(MAX_CONFIRMED_FINDING_ROWS)
+        .map(confirmed_row)
+        .collect())
+}
+
+fn finding_belongs_to_analysis_root(input: &BuildInput, finding: &Finding) -> bool {
+    if !is_non_root_scope(input) {
+        return true;
+    }
+    crate::findings::safe_target_path(input.workspace_root(), &finding.file_path)
+        .is_some_and(|path| path.starts_with(input.analysis_root()))
 }
 
 fn confirmed_row(finding: Finding) -> ConfirmedFindingRow {
@@ -662,6 +722,7 @@ fn finding_line(row: &ConfirmedFindingRow) -> String {
 mod tests {
     use super::*;
     use crate::attack_surface::{AttackSurfaceKind, AttackSurfaceRisk};
+    use crate::findings::Severity;
 
     fn surface_row(id: &str, kind: AttackSurfaceKind, path: &str, score: u16) -> AttackSurface {
         AttackSurface {
@@ -865,7 +926,11 @@ mod tests {
     fn context_off_never_loads_or_refreshes_a_catalog() {
         let target = tempfile::tempdir().unwrap();
         let input = BuildInput {
-            target: target.path().to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().to_path_buf(),
+                scope: None,
+            },
             context_mode: "off".to_string(),
             ..BuildInput::default()
         };
@@ -881,7 +946,11 @@ mod tests {
     fn sources_none_bypasses_catalog_artifacts() {
         let target = tempfile::tempdir().unwrap();
         let input = BuildInput {
-            target: target.path().to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().to_path_buf(),
+                scope: None,
+            },
             context_mode: "auto".to_string(),
             sources: vec!["none".to_string()],
             ..BuildInput::default()
@@ -920,7 +989,11 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_vec_pretty(&catalog).unwrap()).unwrap();
         let input = BuildInput {
-            target: target.path().to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().to_path_buf(),
+                scope: None,
+            },
             context_mode: "off".to_string(),
             sources: vec!["entry-points".to_string()],
             ..BuildInput::default()
@@ -1024,5 +1097,49 @@ mod tests {
             confirmed_findings_section(&[]),
             "Corroborated prior findings: none"
         );
+    }
+
+    #[test]
+    fn scoped_finding_filter_keeps_only_workspace_paths_under_analysis_root() {
+        let target = tempfile::tempdir().unwrap();
+        let analysis_root = target.path().join("services/api");
+        std::fs::create_dir_all(&analysis_root).unwrap();
+        let input = BuildInput {
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root,
+                scope: Some(ScopeRef {
+                    scope_id: "scope_api".to_string(),
+                    rel_path: PathBuf::from("services/api"),
+                    project_model_sha256: format!("sha256:{}", "a".repeat(64)),
+                    target_revision: "fixture".to_string(),
+                }),
+            },
+            ..BuildInput::default()
+        };
+        let finding = |path| {
+            Finding::new_tool(
+                "semgrep",
+                "CWE-79",
+                path,
+                1,
+                None,
+                Severity::High,
+                "unsafe output",
+            )
+        };
+
+        assert!(finding_belongs_to_analysis_root(
+            &input,
+            &finding("services/api/src/handler.rs")
+        ));
+        assert!(!finding_belongs_to_analysis_root(
+            &input,
+            &finding("services/web/src/handler.rs")
+        ));
+        assert!(!finding_belongs_to_analysis_root(
+            &input,
+            &finding("../outside.rs")
+        ));
     }
 }

@@ -82,7 +82,7 @@ fn run_staged_research_stage(
 ) -> Result<(ThreatModelSourceBundle, ResearchDossier)> {
     let source_bundle = load_threat_model_source_bundle(ctx, input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
-    emit_seed_disclosure(ctx, verb, input);
+    emit_seed_disclosure(ctx, verb, input)?;
     let research_stage = stage_scope(checkpoints, "research");
     let dossier = run_research(input, ctx)?;
     source_bundle.authenticate_entry_point_sources(
@@ -90,7 +90,7 @@ fn run_staged_research_stage(
     )?;
     emit_research(ctx, verb, &dossier);
     write_stage_artifact(
-        &input.target,
+        input.workspace_root(),
         &input.output_dir,
         "research.json",
         &research_artifact_json(&dossier),
@@ -341,7 +341,8 @@ fn run_optional_variant_scan(
     if !input.variant_scan {
         return Ok(None);
     }
-    let outcome = run_variant_scan(&input.target, &mut generated.document)?;
+    let outcome = run_variant_scan(input.analysis_root(), &mut generated.document)?;
+    rebase_variant_scan_samples(input, &mut generated.document);
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -357,6 +358,31 @@ fn run_optional_variant_scan(
             .emit();
     }
     Ok(Some(outcome))
+}
+
+fn rebase_variant_scan_samples(input: &BuildInput, document: &mut Value) {
+    let Some(scope) = input
+        .roots
+        .scope
+        .as_ref()
+        .filter(|scope| scope.rel_path != Path::new("."))
+    else {
+        return;
+    };
+    let Some(threats) = document.get_mut("threats").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for sample in threats
+        .iter_mut()
+        .filter_map(|threat| threat.pointer_mut("/variantScan/siblingSample"))
+        .filter_map(Value::as_array_mut)
+        .flatten()
+    {
+        let Some(path) = sample.as_str() else {
+            continue;
+        };
+        *sample = json!(scope.rel_path.join(path).to_string_lossy().replace('\\', "/"));
+    }
 }
 
 fn finalize_staged_document(
@@ -422,7 +448,7 @@ fn stamp_staged_run_provenance(
     dossier: &ResearchDossier,
     variants: Option<&VariantScanOutcome>,
 ) {
-    stamp_provenance(document, &input.target, "staged");
+    stamp_provenance(document, input.workspace_root(), "staged");
     let Some(provenance) = document["provenance"].as_object_mut() else {
         return;
     };
@@ -438,13 +464,13 @@ fn write_staged_resolution_artifacts(
     parked: usize,
 ) -> Result<()> {
     write_stage_artifact(
-        &input.target,
+        input.workspace_root(),
         &input.output_dir,
         "coverage.json",
         &coverage_json(&gap_fill.report, gap_fill.method, parked),
     )?;
     write_stage_artifact(
-        &input.target,
+        input.workspace_root(),
         &input.output_dir,
         "gapfill.json",
         &gap_fill.artifact,
@@ -558,7 +584,11 @@ mod tests {
     fn staged_finalizer_stamps_catalog_receipt_and_coverage_counts() {
         let target = tempfile::tempdir().unwrap();
         let input = BuildInput {
-            target: target.path().to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().to_path_buf(),
+                scope: None,
+            },
             output_dir: "artifacts".to_string(),
             ..BuildInput::default()
         };
@@ -614,6 +644,38 @@ mod tests {
         assert_eq!(
             generated.document["coverage"]["catalogEntryPointsLinked"],
             json!(1)
+        );
+    }
+
+    #[test]
+    fn scoped_variant_samples_are_rebased_to_workspace_relative_paths() {
+        let target = tempfile::tempdir().unwrap();
+        let input = BuildInput {
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().join("services/api"),
+                scope: Some(ScopeRef {
+                    scope_id: "scope_api".to_string(),
+                    rel_path: PathBuf::from("services/api"),
+                    project_model_sha256: format!("sha256:{}", "a".repeat(64)),
+                    target_revision: "fixture".to_string(),
+                }),
+            },
+            ..BuildInput::default()
+        };
+        let mut document = json!({
+            "threats": [{
+                "variantScan": {
+                    "siblingSample": ["src/one.rs", "src/two.rs"]
+                }
+            }]
+        });
+
+        rebase_variant_scan_samples(&input, &mut document);
+
+        assert_eq!(
+            document["threats"][0]["variantScan"]["siblingSample"],
+            json!(["services/api/src/one.rs", "services/api/src/two.rs"])
         );
     }
 }

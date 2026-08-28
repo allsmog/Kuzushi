@@ -1526,6 +1526,7 @@ mod tests {
                     label: "oauth_callback".into(),
                     detail: "GET /oauth/callback".into(),
                     evidence: "src/oauth.rs:42".into(),
+                    evidence_paths: vec!["src/oauth.rs:42".into()],
                     target_element_ids: vec!["oauth".into()],
                 },
                 DfdSecurityItem {
@@ -1534,6 +1535,7 @@ mod tests {
                     label: "OAuth state confusion".into(),
                     detail: "callback state can cross sessions".into(),
                     evidence: "src/oauth.rs:51".into(),
+                    evidence_paths: vec!["src/oauth.rs:51".into()],
                     target_element_ids: vec!["oauth".into()],
                 },
             ],
@@ -1592,6 +1594,7 @@ mod tests {
                 label: "local developer".into(),
                 detail: "authorized operator".into(),
                 evidence: "src/main.rs:1".into(),
+                evidence_paths: vec!["src/main.rs:1".into()],
                 target_element_ids: vec!["Local developer user".into()],
             }],
             link_state: DfdLinkState::Complete,

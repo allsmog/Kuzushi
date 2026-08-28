@@ -111,6 +111,35 @@ fn jobhub_try_start_preserves_the_single_live_job() {
 }
 
 #[test]
+fn read_only_agent_is_the_only_authorized_pairing() {
+    let mut hub = JobHub::default();
+    let run = hub.start(JobKind::Run, "scan");
+    let agent = hub
+        .try_start_read_only_agent_alongside_run("read-only Ask")
+        .unwrap();
+
+    assert!(hub.is_running(JobKind::Run));
+    assert!(hub.is_running(JobKind::Agent));
+    assert!(hub.try_start(JobKind::Plan, "planner").is_err());
+    assert!(hub
+        .try_start_read_only_agent_alongside_run("second Ask")
+        .is_err());
+    run.complete();
+    agent.complete();
+}
+
+#[test]
+fn read_only_agent_requires_a_run_and_refuses_other_job_kinds() {
+    for kind in [JobKind::Agent, JobKind::Plan, JobKind::Threat] {
+        let mut hub = JobHub::default();
+        assert!(hub.try_start_read_only_agent_alongside_run("Ask").is_err());
+        let active = hub.start(kind, "active");
+        assert!(hub.try_start_read_only_agent_alongside_run("Ask").is_err());
+        active.complete();
+    }
+}
+
+#[test]
 fn jobhub_preserves_send_order_for_current_generation() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Run, "scan");

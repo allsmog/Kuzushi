@@ -1968,10 +1968,12 @@ function persistentThreatModelPathCallerFailures(root) {
     if (!existsSync(sourcePath)) return [`persistent threat-model path caller: missing ${file}`];
     const source = readFileSync(sourcePath, "utf8");
     const productionSource = source.split("#[cfg(test)]")[0];
+    const usesPathBoundary =
+      source.includes("persistent_threat_model_path(") ||
+      (file.endsWith("run_reproducibility_metadata.rs") &&
+        source.includes("try_resolve_threat_model("));
     return [
-      source.includes("persistent_threat_model_path(")
-        ? []
-        : [`persistent threat-model path caller must use helper: ${file}`],
+      usesPathBoundary ? [] : [`persistent threat-model path caller must use helper: ${file}`],
       file.endsWith("resolve_threat_model_document.rs") &&
       productionSource.includes(".kuzushi/threat-model.json")
         ? [
@@ -1989,9 +1991,11 @@ function threatModelBuildSummaryStatusFailures(root) {
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
   return [
-    source.includes("saved_threat_model_status(persisted, has_concrete_content, &input.target)")
+    /saved_threat_model_status\(\s*persisted,\s*has_concrete_content,\s*input\.workspace_root\(\),?\s*\)/m.test(
+      source,
+    )
       ? null
-      : "threat-model build summary saved label must pass the target",
+      : "threat-model build summary saved label must pass the workspace root",
     source.includes("persistent_threat_model_path(target)")
       ? null
       : "threat-model build summary saved label must use persistent_threat_model_path",

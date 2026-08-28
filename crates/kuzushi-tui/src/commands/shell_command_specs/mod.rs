@@ -65,7 +65,11 @@ fn parse_prompt_command(trimmed: &str) -> Option<ShellCommand> {
     Some(if question.is_empty() {
         ShellCommand::Help(None)
     } else {
-        ShellCommand::Ask(question.to_string())
+        parse_ask_command(
+            &question.split_whitespace().collect::<Vec<_>>(),
+            trimmed,
+            false,
+        )
     })
 }
 
@@ -121,6 +125,9 @@ fn parse_scan_since_command(verb: &str, args: &[&str]) -> Option<ShellCommand> {
     if verb != "scan" {
         return None;
     }
+    if let Some(command) = parse_scan_batch_command(args) {
+        return Some(command);
+    }
     let (reference, include_worktree) = match args {
         ["since", reference] => (*reference, false),
         ["since", reference, "--include-worktree"] => (*reference, true),
@@ -130,6 +137,16 @@ fn parse_scan_since_command(verb: &str, args: &[&str]) -> Option<ShellCommand> {
         reference: reference.to_string(),
         include_worktree,
     })
+}
+
+fn parse_scan_batch_command(args: &[&str]) -> Option<ShellCommand> {
+    match args {
+        ["batch"] => Some(ShellCommand::ScanBatch { prior_run_id: None }),
+        ["batch", "--prior-run", run_id] => Some(ShellCommand::ScanBatch {
+            prior_run_id: Some((*run_id).to_string()),
+        }),
+        _ => None,
+    }
 }
 
 fn parse_full_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {

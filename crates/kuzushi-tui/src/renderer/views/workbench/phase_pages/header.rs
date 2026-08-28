@@ -458,6 +458,12 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
     atoms.extend(cost_atom(header));
     atoms.push(atom(header.context.clone(), context_style(&header.context)));
     atoms.push(atom(format!("model {}", header.model), theme::muted()));
+    atoms.extend(
+        header
+            .threat_model
+            .as_ref()
+            .map(|model| atom(model.clone(), theme::accent())),
+    );
     atoms.push(atom(
         module_atom(&header.module),
         module_style(&header.module),

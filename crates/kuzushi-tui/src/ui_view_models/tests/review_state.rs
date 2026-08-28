@@ -139,6 +139,70 @@ fn effective_review_index_prefers_loaded_append_only_decisions() {
 }
 
 #[test]
+fn human_identity_decision_dominates_a_newer_automatic_decision() {
+    let identity_id = "fi_0123456789abcdef0123456789abcdef".to_string();
+    let mut rerun = finding("demo.rerun", 18, "same durable finding seen later");
+    rerun.id = Some(2);
+    rerun.created_at = "2026-07-03T00:00:00Z".to_string();
+    rerun.identity_id = Some(identity_id.clone());
+    rerun.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::FalsePositive,
+        confidence: 0.95,
+        rationale: "newer automated review disagreed".to_string(),
+        ..TriageOutcome::default()
+    });
+    rerun.triaged_by = Some(TriageAuthor::Auto);
+
+    let human = ReviewDecisionRecord {
+        id: 7,
+        finding_id: 1,
+        identity_id: Some(identity_id.clone()),
+        decision: ReviewDecision {
+            verdict: ReviewDecisionVerdict::Confirmed,
+            author: TriageAuthor::Human,
+            confidence: 1.0,
+            rationale: "operator confirmed the source".to_string(),
+            dismiss_reason: None,
+            actor: Some("operator".to_string()),
+        },
+        triage_verdict: Some(TriageVerdict::TruePositive),
+        created_at: "2026-07-01T00:00:00Z".to_string(),
+        provenance: None,
+    };
+    let automatic = ReviewDecisionRecord {
+        id: 8,
+        finding_id: 2,
+        identity_id: Some(identity_id),
+        decision: ReviewDecision {
+            verdict: ReviewDecisionVerdict::RejectedFalsePositive,
+            author: TriageAuthor::Auto,
+            confidence: 0.95,
+            rationale: "newer automated review disagreed".to_string(),
+            dismiss_reason: None,
+            actor: None,
+        },
+        triage_verdict: Some(TriageVerdict::FalsePositive),
+        created_at: "2026-07-03T00:00:00Z".to_string(),
+        provenance: None,
+    };
+
+    let records = vec![human, automatic];
+    let index = EffectiveReviewStateIndex::from_findings_and_decisions(
+        std::slice::from_ref(&rerun),
+        &records,
+    );
+    let decision = index
+        .effective_decision_for(&rerun)
+        .expect("human decision");
+
+    assert_eq!(decision.decision_label(), "confirmed");
+    assert_eq!(decision.author_label(), "human");
+    assert_eq!(decision.rationale(), "operator confirmed the source");
+    assert_eq!(decision.source_label(), "durable identity");
+    assert_eq!(review_decision_history_for(&rerun, &records).len(), 2);
+}
+
+#[test]
 fn carried_rejected_decision_conflicts_with_new_scanner_signal() {
     let identity_id = "fi_0123456789abcdef0123456789abcdef".to_string();
     let mut reviewed = finding("demo.reviewed", 12, "reviewed row");

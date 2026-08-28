@@ -411,6 +411,7 @@ impl ShellApp {
                 eligible_patch_fingerprints(self.findings()),
                 "no confirmed true-positive findings ready for patching",
             ),
+            PlanningTaskId::BuildThreatModel => self.expand_map_build_steps(workspace),
             PlanningTaskId::ReverseEngineerBinary => {
                 self.expand_reverse_engineering_task(task, workspace)
             }
@@ -459,7 +460,10 @@ impl ShellApp {
             .map(|step| vec![step])
     }
 
-    fn expand_single_planning_task(&self, task: PlanningTaskId) -> Result<Vec<PlanningRunStep>> {
+    pub(crate) fn expand_single_planning_task(
+        &self,
+        task: PlanningTaskId,
+    ) -> Result<Vec<PlanningRunStep>> {
         self.input_for_planning_task(task)
             .and_then(|input| self.validated_input_for_planning_task(task.tool_name(), input))
             .map(|input| {
@@ -471,7 +475,11 @@ impl ShellApp {
             })
     }
 
-    fn step_with_extra_input(&self, task: PlanningTaskId, extra: Value) -> Result<PlanningRunStep> {
+    pub(crate) fn step_with_extra_input(
+        &self,
+        task: PlanningTaskId,
+        extra: Value,
+    ) -> Result<PlanningRunStep> {
         let input = self.input_for_planning_task_with_extra(task, extra)?;
         let input = self.validated_input_for_planning_task(task.tool_name(), input)?;
         Ok(PlanningRunStep {

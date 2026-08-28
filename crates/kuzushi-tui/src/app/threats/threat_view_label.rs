@@ -6,6 +6,7 @@ pub(crate) fn threat_view_label(view: ThreatView) -> &'static str {
         ThreatView::Stories => "stories",
         ThreatView::Scope => "scope",
         ThreatView::Summary => "summary",
+        ThreatView::Models => "models",
         ThreatView::Versions => "versions",
     }
 }

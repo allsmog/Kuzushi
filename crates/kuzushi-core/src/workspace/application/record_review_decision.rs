@@ -99,5 +99,7 @@ fn review_decision_write(
             .map(|reason| reason.as_str().to_string()),
         dismissed_by: decision.actor.clone(),
         review_session_id,
+        propagation_basis: None,
+        source_finding_ids: None,
     }
 }

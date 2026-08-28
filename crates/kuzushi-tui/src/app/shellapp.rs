@@ -521,6 +521,9 @@ impl ShellApp {
         let changed = self.target() != target.as_deref();
         if changed {
             self.invalidate_view_hydration();
+            let campaign = self.router.campaign_mut();
+            campaign.batch_scan_config = None;
+            campaign.clear_active_batch();
         }
         self.session.set_target(target.clone());
         if changed {
@@ -730,6 +733,41 @@ impl ShellApp {
 
     pub(crate) fn agent_cancel_token(&self) -> Option<&ScanCancellation> {
         self.runtime_state.agent_cancel()
+    }
+
+    pub(crate) fn active_agent_run_id(&self) -> Option<&str> {
+        if !self.jobs().is_running(JobKind::Agent) {
+            return None;
+        }
+        self.agent_chat()
+            .and_then(|agent| agent.run_id.as_deref())
+            .or_else(|| {
+                self.runtime_state
+                    .cleared_agent_run()
+                    .and_then(|run| run.run_id.as_deref())
+            })
+            .or_else(|| self.exclusive_agent_activity_run_id())
+    }
+
+    pub(crate) fn active_agent_is_auxiliary_read_only(&self) -> bool {
+        if !self.jobs().is_running(JobKind::Agent) {
+            return false;
+        }
+        self.jobs().is_running(JobKind::Run)
+            || self
+                .agent_chat()
+                .is_some_and(|agent| agent.auxiliary_read_only)
+            || self
+                .runtime_state
+                .cleared_agent_run()
+                .is_some_and(|run| run.auxiliary_read_only)
+    }
+
+    fn exclusive_agent_activity_run_id(&self) -> Option<&str> {
+        if self.jobs().is_running(JobKind::Run) {
+            return None;
+        }
+        self.activity().map(|session| session.run_id.as_str())
     }
 
     pub(crate) fn set_agent_cancel(&mut self, cancel: Option<ScanCancellation>) {
@@ -970,10 +1008,35 @@ impl ShellApp {
         self.domain.findings_revision()
     }
 
+    pub(crate) fn finding_aliases(&self) -> &[String] {
+        self.domain.finding_aliases()
+    }
+
+    pub(crate) fn identity_fold_policy(&self) -> kuzushi_core::findings::IdentityFoldPolicy {
+        self.domain.identity_fold_policy()
+    }
+
     pub fn set_findings(&mut self, findings: Vec<Finding>) {
         let completion_values = finding_completion_values_from_findings(&findings);
         self.invalidate_finding_patch_truth(None);
         self.domain.set_findings(findings);
+        self.cache_finding_completion_values(completion_values);
+    }
+
+    pub(crate) fn set_findings_projection(
+        &mut self,
+        findings: Vec<Finding>,
+        aliases: Vec<String>,
+        policy: kuzushi_core::findings::IdentityFoldPolicy,
+    ) {
+        let completion_values = finding_completion_values_from_findings(&findings);
+        self.invalidate_finding_patch_truth(None);
+        self.domain
+            .set_findings_projection(findings, aliases, policy);
+        self.cache_finding_completion_values(completion_values);
+    }
+
+    fn cache_finding_completion_values(&self, completion_values: Vec<String>) {
         if let Some(target) = self.target_owned() {
             self.workbench_cache()
                 .borrow_mut()

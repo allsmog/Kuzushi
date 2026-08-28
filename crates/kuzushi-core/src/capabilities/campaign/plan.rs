@@ -47,12 +47,46 @@ struct PlannedJob {
     priority: i64,
 }
 
+struct RankedCampaignPlan {
+    documents: Vec<(String, Value)>,
+    threat_count: usize,
+    jobs: Vec<PlannedJob>,
+    dropped: Vec<PlannedJob>,
+    skipped_covered: usize,
+}
+
 pub fn execute_campaign_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let workspace = ctx
         .workspace
         .context("campaign:plan requires an active workspace target")?;
     let root = workspace.root().to_path_buf();
     let request = parse_plan_request(input)?;
+    let ranked = rank_campaign_plan(&root, &request)?;
+    let prior_overlaps =
+        super::prior_runs::prior_scan_overlaps(&root, &request.tool, &job_shard_axis(&ranked.jobs));
+    let mut plan = plan_document(
+        &root,
+        &request,
+        &ranked.jobs,
+        &ranked.dropped,
+        ranked.skipped_covered,
+        ranked.threat_count,
+    )?;
+    decorate_plan(&mut plan, &ranked, &prior_overlaps);
+    let plan_path = campaign_plan_path(&root, &request.campaign_id);
+    write_json_atomic(&plan_path, &plan)?;
+    Ok(plan_result(
+        &request,
+        &plan_path,
+        ranked.jobs.len(),
+        &ranked.dropped,
+        ranked.skipped_covered,
+        &plan,
+        &prior_overlaps,
+    ))
+}
+
+fn rank_campaign_plan(root: &Path, request: &PlanRequest) -> Result<RankedCampaignPlan> {
     let shards = selected_shards(&root, &request.shard_filter)?;
     let documents = threat_documents(&root, request.models_dir.as_deref())?;
     let threats = planned_threats(&documents);
@@ -69,28 +103,30 @@ pub fn execute_campaign_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         request.max_jobs,
         covered.as_ref(),
     );
-    let prior_overlaps =
-        super::prior_runs::prior_scan_overlaps(&root, &request.tool, &job_shard_axis(&jobs));
-    let mut plan =
-        plan_document(&root, &request, &jobs, &dropped, skipped_covered, threats.len())?;
+    Ok(RankedCampaignPlan {
+        documents,
+        threat_count: threats.len(),
+        jobs,
+        dropped,
+        skipped_covered,
+    })
+}
+
+fn decorate_plan(
+    plan: &mut Value,
+    ranked: &RankedCampaignPlan,
+    prior_overlaps: &[super::prior_runs::PriorScanOverlap],
+) {
     plan["priorScanOverlaps"] = prior_overlaps_json(&prior_overlaps);
-    if threats.is_empty() && !documents.is_empty() {
+    if ranked.threat_count == 0 && !ranked.documents.is_empty() {
         // allowUnseasoned bypassed the empty-document guard; the plan must
         // name the documents that steered nothing so nobody assumes seasoning.
-        plan["unseasonedDocuments"] =
-            json!(documents.iter().map(|(source, _)| source).collect::<Vec<_>>());
+        plan["unseasonedDocuments"] = json!(ranked
+            .documents
+            .iter()
+            .map(|(source, _)| source)
+            .collect::<Vec<_>>());
     }
-    let plan_path = campaign_plan_path(&root, &request.campaign_id);
-    write_json_atomic(&plan_path, &plan)?;
-    Ok(plan_result(
-        &request,
-        &plan_path,
-        jobs.len(),
-        &dropped,
-        skipped_covered,
-        &plan,
-        &prior_overlaps,
-    ))
 }
 
 /// Unique (shard, paths) pairs across the kept jobs — the axis the prior-run
@@ -314,6 +350,18 @@ fn breadth_first_capped(
     jobs: Vec<PlannedJob>,
     max_jobs: usize,
 ) -> (Vec<PlannedJob>, Vec<PlannedJob>) {
+    let mut buckets = shard_job_buckets(jobs);
+    let mut kept = Vec::new();
+    let mut dropped = Vec::new();
+    while buckets.iter().any(|(_, bucket)| !bucket.is_empty()) {
+        append_bucket_round(&mut buckets, max_jobs, &mut kept, &mut dropped);
+    }
+    (kept, dropped)
+}
+
+fn shard_job_buckets(
+    jobs: Vec<PlannedJob>,
+) -> Vec<(String, std::collections::VecDeque<PlannedJob>)> {
     let mut buckets: Vec<(String, std::collections::VecDeque<PlannedJob>)> = Vec::new();
     for job in jobs {
         match buckets.iter_mut().find(|(name, _)| *name == job.shard.name) {
@@ -321,19 +369,25 @@ fn breadth_first_capped(
             None => buckets.push((job.shard.name.clone(), [job].into())),
         }
     }
-    let mut kept = Vec::new();
-    let mut dropped = Vec::new();
-    while buckets.iter().any(|(_, bucket)| !bucket.is_empty()) {
-        for (_, bucket) in &mut buckets {
-            let Some(job) = bucket.pop_front() else { continue };
-            if kept.len() < max_jobs {
-                kept.push(job);
-            } else {
-                dropped.push(job);
-            }
+    buckets
+}
+
+fn append_bucket_round(
+    buckets: &mut [(String, std::collections::VecDeque<PlannedJob>)],
+    max_jobs: usize,
+    kept: &mut Vec<PlannedJob>,
+    dropped: &mut Vec<PlannedJob>,
+) {
+    for (_, bucket) in buckets {
+        let Some(job) = bucket.pop_front() else {
+            continue;
+        };
+        if kept.len() < max_jobs {
+            kept.push(job);
+        } else {
+            dropped.push(job);
         }
     }
-    (kept, dropped)
 }
 
 /// The same threat-granular cell identity `covered_cells` folds: shard ×
@@ -448,7 +502,10 @@ fn dropped_by_shard(dropped: &[PlannedJob]) -> Value {
 }
 
 fn jobs_axis_names(jobs: &[PlannedJob]) -> Vec<String> {
-    let mut names = jobs.iter().map(|job| job.shard.name.clone()).collect::<Vec<_>>();
+    let mut names = jobs
+        .iter()
+        .map(|job| job.shard.name.clone())
+        .collect::<Vec<_>>();
     names.sort();
     names.dedup();
     names

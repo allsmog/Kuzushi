@@ -162,6 +162,86 @@ test("Read returns the content of an in-root file", async () => {
   }
 });
 
+test("LS refuses a directory pathname swapped outside after authorization", async () => {
+  const { base } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  const listed = join(wsRoot, "listed");
+  const outside = join(base, "outside-dir");
+  mkdirSync(listed);
+  mkdirSync(outside);
+  writeFileSync(join(outside, "OUTSIDE_SECRET_NAME"), "secret\n");
+  const request = {
+    toolPolicy: { tools: ["LS"], mcpReadRoots: [realpathSync(wsRoot)] },
+  };
+  const hooks = {
+    afterDirectoryValidation() {
+      rmSync(listed, { recursive: true });
+      symlinkSync(outside, listed);
+    },
+  };
+  const ls = fileToolsForRequest(request, hooks).find((built) => built.name === "LS");
+  try {
+    await assert.rejects(
+      () => ls.invoke({ path: "listed" }),
+      /workspace directory changed during authorization/,
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Read keeps the authorized descriptor when the pathname is swapped before reading", async () => {
+  const { base } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  const inside = join(wsRoot, "inside.txt");
+  const request = {
+    toolPolicy: { tools: ["Read"], mcpReadRoots: [realpathSync(wsRoot)] },
+  };
+  let swapped = false;
+  const hooks = {
+    afterFileValidation(toolName) {
+      if (toolName !== "Read" || swapped) return;
+      rmSync(inside);
+      symlinkSync(join(base, "outside.txt"), inside);
+      swapped = true;
+    },
+  };
+  const read = fileToolsForRequest(request, hooks).find((built) => built.name === "Read");
+  try {
+    const result = await read.invoke({ file_path: "inside.txt" });
+    assert.match(result, /INSIDE_TOKEN/);
+    assert.equal(result.includes("OUTSIDE_SECRET"), false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Grep keeps the authorized descriptor when the pathname is swapped before reading", async () => {
+  const { base } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  const inside = join(wsRoot, "inside.txt");
+  const request = {
+    toolPolicy: { tools: ["Grep"], mcpReadRoots: [realpathSync(wsRoot)] },
+  };
+  let swapped = false;
+  const hooks = {
+    afterFileValidation(toolName) {
+      if (toolName !== "Grep" || swapped) return;
+      rmSync(inside);
+      symlinkSync(join(base, "outside.txt"), inside);
+      swapped = true;
+    },
+  };
+  const grep = fileToolsForRequest(request, hooks).find((built) => built.name === "Grep");
+  try {
+    const result = await grep.invoke({ pattern: "INSIDE_TOKEN|OUTSIDE_SECRET", path: "inside.txt" });
+    assert.match(result, /inside\.txt:1:INSIDE_TOKEN/);
+    assert.equal(result.includes("OUTSIDE_SECRET"), false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("Glob reports an in-root symlink by its matched path, not its realpath target", async () => {
   const { base, tools } = setupWorkspace();
   const wsRoot = join(base, "ws");

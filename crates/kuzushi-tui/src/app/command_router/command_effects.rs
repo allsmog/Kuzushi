@@ -2,6 +2,28 @@ use super::*;
 use crate::commands::PatchCommand;
 use kuzushi_core::workspace::findings_since_filter_expression;
 
+fn format_threat_model_mirror_diff(report: &kuzushi_core::ThreatModelMirrorDiff) -> String {
+    if report.changes.is_empty() {
+        return "compatibility mirror matches the active immutable revision".to_string();
+    }
+    let mut lines = vec![format!(
+        "compatibility mirror differs from {}@{} (mirror {})",
+        report.active.model_id, report.active.revision_id, report.mirror_sha256
+    )];
+    lines.extend(report.changes.iter().map(|change| {
+        format!(
+            "{}: active={} · mirror={}",
+            change.pointer,
+            change.active.as_deref().unwrap_or("<missing>"),
+            change.mirror.as_deref().unwrap_or("<missing>")
+        )
+    }));
+    if report.truncated {
+        lines.push("… additional changes omitted".to_string());
+    }
+    lines.join("\n")
+}
+
 /// Short registry/activity label for a queued command: the leading verb plus
 /// the tool/argument, dropping any trailing JSON payload.
 fn steer_command_summary(raw: &str) -> String {
@@ -64,14 +86,17 @@ impl ShellApp {
     }
 
     fn reduce_scan_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
-        let ShellCommand::ScanSince {
-            reference,
-            include_worktree,
-        } = command
-        else {
-            return None;
-        };
-        Some(self.reduce_scan_since(reference, *include_worktree))
+        match command {
+            ShellCommand::ScanSince {
+                reference,
+                include_worktree,
+            } => Some(self.reduce_scan_since(reference, *include_worktree)),
+            ShellCommand::ScanBatch { prior_run_id } => {
+                self.open_batch_scan_config(prior_run_id.as_deref());
+                Some(Vec::new())
+            }
+            _ => None,
+        }
     }
 
     fn reduce_jobs_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
@@ -83,6 +108,14 @@ impl ShellApp {
             ShellCommand::CancelJob(run_id) => Some(self.reduce_cancel_job(run_id)),
             ShellCommand::ShowCampaigns(campaign_id) => {
                 self.open_campaign_view(campaign_id.clone());
+                Some(Vec::new())
+            }
+            ShellCommand::BatchResults(batch_id) => {
+                self.open_batch_results(batch_id);
+                Some(Vec::new())
+            }
+            ShellCommand::ClearBatchScope => {
+                self.clear_batch_scope();
                 Some(Vec::new())
             }
             ShellCommand::ShowCoverage => {
@@ -371,6 +404,14 @@ impl ShellApp {
                 self.discard_pending_threat_patch();
                 Some(Vec::new())
             }
+            ShellCommand::ThreatModels => {
+                self.open_threat_view(crate::app::ThreatView::Models);
+                Some(Vec::new())
+            }
+            ShellCommand::ThreatModelInspectDiff => {
+                self.inspect_threat_model_mirror_diff();
+                Some(Vec::new())
+            }
             ShellCommand::ThreatVersions => {
                 self.open_threat_versions();
                 Some(Vec::new())
@@ -380,6 +421,20 @@ impl ShellApp {
                 Some(Vec::new())
             }
             _ => None,
+        }
+    }
+
+    fn inspect_threat_model_mirror_diff(&mut self) {
+        let Some(target) = self.target_owned() else {
+            self.log("error", "/threats diff requires an explicit target");
+            return;
+        };
+        match kuzushi_core::inspect_threat_model_mirror_diff(&target) {
+            Ok(report) => self.log("threats", format_threat_model_mirror_diff(&report)),
+            Err(error) => self.log(
+                "error",
+                format!("cannot inspect threat-model diff: {error:#}"),
+            ),
         }
     }
 
@@ -563,13 +618,29 @@ impl ShellApp {
     }
 
     fn reduce_worker_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
+        self.reduce_threat_model_worker_command_effect(command)
+            .or_else(|| self.reduce_general_worker_command_effect(command))
+    }
+
+    fn reduce_general_worker_command_effect(
+        &mut self,
+        command: &ShellCommand,
+    ) -> Option<Vec<ShellEffect>> {
+        self.reduce_agent_worker_command_effect(command)
+            .or_else(|| self.reduce_capability_worker_command_effect(command))
+    }
+
+    fn reduce_agent_worker_command_effect(
+        &mut self,
+        command: &ShellCommand,
+    ) -> Option<Vec<ShellEffect>> {
         match command {
-            ShellCommand::Recommend => Some(self.reduce_recommend()),
-            ShellCommand::Aim(focus) => Some(self.reduce_aim(focus)),
-            ShellCommand::RunTool { tool, input } => {
-                Some(self.reduce_run_tool(tool.clone(), input.clone()))
+            ShellCommand::Ask(question) => {
+                Some(self.reduce_ask_agent(&AskRequest::screen(question.as_str())))
             }
-            ShellCommand::Ask(question) => Some(self.reduce_ask_agent(question)),
+            ShellCommand::AskWholeModel(question) => {
+                Some(self.reduce_ask_agent(&AskRequest::threat_model(question.as_str(), true)))
+            }
             ShellCommand::Plan(goal) => Some(self.reduce_planner_start(goal)),
             ShellCommand::PhaseIntent {
                 selected_phase,
@@ -578,8 +649,27 @@ impl ShellApp {
             ShellCommand::PlanApply => Some(self.reduce_apply_pending_plan()),
             ShellCommand::PlanDiscard => Some(self.reduce_discard_pending_plan()),
             ShellCommand::ThreatRegen => Some(self.reduce_threat_regen()),
-            ShellCommand::ThreatAsk(question) => Some(self.reduce_threat_ask(question)),
+            ShellCommand::ThreatAsk(question) => {
+                Some(self.reduce_ask_agent(&AskRequest::threat_model(question.as_str(), false)))
+            }
+            ShellCommand::ThreatAskWholeModel(question) => {
+                Some(self.reduce_ask_agent(&AskRequest::threat_model(question.as_str(), true)))
+            }
             ShellCommand::ThreatApply => Some(self.reduce_threat_apply()),
+            _ => None,
+        }
+    }
+
+    fn reduce_capability_worker_command_effect(
+        &mut self,
+        command: &ShellCommand,
+    ) -> Option<Vec<ShellEffect>> {
+        match command {
+            ShellCommand::Recommend => Some(self.reduce_recommend()),
+            ShellCommand::Aim(focus) => Some(self.reduce_aim(focus)),
+            ShellCommand::RunTool { tool, input } => {
+                Some(self.reduce_run_tool(tool.clone(), input.clone()))
+            }
             ShellCommand::Patch(command) => Some(self.reduce_patch_command(command)),
             ShellCommand::ReviewDecision(command) => {
                 Some(self.reduce_review_decision_command(command))
@@ -591,6 +681,41 @@ impl ShellApp {
             ShellCommand::Pwn(command) => Some(self.reduce_pwn_command(command)),
             _ => None,
         }
+    }
+
+    fn reduce_threat_model_worker_command_effect(
+        &mut self,
+        command: &ShellCommand,
+    ) -> Option<Vec<ShellEffect>> {
+        match command {
+            ShellCommand::ThreatModelActivate {
+                model_id,
+                revision_id,
+            } => Some(self.reduce_threat_model_activation(model_id, revision_id.as_deref())),
+            ShellCommand::ThreatModelRevisions(model_id) => Some(self.reduce_run_tool(
+                Some("threat-model:revisions".to_string()),
+                Some(serde_json::json!({"modelId": model_id}).to_string()),
+            )),
+            ShellCommand::ThreatModelRestore(revision_id) => Some(self.reduce_run_tool(
+                Some("threat-model:restore".to_string()),
+                Some(serde_json::json!({"revisionId": revision_id}).to_string()),
+            )),
+            _ => None,
+        }
+    }
+
+    fn reduce_threat_model_activation(
+        &self,
+        model_id: &str,
+        revision_id: Option<&str>,
+    ) -> Vec<ShellEffect> {
+        vec![threat_model_activation_worker_effect(
+            ThreatModelActivationSelection {
+                model_id: model_id.to_string(),
+                revision_id: revision_id.map(str::to_string),
+            },
+            self.target_owned(),
+        )]
     }
 
     fn reduce_proof_deferral(&mut self, reference: &str, reason: &str) -> Vec<ShellEffect> {
@@ -644,6 +769,7 @@ impl ShellApp {
     fn reduce_lifecycle_command_effect(&self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
         match command {
             ShellCommand::Cancel => Some(vec![ShellEffect::CancelActiveJobs]),
+            ShellCommand::CancelAsk => Some(vec![ShellEffect::CancelJob(JobKind::Agent)]),
             ShellCommand::Quit => Some(vec![ShellEffect::Quit]),
             _ => None,
         }
@@ -1019,7 +1145,7 @@ impl ShellApp {
         if run_id == "agent" {
             return true;
         }
-        let Some(agent_id) = self.activity().map(|session| session.run_id.as_str()) else {
+        let Some(agent_id) = self.active_agent_run_id() else {
             return false;
         };
         matches!(
@@ -1216,10 +1342,18 @@ impl ShellApp {
 
     fn refresh_threat_versions(&mut self, target: &std::path::Path) {
         match kuzushi_core::list_threat_model_versions(target, Self::THREAT_VERSION_LIST_LIMIT) {
-            Ok(versions) => {
-                let live_sha256 = kuzushi_core::live_threat_model_sha256(target);
-                self.router.threat_mut().set_versions(versions, live_sha256);
-            }
+            Ok(versions) => match kuzushi_core::try_live_threat_model_sha256(target) {
+                Ok(live_sha256) => {
+                    self.router.threat_mut().set_versions(versions, live_sha256);
+                }
+                Err(error) => {
+                    self.log(
+                        "error",
+                        format!("could not read the active threat model: {error:#}"),
+                    );
+                    self.router.threat_mut().set_versions(versions, None);
+                }
+            },
             Err(error) => {
                 self.log(
                     "error",

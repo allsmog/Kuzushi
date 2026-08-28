@@ -56,14 +56,12 @@ impl ModelTokenUsage {
         output_reported_calls: u64,
         total_calls: u64,
     ) -> Result<Self> {
-        anyhow::ensure!(total_calls > 0, "model usage aggregate must include a model call");
+        anyhow::ensure!(
+            total_calls > 0,
+            "model usage aggregate must include a model call"
+        );
         validate_reported_direction(input_tokens, input_reported_calls, total_calls, "input")?;
-        validate_reported_direction(
-            output_tokens,
-            output_reported_calls,
-            total_calls,
-            "output",
-        )?;
+        validate_reported_direction(output_tokens, output_reported_calls, total_calls, "output")?;
         Ok(Self {
             input_tokens: input_tokens.unwrap_or(0),
             output_tokens: output_tokens.unwrap_or(0),

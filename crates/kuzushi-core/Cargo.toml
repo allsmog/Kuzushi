@@ -66,6 +66,7 @@ serde-saphyr = { version = "0.0.29", default-features = false, features = ["dese
 sha2 = "0.11"
 tempfile.workspace = true
 thiserror.workspace = true
+time = { version = "0.3", features = ["parsing"] }
 tokio.workspace = true
 toml.workspace = true
 # Tree-sitter is used by taint-iris-next to drop candidates whose byte

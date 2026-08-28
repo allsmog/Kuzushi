@@ -70,6 +70,16 @@ pub(crate) enum ScanRecommendationsState {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ThreatModelStoreState {
+    Legacy,
+    Ready {
+        manifest: kuzushi_core::ThreatModelManifest,
+        active: Option<kuzushi_core::ActiveThreatModel>,
+    },
+    Invalid(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FindingPatchTruthState {
     Ready(FindingPatchTruth),
@@ -182,6 +192,7 @@ pub(crate) enum ViewHydrationKey {
         current_revision: String,
     },
     ProjectScopeTree,
+    ThreatModelStore,
     ProjectModelDocument {
         scope_id: String,
         revision: Option<String>,
@@ -228,6 +239,7 @@ pub(crate) enum ViewHydrationValue {
     GitMetadata(Option<RunTargetGitMetadata>),
     RevisionRelationship(kuzushi_core::workspace::RevisionRelationship),
     ProjectScopeTree(ProjectScopeTreeState),
+    ThreatModelStore(ThreatModelStoreState),
     ProjectModelDocument(Option<ProjectModelDocument>),
     StrategyQueue(StrategyQueueState),
     PromptMutations(PromptMutationsState),

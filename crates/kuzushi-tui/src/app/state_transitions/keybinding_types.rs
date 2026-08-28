@@ -96,6 +96,8 @@ pub(crate) enum ViewHotkeyAction {
     RecommendScanComponent,
     RecommendPromoteComponent,
     ThreatView(ThreatView),
+    ThreatModelNext,
+    ThreatModelPrevious,
     ActorDetail(usize),
     PauseScan,
     ResumeScan,

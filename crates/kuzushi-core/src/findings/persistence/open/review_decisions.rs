@@ -33,7 +33,7 @@ with requested as (
       from requested
       join review_decisions as decisions
         on (requested.identity_id is not null and decisions.identity_id = requested.identity_id)
-        or (requested.identity_id is null and decisions.finding_id = requested.finding_id)
+        or (decisions.identity_id is null and decisions.finding_id = requested.finding_id)
      where ?2 = 0 or decisions.author = 'human'
 )
 select id, finding_id, identity_id, decision_verdict, triage_verdict,
@@ -58,7 +58,7 @@ with requested as (
       from requested
       join review_decisions as decisions
         on (requested.identity_id is not null and decisions.identity_id = requested.identity_id)
-        or (requested.identity_id is null and decisions.finding_id = requested.finding_id)
+        or (decisions.identity_id is null and decisions.finding_id = requested.finding_id)
 )
 select id, finding_id, identity_id, decision_verdict, triage_verdict,
        confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
@@ -321,6 +321,8 @@ impl FindingStore {
         finding_id: i64,
         triage: &TriageOutcome,
         author: TriageAuthor,
+        propagation: Option<&ReviewDecisionPropagation>,
+        bind_identity: bool,
     ) -> Result<i64> {
         let decision = ReviewDecision::from_triage(triage, Some(author));
         self.append_review_decision_event(
@@ -328,6 +330,8 @@ impl FindingStore {
             &decision,
             true,
             Some((triage.cost_usd, triage.cost_usd_exact)),
+            propagation,
+            bind_identity,
         )
     }
 
@@ -337,7 +341,14 @@ impl FindingStore {
         decision: &ReviewDecision,
         updates_finding_triage: bool,
     ) -> Result<i64> {
-        self.append_review_decision_event(finding_id, decision, updates_finding_triage, None)
+        self.append_review_decision_event(
+            finding_id,
+            decision,
+            updates_finding_triage,
+            None,
+            None,
+            true,
+        )
     }
 
     fn append_review_decision_event(
@@ -346,37 +357,25 @@ impl FindingStore {
         decision: &ReviewDecision,
         updates_finding_triage: bool,
         triage_cost: Option<(f64, bool)>,
+        propagation: Option<&ReviewDecisionPropagation>,
+        bind_identity: bool,
     ) -> Result<i64> {
         let target = self
             .v3_target_for_finding(finding_id, "review decision")?
             .context("review decisions require a file-backed v3 finding identity")?;
-        let read_watermark = StorageWriterActor::commit_blocking(
-            target.event_log_dir.clone(),
-            target.db_path.clone(),
-            WriterCommand::Control(ControlCommand::Barrier),
-        )?
-        .committed_seq;
+        let read_watermark = review_decision_read_watermark(&target)?;
         let (triage_cost_usd, triage_cost_usd_exact) = triage_cost_payload(triage_cost)?;
-        let write = DecisionWrite {
-            stable_fp: target.stable_fp,
-            finding_id: Some(finding_id),
-            identity_id: target.identity_id,
-            verdict: decision.verdict.as_str().to_string(),
-            author: decision.author.as_str().to_string(),
-            rationale: decision.rationale.clone(),
-            confidence_millis: confidence_millis(decision.confidence),
+        let write = review_decision_write(ReviewDecisionWriteInput {
+            target: &target,
+            finding_id,
+            decision,
             read_watermark,
             updates_finding_triage,
             triage_cost_usd,
             triage_cost_usd_exact,
-            dismiss_reason: decision
-                .dismiss_reason
-                .map(|reason| reason.as_str().to_string()),
-            dismissed_by: decision.actor.clone(),
-            // Store-level decisions are not interactive review: there is no
-            // session to attach, and none is invented.
-            review_session_id: None,
-        };
+            propagation,
+            bind_identity,
+        });
         commit_review_decision(target.event_log_dir, target.db_path, write)
     }
 
@@ -384,6 +383,66 @@ impl FindingStore {
         Ok(self
             .v3_finding_by_projected_id(finding_id)?
             .and_then(|finding| finding.identity_id))
+    }
+}
+
+struct ReviewDecisionWriteInput<'a> {
+    target: &'a V3FindingTarget,
+    finding_id: i64,
+    decision: &'a ReviewDecision,
+    read_watermark: u64,
+    updates_finding_triage: bool,
+    triage_cost_usd: Option<serde_json::Number>,
+    triage_cost_usd_exact: bool,
+    propagation: Option<&'a ReviewDecisionPropagation>,
+    bind_identity: bool,
+}
+
+fn review_decision_read_watermark(target: &V3FindingTarget) -> Result<u64> {
+    Ok(StorageWriterActor::commit_blocking(
+        target.event_log_dir.clone(),
+        target.db_path.clone(),
+        WriterCommand::Control(ControlCommand::Barrier),
+    )?
+    .committed_seq)
+}
+
+fn review_decision_write(input: ReviewDecisionWriteInput<'_>) -> DecisionWrite {
+    DecisionWrite {
+        stable_fp: decision_stable_fp(input.target, input.bind_identity),
+        finding_id: Some(input.finding_id),
+        identity_id: input
+            .bind_identity
+            .then(|| input.target.identity_id.clone())
+            .flatten(),
+        verdict: input.decision.verdict.as_str().to_string(),
+        author: input.decision.author.as_str().to_string(),
+        rationale: input.decision.rationale.clone(),
+        confidence_millis: confidence_millis(input.decision.confidence),
+        read_watermark: input.read_watermark,
+        updates_finding_triage: input.updates_finding_triage,
+        triage_cost_usd: input.triage_cost_usd,
+        triage_cost_usd_exact: input.triage_cost_usd_exact,
+        dismiss_reason: input
+            .decision
+            .dismiss_reason
+            .map(|reason| reason.as_str().to_string()),
+        dismissed_by: input.decision.actor.clone(),
+        review_session_id: None,
+        propagation_basis: input
+            .propagation
+            .map(|value| value.basis.as_str().to_string()),
+        source_finding_ids: input
+            .propagation
+            .map(|value| value.source_finding_ids.clone()),
+    }
+}
+
+fn decision_stable_fp(target: &V3FindingTarget, bind_identity: bool) -> String {
+    if bind_identity {
+        target.stable_fp.clone()
+    } else {
+        target.fingerprint.clone()
     }
 }
 

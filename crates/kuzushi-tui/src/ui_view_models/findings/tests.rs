@@ -1,10 +1,10 @@
 use super::*;
-use kuzushi_core::findings::TriageAuthor;
+use kuzushi_core::findings::{FindingIdentityBasis, TriageAuthor};
 use kuzushi_core::workspace::ROOT_SCOPE_ID;
 use kuzushi_core::{
-    write_run_summary, Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, RunSummary, RunTargetGitMetadata, Severity, StaticProofState,
-    TriageOutcome, TriageVerdict, V2Config, WorkspaceTarget,
+    write_run_summary, Finding, FindingEvidence, OptionScope, OptionTarget, PersistedProofVerdict,
+    PersistedSandboxBackend, PersistedVerification, RunSummary, RunTargetGitMetadata, Severity,
+    StaticProofState, TriageOutcome, TriageVerdict, V2Config, WorkspaceTarget,
 };
 use std::collections::BTreeMap;
 
@@ -582,6 +582,162 @@ fn findings_model_projects_cross_run_duplicates_by_engagement_key() {
     assert_eq!(model.rows[0].severity_label, "HIGH");
     assert!(model.rows[0].selected);
     assert!(model.rows[0].source.contains("corroboration 2"));
+}
+
+#[test]
+fn safe_identity_fold_collapses_strong_identity_and_policy_change_invalidates_cache() {
+    let mut first = identity_fold_finding("semgrep/first", 12);
+    let mut second = identity_fold_finding("codeql/second", 44);
+    set_identity(
+        &mut first,
+        FindingIdentityBasis::SourceLocator,
+        "sig:first",
+        "dedup:first",
+    );
+    set_identity(
+        &mut second,
+        FindingIdentityBasis::SourceLocator,
+        "sig:second",
+        "dedup:second",
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![first, second]);
+    set_identity_fold_policy(&mut app, "safe");
+
+    let safe = projected_visible_findings(&app);
+    assert_eq!(safe.len(), 1, "safe trusts strong identity bases");
+
+    set_identity_fold_policy(&mut app, "legacy");
+    let legacy = projected_visible_findings(&app);
+    assert_eq!(legacy.len(), 2, "legacy ignores durable identity");
+    assert!(!std::sync::Arc::ptr_eq(&safe, &legacy));
+}
+
+#[test]
+fn safe_identity_fold_requires_matching_file_fallback_evidence() {
+    let mut first = identity_fold_finding("semgrep/first", 12);
+    let mut matching = identity_fold_finding("codeql/matching", 44);
+    let mut distinct = identity_fold_finding("systems/distinct", 76);
+    set_identity(
+        &mut first,
+        FindingIdentityBasis::FileFallback,
+        "sig:one",
+        "dedup:a",
+    );
+    set_identity(
+        &mut matching,
+        FindingIdentityBasis::FileFallback,
+        "sig:one",
+        "dedup:b",
+    );
+    set_identity(
+        &mut distinct,
+        FindingIdentityBasis::FileFallback,
+        "sig:two",
+        "dedup:a",
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![first, matching, distinct]);
+    set_identity_fold_policy(&mut app, "safe");
+
+    let safe = projected_visible_findings(&app);
+    assert_eq!(
+        safe.len(),
+        2,
+        "matching signatures fold; distinct signatures stay visible"
+    );
+
+    set_identity_fold_policy(&mut app, "aggressive");
+    assert_eq!(projected_visible_findings(&app).len(), 1);
+}
+
+#[test]
+fn safe_identity_fold_uses_dedup_when_fallback_signature_is_unavailable() {
+    let mut first = identity_fold_finding("semgrep/first", 12);
+    let mut matching = identity_fold_finding("codeql/matching", 44);
+    let mut distinct = identity_fold_finding("systems/distinct", 76);
+    for finding in [&mut first, &mut matching, &mut distinct] {
+        set_identity(
+            finding,
+            FindingIdentityBasis::FileFallback,
+            "unused",
+            "dedup:shared",
+        );
+        finding.source_signature = None;
+    }
+    distinct.dedup_key = Some("dedup:distinct".to_string());
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![first, matching, distinct]);
+    set_identity_fold_policy(&mut app, "safe");
+
+    assert_eq!(projected_visible_findings(&app).len(), 2);
+}
+
+#[test]
+fn attack_chain_never_folds_into_component_even_when_aggressive() {
+    let mut chain = Finding::new_tool(
+        "chains",
+        "exploit-chain/auth-rce",
+        "src/auth.rs",
+        12,
+        None,
+        Severity::Critical,
+        "authentication bypass reaches command execution",
+    );
+    let mut component = identity_fold_finding("semgrep/command-execution", 12);
+    set_identity(
+        &mut chain,
+        FindingIdentityBasis::SourceLocator,
+        "sig:same",
+        "dedup:same",
+    );
+    set_identity(
+        &mut component,
+        FindingIdentityBasis::SourceLocator,
+        "sig:same",
+        "dedup:same",
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![chain, component]);
+    set_identity_fold_policy(&mut app, "aggressive");
+
+    assert_eq!(projected_visible_findings(&app).len(), 2);
+}
+
+fn identity_fold_finding(rule_id: &str, line: u32) -> Finding {
+    Finding::new_tool(
+        "semgrep",
+        rule_id,
+        "src/auth.rs",
+        line,
+        None,
+        Severity::High,
+        "command execution candidate",
+    )
+}
+
+fn set_identity(
+    finding: &mut Finding,
+    basis: FindingIdentityBasis,
+    source_signature: &str,
+    dedup_key: &str,
+) {
+    finding.identity_id = Some("fi_shared".to_string());
+    finding.identity_basis = Some(basis);
+    finding.source_signature = Some(source_signature.to_string());
+    finding.dedup_key = Some(dedup_key.to_string());
+}
+
+fn set_identity_fold_policy(app: &mut ShellApp, policy: &str) {
+    app.option_store_mut().set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("sast:scan".to_string()),
+        "identityFold",
+        serde_json::json!(policy),
+    );
+    let policy = IdentityFoldPolicy::parse(Some(policy)).unwrap();
+    let findings = app.findings().to_vec();
+    app.set_findings_projection(findings, Vec::new(), policy);
 }
 
 #[test]

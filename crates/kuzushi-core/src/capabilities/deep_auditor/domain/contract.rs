@@ -106,6 +106,9 @@ pub struct DeepAuditConfig {
     pub passes: u32,
     /// Dataflow-tool policy offered to the auditor (off / available / build).
     pub taint_tools: TaintToolPolicy,
+    /// Human-reviewed historical signal supplied by bulk triage. It is shown
+    /// as advisory context and never changes the finding or tool policy.
+    pub reviewed_refutation_context: Option<String>,
 }
 
 impl DeepAuditConfig {
@@ -119,6 +122,7 @@ impl DeepAuditConfig {
             temperature: DEFAULT_TEMPERATURE,
             passes: DEFAULT_PASSES,
             taint_tools: TaintToolPolicy::default(),
+            reviewed_refutation_context: None,
         }
     }
 }
@@ -157,7 +161,8 @@ const DEEP_AUDITOR_OUTPUT: &str = "Return ONLY a JSON object matching this schem
 /// Extra method step advertised only when the auditor is offered the
 /// `cpg_taint_paths` dataflow tool. A returned guard/authz annotation is
 /// falsification evidence; an empty flow count is never proof of safety.
-const DEEP_AUDITOR_TAINT_STEP: &str = "2b. When the alleged flow crosses functions, call cpg_taint_paths with regex \
+const DEEP_AUDITOR_TAINT_STEP: &str =
+    "2b. When the alleged flow crosses functions, call cpg_taint_paths with regex \
 source/sink patterns before reading callers by hand. A returned `guard` or `authz` annotation is \
 falsification evidence: cite it as kind=\"guard\" and prefer triggerable=false. An empty flowCount \
 is NOT evidence of safety — fall back to read_definition/find_references.";

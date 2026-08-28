@@ -81,13 +81,13 @@ fn query_question_closer(
     prompt: String,
 ) -> Result<crate::structured_output::CostedStructuredJson<Value>> {
     let _scope = begin_question_closer_scope(ctx, verb, question_count);
-    let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(input.workspace_root());
     crate::structured_output::query_cached_structured_json_with_cost(
         cache.as_ref(),
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
-            input.target.clone(),
+            input.analysis_root().to_path_buf(),
             threat_model_system_prompt(),
             prompt,
         ),
@@ -139,7 +139,7 @@ fn question_closer_prompt(
     let question_lines = bullet_lines(questions.iter().take(MAX_QUESTIONS).cloned());
     let anchor_lines = bullet_lines(evidence_index.iter().take(MAX_PROMPT_ANCHORS).cloned());
     let threat_lines = bullet_lines(prompt_threat_rows(document));
-    let docs = project_docs_section(&read_project_docs(&input.target));
+    let docs = project_docs_section(&read_project_docs(input.analysis_root()));
     format!(
         r#"The persisted threat model for {repo} carries open questions from earlier builds. Answer ONLY the questions you can ground in the evidence below; leave every other question unanswered.
 

@@ -8,8 +8,10 @@
 //! `kuzushi campaign run`) and run `done.json` sentinels into one view.
 //! Neither tool calls a model: planning is pure workspace-file computation.
 
+mod batch;
 pub mod coverage;
 mod dispatcher_lease;
+mod parallel_safety;
 mod plan;
 mod prior_runs;
 mod shards;
@@ -21,8 +23,27 @@ mod threats;
 pub mod trend;
 pub mod trend_history;
 
+pub use batch::{
+    acquire_scan_batch_threat_model_lease, capture_batch_equivalence, compile_scan_batch_plan,
+    load_scan_batch_child_equivalence_receipt, persist_batch_gate_outcome,
+    persist_batch_sarif_document, scan_batch_base_input, validate_scan_batch_execution_plan,
+    validate_scan_batch_id,
+    verify_scan_batch_child_equivalence, BatchEquivalenceComponents, BatchEquivalenceKey,
+    BatchGateStatus, BatchOperationalStatus, BatchSecurityGateStatus, CampaignPlanHandle,
+    ScanBatchChildEquivalenceReceipt, ScanBatchGateBinding, ScanBatchGateCounts, ScanBatchGateOutcome,
+    ScanBatchGatePolicy, ScanBatchPlanSpec, ScanBatchThreatModelLease, ValidatedScanBatchPlan,
+    MAX_SCAN_BATCH_TRIALS, RECEIPTLESS_ATTEMPT_OUTCOME, SCAN_BATCH_EQUIVALENCE_RECEIPT_FILE,
+    SCAN_BATCH_KIND, SCAN_BATCH_SCHEMA_VERSION,
+};
 pub use coverage::execute_campaign_coverage;
-pub use dispatcher_lease::{acquire_dispatcher_lease, CampaignDispatcherLease};
+pub use dispatcher_lease::{
+    acquire_batch_controller_lease, acquire_dispatcher_lease, BatchControllerLease,
+    CampaignDispatcherLease,
+};
+pub use parallel_safety::{
+    resolve_parallel_safety, ParallelSafety, ParallelSafetyResolution, ScanTaskParallelClaim,
+    MAX_CAMPAIGN_WORKERS,
+};
 pub use plan::execute_campaign_plan;
 pub use status::execute_campaign_status;
 
@@ -89,9 +110,7 @@ fn string_list_value(value: &Value) -> Option<Vec<String>> {
     if let Some(items) = value.as_array() {
         return Some(collect_non_empty(items.iter().filter_map(Value::as_str)));
     }
-    value
-        .as_str()
-        .map(|csv| collect_non_empty(csv.split(',')))
+    value.as_str().map(|csv| collect_non_empty(csv.split(',')))
 }
 
 fn collect_non_empty<'a>(items: impl Iterator<Item = &'a str>) -> Vec<String> {

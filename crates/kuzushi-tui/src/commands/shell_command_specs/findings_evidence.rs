@@ -95,6 +95,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "campaign deck: planned job matrix + dispatcher queue state",
     },
     ShellCommandSpec {
+        command: "batch <id>|clear",
+        aliases: &["/batch <id>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "open a scan-batch occurrence report and retain or clear its Review scope",
+    },
+    ShellCommandSpec {
         command: "coverage",
         aliases: &["/coverage"],
         category: ShellCommandCategory::FindingsEvidence,
@@ -198,7 +204,7 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "Haiku-driven threat-model patch; review then /threats apply",
     },
     ShellCommandSpec {
-        command: "threats ask <question>",
+        command: "threats ask [--whole-model] <question>",
         aliases: &["/threats ask <question>"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "ask the agent about the current threat model",
@@ -214,6 +220,36 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["/threats reject"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "discard the pending threat-model patch",
+    },
+    ShellCommandSpec {
+        command: "threats models",
+        aliases: &["/threats models"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "list immutable threat-model lineages and their active head",
+    },
+    ShellCommandSpec {
+        command: "threats diff",
+        aliases: &["/threats diff", "threats inspect diff"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "inspect compatibility-mirror edits against the active immutable revision",
+    },
+    ShellCommandSpec {
+        command: "threats activate <model-id>[@<revision-id>]",
+        aliases: &["/threats activate <model-id>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "activate a model head or exact immutable revision",
+    },
+    ShellCommandSpec {
+        command: "threats revisions <model-id>",
+        aliases: &["/threats revisions <model-id>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "list immutable revisions in one threat-model lineage",
+    },
+    ShellCommandSpec {
+        command: "threats restore <revision-id>",
+        aliases: &["/threats restore <revision-id>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "append a new revision from historical model content",
     },
     ShellCommandSpec {
         command: "threats versions",

@@ -55,6 +55,64 @@ pub(super) struct QueueJob {
     /// Epoch ms before which a requeued job must not be redispatched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) not_before_ms: Option<u64>,
+    /// Immutable run identities for every spawn of this logical job. The
+    /// current `runId` remains a convenience pointer to the latest attempt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) attempt_runs: Vec<QueueAttemptRun>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct QueueAttemptRun {
+    pub(super) run_id: String,
+    pub(super) attempt: u32,
+    pub(super) dispatch: u32,
+    pub(super) started_at_ms: u64,
+    pub(super) state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cost_usd: Option<f64>,
+}
+
+impl QueueJob {
+    pub(super) fn record_attempt_start(&mut self, run_id: &str, attempt: u32, dispatch: u32) {
+        if self.attempt_runs.iter().any(|run| run.run_id == run_id) {
+            return;
+        }
+        self.attempt_runs.push(QueueAttemptRun {
+            run_id: run_id.to_string(),
+            attempt,
+            dispatch,
+            started_at_ms: now_ms(),
+            state: "running".to_string(),
+            outcome: None,
+            exit_code: None,
+            cost_usd: None,
+        });
+    }
+
+    pub(super) fn record_attempt_terminal(
+        &mut self,
+        run_id: &str,
+        outcome: &str,
+        exit_code: Option<i32>,
+        cost_usd: Option<f64>,
+    ) {
+        let Some(attempt) = self
+            .attempt_runs
+            .iter_mut()
+            .find(|attempt| attempt.run_id == run_id)
+        else {
+            return;
+        };
+        attempt.state = "terminal".to_string();
+        attempt.outcome = Some(outcome.to_string());
+        attempt.exit_code = exit_code;
+        attempt.cost_usd = cost_usd;
+    }
 }
 
 pub(super) struct QueueStore {
@@ -78,6 +136,10 @@ impl QueueStore {
         let path = campaign_dir.join("queue.json");
         let events_path = campaign_dir.join("events.jsonl");
         let mut doc = load_or_new_doc(&path, campaign_id)?;
+        anyhow::ensure!(
+            doc.campaign_id == campaign_id,
+            "campaign queue id disagrees with its directory"
+        );
         doc.budget_usd = budget_usd;
         doc.job_budget_usd = job_budget_usd;
         add_missing_jobs(&mut doc, job_ids);
@@ -95,6 +157,26 @@ impl QueueStore {
 
     pub(super) fn job(&self, job_id: &str) -> Option<&QueueJob> {
         self.doc.jobs.get(job_id)
+    }
+
+    pub(super) fn require_exact_scan_batch_jobs(
+        &self,
+        expected_ids: &[String],
+        trials_planned: usize,
+    ) -> Result<()> {
+        let expected = expected_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>();
+        let actual = self
+            .doc
+            .jobs
+            .keys()
+            .collect::<std::collections::BTreeSet<_>>();
+        anyhow::ensure!(
+            expected.len() == trials_planned && actual == expected,
+            "scan-batch queue jobs must exactly match trialsPlanned"
+        );
+        Ok(())
     }
 
     pub(super) fn update_job(
@@ -308,12 +390,24 @@ fn load_recoverable_summary(
     }
     let summary = kuzushi_core::load_run_summary(target, run_id.as_str())
         .with_context(|| format!("could not verify running campaign job {job_id}"))?;
-    anyhow::ensure!(
-        summary.status != "running",
-        "campaign job {job_id} still has a live child owner for run {}",
-        run_id.as_str()
-    );
+    reject_unrecoverable_running_summary(job_id, run_id.as_str(), &summary)?;
     Ok(Some(summary))
+}
+
+fn reject_unrecoverable_running_summary(
+    job_id: &str,
+    run_id: &str,
+    summary: &kuzushi_core::RunSummary,
+) -> Result<()> {
+    if summary.status != "running" {
+        return Ok(());
+    }
+    let detail = if summary.process_id.is_some() {
+        "still has an authenticated live child owner"
+    } else {
+        "has legacy running metadata without an authenticated process owner"
+    };
+    anyhow::bail!("campaign job {job_id} {detail} for run {run_id}; refusing automatic recovery")
 }
 
 fn apply_recovered_terminal(
@@ -321,6 +415,7 @@ fn apply_recovered_terminal(
     summary: &kuzushi_core::RunSummary,
     job_id: &str,
 ) -> Result<()> {
+    let run_id = job.run_id.clone();
     let terminal = recovered_terminal_state(&summary.status)
         .with_context(|| format!("campaign job {job_id} has unknown persisted status"))?;
     job.state = terminal.state.to_string();
@@ -328,10 +423,26 @@ fn apply_recovered_terminal(
     job.reason = terminal.reason.map(str::to_string);
     job.cost_usd = accumulated_cost(job.cost_usd, summary.cost_usd.or(summary.observed_cost_usd));
     job.provider_spend_unresolved |= summary.provider_spend_unresolved;
+    if let Some(run_id) = run_id {
+        job.record_attempt_terminal(
+            &run_id,
+            &summary.status,
+            Some(terminal.exit_code),
+            summary.cost_usd.or(summary.observed_cost_usd),
+        );
+    }
     Ok(())
 }
 
 fn recover_without_child_metadata(job: &mut QueueJob) {
+    if let Some(run_id) = job.run_id.clone() {
+        job.record_attempt_terminal(
+            &run_id,
+            kuzushi_core::capabilities::campaign::RECEIPTLESS_ATTEMPT_OUTCOME,
+            None,
+            None,
+        );
+    }
     job.state = "planned".to_string();
     job.reason = Some("recovered from dead dispatcher before child metadata".to_string());
 }
@@ -515,6 +626,7 @@ mod tests {
                 .update_job("job-a", "job-start", |entry| {
                     entry.state = "running".to_string();
                     entry.run_id = Some("camp-job-a-a1".to_string());
+                    entry.record_attempt_start("camp-job-a-a1", 1, 1);
                 })
                 .unwrap();
             // Simulated SIGKILL: no terminal transition is written.
@@ -535,6 +647,10 @@ mod tests {
         assert_eq!(
             job.reason.as_deref(),
             Some("recovered from dead dispatcher before child metadata")
+        );
+        assert_eq!(
+            job.attempt_runs[0].outcome.as_deref(),
+            Some(kuzushi_core::capabilities::campaign::RECEIPTLESS_ATTEMPT_OUTCOME)
         );
         let events = std::fs::read_to_string(tmp.path().join("events.jsonl")).unwrap();
         let recovery = events
@@ -567,8 +683,21 @@ mod tests {
         .err()
         .expect("a live child owner must block stale recovery");
 
-        assert!(error.to_string().contains("still has a live child owner"));
+        assert!(error
+            .to_string()
+            .contains("still has an authenticated live child owner"));
         assert_eq!(std::fs::read(queue_path).unwrap(), before);
+    }
+
+    #[test]
+    fn legacy_running_summary_without_process_identity_refuses_recovery() {
+        let summary = kuzushi_core::RunSummary::running("legacy-run", "run", None, "target");
+
+        let error = reject_unrecoverable_running_summary("job-legacy", "legacy-run", &summary)
+            .expect_err("legacy running metadata has no authenticated owner");
+
+        assert!(error.to_string().contains("legacy running metadata"));
+        assert!(error.to_string().contains("refusing automatic recovery"));
     }
 
     fn seed_live_running_job(target: &Path, campaign: &Path, run_id: &str) {

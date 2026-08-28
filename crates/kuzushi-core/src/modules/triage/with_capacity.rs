@@ -349,13 +349,37 @@ fn run_triage_stage2_with(
     findings: Vec<Finding>,
     classify: &dyn Fn(&Finding) -> Result<TriageRuntimeOutcome>,
 ) -> Result<TriageRunStats> {
-    let clusters = cluster_triage_findings(findings);
+    let mut clusters = cluster_triage_findings(findings);
+    order_clusters_by_reviewed_refutation(&mut clusters, input);
     let mut stats = TriageRunStats::with_capacity(clusters.len());
     stats.clusters = clusters.len();
     for cluster in clusters {
         triage_one_cluster(store, input, &mut stats, cluster, classify)?;
     }
     Ok(stats)
+}
+
+fn order_clusters_by_reviewed_refutation(clusters: &mut [TriageCluster], input: &TriageRunInput) {
+    // Higher historical refutation signal is reviewed first to accelerate
+    // false-positive reduction. Stable sorting preserves the prior order for
+    // equal/missing signals, and every cluster remains in the slice.
+    clusters.sort_by(|left, right| {
+        let left = reviewed_refutation_rate(input, &left.representative);
+        let right = reviewed_refutation_rate(input, &right.representative);
+        match (left, right) {
+            (Some(left), Some(right)) => right.total_cmp(&left),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+}
+
+fn reviewed_refutation_rate(input: &TriageRunInput, finding: &Finding) -> Option<f64> {
+    input
+        .reviewed_refutation_priors
+        .get(&finding.fingerprint)
+        .map(|prior| prior.shrunken_refutation_rate)
 }
 
 fn deep_triage_outcome(
@@ -365,16 +389,7 @@ fn deep_triage_outcome(
     finding: &Finding,
     trace: Option<&crate::run_artifacts::TraceHandle>,
 ) -> Result<TriageRuntimeOutcome> {
-    let base = crate::capabilities::deep_auditor::DeepAuditConfig::new(config.cwd.clone());
-    let tuning = input.deep_tuning;
-    let cfg = crate::capabilities::deep_auditor::DeepAuditConfig {
-        passes: input.votes as u32,
-        max_steps: tuning.max_steps.unwrap_or(base.max_steps),
-        deposit_usd: tuning.deposit_usd.unwrap_or(base.deposit_usd),
-        temperature: tuning.temperature.unwrap_or(base.temperature),
-        taint_tools: tuning.taint_tools,
-        ..base
-    };
+    let cfg = deep_triage_config(config, input, finding);
     let outcome = crate::capabilities::deep_auditor::run_deep_auditor_traced(
         routed, None, &cfg, finding, trace,
     )?;
@@ -384,6 +399,107 @@ fn deep_triage_outcome(
         failed_vote_summaries: Vec::new(),
         evidence: outcome.evidence,
     })
+}
+
+fn deep_triage_config(
+    config: &TriageExecutionConfig,
+    input: &TriageRunInput,
+    finding: &Finding,
+) -> crate::capabilities::deep_auditor::DeepAuditConfig {
+    let base = crate::capabilities::deep_auditor::DeepAuditConfig::new(config.cwd.clone());
+    let tuning = input.deep_tuning;
+    crate::capabilities::deep_auditor::DeepAuditConfig {
+        passes: input.votes as u32,
+        max_steps: tuning.max_steps.unwrap_or(base.max_steps),
+        deposit_usd: tuning.deposit_usd.unwrap_or(base.deposit_usd),
+        temperature: tuning.temperature.unwrap_or(base.temperature),
+        taint_tools: tuning.taint_tools,
+        reviewed_refutation_context: reviewed_refutation_prompt_note(input, finding),
+        ..base
+    }
+}
+
+#[cfg(test)]
+mod reviewed_refutation_prior_tests {
+    use super::*;
+    use crate::findings::{RefutationCohortKey, ReviewedRefutationPrior};
+
+    fn finding(fingerprint: &str, rule: &str) -> Finding {
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            rule,
+            format!("src/{fingerprint}.rs"),
+            10,
+            Some(10),
+            Severity::High,
+            "candidate",
+        );
+        finding.fingerprint = fingerprint.to_string();
+        finding
+    }
+
+    fn prior(rule: &str, rate: f64) -> ReviewedRefutationPrior {
+        ReviewedRefutationPrior {
+            key: RefutationCohortKey {
+                tool: "semgrep".to_string(),
+                rule_id: rule.to_string(),
+                rule_version: Some("1".to_string()),
+                tool_version: None,
+                rule_set_hash: None,
+                config_hash: None,
+                language: Some("rust".to_string()),
+            },
+            emitted: 10,
+            reviewed: 4,
+            refuted: 3,
+            shrunken_refutation_rate: rate,
+            credible_interval_90: [0.3, 0.9],
+        }
+    }
+
+    #[test]
+    fn advisory_prior_stably_orders_without_removing_clusters() {
+        let mut input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        input
+            .reviewed_refutation_priors
+            .insert("high".to_string(), prior("high-rule", 0.8));
+        input
+            .reviewed_refutation_priors
+            .insert("low".to_string(), prior("low-rule", 0.2));
+        let mut clusters = cluster_triage_findings(vec![
+            finding("none", "none-rule"),
+            finding("low", "low-rule"),
+            finding("high", "high-rule"),
+        ]);
+
+        order_clusters_by_reviewed_refutation(&mut clusters, &input);
+
+        assert_eq!(clusters.len(), 3);
+        assert_eq!(clusters[0].representative.fingerprint, "high");
+        assert_eq!(clusters[1].representative.fingerprint, "low");
+        assert_eq!(clusters[2].representative.fingerprint, "none");
+    }
+
+    #[test]
+    fn deep_config_receives_the_same_advisory_prompt_context() {
+        let finding = finding("candidate", "CWE-89");
+        let mut input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        input
+            .reviewed_refutation_priors
+            .insert(finding.fingerprint.clone(), prior("CWE-89", 0.8));
+        let config = TriageExecutionConfig::new(PathBuf::from("."), "provider:model".to_string());
+
+        let cfg = deep_triage_config(&config, &input, &finding);
+
+        let context = cfg.reviewed_refutation_context.unwrap();
+        assert!(
+            context.contains("human-reviewed refutation prior"),
+            "{context}"
+        );
+        assert!(context.contains("never suppress or decide"), "{context}");
+        assert!(context.contains("3/4 reviewed refuted"), "{context}");
+        assert!(context.contains("4/10 emitted reviewed"), "{context}");
+    }
 }
 
 fn triage_one_cluster(
@@ -397,20 +513,36 @@ fn triage_one_cluster(
         return Ok(());
     }
 
-    let representative = cluster.representative;
     let Some(runtime_outcome) = classify_cluster_representative(
         stats,
-        &representative,
+        &cluster.representative,
         &cluster.duplicates,
         classify,
     )?
     else {
         return Ok(());
     };
+    persist_cluster_outcomes(store, input, stats, cluster, runtime_outcome)
+}
+
+fn persist_cluster_outcomes(
+    store: &FindingStore,
+    input: &TriageRunInput,
+    stats: &mut TriageRunStats,
+    cluster: TriageCluster,
+    runtime_outcome: TriageRuntimeOutcome,
+) -> Result<()> {
+    let representative = cluster.representative;
     stats.record_vote_failures(&representative, &runtime_outcome.failed_vote_summaries);
     let inherited = runtime_outcome.outcome.clone();
     let representative_fingerprint = representative.fingerprint.clone();
-    persist_triage_outcome(store, stats, representative, runtime_outcome)?;
+    persist_triage_outcome(
+        store,
+        stats,
+        representative,
+        runtime_outcome,
+        input.identity_reconcile,
+    )?;
     for duplicate in cluster.duplicates {
         propagate_duplicate_outcome(
             store,
@@ -418,6 +550,7 @@ fn triage_one_cluster(
             duplicate,
             &inherited,
             &representative_fingerprint,
+            input.identity_reconcile,
         );
     }
     Ok(())

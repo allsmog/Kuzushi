@@ -114,14 +114,6 @@ pub(super) fn threat_regen_input(existing: &Value) -> Value {
     })
 }
 
-pub(super) fn threat_ask_input(existing: &Value, question: &str) -> Value {
-    json!({
-        "action": "ask",
-        "question": question,
-        "existingThreatModel": existing,
-    })
-}
-
 pub(super) fn threat_patch_value(patch: &ThreatPatch) -> Value {
     json!({
         "goal": patch.goal,

@@ -1492,7 +1492,26 @@ mod catalog_regex_markers_for_discovery_tests {
 }
 
 pub(crate) fn load_taint_iris_next_threat_model(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    load_taint_iris_next_json_artifact(
-        crate::capabilities::threat_model::persistent_threat_model_path(repo_root),
-    )
+    let path = crate::capabilities::threat_model::persistent_threat_model_path(repo_root);
+    match crate::capabilities::threat_model::try_load_persistent_threat_model(repo_root) {
+        Ok(Some(value)) => artifact_load_result(path, "loaded", Some(value), true),
+        Ok(None) => artifact_load_result(path, "not found", None, false),
+        Err(error) => artifact_load_result(path, &error.to_string(), None, false),
+    }
+}
+
+fn artifact_load_result(
+    path: PathBuf,
+    reason: &str,
+    value: Option<Value>,
+    ok: bool,
+) -> TaintIrisNextArtifactLoad {
+    TaintIrisNextArtifactLoad {
+        status: TaintIrisNextArtifactStatus {
+            ok,
+            path: Some(path.display().to_string()),
+            reason: reason.to_string(),
+        },
+        value,
+    }
 }

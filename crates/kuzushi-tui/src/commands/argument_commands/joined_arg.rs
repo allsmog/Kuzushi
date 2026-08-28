@@ -14,7 +14,7 @@ pub(crate) fn parse_joined_arg_command(
         "favorite" | "fav" => required_joined_arg(rest, original, ShellCommand::FavoriteTool),
         "prompt" => empty_joined_arg(rest, ShellCommand::Prompts, ShellCommand::Prompt),
         "plan" => required_joined_arg(rest, original, ShellCommand::Plan),
-        "ask" => required_joined_arg(rest, original, ShellCommand::Ask),
+        "ask" => return Some(parse_ask_command(args, original, false)),
         "attach" => empty_joined_arg(rest, ShellCommand::FilePicker, ShellCommand::Attach),
         "load" => ShellCommand::Load((!rest.trim().is_empty()).then_some(rest)),
         _ => return None,

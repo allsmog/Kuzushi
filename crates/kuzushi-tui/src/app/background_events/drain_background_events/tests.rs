@@ -115,6 +115,7 @@ fn job_drain_finishes_agent_slot_and_clears_liveness() {
         audit: AgentCallAudit {
             cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
             call_attempted: true,
+            tool_policy_receipt: None,
         },
     }));
     let agent = AgentChatView {

@@ -1,5 +1,4 @@
 use super::*;
-use serde_json::json;
 
 #[path = "threat_regen_worker/job.rs"]
 mod job;
@@ -98,71 +97,11 @@ fn threat_regen_prompt(existing: &serde_json::Value) -> String {
     )
 }
 
-pub(crate) fn threat_ask_worker(
-    config: V2Config,
-    model: String,
-    thinking_level: Option<String>,
-    cwd: PathBuf,
-    existing: serde_json::Value,
-    question: String,
-    metadata: ProposalRunMetadata,
-    sink: JobEventSink,
-    cancel: ScanCancellation,
-) {
-    ThreatWorkerJob {
-        config,
-        model,
-        thinking_level,
-        cwd,
-        existing,
-        metadata,
-        cancel,
-    }
-    .run_ask(question, sink);
-}
-
-fn settle_threat_ask_result(
-    run: &ProposalRun<'_>,
-    lifecycle: ProposalRunLifecycle,
-    result: CostedWorkerResult<String>,
-    audit: AgentCallAudit,
-    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
-) -> ThreatPatchEvent {
-    match result {
-        Ok((answer, cost)) => persisted_threat_answer_event(run, lifecycle, answer, cost, audit),
-        Err(error) => failed_threat_event(run, lifecycle, error, audit, cancellation),
-    }
-}
-
 fn send_threat_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: AgentCallAudit) {
     sink.send(ShellEvent::Threat(ThreatPatchEvent::Failed {
         error: error.to_string(),
         audit,
     }));
-}
-
-fn persisted_threat_answer_event(
-    run: &ProposalRun<'_>,
-    lifecycle: ProposalRunLifecycle,
-    answer: String,
-    cost: kuzushi_core::runtime::RuntimeCostReport,
-    audit: AgentCallAudit,
-) -> ThreatPatchEvent {
-    match run.complete_observed(
-        "threat-model answer ready",
-        json!({ "answer": answer.clone() }),
-        cost,
-        lifecycle,
-    ) {
-        Ok(()) => ThreatPatchEvent::Answer {
-            text: answer,
-            audit: audit.with_cost(cost),
-        },
-        Err(error) => ThreatPatchEvent::Failed {
-            error: threat_terminal_persistence_error(run, error),
-            audit: audit.with_cost(cost),
-        },
-    }
 }
 
 fn failed_threat_event(
@@ -191,38 +130,6 @@ fn threat_persistence_aware_failure(message: String, persisted: anyhow::Result<(
         Ok(()) => message,
         Err(_error) => format!("{message}; additionally, terminal run persistence failed"),
     }
-}
-
-pub(crate) fn run_threat_ask_worker(
-    config: V2Config,
-    model: String,
-    thinking_level: Option<String>,
-    cwd: PathBuf,
-    existing: serde_json::Value,
-    question: &str,
-    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
-    cancel: ScanCancellation,
-) -> CostedWorkerResult<String> {
-    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)
-        .map_err(CostedWorkerError::before_call)?;
-    let prompt = threat_ask_prompt(question, &existing);
-    let answer = worker_response_text(
-        runtime,
-        model,
-        cwd,
-        ASK_SYSTEM_PROMPT.to_string(),
-        prompt,
-        "threat-ask returned no content",
-        &observation,
-    )?;
-    Ok((answer.0.to_string(), answer.1))
-}
-
-fn threat_ask_prompt(question: &str, existing: &serde_json::Value) -> String {
-    format!(
-        "OPERATOR QUESTION:\n{question}\n\nCURRENT THREAT MODEL JSON:\n{}",
-        pretty_threat_json(existing)
-    )
 }
 
 fn pretty_threat_json(value: &serde_json::Value) -> String {

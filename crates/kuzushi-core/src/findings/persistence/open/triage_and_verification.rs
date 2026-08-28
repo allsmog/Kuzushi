@@ -5,7 +5,21 @@ use crate::storage_v3::writer_actor::{
 
 impl FindingStore {
     pub fn record_auto_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
-        self.record_triage_with_author(finding_id, triage, TriageAuthor::Auto)
+        self.record_auto_triage_for_identity(finding_id, triage)
+            .map(|_| ())
+    }
+
+    /// Propagates an automated verdict only across observations whose durable
+    /// identity basis authorizes it. Every accepted write records the source
+    /// finding and the weakest basis used for the propagation decision.
+    pub fn record_auto_triage_for_identity(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+    ) -> Result<usize> {
+        let source = self.required_projected_finding(finding_id)?;
+        let candidates = self.identity_candidates(&source)?;
+        self.propagate_auto_triage(&source, candidates, triage)
     }
 
     pub fn record_triage_with_author(
@@ -16,6 +30,17 @@ impl FindingStore {
     ) -> Result<()> {
         self.upsert_triage_for_finding_ids([finding_id], triage, author)
             .map(|_| ())
+    }
+
+    /// Records an automated finding-local verdict without binding the event
+    /// to its durable identity. Used by `identityReconcile=off` so later
+    /// projections cannot silently treat the decision as identity-wide.
+    pub fn record_auto_triage_locally(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+    ) -> Result<bool> {
+        self.upsert_triage_for_finding_id(finding_id, triage, TriageAuthor::Auto, None, false)
     }
 
     pub fn record_auto_triage_for_fingerprint(
@@ -50,7 +75,58 @@ impl FindingStore {
     ) -> Result<usize> {
         let mut updated = 0;
         for finding_id in finding_ids {
-            updated += usize::from(self.upsert_triage_for_finding_id(finding_id, triage, author)?);
+            updated += usize::from(
+                self.upsert_triage_for_finding_id(finding_id, triage, author, None, true)?,
+            );
+        }
+        Ok(updated)
+    }
+
+    fn propagate_auto_triage(
+        &self,
+        source: &Finding,
+        candidates: Vec<Finding>,
+        triage: &TriageOutcome,
+    ) -> Result<usize> {
+        let source_id = source.id.context("projected finding is missing its id")?;
+        let targets = compatible_auto_triage_targets(source, candidates);
+        if self.auto_triage_blocked_by_human_history(&targets)? {
+            return Ok(0);
+        }
+        self.persist_propagated_auto_triage(source_id, targets, triage)
+    }
+
+    fn auto_triage_blocked_by_human_history(&self, targets: &[AutoTriageTarget]) -> Result<bool> {
+        for target in targets {
+            let finding_id = required_finding_id(&target.finding)?;
+            if self.finding_has_human_decision(finding_id, &target.finding)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn persist_propagated_auto_triage(
+        &self,
+        source_id: i64,
+        targets: Vec<AutoTriageTarget>,
+        triage: &TriageOutcome,
+    ) -> Result<usize> {
+        let mut updated = 0;
+        for target in targets {
+            let propagation = ReviewDecisionPropagation {
+                basis: target.basis,
+                source_finding_ids: vec![source_id],
+            };
+            let candidate_id = required_finding_id(&target.finding)?;
+            let candidate_triage = propagated_triage_outcome(triage, candidate_id == source_id);
+            updated += usize::from(self.upsert_triage_for_finding_id(
+                candidate_id,
+                &candidate_triage,
+                TriageAuthor::Auto,
+                Some(&propagation),
+                true,
+            )?);
         }
         Ok(updated)
     }
@@ -60,9 +136,17 @@ impl FindingStore {
         finding_id: i64,
         triage: &TriageOutcome,
         author: TriageAuthor,
+        propagation: Option<&ReviewDecisionPropagation>,
+        bind_identity: bool,
     ) -> Result<bool> {
         if self.triage_update_allowed(finding_id, author)? {
-            self.append_review_decision_from_triage(finding_id, triage, author)?;
+            self.append_review_decision_from_triage(
+                finding_id,
+                triage,
+                author,
+                propagation,
+                bind_identity,
+            )?;
             return Ok(true);
         }
         Ok(false)
@@ -74,10 +158,45 @@ impl FindingStore {
                 "finding constraint violation: missing projected finding id {finding_id}"
             );
         };
-        if finding.triaged_by == Some(TriageAuthor::Human) && author != TriageAuthor::Human {
+        if author != TriageAuthor::Human && self.finding_has_human_decision(finding_id, &finding)? {
             return Ok(false);
         }
         Ok(true)
+    }
+
+    fn required_projected_finding(&self, finding_id: i64) -> Result<Finding> {
+        self.v3_finding_by_projected_id(finding_id)?
+            .with_context(|| {
+                format!("finding constraint violation: missing projected finding id {finding_id}")
+            })
+    }
+
+    fn identity_candidates(&self, source: &Finding) -> Result<Vec<Finding>> {
+        let Some(identity_id) = source.identity_id.as_deref() else {
+            return Ok(vec![source.clone()]);
+        };
+        let mut stmt = self.conn.prepare(
+            "select finding_json from finding_current where identity_id = ?1 order by id asc",
+        )?;
+        let rows = stmt.query_map(
+            params![identity_id],
+            super::finding_writes::row_to_current_finding,
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not list findings for identity-aware triage")
+    }
+
+    fn finding_has_human_decision(&self, finding_id: i64, finding: &Finding) -> Result<bool> {
+        if finding.triaged_by == Some(TriageAuthor::Human) {
+            return Ok(true);
+        }
+        self.conn
+            .query_row(
+                "select exists(select 1 from review_decisions where finding_id = ?1 and author = 'human')",
+                params![finding_id],
+                |row| row.get(0),
+            )
+            .context("Could not check finding-local human review decisions")
     }
 
     /// Persist an empirical verification outcome alongside its finding.
@@ -191,6 +310,37 @@ impl FindingStore {
         }
         Ok(verifications)
     }
+}
+
+fn propagated_triage_outcome(triage: &TriageOutcome, is_source: bool) -> TriageOutcome {
+    let mut outcome = triage.clone();
+    if !is_source {
+        outcome.cost_usd = 0.0;
+        outcome.cost_usd_exact = true;
+    }
+    outcome
+}
+
+struct AutoTriageTarget {
+    finding: Finding,
+    basis: FindingIdentityBasis,
+}
+
+fn compatible_auto_triage_targets(
+    source: &Finding,
+    candidates: Vec<Finding>,
+) -> Vec<AutoTriageTarget> {
+    candidates
+        .into_iter()
+        .filter_map(|finding| {
+            let basis = auto_triage_propagation_basis(source, &finding)?;
+            Some(AutoTriageTarget { finding, basis })
+        })
+        .collect()
+}
+
+fn required_finding_id(finding: &Finding) -> Result<i64> {
+    finding.id.context("projected finding is missing its id")
 }
 
 impl FindingStore {

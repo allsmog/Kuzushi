@@ -1,6 +1,7 @@
 use super::review_conflicts::effective_review_decision_conflict_label;
 use kuzushi_core::findings::{
     finding_lifecycle_status, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict,
+    TriageAuthor,
 };
 use kuzushi_core::workspace::WorkspaceFindingReviewContext;
 use kuzushi_core::Finding;
@@ -256,10 +257,24 @@ fn insert_latest_decision<K: Ord>(
     candidate: IndexedReviewDecision,
 ) {
     match decisions.get(&key) {
-        Some(existing) if existing.sort_key > candidate.sort_key => {}
+        Some(existing) if decision_remains_effective(existing, &candidate) => {}
         _ => {
             decisions.insert(key, candidate);
         }
+    }
+}
+
+fn decision_remains_effective(
+    existing: &IndexedReviewDecision,
+    candidate: &IndexedReviewDecision,
+) -> bool {
+    match (
+        existing.decision.author == TriageAuthor::Human,
+        candidate.decision.author == TriageAuthor::Human,
+    ) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => existing.sort_key > candidate.sort_key,
     }
 }
 

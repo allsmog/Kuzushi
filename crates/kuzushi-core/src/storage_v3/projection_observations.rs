@@ -1,6 +1,7 @@
 use super::projection_fts::rebuild_fts_if_available;
 use super::projection_payload::{payload_i64, payload_str, require_payload_str};
 use crate::event_log::{EventEnvelope, EventKind};
+use crate::findings::FindingIdentityBasis;
 use anyhow::{Context, Result};
 use rusqlite::{params, Transaction};
 use serde_json::Value;
@@ -148,14 +149,16 @@ fn upsert_current_finding(
     tx.execute(
         r#"
         insert into finding_current(
-          id, run_id, identity_id, identity_match_tier, fingerprint, created_at,
-          updated_at, dedup_key, source_signature, finding_json
+          id, run_id, identity_id, identity_match_tier, identity_basis,
+          fingerprint, created_at, updated_at, dedup_key, source_signature,
+          finding_json
         )
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, ?9, ?10)
         on conflict(id) do update set
           run_id = excluded.run_id,
           identity_id = excluded.identity_id,
           identity_match_tier = excluded.identity_match_tier,
+          identity_basis = coalesce(excluded.identity_basis, finding_current.identity_basis),
           updated_at = excluded.updated_at,
           dedup_key = coalesce(excluded.dedup_key, finding_current.dedup_key),
           source_signature = coalesce(excluded.source_signature, finding_current.source_signature),
@@ -166,6 +169,7 @@ fn upsert_current_finding(
             require_payload_str(&event.payload, "runId")?,
             json_str(finding, "identityId")?,
             json_str(finding, "identityMatchTier")?,
+            json_optional_str(finding, "identityBasis"),
             json_str(finding, "fingerprint")?,
             event.created_at,
             json_optional_str(finding, "dedup_key"),
@@ -189,6 +193,11 @@ fn project_identity_link(
     let created_at = current
         .and_then(|projection| projection.created_at.as_deref())
         .unwrap_or(run.started_at.as_str());
+    let match_tier = payload_str(&event.payload, "identityMatchTier")
+        .or_else(|| payload_str(&event.payload, "identityMatchBasis"))
+        .context("finding identity projection requires an identity match tier")?;
+    let basis = payload_str(&event.payload, "identityMatchBasis")
+        .filter(|value| FindingIdentityBasis::from_str(value).is_some());
     insert_identity(
         tx,
         &IdentityProjection {
@@ -196,7 +205,8 @@ fn project_identity_link(
             target_id: &run.target_id,
             alias: require_payload_str(&event.payload, "identityAlias")?,
             fingerprint: require_payload_str(&event.payload, "identityFingerprint")?,
-            match_basis: require_payload_str(&event.payload, "identityMatchBasis")?,
+            match_tier,
+            basis,
             run_id,
             created_at,
         },
@@ -227,7 +237,8 @@ struct IdentityProjection<'a> {
     target_id: &'a str,
     alias: &'a str,
     fingerprint: &'a str,
-    match_basis: &'a str,
+    match_tier: &'a str,
+    basis: Option<&'a str>,
     run_id: &'a str,
     created_at: &'a str,
 }
@@ -251,17 +262,30 @@ fn insert_identity(tx: &Transaction<'_>, identity: &IdentityProjection<'_>) -> R
             identity.created_at,
         ],
     )?;
+    insert_identity_fingerprint(tx, identity)
+}
+
+fn insert_identity_fingerprint(
+    tx: &Transaction<'_>,
+    identity: &IdentityProjection<'_>,
+) -> Result<()> {
     tx.execute(
         r#"
-        insert or ignore into finding_identity_fingerprints(
-          identity_id, fingerprint, match_basis, created_at
+        insert into finding_identity_fingerprints(
+          identity_id, fingerprint, match_basis, identity_basis, created_at
         )
-        values (?1, ?2, ?3, ?4)
+        values (?1, ?2, ?3, ?4, ?5)
+        on conflict(identity_id, fingerprint) do update set
+          identity_basis = coalesce(
+            excluded.identity_basis,
+            finding_identity_fingerprints.identity_basis
+          )
         "#,
         params![
             identity.identity_id,
             identity.fingerprint,
-            identity.match_basis,
+            identity.match_tier,
+            identity.basis,
             identity.created_at,
         ],
     )?;

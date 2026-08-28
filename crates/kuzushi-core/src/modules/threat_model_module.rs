@@ -32,12 +32,94 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
         )),
         threat_model_verify_tool(),
         threat_model_import_tool(),
+        threat_model_models_tool(),
+        threat_model_activate_tool(),
+        threat_model_revisions_tool(),
+        threat_model_restore_tool(),
+        threat_model_adopt_tool(),
         tool(
             "threat-model:methodologies",
             "List supported threat-model methodologies.",
         )
         .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
     ]
+}
+
+fn threat_model_models_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:models",
+        "List immutable threat-model lineages and their head revisions.",
+        vec![target_option()],
+    )
+    .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+}
+
+fn threat_model_activate_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:activate",
+        "Activate one immutable threat-model revision without creating a content revision.",
+        vec![
+            target_option(),
+            opt("modelId", OptionType::String, "Threat-model lineage id.").required(),
+            opt(
+                "revisionId",
+                OptionType::String,
+                "Revision id; omitted selects the lineage head.",
+            ),
+            opt(
+                "force",
+                OptionType::Bool,
+                "Discard a divergent compatibility mirror after recording its digest.",
+            )
+            .default(json!(false)),
+        ],
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_model_revisions_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:revisions",
+        "List immutable revisions in one threat-model lineage.",
+        vec![
+            target_option(),
+            opt("modelId", OptionType::String, "Threat-model lineage id.").required(),
+        ],
+    )
+    .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+}
+
+fn threat_model_restore_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:restore",
+        "Restore historical content as a new immutable revision and activate it.",
+        vec![
+            target_option(),
+            opt("revisionId", OptionType::String, "Historical revision id.").required(),
+        ],
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_model_adopt_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:adopt",
+        "Adopt a hand-edited compatibility mirror as a new immutable revision.",
+        vec![target_option()],
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
 }
 
 fn threat_model_verify_tool() -> ToolDescriptor {
@@ -74,6 +156,7 @@ fn threat_model_import_tool() -> ToolDescriptor {
 fn threat_model_verify_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
+        threat_model_scope_option(),
         opt(
             "write",
             OptionType::Bool,
@@ -100,9 +183,21 @@ fn threat_model_import_options() -> Vec<OptionSpec> {
         ),
         threat_model_methodology_option("stride"),
         opt(
+            "modelId",
+            OptionType::String,
+            "Existing lineage to receive the imported document; omitted creates an explicit variant lineage.",
+        ),
+        opt("label", OptionType::String, "Label for a newly imported lineage."),
+        opt(
+            "activate",
+            OptionType::Bool,
+            "Activate the imported revision.",
+        )
+        .default(json!(true)),
+        opt(
             "force",
             OptionType::Bool,
-            "Overwrite a user-edited live threat model.",
+            "Discard a divergent compatibility mirror after recording its digest.",
         )
         .default(json!(false)),
     ]
@@ -130,21 +225,37 @@ fn threat_model_build_tool() -> ToolDescriptor {
 }
 
 fn threat_model_build_options() -> Vec<OptionSpec> {
-    let mut options = vec![
+    let mut options = threat_model_source_options();
+    options.extend(threat_model_generation_options());
+    options.extend(threat_model_lineage_options());
+    options.push(model_option());
+    options
+}
+
+fn threat_model_source_options() -> Vec<OptionSpec> {
+    vec![
         target_option(),
+        threat_model_scope_option(),
         threat_model_methodology_option("stride"),
         opt(
             "sources",
             OptionType::StringList,
-            "Parent artifacts for the model. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
+            "Parent artifacts for the model: context, threat-model, x-ray, entry-points, or opt-in threat-model attachments. Attachment text is workspace-confined, byte-bounded, and untrusted. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
         )
             .aliases(&["sourceArtifacts", "source_artifacts"])
             .default(json!(["context", "threat-model"])),
         opt("seed", OptionType::StringList, "Inline or workspace-file seed context.")
             .inline_or_workspace_files(),
-        opt("designDoc", OptionType::Path, "Architecture document source.")
-            .aliases(&["design_doc", "design"])
+        opt("designDocs", OptionType::StringList, "Architecture document sources.")
+            .aliases(&["designDoc", "design_docs", "design_doc", "design"])
             .workspace_read(),
+        opt(
+            "mapBuildSetId",
+            OptionType::String,
+            "Durable identity shared by scoped builds expanded from one Map selection.",
+        )
+        .aliases(&["map_build_set_id"])
+        .advanced(),
         opt(
             "vulnsFile",
             OptionType::Path,
@@ -156,10 +267,7 @@ fn threat_model_build_options() -> Vec<OptionSpec> {
             .aliases(&["output_dir"])
             .state_write()
             .advanced(),
-    ];
-    options.extend(threat_model_generation_options());
-    options.push(model_option());
-    options
+    ]
 }
 
 fn threat_model_generation_options() -> Vec<OptionSpec> {
@@ -294,6 +402,7 @@ fn threat_model_bounds_options() -> Vec<OptionSpec> {
 fn threat_model_read_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
+        threat_model_scope_option(),
         opt(
             "outputDir",
             OptionType::Path,
@@ -308,6 +417,41 @@ fn threat_model_read_options() -> Vec<OptionSpec> {
         )
         .aliases(&["type"])
         .choices(&["pasta", "stride", "dread"]),
+    ]
+}
+
+fn threat_model_scope_option() -> OptionSpec {
+    opt(
+        "scope",
+        OptionType::String,
+        "Bound project scope, written as id:<scope-id> or path:<workspace-relative-path>.",
+    )
+    .advanced()
+}
+
+fn threat_model_lineage_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "modelId",
+            OptionType::String,
+            "Existing threat-model lineage to append; omitted builds use the active matching lineage or mint the first lineage.",
+        )
+        .aliases(&["model_id"])
+        .advanced(),
+        opt(
+            "newModel",
+            OptionType::Bool,
+            "Create an explicit variant lineage even when scope and methodology already match.",
+        )
+        .aliases(&["new_model"])
+        .default(json!(false))
+        .advanced(),
+        opt(
+            "activate",
+            OptionType::Bool,
+            "Activate the committed revision; omitted preserves the current lineage-selection policy.",
+        )
+        .advanced(),
     ]
 }
 

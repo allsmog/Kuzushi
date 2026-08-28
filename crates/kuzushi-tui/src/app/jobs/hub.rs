@@ -105,6 +105,41 @@ impl JobHub {
         Ok(self.replace_slot(kind, label))
     }
 
+    /// The sole concurrency exception: one read-only Ask agent may accompany
+    /// one Run. All ordinary starts remain exclusive, and this path refuses
+    /// Plan/Threat/Agent-only state or a second Agent.
+    pub(crate) fn try_start_read_only_agent_alongside_run(
+        &mut self,
+        label: impl Into<String>,
+    ) -> Result<JobTicket, JobStartConflict> {
+        if self.only_run_is_active() {
+            return Ok(self.replace_slot(JobKind::Agent, label));
+        }
+        Err(self.read_only_agent_conflict())
+    }
+
+    pub(crate) fn can_start_read_only_agent_alongside_run(&self) -> bool {
+        self.only_run_is_active()
+    }
+
+    fn only_run_is_active(&self) -> bool {
+        self.slots.len() == 1 && self.slots.contains_key(&JobKind::Run)
+    }
+
+    fn read_only_agent_conflict(&self) -> JobStartConflict {
+        self.slots
+            .iter()
+            .next()
+            .map(|(kind, slot)| JobStartConflict {
+                kind: *kind,
+                label: slot.label.clone(),
+            })
+            .unwrap_or(JobStartConflict {
+                kind: JobKind::Run,
+                label: "no active Run".to_string(),
+            })
+    }
+
     #[cfg(test)]
     pub(crate) fn start(&mut self, kind: JobKind, label: impl Into<String>) -> JobTicket {
         self.replace_slot(kind, label)

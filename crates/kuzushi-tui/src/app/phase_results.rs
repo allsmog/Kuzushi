@@ -372,6 +372,7 @@ impl ShellApp {
         if let Some(reason) = self.phase_recovery_prerequisite_blocker(completed.phase) {
             return prerequisite_blocked_result_policy(&reason);
         }
+        offer_threat_model_rerun_actions(completed, &mut policy);
         self.offer_continue_run(completed, &mut policy);
         policy
     }
@@ -954,6 +955,34 @@ fn successful_result_actions(
         actions.push(Discard);
     }
     actions
+}
+
+fn offer_threat_model_rerun_actions(
+    completed: &PhaseAttemptCompleted,
+    policy: &mut PhaseResultPolicy,
+) {
+    use PhaseResultAction::{Refine, Regenerate};
+    if completed.phase != WorkflowPhase::Map
+        || completed.outcome != PhaseAttemptOutcome::Completed
+        || !phase_attempt_used_tool(completed, "threat-model:build")
+    {
+        return;
+    }
+    for action in [Refine, Regenerate] {
+        if !policy.actions.contains(&action) {
+            policy.actions.push(action);
+        }
+    }
+}
+
+fn phase_attempt_used_tool(completed: &PhaseAttemptCompleted, expected: &str) -> bool {
+    let target = std::path::Path::new(&completed.target_snapshot.target);
+    completed.run_refs.iter().rev().any(|run_id| {
+        kuzushi_core::load_run_summary(target, run_id)
+            .ok()
+            .and_then(|summary| summary.tool)
+            .is_some_and(|tool| tool == expected)
+    })
 }
 
 fn continuation_action(routes_to_report: bool) -> PhaseResultAction {
@@ -2178,6 +2207,14 @@ mod tests {
             let key = KeyCode::Char(command.default_hint().chars().next().unwrap());
             assert_eq!(PhaseResultCommand::from_default_key(key), Some(command));
         }
+    }
+
+    #[test]
+    fn completed_map_keeps_the_generic_action_set_narrow() {
+        let actions = successful_result_actions(WorkflowPhase::Map, false);
+
+        assert!(actions.contains(&PhaseResultAction::RunAgain));
+        assert!(!actions.contains(&PhaseResultAction::Regenerate));
     }
 
     #[test]

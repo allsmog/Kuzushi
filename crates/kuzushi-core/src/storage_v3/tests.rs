@@ -10,6 +10,41 @@ fn projection_starts_at_zero_watermark() {
 }
 
 #[test]
+fn opening_legacy_projection_adds_nullable_threat_model_ref_columns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("index.sqlite3");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        r#"
+        create table threat_model_versions (
+          id integer primary key autoincrement, created_at text not null,
+          source text not null, run_id text, methodology text not null,
+          threat_count integer not null, sha256 text not null,
+          document_json text not null
+        );
+        insert into threat_model_versions values
+          (1, '1000', 'build', 'run-old', 'stride', 1, 'sha256:old', '{}');
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    drop(ProjectionDb::open(&db_path).unwrap());
+
+    let conn = Connection::open(&db_path).unwrap();
+    assert!(table_has_column(&conn, "threat_model_versions", "model_id").unwrap());
+    assert!(table_has_column(&conn, "threat_model_versions", "revision_id").unwrap());
+    let refs: (Option<String>, Option<String>) = conn
+        .query_row(
+            "select model_id, revision_id from threat_model_versions where id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(refs, (None, None));
+}
+
+#[test]
 fn opening_legacy_projection_adds_verification_provenance_columns() {
     let tmp = tempfile::tempdir().unwrap();
     let db_path = tmp.path().join("index.sqlite3");

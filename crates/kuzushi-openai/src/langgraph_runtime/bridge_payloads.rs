@@ -1,8 +1,36 @@
-use kuzushi_core::{AgentRuntimeOptions, AgentStructuredOutput, AgentToolPolicy};
+use kuzushi_core::{
+    AgentRuntimeOptions, AgentStructuredOutput, AgentToolPolicy, AgentToolPolicyAuthorization,
+    AgentToolPolicyReceipt,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const LANGGRAPH_BRIDGE_PROTOCOL_VERSION: u32 = 1;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolPolicyHandshakeBridgeRequest {
+    pub(crate) protocol_version: u32,
+    #[serde(rename = "type")]
+    pub(crate) envelope_type: &'static str,
+    pub(crate) authorization: AgentToolPolicyAuthorization,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolPolicyHandshakeBridgeResponse {
+    pub(crate) ok: bool,
+    #[serde(default)]
+    pub(crate) acknowledgement: Option<AgentToolPolicyReceipt>,
+    #[serde(default)]
+    pub(crate) error: Option<String>,
+    #[serde(default, alias = "error_class")]
+    pub(crate) error_class: Option<String>,
+    #[serde(default)]
+    pub(crate) detail: Option<String>,
+    #[serde(default)]
+    pub(crate) status: Option<u16>,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -99,6 +127,8 @@ pub(crate) struct BridgeRequest {
     pub(crate) max_output_tokens: Option<u32>,
     pub(crate) tool_policy: AgentToolPolicy,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) authorization: Option<AgentToolPolicyAuthorization>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) runtime_options: Option<AgentRuntimeOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) temperature: Option<f32>,
@@ -110,6 +140,8 @@ pub(crate) struct BridgeResponse {
     pub(crate) ok: bool,
     pub(crate) text: Option<String>,
     pub(crate) structured: Option<Value>,
+    #[serde(default)]
+    pub(crate) tool_policy_acknowledgement: Option<AgentToolPolicyReceipt>,
     pub(crate) error: Option<String>,
     #[serde(default, alias = "error_class")]
     pub(crate) error_class: Option<String>,

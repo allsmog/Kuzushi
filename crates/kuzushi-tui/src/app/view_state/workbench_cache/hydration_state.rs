@@ -73,6 +73,9 @@ impl WorkbenchCache {
             ViewHydrationKey::ProjectScopeTree => self
                 .cached_project_scope_tree(Some(target))
                 .is_not_requested(),
+            ViewHydrationKey::ThreatModelStore => self
+                .cached_threat_model_store(Some(target))
+                .is_not_requested(),
             ViewHydrationKey::ProjectModelDocument { scope_id, revision } => self
                 .cached_project_model_document(Some(target), scope_id, revision.as_deref())
                 .is_not_requested(),
@@ -277,11 +280,7 @@ impl WorkbenchCache {
     ) {
         match (key, value) {
             (ViewHydrationKey::GitMetadata, ViewHydrationValue::GitMetadata(metadata)) => {
-                self.git_metadata = Some(GitMetadataCache {
-                    target,
-                    metadata,
-                    stale: false,
-                });
+                self.store_git_metadata(target, metadata);
             }
             (
                 ViewHydrationKey::RevisionRelationship {
@@ -290,24 +289,77 @@ impl WorkbenchCache {
                 },
                 ViewHydrationValue::RevisionRelationship(relationship),
             ) => {
-                self.revision_relationships
-                    .insert((target, accepted_revision, current_revision), relationship);
+                self.store_revision_relationship(
+                    target,
+                    accepted_revision,
+                    current_revision,
+                    relationship,
+                );
             }
+            (key, value) => self.apply_project_artifact_hydration(target, key, value),
+        }
+    }
+
+    fn apply_project_artifact_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
             (ViewHydrationKey::ProjectScopeTree, ViewHydrationValue::ProjectScopeTree(state)) => {
-                self.scope_tree = Some(ScopeTreeCache { target, state });
+                self.store_project_scope_tree(target, state);
+            }
+            (ViewHydrationKey::ThreatModelStore, ViewHydrationValue::ThreatModelStore(state)) => {
+                self.threat_model_store = Some((target, state))
             }
             (
                 ViewHydrationKey::ProjectModelDocument { scope_id, revision },
                 ViewHydrationValue::ProjectModelDocument(document),
             ) => self.store_project_model_document(target, scope_id, revision, document),
             (ViewHydrationKey::StrategyQueue, ViewHydrationValue::StrategyQueue(state)) => {
-                self.strategy_queue = Some(StrategyQueueCache { target, state });
+                self.store_strategy_queue(target, state);
             }
             (ViewHydrationKey::PromptMutations, ViewHydrationValue::PromptMutations(state)) => {
-                self.prompt_mutations = Some(PromptMutationsCache { target, state });
+                self.store_prompt_mutations(target, state);
             }
             (key, value) => self.apply_finding_hydration(target, key, value),
         }
+    }
+
+    fn store_git_metadata(
+        &mut self,
+        target: PathBuf,
+        metadata: Option<kuzushi_core::run_artifacts::RunTargetGitMetadata>,
+    ) {
+        self.git_metadata = Some(GitMetadataCache {
+            target,
+            metadata,
+            stale: false,
+        });
+    }
+
+    fn store_project_scope_tree(&mut self, target: PathBuf, state: ProjectScopeTreeState) {
+        self.scope_tree = Some(ScopeTreeCache { target, state });
+    }
+
+    fn store_strategy_queue(&mut self, target: PathBuf, state: StrategyQueueState) {
+        self.strategy_queue = Some(StrategyQueueCache { target, state });
+    }
+
+    fn store_prompt_mutations(&mut self, target: PathBuf, state: PromptMutationsState) {
+        self.prompt_mutations = Some(PromptMutationsCache { target, state });
+    }
+
+    fn store_revision_relationship(
+        &mut self,
+        target: PathBuf,
+        accepted_revision: String,
+        current_revision: String,
+        relationship: kuzushi_core::workspace::RevisionRelationship,
+    ) {
+        self.revision_relationships
+            .insert((target, accepted_revision, current_revision), relationship);
     }
 
     fn apply_finding_hydration(
@@ -527,6 +579,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         ViewHydrationKey::GitMetadata
         | ViewHydrationKey::RevisionRelationship { .. }
         | ViewHydrationKey::ProjectScopeTree
+        | ViewHydrationKey::ThreatModelStore
         | ViewHydrationKey::ProjectModelDocument { .. }
         | ViewHydrationKey::StrategyQueue
         | ViewHydrationKey::PromptMutations

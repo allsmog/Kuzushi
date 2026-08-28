@@ -10,6 +10,13 @@ pub(crate) struct BoundedText {
     pub(crate) truncated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DigestedPrefix {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) truncated: bool,
+    pub(crate) sha256: String,
+}
+
 /// Read at most `max_bytes` of a source-like file without following symlinks.
 /// Binary-looking files return `Ok(None)`; text is decoded lossily to preserve
 /// the existing inventory behavior for imperfect source encodings.
@@ -77,6 +84,21 @@ pub(crate) fn read_utf8_text_within(
     decode_utf8_prefix(read_regular_bytes_within(root, path, max_bytes)?)
 }
 
+/// Open `path` beneath `root` without following symlinked path components,
+/// then read a bounded UTF-8 prefix from the same authorized file descriptor.
+pub(crate) fn read_utf8_text_prefix_within(
+    root: &Path,
+    path: &Path,
+    max_bytes: usize,
+) -> io::Result<BoundedText> {
+    let prefix = read_open_file_prefix(open_regular_file_within(root, path)?, max_bytes)?;
+    let text = decode_utf8_prefix(prefix.bytes)?;
+    Ok(BoundedText {
+        text,
+        truncated: prefix.truncated,
+    })
+}
+
 pub(crate) fn read_source_text_prefix_within(
     root: &Path,
     path: &Path,
@@ -91,6 +113,14 @@ pub(crate) fn read_regular_bytes_within(
     max_bytes: usize,
 ) -> io::Result<Vec<u8>> {
     read_open_regular_bytes(path, open_regular_file_within(root, path)?, max_bytes)
+}
+
+pub(crate) fn digest_regular_file_prefix_within(
+    root: &Path,
+    path: &Path,
+    max_bytes: usize,
+) -> io::Result<DigestedPrefix> {
+    digest_open_file_prefix(open_regular_file_within(root, path)?, max_bytes)
 }
 
 pub(crate) fn read_dir_within(root: &Path, path: &Path) -> io::Result<fs::ReadDir> {
@@ -122,6 +152,37 @@ fn read_open_file_prefix(file: fs::File, max_bytes: usize) -> io::Result<FilePre
     let truncated = bytes.len() > max_bytes;
     bytes.truncate(max_bytes);
     Ok(FilePrefix { bytes, truncated })
+}
+
+fn digest_open_file_prefix(mut file: fs::File, max_bytes: usize) -> io::Result<DigestedPrefix> {
+    use sha2::{Digest as _, Sha256};
+
+    let mut hasher = Sha256::new();
+    let mut prefix = Vec::with_capacity(max_bytes.min(64 * 1024));
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut total = 0_usize;
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        if prefix.len() < max_bytes {
+            let keep = read.min(max_bytes - prefix.len());
+            prefix.extend_from_slice(&buffer[..keep]);
+        }
+        total = total.saturating_add(read);
+    }
+    let sha256 = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(DigestedPrefix {
+        bytes: prefix,
+        truncated: total > max_bytes,
+        sha256: format!("sha256:{sha256}"),
+    })
 }
 
 fn reject_truncated(path: &Path, max_bytes: usize, truncated: bool) -> io::Result<()> {

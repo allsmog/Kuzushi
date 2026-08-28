@@ -3,14 +3,20 @@
 //! Resolution order (first hit wins):
 //! 1. in-tree `THREAT_MODEL*.md` at the scope root,
 //! 2. nearest-ancestor `THREAT_MODEL*.md` walking up to the target root,
-//! 3. kuzushi's persistent target-level threat model (`threat-model.json`).
+//! 3. an immutable model-store head bound to the selected scope,
+//! 4. kuzushi's persistent compatibility mirror (`threat-model.json`).
 //!
 //! Anything found in the target tree is untrusted *data* used for seeding
 //! and provenance — never configuration. The resolved source and step are
 //! recorded on run provenance so review can answer "which model seeded
 //! this finding".
 
-use super::store::persistent_threat_model_path;
+use super::{
+    load_scope_threat_model, persistent_threat_model_path, threat_model_object_path, ScopeRef,
+    ThreatModelRef,
+};
+use anyhow::{Context, Result};
+use crate::capabilities::threat_model::current_scope_ref_for_path;
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 
@@ -19,6 +25,7 @@ use std::path::{Component, Path, PathBuf};
 pub enum ThreatModelResolvedVia {
     ScopeFile,
     AncestorFile,
+    ScopeModel,
     PersistentModel,
 }
 
@@ -27,6 +34,7 @@ impl ThreatModelResolvedVia {
         match self {
             Self::ScopeFile => "scope-file",
             Self::AncestorFile => "ancestor-file",
+            Self::ScopeModel => "scope-model",
             Self::PersistentModel => "persistent-model",
         }
     }
@@ -38,16 +46,33 @@ pub struct ResolvedThreatModel {
     /// Target-relative path of the governing document.
     pub source_path: PathBuf,
     pub resolved_via: ThreatModelResolvedVia,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_ref: Option<ThreatModelRef>,
 }
 
 /// Resolve the threat model governing `scope_rel_path` (`"."` for the whole
 /// target). Returns `None` when no document exists at any step.
 pub fn resolve_threat_model(target: &Path, scope_rel_path: &str) -> Option<ResolvedThreatModel> {
-    let scope = sanitized_scope(scope_rel_path)?;
+    try_resolve_threat_model(target, scope_rel_path)
+        .ok()
+        .flatten()
+}
+
+pub fn try_resolve_threat_model(
+    target: &Path,
+    scope_rel_path: &str,
+) -> Result<Option<ResolvedThreatModel>> {
+    let Some(scope) = sanitized_scope(scope_rel_path) else {
+        return Ok(None);
+    };
     if let Some(resolved) = tree_threat_model(target, &scope) {
-        return Some(resolved);
+        return Ok(Some(resolved));
     }
-    persistent_model(target)
+    let scope_ref = required_current_scope_ref(target, &scope)?;
+    if let Some(resolved) = scope_model(target, &scope_ref)? {
+        return Ok(Some(resolved));
+    }
+    Ok(persistent_model(target))
 }
 
 /// Reject absolute or parent-escaping scope inputs: scope paths come from
@@ -75,12 +100,47 @@ fn tree_threat_model(target: &Path, scope: &Path) -> Option<ResolvedThreatModel>
                 } else {
                     ThreatModelResolvedVia::AncestorFile
                 },
+                model_ref: None,
             });
         }
         at_scope_root = false;
         level = parent_within_target(dir);
     }
     None
+}
+
+fn scope_model(target: &Path, scope_ref: &ScopeRef) -> Result<Option<ResolvedThreatModel>> {
+    let Some(active) = load_scope_threat_model(target, scope_ref)? else {
+        return Ok(None);
+    };
+    let path = threat_model_object_path(target, &active.model_ref.sha256)?;
+    let source_path = path
+        .strip_prefix(target)
+        .map(Path::to_path_buf)
+        .unwrap_or(path);
+    Ok(Some(ResolvedThreatModel {
+        source_path,
+        resolved_via: ThreatModelResolvedVia::ScopeModel,
+        model_ref: Some(active.model_ref),
+    }))
+}
+
+fn required_current_scope_ref(target: &Path, scope: &Path) -> Result<ScopeRef> {
+    let rel_path = normalized_scope_string(scope);
+    current_scope_ref_for_path(target, &rel_path)?.with_context(|| {
+        format!(
+            "requested threat-model scope {rel_path:?} is absent from the current decomposition"
+        )
+    })
+}
+
+fn normalized_scope_string(scope: &Path) -> String {
+    let value = scope.to_string_lossy().replace('\\', "/");
+    if value.is_empty() {
+        ".".to_string()
+    } else {
+        value
+    }
 }
 
 fn parent_within_target(dir: &Path) -> Option<&Path> {
@@ -95,7 +155,12 @@ fn threat_model_file_in(dir: &Path) -> Option<String> {
     let entries = std::fs::read_dir(dir).ok()?;
     let mut names: Vec<String> = entries
         .flatten()
-        .filter(|entry| entry.file_type().map(|kind| kind.is_file()).unwrap_or(false))
+        .filter(|entry| {
+            entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+        })
         .filter_map(|entry| entry.file_name().into_string().ok())
         .filter(|name| name.starts_with("THREAT_MODEL") && name.ends_with(".md"))
         .collect();
@@ -105,7 +170,12 @@ fn threat_model_file_in(dir: &Path) -> Option<String> {
 
 fn persistent_model(target: &Path) -> Option<ResolvedThreatModel> {
     let path = persistent_threat_model_path(target);
-    if !path.is_file() {
+    // A malformed compatibility mirror is still provenance. Treating a
+    // directory or symlink as "no model" silently erases the invalid state
+    // from run receipts. The downstream bounded reader classifies the exact
+    // failure, while an authoritative manifest/object integrity error has
+    // already returned from `scope_model` above and never falls back here.
+    if std::fs::symlink_metadata(&path).is_err() {
         return None;
     }
     let source_path = path
@@ -115,6 +185,7 @@ fn persistent_model(target: &Path) -> Option<ResolvedThreatModel> {
     Some(ResolvedThreatModel {
         source_path,
         resolved_via: ThreatModelResolvedVia::PersistentModel,
+        model_ref: None,
     })
 }
 
@@ -170,7 +241,54 @@ mod tests {
             resolved.resolved_via,
             ThreatModelResolvedVia::PersistentModel
         );
-        assert!(resolve_threat_model(dir.path(), "missing-scope").is_some());
+        assert!(resolve_threat_model(dir.path(), "missing-scope").is_none());
+        assert!(try_resolve_threat_model(dir.path(), "missing-scope")
+            .unwrap_err()
+            .to_string()
+            .contains("absent from the current decomposition"));
+    }
+
+    #[test]
+    fn immutable_scope_model_precedes_the_compatibility_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        let scope = current_scope_ref_for_path(dir.path(), ".")
+            .unwrap()
+            .unwrap();
+        let committed = crate::capabilities::threat_model::commit_threat_model_revision(
+            dir.path(),
+            &serde_json::json!({
+                "version": "2.0",
+                "methodology": "stride",
+                "dfd": {
+                    "nodes": [{"id": "app"}],
+                    "flows": [],
+                    "trustBoundaries": []
+                },
+                "threats": [],
+                "summary": {}
+            }),
+            crate::capabilities::threat_model::ThreatModelCommit {
+                model_id: None,
+                new_model: false,
+                label: "root STRIDE".to_string(),
+                scope,
+                methodology: "stride".to_string(),
+                source: crate::capabilities::threat_model::ThreatModelRevisionSource::Build,
+                source_revision_id: None,
+                run_id: Some("run-1".to_string()),
+                activate: Some(true),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap();
+
+        let resolved = try_resolve_threat_model(dir.path(), ".").unwrap().unwrap();
+
+        assert_eq!(resolved.resolved_via, ThreatModelResolvedVia::ScopeModel);
+        assert_eq!(resolved.model_ref, Some(committed.model_ref));
+        assert!(resolved
+            .source_path
+            .starts_with(".kuzushi/threat-models/objects"));
     }
 
     #[test]

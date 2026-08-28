@@ -186,6 +186,9 @@ function serializedFailure(error) {
 }
 
 function agentMcpsEnabled(request) {
+  // An executing-query authorization is fail-closed authority. Compatibility
+  // environment switches may never widen its explicitly acknowledged tools.
+  if (request?.authorization) return false;
   const value = process.env.KUZUSHI_AGENT_MCPS;
   if (value === "0" || value === "false") return false;
   if (request?.toolPolicy?.mcps === true) return true;

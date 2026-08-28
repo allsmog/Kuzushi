@@ -1,6 +1,18 @@
 use super::*;
 use kuzushi_core::run_artifacts::FailureToLlmContext;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AskExecutionMode {
+    Interactive,
+    AuxiliaryReadOnly,
+}
+
+impl AskExecutionMode {
+    pub(super) fn is_auxiliary(self) -> bool {
+        self == Self::AuxiliaryReadOnly
+    }
+}
+
 pub(crate) struct AgentDispatch {
     pub(super) config: V2Config,
     pub(super) model: String,
@@ -17,6 +29,14 @@ pub(crate) struct AgentDispatch {
     pub(super) failure_context: Option<FailureToLlmContext>,
     pub(super) attached_failure_context: bool,
     pub(super) attached_screen_context: bool,
+    pub(super) attachment: AskAttachment,
+    pub(super) thread_context_key: ThreadContextKey,
+    pub(super) attached_turn_count: usize,
+    pub(super) thread_reset_reason: Option<String>,
+    pub(super) execution_mode: AskExecutionMode,
+    pub(super) tool_policy_authorization:
+        Option<kuzushi_core::runtime::AgentToolPolicyAuthorization>,
+    pub(super) tool_policy_receipt: Option<kuzushi_core::runtime::AgentToolPolicyReceipt>,
 }
 
 pub(super) fn spawn_agent_dispatch(
@@ -24,16 +44,32 @@ pub(super) fn spawn_agent_dispatch(
     ticket: JobTicket,
 ) -> std::thread::JoinHandle<()> {
     spawn_job_worker("agent", ticket, move |sink, cancel| {
-        agent_worker(
-            dispatch.config,
-            dispatch.model,
-            dispatch.thinking_level,
-            dispatch.cwd,
-            dispatch.agent_prompt,
-            dispatch.run_id,
-            sink,
-            cancel,
-        )
+        if dispatch.execution_mode.is_auxiliary() {
+            read_only_agent_worker(
+                dispatch.config,
+                dispatch.model,
+                dispatch.thinking_level,
+                dispatch.cwd,
+                dispatch.agent_prompt,
+                dispatch.run_id,
+                dispatch
+                    .tool_policy_authorization
+                    .expect("auxiliary Ask requires an authorized policy"),
+                sink,
+                cancel,
+            );
+        } else {
+            agent_worker(
+                dispatch.config,
+                dispatch.model,
+                dispatch.thinking_level,
+                dispatch.cwd,
+                dispatch.agent_prompt,
+                dispatch.run_id,
+                sink,
+                cancel,
+            );
+        }
     })
 }
 

@@ -36,6 +36,12 @@ fn map_fixture(state: SemanticFixture) -> MapPhaseModel {
         worklist: crate::ui_view_models::WorklistViewModel::default(),
         next_scans: super::super::NextScansState::Pending,
         dfd: fixture_dfd(richness >= 3),
+        threat_model_freshness: crate::ui_view_models::ThreatModelFreshnessModel {
+            verdict: "verified".to_string(),
+            document_sha256: Some("sha256:fixture".to_string()),
+            current_sha256: Some("sha256:fixture".to_string()),
+            requires_attention: false,
+        },
         empty_hint: (richness == 0).then_some("fixture empty".to_string()),
         decompose_first: None,
     }

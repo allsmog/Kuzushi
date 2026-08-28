@@ -433,7 +433,13 @@ mod tests {
             "#,
         )
         .expect("gitmodules");
-        kuzushi_core::discover_and_save_nested_project_scopes(dir.path()).unwrap();
+        let scope_tree = kuzushi_core::discover_and_save_nested_project_scopes(dir.path()).unwrap();
+        let expected_scope_id = scope_tree
+            .non_root_scopes()
+            .find(|scope| scope.rel_path == "libs/parser")
+            .expect("persisted submodule scope")
+            .id
+            .clone();
 
         let candidates = discover_target_candidates(dir.path());
 
@@ -444,8 +450,9 @@ mod tests {
         assert_eq!(submodule.hint, "git submodule");
         assert_eq!(
             submodule.scope.as_ref().map(|scope| scope.id.as_str()),
-            Some("submodule-libs-parser")
+            Some(expected_scope_id.as_str())
         );
+        assert!(expected_scope_id.starts_with("submodule-libs-parser-"));
         assert!(
             candidates
                 .iter()

@@ -146,6 +146,7 @@ pub(crate) struct ReviewQueueRow {
     pub(crate) proof_confidence: ProofConfidence,
     pub(crate) proof_confidence_label: String,
     pub(crate) confidence_label: String,
+    pub(crate) occurrence: Option<ReviewOccurrence>,
     pub(crate) priority_label: String,
     pub(crate) lifecycle_status: String,
     pub(crate) decision: String,
@@ -166,6 +167,14 @@ pub(crate) struct ReviewQueueRow {
     /// `ReviewQueueModel::selected_row` so cached rows survive cursor moves.
     pub(crate) selected: bool,
     pub(crate) workflow_group: ReviewWorkflowGroup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReviewOccurrence {
+    pub(crate) seen: usize,
+    pub(crate) completed: usize,
+    pub(crate) planned: usize,
+    pub(crate) failed: usize,
 }
 
 pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> ReviewQueueModel {
@@ -327,7 +336,7 @@ fn cached_review_queue_rows(
         app.review_decisions(),
     );
     let candidates = projected_findings_before_search(app);
-    let facet_groups = Arc::from(review_facet_groups(&candidates, &review_index));
+    let facet_groups = Arc::from(review_facet_groups(app, &candidates, &review_index));
     let (open_count, complete_count) = candidate_review_counts(&candidates, &review_index);
     let all_rows = projected_review_queue_rows(app, &review_index, base.as_deref());
     let rows = Arc::from(filter_review_rows(all_rows, mode));
@@ -375,6 +384,9 @@ fn review_filter_chips(app: &ShellApp, mode: ReviewQueueMode) -> Vec<String> {
     if let Some(tool) = review.backlog_tool.as_deref() {
         chips.push(format!("source:{tool}"));
     }
+    if let Some(batch_id) = app.router.campaign().active_batch_id.as_deref() {
+        chips.push(format!("batch:{batch_id}"));
+    }
     chips.extend(FindingSearch::parse(&review.search_query).chips(review.search_capture));
     if chips.is_empty() {
         chips.push(format!("completeness:{}", mode.label()));
@@ -383,6 +395,7 @@ fn review_filter_chips(app: &ShellApp, mode: ReviewQueueMode) -> Vec<String> {
 }
 
 fn review_facet_groups(
+    app: &ShellApp,
     candidates: &[crate::VisibleFindingProjection],
     review_index: &EffectiveReviewStateIndex,
 ) -> Vec<ReviewFacetGroup> {
@@ -392,17 +405,49 @@ fn review_facet_groups(
             *counts.entry((facet.facet, facet.value)).or_default() += 1;
         }
     }
-    [
+    append_batch_run_facets(app, candidates, &mut counts);
+    review_facet_labels(app)
+        .into_iter()
+        .map(|label| facet_group(label, &counts))
+        .collect()
+}
+
+fn review_facet_labels(app: &ShellApp) -> Vec<&'static str> {
+    let mut labels = vec![
         "severity",
         "source",
         "file",
         "actor",
         "confidence",
         "status",
-    ]
-    .into_iter()
-    .map(|label| facet_group(label, &counts))
-    .collect()
+    ];
+    if app.router.campaign().active_batch_report().is_some() {
+        labels.push("runs");
+    }
+    labels
+}
+
+fn append_batch_run_facets(
+    app: &ShellApp,
+    candidates: &[crate::VisibleFindingProjection],
+    counts: &mut std::collections::BTreeMap<(&'static str, String), usize>,
+) {
+    let Some(report) = app.router.campaign().active_batch_report() else {
+        return;
+    };
+    let visible = candidates
+        .iter()
+        .map(|candidate| &candidate.finding.fingerprint)
+        .collect::<std::collections::HashSet<_>>();
+    for row in report
+        .rows
+        .iter()
+        .filter(|row| row.fingerprints.iter().any(|value| visible.contains(value)))
+    {
+        for run_id in &row.run_ids {
+            *counts.entry(("runs", run_id.clone())).or_default() += 1;
+        }
+    }
 }
 
 fn facet_group(
@@ -442,9 +487,26 @@ fn projected_review_queue_rows(
                 &projected.finding,
                 decision.as_ref(),
                 base,
+                batch_occurrence(app, &projected.finding.fingerprint),
             )
         })
         .collect()
+}
+
+fn batch_occurrence(app: &ShellApp, fingerprint: &str) -> Option<ReviewOccurrence> {
+    let row = app
+        .router
+        .campaign()
+        .active_batch_report()?
+        .rows
+        .iter()
+        .find(|row| row.fingerprints.iter().any(|value| value == fingerprint))?;
+    Some(ReviewOccurrence {
+        seen: row.seen,
+        completed: row.completed,
+        planned: row.planned,
+        failed: row.failed,
+    })
 }
 
 fn filter_review_rows(rows: Vec<ReviewQueueRow>, mode: ReviewQueueMode) -> Vec<ReviewQueueRow> {
@@ -508,6 +570,7 @@ impl ReviewQueueRow {
         finding: &Finding,
         decision: Option<&EffectiveReviewDecision>,
         base: Option<&str>,
+        occurrence: Option<ReviewOccurrence>,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
         let decision_label = effective_review_decision_label(finding, decision);
@@ -521,6 +584,7 @@ impl ReviewQueueRow {
             proof_confidence: ProofConfidence::classify(finding),
             proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
             confidence_label: effective_review_confidence_label(finding, decision),
+            occurrence,
             priority_label: format!("review-order:{}", index + 1),
             lifecycle_status: lifecycle_status_label(finding),
             decision: decision_label,

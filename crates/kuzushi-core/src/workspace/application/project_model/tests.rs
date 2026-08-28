@@ -64,11 +64,17 @@ fn nested_project_model_inherits_parent_context_and_threat_model() {
     )
     .unwrap();
     let tree = discover_nested_project_scopes(temp.path());
+    let parser_scope_id = tree
+        .scopes
+        .iter()
+        .find(|scope| scope.rel_path == "libs/parser")
+        .map(|scope| scope.id.clone())
+        .expect("parser scope");
     save_nested_project_scopes(temp.path(), &tree).unwrap();
 
     let document = build_project_model_document(
         temp.path(),
-        "submodule-libs-parser",
+        &parser_scope_id,
         Some("abc123".to_string()),
     )
     .unwrap();

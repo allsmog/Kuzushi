@@ -142,6 +142,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::ProjectScopeTree => {
             ViewHydrationValue::ProjectScopeTree(ProjectScopeTreeState::RootOnly)
         }
+        ViewHydrationKey::ThreatModelStore => {
+            ViewHydrationValue::ThreatModelStore(ThreatModelStoreState::Legacy)
+        }
         ViewHydrationKey::ProjectModelDocument { .. } => {
             ViewHydrationValue::ProjectModelDocument(None)
         }

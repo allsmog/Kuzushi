@@ -17,7 +17,9 @@ use crate::command::CampaignCommand;
 use anyhow::{Context, Result};
 use budget::effective_job_budget;
 use child::{run_child, ChildReport, ChildSpec};
-use kuzushi_core::capabilities::campaign::{acquire_dispatcher_lease, CampaignDispatcherLease};
+use kuzushi_core::capabilities::campaign::{
+    acquire_dispatcher_lease, CampaignDispatcherLease, MAX_CAMPAIGN_WORKERS,
+};
 use kuzushi_core::run_artifacts::load_run_summary;
 use policy::{
     budget_exhausted, looks_rate_limited, transition_for, JobOutcome, QuotaWall, Transition,
@@ -28,12 +30,43 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::task::JoinSet;
 
-const MAX_WORKERS: usize = 8;
-
 pub(crate) async fn campaign_command(
     command: CampaignCommand,
     default_target: Option<PathBuf>,
 ) -> Result<()> {
+    match command {
+        batch @ CampaignCommand::Batch { .. } => {
+            super::scan_batch::run_existing_batch_command(batch, default_target).await
+        }
+        run @ CampaignCommand::Run { .. } => campaign_run_command(run, default_target).await,
+    }
+}
+
+async fn campaign_run_command(
+    command: CampaignCommand,
+    default_target: Option<PathBuf>,
+) -> Result<()> {
+    let request = public_campaign_request(command)?;
+    let target = crate::support::require_cli_target("campaign run", None, default_target)?;
+    run_loaded_campaign(
+        target,
+        request.campaign_id,
+        request.jobs,
+        request.dry_run,
+        request.settings,
+        DispatchAuthority::PublicCampaign,
+    )
+    .await
+}
+
+struct PublicCampaignRequest {
+    campaign_id: String,
+    jobs: Vec<String>,
+    dry_run: bool,
+    settings: DispatchSettings,
+}
+
+fn public_campaign_request(command: CampaignCommand) -> Result<PublicCampaignRequest> {
     let CampaignCommand::Run {
         campaign_id,
         workers,
@@ -47,34 +80,86 @@ pub(crate) async fn campaign_command(
         resume,
         jobs,
         dry_run,
-    } = command;
-    let target = crate::support::require_cli_target("campaign run", None, default_target)?;
-    let settings = DispatchSettings {
-        workers: clamped_workers(workers)?,
-        max_attempts: max_attempts.max(1),
-        job_timeout: Duration::from_secs(job_timeout_secs.max(1)),
-        quota_wall_threshold,
-        quota_wall_pause: Duration::from_secs(quota_wall_pause_secs.max(1)),
-        retry_backoff_secs: retry_backoff_secs.max(1),
-        budget_usd: budget,
-        job_budget_usd: job_budget,
-        resume,
+    } = command
+    else {
+        unreachable!("batch controller routed to the raw campaign dispatcher")
     };
-    let plan_jobs = load_plan_jobs(&target, &campaign_id, &jobs)?;
+    Ok(PublicCampaignRequest {
+        campaign_id,
+        jobs,
+        dry_run,
+        settings: DispatchSettings {
+            workers: clamped_workers(workers)?,
+            max_attempts: max_attempts.max(1),
+            job_timeout: Duration::from_secs(job_timeout_secs.max(1)),
+            quota_wall_threshold,
+            quota_wall_pause: Duration::from_secs(quota_wall_pause_secs.max(1)),
+            retry_backoff_secs: retry_backoff_secs.max(1),
+            budget_usd: budget,
+            job_budget_usd: job_budget,
+            resume,
+        },
+    })
+}
+
+async fn run_loaded_campaign(
+    target: PathBuf,
+    campaign_id: String,
+    jobs: Vec<String>,
+    dry_run: bool,
+    settings: DispatchSettings,
+    authority: DispatchAuthority,
+) -> Result<()> {
+    let loaded_plan = load_plan_jobs(&target, &campaign_id, &jobs)?;
+    authorize_loaded_plan(&loaded_plan, authority, &campaign_id)?;
+    enforce_scan_batch_worker_boundary(&loaded_plan, &settings)?;
     if dry_run {
-        return print_dry_run(&campaign_id, &plan_jobs);
+        return print_dry_run(&campaign_id, &loaded_plan.jobs);
     }
-    Dispatcher::open(target, campaign_id, plan_jobs, settings)?
+    Dispatcher::open(target, campaign_id, loaded_plan, settings)?
         .run()
         .await
 }
 
+pub(crate) async fn dispatch_scan_batch_plan(
+    target: PathBuf,
+    campaign_id: String,
+    workers: usize,
+) -> Result<()> {
+    let settings = standard_batch_dispatch_settings(workers)?;
+    run_loaded_campaign(
+        target,
+        campaign_id,
+        Vec::new(),
+        false,
+        settings,
+        DispatchAuthority::ScanBatchController,
+    )
+    .await
+}
+
+fn standard_batch_dispatch_settings(workers: usize) -> Result<DispatchSettings> {
+    Ok(DispatchSettings {
+        workers: clamped_workers(workers)?,
+        max_attempts: 2,
+        job_timeout: Duration::from_secs(3600),
+        quota_wall_threshold: 3,
+        quota_wall_pause: Duration::from_secs(900),
+        retry_backoff_secs: 5,
+        budget_usd: None,
+        job_budget_usd: None,
+        resume: false,
+    })
+}
+
 fn clamped_workers(requested: usize) -> Result<usize> {
     anyhow::ensure!(requested >= 1, "--workers must be at least 1");
-    if requested > MAX_WORKERS {
-        eprintln!("campaign: --workers {requested} clamped to the hard cap of {MAX_WORKERS}");
+    if requested > MAX_CAMPAIGN_WORKERS {
+        eprintln!(
+            "campaign: --workers {requested} clamped to the hard cap of {MAX_CAMPAIGN_WORKERS}"
+        );
     }
-    Ok(requested.min(MAX_WORKERS))
+    Ok(requested.min(MAX_CAMPAIGN_WORKERS))
 }
 
 struct DispatchSettings {
@@ -99,6 +184,38 @@ struct PlanJob {
     job_budget_usd: Option<f64>,
 }
 
+struct LoadedPlan {
+    jobs: Vec<PlanJob>,
+    batch_guard: Option<ScanBatchGuard>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchAuthority {
+    PublicCampaign,
+    ScanBatchController,
+}
+
+fn authorize_loaded_plan(
+    plan: &LoadedPlan,
+    authority: DispatchAuthority,
+    campaign_id: &str,
+) -> Result<()> {
+    if plan.batch_guard.is_some() && authority == DispatchAuthority::PublicCampaign {
+        anyhow::bail!(
+            "scan batch {campaign_id} must run through `kuzushi campaign batch {campaign_id}`; raw `campaign run` is refused"
+        );
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct ScanBatchGuard {
+    expected_key: String,
+    base_input: Value,
+    effective_workers: usize,
+    trials_planned: usize,
+}
+
 fn campaign_dir(target: &Path, campaign_id: &str) -> PathBuf {
     kuzushi_core::workspace::workspace_state_dir(target)
         .join("campaigns")
@@ -107,7 +224,7 @@ fn campaign_dir(target: &Path, campaign_id: &str) -> PathBuf {
 
 /// Plan order is the dispatch order: `campaign:plan` already sorted jobs by
 /// priority, and re-deriving rank here would let the two drift apart.
-fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result<Vec<PlanJob>> {
+fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result<LoadedPlan> {
     let plan_path = campaign_dir(target, campaign_id).join("plan.json");
     let body = std::fs::read_to_string(&plan_path).with_context(|| {
         format!(
@@ -117,12 +234,62 @@ fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result
     })?;
     let plan: Value = serde_json::from_str(&body)
         .with_context(|| format!("{} is malformed", plan_path.display()))?;
+    let batch_guard = scan_batch_guard(campaign_id, &plan, filter)?;
     let rows = plan
         .get("jobs")
         .and_then(Value::as_array)
         .with_context(|| format!("{} has no jobs array", plan_path.display()))?;
     let jobs = rows.iter().map(plan_job_row).collect::<Result<Vec<_>>>()?;
-    filtered_jobs(jobs, filter)
+    let jobs = if batch_guard.is_some() {
+        jobs
+    } else {
+        filtered_jobs(jobs, filter)?
+    };
+    Ok(LoadedPlan { jobs, batch_guard })
+}
+
+fn scan_batch_guard(
+    campaign_id: &str,
+    plan: &Value,
+    filter: &[String],
+) -> Result<Option<ScanBatchGuard>> {
+    if plan.get("kind").and_then(Value::as_str)
+        != Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND)
+    {
+        return Ok(None);
+    }
+    anyhow::ensure!(
+        filter.is_empty(),
+        "scan batches cannot use --jobs exclusions; compile a new batch instead"
+    );
+    let checked = kuzushi_core::capabilities::campaign::validate_scan_batch_execution_plan(
+        campaign_id,
+        plan,
+    )?;
+    Ok(Some(ScanBatchGuard {
+        expected_key: checked.equivalence_key,
+        base_input: checked.base_input,
+        effective_workers: checked.effective_workers,
+        trials_planned: checked.trials_planned,
+    }))
+}
+
+fn enforce_scan_batch_worker_boundary(
+    plan: &LoadedPlan,
+    settings: &DispatchSettings,
+) -> Result<()> {
+    if let Some(guard) = &plan.batch_guard {
+        enforce_frozen_worker_count(guard.effective_workers, settings.workers)?;
+    }
+    Ok(())
+}
+
+fn enforce_frozen_worker_count(expected: usize, received: usize) -> Result<()> {
+    anyhow::ensure!(
+        received == expected,
+        "scan-batch plan freezes effective workers at {expected}; dispatcher received {received}"
+    );
+    Ok(())
 }
 
 fn plan_job_row(row: &Value) -> Result<PlanJob> {
@@ -181,6 +348,7 @@ struct Dispatcher {
     binary: PathBuf,
     logs_dir: PathBuf,
     plan_jobs: Vec<PlanJob>,
+    batch_guard: Option<ScanBatchGuard>,
     store: QueueStore,
     settings: DispatchSettings,
     wall: QuotaWall,
@@ -192,7 +360,7 @@ impl Dispatcher {
     fn open(
         target: PathBuf,
         campaign_id: String,
-        plan_jobs: Vec<PlanJob>,
+        loaded_plan: LoadedPlan,
         settings: DispatchSettings,
     ) -> Result<Self> {
         let lease = acquire_dispatcher_lease(&target, &campaign_id)?;
@@ -200,7 +368,14 @@ impl Dispatcher {
         let logs_dir = dir.join("logs");
         std::fs::create_dir_all(&logs_dir)
             .with_context(|| format!("Could not create {}", logs_dir.display()))?;
-        let store = open_dispatch_queue(&target, &dir, &campaign_id, &plan_jobs, &settings)?;
+        let store = open_dispatch_queue(
+            &target,
+            &dir,
+            &campaign_id,
+            &loaded_plan.jobs,
+            loaded_plan.batch_guard.as_ref(),
+            &settings,
+        )?;
         let binary = std::env::current_exe().context("Could not resolve the kuzushi binary")?;
         let wall = QuotaWall::new(settings.quota_wall_threshold);
         Ok(Self {
@@ -208,7 +383,8 @@ impl Dispatcher {
             campaign_id,
             binary,
             logs_dir,
-            plan_jobs,
+            plan_jobs: loaded_plan.jobs,
+            batch_guard: loaded_plan.batch_guard,
             store,
             settings,
             wall,
@@ -252,40 +428,97 @@ impl Dispatcher {
         running: &mut JoinSet<(String, String, Result<ChildReport>)>,
     ) -> Result<()> {
         while running.len() < self.settings.workers {
-            if self.store.provider_spend_unresolved() {
-                self.park_pending("provider-spend-unresolved")?;
-                return Ok(());
-            }
-            if budget_exhausted(self.store.total_cost_usd(), self.settings.budget_usd) {
-                self.park_pending("budget-exhausted")?;
-                return Ok(());
-            }
-            let Some(job) = self.next_ready_job() else {
+            let Some(job) = self.next_job_for_dispatch()? else {
                 return Ok(());
             };
-            let entry = self.store.job(&job.job_id);
-            let attempt = entry.map(|entry| entry.attempts).unwrap_or(0) + 1;
-            // Run ids come from the never-reset dispatch counter, not the
-            // attempt budget: a resumed job re-minting an old run id would
-            // inherit that run's artifacts, and the live budget guard would
-            // kill the fresh child on the stale trace's spend.
-            let dispatch = entry.map(|entry| entry.dispatches).unwrap_or(0) + 1;
-            let run_id = format!("{}-{}-a{dispatch}", self.campaign_id, job.job_id);
-            self.store.update_job(&job.job_id, "job-start", |entry| {
-                entry.state = "running".to_string();
-                entry.attempts = attempt;
-                entry.dispatches = dispatch;
-                entry.run_id = Some(run_id.clone());
-                entry.not_before_ms = None;
-            })?;
-            running.spawn(job_future(
-                self.child_spec(&job, &run_id),
-                job.job_id,
-                run_id,
-                self.shutdown_rx.clone(),
-            ));
+            self.start_dispatch_job(running, job)?;
         }
         Ok(())
+    }
+
+    fn next_job_for_dispatch(&mut self) -> Result<Option<PlanJob>> {
+        self.verify_scan_batch_before_launch()?;
+        if let Some(reason) = self.dispatch_stop_reason() {
+            self.park_pending(reason)?;
+            return Ok(None);
+        }
+        Ok(self.next_ready_job())
+    }
+
+    fn dispatch_stop_reason(&self) -> Option<&'static str> {
+        if self.store.provider_spend_unresolved() {
+            return Some("provider-spend-unresolved");
+        }
+        budget_exhausted(self.store.total_cost_usd(), self.settings.budget_usd)
+            .then_some("budget-exhausted")
+    }
+
+    fn start_dispatch_job(
+        &mut self,
+        running: &mut JoinSet<(String, String, Result<ChildReport>)>,
+        job: PlanJob,
+    ) -> Result<()> {
+        let (attempt, dispatch) = self.next_attempt_numbers(&job.job_id);
+        let run_id = format!("{}-{}-a{dispatch}", self.campaign_id, job.job_id);
+        self.mark_job_running(&job.job_id, &run_id, attempt, dispatch)?;
+        running.spawn(job_future(
+            self.child_spec(&job, &run_id),
+            job.job_id,
+            run_id,
+            self.shutdown_rx.clone(),
+        ));
+        Ok(())
+    }
+
+    fn next_attempt_numbers(&self, job_id: &str) -> (u32, u32) {
+        let entry = self.store.job(job_id);
+        (
+            entry.map(|entry| entry.attempts).unwrap_or(0) + 1,
+            entry.map(|entry| entry.dispatches).unwrap_or(0) + 1,
+        )
+    }
+
+    fn mark_job_running(
+        &mut self,
+        job_id: &str,
+        run_id: &str,
+        attempt: u32,
+        dispatch: u32,
+    ) -> Result<()> {
+        self.store.update_job(job_id, "job-start", |entry| {
+            entry.state = "running".to_string();
+            entry.attempts = attempt;
+            entry.dispatches = dispatch;
+            entry.run_id = Some(run_id.to_string());
+            entry.not_before_ms = None;
+            entry.record_attempt_start(run_id, attempt, dispatch);
+        })
+    }
+
+    fn verify_scan_batch_before_launch(&mut self) -> Result<()> {
+        let Some(guard) = self.batch_guard.as_ref() else {
+            return Ok(());
+        };
+        if self.next_ready_job().is_none() {
+            return Ok(());
+        }
+        let current = current_batch_equivalence(&self.target, &guard.base_input)?;
+        if current.sha256 == guard.expected_key {
+            return Ok(());
+        }
+        let expected = guard.expected_key.clone();
+        self.park_pending("batch-equivalence-drift")?;
+        self.store.append_event(
+            "batch-equivalence-drift",
+            None,
+            serde_json::json!({ "expected": expected, "actual": current.sha256 }),
+        )?;
+        anyhow::bail!(
+            "scan batch {} stopped before the next trial: BatchEquivalenceKey changed (expected {}, actual {})",
+            self.campaign_id,
+            expected,
+            current.sha256
+        )
     }
 
     fn child_spec(&self, job: &PlanJob, run_id: &str) -> ChildSpec {
@@ -342,7 +575,14 @@ impl Dispatcher {
             self.settings.max_attempts,
             self.settings.retry_backoff_secs,
         );
-        self.apply_transition(job_id, &report, cost, provider_spend_unresolved, transition)?;
+        self.apply_transition(
+            job_id,
+            run_id,
+            &report,
+            cost,
+            provider_spend_unresolved,
+            transition,
+        )?;
         if self.wall.observe(rate_limited) {
             self.pause_for_quota_wall()?;
         }
@@ -352,17 +592,19 @@ impl Dispatcher {
     fn apply_transition(
         &mut self,
         job_id: &str,
+        run_id: &str,
         report: &ChildReport,
         cost: Option<f64>,
         provider_spend_unresolved: bool,
         transition: Transition,
     ) -> Result<()> {
-        let outcome = report.outcome.label();
+        let outcome = self.batch_attempt_outcome(run_id, report)?;
         let exit_code = report.exit_code;
-        self.store.update_job(job_id, outcome, |entry| {
+        self.store.update_job(job_id, &outcome, |entry| {
             entry.exit_code = exit_code;
             entry.cost_usd = accumulated_job_cost(entry.cost_usd, cost);
             entry.provider_spend_unresolved |= provider_spend_unresolved;
+            entry.record_attempt_terminal(run_id, &outcome, exit_code, cost);
             match transition {
                 Transition::Complete => entry.state = "completed".to_string(),
                 Transition::Fail => entry.state = "failed".to_string(),
@@ -382,6 +624,37 @@ impl Dispatcher {
                 }
             }
         })
+    }
+
+    fn batch_attempt_outcome(&self, run_id: &str, report: &ChildReport) -> Result<String> {
+        let outcome = report.outcome.label().to_string();
+        if self.batch_guard.is_none() {
+            return Ok(outcome);
+        }
+        use kuzushi_core::run_artifacts::RunArtifactRead;
+        match kuzushi_core::run_artifacts::read_run_artifact_text(
+            &self.target,
+            run_id,
+            kuzushi_core::capabilities::campaign::SCAN_BATCH_EQUIVALENCE_RECEIPT_FILE,
+        ) {
+            RunArtifactRead::Ready { .. } => {
+                kuzushi_core::capabilities::campaign::load_scan_batch_child_equivalence_receipt(
+                    &self.target,
+                    run_id,
+                )?;
+                Ok(outcome)
+            }
+            RunArtifactRead::Missing { .. } if report.outcome != JobOutcome::Completed => {
+                Ok(kuzushi_core::capabilities::campaign::RECEIPTLESS_ATTEMPT_OUTCOME.to_string())
+            }
+            RunArtifactRead::Missing { .. } => {
+                anyhow::bail!("completed scan-batch child {run_id} omitted its equivalence receipt")
+            }
+            other => {
+                other.require("scan-batch child equivalence receipt")?;
+                unreachable!("ready and missing receipt states were handled")
+            }
+        }
     }
 
     fn pause_for_quota_wall(&mut self) -> Result<()> {
@@ -483,18 +756,43 @@ impl Dispatcher {
                 "providerSpendUnresolved": provider_spend_unresolved,
             }),
         )?;
-        println!(
-            "campaign {} finished: {summary}; {}",
-            self.campaign_id,
-            campaign_cost_label(cost, provider_spend_unresolved)
-        );
+        self.print_finish_summary(&summary, cost, provider_spend_unresolved);
         let completed = counts.get("completed").copied().unwrap_or(0);
         let total: usize = counts.values().sum();
         if completed == total {
             return Ok(());
         }
-        Err(RunCommandExit::new(3, format!("campaign {}: {summary}", self.campaign_id)).into())
+        let exit_code = if self.batch_guard.is_some() { 1 } else { 3 };
+        Err(RunCommandExit::new(
+            exit_code,
+            format!("campaign {}: {summary}", self.campaign_id),
+        )
+        .into())
     }
+
+    fn print_finish_summary(&self, summary: &str, cost: f64, unresolved: bool) {
+        let line = format!(
+            "campaign {} finished: {summary}; {}",
+            self.campaign_id,
+            campaign_cost_label(cost, unresolved)
+        );
+        if self.batch_guard.is_some() {
+            eprintln!("{line}");
+        } else {
+            println!("{line}");
+        }
+    }
+}
+
+fn current_batch_equivalence(
+    target: &Path,
+    base_input: &Value,
+) -> Result<kuzushi_core::capabilities::campaign::BatchEquivalenceKey> {
+    let config = crate::application::config_diagnostics::load_cli_config(Some(target))?;
+    let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+    kuzushi_core::capabilities::campaign::capture_batch_equivalence(
+        target, base_input, &config, &registry,
+    )
 }
 
 fn campaign_cost_label(observed_usd: f64, provider_spend_unresolved: bool) -> String {
@@ -509,6 +807,7 @@ fn open_dispatch_queue(
     campaign_dir: &Path,
     campaign_id: &str,
     plan_jobs: &[PlanJob],
+    batch_guard: Option<&ScanBatchGuard>,
     settings: &DispatchSettings,
 ) -> Result<QueueStore> {
     let job_ids = plan_jobs
@@ -523,6 +822,9 @@ fn open_dispatch_queue(
         settings.budget_usd,
         settings.job_budget_usd,
     )?;
+    if let Some(guard) = batch_guard {
+        store.require_exact_scan_batch_jobs(&job_ids, guard.trials_planned)?;
+    }
     if settings.resume {
         report_resumed_jobs(&mut store)?;
     }
@@ -673,6 +975,95 @@ async fn sleep_or_shutdown(wait: Duration, shutdown: &mut tokio::sync::watch::Re
         _ = shutdown.changed() => {}
     }
 }
+
+#[cfg(test)]
+mod batch_worker_receipt_tests {
+    use super::*;
+    use kuzushi_core::capabilities::campaign::{
+        compile_scan_batch_plan, ScanBatchGatePolicy, ScanBatchPlanSpec,
+    };
+    use kuzushi_core::{ModuleRegistry, V2Config};
+    use serde_json::json;
+
+    fn compile_batch(root: &Path) -> String {
+        std::fs::write(root.join("source.rs"), "fn main() {}\n").unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        compile_scan_batch_plan(ScanBatchPlanSpec {
+            root,
+            batch_id: Some("batch-dispatch-auth".to_string()),
+            trials: 2,
+            requested_workers: 1,
+            gate_policy: ScanBatchGatePolicy::default(),
+            prepared_input: json!({
+                "triage": false,
+                "taskMode": "manual",
+                "tasks": ["secret-scan"]
+            }),
+            config: &V2Config::default(),
+            registry: &registry,
+        })
+        .unwrap()
+        .campaign_id
+    }
+
+    #[test]
+    fn dispatcher_requires_the_authenticated_effective_worker_count() {
+        assert!(enforce_frozen_worker_count(3, 3).is_ok());
+        assert!(enforce_frozen_worker_count(3, 2).is_err());
+        assert!(enforce_frozen_worker_count(3, 4).is_err());
+    }
+
+    #[test]
+    fn scan_batch_job_filtering_is_refused() {
+        let target = tempfile::tempdir().unwrap();
+        let batch_id = compile_batch(target.path());
+        let error = load_plan_jobs(target.path(), &batch_id, &["trial-0001".to_string()])
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("cannot use --jobs exclusions"));
+    }
+
+    #[test]
+    fn tampered_batch_is_refused_before_queue_creation() {
+        let target = tempfile::tempdir().unwrap();
+        let batch_id = compile_batch(target.path());
+        let directory = campaign_dir(target.path(), &batch_id);
+        let plan_path = directory.join("plan.json");
+        let mut plan: Value = serde_json::from_slice(&std::fs::read(&plan_path).unwrap()).unwrap();
+        plan["jobs"][0]["input"]["trial"] = json!(2);
+        std::fs::write(&plan_path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
+
+        assert!(load_plan_jobs(target.path(), &batch_id, &[]).is_err());
+        assert!(!directory.join("queue.json").exists());
+    }
+
+    #[tokio::test]
+    async fn public_campaign_run_cannot_bypass_the_batch_controller_or_resume_queue() {
+        let target = tempfile::tempdir().unwrap();
+        let batch_id = compile_batch(target.path());
+        let directory = campaign_dir(target.path(), &batch_id);
+        let mut settings = standard_batch_dispatch_settings(1).unwrap();
+        settings.resume = true;
+
+        let error = run_loaded_campaign(
+            target.path().to_path_buf(),
+            batch_id.clone(),
+            Vec::new(),
+            false,
+            settings,
+            DispatchAuthority::PublicCampaign,
+        )
+        .await
+        .expect_err("public campaign run must not dispatch a scan batch");
+
+        assert!(error.to_string().contains("raw `campaign run` is refused"));
+        assert!(error.to_string().contains("campaign batch"));
+        assert!(!directory.join("queue.json").exists());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod dispatcher_recovery_tests;
 
 #[cfg(test)]
 mod cost_accounting_tests {

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::bridge_payloads::{
     BridgeRequest, BridgeResponse, NextStepBridgeRequest, NextStepBridgeResponse,
+    ToolPolicyHandshakeBridgeRequest, ToolPolicyHandshakeBridgeResponse,
 };
 
 const LEGACY_ERROR_PATTERNS: &[(&[&str], &str)] = &[
@@ -60,6 +61,13 @@ pub(crate) fn run_bridge(
         &extra_env,
         cancellation,
     )
+}
+
+pub(crate) fn run_tool_policy_handshake_bridge(
+    command: &[String],
+    request: &ToolPolicyHandshakeBridgeRequest,
+) -> Result<ToolPolicyHandshakeBridgeResponse> {
+    run_json_bridge(command, request, "tool-policy handshake bridge", &[], None)
 }
 
 /// Build `KUZUSHI_MCP_<NAME>_ARTIFACT=<path>` env pairs from the

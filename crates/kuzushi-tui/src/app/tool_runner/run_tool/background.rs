@@ -29,6 +29,25 @@ impl ShellApp {
         );
     }
 
+    #[cfg(test)]
+    pub(crate) fn persist_background_tool_preparation_for_test(
+        &self,
+        tool_name: &str,
+        input: serde_json::Value,
+        workspace: &WorkspaceTarget,
+    ) -> anyhow::Result<(String, serde_json::Value)> {
+        let prepared = self.prepare_background_tool_input(tool_name, input, workspace)?;
+        let dispatch_input = prepared.value().clone();
+        let seed = persist_background_tool_run_start(
+            self.registry(),
+            self.config(),
+            workspace,
+            tool_name,
+            prepared.value(),
+        )?;
+        Ok((seed.run_id, dispatch_input))
+    }
+
     pub(crate) fn start_authorized_background_tool(
         &mut self,
         tool_name: String,

@@ -35,6 +35,13 @@ pub struct CampaignRouteState {
     /// Bounded trend history backing the sparkline strip; refreshed with
     /// the trend. Empty until two distinct snapshots exist.
     pub(crate) trend_history: Vec<TrendSnapshot>,
+    /// Draft owned by the batch configurator. While present the Campaign
+    /// surface renders configuration instead of the campaign list.
+    pub(crate) batch_scan_config: Option<crate::app::BatchScanConfig>,
+    /// The batch whose occurrence report scopes Review. The id survives deck
+    /// refreshes until the operator clears it or switches targets.
+    pub(crate) active_batch_id: Option<String>,
+    pub(crate) active_batch_report: Option<kuzushi_core::findings::BatchOccurrenceReport>,
 }
 
 impl Default for CampaignRouteState {
@@ -50,6 +57,9 @@ impl Default for CampaignRouteState {
             notice: None,
             trend: None,
             trend_history: Vec::new(),
+            batch_scan_config: None,
+            active_batch_id: None,
+            active_batch_report: None,
         }
     }
 }
@@ -117,6 +127,27 @@ impl CampaignRouteState {
     pub(crate) fn cycle_workers(&mut self) {
         self.workers = self.workers % CAMPAIGN_MAX_WORKERS + 1;
     }
+
+    pub(crate) fn sync_selected_batch_workers(&mut self) {
+        let frozen = self
+            .selected_campaign()
+            .filter(|campaign| crate::app::is_scan_batch_snapshot(campaign))
+            .and_then(|campaign| campaign.effective_workers);
+        if let Some(workers) = frozen {
+            self.workers = workers;
+        }
+    }
+
+    pub(crate) fn active_batch_report(
+        &self,
+    ) -> Option<&kuzushi_core::findings::BatchOccurrenceReport> {
+        self.active_batch_report.as_ref()
+    }
+
+    pub(crate) fn clear_active_batch(&mut self) {
+        self.active_batch_id = None;
+        self.active_batch_report = None;
+    }
 }
 
 /// The exact dispatcher argv the deck's Launch composes — kept pure so the
@@ -144,6 +175,19 @@ pub(crate) fn dispatcher_args(
     args
 }
 
+/// Scan batches launch their controller, which owns dispatch followed by the
+/// exactly-once aggregate, gate, and SARIF publication sequence.
+pub(crate) fn batch_controller_args(batch_id: &str, target: &std::path::Path) -> Vec<String> {
+    vec![
+        "--plain".to_string(),
+        "--target".to_string(),
+        target.display().to_string(),
+        "campaign".to_string(),
+        "batch".to_string(),
+        batch_id.to_string(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +213,17 @@ mod tests {
         let subset = ["j2".to_string()];
         let args = dispatcher_args("camp1", target, 3, &subset, 2);
         assert_eq!(args[7..], ["--jobs".to_string(), "j2".to_string()]);
+    }
+
+    #[test]
+    fn batch_controller_args_use_the_exact_detached_controller_contract() {
+        let args = batch_controller_args("batch1", std::path::Path::new("/tmp/ws"));
+
+        assert_eq!(
+            args,
+            ["--plain", "--target", "/tmp/ws", "campaign", "batch", "batch1"]
+        );
+        assert!(!args.iter().any(|arg| arg == "--workers" || arg == "--jobs"));
     }
 
     #[test]

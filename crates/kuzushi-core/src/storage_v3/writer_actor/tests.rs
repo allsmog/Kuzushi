@@ -18,6 +18,8 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         dismiss_reason: None,
         dismissed_by: None,
         review_session_id: None,
+        propagation_basis: None,
+        source_finding_ids: None,
     }
 }
 
@@ -27,6 +29,7 @@ fn observation(observation_hash: &str) -> ObservationWrite {
         identity_id: None,
         identity_alias: None,
         identity_fingerprint: None,
+        identity_match_tier: None,
         identity_match_basis: None,
         observation_hash: observation_hash.to_string(),
         stable_fp: "fp3_observed".to_string(),

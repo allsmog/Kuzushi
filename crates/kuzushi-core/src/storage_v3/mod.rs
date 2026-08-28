@@ -409,11 +409,47 @@ pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     migrate_review_decision_dismissal_columns(conn)?;
     migrate_review_decision_provenance_columns(conn)?;
     migrate_review_decision_session_column(conn)?;
+    migrate_review_decision_propagation_columns(conn)?;
+    migrate_finding_identity_basis_column(conn)?;
+    migrate_threat_model_version_ref_columns(conn)?;
     migrate_review_session_rank_objective_column(conn)?;
     migrate_verification_provenance_columns(conn)?;
     migrate_patch_cost_columns(conn)?;
     migrate_patch_lifecycle_columns(conn)?;
     create_optional_fts(conn)?;
+    Ok(())
+}
+
+/// Additive and deliberately nullable: older projections only recorded the
+/// broad match tier, so backfilling `stable_fp` as a high-confidence basis
+/// would manufacture evidence. Readers derive those rows conservatively.
+fn migrate_finding_identity_basis_column(conn: &Connection) -> Result<()> {
+    if !table_has_column(conn, "finding_current", "identity_basis")? {
+        conn.execute_batch("alter table finding_current add column identity_basis text")?;
+    }
+    if !table_has_column(conn, "finding_identity_fingerprints", "identity_basis")? {
+        conn.execute_batch(
+            "alter table finding_identity_fingerprints add column identity_basis text",
+        )?;
+    }
+    Ok(())
+}
+
+/// Immutable model references did not exist in the original version ledger.
+/// Both columns remain null on legacy rows rather than inferring a lineage
+/// from document content or the compatibility mirror.
+fn migrate_threat_model_version_ref_columns(conn: &Connection) -> Result<()> {
+    for column in ["model_id", "revision_id"] {
+        if !table_has_column(conn, "threat_model_versions", column)? {
+            conn.execute_batch(&format!(
+                "alter table threat_model_versions add column {column} text"
+            ))?;
+        }
+    }
+    conn.execute_batch(
+        "create index if not exists idx_threat_model_versions_ref
+           on threat_model_versions(model_id, revision_id, id desc)",
+    )?;
     Ok(())
 }
 
@@ -490,6 +526,19 @@ fn review_decisions_has_column(conn: &Connection, column: &str) -> Result<bool> 
 fn migrate_review_decision_session_column(conn: &Connection) -> Result<()> {
     if !review_decisions_has_column(conn, "review_session_id")? {
         conn.execute_batch("alter table review_decisions add column review_session_id text")?;
+    }
+    Ok(())
+}
+
+/// Additive audit provenance for basis-aware automatic propagation. Existing
+/// decision events genuinely carry no such proof, so both columns stay null.
+fn migrate_review_decision_propagation_columns(conn: &Connection) -> Result<()> {
+    for column in ["propagation_basis", "source_finding_ids_json"] {
+        if !review_decisions_has_column(conn, column)? {
+            conn.execute_batch(&format!(
+                "alter table review_decisions add column {column} text"
+            ))?;
+        }
     }
     Ok(())
 }

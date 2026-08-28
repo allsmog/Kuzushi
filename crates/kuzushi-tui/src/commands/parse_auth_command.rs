@@ -38,11 +38,55 @@ pub(crate) fn parse_threat_command(args: &[&str]) -> ShellCommand {
         Some("regen") => ShellCommand::ThreatRegen,
         Some("apply") => ShellCommand::ThreatApply,
         Some("reject") | Some("discard") => ShellCommand::ThreatReject,
+        Some("models") => ShellCommand::ThreatModels,
+        Some("diff") => ShellCommand::ThreatModelInspectDiff,
+        Some("inspect") if args.get(1).copied() == Some("diff") => {
+            ShellCommand::ThreatModelInspectDiff
+        }
+        Some("activate") => threat_model_activate_command(args),
+        Some("revisions") => threat_model_revisions_command(args),
+        Some("restore") => threat_model_restore_command(args),
         Some("versions") | Some("history") | Some("5") => ShellCommand::ThreatVersions,
-        Some("use") | Some("select") | Some("restore") => threat_version_use_command(args),
+        Some("use") | Some("select") => threat_version_use_command(args),
         Some("ask") => threat_ask_command(args),
         Some(other) => ShellCommand::Unknown(format!("/threats {other}")),
     }
+}
+
+fn threat_model_activate_command(args: &[&str]) -> ShellCommand {
+    let Some(selector) = args.get(1).copied() else {
+        return ShellCommand::Unknown("/threats activate <model-id>[@<revision-id>]".to_string());
+    };
+    let (model_id, revision_id) = split_threat_model_selector(selector);
+    if model_id.is_empty() || revision_id.is_some_and(str::is_empty) {
+        return ShellCommand::Unknown("/threats activate <model-id>[@<revision-id>]".to_string());
+    }
+    ShellCommand::ThreatModelActivate {
+        model_id: model_id.to_string(),
+        revision_id: revision_id.map(str::to_string),
+    }
+}
+
+fn split_threat_model_selector(selector: &str) -> (&str, Option<&str>) {
+    selector
+        .split_once('@')
+        .map_or((selector, None), |(model_id, revision_id)| {
+            (model_id, Some(revision_id))
+        })
+}
+
+fn threat_model_revisions_command(args: &[&str]) -> ShellCommand {
+    args.get(1).map_or_else(
+        || ShellCommand::Unknown("/threats revisions <model-id>".to_string()),
+        |model_id| ShellCommand::ThreatModelRevisions((*model_id).to_string()),
+    )
+}
+
+fn threat_model_restore_command(args: &[&str]) -> ShellCommand {
+    args.get(1).map_or_else(
+        || ShellCommand::Unknown("/threats restore <revision-id>".to_string()),
+        |revision_id| ShellCommand::ThreatModelRestore((*revision_id).to_string()),
+    )
 }
 
 fn threat_version_use_command(args: &[&str]) -> ShellCommand {
@@ -53,11 +97,59 @@ fn threat_version_use_command(args: &[&str]) -> ShellCommand {
 }
 
 pub(crate) fn threat_ask_command(args: &[&str]) -> ShellCommand {
-    let rest = args.get(1..).unwrap_or_default().join(" ");
-    if rest.trim().is_empty() {
-        ShellCommand::Unknown("/threats ask".to_string())
+    match parse_ask_request(args.get(1..).unwrap_or_default(), true) {
+        Some(request) => threat_ask_shell_command(request),
+        None => ShellCommand::Unknown("/threats ask".to_string()),
+    }
+}
+
+pub(crate) fn parse_ask_command(
+    args: &[&str],
+    original: &str,
+    threat_model_default: bool,
+) -> ShellCommand {
+    if args == ["cancel"] {
+        return ShellCommand::CancelAsk;
+    }
+    parse_ask_request(args, threat_model_default)
+        .map(ask_shell_command)
+        .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
+}
+
+fn ask_shell_command(request: AskRequest) -> ShellCommand {
+    match request.attachment {
+        AskAttachment::ThreatModel { whole_model: true } => {
+            ShellCommand::AskWholeModel(request.question)
+        }
+        AskAttachment::Screen | AskAttachment::ThreatModel { whole_model: false } => {
+            ShellCommand::Ask(request.question)
+        }
+    }
+}
+
+fn threat_ask_shell_command(request: AskRequest) -> ShellCommand {
+    if request.attachment.whole_model() {
+        ShellCommand::ThreatAskWholeModel(request.question)
     } else {
-        ShellCommand::ThreatAsk(rest)
+        ShellCommand::ThreatAsk(request.question)
+    }
+}
+
+fn parse_ask_request(args: &[&str], threat_model_default: bool) -> Option<AskRequest> {
+    let whole_model = args.contains(&"--whole-model");
+    let question = args
+        .iter()
+        .filter(|arg| **arg != "--whole-model")
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if question.trim().is_empty() {
+        return None;
+    }
+    if threat_model_default || whole_model {
+        Some(AskRequest::threat_model(question, whole_model))
+    } else {
+        Some(AskRequest::screen(question))
     }
 }
 
