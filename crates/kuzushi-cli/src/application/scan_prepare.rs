@@ -1,4 +1,6 @@
-use super::scan::{apply_scan_since_scope, scan_option_store, scan_runtime, scan_tool_input};
+use super::scan::{
+    apply_scan_since_scope, scan_option_store, scan_runtime, scan_tool_input, ScanScopeRefused,
+};
 use crate::command::ScanModeArg;
 use crate::scan_budget::apply_scan_budget_caps;
 use anyhow::Result;
@@ -192,9 +194,9 @@ impl ScanCommandSetup {
         Ok(())
     }
 
-    /// Resolves `--since` into the scope file and folds its `diffBase` into
-    /// the requested input, so the shorthand compiles into canonical tool
-    /// input rather than a CLI-only side channel.
+    /// Resolves `--since` into the scope file and folds the effective
+    /// `paths`/`diffBase` into the requested input, so the shorthand compiles
+    /// into canonical tool input rather than a CLI-only side channel.
     fn apply_since_scope(
         &mut self,
         since: Option<&str>,
@@ -216,8 +218,18 @@ impl ScanCommandSetup {
                 self.bootstrap.requested_input = input;
                 Ok(())
             }
-            Err(error) => Err(self.recorded_error(error, &self.bootstrap.requested_input)),
+            Err(error) => Err(self.refusal_or_recorded_error(error)),
         }
+    }
+
+    /// A refused scope is a scan that never began, so it records no run
+    /// artifact; anything else is a preparation failure and keeps its
+    /// recorded, inspectable run.
+    fn refusal_or_recorded_error(&self, error: anyhow::Error) -> anyhow::Error {
+        if error.downcast_ref::<ScanScopeRefused>().is_some() {
+            return error;
+        }
+        self.recorded_error(error, &self.bootstrap.requested_input)
     }
 
     fn apply_budget_caps(&self, budget: Option<&str>, json: bool, ci: bool) -> Result<()> {

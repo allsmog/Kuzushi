@@ -128,6 +128,35 @@ is still required for workspace-backed state.
 scan-gate policy, then go through the same preparation path as
 `kuzushi run sast:scan` where they are tool input.
 
+#### Changed-file scope (`--since`, `--paths`, `--shard`)
+
+`kuzushi scan --since <ref>` and the shell's `scan since <ref>` resolve the
+same scope through one shared helper,
+`kuzushi_core::workspace::changed_scan_input`. It lists the files the
+reference changed, drops the ones it deleted, and both modes then scope the
+identical set. `--include-worktree` adds uncommitted edits.
+
+The resolved scope compiles into the canonical `sast:scan` options `paths` and
+`diffBase`, so every engine is narrowed — not only the ones that read
+`.kuzushi/v3/since.txt`. That scope file is still written, from the same
+effective list, for `full-mode:hunt`.
+
+Precedence when `--since` meets `--paths` or `--shard`:
+
+1. `--paths`/`--shard` resolve first into the `paths` input, as today.
+2. `--since` resolves the changed files, then narrows to the **intersection**
+   of the two (target-relative, normalized; a root covers whole path
+   components, so `src` covers `src/lib.rs` but not `srclib/x.rs`). The scope
+   line discloses it as `scope: N files since <ref> ∩ M requested → K`.
+3. `--since` never widens. A requested root that cannot name a target-relative
+   diff path narrows to nothing rather than falling back to every change.
+4. An empty scope — nothing changed, or an empty intersection — **refuses the
+   scan** with `--since <ref>: no existing changed files …` on stderr and
+   exit 1, writing no run artifact. It does not fall back to scanning the
+   whole target.
+5. A `diffBase` already present in raw `sast:scan` JSON input must equal the
+   `--since` reference; a mismatch is an explicit error, not a silent winner.
+
 Global `--load <specifier>` is supported for shell and headless `run`.
 For local file/path modules, trust is digest-pinned in `kuzushi.lock`: approve
 the exact resolved bundle with `kuzushi kwp approve <specifier>` before

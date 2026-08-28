@@ -685,12 +685,38 @@ fn record_failed_scan_execution(
     try_record_tool_run_failed_settled(tool_run, &error.to_string(), &observation, completion)
 }
 
+/// Refusal to start a scan whose `--since` scope resolved to nothing.
+///
+/// Typed so scan preparation can report it without minting a run artifact for
+/// a scan that never began, while genuine preparation failures keep recording
+/// theirs. Reaches the operator through the ordinary pre-dispatch refusal
+/// path: message on stderr, exit 1, no stdout envelope in any mode.
+#[derive(Debug)]
+pub(crate) struct ScanScopeRefused(String);
+
+impl std::fmt::Display for ScanScopeRefused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ScanScopeRefused {}
+
+/// The `--since` scope actually handed to the scan, after intersecting the
+/// changed files with any `--paths`/`--shard` roots already on the input.
+struct EffectiveSinceScope {
+    paths: Vec<PathBuf>,
+    diff_base: String,
+    changed: usize,
+    requested: Option<usize>,
+}
+
 /// Resolve `--since <ref>` into the scan scope, materialise `since.txt`, and
-/// carry the diff base into the canonical `sast:scan` input.
+/// carry the resolved scope into the canonical `sast:scan` input.
 ///
 /// Shares `changed_scan_input` with the shell's `scan since <ref>`, so both
-/// modes scope the identical file set and neither writes paths the reference
-/// deleted.
+/// modes scope the identical file set, neither writes paths the reference
+/// deleted, and both refuse rather than widen when nothing changed.
 pub(crate) fn apply_scan_since_scope(
     workspace: &WorkspaceTarget,
     input: &mut serde_json::Value,
@@ -702,30 +728,147 @@ pub(crate) fn apply_scan_since_scope(
     let Some(since_ref) = since else {
         return Ok(());
     };
-    let scope =
+    let changed =
         kuzushi_core::workspace::changed_scan_input(workspace.root(), since_ref, include_worktree)
             .with_context(|| format!("--since {since_ref:?} failed"))?;
-    let paths = scope
-        .as_ref()
-        .map_or(&[][..], |scope| scope.paths.as_slice());
-    write_scan_scope_file(workspace, paths)?;
-    if let Some(scope) = &scope {
-        set_scan_diff_base(input, &scope.diff_base);
-    }
-    emit_scan_scope_line(paths, since_ref, include_worktree, json, ci);
+    let scope = resolve_effective_since_scope(changed, input, since_ref, include_worktree)?;
+    write_scan_scope_file(workspace, &scope.paths)?;
+    set_scan_paths(input, &scope.paths);
+    set_scan_diff_base(input, &scope.diff_base)?;
+    emit_scan_scope_line(&scope, since_ref, include_worktree, json, ci);
     Ok(())
+}
+
+/// Intersect the changed files with any requested `paths` roots, or refuse.
+///
+/// Refusing is the point: an empty scope used to leave an empty `since.txt`,
+/// which downstream reads as "no scope file" and widens to the whole target —
+/// the opposite of what `--since` asked for.
+fn resolve_effective_since_scope(
+    changed: Option<kuzushi_core::workspace::ChangedScanScope>,
+    input: &serde_json::Value,
+    since_ref: &str,
+    include_worktree: bool,
+) -> Result<EffectiveSinceScope> {
+    let requested = requested_scan_roots(input);
+    let scope = changed.map(|changed| EffectiveSinceScope {
+        changed: changed.paths.len(),
+        paths: retain_requested_roots(&changed.paths, requested.as_deref()),
+        requested: requested.as_ref().map(Vec::len),
+        diff_base: changed.diff_base,
+    });
+    match scope {
+        Some(scope) if !scope.paths.is_empty() => Ok(scope),
+        scope => Err(refuse_empty_since_scope(
+            since_ref,
+            include_worktree,
+            scope.is_some(),
+        )),
+    }
+}
+
+fn refuse_empty_since_scope(
+    since_ref: &str,
+    include_worktree: bool,
+    narrowed_away: bool,
+) -> anyhow::Error {
+    let subject = if narrowed_away {
+        "no existing changed files inside the requested paths scope"
+    } else {
+        "no existing changed files to scan"
+    };
+    let hint = if include_worktree {
+        ""
+    } else {
+        "; pass --include-worktree to include uncommitted changes"
+    };
+    anyhow::Error::new(ScanScopeRefused(format!(
+        "--since {since_ref}: {subject}{hint}"
+    )))
+}
+
+/// Workspace-relative path roots already on the input from `--paths` or
+/// `--shard`. `None` means no scope was requested; `Some(_)` always narrows,
+/// so an unusable root fails closed instead of widening back to every change.
+fn requested_scan_roots(input: &serde_json::Value) -> Option<Vec<PathBuf>> {
+    let values = input.get("paths")?.as_array()?;
+    Some(
+        values
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .filter_map(normalized_scan_root)
+            .collect(),
+    )
+}
+
+/// Target-relative normalization for prefix comparison against git's
+/// target-relative diff output. Absolute or parent-escaping roots cannot name
+/// a diff path, so they are dropped rather than matched loosely.
+fn normalized_scan_root(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    let trimmed = trimmed.strip_prefix("./").unwrap_or(trimmed);
+    let path = Path::new(trimmed);
+    let escapes = path
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir));
+    if trimmed.is_empty() || path.is_absolute() || escapes {
+        return None;
+    }
+    Some(path.to_path_buf())
+}
+
+/// `Path::starts_with` is component-wise, so root `src` covers `src/lib.rs`
+/// and the file `src/lib.rs` covers itself, while `srclib/x` stays out.
+fn retain_requested_roots(changed: &[PathBuf], roots: Option<&[PathBuf]>) -> Vec<PathBuf> {
+    let Some(roots) = roots else {
+        return changed.to_vec();
+    };
+    changed
+        .iter()
+        .filter(|path| roots.iter().any(|root| path.starts_with(root)))
+        .cloned()
+        .collect()
+}
+
+/// `paths` is a declared `sast:scan` option, and writing the effective scope
+/// there is what makes `--since` narrow every engine — as the shell's `scan
+/// since` already does — rather than only the ones that read `since.txt`.
+fn set_scan_paths(input: &mut serde_json::Value, paths: &[PathBuf]) {
+    let Some(object) = input.as_object_mut() else {
+        return;
+    };
+    let rendered = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    object.insert("paths".to_string(), serde_json::json!(rendered));
 }
 
 /// `diffBase` is a declared `sast:scan` option; setting it here is what makes
 /// `--since` a shorthand for the same tool input the shell submits, instead of
-/// a CLI-only scope file.
-fn set_scan_diff_base(input: &mut serde_json::Value, diff_base: &str) {
+/// a CLI-only scope file. A different `diffBase` already on the input is a
+/// contradiction, not something for `--since` to win or lose silently.
+fn set_scan_diff_base(input: &mut serde_json::Value, diff_base: &str) -> Result<()> {
     let Some(object) = input.as_object_mut() else {
-        return;
+        return Ok(());
     };
-    object
-        .entry("diffBase")
-        .or_insert_with(|| serde_json::json!(diff_base));
+    if let Some(existing) = existing_diff_base(object) {
+        anyhow::ensure!(
+            existing == diff_base,
+            "--since {diff_base} conflicts with input diffBase {existing}"
+        );
+        return Ok(());
+    }
+    object.insert("diffBase".to_string(), serde_json::json!(diff_base));
+    Ok(())
+}
+
+/// Both the canonical key and its declared `diff_base` alias, since raw JSON
+/// scan input may carry either.
+fn existing_diff_base(object: &serde_json::Map<String, serde_json::Value>) -> Option<&str> {
+    ["diffBase", "diff_base"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
 }
 
 fn write_scan_scope_file(workspace: &WorkspaceTarget, files: &[PathBuf]) -> Result<()> {
@@ -764,8 +907,8 @@ pub(crate) fn scan_scope_body(files: &[PathBuf]) -> String {
         .collect()
 }
 
-pub(crate) fn emit_scan_scope_line(
-    files: &[PathBuf],
+fn emit_scan_scope_line(
+    scope: &EffectiveSinceScope,
     since_ref: &str,
     include_worktree: bool,
     json: bool,
@@ -774,18 +917,23 @@ pub(crate) fn emit_scan_scope_line(
     if json || ci {
         return;
     }
-    let suffix = scan_worktree_suffix(include_worktree);
-    if files.is_empty() {
-        // An empty since.txt is treated downstream as "no scope file", so the
-        // scan widens to the whole target. Say so rather than printing a
-        // reassuring "0 files" and quietly scanning everything.
-        eprintln!(
-            "scope: no existing changed files since {since_ref} {suffix}; \
-             --since did not narrow this scan"
-        );
-        return;
+    eprintln!(
+        "{}",
+        scan_scope_line(scope, since_ref, scan_worktree_suffix(include_worktree))
+    );
+}
+
+/// Discloses the intersection when `--paths`/`--shard` also narrowed the run,
+/// so the operator can see which of the two scopes dropped a file.
+fn scan_scope_line(scope: &EffectiveSinceScope, since_ref: &str, suffix: &str) -> String {
+    match scope.requested {
+        Some(requested) => format!(
+            "scope: {} files since {since_ref} ∩ {requested} requested → {}",
+            scope.changed,
+            scope.paths.len()
+        ),
+        None => format!("scope: {} files since {since_ref} {suffix}", scope.changed),
     }
-    eprintln!("scope: {} files since {since_ref} {suffix}", files.len());
 }
 
 pub(crate) fn scan_worktree_suffix(include_worktree: bool) -> &'static str {
@@ -1106,10 +1254,11 @@ mod tests {
     use super::{
         apply_scan_since_scope, apply_semantic_failure_gate_policy,
         emit_scan_patch_validation_disclosure, execute_scan_tool, finish_completed_scan,
-        record_failed_scan_execution, scan_gate_ids, scan_scope_body, scan_semantic_error,
-        settle_apk_scan, settle_scan_cancellation_observed, settle_scan_dispatch,
-        write_scan_scope_file, ScanExecutionFailureRecord, ScanFinish, ScanGatePolicy,
-        ScanToolExecution,
+        record_failed_scan_execution, requested_scan_roots, retain_requested_roots, scan_gate_ids,
+        scan_scope_body, scan_scope_line, scan_semantic_error, set_scan_diff_base, settle_apk_scan,
+        settle_scan_cancellation_observed, settle_scan_dispatch, write_scan_scope_file,
+        EffectiveSinceScope, ScanExecutionFailureRecord, ScanFinish, ScanGatePolicy,
+        ScanScopeRefused, ScanToolExecution,
     };
     use crate::application::run_exit::RunCommandExit;
     use kuzushi_core::run_artifacts::{
@@ -1176,7 +1325,8 @@ mod tests {
     }
 
     /// `--since` must scope exactly what the shell's `scan since` scopes:
-    /// files that still exist, and a `diffBase` on the canonical tool input.
+    /// files that still exist, on `paths` and `diffBase` of the canonical
+    /// tool input, so every engine sees the same narrowing.
     #[cfg(unix)]
     #[test]
     fn since_scope_drops_deleted_files_and_carries_diff_base() {
@@ -1203,11 +1353,14 @@ mod tests {
         let lines: Vec<_> = body.lines().filter(|line| !line.is_empty()).collect();
         assert_eq!(lines, vec!["keep.rs"], "deleted paths must not be scoped");
         assert_eq!(input["diffBase"], serde_json::json!(base));
+        assert_eq!(input["paths"], serde_json::json!(["keep.rs"]));
     }
 
+    /// A `--since` reference that changed nothing must refuse, not fall back
+    /// to the whole target through an empty scope file.
     #[cfg(unix)]
     #[test]
-    fn since_scope_without_changes_writes_no_paths_and_no_diff_base() {
+    fn since_scope_without_changes_refuses_the_scan() {
         let temp = tempfile::tempdir().expect("workspace");
         let root = temp.path();
         init_clean_git_fixture(root);
@@ -1216,12 +1369,176 @@ mod tests {
         let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
         workspace.ensure_state_dir().expect("state dir");
         let mut input = serde_json::json!({ "mode": "standard" });
+        let error = apply_scan_since_scope(&workspace, &mut input, Some(&base), false, true, false)
+            .expect_err("an empty since scope must refuse");
+
+        assert!(
+            error.downcast_ref::<ScanScopeRefused>().is_some(),
+            "refusal must be typed so preparation records no run: {error:#}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "--since {base}: no existing changed files to scan; \
+                 pass --include-worktree to include uncommitted changes"
+            )
+        );
+        assert!(input.get("diffBase").is_none());
+        assert!(input.get("paths").is_none());
+    }
+
+    /// With `--include-worktree` already set there is nothing further to
+    /// include, so the refusal must not suggest it.
+    #[cfg(unix)]
+    #[test]
+    fn since_scope_refusal_drops_the_worktree_hint_when_already_included() {
+        let temp = tempfile::tempdir().expect("workspace");
+        let root = temp.path();
+        init_clean_git_fixture(root);
+        let base = git_output(root, &["rev-parse", "HEAD"]);
+
+        let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
+        workspace.ensure_state_dir().expect("state dir");
+        let mut input = serde_json::json!({});
+        let error = apply_scan_since_scope(&workspace, &mut input, Some(&base), true, true, false)
+            .expect_err("an empty since scope must refuse");
+
+        assert_eq!(
+            error.to_string(),
+            format!("--since {base}: no existing changed files to scan")
+        );
+    }
+
+    /// `--since` combined with `--paths`/`--shard` narrows to the
+    /// intersection; it never widens back to either scope alone.
+    #[cfg(unix)]
+    #[test]
+    fn since_scope_intersects_requested_path_roots() {
+        let temp = tempfile::tempdir().expect("workspace");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("docs/readme.md"), "a\n").unwrap();
+        init_clean_git_fixture(root);
+        let base = git_output(root, &["rev-parse", "HEAD"]);
+
+        std::fs::write(root.join("src/lib.rs"), "fn b() {}\n").unwrap();
+        std::fs::write(root.join("docs/readme.md"), "b\n").unwrap();
+        git_output(root, &["add", "-A"]);
+        git_output(root, &["commit", "-qm", "touch both"]);
+
+        let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
+        workspace.ensure_state_dir().expect("state dir");
+        let mut input = serde_json::json!({ "paths": ["./src/"] });
         apply_scan_since_scope(&workspace, &mut input, Some(&base), false, true, false)
             .expect("since scope");
 
+        assert_eq!(input["paths"], serde_json::json!(["src/lib.rs"]));
         let scope_file = workspace.findings_db_path().with_file_name("since.txt");
-        assert_eq!(std::fs::read_to_string(scope_file).expect("since.txt"), "");
-        assert!(input.get("diffBase").is_none());
+        let body = std::fs::read_to_string(scope_file).expect("since.txt");
+        assert_eq!(
+            body.lines().filter(|line| !line.is_empty()).count(),
+            1,
+            "since.txt must carry the post-intersection scope: {body:?}"
+        );
+    }
+
+    /// An empty intersection is still an empty scope, so it refuses too.
+    #[cfg(unix)]
+    #[test]
+    fn since_scope_refuses_an_empty_intersection() {
+        let temp = tempfile::tempdir().expect("workspace");
+        let root = temp.path();
+        std::fs::write(root.join("app.rs"), "fn a() {}\n").unwrap();
+        init_clean_git_fixture(root);
+        let base = git_output(root, &["rev-parse", "HEAD"]);
+
+        std::fs::write(root.join("app.rs"), "fn b() {}\n").unwrap();
+        git_output(root, &["add", "-A"]);
+        git_output(root, &["commit", "-qm", "touch app"]);
+
+        let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
+        workspace.ensure_state_dir().expect("state dir");
+        let mut input = serde_json::json!({ "paths": ["vendor"] });
+        let error = apply_scan_since_scope(&workspace, &mut input, Some(&base), true, true, false)
+            .expect_err("an empty intersection must refuse");
+
+        assert!(error.downcast_ref::<ScanScopeRefused>().is_some());
+        assert_eq!(
+            error.to_string(),
+            format!("--since {base}: no existing changed files inside the requested paths scope")
+        );
+    }
+
+    /// A `paths` root that cannot name a target-relative diff path must fail
+    /// closed, never fall back to every changed file.
+    #[test]
+    fn unusable_requested_roots_narrow_to_nothing_rather_than_widening() {
+        let changed = vec![PathBuf::from("src/lib.rs")];
+        let requested = requested_scan_roots(&serde_json::json!({ "paths": ["/abs", "../up"] }))
+            .expect("paths key present");
+        assert!(requested.is_empty());
+        assert!(retain_requested_roots(&changed, Some(&requested)).is_empty());
+        assert_eq!(
+            retain_requested_roots(&changed, None),
+            changed,
+            "no requested scope must leave the changed set intact"
+        );
+    }
+
+    #[test]
+    fn requested_roots_match_whole_path_components_only() {
+        let changed = vec![
+            PathBuf::from("src/lib.rs"),
+            PathBuf::from("srclib/other.rs"),
+            PathBuf::from("src"),
+        ];
+        let roots = vec![PathBuf::from("src")];
+        assert_eq!(
+            retain_requested_roots(&changed, Some(&roots)),
+            vec![PathBuf::from("src/lib.rs"), PathBuf::from("src")]
+        );
+    }
+
+    #[test]
+    fn diff_base_conflict_is_explicit_and_equal_values_are_accepted() {
+        let mut conflicting = serde_json::json!({ "diffBase": "HEAD~9" });
+        let error = set_scan_diff_base(&mut conflicting, "HEAD~1").expect_err("conflict");
+        assert_eq!(
+            error.to_string(),
+            "--since HEAD~1 conflicts with input diffBase HEAD~9"
+        );
+
+        let mut aliased = serde_json::json!({ "diff_base": "HEAD~2" });
+        assert!(set_scan_diff_base(&mut aliased, "HEAD~1").is_err());
+
+        let mut agreeing = serde_json::json!({ "diffBase": "HEAD~1" });
+        set_scan_diff_base(&mut agreeing, "HEAD~1").expect("equal values agree");
+        assert_eq!(agreeing["diffBase"], serde_json::json!("HEAD~1"));
+    }
+
+    #[test]
+    fn scope_line_discloses_the_intersection_when_paths_were_requested() {
+        let intersected = EffectiveSinceScope {
+            paths: vec![PathBuf::from("src/lib.rs")],
+            diff_base: "HEAD~1".to_string(),
+            changed: 4,
+            requested: Some(2),
+        };
+        assert_eq!(
+            scan_scope_line(&intersected, "HEAD~1", "(+worktree)"),
+            "scope: 4 files since HEAD~1 ∩ 2 requested → 1"
+        );
+
+        let plain = EffectiveSinceScope {
+            requested: None,
+            ..intersected
+        };
+        assert_eq!(
+            scan_scope_line(&plain, "HEAD~1", "(+worktree)"),
+            "scope: 4 files since HEAD~1 (+worktree)"
+        );
     }
 
     #[cfg(unix)]
