@@ -2,14 +2,31 @@ name: CI
 
 on:
   # Run one quick pass when review starts and again for each later PR head.
-  # Drafts still skip runner allocation below; merge-queue and main validation
-  # keep the exact SHA that may merge or ship bound to a fresh receipt.
+  # Drafts still skip runner allocation below; the merge queue keeps the exact
+  # SHA that may merge bound to a fresh receipt.
+  #
+  # There is deliberately no `push: branches: [main]` trigger. Every commit
+  # that reaches main already passed this workflow on its pull request head or
+  # in the merge queue, so a post-merge rerun bought a second receipt for an
+  # already-validated tree at full runner cost. Release trees are revalidated
+  # by release-candidate.yml, which calls ci-full.yml against the exact
+  # candidate SHA.
+  #
+  # `paths-ignore` skips a run only when EVERY changed file matches, so a
+  # mixed documentation-and-code pull request still runs the gauntlet. The
+  # list is prose-only on purpose: `.github/**`, `scripts/**`, `crates/**`,
+  # `Cargo.lock`, `pnpm-lock.yaml`, and `package.json` are never ignored,
+  # because a path filter must never become a way to land executable or
+  # workflow changes without a receipt.
   pull_request:
     branches: [main]
     types: [opened, reopened, ready_for_review, synchronize]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "plans/**"
+      - "design/**"
   merge_group:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       quality_base_ref:
