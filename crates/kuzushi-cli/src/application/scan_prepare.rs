@@ -73,7 +73,7 @@ fn prepare_scan_command_from_bootstrap(
     use_stored_options: bool,
 ) -> Result<PreparedScanCommand> {
     let config = bootstrap.load_config_or_record_failure()?;
-    let setup = bootstrap.with_config(config);
+    let mut setup = bootstrap.with_config(config);
     let store = setup.finding_store()?;
     setup.prepare_workspace_state(&store)?;
     setup.apply_since_scope(since, include_worktree, json, ci)?;
@@ -192,15 +192,32 @@ impl ScanCommandSetup {
         Ok(())
     }
 
+    /// Resolves `--since` into the scope file and folds its `diffBase` into
+    /// the requested input, so the shorthand compiles into canonical tool
+    /// input rather than a CLI-only side channel.
     fn apply_since_scope(
-        &self,
+        &mut self,
         since: Option<&str>,
         include_worktree: bool,
         json: bool,
         ci: bool,
     ) -> Result<()> {
-        apply_scan_since_scope(&self.bootstrap.workspace, since, include_worktree, json, ci)
-            .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))
+        let mut input = self.bootstrap.requested_input.clone();
+        let applied = apply_scan_since_scope(
+            &self.bootstrap.workspace,
+            &mut input,
+            since,
+            include_worktree,
+            json,
+            ci,
+        );
+        match applied {
+            Ok(()) => {
+                self.bootstrap.requested_input = input;
+                Ok(())
+            }
+            Err(error) => Err(self.recorded_error(error, &self.bootstrap.requested_input)),
+        }
     }
 
     fn apply_budget_caps(&self, budget: Option<&str>, json: bool, ci: bool) -> Result<()> {

@@ -685,8 +685,15 @@ fn record_failed_scan_execution(
     try_record_tool_run_failed_settled(tool_run, &error.to_string(), &observation, completion)
 }
 
+/// Resolve `--since <ref>` into the scan scope, materialise `since.txt`, and
+/// carry the diff base into the canonical `sast:scan` input.
+///
+/// Shares `changed_scan_input` with the shell's `scan since <ref>`, so both
+/// modes scope the identical file set and neither writes paths the reference
+/// deleted.
 pub(crate) fn apply_scan_since_scope(
     workspace: &WorkspaceTarget,
+    input: &mut serde_json::Value,
     since: Option<&str>,
     include_worktree: bool,
     json: bool,
@@ -695,11 +702,30 @@ pub(crate) fn apply_scan_since_scope(
     let Some(since_ref) = since else {
         return Ok(());
     };
-    let scope = kuzushi_core::git_diff_files(workspace.root(), since_ref, include_worktree)
-        .with_context(|| format!("--since {since_ref:?} failed"))?;
-    write_scan_scope_file(workspace, &scope.files)?;
-    emit_scan_scope_line(&scope.files, since_ref, include_worktree, json, ci);
+    let scope =
+        kuzushi_core::workspace::changed_scan_input(workspace.root(), since_ref, include_worktree)
+            .with_context(|| format!("--since {since_ref:?} failed"))?;
+    let paths = scope
+        .as_ref()
+        .map_or(&[][..], |scope| scope.paths.as_slice());
+    write_scan_scope_file(workspace, paths)?;
+    if let Some(scope) = &scope {
+        set_scan_diff_base(input, &scope.diff_base);
+    }
+    emit_scan_scope_line(paths, since_ref, include_worktree, json, ci);
     Ok(())
+}
+
+/// `diffBase` is a declared `sast:scan` option; setting it here is what makes
+/// `--since` a shorthand for the same tool input the shell submits, instead of
+/// a CLI-only scope file.
+fn set_scan_diff_base(input: &mut serde_json::Value, diff_base: &str) {
+    let Some(object) = input.as_object_mut() else {
+        return;
+    };
+    object
+        .entry("diffBase")
+        .or_insert_with(|| serde_json::json!(diff_base));
 }
 
 fn write_scan_scope_file(workspace: &WorkspaceTarget, files: &[PathBuf]) -> Result<()> {
@@ -745,14 +771,21 @@ pub(crate) fn emit_scan_scope_line(
     json: bool,
     ci: bool,
 ) {
-    if !json && !ci {
-        eprintln!(
-            "scope: {} files since {} {}",
-            files.len(),
-            since_ref,
-            scan_worktree_suffix(include_worktree)
-        );
+    if json || ci {
+        return;
     }
+    let suffix = scan_worktree_suffix(include_worktree);
+    if files.is_empty() {
+        // An empty since.txt is treated downstream as "no scope file", so the
+        // scan widens to the whole target. Say so rather than printing a
+        // reassuring "0 files" and quietly scanning everything.
+        eprintln!(
+            "scope: no existing changed files since {since_ref} {suffix}; \
+             --since did not narrow this scan"
+        );
+        return;
+    }
+    eprintln!("scope: {} files since {since_ref} {suffix}", files.len());
 }
 
 pub(crate) fn scan_worktree_suffix(include_worktree: bool) -> &'static str {
@@ -1071,11 +1104,12 @@ pub(crate) fn scan_runtime(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_semantic_failure_gate_policy, emit_scan_patch_validation_disclosure,
-        execute_scan_tool, finish_completed_scan, record_failed_scan_execution, scan_gate_ids,
-        scan_scope_body, scan_semantic_error, settle_apk_scan, settle_scan_cancellation_observed,
-        settle_scan_dispatch, write_scan_scope_file, ScanExecutionFailureRecord, ScanFinish,
-        ScanGatePolicy, ScanToolExecution,
+        apply_scan_since_scope, apply_semantic_failure_gate_policy,
+        emit_scan_patch_validation_disclosure, execute_scan_tool, finish_completed_scan,
+        record_failed_scan_execution, scan_gate_ids, scan_scope_body, scan_semantic_error,
+        settle_apk_scan, settle_scan_cancellation_observed, settle_scan_dispatch,
+        write_scan_scope_file, ScanExecutionFailureRecord, ScanFinish, ScanGatePolicy,
+        ScanToolExecution,
     };
     use crate::application::run_exit::RunCommandExit;
     use kuzushi_core::run_artifacts::{
@@ -1139,6 +1173,91 @@ mod tests {
 
         assert!(error.to_string().contains("symlink"));
         assert_eq!(std::fs::read_to_string(outside.path()).unwrap(), "outside");
+    }
+
+    /// `--since` must scope exactly what the shell's `scan since` scopes:
+    /// files that still exist, and a `diffBase` on the canonical tool input.
+    #[cfg(unix)]
+    #[test]
+    fn since_scope_drops_deleted_files_and_carries_diff_base() {
+        let temp = tempfile::tempdir().expect("workspace");
+        let root = temp.path();
+        std::fs::write(root.join("keep.rs"), "fn keep() {}\n").unwrap();
+        std::fs::write(root.join("gone.rs"), "fn gone() {}\n").unwrap();
+        init_clean_git_fixture(root);
+        let base = git_output(root, &["rev-parse", "HEAD"]);
+
+        std::fs::write(root.join("keep.rs"), "fn keep2() {}\n").unwrap();
+        std::fs::remove_file(root.join("gone.rs")).unwrap();
+        git_output(root, &["add", "-A"]);
+        git_output(root, &["commit", "-qm", "edit and delete"]);
+
+        let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
+        workspace.ensure_state_dir().expect("state dir");
+        let mut input = serde_json::json!({ "mode": "standard" });
+        apply_scan_since_scope(&workspace, &mut input, Some(&base), false, true, false)
+            .expect("since scope");
+
+        let scope_file = workspace.findings_db_path().with_file_name("since.txt");
+        let body = std::fs::read_to_string(scope_file).expect("since.txt");
+        let lines: Vec<_> = body.lines().filter(|line| !line.is_empty()).collect();
+        assert_eq!(lines, vec!["keep.rs"], "deleted paths must not be scoped");
+        assert_eq!(input["diffBase"], serde_json::json!(base));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn since_scope_without_changes_writes_no_paths_and_no_diff_base() {
+        let temp = tempfile::tempdir().expect("workspace");
+        let root = temp.path();
+        init_clean_git_fixture(root);
+        let base = git_output(root, &["rev-parse", "HEAD"]);
+
+        let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
+        workspace.ensure_state_dir().expect("state dir");
+        let mut input = serde_json::json!({ "mode": "standard" });
+        apply_scan_since_scope(&workspace, &mut input, Some(&base), false, true, false)
+            .expect("since scope");
+
+        let scope_file = workspace.findings_db_path().with_file_name("since.txt");
+        assert_eq!(std::fs::read_to_string(scope_file).expect("since.txt"), "");
+        assert!(input.get("diffBase").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn since_scope_rejects_an_unknown_reference() {
+        let temp = tempfile::tempdir().expect("workspace");
+        let root = temp.path();
+        init_clean_git_fixture(root);
+        let workspace = kuzushi_core::WorkspaceTarget::new(root).expect("workspace target");
+        workspace.ensure_state_dir().expect("state dir");
+        let mut input = serde_json::json!({});
+
+        let error = apply_scan_since_scope(
+            &workspace,
+            &mut input,
+            Some("no-such-ref"),
+            false,
+            true,
+            false,
+        )
+        .expect_err("unknown ref must fail");
+
+        assert!(
+            format!("{error:#}").contains("git diff failed"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    fn git_output(root: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
     }
 
     #[test]

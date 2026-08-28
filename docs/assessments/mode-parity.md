@@ -48,6 +48,7 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Typed run lifecycle/artifacts | ✓ | ✓ | ✓ | Shared dispatch writes stable task/call identities to authoritative `items.jsonl`, plus prepared `input.json` and normalized `result.json`. One reducer drives live/replay/plain projections; terminal states and cost completeness remain distinct. |
 | Staged-tool checkpoints | ✓ | ✓ | ✓ | Shared dispatch keys checkpoints from stable registry/descriptor/input/workspace fingerprints, reuses them only at the same known clean revision, and publishes them with durable unique-temp writes. `workspace:status` exposes pending coordinates and whether each checkpoint is reusable. |
 | Verification provenance | ✓ | ✓ | ✓ | Persisted proof carries both the verification run id and the discovery scan it verified. A later observation may reuse proof by durable identity, but is marked for revalidation; shell replay opens the verification run only. |
+| Changed-file scan scope (`--since` / `scan since`) | ◐ | ◐ | N/A | Both modes resolve "what changed since `<ref>`" through one shared helper, `kuzushi_core::workspace::changed_scan_input`, so they agree on the file set, drop paths the reference deleted, and surface the same git error text. `kuzushi scan --since` additionally materializes the resolved paths into `.kuzushi/v3/since.txt` (read only by `full-mode:hunt`) and folds the resolved `diffBase` into the canonical `sast:scan` input. Residual asymmetry: on a reference that changed nothing the shell refuses to start, while `kuzushi scan --since` discloses that the scan was not narrowed and proceeds. `run` has no `--since` shorthand; pass `paths`/`diffBase` as tool input. |
 | Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. A live shell run keeps the target captured at launch even if ambient app state later changes. |
 | Cancellation | ✓ | ✓ | ✓ | Shell/TUI work has live cancellation controls, and core scan engines accept cancellation tokens. Headless `scan` and `run` each install the same two-stage SIGINT policy: the first Ctrl-C requests cooperative cancellation and settles a durable `canceled` terminal state with exit code 130, and a second Ctrl-C exits immediately with 130. |
 | Plain/scripted output | ✓ | ✓ | ✓ | Plain output reuses the same projections as TTY output. Bare `--plain` emits a self-contained summary; scripted scan requires an explicit target, waits for terminal completion, writes its run bundle, and exits nonzero for invalid, partial, blocked, failed, canceled, or interrupted outcomes. |
@@ -360,6 +361,12 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
 - Command discoverability depends on parser, handler, and help/spec metadata
   staying aligned. Tests should assert that every parsed shell verb is visible
   or intentionally hidden.
+- `--since` narrows only the engines that read `.kuzushi/v3/since.txt`
+  (`full-mode:hunt`), while the shell's `scan since` scopes the whole pipeline
+  through the `paths` tool input. Feeding the shared `ChangedScanScope.paths`
+  into the CLI's `sast:scan` input needs an explicit precedence rule against
+  `--paths` and `--shard` first, so it is left as follow-up rather than
+  silently changing scan scope.
 - View-models should stay pure or read through cached app services. Per-frame
   filesystem reads in TUI review surfaces are parity/performance bugs because
   plain and TTY output should observe the same data without repeated IO.

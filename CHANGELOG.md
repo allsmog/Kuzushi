@@ -27,6 +27,13 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `kuzushi scan --since <ref>` and the shell's `scan since <ref>` now resolve
+  the same changed-file scope through one shared helper. The CLI no longer
+  writes paths the reference deleted into `.kuzushi/v3/since.txt`, it carries
+  the resolved `diffBase` into the canonical `sast:scan` input instead of
+  keeping it in a CLI-only scope file, and a reference that changed nothing is
+  reported as such rather than as a reassuring `0 files` line before an
+  unnarrowed scan.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
