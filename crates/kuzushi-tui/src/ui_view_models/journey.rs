@@ -7,7 +7,7 @@
 
 use crate::app::{FindingLedgerCounts, PlanningTaskId, ViewDataState, WorkflowPhase};
 use crate::ui_view_models::review_state::{
-    indexed_review_decision_complete, EffectiveReviewStateIndex,
+    decision_is_review_actionable, indexed_review_decision_complete, EffectiveReviewStateIndex,
 };
 use crate::{RunSummaryEntriesState, ShellApp};
 use kuzushi_core::findings::ReviewDecisionVerdict;
@@ -646,27 +646,7 @@ fn finding_has_current_terminal_verification(finding: &Finding) -> bool {
 }
 
 fn indexed_actionable_finding(index: &EffectiveReviewStateIndex, finding: &Finding) -> bool {
-    if let Some(decision) = index.effective_decision_for(finding) {
-        return matches!(
-            decision.verdict(),
-            ReviewDecisionVerdict::Confirmed | ReviewDecisionVerdict::ToFix
-        );
-    }
-    finding
-        .triage
-        .as_ref()
-        .is_some_and(|triage| triage.verdict == TriageVerdict::TruePositive)
-}
-
-pub(crate) fn finding_is_review_actionable(
-    finding: &Finding,
-    decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
-) -> bool {
-    let index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        std::slice::from_ref(finding),
-        decisions,
-    );
-    indexed_actionable_finding(&index, finding)
+    decision_is_review_actionable(finding, index.effective_decision_for(finding).as_ref())
 }
 
 fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
@@ -1311,6 +1291,23 @@ mod tests {
             &app.engagement,
         );
         assert_eq!(counts.proof_deferred, 1);
+        // A deferral is a decision, never proof: the proven and proof-backed
+        // folds must stay at zero for the very generation it was recorded on.
+        assert_eq!(counts.proven, 0);
+        assert_eq!(counts.proof_backed, 0);
+        // The same decision projects for display, so a selected finding can
+        // disclose it instead of reading as merely unproven.
+        let view = app
+            .engagement
+            .proof_deferral_for(&finding)
+            .map(kuzushi_core::workflow_attempts::ProofDeferralView::from_record)
+            .expect("projected proof deferral");
+        assert_eq!(view.scan_id, "scan-1");
+        assert_eq!(view.actor, "operator");
+        assert_eq!(
+            view.reason,
+            "runtime environment is intentionally unavailable"
+        );
 
         let stale = actionable_finding("scan-2");
         let mut stale_counts = finding_ledger_counts(std::slice::from_ref(&stale), &[], 1);
@@ -1321,6 +1318,7 @@ mod tests {
             &app.engagement,
         );
         assert_eq!(stale_counts.proof_deferred, 0);
+        assert!(app.engagement.proof_deferral_for(&stale).is_none());
     }
 
     #[test]

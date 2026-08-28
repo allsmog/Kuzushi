@@ -8,7 +8,8 @@ pub(crate) use investigate_args::InvestigateArgs;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
     AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand,
-    ReviewYieldCommand, RunsCommand, ScanModeArg, SessionExportFormat, SessionsCommand,
+    ProofCommand, ReviewYieldCommand, RunsCommand, ScanModeArg, SessionExportFormat,
+    SessionsCommand,
 };
 
 #[derive(Debug, Subcommand)]
@@ -195,6 +196,11 @@ pub(crate) enum Command {
         /// Output file or bundle directory. Relative paths resolve under the target root.
         #[arg(long = "out")]
         output: PathBuf,
+    },
+    /// Record operator decisions about empirical proof.
+    Proof {
+        #[command(subcommand)]
+        command: ProofCommand,
     },
     /// Add an expiring, evidence-backed suppression for a finding.
     Suppress {

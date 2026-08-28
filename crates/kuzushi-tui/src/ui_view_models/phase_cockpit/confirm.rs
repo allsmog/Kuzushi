@@ -35,20 +35,30 @@ pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
         empty_hint: selected.is_none().then(|| prove_empty_hint(app)),
         investigation,
         trace,
+        deferral: selected_proof_deferral(app, selected.as_ref()),
     }
+}
+
+/// The durable proof deferral for the selected finding, if the operator
+/// recorded one against this exact discovery generation.
+fn selected_proof_deferral(
+    app: &ShellApp,
+    selected: Option<&(Option<String>, kuzushi_core::Finding)>,
+) -> Option<kuzushi_core::workflow_attempts::ProofDeferralView> {
+    let (_, finding) = selected?;
+    app.engagement
+        .proof_deferral_for(finding)
+        .map(kuzushi_core::workflow_attempts::ProofDeferralView::from_record)
 }
 
 fn prove_empty_hint(app: &ShellApp) -> String {
     let Some(deferral) = app.engagement.latest_proof_deferral() else {
         return "select a finding to inspect its path and proof".to_string();
     };
-    let subject = deferral
-        .identity_id
-        .as_deref()
-        .unwrap_or(&deferral.finding_fingerprint);
+    let view = kuzushi_core::workflow_attempts::ProofDeferralView::from_record(deferral);
     format!(
-        "proof deferral recorded for {subject} by operator · {}. No proof was produced; open Review to select a finding",
-        deferral.reason
+        "proof deferral recorded for {} by {} · {}. No proof was produced; open Review to select a finding",
+        view.subject, view.actor, view.reason
     )
 }
 

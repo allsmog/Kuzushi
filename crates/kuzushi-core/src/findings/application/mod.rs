@@ -2,6 +2,7 @@ use super::domain::*;
 use super::presentation::{proof_state_label, runtime_validation_label};
 use serde::Serialize;
 
+mod effective_review_state;
 mod generic_tool_findings;
 mod projections;
 mod review_decision_conflict;
@@ -14,6 +15,10 @@ pub(crate) use generic_tool_findings::{
 pub use scan_comparison::{
     compare_scan_runs, ComparedFinding, ScanComparisonClass, ScanFindingSignature,
     ScanRunComparison, ScanUncertainMatch,
+};
+pub use effective_review_state::{
+    decision_is_review_actionable, finding_is_review_actionable, review_decision_history_for,
+    review_verdict_is_actionable, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
 pub use review_decision_conflict::ReviewDecisionConflict;
 pub use projections::{

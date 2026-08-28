@@ -395,11 +395,13 @@ fn critical_compact_lines(
         .proof
         .as_ref()
         .is_some_and(|proof| proof.requires_revalidation);
-    vec![
+    let mut lines = vec![
         compact_identity_line(model, finding, width),
         compact_status_line(finding, stale, width),
-        compact_next_line(finding, width),
-    ]
+    ];
+    lines.extend(proof_deferral_lines(model, width));
+    lines.push(compact_next_line(finding, width));
+    lines
 }
 
 fn compact_identity_line(
@@ -597,6 +599,7 @@ fn status_lines(
         theme::label(),
     ));
     lines.extend(finding_header_lines(finding, width));
+    lines.extend(proof_deferral_lines(model, width));
     if model
         .proof
         .as_ref()
@@ -608,6 +611,19 @@ fn status_lines(
         ));
     }
     lines
+}
+
+/// The operator's recorded decision to postpone proof, disclosed above the
+/// proof block. It reports a decision, not evidence: nothing here feeds the
+/// proof ladder, the proof meter, or the confidence band.
+fn proof_deferral_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'static>> {
+    let Some(deferral) = model.deferral.as_ref() else {
+        return Vec::new();
+    };
+    vec![Line::styled(
+        fit(&format!("⏸ {}", deferral.disclosure_line()), width),
+        theme::warn(),
+    )]
 }
 
 fn render_reference_body(
@@ -942,6 +958,7 @@ mod dataflow_prove_tests {
 
     fn prove_model() -> ProvePhaseModel {
         ProvePhaseModel {
+            deferral: None,
             finding: Some(finding_with_dataflow()),
             attack_path: TaintFlowPath::default(),
             proof: None,
@@ -972,6 +989,58 @@ mod dataflow_prove_tests {
         let evidence_at = text.find("EVIDENCE").unwrap();
         let dataflow_at = text.find("AUDITED DATAFLOW").unwrap();
         assert!(evidence_at < dataflow_at, "{text}");
+    }
+
+    /// Plain output and the compact STATUS/NEXT strip disclose the operator's
+    /// deferral above the proof blocks; without one, nothing is claimed.
+    #[test]
+    fn prove_discloses_a_recorded_proof_deferral_above_the_proof_blocks() {
+        let mut model = prove_model();
+        model.deferral = Some(deferral_view());
+
+        let text = body(&model);
+        let disclosure_at = text
+            .find("proof deferred by operator at generation scan-7")
+            .unwrap_or_else(|| panic!("{text}"));
+        assert!(
+            disclosure_at < text.find("PROOF LADDER").unwrap(),
+            "the decision is disclosed above the proof blocks: {text}"
+        );
+        assert!(
+            text.contains("no runtime harness for this language yet"),
+            "{text}"
+        );
+
+        let compact = compact_status_text(&model);
+        assert!(compact.contains("proof deferred by operator"), "{compact}");
+        assert!(
+            !body(&prove_model()).contains("proof deferred"),
+            "no deferral is ever implied without a recorded decision"
+        );
+    }
+
+    fn deferral_view() -> kuzushi_core::workflow_attempts::ProofDeferralView {
+        kuzushi_core::workflow_attempts::ProofDeferralView::from_record(
+            &kuzushi_core::workflow_attempts::ProofDeferralRecorded::human(
+                "semgrep:js/xss:9867ad7c",
+                None,
+                "scan-7",
+                kuzushi_core::workflow_attempts::PhaseTargetSnapshot {
+                    target: "/target".to_string(),
+                    revision: Some("abc".to_string()),
+                    dirty: false,
+                },
+                "no runtime harness for this language yet",
+            ),
+        )
+    }
+
+    fn compact_status_text(model: &ProvePhaseModel) -> String {
+        critical_compact_lines(model, model.finding.as_ref().expect("finding"), 100)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]

@@ -1751,3 +1751,177 @@ fn proof_deferral_requires_a_durable_generation_and_reason() {
         assert!(error.to_string().contains("proof deferral"));
     }
 }
+
+/// A reviewed finding, persisted the way any mode persists one, so the shared
+/// deferral service is exercised against a real store rather than a stub.
+fn confirmed_finding_workspace(root: &std::path::Path) -> (WorkspaceTarget, String) {
+    use crate::findings::{
+        Finding, FindingStore, ReviewDecision, ReviewDecisionVerdict, Severity, TriageAuthor,
+    };
+    let workspace = WorkspaceTarget::new(root).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store.record_run_started("scan-1", root, "running").unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "demo.rule",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "candidate",
+    );
+    let fingerprint = finding.fingerprint.clone();
+    let id = store.insert_finding("scan-1", &finding).unwrap();
+    store
+        .append_user_review_decision(
+            id,
+            &ReviewDecision {
+                verdict: ReviewDecisionVerdict::Confirmed,
+                author: TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "reviewed the source and sink".to_string(),
+                dismiss_reason: None,
+                actor: Some("operator".to_string()),
+            },
+        )
+        .unwrap();
+    (workspace, fingerprint)
+}
+
+#[test]
+fn record_proof_deferral_service_binds_the_decision_to_the_discovery_generation() {
+    let target = tempfile::tempdir().unwrap();
+    let (workspace, fingerprint) = confirmed_finding_workspace(target.path());
+
+    let recorded = record_proof_deferral(
+        &workspace,
+        &ProofDeferralRequest {
+            reference: fingerprint.clone(),
+            reason: "  no runtime harness for this language yet  ".to_string(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(recorded.scan_id, "scan-1");
+    assert_eq!(
+        recorded.deferral.reason,
+        "no runtime harness for this language yet",
+        "the service trims the operator reason before it becomes durable"
+    );
+    let ledger = load_phase_attempt_ledger(target.path()).unwrap();
+    assert!(ledger.proof_is_deferred_for(
+        &PhaseTargetSnapshot::capture(target.path()),
+        &fingerprint,
+        None,
+        "scan-1"
+    ));
+    assert!(
+        !ledger.proof_is_deferred_for(
+            &PhaseTargetSnapshot::capture(target.path()),
+            &fingerprint,
+            None,
+            "scan-2"
+        ),
+        "a later observation must never inherit the decision"
+    );
+}
+
+#[test]
+fn record_proof_deferral_service_refuses_an_unreviewed_finding() {
+    use crate::findings::{Finding, FindingStore, Severity};
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("scan-1", target.path(), "running")
+        .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "demo.rule",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "candidate",
+    );
+    store.insert_finding("scan-1", &finding).unwrap();
+
+    let error = record_proof_deferral(
+        &workspace,
+        &ProofDeferralRequest {
+            reference: finding.fingerprint.clone(),
+            reason: "later".to_string(),
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        error.to_string().contains("not review-actionable"),
+        "{error}"
+    );
+    assert!(load_phase_attempt_ledger(target.path())
+        .unwrap()
+        .latest_proof_deferral_for(&PhaseTargetSnapshot::capture(target.path()))
+        .is_none());
+}
+
+#[test]
+fn proof_deferral_view_discloses_the_decision_without_any_proof_state() {
+    let record = ProofDeferralRecorded::human(
+        "semgrep:demo.rule:9867ad7c",
+        Some("fi_stable".to_string()),
+        "scan-7",
+        PhaseTargetSnapshot {
+            target: "/target".to_string(),
+            revision: Some("abc".to_string()),
+            dirty: false,
+        },
+        "runtime harness is unavailable in this environment",
+    );
+
+    let view = ProofDeferralView::from_record(&record);
+
+    assert_eq!(view.subject, "fi_stable");
+    assert_eq!(view.fingerprint, "semgrep:demo.rule:9867ad7c");
+    assert_eq!(view.scan_id, "scan-7");
+    assert_eq!(view.actor, "operator");
+    assert_eq!(
+        view.disclosure_line(),
+        "proof deferred by operator at generation scan-7 · runtime harness is unavailable in this environment"
+    );
+}
+
+#[test]
+fn proof_deferral_view_for_finding_reads_only_the_matching_generation() {
+    use crate::findings::{Finding, Severity};
+    let target = tempfile::tempdir().unwrap();
+    let (workspace, fingerprint) = confirmed_finding_workspace(target.path());
+    record_proof_deferral(
+        &workspace,
+        &ProofDeferralRequest {
+            reference: fingerprint.clone(),
+            reason: "deferred to phase 2".to_string(),
+        },
+    )
+    .unwrap();
+
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "demo.rule",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "candidate",
+    );
+    finding.scan_id = Some("scan-1".to_string());
+    let view = proof_deferral_view_for_finding(&workspace, &finding)
+        .unwrap()
+        .expect("the recorded deferral for this generation");
+    assert_eq!(view.reason, "deferred to phase 2");
+
+    finding.scan_id = Some("scan-2".to_string());
+    assert!(proof_deferral_view_for_finding(&workspace, &finding)
+        .unwrap()
+        .is_none());
+}

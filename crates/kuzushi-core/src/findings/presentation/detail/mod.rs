@@ -1,4 +1,5 @@
 pub(in crate::findings) use super::*;
+use crate::workflow_attempts::ProofDeferralView;
 
 pub(in crate::findings) use proof_ladder::*;
 pub(in crate::findings) use proof_state_label::*;

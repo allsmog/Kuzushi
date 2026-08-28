@@ -32,37 +32,23 @@ impl ShellApp {
         }
     }
 
+    /// The shell never writes the deferral ledger itself: it resolves the
+    /// target and hands the request to the shared core service so the headless
+    /// `kuzushi proof defer` records exactly the same decision.
     fn persist_proof_deferral(&self, apply: &ProofDeferralApply) -> anyhow::Result<String> {
         let target = apply
             .target
             .as_deref()
             .context("proof deferral needs an active target")?;
         let workspace = WorkspaceTarget::new(target)?;
-        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path())?;
-        let finding = store
-            .get_finding_by_reference(&apply.reference)?
-            .or_else(|| kuzushi_core::resolve_finding_alias(self.findings(), &apply.reference))
-            .with_context(|| format!("no finding matches {:?}", apply.reference))?;
-        let decisions = store.list_review_decisions_for_findings(std::slice::from_ref(&finding))?;
-        anyhow::ensure!(
-            crate::ui_view_models::finding_is_review_actionable(&finding, &decisions),
-            "finding is not review-actionable; complete Review before deferring proof"
-        );
-        let scan_id = finding
-            .scan_id
-            .as_deref()
-            .filter(|scan_id| !scan_id.trim().is_empty())
-            .context("finding has no durable discovery generation; scan it before deferring proof")?
-            .to_string();
-        let deferral = kuzushi_core::workflow_attempts::ProofDeferralRecorded::human(
-            finding.fingerprint,
-            finding.identity_id,
-            scan_id.clone(),
-            kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(workspace.root()),
-            apply.reason.clone(),
-        );
-        kuzushi_core::workflow_attempts::append_proof_deferral(workspace.root(), deferral)?;
-        Ok(scan_id)
+        let recorded = kuzushi_core::workflow_attempts::record_proof_deferral(
+            &workspace,
+            &kuzushi_core::workflow_attempts::ProofDeferralRequest {
+                reference: apply.reference.clone(),
+                reason: apply.reason.clone(),
+            },
+        )?;
+        Ok(recorded.scan_id)
     }
 
     pub(crate) fn reduce_review_decision_command(

@@ -193,9 +193,9 @@ pub(crate) use jobs_registry::{
 };
 pub(crate) use journey::{
     attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
-    finding_is_review_actionable, finding_ledger_counts, journey_footer_segment, journey_model,
-    journey_phase_segment, journey_reality_projection, CheckpointDrift, JourneyDestination,
-    JourneyModel, JourneyPhaseAccess, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
+    finding_ledger_counts, journey_footer_segment, journey_model, journey_phase_segment,
+    journey_reality_projection, CheckpointDrift, JourneyDestination, JourneyModel,
+    JourneyPhaseAccess, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
     JourneyRealityProjection, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;

@@ -1,5 +1,6 @@
 use crate::support::require_cli_target;
 use anyhow::{Context, Result};
+use kuzushi_core::workflow_attempts::proof_deferral_view_for_finding;
 use kuzushi_core::{
     resolve_finding_alias, stable_finding_alias, FindingDetailReport, FindingListFilter,
     FindingStore, WorkspaceTarget,
@@ -66,8 +67,13 @@ pub(crate) fn finding_command(
         .map(|finding_id| store.list_review_decisions_for_finding_identity(finding_id))
         .transpose()?
         .unwrap_or_default();
-    let report =
-        FindingDetailReport::new(alias, finding, patch_results).with_review_decisions(decisions);
+    // A recorded proof deferral is an operator decision on this exact
+    // discovery generation; the detail must disclose it beside the proof
+    // state rather than reporting the finding as merely unproven.
+    let deferral = proof_deferral_view_for_finding(&workspace, &finding)?;
+    let report = FindingDetailReport::new(alias, finding, patch_results)
+        .with_review_decisions(decisions)
+        .with_proof_deferral(deferral);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);

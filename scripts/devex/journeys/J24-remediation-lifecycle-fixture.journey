@@ -80,4 +80,9 @@ expect: proof deferred for F-0001
 nav-mode:
 keys: 4
 wait-live-snap: 10 Viewing Prove | prove-after-defer
-ask: Prove — is the recorded deferral visible as a durable outcome for this finding?
+# Machine-checked, not asked: the deferral must be disclosed on Prove, with
+# its author and the operator's own reason. It reads the same whether a
+# finding is selected (STATUS/NEXT strip) or not (empty-state receipt).
+expect: proof defer
+expect: by operator
+expect: patch deferred to phase 2
