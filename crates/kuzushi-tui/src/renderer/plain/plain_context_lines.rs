@@ -1,8 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
-    plain_context_model, plain_workspace_projection, project_model, strategy_queue_model,
-    PlainContextModel, PlainWorkspaceProjection, ProjectModel, StrategyQueueModel,
-    StrategyQueueRow,
+    plain_context_model, plain_workspace_projection, project_context_columns, project_model,
+    strategy_queue_model, PlainContextModel, PlainWorkspaceProjection, ProjectContextRow,
+    ProjectModel, StrategyQueueModel, StrategyQueueRow,
 };
 
 pub(crate) fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
@@ -99,16 +99,8 @@ fn push_plain_project_model_summary(lines: &mut Vec<String>, model: &ProjectMode
     lines.push(plain_section_divider("PROJECT MODEL", width));
     lines.push(format!("scope: {}", model.scope_label));
     lines.push(format!("revision: {}", model.revision_label));
-    lines.extend(model.rows.iter().map(|row| {
-        format!(
-            "{} {} [{}:{}] {}",
-            row.origin.glyph(),
-            row.section,
-            row.origin.label(),
-            row.state,
-            row.summary
-        )
-    }));
+    let table = project_context_columns(model, width);
+    lines.extend(table.rows.iter().map(ProjectContextRow::text));
     lines.push(String::new());
     lines.push(model.next_hint.to_string());
 }

@@ -253,7 +253,9 @@ pub(crate) use prereq_prompt::{
     PrereqPromptStepModel,
 };
 pub(crate) use project_model::{
-    project_model, project_revision_label, ProjectModel, ProjectModelOrigin, ProjectModelRow,
+    project_context_columns, project_model, project_revision_label, ProjectContextCell,
+    ProjectContextRow, ProjectContextTable, ProjectModel, ProjectModelOrigin, ProjectModelRow,
+    CONTEXT_COLUMN_RULE,
 };
 pub(crate) use prompt::{
     navigation_prompt_label, prompt_model, prompt_text, workbench_prompt_mode,

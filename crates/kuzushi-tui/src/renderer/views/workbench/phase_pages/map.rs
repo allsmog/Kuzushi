@@ -1,7 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
-    AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel, MapPhaseModel,
-    ModuleRisk, NextScansState, ProjectModelOrigin, WorklistRowModel,
+    project_context_columns, AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel,
+    MapPhaseModel, ModuleRisk, NextScansState, ProjectContextCell, ProjectContextRow,
+    ProjectModelOrigin, WorklistRowModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
@@ -318,16 +319,33 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
         fit(&context_status_line(model), width),
         artifact_state_style(model.context.state),
     ));
-    lines.extend(model.project.rows.iter().take(8).map(|row| {
-        Line::from(vec![
-            Span::styled(
-                format!("{} {:<14} ", row.origin.glyph(), row.section),
-                origin_style(row.origin),
-            ),
-            Span::styled(fit(&row.summary, width.saturating_sub(17)), theme::muted()),
-        ])
-    }));
+    let table = project_context_columns(&model.project, width);
+    lines.extend(table.rows.iter().take(8).map(context_row_line));
     lines
+}
+
+/// One receipt row, styled from the shared column projection so the pane and
+/// plain output cannot disagree about which cells a row has.
+fn context_row_line(row: &ProjectContextRow) -> Line<'static> {
+    Line::from(
+        row.segments()
+            .into_iter()
+            .map(|segment| Span::styled(segment.text, context_cell_style(segment.cell, row.origin)))
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn context_cell_style(
+    cell: ProjectContextCell,
+    origin: ProjectModelOrigin,
+) -> ratatui::style::Style {
+    match cell {
+        ProjectContextCell::Origin | ProjectContextCell::Section | ProjectContextCell::State => {
+            origin_style(origin)
+        }
+        ProjectContextCell::Action => theme::accent(),
+        ProjectContextCell::Rule | ProjectContextCell::Summary => theme::muted(),
+    }
 }
 
 fn context_heading_line(scope: &str, revision: &str, width: usize) -> Line<'static> {
@@ -805,7 +823,7 @@ mod next_scan_tests {
     }
 
     #[test]
-    fn context_rows_separate_a_full_width_section_from_its_summary() {
+    fn narrow_context_rows_separate_a_full_width_section_from_its_summary() {
         let map = map_fixture();
         assert!(
             map.project
@@ -815,9 +833,29 @@ mod next_scan_tests {
             "fixture must carry the widest section label"
         );
 
-        let rendered = text(&context_lines(&map, 100));
+        let rendered = text(&context_lines(&map, 60));
 
         assert!(rendered.contains("review surface 0 items"), "{rendered}");
+    }
+
+    /// #172: a card wide enough to afford them spends its columns on the
+    /// state and next action the project model already carries, instead of
+    /// leaving the pane's right half empty.
+    #[test]
+    fn wide_context_rows_carry_the_state_and_next_action() {
+        let map = map_fixture();
+
+        let rendered = text(&context_lines(&map, 100));
+
+        assert!(rendered.contains("review surface"), "{rendered}");
+        assert!(
+            rendered.contains("\u{2502} missing"),
+            "state cell: {rendered}"
+        );
+        assert!(
+            rendered.contains("\u{25b8} findings"),
+            "action cell: {rendered}"
+        );
     }
 
     #[test]
