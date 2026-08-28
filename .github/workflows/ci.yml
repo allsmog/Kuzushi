@@ -78,6 +78,10 @@ jobs:
           inherit-toolchain: true
           cache: true
       - run: pnpm install --frozen-lockfile
+      # Kept on Docker for now because the GitHub-hosted ubuntu image ships a
+      # running daemon. A self-hosted runner will not, so relabelling this job
+      # means first replacing this step with the native actionlint binary at
+      # the same pinned 1.7.12 and keeping ci-full.yml's digest pin in step.
       - name: Lint GitHub Actions workflows
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
       - name: Run quick repository contract
