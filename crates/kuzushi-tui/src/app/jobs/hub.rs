@@ -147,6 +147,14 @@ impl JobHub {
         self.slots.get(&kind).map(|slot| slot.label.as_str())
     }
 
+    /// Label of the one job that owns the execution slot. `try_start` refuses
+    /// a second job, so there is at most one — which is what lets a stop
+    /// request name what it is stopping, even when the job was launched from
+    /// a view the operator has since left.
+    pub(crate) fn live_job_label(&self) -> Option<&str> {
+        self.slots.values().next().map(|slot| slot.label.as_str())
+    }
+
     pub(crate) fn cancel_requested(&self, kind: JobKind) -> bool {
         self.slots
             .get(&kind)

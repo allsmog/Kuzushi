@@ -239,6 +239,21 @@ fn jobhub_cancel_arms_slot_token() {
 }
 
 #[test]
+fn jobhub_names_the_one_live_job_without_being_told_its_kind() {
+    // A stop request knows only "something is running"; the hub is globally
+    // exclusive, so it can still name it.
+    let mut hub = JobHub::default();
+    assert_eq!(hub.live_job_label(), None);
+
+    let ticket = hub.start(JobKind::Run, "taint-iris:hunt");
+    assert_eq!(hub.live_job_label(), Some("taint-iris:hunt"));
+
+    hub.finish(ticket.kind());
+    assert_eq!(hub.live_job_label(), None);
+    ticket.complete();
+}
+
+#[test]
 fn job_ticket_exposes_identity_and_finish_clears_slot() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Plan, "planner");
