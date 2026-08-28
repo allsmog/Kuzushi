@@ -5,6 +5,7 @@ use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod changed_scan_scope;
 mod export_evidence_origin;
 mod export_markdown_bundle;
 mod export_metadata;
@@ -22,6 +23,7 @@ mod record_review_session;
 mod since_filter;
 mod status;
 
+pub use changed_scan_scope::{changed_scan_input, ChangedScanScope};
 pub use export_metadata::workspace_export_omitted_fields;
 pub use export_projection::{
     workspace_finding_export_records_with_context, workspace_finding_export_records_with_reviews,

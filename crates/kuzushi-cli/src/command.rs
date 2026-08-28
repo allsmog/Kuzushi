@@ -55,9 +55,12 @@ pub(crate) enum Command {
         /// repeat-separated) without a manifest. Mutually exclusive with `--shard`.
         #[arg(long, value_delimiter = ',', conflicts_with = "shard")]
         paths: Vec<String>,
-        /// Diff-scope the scan to files changed since `<ref>`. Engines that
-        /// support it (full-mode-multi today) narrow their walk; others are
-        /// unaffected. Pass `--include-worktree` to include uncommitted edits.
+        /// Diff-scope the scan to files changed since `<ref>`, matching the
+        /// shell's `scan since <ref>`. Compiles into the canonical `sast:scan`
+        /// `paths` and `diffBase` options, so every engine is narrowed. With
+        /// `--paths`/`--shard` the effective scope is the intersection. A
+        /// reference that changed nothing refuses rather than scanning
+        /// everything. Pass `--include-worktree` to include uncommitted edits.
         #[arg(long)]
         since: Option<String>,
         /// When `--since` is set, also include uncommitted (working-tree) changes.

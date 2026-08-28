@@ -23,19 +23,16 @@ fn changed_scan_request(
     reference: &str,
     include_worktree: bool,
 ) -> anyhow::Result<Option<ChangedScanRequest>> {
-    let scope = kuzushi_core::git_diff_files(target, reference, include_worktree)?;
-    let paths = scope
-        .files
-        .into_iter()
-        .filter(|path| target.join(path).is_file())
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>();
-    if paths.is_empty() {
+    // Shared with `kuzushi scan --since`: one resolution of "what changed"
+    // so shell and CLI never disagree about the scope of the same intent.
+    let Some(scope) =
+        kuzushi_core::workspace::changed_scan_input(target, reference, include_worktree)?
+    else {
         return Ok(None);
-    }
+    };
     Ok(Some(ChangedScanRequest {
-        path_count: paths.len(),
-        input: serde_json::json!({ "paths": paths, "diffBase": reference }).to_string(),
+        path_count: scope.paths.len(),
+        input: scope.to_sast_scan_input().to_string(),
     }))
 }
 

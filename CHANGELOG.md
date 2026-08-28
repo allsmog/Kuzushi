@@ -52,6 +52,18 @@ packages, create a tag, or create a GitHub Release._
 
 **Fixed:**
 
+- `kuzushi scan --since <ref>` and the shell's `scan since <ref>` now resolve
+  the same changed-file scope through one shared helper. The CLI no longer
+  writes paths the reference deleted into `.kuzushi/v3/since.txt`, and the
+  resolved scope compiles into the canonical `sast:scan` `paths` and
+  `diffBase` options, so `--since` narrows every engine instead of only the
+  ones that read the scope file. Combined with `--paths`/`--shard` the
+  effective scope is the intersection, disclosed as
+  `scope: N files since <ref> ∩ M requested → K`. A reference that changed
+  nothing — or an empty intersection — now refuses the scan instead of leaving
+  an empty scope file that silently widened the run to the whole target. A
+  `diffBase` already present in raw scan input must match `--since`; a
+  mismatch is an explicit error.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
