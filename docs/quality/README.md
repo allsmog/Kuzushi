@@ -1,8 +1,9 @@
 # Quality docs
 
-`crap-gate.md` is live policy (the shipped CRAP-risk proxy gate). Everything
-else here is a historical point-in-time audit, kept for the reasoning it
-captures rather than as a live work queue.
+`crap-gate.md` (the shipped CRAP-risk proxy gate) and
+`local-verify-receipt.md` (the signed local merge-gate receipt) are live policy.
+Everything else here is a historical point-in-time audit, kept for the reasoning
+it captures rather than as a live work queue.
 
 - `CODE_QUALITY_*.md` — TypeScript-era quality audits. The concrete cleanup
   items they list (unused files, deprecated re-exports, DRY consolidation)

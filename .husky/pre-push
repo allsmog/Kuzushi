@@ -1,0 +1,43 @@
+# shellcheck shell=sh
+# Kuzushi pre-push hook
+# Asks for a signed local verification receipt before the pushed commit reaches
+# `main`. This is advisory, not enforcement: branch protection requires no
+# status check, and `git push --no-verify` skips this hook entirely. It exists
+# to make the trust-on-owner merge gate explicit and auditable, not to pretend
+# the gate is enforced. See docs/quality/local-verify-receipt.md.
+#
+# Escape hatches:
+#   - git push --no-verify ...     # skip hooks for this push
+#   - HUSKY=0 git push ...         # skip all hooks
+# Opt in for non-main branches with KUZUSHI_REQUIRE_RECEIPT=1.
+
+zero="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+	: "$remote_sha"
+
+	# Branch or tag deletion: nothing is being published to verify.
+	if [ "$local_sha" = "$zero" ]; then
+		continue
+	fi
+
+	# Tags carry no new tree of their own; releases are gated by RELEASING.md.
+	case "$local_ref$remote_ref" in
+	*refs/tags/*) continue ;;
+	esac
+
+	if [ "$remote_ref" != "refs/heads/main" ] && [ "$KUZUSHI_REQUIRE_RECEIPT" != "1" ]; then
+		continue
+	fi
+
+	# </dev/null so the verifier cannot swallow the remaining ref-update lines.
+	if ! node scripts/verify-receipt.mjs verify --commit "$local_sha" </dev/null; then
+		echo "" >&2
+		echo "pre-push: refusing to push $local_sha to $remote_ref without a valid receipt." >&2
+		echo "  Produce one with:  pnpm verify:quick:summary && pnpm verify:receipt:sign" >&2
+		echo "  Then re-run the push. To bypass deliberately: git push --no-verify" >&2
+		exit 1
+	fi
+done
+
+exit 0
