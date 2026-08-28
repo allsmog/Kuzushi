@@ -123,6 +123,8 @@ const rustArtifactSpecChecks = [
 const quickCiRequirements = [
   "pnpm verify:quick:summary",
   "rhysd/actionlint:1.7.12",
+  "scripts/runner/lint-workflows.sh",
+  '"self-hosted","macOS","ARM64","kuzushi-mac"',
   "quality-gauntlet:",
   "types: [opened, reopened, ready_for_review, synchronize]",
   "github.event.pull_request.draft == false",
@@ -140,13 +142,23 @@ const fullCiRequirements = [
   "pnpm test:coverage",
   "pnpm test:mutations",
   "rhysd/actionlint:1.7.12",
+  "scripts/runner/lint-workflows.sh",
   "cargo test --workspace --locked",
   "quality-gauntlet:",
   "verify-pack:",
   "pnpm verify:pack",
   "node scripts/build-native-runtime.mjs",
   "moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3",
-  "native-linux-x64",
+  // The native payload is host-specific. Consumers must read the producing
+  // job's resolved slug, never a hardcoded platform, or a run on the
+  // self-hosted Mac would download an artifact that was never uploaded.
+  "nativePlatformSlug",
+  "needs.rust-cli.outputs.native-artifact",
+  // Routine jobs default to the owner's self-hosted Mac; only the Windows
+  // compile stays pinned to a hosted image. RELEASING.md's visibility gate
+  // requires removing the runner before the repository becomes public.
+  '"self-hosted","macOS","ARM64","kuzushi-mac"',
+  "runs-on: windows-latest",
   "KUZUSHI_CRAP_RISK_BASE_REF",
   "fetch-depth: 0",
 ];

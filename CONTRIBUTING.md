@@ -103,6 +103,33 @@ pnpm setup:benchmarks govwa juice-shop
 pnpm setup:benchmarks all
 ```
 
+## Continuous integration
+
+Quick CI (`.github/workflows/ci.yml`) runs one `quality-gauntlet` job per
+ready pull-request head. It executes `pnpm verify:quick:summary` — the same
+gate you run locally — plus an actionlint pass over every workflow. Full CI
+(`.github/workflows/ci-full.yml`) adds the cross-platform, coverage, mutation,
+packaging, and end-to-end jobs, and runs monthly, on release candidates, or on
+request.
+
+Both workflows run on **one ephemeral self-hosted Apple-Silicon runner on the
+repository owner's Mac**, labelled `self-hosted, macOS, ARM64, kuzushi-mac`.
+Two consequences matter when you read a CI result:
+
+- **A queued job may mean the runner is offline, not that CI is slow.** There
+  is exactly one runner, and it registers ephemerally per job.
+- **A green run does not prove the Linux-only patch-validation sandbox.**
+  Bubblewrap and AppArmor do not exist on macOS, so `rust-cli` records in its
+  job summary that it did not exercise them. `windows-compile` still runs on
+  `windows-latest`.
+
+Re-run any job on GitHub-hosted Linux by dispatching the workflow with the
+`hosted` input set to `true`.
+
+Setup, threat model, and teardown for the runner live in
+[scripts/runner/README.md](scripts/runner/README.md), summarised in
+[docs/quality/self-hosted-runner.md](docs/quality/self-hosted-runner.md).
+
 ## Submitting Changes
 
 1. Create a branch from `main`

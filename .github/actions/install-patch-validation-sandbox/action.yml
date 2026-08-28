@@ -4,7 +4,13 @@ description: Install and verify the trusted Bubblewrap backend used by repositor
 runs:
   using: composite
   steps:
-    - shell: bash
+    # Bubblewrap and AppArmor are Linux kernel features. There is no macOS or
+    # Windows equivalent to install, so this action is a declared no-op off
+    # Linux rather than a silent one: the caller is told, in its log, that the
+    # isolating backend was never installed.
+    - name: Install Bubblewrap backend
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
       run: |
         sudo apt-get update
         sudo apt-get install --yes --no-install-recommends bubblewrap
@@ -20,3 +26,8 @@ runs:
         bwrap --unshare-all --ro-bind /usr /usr --ro-bind /bin /bin \
           --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
           --proc /proc --dev /dev -- /bin/true
+    - name: Report skipped sandbox install
+      if: ${{ runner.os != 'Linux' }}
+      shell: bash
+      run: |
+        echo "::notice title=Patch-validation sandbox not installed::Bubblewrap and AppArmor are Linux-only, so no isolating sandbox backend was installed on ${RUNNER_OS}. Kuzushi resolves SandboxBackend::Plain here and repository-execution tests do not exercise bwrap."

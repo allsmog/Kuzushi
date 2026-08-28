@@ -1,0 +1,86 @@
+# Self-hosted CI runner
+
+Routine Kuzushi CI runs on one ephemeral self-hosted GitHub Actions runner on
+the repository owner's Apple-Silicon Mac. The private repository sits on a
+personal account whose Actions spending cap is exhausted, so hosted minutes are
+the constraint this arrangement removes.
+
+The operational detail — installation, the fine-grained PAT, verification, and
+teardown — lives in [`scripts/runner/README.md`](../../scripts/runner/README.md).
+This page records what the arrangement means for reading a CI result.
+
+## What runs where
+
+| Workflow | Jobs | Runner |
+| --- | --- | --- |
+| `ci.yml` | `quality-gauntlet` | self-hosted Mac |
+| `ci-full.yml` | `quality-gauntlet`, `rust-core`, `cargo-deny`, `rust-cli`, `coverage`, `mutation`, `node22-compat`, `verify-pack`, `e2e` | self-hosted Mac |
+| `ci-full.yml` | `windows-compile` | `windows-latest` (hosted) |
+| `release-candidate.yml`, `release.yml`, `published-release-smoke.yml` | all | hosted |
+
+Runner labels are `self-hosted`, `macOS`, `ARM64`, `kuzushi-mac`. Workflows
+select on the complete set, so a runner carrying only the built-in labels never
+picks up a Kuzushi job.
+
+Publishing never touches this machine. `NPM_TOKEN` and every other release
+credential stay on hosted runners.
+
+## Escape hatch: `hosted: true`
+
+Both workflows take a boolean `hosted` input, default `false`. Dispatching
+either with `hosted: true` puts every self-hosted job back on `ubuntu-latest`.
+Use it when:
+
+- the Mac is offline and a run must not wait;
+- a change needs the Linux-only sandbox coverage (below) proven;
+- a dependency bump looks untrustworthy and should not execute `build.rs` on
+  the owner's machine.
+
+```sh
+gh workflow run ci-full.yml -f hosted=true
+```
+
+## What a green run on this runner does not prove
+
+Two differences are real, and both are disclosed in the run rather than left
+for the reader to infer.
+
+**The patch-validation sandbox is not exercised.** Bubblewrap and AppArmor are
+Linux kernel features. `.github/actions/install-patch-validation-sandbox` is a
+declared no-op off Linux and emits a notice saying so;
+`SandboxBackend::detect_backend` then resolves to
+`SandboxBackend::Plain` (`crates/kuzushi-sandbox/src/backend/mod.rs`). The
+sandbox tests still pass, because the argv builders are pure string assembly
+and the one execution test branches on `which("bwrap")` — which is exactly why
+`rust-cli` writes an explicit "not exercised" line into its job summary. Only a
+Linux run covers that path.
+
+**The build is a different target.** macOS and `ubuntu-latest` produce
+different `cargo` target directories and different native payloads, so the two
+runners never share a build cache. The native artifact consumed by
+`node22-compat`, `verify-pack`, and `e2e` is named from the producing job's
+host slug (`nativePlatformSlug()` in `scripts/native-runtime-contract.mjs`),
+not a hardcoded `linux-x64`. Linux-specific packaging behaviour is proven by
+the release-candidate workflow, which stays hosted.
+
+## actionlint without a Docker daemon
+
+The hosted ubuntu image ships a running Docker daemon; the Mac does not. The
+lint step therefore runs the native binary through
+[`scripts/runner/lint-workflows.sh`](../../scripts/runner/lint-workflows.sh),
+which requires the exact pinned `1.7.12` on `PATH` and fails with an install
+hint (`brew install actionlint`) otherwise, so the lint surface cannot drift
+because a machine carries a different build. The SHA-pinned
+`rhysd/actionlint:1.7.12` image remains as the `hosted: true` branch.
+
+## The runner must be removed before the repository goes public
+
+GitHub does not run fork workflows for a private repository, which is the only
+reason a self-hosted runner is defensible here. On a public repository, a
+self-hosted runner is a remote-code-execution primitive for anyone who can open
+a pull request.
+
+This is item 8 of the repository visibility gate in
+[`RELEASING.md`](../../RELEASING.md): `gh api
+/repos/allsmog/Kuzushi/actions/runners --jq '.total_count'` must return `0` and
+both workflows must be back on `ubuntu-latest` before visibility changes.
