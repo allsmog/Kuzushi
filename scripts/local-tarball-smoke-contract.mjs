@@ -57,6 +57,22 @@ export function nodeArchitectureFailure(plan_, nodeArch) {
 }
 
 /**
+ * Why a Rosetta-translated smoke may not run, or `null` when it may. Pure.
+ */
+function rosettaPlanFailure({ slug, hostSlug, platform, arch, allowRosetta, rosettaInstalled }) {
+  if (slug !== rosettaTranslatedSlug || hostSlug !== rosettaHostSlug) {
+    return `release smoke ${slug} cannot run on ${platform}-${arch}`;
+  }
+  if (!allowRosetta) {
+    return `release smoke ${slug} on ${hostSlug} requires an explicit ${rosettaOverrideEnvVar}=1 opt-in`;
+  }
+  if (!rosettaInstalled) {
+    return `release smoke ${slug} on ${hostSlug} requested Rosetta translation, but Rosetta 2 is not installed`;
+  }
+  return null;
+}
+
+/**
  * The one place that decides which slug a smoke run may execute, and under what
  * translation. Pure: every host fact arrives as an argument.
  */
@@ -72,19 +88,15 @@ export function smokeExecutionPlan({
   }
   const hostSlug = nativePlatformPackage(platform, arch)?.slug;
   if (hostSlug === slug) return plan(hostSlug, slug, "none");
-  if (slug !== rosettaTranslatedSlug || hostSlug !== rosettaHostSlug) {
-    throw new Error(`release smoke ${slug} cannot run on ${platform}-${arch}`);
-  }
-  if (!allowRosetta) {
-    throw new Error(
-      `release smoke ${slug} on ${hostSlug} requires an explicit ${rosettaOverrideEnvVar}=1 opt-in`,
-    );
-  }
-  if (!rosettaInstalled) {
-    throw new Error(
-      `release smoke ${slug} on ${hostSlug} requested Rosetta translation, but Rosetta 2 is not installed`,
-    );
-  }
+  const failure = rosettaPlanFailure({
+    slug,
+    hostSlug,
+    platform,
+    arch,
+    allowRosetta,
+    rosettaInstalled,
+  });
+  if (failure) throw new Error(failure);
   return plan(hostSlug, slug, "rosetta");
 }
 
