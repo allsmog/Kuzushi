@@ -98,6 +98,9 @@ jobs:
     uses: ./.github/workflows/ci-full.yml
     with:
       quality_base_ref: ${{ inputs.quality_base_ref }}
+      # A release candidate is the one tree that always earns the mutation
+      # sweep, which no longer runs on the monthly Full CI cron.
+      deep: true
     permissions:
       contents: read
 

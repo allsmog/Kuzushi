@@ -1,10 +1,12 @@
 name: Full CI
 
 on:
-  # One deliberate full run per week catches platform and deep-quality drift
+  # One deliberate full run per month catches platform and deep-quality drift
   # without charging every intermediate PR commit for the complete matrix.
+  # Releases do not wait for the cron: release-candidate.yml calls this
+  # workflow directly against the exact candidate commit.
   schedule:
-    - cron: "17 10 * * 1"
+    - cron: "17 10 1 * *"
   workflow_dispatch:
     inputs:
       quality_base_ref:
@@ -12,6 +14,11 @@ on:
         required: false
         type: string
         default: ""
+      deep:
+        description: Also run the long mutation sweep
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       quality_base_ref:
@@ -19,6 +26,11 @@ on:
         required: false
         type: string
         default: ""
+      deep:
+        description: Also run the long mutation sweep
+        required: false
+        type: boolean
+        default: false
 
 # A full run is deliberate. Serialize it by ref without coupling it to the
 # lightweight PR workflow.
@@ -133,7 +145,7 @@ jobs:
           name: native-linux-x64
           path: native/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   coverage:
     name: coverage
@@ -154,8 +166,14 @@ jobs:
         with:
           inherit-toolchain: true
           cache: true
+      # Building cargo-llvm-cov from source cost several runner-minutes per
+      # run. install-action fetches the upstream release binary and verifies
+      # its checksum. The version stays exact because
+      # scripts/run-rust-coverage.sh refuses any other build.
       - name: Install coverage tool
-        run: cargo install cargo-llvm-cov --version 0.8.7 --locked
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
+        with:
+          tool: cargo-llvm-cov@0.8.7
       - uses: ./.github/actions/install-patch-validation-sandbox
       - name: Enforce measured coverage
         env:
@@ -167,10 +185,15 @@ jobs:
           name: rust-coverage
           path: target/llvm-cov/lcov.info
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
+  # The mutation sweep is the single most expensive job in the repository (up
+  # to 90 runner-minutes). It runs only when a caller asks for it explicitly:
+  # release-candidate.yml passes `deep: true`, and an operator can pass it from
+  # the Run workflow dialog. The monthly cron deliberately leaves it out.
   mutation:
     name: mutation
+    if: ${{ inputs.deep == true }}
     needs: quality-gauntlet
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -189,8 +212,13 @@ jobs:
           inherit-toolchain: true
           cache: true
       - uses: ./.github/actions/install-patch-validation-sandbox
+      # Same reasoning as the coverage tool: a checksum-verified upstream
+      # release binary instead of a from-source build. The version stays exact
+      # because scripts/run-rust-mutations.sh refuses any other build.
       - name: Install mutation tool
-        run: cargo install cargo-mutants --version 27.1.0 --locked
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2.87.0
+        with:
+          tool: cargo-mutants@27.1.0
       - name: Require sampled changed mutants to be caught
         env:
           KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
@@ -201,7 +229,7 @@ jobs:
           name: mutation-results
           path: target/mutation/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   node22-compat:
     name: node22-compat
