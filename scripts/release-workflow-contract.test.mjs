@@ -8,6 +8,8 @@ import {
   candidateWorkflowFailures,
   platformPublisherFailures,
   publisherWorkflowFailures,
+  releaseCrossBuilds,
+  releaseNativeBuildPlatforms,
 } from "./release-workflow-contract.mjs";
 
 const candidate = workflow("release-candidate.yml");
@@ -39,6 +41,47 @@ test("release matrix requires every exact native runner", () => {
   const missingWindows = candidate.replace("windows-2025", "windows-latest");
   assert.match(candidateWorkflowFailures(missingWindows).join("\n"), /win32-x64 on windows-2025/);
 });
+
+test("darwin-x64 is cross-built on the Apple silicon runner and still installed on Intel", () => {
+  assert.ok(!jobSource(candidate, "native-binaries").includes("macos-15-intel"));
+  assert.match(
+    jobSource(candidate, "local-tarball-smoke"),
+    /- os: macos-15-intel\n {12}slug: darwin-x64/,
+  );
+  assert.deepEqual(
+    releaseNativeBuildPlatforms.map(({ slug }) => slug),
+    ["linux-x64", "linux-arm64", "darwin-arm64", "win32-x64"],
+  );
+  assert.deepEqual(releaseCrossBuilds, [
+    {
+      runner: "macos-14",
+      hostSlug: "darwin-arm64",
+      slug: "darwin-x64",
+      target: "x86_64-apple-darwin",
+    },
+  ]);
+});
+
+test("a cross-built slug must be produced by its own target and artifact", () => {
+  for (const token of [
+    "cross_target: x86_64-apple-darwin",
+    "rustup target add ${{ matrix.cross_target }}",
+    "KUZUSHI_NATIVE_TARGET: ${{ matrix.cross_target }}",
+    "name: release-candidate-native-${{ matrix.cross_slug }}",
+  ]) {
+    assert.match(
+      candidateWorkflowFailures(candidate.replace(token, "# removed")).join("\n"),
+      /must cross-build darwin-x64 on macos-14/,
+      token,
+    );
+  }
+});
+
+function jobSource(source, jobName) {
+  const start = source.indexOf(`\n  ${jobName}:\n`);
+  const next = source.slice(start + 1).search(/\n {2}[a-z][a-z0-9-]*:\n/);
+  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
+}
 
 test("release publisher remains latest-tagged and main-bound", () => {
   const withoutMain = publisher.replace(

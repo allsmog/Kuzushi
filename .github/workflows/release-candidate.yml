@@ -114,10 +114,15 @@ jobs:
             slug: linux-x64
           - os: ubuntu-24.04-arm
             slug: linux-arm64
-          - os: macos-15-intel
-            slug: darwin-x64
+          # Apple silicon hosts both darwin slugs: the arm64 payload natively and
+          # the x64 payload through `--target x86_64-apple-darwin`. Kuzushi has no
+          # cross-hostile native dependency (no openssl, git2, or portable-pty;
+          # cc-built grammars, bundled libsqlite3-sys, ring, cranelift, and rustls
+          # all cross cleanly), so the Intel-hosted native runner is not needed.
           - os: macos-14
             slug: darwin-arm64
+            cross_slug: darwin-x64
+            cross_target: x86_64-apple-darwin
           - os: windows-2025
             slug: win32-x64
     name: native-${{ matrix.slug }}
@@ -147,28 +152,46 @@ jobs:
           cargo test -p kuzushi-core scan::subprocess::scan_cancellation::tests
           cargo test -p kuzushi-core capabilities::recon::adapters::process::tests
           cargo test -p kuzushi-cli mcp::tests
-      - name: Package native archive
+      - name: Install the cross-compilation target
+        if: matrix.cross_target
+        run: rustup target add ${{ matrix.cross_target }}
+      - name: Cross-build the second native runtime
+        if: matrix.cross_target
+        env:
+          KUZUSHI_NATIVE_TARGET: ${{ matrix.cross_target }}
+        run: node scripts/build-native-runtime.mjs
+      - name: Package every staged native archive
         shell: bash
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
-          PLATFORM_SLUG: ${{ matrix.slug }}
         run: |
           set -euo pipefail
-          staging="kuzushi-v${EXPECTED_VERSION}-${PLATFORM_SLUG}"
-          mkdir -p "${staging}"
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then
-            cp "native/${PLATFORM_SLUG}"/*.exe "${staging}/"
-            7z a "${staging}.zip" "${staging}" > /dev/null
-          else
-            cp "native/${PLATFORM_SLUG}"/* "${staging}/"
-            tar -czf "${staging}.tar.gz" "${staging}"
-          fi
+          for staged in native/*/; do
+            slug="$(basename "${staged}")"
+            staging="kuzushi-v${EXPECTED_VERSION}-${slug}"
+            mkdir -p "${staging}"
+            if [[ "${RUNNER_OS}" == "Windows" ]]; then
+              cp "${staged}"*.exe "${staging}/"
+              7z a "${staging}.zip" "${staging}" > /dev/null
+            else
+              cp "${staged}"* "${staging}/"
+              tar -czf "${staging}.tar.gz" "${staging}"
+            fi
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-candidate-native-${{ matrix.slug }}
           path: |
-            kuzushi-*.tar.gz
-            kuzushi-*.zip
+            kuzushi-v${{ inputs.expected_version }}-${{ matrix.slug }}.tar.gz
+            kuzushi-v${{ inputs.expected_version }}-${{ matrix.slug }}.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload the cross-built platform archive
+        if: matrix.cross_slug
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-candidate-native-${{ matrix.cross_slug }}
+          path: kuzushi-v${{ inputs.expected_version }}-${{ matrix.cross_slug }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
