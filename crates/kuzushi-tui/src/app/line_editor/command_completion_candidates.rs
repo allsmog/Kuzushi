@@ -84,6 +84,14 @@ fn is_value_filled_example(base_head: Option<&str>, alias: &str) -> bool {
 /// Project a command/alias `form` into its completion candidate when it
 /// fuzzy-matches `prefix`. `None` when it has no head, is a `?` form in slash
 /// mode, or doesn't match.
+///
+/// The match is *anchored*: the first typed character must open the command or
+/// one of its words. Completion here is not a list to browse — the row it
+/// drafts is one Enter away from dispatching a tool — so an unanchored
+/// subsequence is too generous. `xu` is a subsequence of `context build`
+/// (conte**x**t b**u**ild), and offering that run to two stray keystrokes is
+/// how an operator dispatches something nobody named. Ranking below stays on
+/// the permissive scorer; it only orders rows this filter already admitted.
 fn candidate_for_prefix(form: &str, prefix: &str, slash: bool) -> Option<String> {
     let head = command_completion_head(form)?;
     if slash && head.starts_with('?') {
@@ -98,8 +106,8 @@ fn candidate_for_prefix(form: &str, prefix: &str, slash: bool) -> Option<String>
         head
     };
     let comparable = candidate.strip_prefix('/').unwrap_or(&candidate);
-    let matches = subsequence_score(comparable, prefix).is_some()
-        || subsequence_score(&candidate, prefix).is_some();
+    let matches = anchored_subsequence_score(comparable, prefix).is_some()
+        || anchored_subsequence_score(&candidate, prefix).is_some();
     matches.then_some(candidate)
 }
 
@@ -189,6 +197,63 @@ pub(crate) fn config_completion_keys() -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_prefixes_still_reach_the_command_they_abbreviate() {
+        // Positive controls first: anchoring must not cost the operator the
+        // abbreviations they actually type.
+        for (prefix, expected) in [
+            ("cb", "context build"),
+            ("ctx", "context"),
+            ("con", "context"),
+            ("con", "context build"),
+            ("cs", "context status"),
+        ] {
+            let candidates = command_completion_candidates(prefix, false);
+            assert!(
+                candidates.iter().any(|candidate| candidate == expected),
+                "{prefix:?} no longer reaches {expected:?}: {candidates:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_mid_word_prefix_does_not_complete_into_a_dispatchable_run() {
+        // `xu` is a subsequence of `conte`x`t b`u`ild` but opens no word in it.
+        let candidates = command_completion_candidates("xu", false);
+        assert!(
+            !candidates.iter().any(|candidate| candidate == "context build"),
+            "`xu` completed into a tool run: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn every_two_char_prefix_completes_only_at_a_word_start() {
+        // Repo-wide guard, in the spirit of the alias invariant below: the
+        // hazard is structural, so pin it over every registered spec and every
+        // two-key prefix rather than over the one pair that happened to be
+        // dangerous. Two characters is the shortest prefix a completion is
+        // offered for, so it is where an unanchored match does the most damage.
+        for first in 'a'..='z' {
+            for second in 'a'..='z' {
+                let prefix = format!("{first}{second}");
+                for candidate in command_completion_candidates(&prefix, false) {
+                    assert!(
+                        opens_a_word_of(&candidate, first),
+                        "{prefix:?} completed into {candidate:?}, which does not start it"
+                    );
+                }
+            }
+        }
+    }
+
+    fn opens_a_word_of(candidate: &str, first: char) -> bool {
+        let chars: Vec<char> = candidate.chars().collect();
+        chars.iter().enumerate().any(|(at, ch)| {
+            ch.eq_ignore_ascii_case(&first)
+                && (at == 0 || matches!(chars[at - 1], ' ' | ':' | '-' | '.' | '_' | '/'))
+        })
+    }
 
     #[test]
     fn no_alias_completes_into_a_filled_in_example_value() {

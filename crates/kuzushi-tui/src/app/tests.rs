@@ -16988,8 +16988,11 @@ fn ctrl_c_cancels_registered_worker_before_view_state_hydrates() {
     assert!(cancel.is_cancelled());
     assert!(app.jobs().cancel_requested(JobKind::Run));
     assert!(!app.should_quit());
+    // No domain has projected the worker yet, but the hub already knows its
+    // label, so the stop request names it instead of falling back to the
+    // anonymous "abort requested for active worker" line.
     assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "system" && line.body.contains("abort requested for active worker")
+        line.prefix == "system" && line.body == "stop requested for starting worker"
     }));
 
     press_key(
@@ -23141,6 +23144,57 @@ fn cancel_job_effect_for_a_non_run_kind_does_not_blank_a_live_run_jobs_rows() {
         .and_then(|session| session.tasks.get("triage:run"))
         .expect("triage row seeded");
     assert_ne!(row.state, DagTaskState::Canceled);
+}
+
+#[test]
+fn a_stop_request_names_the_backgrounded_job_it_stops() {
+    // The one live job may have been backgrounded from a view the operator
+    // has since left, so a stop request must say which job it addressed
+    // instead of "abort requested for active worker".
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _ticket = app.jobs_mut().start(JobKind::Run, "taint-iris:hunt");
+    app.set_activity(Some(ActivitySession::new("run-9")));
+
+    assert!(app.request_active_abort());
+
+    let lines = app.log_lines();
+    assert!(
+        lines.iter().any(|line| {
+            line.prefix == "system"
+                && line.body.contains("stop requested for taint-iris:hunt")
+                && line.body.contains("run-9")
+        }),
+        "stop request did not name the job: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.body.contains("abort requested for active worker")),
+        "generic line survived alongside the named one: {lines:?}"
+    );
+}
+
+#[test]
+fn a_stop_request_names_the_job_alongside_the_per_domain_cleanup_line() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _ticket = app.jobs_mut().start(JobKind::Plan, "planner");
+    app.set_planner_running(true);
+
+    assert!(app.request_active_abort());
+
+    let lines = app.log_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.prefix == "system" && line.body == "stop requested for planner"),
+        "stop request did not name the job: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.prefix == "plan" && line.body.contains("abort requested; waiting")),
+        "per-domain cleanup line was lost: {lines:?}"
+    );
 }
 
 #[test]

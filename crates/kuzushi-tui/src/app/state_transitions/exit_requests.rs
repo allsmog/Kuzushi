@@ -27,7 +27,7 @@ impl ShellApp {
         if !had_running_work {
             return false;
         }
-        self.log_unprojected_abort(requested);
+        self.log_stop_request_subject(requested);
         self.pause_planning_after_abort();
         self.mark_activity_canceling();
         self.drop_queued_steer_items_for_abort();
@@ -45,13 +45,29 @@ impl ShellApp {
         requested
     }
 
-    fn log_unprojected_abort(&mut self, projected: bool) {
-        if !projected {
-            self.log(
+    /// Say what the stop request addresses. The per-domain lines above already
+    /// describe the *cleanup* of whichever domain matched, but the one live
+    /// job may have been backgrounded from a view the operator has since left,
+    /// so a bare "abort requested for active worker" leaves them guessing at
+    /// what they just stopped. Name the job whenever the hub knows it, and
+    /// keep the generic line only for the case where nothing can be named.
+    fn log_stop_request_subject(&mut self, projected: bool) {
+        match self.stop_request_subject() {
+            Some(subject) => self.log("system", format!("stop requested for {subject}")),
+            None if !projected => self.log(
                 "system",
                 "abort requested for active worker; waiting for cleanup",
-            );
+            ),
+            None => {}
         }
+    }
+
+    fn stop_request_subject(&self) -> Option<String> {
+        let label = self.jobs().live_job_label()?;
+        Some(match self.activity().map(|session| session.run_id.as_str()) {
+            Some(run_id) => format!("{label} · {run_id}"),
+            None => label.to_string(),
+        })
     }
 
     fn pause_planning_after_abort(&mut self) {

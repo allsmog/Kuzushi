@@ -3071,6 +3071,35 @@ mod tests {
     }
 
     #[test]
+    fn runtime_validation_label_says_not_executed_for_non_disproof_verdicts() {
+        // These four verdicts mean runtime verification could not run. They
+        // are not a verdict on the scanner's claim, so the operator-facing
+        // label must not read as a rejection of it.
+        for verdict in [
+            PersistedProofVerdict::HarnessFailedToBuild,
+            PersistedProofVerdict::InfrastructureError,
+            PersistedProofVerdict::LanguageUnsupportedYet,
+            PersistedProofVerdict::InsufficientFindingDetail,
+        ] {
+            let mut verification = crate::findings::test_support::empirically_verified(0);
+            verification.proof_verdict = verdict;
+            let label = runtime_validation_label(Some(&verification));
+
+            assert!(
+                !label.contains("execution_rejected"),
+                "{verdict:?} still labeled as a rejection: {label}"
+            );
+            assert!(
+                label.starts_with("not executed - "),
+                "{verdict:?} label lost its honest prefix: {label}"
+            );
+        }
+
+        // The durable artifact vocabulary is unchanged: only the label moved.
+        assert!(crate::findings::is_runtime_proof_state("execution_rejected"));
+    }
+
+    #[test]
     fn finding_next_action_is_exported_for_ui_surfaces() {
         let mut finding = Finding::new_semgrep(
             "demo.xss",

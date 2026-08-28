@@ -195,6 +195,17 @@ const STATIC_PROOF_SUMMARIES: &[(StaticProofState, StaticProofSummary)] = &[
     ),
 ];
 
+/// Human-readable runtime-validation label, exported verbatim into JSON/JSONL
+/// exports and the finding detail report.
+///
+/// The four non-disproof verdicts below (harness failed to build, blocked
+/// infrastructure, unsupported language, insufficient detail) say only that
+/// runtime verification could not execute — they carry no verdict on the
+/// scanner's claim. Their prefix therefore reads `not executed`, not
+/// `execution_rejected`, which reads as "we rejected the claim".
+/// `execution_rejected` remains the durable artifact vocabulary (see
+/// `findings::domain::static_proof_state::is_runtime_proof_state`); only this
+/// operator-facing prefix changed.
 pub fn runtime_validation_label(verification: Option<&PersistedVerification>) -> String {
     let Some(verification) = verification else {
         return "not attempted".to_string();
@@ -218,17 +229,17 @@ pub fn runtime_validation_label(verification: Option<&PersistedVerification>) ->
                 .to_string()
         }
         PersistedProofVerdict::HarnessFailedToBuild => {
-            "execution_rejected - Verification harness failed to build".to_string()
+            "not executed - Verification harness failed to build".to_string()
         }
         PersistedProofVerdict::InfrastructureError => {
-            "execution_rejected - Runtime verification was blocked by infrastructure".to_string()
+            "not executed - Runtime verification was blocked by infrastructure".to_string()
         }
         PersistedProofVerdict::LanguageUnsupportedYet => {
-            "execution_rejected - Runtime verification does not support this language yet"
+            "not executed - Runtime verification does not support this language yet"
                 .to_string()
         }
         PersistedProofVerdict::InsufficientFindingDetail => {
-            "execution_rejected - Finding lacks enough detail for runtime verification".to_string()
+            "not executed - Finding lacks enough detail for runtime verification".to_string()
         }
     }
 }

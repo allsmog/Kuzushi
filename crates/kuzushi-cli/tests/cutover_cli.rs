@@ -1510,9 +1510,12 @@ fn doctor_json_reports_named_preflight_checks() {
 }
 
 #[test]
-fn failed_run_writes_failure_handoff_context() {
+fn blocked_run_writes_failure_handoff_context() {
     let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
     let output = kuzushi()
+        .env("HOME", &home)
         .args(["--target"])
         .arg(tmp.path())
         .args(["run", "context:build", "--input", r#"{"enrichment":true}"#])
@@ -1525,7 +1528,9 @@ fn failed_run_writes_failure_handoff_context() {
     );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body["ok"], false);
-    assert_eq!(body["status"], "failed");
+    // The enrichment request is refused before anything executes, so the run
+    // is `blocked`; the failure-handoff context is written either way.
+    assert_eq!(body["status"], "blocked");
     assert_eq!(body["fallback_context"]["failedStage"], "context:build");
     assert!(body["fallback_context"]["fallbackPrompt"]
         .as_str()
@@ -1557,7 +1562,7 @@ fn failed_run_writes_failure_handoff_context() {
             .terminal
             .as_ref()
             .map(|terminal| terminal.status),
-        Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        Some(kuzushi_core::run_lifecycle::RunItemStatus::Blocked)
     );
 }
 
@@ -1606,7 +1611,10 @@ fn malformed_run_input_writes_blocked_artifact_bundle() {
     let report = fs::read_to_string(latest_run_artifact(tmp.path(), "report.md")).unwrap();
 
     assert!(input.contains("rawInput"));
-    assert_eq!(failure_json["failures"][0]["error"], "--input must be JSON");
+    assert_eq!(
+        failure_json["failures"][0]["error"],
+        "--input must contain structured JSON; use --option key=value for ordinary options"
+    );
     assert!(report.contains("Status: blocked"));
 }
 
@@ -1659,7 +1667,7 @@ fn unknown_run_tool_writes_blocked_artifact_bundle() {
 }
 
 #[test]
-fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
+fn runtime_backed_run_missing_model_writes_blocked_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     let home = tmp.path().join("home");
@@ -1680,9 +1688,11 @@ fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
         "runtime-backed run without model should fail"
     );
     let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let (_, failure_json) = assert_failed_run_bundle(&repo, "run", "triage:run");
+    // Nothing executed: the missing model is refused before dispatch, so the
+    // honest artifact status is `blocked`, not `failed`.
+    let (_, failure_json) = assert_blocked_run_bundle(&repo, "run", "triage:run");
 
-    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["status"], "blocked");
     assert_eq!(stdout["fallback_context"]["failedStage"], "triage:run");
     assert!(failure_json["failures"][0]["error"]
         .as_str()

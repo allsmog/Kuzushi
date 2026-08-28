@@ -80,6 +80,25 @@ packages, create a tag, or create a GitHub Release._
   `demoj` and the command was never run. Line feeds are now folded into Enter
   at the key-dispatch boundary, and unbound Ctrl/Alt chords are refused by the
   line editor rather than typed as text.
+- Shell command completion now anchors its fuzzy match: the first character
+  you type must open the command or one of its words. Two stray keystrokes
+  such as `xu` no longer draft `context build` (conte**x**t b**u**ild), which
+  put a tool run one Enter away from a typo. Ordinary abbreviations (`cb`,
+  `ctx`, `con`) are unchanged, and history and finding search keep the
+  permissive match.
+- Runtime-validation labels no longer read as a rejection of the scanner's
+  claim when nothing ran. A harness that failed to build, blocked
+  infrastructure, an unsupported language, and a finding with too little
+  detail now read `not executed - …` instead of `execution_rejected - …` in
+  the finding detail report and in JSON/JSONL exports. The durable
+  `execution_rejected` proof-state token in `.kuzushi` artifacts is
+  unchanged, so stored findings and their vocabulary still load as before.
+- Ctrl+C now names the job it stops. The shell logged
+  `abort requested for active worker` with no subject, which left an
+  operator guessing when the running job had been backgrounded from a view
+  they had since left. The stop request now reads
+  `stop requested for <job> · <run-ref>` whenever the job hub knows the
+  label, and the per-domain cleanup lines are unchanged.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
