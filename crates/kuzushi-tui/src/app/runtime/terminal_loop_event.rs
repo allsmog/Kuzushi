@@ -10,24 +10,54 @@ pub(crate) const TERMINAL_EVENT_BATCH_TIME_SLICE: Duration = Duration::from_mill
 const MIN_BACKGROUND_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const MAX_BACKGROUND_WAKE_BURST: u8 = 2;
 
+/// Paces background wakes to the frame cadence and remembers the hint it had
+/// to suppress. A suppressed hint is not a dropped one: producers coalesce
+/// into `deferred` while the inbox shortens its wait and delivers one paced
+/// wake at the window boundary, so background work never has to wait out the
+/// idle poll for a producer that already stopped notifying.
 #[derive(Debug, Default)]
 struct WakeRateState {
     window_started: Option<Instant>,
     sends_in_window: u8,
+    deferred: bool,
 }
 
 impl WakeRateState {
     fn permits_send(&mut self, now: Instant) -> bool {
-        if self.window_started.is_none_or(|started| {
-            now.saturating_duration_since(started) >= MIN_BACKGROUND_WAKE_INTERVAL
-        }) {
-            self.window_started = Some(now);
-            self.sends_in_window = 0;
-        }
+        self.roll_window(now);
         if self.sends_in_window >= MAX_BACKGROUND_WAKE_BURST {
+            self.deferred = true;
             return false;
         }
         self.sends_in_window += 1;
+        true
+    }
+
+    fn roll_window(&mut self, now: Instant) {
+        if self.window_started.is_some_and(|started| {
+            now.saturating_duration_since(started) < MIN_BACKGROUND_WAKE_INTERVAL
+        }) {
+            return;
+        }
+        self.window_started = Some(now);
+        self.sends_in_window = 0;
+        self.deferred = false;
+    }
+
+    /// How long a suppressed hint still owes the cadence, or `None` when no
+    /// hint is waiting.
+    fn deferred_wait(&self, now: Instant) -> Option<Duration> {
+        let started = self.window_started.filter(|_| self.deferred)?;
+        Some(MIN_BACKGROUND_WAKE_INTERVAL.saturating_sub(now.saturating_duration_since(started)))
+    }
+
+    fn take_deferred_if_due(&mut self, now: Instant) -> bool {
+        if self.deferred_wait(now) != Some(Duration::ZERO) {
+            return false;
+        }
+        self.window_started = Some(now);
+        self.sends_in_window = 1;
+        self.deferred = false;
         true
     }
 }
@@ -40,6 +70,7 @@ pub(crate) enum TerminalLoopEvent {
 pub(crate) struct TerminalLoopInbox {
     rx: Receiver<Result<TerminalLoopEvent, String>>,
     wake_pending: Arc<AtomicBool>,
+    rate: Arc<Mutex<WakeRateState>>,
 }
 
 #[derive(Clone, Debug)]
@@ -81,7 +112,7 @@ impl TerminalLoopInbox {
         let wake = TerminalLoopWake {
             tx: tx.clone(),
             pending: wake_pending.clone(),
-            rate,
+            rate: rate.clone(),
         };
         thread::spawn(move || loop {
             let event = event::read()
@@ -91,7 +122,14 @@ impl TerminalLoopInbox {
                 break;
             }
         });
-        (Self { rx, wake_pending }, wake)
+        (
+            Self {
+                rx,
+                wake_pending,
+                rate,
+            },
+            wake,
+        )
     }
 
     #[cfg(test)]
@@ -99,6 +137,7 @@ impl TerminalLoopInbox {
         Self {
             rx,
             wake_pending: Arc::new(AtomicBool::new(false)),
+            rate: Arc::new(Mutex::new(WakeRateState::default())),
         }
     }
 
@@ -110,17 +149,64 @@ impl TerminalLoopInbox {
         let wake = TerminalLoopWake {
             tx,
             pending: wake_pending.clone(),
-            rate,
+            rate: rate.clone(),
         };
-        (Self { rx, wake_pending }, wake)
+        (
+            Self {
+                rx,
+                wake_pending,
+                rate,
+            },
+            wake,
+        )
     }
 
+    /// Waits the caller's full timeout, except that a suppressed background
+    /// hint is delivered as one paced wake as soon as its cadence window
+    /// closes. Waking early at the boundary must not shorten the caller's
+    /// deadline, so an undue boundary resumes waiting for the remainder.
     pub(crate) fn recv_timeout(&self, timeout: Duration) -> Result<Option<TerminalLoopEvent>> {
-        match self.rx.recv_timeout(timeout) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(event) = self.recv_until_paced_boundary(deadline)? {
+                return Ok(Some(event));
+            }
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+        }
+    }
+
+    fn recv_until_paced_boundary(&self, deadline: Instant) -> Result<Option<TerminalLoopEvent>> {
+        match self.rx.recv_timeout(self.paced_timeout(deadline)) {
             Ok(event) => self.resolve_received(event).map(Some),
-            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Timeout) => Ok(self.take_deferred_wake_if_due()),
             Err(RecvTimeoutError::Disconnected) => anyhow::bail!("terminal event reader stopped"),
         }
+    }
+
+    fn rate(&self) -> std::sync::MutexGuard<'_, WakeRateState> {
+        self.rate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The next wait: time left on the caller's deadline, shortened to the
+    /// cadence boundary when a suppressed hint is owed a wake.
+    fn paced_timeout(&self, deadline: Instant) -> Duration {
+        let now = Instant::now();
+        let remaining = deadline.saturating_duration_since(now);
+        self.rate()
+            .deferred_wait(now)
+            .map_or(remaining, |until_due| remaining.min(until_due))
+    }
+
+    /// Delivers the suppressed hint as one paced wake once its window closes.
+    /// No producer has to notify again for the deferred work to run.
+    fn take_deferred_wake_if_due(&self) -> Option<TerminalLoopEvent> {
+        self.rate()
+            .take_deferred_if_due(Instant::now())
+            .then_some(TerminalLoopEvent::Wake)
     }
 
     fn try_recv(&self) -> Result<Option<TerminalLoopEvent>> {
@@ -262,6 +348,78 @@ mod tests {
 
         wake.notify_at(window + MIN_BACKGROUND_WAKE_INTERVAL);
         assert_wake_arrives_without_idle_poll(&input);
+    }
+
+    #[test]
+    fn wake_rate_defers_only_until_the_next_cadence_window() {
+        let base = Instant::now();
+        let mut rate = WakeRateState::default();
+
+        assert!(rate.permits_send(base));
+        assert!(rate.permits_send(base + Duration::from_millis(1)));
+        assert!(!rate.permits_send(base + Duration::from_millis(2)));
+
+        assert_eq!(
+            rate.deferred_wait(base + Duration::from_millis(2)),
+            Some(Duration::from_millis(31))
+        );
+        assert!(!rate.take_deferred_if_due(base + Duration::from_millis(32)));
+        assert!(rate.take_deferred_if_due(base + MIN_BACKGROUND_WAKE_INTERVAL));
+
+        // The paced wake opens the next window and spends one of its sends.
+        assert_eq!(rate.sends_in_window, 1);
+        assert_eq!(
+            rate.deferred_wait(base + MIN_BACKGROUND_WAKE_INTERVAL),
+            None
+        );
+    }
+
+    #[test]
+    fn suppressed_background_wake_is_delivered_without_a_producer_retry() {
+        let (input, wake) = TerminalLoopInbox::channel_for_test();
+        let window = Instant::now();
+
+        wake.notify_at(window);
+        assert_wake_arrives_without_idle_poll(&input);
+        wake.notify_at(window);
+        assert_wake_arrives_without_idle_poll(&input);
+
+        // The third hint is paced away, but it is remembered. The inbox
+        // shortens this otherwise-long wait to the cadence boundary and
+        // delivers one wake even though no producer notifies again.
+        wake.notify_at(window);
+        let waited_from = Instant::now();
+        assert!(matches!(
+            input.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Some(TerminalLoopEvent::Wake)
+        ));
+        assert!(
+            waited_from.elapsed() < Duration::from_secs(1),
+            "deferred wake waited out the caller timeout: {:?}",
+            waited_from.elapsed()
+        );
+    }
+
+    /// The pacing boundary shortens a long wait; it must never lengthen a
+    /// short one. A zero/near-zero poll still reports "nothing yet" so the
+    /// input-batch drain and the Run Focus visibility hold keep their own
+    /// deadlines, and the hint survives that poll.
+    #[test]
+    fn a_deferred_wake_never_outlives_a_shorter_caller_timeout() {
+        let (input, wake) = TerminalLoopInbox::channel_for_test();
+        let window = Instant::now();
+        for _ in 0..MAX_BACKGROUND_WAKE_BURST {
+            wake.notify_at(window);
+            assert_wake_arrives_without_idle_poll(&input);
+        }
+        wake.notify_at(window);
+
+        assert!(input.recv_timeout(Duration::ZERO).unwrap().is_none());
+
+        assert!(matches!(
+            input.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Some(TerminalLoopEvent::Wake)
+        ));
     }
 
     fn assert_wake_arrives_without_idle_poll(input: &TerminalLoopInbox) {
