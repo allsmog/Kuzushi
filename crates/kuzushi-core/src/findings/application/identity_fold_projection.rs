@@ -59,24 +59,25 @@ impl SafeProjectionContext {
         if is_attack_chain_finding(finding) {
             return finding_projection_key(finding, policy);
         }
-        if policy == IdentityFoldPolicy::Safe && self.fallback_matches_strong(finding) {
-            return format!(
-                "identity:{}",
-                finding.identity_id.as_deref().unwrap_or_default()
-            );
+        if policy == IdentityFoldPolicy::Safe {
+            if let Some(identity_id) = self.fallback_strong_identity(finding) {
+                return format!("identity:{identity_id}");
+            }
         }
         finding_projection_key(finding, policy)
     }
 
-    fn fallback_matches_strong(&self, finding: &Finding) -> bool {
+    /// Returns the identity the fold key is built from, so a finding without
+    /// one can never reach the `identity:` branch. Answering `bool` here and
+    /// re-reading `identity_id` at the call site allowed an absent identity to
+    /// fold every such finding into one empty `identity:` bucket.
+    fn fallback_strong_identity<'a>(&self, finding: &'a Finding) -> Option<&'a str> {
         if finding.effective_identity_basis().is_strong() {
-            return false;
+            return None;
         }
-        finding
-            .identity_id
-            .as_ref()
-            .and_then(|identity| self.strong_evidence.get(identity))
-            .is_some_and(|evidence| evidence.matches(finding))
+        let identity_id = finding.identity_id.as_ref()?;
+        let evidence = self.strong_evidence.get(identity_id)?;
+        evidence.matches(finding).then_some(identity_id.as_str())
     }
 }
 

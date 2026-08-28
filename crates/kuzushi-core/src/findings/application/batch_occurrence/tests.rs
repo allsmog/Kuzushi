@@ -743,3 +743,27 @@ fn write_batch_queue(root: &Path, queue: serde_json::Value) {
     let path = crate::capabilities::campaign::campaign_dir(root, "batch-test").join("queue.json");
     std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
 }
+
+#[test]
+fn a_plan_row_without_a_job_id_reports_unknown_rather_than_planned() {
+    // A trial nobody can bind to queue state must not read as "not started
+    // yet": that would let an unreadable trial count toward a clean batch.
+    let trials = super::load::trial_reports(
+        &json!({"jobs": [{"trial": 1}, {"trial": 2, "jobId": "trial-002"}]}),
+        Some(&json!({"jobs": {"trial-002": {"state": "completed"}}})),
+    );
+
+    assert_eq!(trials[0].state, "unknown");
+    assert!(trials[0].job_id.is_empty());
+    assert_eq!(trials[1].state, "completed");
+}
+
+#[test]
+fn a_planned_trial_is_still_reported_as_planned_when_the_queue_has_no_entry() {
+    let trials = super::load::trial_reports(
+        &json!({"jobs": [{"trial": 1, "jobId": "trial-001"}]}),
+        Some(&json!({"jobs": {}})),
+    );
+
+    assert_eq!(trials[0].state, "planned");
+}
