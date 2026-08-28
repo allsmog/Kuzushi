@@ -37,6 +37,40 @@ fn mutation_survivor_rerun_review_labels_disclose_the_requested_derivation() {
 }
 
 #[test]
+fn a_refused_rerun_dispatch_is_disclosed_on_the_review_card() {
+    let mut review = crate::app::PhaseRerunReview {
+        phase: WorkflowPhase::Scan,
+        parent_attempt_id: "scan-attempt".to_string(),
+        tool: "secret-scan:scan".to_string(),
+        tool_description: "scan for secrets".to_string(),
+        original_input: serde_json::json!({}),
+        prepared_input: serde_json::json!({}),
+        changed_options: Vec::new(),
+        option_editor_open: false,
+        option_cursor: 0,
+        option_edit: None,
+        option_error: None,
+        dispatch_error: None,
+        draft_modified: false,
+        derivation: None,
+    };
+    assert!(!rendered_rerun_review(&review).contains("REFUSED"));
+
+    review.dispatch_error = Some("rerun requires an active target".to_string());
+
+    assert!(rendered_rerun_review(&review)
+        .contains("REFUSED · DISPATCH · rerun requires an active target"));
+}
+
+fn rendered_rerun_review(review: &crate::app::PhaseRerunReview) -> String {
+    phase_rerun_review_rows(review)
+        .into_iter()
+        .map(|row| row.text)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
 fn result_action_labels_follow_phase_result_key_overrides() {
     let mut config = V2Config::default();
     config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {

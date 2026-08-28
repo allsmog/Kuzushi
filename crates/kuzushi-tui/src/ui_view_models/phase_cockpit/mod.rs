@@ -695,6 +695,11 @@ fn phase_rerun_review_rows(
             ))
         }));
     }
+    if let Some(error) = review.dispatch_error.as_deref() {
+        rows.push(phase_rerun_detail_row(format!(
+            "REFUSED · DISPATCH · {error}"
+        )));
+    }
     rows
 }
 

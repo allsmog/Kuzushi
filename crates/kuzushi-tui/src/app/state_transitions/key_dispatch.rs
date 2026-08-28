@@ -645,6 +645,7 @@ impl ShellApp {
                 option_cursor: 0,
                 option_edit: None,
                 option_error: None,
+                dispatch_error: None,
                 draft_modified: false,
                 derivation,
             },
@@ -1022,6 +1023,8 @@ impl ShellApp {
             review.changed_options = changed_options;
             review.draft_modified = review.prepared_input != review.original_input;
             review.option_error = None;
+            // The draft the last refusal described no longer exists.
+            review.dispatch_error = None;
         }
         Ok(())
     }
@@ -1035,44 +1038,47 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    /// A refused launch must not cost the operator the draft they just
+    /// reviewed, so the pending review is consumed only once a launch exists.
     fn dispatch_phase_rerun_review(&mut self) -> InputUpdate {
-        let Some(review) = self.engagement.take_pending_phase_rerun() else {
+        let Some(review) = self.engagement.pending_phase_rerun().cloned() else {
             return InputUpdate::handled();
         };
-        let Some(launch) = self.phase_rerun_launch(review) else {
-            return InputUpdate::handled();
-        };
-        InputUpdate::handled_with_effects(vec![ShellEffect::DispatchRunTool(launch)])
+        match self.phase_rerun_launch(review) {
+            Ok(launch) => {
+                self.engagement.clear_pending_phase_rerun();
+                InputUpdate::handled_with_effects(vec![ShellEffect::DispatchRunTool(launch)])
+            }
+            Err(reason) => {
+                self.refuse_phase_rerun_dispatch(reason);
+                InputUpdate::handled()
+            }
+        }
     }
 
-    fn phase_rerun_launch(&mut self, review: PhaseRerunReview) -> Option<RunToolLaunch> {
+    fn refuse_phase_rerun_dispatch(&mut self, reason: String) {
+        self.refuse_phase_result_action(format!("rerun not dispatched — {reason}"));
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.dispatch_error = Some(reason);
+        }
+    }
+
+    fn phase_rerun_launch(&mut self, review: PhaseRerunReview) -> Result<RunToolLaunch, String> {
         let workspace = self.phase_rerun_workspace()?;
         let current =
             kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(workspace.root());
         if let Some(reason) =
             self.phase_recovery_prerequisite_blocker_for_snapshot(review.phase, &current)
         {
-            self.log("workflow", reason);
-            return None;
+            return Err(reason);
         }
-        let prepared = match self.prepare_background_tool_input(
-            &review.tool,
-            review.prepared_input.clone(),
-            &workspace,
-        ) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.log(
-                    "workflow",
-                    format!("exact rerun is no longer valid: {error}"),
-                );
-                return None;
-            }
-        };
+        let prepared = self
+            .prepare_background_tool_input(&review.tool, review.prepared_input.clone(), &workspace)
+            .map_err(|error| format!("exact rerun is no longer valid: {error}"))?;
         self.apply_phase_rerun_lineage(&review);
         let thinking_level = thinking_level_from_input(prepared.value())
             .or_else(|| self.session_thinking_level_owned());
-        Some(RunToolLaunch {
+        Ok(RunToolLaunch {
             tool_name: review.tool,
             input: prepared,
             workspace,
@@ -1081,16 +1087,11 @@ impl ShellApp {
         })
     }
 
-    fn phase_rerun_workspace(&mut self) -> Option<WorkspaceTarget> {
-        let Some(target) = self.target_owned() else {
-            self.log("workflow", "rerun requires an active target");
-            return None;
-        };
-        let Ok(workspace) = WorkspaceTarget::new(&target) else {
-            self.log("workflow", "rerun target is unavailable");
-            return None;
-        };
-        Some(workspace)
+    fn phase_rerun_workspace(&self) -> Result<WorkspaceTarget, String> {
+        let target = self
+            .target_owned()
+            .ok_or_else(|| "rerun requires an active target".to_string())?;
+        WorkspaceTarget::new(&target).map_err(|_| "rerun target is unavailable".to_string())
     }
 
     fn apply_phase_rerun_lineage(&mut self, review: &PhaseRerunReview) {
@@ -2945,15 +2946,64 @@ mod tests {
             option_cursor: 0,
             option_edit: None,
             option_error: None,
+            dispatch_error: None,
             draft_modified: false,
             derivation: None,
         };
+        app.engagement.set_pending_phase_rerun(review);
 
-        assert!(app.phase_rerun_launch(review).is_none());
+        assert!(app.dispatch_phase_rerun_review().effects.is_empty());
         assert!(app.log_lines().iter().any(|line| {
             line.body
                 .contains("rerun Map because the accepted Map is stale, then retry Scan")
         }));
+        let review = app
+            .engagement
+            .pending_phase_rerun()
+            .expect("a refused dispatch must leave the reviewed draft open");
+        assert!(
+            review
+                .dispatch_error
+                .as_deref()
+                .is_some_and(|reason| reason.contains("the accepted Map is stale")),
+            "the refusal reason must reach the card, not only the transcript"
+        );
+    }
+
+    /// The review card is the only place the operator's edited draft lives, so
+    /// a refused launch has to keep it — and say why on the card itself.
+    #[test]
+    fn a_refused_rerun_dispatch_keeps_the_reviewed_draft_and_discloses_why() {
+        let input = rerun_review_input();
+        let (_target, mut app, _) =
+            app_with_unresolved_map_result_input(V2Config::default(), input.clone());
+        assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
+        // Losing the target is the plainest way a launch stops being possible
+        // after the review opened.
+        app.set_target(None);
+
+        let update = app.reduce_key(plain_key(KeyCode::Enter));
+
+        assert!(update.handled);
+        assert!(
+            update.effects.is_empty(),
+            "a refused rerun must not dispatch a tool"
+        );
+        let review = app
+            .engagement
+            .pending_phase_rerun()
+            .expect("a refused dispatch must leave the reviewed draft open");
+        assert_eq!(review.prepared_input, input);
+        assert_eq!(
+            review.dispatch_error.as_deref(),
+            Some("rerun requires an active target")
+        );
+        assert!(
+            app.log_lines()
+                .iter()
+                .any(|line| line.body.contains("rerun not dispatched")),
+            "a refused rerun must be recorded, not silent"
+        );
     }
 
     fn rerun_review_input() -> serde_json::Value {
