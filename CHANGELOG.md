@@ -27,6 +27,12 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Shell command completion now anchors its fuzzy match: the first character
+  you type must open the command or one of its words. Two stray keystrokes
+  such as `xu` no longer draft `context build` (conte**x**t b**u**ild), which
+  put a tool run one Enter away from a typo. Ordinary abbreviations (`cb`,
+  `ctx`, `con`) are unchanged, and history and finding search keep the
+  permissive match.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
