@@ -5,7 +5,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { localConsumerManifest, selectLocalTarballs } from "./local-tarball-smoke-contract.mjs";
+import {
+  localConsumerManifest,
+  rosettaOverrideRequested,
+  rosettaTranslationInstalled,
+  selectLocalTarballs,
+  translatedCommand,
+} from "./local-tarball-smoke-contract.mjs";
 import { nativeExecutableName, nativeRuntimeBinaries } from "./native-runtime-contract.mjs";
 import { verifyReleaseManifest } from "./release-artifact-contract.mjs";
 
@@ -16,7 +22,11 @@ if (!directoryArg || !commitSha || !version || !slug) {
 
 const directory = path.resolve(directoryArg);
 const manifest = verifyReleaseManifest(directory, commitSha, version);
-const selected = selectLocalTarballs(manifest, directory, slug, process.platform, process.arch);
+const allowRosetta = rosettaOverrideRequested(process.env);
+const selected = selectLocalTarballs(manifest, directory, slug, process.platform, process.arch, {
+  allowRosetta,
+  rosettaInstalled: allowRosetta && rosettaTranslationInstalled(),
+});
 const consumer = mkdtempSync(path.join(tmpdir(), `kuzushi-${slug}-consumer-`));
 
 try {
@@ -46,9 +56,12 @@ try {
   );
   writeFileSync(
     path.join(process.cwd(), "local-tarball-smoke.json"),
-    `${JSON.stringify({ commitSha, version, slug, root: selected.root.file, platform: selected.native.file }, null, 2)}\n`,
+    `${JSON.stringify({ commitSha, version, slug, hostSlug: selected.plan.hostSlug, smokedSlug: selected.plan.smokedSlug, translation: selected.plan.translation, root: selected.root.file, platform: selected.native.file }, null, 2)}\n`,
   );
-  process.stdout.write(`local tarball install and runtime smoke passed for ${slug}\n`);
+  process.stdout.write(
+    `local tarball install and runtime smoke passed for ${slug} on ${selected.plan.hostSlug} ` +
+      `(translation: ${selected.plan.translation})\n`,
+  );
 } finally {
   rmSync(consumer, { recursive: true, force: true });
 }
@@ -98,7 +111,10 @@ function isolatedEnvironment(readRoot) {
 }
 
 function run(command, args, cwd, env) {
-  const result = spawnSync(command, args, { cwd, env, encoding: "utf8" });
+  // A translated plan must translate the launcher too, so a Rosetta leg can
+  // never accidentally exercise the host architecture instead.
+  const launched = translatedCommand(selected.plan, command, args);
+  const result = spawnSync(launched.command, launched.args, { cwd, env, encoding: "utf8" });
   if (result.error || result.status !== 0) {
     const detail = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
     throw result.error ?? new Error(`${command} ${args.join(" ")} failed: ${detail}`);
