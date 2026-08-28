@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -42,10 +43,26 @@ const ciPlan = Object.freeze([
   step("e2e", pnpm, ["test:e2e"]),
 ]);
 
-const ciMatrixExceptions = Object.freeze([
+// What no local run on one machine can attest, whatever mode it used. The
+// receipt carries these so a reader never mistakes a local pass for full
+// matrix coverage.
+const hostMatrixExceptions = Object.freeze([
   "Node 22 minimum-version compatibility runs in CI's dedicated Node 22 job.",
   "Linux bubblewrap/AppArmor setup and artifact upload/download run only on GitHub-hosted CI.",
+  "Cross-platform compilation (Windows, Linux, the native release matrix) is not exercised by a single-host run.",
 ]);
+
+export function verificationExceptions(mode) {
+  const covered = new Set(verificationPlan(mode).map(({ name }) => name));
+  const omitted = ciPlan.map(({ name }) => name).filter((name) => !covered.has(name));
+  if (omitted.length === 0) return [...hostMatrixExceptions];
+  return [...hostMatrixExceptions, `Mode ${mode} did not run: ${omitted.join(", ")}.`];
+}
+
+export function planDigest(plan) {
+  const pairs = plan.map(({ name, command, args }) => [name, [command, ...args].join(" ")]);
+  return createHash("sha256").update(JSON.stringify(pairs)).digest("hex");
+}
 
 export function verificationPlan(mode) {
   if (mode === "quick") return quickPlan;
@@ -87,9 +104,15 @@ function validatePlans() {
 export function parseArguments(args) {
   let mode;
   let summary = false;
-  for (const arg of args) {
+  let receipt = null;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
     if (arg === "--summary") {
       summary = true;
+    } else if (arg === "--receipt") {
+      index += 1;
+      receipt = args[index];
+      if (!receipt) throw new Error("--receipt requires a file path");
     } else if (arg.startsWith("-")) {
       throw new Error(`unknown verification option: ${arg}`);
     } else if (mode) {
@@ -98,7 +121,60 @@ export function parseArguments(args) {
       mode = arg;
     }
   }
-  return { mode: mode ?? "quick", summary };
+  return { mode: mode ?? "quick", summary, receipt };
+}
+
+// Every fact below is captured from a real command. A fact we cannot read is
+// recorded as null so a reader sees "unknown", never a comfortable default.
+function captureOutput(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  if (result.error || result.status !== 0) return null;
+  return result.stdout.trim();
+}
+
+export function rustcIdentity(versionOutput) {
+  if (!versionOutput) return null;
+  const lines = versionOutput.split(/\r?\n/);
+  const host = lines.find((line) => line.startsWith("host: "))?.slice("host: ".length);
+  return host ? `${lines[0]} (host ${host})` : lines[0];
+}
+
+export function workingTreeDirty(porcelain) {
+  if (porcelain === null) return null;
+  return porcelain.length > 0;
+}
+
+function repositoryFacts() {
+  return {
+    commit: captureOutput("git", ["rev-parse", "HEAD"]),
+    tree: captureOutput("git", ["rev-parse", "HEAD^{tree}"]),
+    dirty: workingTreeDirty(captureOutput("git", ["status", "--porcelain"])),
+  };
+}
+
+function toolchainFacts() {
+  return {
+    rustc: rustcIdentity(
+      captureOutput(process.platform === "win32" ? "rustc.exe" : "rustc", ["-vV"]),
+    ),
+    node: process.version,
+    pnpm: captureOutput(pnpm, ["-v"]),
+  };
+}
+
+function defaultReceiptPath() {
+  const gitDir = captureOutput("git", ["rev-parse", "--absolute-git-dir"]);
+  if (!gitDir) {
+    throw new Error(
+      "cannot locate the git directory for the default receipt path; pass --receipt <path>",
+    );
+  }
+  return path.join(gitDir, "kuzushi-verify-receipt.json");
+}
+
+function writeReceipt(file, receipt) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
 function runStep(item, summary) {
@@ -118,28 +194,43 @@ function runStep(item, summary) {
   };
 }
 
-function main() {
-  const { mode, summary } = parseArguments(process.argv.slice(2));
-  validatePlans();
-  const plan = verificationPlan(mode);
-  const receipt = {
+function openReceipt(mode, plan) {
+  const { commit, tree, dirty } = repositoryFacts();
+  return {
     mode,
     startedAt: new Date().toISOString(),
-    matrixExceptions: mode === "ci" ? ciMatrixExceptions : [],
+    commit,
+    tree,
+    dirty,
+    toolchain: toolchainFacts(),
+    host: `${process.platform}-${process.arch}`,
+    plan: { mode, digest: planDigest(plan) },
+    exceptions: verificationExceptions(mode),
     steps: [],
   };
-  let exitCode = 0;
+}
+
+function runPlan(plan, receipt, summary) {
   for (const item of plan) {
     const result = runStep(item, summary);
     receipt.steps.push(result);
-    if (result.status !== 0 || result.signal) {
-      exitCode = result.status ?? 1;
-      break;
-    }
+    if (result.status !== 0 || result.signal) return result.status ?? 1;
   }
+  return 0;
+}
+
+function main() {
+  const { mode, summary, receipt: receiptOverride } = parseArguments(process.argv.slice(2));
+  validatePlans();
+  const plan = verificationPlan(mode);
+  const receiptPath = receiptOverride ?? defaultReceiptPath();
+  const receipt = openReceipt(mode, plan);
+  const exitCode = runPlan(plan, receipt, summary);
   receipt.ok = exitCode === 0;
   receipt.finishedAt = new Date().toISOString();
+  writeReceipt(receiptPath, receipt);
   process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+  process.stderr.write(`verify: receipt written to ${receiptPath}\n`);
   process.exitCode = exitCode;
 }
 

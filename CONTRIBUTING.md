@@ -114,6 +114,36 @@ pnpm setup:benchmarks all
 
 Keep PRs focused — one feature or fix per PR.
 
+## The merge gate
+
+Kuzushi is a solo private repository. Routine verification runs locally, and
+hosted GitHub Actions is reserved for releases. Branch protection on `main`
+requires no status check, so the merge gate is **trust-on-owner**: the person
+with push access is the gate. The signed receipt below does not change that. It
+records what was actually run, so the trust is explicit and auditable instead of
+implied.
+
+```sh
+KUZUSHI_CRAP_RISK_BASE_REF=origin/main pnpm verify:quick:summary  # run the gate
+pnpm verify:receipt:sign                                         # sign the result
+node scripts/verify-receipt.mjs verify --commit "$(git rev-parse HEAD)"
+```
+
+`pnpm verify:quick:summary` writes a receipt into the git directory (outside the
+working tree, so it cannot attest a tree that contains it) binding the run to
+the commit, tree, clean/dirty state, toolchain, host, and a digest of the plan
+that ran. It also records what the run does **not** cover, including every
+CI-only gate a `quick` run skipped. `pnpm verify:receipt:sign` signs it with the
+owner's SSH key; `verify` refuses a receipt that is unsigned, stale, dirty,
+failing, from a different commit, or produced by a weaker plan.
+
+`.husky/pre-push` asks for that receipt before a push reaches `main`. It is
+advisory by design — `git push --no-verify` bypasses it — and it is not a
+substitute for the release pipeline in [RELEASING.md](RELEASING.md).
+
+Full contract, receipt schema, and how to trust a signing key:
+[docs/quality/local-verify-receipt.md](docs/quality/local-verify-receipt.md).
+
 ## Adding a New Built-in Tool
 
 See [AGENTS.md](AGENTS.md) and [docs/modules.md](docs/modules.md) for the full

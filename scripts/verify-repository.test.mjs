@@ -5,7 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { parseArguments, validatePnpmPlanScripts, verificationPlan } from "./verify-repository.mjs";
+import {
+  parseArguments,
+  planDigest,
+  rustcIdentity,
+  validatePnpmPlanScripts,
+  verificationExceptions,
+  verificationPlan,
+  workingTreeDirty,
+} from "./verify-repository.mjs";
 
 const verifier = path.join(path.dirname(fileURLToPath(import.meta.url)), "verify-repository.mjs");
 const packageJson = JSON.parse(
@@ -77,9 +85,59 @@ test("unknown verification modes fail closed", () => {
 });
 
 test("verification arguments enable summary output explicitly", () => {
-  assert.deepEqual(parseArguments([]), { mode: "quick", summary: false });
-  assert.deepEqual(parseArguments(["ci", "--summary"]), { mode: "ci", summary: true });
+  assert.deepEqual(parseArguments([]), { mode: "quick", summary: false, receipt: null });
+  assert.deepEqual(parseArguments(["ci", "--summary"]), {
+    mode: "ci",
+    summary: true,
+    receipt: null,
+  });
+  assert.deepEqual(parseArguments(["--receipt", "/tmp/r.json"]), {
+    mode: "quick",
+    summary: false,
+    receipt: "/tmp/r.json",
+  });
   assert.throws(() => parseArguments(["--verbose"]), /unknown verification option/);
+  assert.throws(() => parseArguments(["--receipt"]), /--receipt requires a file path/);
+});
+
+test("plan digest changes when a plan step is weakened", () => {
+  const quick = verificationPlan("quick");
+  const weakened = quick.map((item) =>
+    item.name === "cargo-check" ? { ...item, args: ["check"] } : item,
+  );
+  const renamed = quick.map((item) => (item.name === "biome" ? { ...item, name: "lint" } : item));
+
+  assert.match(planDigest(quick), /^[0-9a-f]{64}$/);
+  assert.equal(planDigest(quick), planDigest(verificationPlan("quick")));
+  assert.notEqual(planDigest(quick), planDigest(weakened));
+  assert.notEqual(planDigest(quick), planDigest(renamed));
+  assert.notEqual(planDigest(quick), planDigest(verificationPlan("ci")));
+});
+
+test("exceptions name the CI-only gates a quick run did not cover", () => {
+  const quick = verificationExceptions("quick");
+  const ci = verificationExceptions("ci");
+  const omitted = quick.find((entry) => entry.startsWith("Mode quick did not run:"));
+
+  assert.ok(omitted, "quick exceptions must name the gates it skipped");
+  for (const gate of ["clippy", "cargo-deny", "rust-tests", "mutations", "e2e"]) {
+    assert.ok(omitted.includes(gate), `quick exceptions must disclose ${gate}`);
+  }
+  assert.ok(quick.some((entry) => entry.includes("Cross-platform compilation")));
+  assert.ok(!ci.some((entry) => entry.startsWith("Mode ci did not run:")));
+  assert.ok(ci.some((entry) => entry.includes("Node 22")));
+});
+
+test("toolchain and dirty facts stay honest when the fact is unreadable", () => {
+  assert.equal(rustcIdentity(null), null);
+  assert.equal(
+    rustcIdentity("rustc 1.90.0 (abc 2026-01-01)\nbinary: rustc\nhost: aarch64-apple-darwin"),
+    "rustc 1.90.0 (abc 2026-01-01) (host aarch64-apple-darwin)",
+  );
+  assert.equal(rustcIdentity("rustc 1.90.0"), "rustc 1.90.0");
+  assert.equal(workingTreeDirty(null), null, "an unreadable git status must not read as clean");
+  assert.equal(workingTreeDirty(""), false);
+  assert.equal(workingTreeDirty(" M scripts/verify-repository.mjs"), true);
 });
 
 test("process receipt owns stdout and records successful completion", {
@@ -136,11 +194,60 @@ test("process receipt preserves terminating signal", { skip: process.platform ==
   });
 });
 
-function runVerifier(environment, args = ["quick"]) {
-  return spawnSync(process.execPath, [verifier, ...args], {
+test("receipt binds the run to a commit, tree, toolchain, and plan digest", {
+  skip: process.platform === "win32",
+}, () => {
+  withFakeTools("success", { keepPath: true }, (environment) => {
+    const receiptPath = temporaryReceiptPath();
+    const result = runVerifier(environment, ["quick", "--summary"], receiptPath);
+    const receipt = JSON.parse(result.stdout);
+
+    assert.equal(result.status, 0);
+    assert.equal(receipt.commit, gitOutput(["rev-parse", "HEAD"]));
+    assert.equal(receipt.tree, gitOutput(["rev-parse", "HEAD^{tree}"]));
+    assert.equal(receipt.dirty, gitOutput(["status", "--porcelain"]).length > 0);
+    assert.equal(receipt.toolchain.node, process.version);
+    assert.equal(receipt.host, `${process.platform}-${process.arch}`);
+    assert.deepEqual(receipt.plan, {
+      mode: "quick",
+      digest: planDigest(verificationPlan("quick")),
+    });
+    assert.ok(receipt.exceptions.length > 0, "receipt must state what it does not cover");
+    assert.deepEqual(JSON.parse(readFileSync(receiptPath, "utf8")), receipt);
+    assert.match(result.stderr, new RegExp(`receipt written to ${escapeRegExp(receiptPath)}`));
+  });
+});
+
+test("receipt records a dirty working tree honestly", {
+  skip: process.platform === "win32",
+}, () => {
+  withFakeTools("success", { keepPath: true }, (environment) => {
+    withTemporaryGitRepository((repository) => {
+      const receiptPath = temporaryReceiptPath();
+      const clean = JSON.parse(runVerifierIn(repository, environment, receiptPath).stdout);
+      writeFileSync(path.join(repository, "scratch.txt"), "uncommitted\n");
+      const dirty = JSON.parse(runVerifierIn(repository, environment, receiptPath).stdout);
+
+      assert.equal(clean.dirty, false);
+      assert.equal(dirty.dirty, true);
+      assert.equal(dirty.commit, clean.commit, "an uncommitted edit does not move HEAD");
+      assert.equal(dirty.ok, true, "the receipt still passes; it just says the tree was dirty");
+    });
+  });
+});
+
+function runVerifier(environment, args = ["quick"], receiptPath = temporaryReceiptPath()) {
+  return spawnSync(process.execPath, [verifier, ...args, "--receipt", receiptPath], {
     encoding: "utf8",
     env: environment,
   });
+}
+
+function temporaryReceiptPath() {
+  return path.join(
+    mkdtempSync(path.join(os.tmpdir(), "kuzushi-verify-out-")),
+    "kuzushi-verify-receipt.json",
+  );
 }
 
 function commandKey({ command, args }) {
@@ -151,19 +258,65 @@ function stepArgs(plan, name) {
   return plan.find((item) => item.name === name)?.args;
 }
 
-function withFakeTools(mode, callback) {
+// keepPath leaves the real PATH behind the fakes, so provenance commands
+// (git, rustc) still resolve while pnpm/cargo stay stubbed.
+function withFakeTools(mode, optionsOrCallback, maybeCallback) {
+  const callback = maybeCallback ?? optionsOrCallback;
+  const { keepPath = false } = maybeCallback ? optionsOrCallback : {};
   const directory = mkdtempSync(path.join(os.tmpdir(), "kuzushi-verify-receipt-"));
   try {
-    const tool = `#!/bin/sh\necho fake child output\n${toolExit(mode)}\n`;
+    // A version probe answers like the real tool would; only plan steps emit
+    // the marker output the leak assertions look for.
+    const tool = [
+      "#!/bin/sh",
+      'case "$1" in -v|--version) echo 9.9.9-fake; exit 0 ;; esac',
+      "echo fake child output",
+      toolExit(mode),
+      "",
+    ].join("\n");
     for (const name of ["pnpm", "cargo"]) {
       const file = path.join(directory, name);
       writeFileSync(file, tool);
       chmodSync(file, 0o755);
     }
-    callback({ ...process.env, PATH: directory });
+    const PATH = keepPath ? `${directory}${path.delimiter}${process.env.PATH}` : directory;
+    callback({ ...process.env, PATH });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+}
+
+function withTemporaryGitRepository(callback) {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-verify-repo-"));
+  try {
+    for (const args of [
+      ["init", "--quiet", "--initial-branch=main"],
+      ["config", "user.email", "receipt-test@example.invalid"],
+      ["config", "user.name", "receipt test"],
+      ["commit", "--quiet", "--allow-empty", "-m", "initial"],
+    ]) {
+      spawnSync("git", args, { cwd: repository, encoding: "utf8" });
+    }
+    callback(repository);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+}
+
+function runVerifierIn(cwd, environment, receiptPath) {
+  return spawnSync(process.execPath, [verifier, "quick", "--summary", "--receipt", receiptPath], {
+    cwd,
+    encoding: "utf8",
+    env: environment,
+  });
+}
+
+function gitOutput(args) {
+  return spawnSync("git", args, { encoding: "utf8" }).stdout.trim();
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function toolExit(mode) {

@@ -5,6 +5,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Additive:**
+
+- Local verification now leaves a signed receipt. `pnpm verify:quick:summary`
+  binds its result to the commit, tree, clean/dirty state, toolchain, host, and
+  a digest of the plan that ran, and states what the run does not cover;
+  `pnpm verify:receipt:sign` signs it and `pnpm verify:receipt:verify` refuses
+  anything unsigned, stale, dirty, failing, from another commit, or produced by
+  a weakened plan. A new `.husky/pre-push` hook asks for that receipt before a
+  push reaches `main`. The gate stays trust-on-owner and advisory — `git push
+  --no-verify` bypasses it — but it is now auditable. See
+  [docs/quality/local-verify-receipt.md](./docs/quality/local-verify-receipt.md).
+
 **Fixed:**
 
 - The JOURNEY phase chip no longer flips to `Scan 2/5` partway through the
