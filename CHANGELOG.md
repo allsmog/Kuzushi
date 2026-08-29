@@ -19,6 +19,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Map's inventory no longer claims a web framework because a manifest happens
+  to spell its name. Framework needles were matched as raw substrings of whole
+  manifest text, so a Python package named `falcon-benchmarks` was reported as
+  the Falcon web framework — a routing/deserialization surface claim carried by
+  a coincidence. A needle now has to stand as a whole package token on a line
+  that can declare a dependency, which also rules out comments and the
+  manifest's own name/description/keywords fields. Declared dependencies,
+  dotted Java and ASP.NET prefixes, Go module paths, and Cargo
+  `[dependencies.<crate>]` headers all keep matching.
+
 - The JOURNEY phase chip no longer flips to `Scan 2/5` partway through the
   first Map run on a target. Pre-ledger inference reads `.kuzushi/` artifacts,
   which Map tools write while the run is still going; it is now suppressed
