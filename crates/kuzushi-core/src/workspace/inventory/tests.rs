@@ -342,7 +342,7 @@ mod tests {
         fs::create_dir_all(temp.path().join("scripts/falcon-benchmarks")).unwrap();
         fs::write(
             temp.path().join("scripts/falcon-benchmarks/pyproject.toml"),
-            "[project]\nname = \"falcon-benchmarks\"\ndescription = \"benchmarks for falcon bundles\"\ndependencies = [\"numpy\", \"pandas\"]\n",
+            "[project]\nname = \"falcon-benchmarks\"\ndescription = \"benchmarks for falcon bundles\"\nkeywords = [\n  \"falcon\",\n]\ndependencies = [\"numpy\", \"pandas\"]\n",
         )
         .unwrap();
         fs::write(temp.path().join("Gemfile"), "gem 'guardrails'\n").unwrap();

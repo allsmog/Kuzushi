@@ -12,11 +12,11 @@
 //! `requirements.txt`, and `Gemfile` manifests whose needles are bare package
 //! names. JSON manifests declare their frameworks through needles that carry
 //! their own quotes (`"express"`), so their metadata fields cannot collide.
+//! A metadata value spread over several lines is excluded whole, not just at
+//! its assignment line.
 
 /// Manifest fields that describe the package itself rather than what it
 /// depends on. A framework name spelled in one of them is prose, not evidence.
-/// The exclusion is line-scoped: a metadata value continued onto later lines
-/// is only covered by the package-token rule below.
 const SELF_DESCRIPTION_KEYS: &[&str] = &[
     "authors",
     "categories",
@@ -34,18 +34,67 @@ const SELF_DESCRIPTION_KEYS: &[&str] = &[
 
 /// The lines of a lowercased manifest that can carry a dependency.
 pub(crate) fn manifest_declaration_lines(lower: &str) -> Vec<&str> {
-    lower.lines().filter(|line| can_declare(line)).collect()
+    let mut self_description = SelfDescription::default();
+    lower
+        .lines()
+        .filter(|line| self_description.admits(line))
+        .collect()
 }
 
-fn can_declare(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    !trimmed.starts_with('#') && !describes_the_package_itself(trimmed)
+/// Tracks a self-description value that a formatter spread over several lines,
+/// so `keywords = [` followed by `"falcon",` is excluded whole rather than
+/// leaving its contents behind as declarations.
+#[derive(Default)]
+struct SelfDescription {
+    terminator: Option<&'static str>,
 }
 
-fn describes_the_package_itself(trimmed: &str) -> bool {
-    trimmed
-        .split_once('=')
-        .is_some_and(|(key, _)| SELF_DESCRIPTION_KEYS.contains(&key.trim()))
+impl SelfDescription {
+    fn admits(&mut self, line: &str) -> bool {
+        if self.terminator.is_some() {
+            self.consume_continuation(line);
+            return false;
+        }
+        let trimmed = line.trim_start();
+        !trimmed.starts_with('#') && !self.begins_at(trimmed)
+    }
+
+    fn consume_continuation(&mut self, line: &str) {
+        if self.terminator.is_some_and(|end| line.contains(end)) {
+            self.terminator = None;
+        }
+    }
+
+    fn begins_at(&mut self, trimmed: &str) -> bool {
+        let Some(value) = self_description_value(trimmed) else {
+            return false;
+        };
+        self.terminator = continuation_terminator(value);
+        true
+    }
+}
+
+fn self_description_value(trimmed: &str) -> Option<&str> {
+    let (key, value) = trimmed.split_once('=')?;
+    SELF_DESCRIPTION_KEYS
+        .contains(&key.trim())
+        .then_some(value)
+}
+
+/// What has to appear before a self-description value is over. A value the
+/// line already closes needs nothing; one left open by a trailing bracket or
+/// an opening block string runs until its counterpart. A malformed manifest
+/// that never closes such a value suppresses the framework claims below it,
+/// which under-reports rather than inventing evidence.
+fn continuation_terminator(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    match value {
+        "\"\"\"" => Some("\"\"\""),
+        "'''" => Some("'''"),
+        _ if value.ends_with('[') => Some("]"),
+        _ if value.ends_with('{') => Some("}"),
+        _ => None,
+    }
 }
 
 /// Whether `needle` appears in `line` as a whole package token.
@@ -130,6 +179,47 @@ mod tests {
             .iter()
             .any(|line| declares_package_token(line, "falcon")));
         assert!(declarations.contains(&"dependencies = [\"numpy\"]"));
+    }
+
+    #[test]
+    fn a_metadata_value_spread_over_lines_is_excluded_whole() {
+        let manifest = concat!(
+            "[project]\n",
+            "keywords = [\n",
+            "  \"falcon\",\n",
+            "  \"benchmarks\",\n",
+            "]\n",
+            "description = \"\"\"\n",
+            "shaped like falcon\n",
+            "\"\"\"\n",
+            "dependencies = [\n",
+            "  \"numpy\",\n",
+            "]\n",
+        );
+
+        let declarations = manifest_declaration_lines(manifest);
+
+        assert!(!declarations
+            .iter()
+            .any(|line| declares_package_token(line, "falcon")));
+        assert!(declarations.contains(&"  \"numpy\","));
+    }
+
+    #[test]
+    fn a_multiline_dependency_array_keeps_declaring_its_framework() {
+        let manifest = concat!(
+            "[project]\n",
+            "name = \"gateway\"\n",
+            "dependencies = [\n",
+            "  \"falcon>=3.1.3\",\n",
+            "]\n",
+        );
+
+        let declarations = manifest_declaration_lines(manifest);
+
+        assert!(declarations
+            .iter()
+            .any(|line| declares_package_token(line, "falcon")));
     }
 
     #[test]
