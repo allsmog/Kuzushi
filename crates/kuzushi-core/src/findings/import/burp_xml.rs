@@ -100,10 +100,7 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
         match reader.read_event() {
             Ok(Event::Start(event)) => handle_burp_open(&event, &mut state)?,
             Ok(Event::Text(event)) => state.current_field.text.push_str(&decoded_text(&event)?),
-            Ok(Event::CData(event)) => state
-                .current_field
-                .text
-                .push_str(&String::from_utf8_lossy(event.as_ref())),
+            Ok(Event::CData(event)) => state.current_field.text.push_str(event.as_ref()),
             Ok(Event::End(event)) => handle_burp_close(&event, &mut state),
             Ok(Event::Eof) => break,
             Err(err) => anyhow::bail!(
@@ -117,8 +114,7 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
 }
 
 fn decoded_text(event: &BytesText<'_>) -> Result<String> {
-    let decoded = event.decode().context("Burp XML text decode failed")?;
-    Ok(quick_xml::escape::unescape(decoded.as_ref())
+    Ok(quick_xml::escape::unescape(event.as_ref())
         .context("Burp XML text entity decode failed")?
         .into_owned())
 }
@@ -134,7 +130,7 @@ fn handle_burp_open(
     event: &quick_xml::events::BytesStart<'_>,
     state: &mut BurpParseState,
 ) -> Result<()> {
-    let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+    let name = event.name().as_ref().to_string();
     if name == "item" {
         state.current_item = Some(BurpItem::default());
         return Ok(());
@@ -148,7 +144,7 @@ fn handle_burp_open(
 }
 
 fn handle_burp_close(event: &quick_xml::events::BytesEnd<'_>, state: &mut BurpParseState) {
-    let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+    let name = event.name().as_ref().to_string();
     if name == "item" {
         if let Some(item) = state.current_item.take() {
             state.items.push(item);
@@ -179,8 +175,8 @@ fn assign_burp_field(item: &mut BurpItem, name: &str, decoded: String) {
 fn attribute(event: &quick_xml::events::BytesStart<'_>, key: &str) -> Result<Option<String>> {
     for attr in event.attributes() {
         let attr = attr.context("Burp XML attribute decode failed")?;
-        if attr.key.as_ref() == key.as_bytes() {
-            let value = String::from_utf8_lossy(attr.value.as_ref()).to_string();
+        if attr.key.as_ref() == key {
+            let value = attr.value.as_ref().to_string();
             return Ok(Some(value));
         }
     }

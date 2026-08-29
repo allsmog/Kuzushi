@@ -45,7 +45,7 @@ impl ParserState {
     }
 
     pub(in crate::modules) fn on_close_owned(&mut self, element: &quick_xml::events::BytesEnd<'_>) {
-        let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
+        let name = element.name().as_ref().to_string();
         let local = name
             .rsplit_once(':')
             .map(|(_, l)| l.to_string())
@@ -181,7 +181,7 @@ fn is_component_tag(local: &str) -> bool {
 }
 
 pub(in crate::modules) fn element_local_name(element: &BytesStart<'_>) -> String {
-    let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
+    let name = element.name().as_ref().to_string();
     name.rsplit_once(':')
         .map(|(_, local)| local.to_string())
         .unwrap_or(name)
@@ -193,11 +193,9 @@ pub(in crate::modules) fn attr_value(
 ) -> Result<Option<String>> {
     for attr in element.attributes() {
         let attr = attr?;
-        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        let key = attr.key.as_ref().to_string();
         if attr_matches(&key, qualified) {
-            return Ok(Some(
-                String::from_utf8_lossy(attr.value.as_ref()).to_string(),
-            ));
+            return Ok(Some(attr.value.as_ref().to_string()));
         }
     }
     Ok(None)
