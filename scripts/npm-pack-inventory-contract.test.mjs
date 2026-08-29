@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import {
   packedInventoryFailures,
   safePackagePathFailures,
 } from "./npm-pack-inventory-contract.mjs";
+import { packagedRuntimeClosureFailures } from "./package-runtime-closure-contract.mjs";
+
+const repo = process.cwd();
 
 test("packed inventory accepts the exact regular-file list", () => {
   const packed = {
@@ -35,4 +40,26 @@ test("package paths reject traversal, platform separators, and local state", () 
     assert.notDeepEqual(safePackagePathFailures(value), [], value);
   }
   assert.deepEqual(safePackagePathFailures("scripts/langgraph-bridge/model.mjs"), []);
+});
+
+test("packaged LangGraph runtime closes over its relative module graph", () => {
+  const packageEntries = JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).files;
+  const readSource = (relativePath) => readFileSync(path.join(repo, relativePath), "utf8");
+  assert.deepEqual(packagedRuntimeClosureFailures({ packageEntries, readSource }), []);
+
+  for (const omitted of [
+    "scripts/langgraph-bridge/confined-file-read.mjs",
+    "scripts/langgraph-bridge/next-step-messages.mjs",
+    "scripts/langgraph-bridge/tool-policy-handshake.mjs",
+    "scripts/langgraph-bridge/grep-regex-worker.mjs",
+  ]) {
+    const failures = packagedRuntimeClosureFailures({
+      packageEntries: packageEntries.filter((entry) => entry !== omitted),
+      readSource,
+    });
+    assert.ok(
+      failures.some((failure) => failure.includes(omitted)),
+      `expected missing packaged dependency to be reported: ${omitted}`,
+    );
+  }
 });
