@@ -320,6 +320,46 @@ mod tests {
     }
 
     #[test]
+    fn repository_inventory_detects_falcon_declared_in_pyproject_dependencies() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("pyproject.toml"),
+            "[project]\nname = \"gateway\"\ndependencies = [\"falcon>=3.1.3\"]\n",
+        )
+        .unwrap();
+
+        let inventory = build_repository_inventory(temp.path()).unwrap();
+
+        assert_framework(&inventory, "Falcon", "Python");
+    }
+
+    /// A package whose own name merely spells a framework is not that
+    /// framework: `falcon-benchmarks` is an ML benchmarking script, and
+    /// `guardrails` is not Rails.
+    #[test]
+    fn repository_inventory_refuses_a_framework_claim_from_a_coincidental_name() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("scripts/falcon-benchmarks")).unwrap();
+        fs::write(
+            temp.path().join("scripts/falcon-benchmarks/pyproject.toml"),
+            "[project]\nname = \"falcon-benchmarks\"\ndescription = \"benchmarks for falcon bundles\"\nkeywords = [\n  \"falcon\",\n]\ndependencies = [\"numpy\", \"pandas\"]\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("Gemfile"), "gem 'guardrails'\n").unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"warp-tunnel\"\n[dependencies]\ntokio = \"1\"\n",
+        )
+        .unwrap();
+
+        let inventory = build_repository_inventory(temp.path()).unwrap();
+
+        assert_no_framework(&inventory, "Falcon");
+        assert_no_framework(&inventory, "Rails");
+        assert_no_framework(&inventory, "Warp");
+    }
+
+    #[test]
     fn repository_inventory_detects_litestar_route_methods() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("requirements.txt"), "litestar\n").unwrap();
@@ -1416,6 +1456,17 @@ mod tests {
             }),
             "missing route {method} {route} {framework}: {:?}",
             inventory.routes_controllers
+        );
+    }
+
+    fn assert_no_framework(inventory: &RepositoryInventory, name: &str) {
+        assert!(
+            inventory
+                .frameworks
+                .iter()
+                .all(|framework| framework.name != name),
+            "unexpected framework {name}: {:?}",
+            inventory.frameworks
         );
     }
 

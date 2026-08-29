@@ -25,14 +25,31 @@ fn inspect_manifest_framework_entries(
     lower: &str,
     builder: &mut InventoryBuilder,
 ) {
+    let probes = manifest_framework_probes(lower_name);
+    if probes.is_empty() {
+        return;
+    }
+    let declarations = manifest_declaration_lines(lower);
+    for (language, needles) in probes {
+        inspect_framework_needles(relative, &declarations, language, builder, needles);
+    }
+}
+
+type FrameworkProbe = (&'static str, &'static [(&'static str, &'static str)]);
+
+/// The needle tables that apply to one manifest, resolved from its file name
+/// alone so a source file never pays for the declaration-line scan.
+fn manifest_framework_probes(lower_name: &str) -> Vec<FrameworkProbe> {
+    let mut probes = Vec::new();
     if lower_name.ends_with(".csproj") {
-        inspect_framework_needles(relative, lower, "C#", builder, DOTNET_FRAMEWORK_PROBES);
+        probes.push(("C#", DOTNET_FRAMEWORK_PROBES));
     }
     for entry in MANIFEST_FRAMEWORK_ENTRIES {
         if entry.matches_file(lower_name) {
-            inspect_framework_needles(relative, lower, entry.language, builder, entry.needles);
+            probes.push((entry.language, entry.needles));
         }
     }
+    probes
 }
 
 struct ManifestFrameworkEntry {
@@ -127,16 +144,22 @@ const DOTNET_FRAMEWORK_PROBES: &[(&str, &str)] = &[
 
 fn inspect_framework_needles(
     relative: &str,
-    lower: &str,
+    declarations: &[&str],
     language: &str,
     builder: &mut InventoryBuilder,
     needles: &[(&str, &str)],
 ) {
     for (needle, framework) in needles {
-        if lower.contains(needle) {
+        if declares_framework(declarations, needle) {
             builder.add_framework(framework, language, framework_evidence(relative, framework));
         }
     }
+}
+
+fn declares_framework(declarations: &[&str], needle: &str) -> bool {
+    declarations
+        .iter()
+        .any(|line| declares_package_token(line, needle))
 }
 
 fn framework_evidence(relative: &str, framework: &str) -> String {
