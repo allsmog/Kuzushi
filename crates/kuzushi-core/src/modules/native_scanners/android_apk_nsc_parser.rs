@@ -53,12 +53,11 @@ pub(in crate::modules) fn parse_network_security_bytes(
 }
 
 fn decoded_text(event: &BytesText<'_>) -> Result<String> {
-    let decoded = event.decode()?;
-    Ok(quick_xml::escape::unescape(decoded.as_ref())?.into_owned())
+    Ok(quick_xml::escape::unescape(event.as_ref())?.into_owned())
 }
 
 fn end_local_name(element: &quick_xml::events::BytesEnd<'_>) -> String {
-    let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
+    let name = element.name().as_ref().to_string();
     name.rsplit_once(':')
         .map(|(_, l)| l.to_string())
         .unwrap_or(name)
@@ -176,7 +175,7 @@ impl NscParserState {
 }
 
 fn local_name(element: &BytesStart<'_>) -> String {
-    let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
+    let name = element.name().as_ref().to_string();
     name.rsplit_once(':')
         .map(|(_, local)| local.to_string())
         .unwrap_or(name)
@@ -185,11 +184,9 @@ fn local_name(element: &BytesStart<'_>) -> String {
 fn attr_value(element: &BytesStart<'_>, qualified: &str) -> Result<Option<String>> {
     for attr in element.attributes() {
         let attr = attr?;
-        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        let key = attr.key.as_ref().to_string();
         if key == qualified || strip_ns(&key) == strip_ns(qualified) {
-            return Ok(Some(
-                String::from_utf8_lossy(attr.value.as_ref()).to_string(),
-            ));
+            return Ok(Some(attr.value.as_ref().to_string()));
         }
     }
     Ok(None)

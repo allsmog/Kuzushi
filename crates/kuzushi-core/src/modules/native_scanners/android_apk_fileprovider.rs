@@ -261,7 +261,7 @@ fn fileprovider_output(
 }
 
 fn local_name(element: &BytesStart<'_>) -> String {
-    let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
+    let name = element.name().as_ref().to_string();
     name.rsplit_once(':')
         .map(|(_, local)| local.to_string())
         .unwrap_or(name)
@@ -270,11 +270,9 @@ fn local_name(element: &BytesStart<'_>) -> String {
 fn attr_value(element: &BytesStart<'_>, qualified: &str) -> Result<Option<String>> {
     for attr in element.attributes() {
         let attr = attr?;
-        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        let key = attr.key.as_ref().to_string();
         if key == qualified || strip_ns(&key) == strip_ns(qualified) {
-            return Ok(Some(
-                String::from_utf8_lossy(attr.value.as_ref()).to_string(),
-            ));
+            return Ok(Some(attr.value.as_ref().to_string()));
         }
     }
     Ok(None)

@@ -38,11 +38,11 @@ pub(super) fn parse_nmap_xml(xml: &str) -> Result<ParsedNmapXml> {
         match reader.read_event() {
             Ok(Event::Start(event)) | Ok(Event::Empty(event)) => {
                 let attrs = collect_attrs(&event)?;
-                let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+                let name = event.name().as_ref().to_string();
                 dispatch_nmap_open(name.as_str(), &attrs, &mut state);
             }
             Ok(Event::End(event)) => {
-                let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+                let name = event.name().as_ref().to_string();
                 dispatch_nmap_close(name.as_str(), &mut state);
             }
             Ok(Event::Eof) => break,
@@ -169,12 +169,9 @@ fn collect_attrs(
     let mut attrs = std::collections::BTreeMap::new();
     for attr in event.attributes() {
         let attr = attr.context("nmap XML attribute decode failed")?;
-        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        let key = attr.key.as_ref().to_string();
         let value = attr
-            .decoded_and_normalized_value(
-                quick_xml::XmlVersion::Implicit1_0,
-                quick_xml::reader::Reader::from_str("").decoder(),
-            )
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
             .context("nmap XML attribute unescape failed")?
             .into_owned();
         attrs.insert(key, value);
