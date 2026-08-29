@@ -12,9 +12,7 @@ export function packagedRuntimeClosureFailures({
   readSource,
   roots = ["scripts/langgraph-bridge.mjs", "scripts/kuzushi-dynamic-module-host.mjs"],
 }) {
-  const entries = Array.isArray(packageEntries)
-    ? packageEntries.filter((entry) => typeof entry === "string" && entry.length > 0)
-    : [];
+  const entries = declaredPackageEntries(packageEntries);
   const failures = [];
   const visited = new Set();
   const queue = [...roots];
@@ -24,31 +22,9 @@ export function packagedRuntimeClosureFailures({
     if (visited.has(current)) continue;
     visited.add(current);
 
-    if (!packageEntryCovers(entries, current)) {
-      failures.push(`packaged runtime root is not shipped ${current}`);
-      continue;
-    }
-
-    let source;
-    try {
-      source = readSource(current);
-    } catch (error) {
-      failures.push(`packaged runtime source is unreadable ${current}: ${error.message}`);
-      continue;
-    }
-
-    for (const specifier of relativeRuntimeReferences(source)) {
-      const resolved = resolveRelativeRuntimeReference(current, specifier);
-      if (resolved === null) {
-        failures.push(`packaged runtime reference escapes package root ${current} -> ${specifier}`);
-        continue;
-      }
-      if (!packageEntryCovers(entries, resolved)) {
-        failures.push(`packaged runtime reference is not shipped ${current} -> ${resolved}`);
-        continue;
-      }
-      if (resolved.endsWith(".mjs") && !visited.has(resolved)) queue.push(resolved);
-    }
+    const outcome = packagedRuntimeModuleOutcome(entries, readSource, current);
+    failures.push(...outcome.failures);
+    queue.push(...outcome.dependencies.filter((dependency) => !visited.has(dependency)));
   }
 
   return failures;
@@ -61,16 +37,63 @@ export function relativeRuntimeReferences(source) {
   return [...new Set(references)];
 }
 
+function declaredPackageEntries(packageEntries) {
+  if (!Array.isArray(packageEntries)) return [];
+  return packageEntries.filter((entry) => typeof entry === "string" && entry.length > 0);
+}
+
+function packagedRuntimeModuleOutcome(entries, readSource, file) {
+  if (!packageEntryCovers(entries, file)) {
+    return { failures: [`packaged runtime root is not shipped ${file}`], dependencies: [] };
+  }
+
+  const read = readPackagedRuntimeSource(readSource, file);
+  if (read.failure) return { failures: [read.failure], dependencies: [] };
+
+  const outcomes = relativeRuntimeReferences(read.source).map((specifier) =>
+    packagedRuntimeReferenceOutcome(entries, file, specifier),
+  );
+  return {
+    failures: outcomes.map((outcome) => outcome.failure).filter(Boolean),
+    dependencies: outcomes.map((outcome) => outcome.dependency).filter(Boolean),
+  };
+}
+
+function readPackagedRuntimeSource(readSource, file) {
+  try {
+    return { source: readSource(file) };
+  } catch (error) {
+    return { failure: `packaged runtime source is unreadable ${file}: ${error.message}` };
+  }
+}
+
+function packagedRuntimeReferenceOutcome(entries, importer, specifier) {
+  const resolved = resolveRelativeRuntimeReference(importer, specifier);
+  if (resolved === null) {
+    return {
+      failure: `packaged runtime reference escapes package root ${importer} -> ${specifier}`,
+    };
+  }
+  if (!packageEntryCovers(entries, resolved)) {
+    return { failure: `packaged runtime reference is not shipped ${importer} -> ${resolved}` };
+  }
+  if (resolved.endsWith(".mjs")) return { dependency: resolved };
+  return {};
+}
+
 function resolveRelativeRuntimeReference(importer, specifier) {
   const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(importer), specifier));
-  if (resolved === ".." || resolved.startsWith("../") || path.posix.isAbsolute(resolved)) return null;
+  if (resolved === ".." || resolved.startsWith("../") || path.posix.isAbsolute(resolved))
+    return null;
   return resolved;
 }
 
 function packageEntryCovers(entries, file) {
   const includes = entries.filter((entry) => !entry.startsWith("!"));
   const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
-  return includes.some((entry) => covers(entry, file)) && !excludes.some((entry) => covers(entry, file));
+  return (
+    includes.some((entry) => covers(entry, file)) && !excludes.some((entry) => covers(entry, file))
+  );
 }
 
 function covers(entry, file) {
