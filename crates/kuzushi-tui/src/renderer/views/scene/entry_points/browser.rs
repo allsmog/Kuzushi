@@ -21,8 +21,11 @@ const PANE_GAP: u16 = 1;
 const LIST_PANE_MAX: u16 = 60;
 const LIST_PANE_MIN: u16 = 32;
 const SOURCE_SEPARATOR: &str = " · ";
-/// Below this the location is fragments rather than a file and line, and
-/// below `MIN_NAME_COLUMNS` the name it would displace stops reading.
+/// Narrowest a *truncated* location may be before it reads as fragments
+/// rather than a file and line. A location that already fits whole is never
+/// held to it — a complete `a.py:1` identifies its row as well as any longer
+/// path does. Below `MIN_NAME_COLUMNS` the name it would displace stops
+/// reading, and then the location is dropped instead.
 const MIN_SOURCE_COLUMNS: usize = 10;
 const MIN_NAME_COLUMNS: usize = 8;
 
@@ -332,11 +335,14 @@ fn entry_row_text(entry: &EntryPointItem, marker: &str, width: usize) -> String 
 }
 
 /// Columns the location may take: never more than it needs, never more than
-/// half the row, and none at all when what remains could not hold a name.
+/// half the row, and none at all when what remains could not hold a name or
+/// when half the row would leave only a fragment of a long location.
 fn source_columns(source: &str, width: usize) -> usize {
-    let budget = (width / 2).min(display_width(source));
+    let source_width = display_width(source);
+    let budget = (width / 2).min(source_width);
     let name_room = width.saturating_sub(budget + display_width(SOURCE_SEPARATOR));
-    if budget < MIN_SOURCE_COLUMNS || name_room < MIN_NAME_COLUMNS {
+    let is_fragment = budget < source_width && budget < MIN_SOURCE_COLUMNS;
+    if is_fragment || name_room < MIN_NAME_COLUMNS {
         return 0;
     }
     budget
@@ -649,6 +655,18 @@ mod tests {
         entry.source = "not recorded".into();
 
         assert_eq!(entry_row_text(&entry, "›", 46).trim_end(), "› POST /admin");
+    }
+
+    /// The fragment floor guards truncation, not shortness: a complete
+    /// `a.py:1` tells its row apart from the next one just as well as a long
+    /// path does, and a pane with room to spare must not suppress it.
+    #[test]
+    fn a_short_but_complete_location_still_reaches_the_row() {
+        let mut entry = sample_model().entries.remove(0);
+        entry.source = "a.py:1".into();
+
+        assert_eq!(source_columns("a.py:1", 46), display_width("a.py:1"));
+        assert!(entry_row_text(&entry, " ", 46).ends_with("a.py:1"));
     }
 
     /// A location cropped to fragments explains less than the name it would
