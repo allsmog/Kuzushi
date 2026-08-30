@@ -1,4 +1,4 @@
-use super::model::{EntryPointGroup, EntryPointTarget};
+use super::model::{EntryPointGroup, EntryPointTarget, SOURCE_NOT_RECORDED};
 use crate::ui_view_models::viz_data::dfd::{string_field, DfdModel};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -57,7 +57,7 @@ pub(super) fn ingress_label(value: &Value) -> String {
 pub(super) fn source_label(value: &Value) -> String {
     let path = string_field(value, "path")
         .or_else(|| string_field(value, "location"))
-        .unwrap_or_else(|| "not recorded".to_string());
+        .unwrap_or_else(|| SOURCE_NOT_RECORDED.to_string());
     value
         .get("line")
         .and_then(Value::as_u64)

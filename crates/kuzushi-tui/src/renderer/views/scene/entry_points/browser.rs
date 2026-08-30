@@ -3,6 +3,7 @@ use super::{
     paired_digest_summary, provenance_summary, receipt_count_summary, responsive_summary,
     revision_summary, timestamp_summary,
 };
+use crate::renderer::shared::text::{display_width, fit_path, pad};
 use crate::theme;
 use crate::ui_view_models::{EntryPointBreakdown, EntryPointItem};
 use ratatui::buffer::Buffer;
@@ -13,6 +14,17 @@ use std::sync::Arc;
 
 const WIDE_LAYOUT_MIN: u16 = 90;
 const PANE_GAP: u16 = 1;
+/// Widest the list pane grows beside the detail pane. A real catalog names
+/// most rows by kind alone, so the list needs room for a name *and* the
+/// location that separates two of them; the detail pane still keeps the
+/// larger share at every width that reaches this cap.
+const LIST_PANE_MAX: u16 = 60;
+const LIST_PANE_MIN: u16 = 32;
+const SOURCE_SEPARATOR: &str = " · ";
+/// Below this the location is fragments rather than a file and line, and
+/// below `MIN_NAME_COLUMNS` the name it would displace stops reading.
+const MIN_SOURCE_COLUMNS: usize = 10;
+const MIN_NAME_COLUMNS: usize = 8;
 
 pub(crate) struct EntryPointBrowser {
     pub model: Arc<EntryPointBreakdown>,
@@ -125,7 +137,7 @@ fn render_wide(
     detail_scroll: usize,
     compact_summary: bool,
 ) {
-    let list_width = (area.width * 2 / 5).clamp(32, 44);
+    let list_width = (area.width * 2 / 5).clamp(LIST_PANE_MIN, LIST_PANE_MAX);
     let list = Rect {
         width: list_width,
         ..area
@@ -289,13 +301,45 @@ fn display_row_line(
 
 fn entry_row(entry: &EntryPointItem, selected: bool, width: usize) -> Line<'static> {
     let marker = if selected { "›" } else { " " };
-    let text = fit(&format!("{marker} {}", entry.name), width);
     let style = if selected {
         theme::accent()
     } else {
         theme::primary()
     };
-    Line::styled(text, style)
+    Line::styled(entry_row_text(entry, marker, width), style)
+}
+
+/// A real catalog names most rows by kind alone — one audited target carries
+/// 512 rows titled "Deserialization or parser boundary" — so the row's own
+/// `path:line` is the only thing that tells two of them apart without opening
+/// each in turn. Keep it on the row, truncated from the left so the file and
+/// line survive a narrow pane, and pad the name so the locations line up.
+fn entry_row_text(entry: &EntryPointItem, marker: &str, width: usize) -> String {
+    let name = format!("{marker} {}", entry.name);
+    let Some(source) = entry.recorded_source() else {
+        return fit(&name, width);
+    };
+    let source_width = source_columns(source, width);
+    if source_width == 0 {
+        return fit(&name, width);
+    }
+    let name_width = width - source_width - display_width(SOURCE_SEPARATOR);
+    format!(
+        "{}{SOURCE_SEPARATOR}{}",
+        pad(&name, name_width),
+        fit_path(source, source_width)
+    )
+}
+
+/// Columns the location may take: never more than it needs, never more than
+/// half the row, and none at all when what remains could not hold a name.
+fn source_columns(source: &str, width: usize) -> usize {
+    let budget = (width / 2).min(display_width(source));
+    let name_room = width.saturating_sub(budget + display_width(SOURCE_SEPARATOR));
+    if budget < MIN_SOURCE_COLUMNS || name_room < MIN_NAME_COLUMNS {
+        return 0;
+    }
+    budget
 }
 
 fn render_entry_detail(
@@ -578,6 +622,73 @@ mod tests {
         assert_eq!(viewport_start(600, 10, 599), 590);
         assert_eq!(viewport_start(600, 10, 0), 0);
         assert_eq!(viewport_start(600, 10, 300), 296);
+    }
+
+    /// The defect this guards: a real catalog titles hundreds of rows by kind
+    /// alone, and the list used to render nothing but that title.
+    #[test]
+    fn rows_sharing_a_generic_title_are_told_apart_by_their_own_location() {
+        let model = generic_title_model();
+
+        let rows = visible_entry_list_lines(&model, 0, 46, 8)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+
+        assert!(rows.iter().any(|row| row.contains("parse/frames.rs:18")));
+        assert!(rows.iter().any(|row| row.contains("wire/codec.rs:204")));
+        assert!(rows.iter().any(|row| row.contains("codec.rs:9")));
+        for row in &rows {
+            assert!(display_width(row) <= 46, "row overflows the pane: {row}");
+        }
+    }
+
+    #[test]
+    fn a_row_without_a_recorded_location_carries_only_its_name() {
+        let mut entry = sample_model().entries.remove(0);
+        entry.source = "not recorded".into();
+
+        assert_eq!(entry_row_text(&entry, "›", 46).trim_end(), "› POST /admin");
+    }
+
+    /// A location cropped to fragments explains less than the name it would
+    /// displace, so the narrow row keeps the name whole instead.
+    #[test]
+    fn a_pane_too_narrow_for_both_keeps_the_name() {
+        let entry = sample_model().entries.remove(0);
+
+        let row = entry_row_text(&entry, "›", 20);
+
+        assert_eq!(row, "› POST /admin");
+        assert_eq!(source_columns("src/routes.rs:42", 20), 0);
+    }
+
+    #[test]
+    fn a_long_location_keeps_its_file_and_line_rather_than_its_repository_prefix() {
+        let mut entry = sample_model().entries.remove(0);
+        entry.source = "crates/kuzushi-core/src/modules/registry/dispatch.rs:1180".into();
+
+        let row = entry_row_text(&entry, " ", 46);
+
+        assert!(row.ends_with("dispatch.rs:1180"), "{row}");
+        assert_eq!(display_width(&row), 46, "{row}");
+    }
+
+    fn generic_title_model() -> EntryPointBreakdown {
+        let template = sample_model();
+        let mut model = template.clone();
+        model.entries = ["parse/frames.rs:18", "wire/codec.rs:204", "codec.rs:9"]
+            .iter()
+            .enumerate()
+            .map(|(index, source)| EntryPointItem {
+                id: format!("EP-{index}"),
+                name: "Deserialization or parser boundary".into(),
+                source: (*source).into(),
+                ..template.entries[0].clone()
+            })
+            .collect();
+        model.dispositions[0].count = model.entries.len();
+        model
     }
 
     fn sample_model() -> EntryPointBreakdown {
