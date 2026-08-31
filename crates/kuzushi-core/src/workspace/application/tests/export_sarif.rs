@@ -183,11 +183,18 @@ fn a_windows_drive_absolute_path_becomes_a_file_uri_with_a_literal_drive_letter(
 }
 
 #[test]
-fn a_unc_share_path_keeps_its_host_in_the_authority() {
+fn a_leading_double_backslash_stays_a_workspace_relative_name() {
+    // `\` is an ordinary Unix filename byte and `secret_relative_path` keeps it
+    // verbatim, so reading `\\build01\share.rs` as a UNC share would aim the
+    // consumer at a network host instead of a file in the repository.
+    assert_eq!(absolute_file_uri(r"\\build01\share.rs"), None);
+
+    let physical = physical_location_of(r"\\build01\share.rs", 0, None);
     assert_eq!(
-        absolute_file_uri(r"\\build01\share\src\app.rs").as_deref(),
-        Some("file://build01/share/src/app.rs")
+        physical["artifactLocation"]["uri"],
+        "%5C%5Cbuild01%5Cshare.rs"
     );
+    assert_eq!(physical["artifactLocation"]["uriBaseId"], "WORKSPACE_ROOT");
 }
 
 #[test]
@@ -206,7 +213,6 @@ fn relative_and_drive_relative_paths_have_no_absolute_file_uri() {
     assert_eq!(absolute_file_uri(r"src\main.rs"), None);
     assert_eq!(absolute_file_uri(r"C:main.rs"), None);
     assert_eq!(absolute_file_uri(""), None);
-    assert_eq!(absolute_file_uri(r"\\"), None);
 }
 
 #[test]

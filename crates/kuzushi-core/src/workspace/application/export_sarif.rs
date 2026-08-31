@@ -302,14 +302,15 @@ fn sarif_artifact_location(file: &str) -> serde_json::Value {
 /// `/private/var` path whose target was resolved as `/var`. Naming such a
 /// location honestly outside the workspace beats re-anchoring it inside one.
 ///
-/// A leading `\\` is read as a UNC share rather than as two literal filename
-/// bytes, the same platform-agnostic judgement `is_windows_drive_path` already
-/// makes: no producer emits a workspace-relative path starting that way.
+/// A leading `\\` is deliberately *not* read as a UNC share. `\` is an ordinary
+/// filename byte on Unix and `secret_relative_path` builds its path straight
+/// from `Path::display()`, so a repository file named `\\build01\share.rs` would
+/// be re-pointed at a network host that does not exist. That path keeps
+/// resolving against `WORKSPACE_ROOT` with its bytes escaped, for the same
+/// reason `relative_uri_reference` escapes `\` rather than splitting on it: the
+/// escape is reversible, a wrong reading is not. A Windows drive prefix carries
+/// no such ambiguity, which is why it does get an absolute reading here.
 fn absolute_file_uri(file: &str) -> Option<String> {
-    if let Some(share) = file.strip_prefix(r"\\") {
-        let share = share.replace('\\', "/");
-        return (!share.is_empty()).then(|| format!("file://{}", absolute_uri_path(&share)));
-    }
     if is_windows_drive_absolute(file) {
         return Some(format!("file:///{}", absolute_uri_path(&file.replace('\\', "/"))));
     }
