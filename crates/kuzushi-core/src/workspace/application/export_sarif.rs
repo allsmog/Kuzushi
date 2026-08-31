@@ -277,13 +277,60 @@ fn sarif_physical_location(location: &WorkspaceFindingExportLocation) -> serde_j
 }
 
 /// SARIF 2.1.0 §3.4.4 forbids pairing `uriBaseId` with a `uri` that is already
-/// absolute. Findings may be anchored to hierarchical URLs or opaque URI
-/// identifiers; both must stay independent of `WORKSPACE_ROOT`.
+/// absolute. Findings may be anchored to hierarchical URLs, opaque URI
+/// identifiers, or absolute filesystem paths; all three must stay independent
+/// of `WORKSPACE_ROOT`.
 fn sarif_artifact_location(file: &str) -> serde_json::Value {
     if has_uri_scheme(file) {
         return json!({ "uri": file });
     }
+    if let Some(uri) = absolute_file_uri(file) {
+        return json!({ "uri": uri });
+    }
     json!({ "uri": relative_uri_reference(file), "uriBaseId": "WORKSPACE_ROOT" })
+}
+
+/// The `file:` URI for a location the detector reported as an absolute
+/// filesystem path, or `None` when the path is workspace-relative.
+///
+/// A `uri` carrying `uriBaseId` is resolved against that base, so binding an
+/// absolute path to `WORKSPACE_ROOT` renames the finding: `C:\src\app.rs`
+/// becomes `<workspace root>/C%3A%5Csrc%5Capp.rs`, a file that exists nowhere.
+/// Absolute paths do reach this export — `normalize_reported_file_path` keeps a
+/// model-reported path verbatim when it does not sit under the target root, as
+/// happens for a vendored dependency read from a system prefix or for a macOS
+/// `/private/var` path whose target was resolved as `/var`. Naming such a
+/// location honestly outside the workspace beats re-anchoring it inside one.
+///
+/// A leading `\\` is read as a UNC share rather than as two literal filename
+/// bytes, the same platform-agnostic judgement `is_windows_drive_path` already
+/// makes: no producer emits a workspace-relative path starting that way.
+fn absolute_file_uri(file: &str) -> Option<String> {
+    if let Some(share) = file.strip_prefix(r"\\") {
+        let share = share.replace('\\', "/");
+        return (!share.is_empty()).then(|| format!("file://{}", absolute_uri_path(&share)));
+    }
+    if is_windows_drive_absolute(file) {
+        return Some(format!("file:///{}", absolute_uri_path(&file.replace('\\', "/"))));
+    }
+    file.starts_with('/')
+        .then(|| format!("file://{}", absolute_uri_path(file)))
+}
+
+/// Percent-encode an already-`/`-separated absolute path. `:` stays literal
+/// here, unlike in `relative_uri_reference`: it is a legal path character once
+/// the reference is absolute, and keeping it preserves the conventional
+/// `file:///C:/…` drive form that consumers map back to a Windows path.
+fn absolute_uri_path(path: &str) -> String {
+    path.bytes()
+        .map(|byte| {
+            if byte == b':' {
+                ":".to_string()
+            } else {
+                encoded_path_byte(byte)
+            }
+        })
+        .collect()
 }
 
 /// Turn a workspace-relative path into the URI reference SARIF 2.1.0 §3.4.2
@@ -324,12 +371,20 @@ fn has_uri_scheme(file: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
 }
 
+/// A drive letter is never a URI scheme. This also accepts the drive-*relative*
+/// `C:dir\file` form, which stays workspace-bound: it names a file relative to
+/// that drive's working directory, so there is no absolute URI to emit for it.
 fn is_windows_drive_path(file: &str) -> bool {
+    is_windows_drive_absolute(file) || (has_drive_prefix(file) && file[2..].contains('\\'))
+}
+
+fn is_windows_drive_absolute(file: &str) -> bool {
+    has_drive_prefix(file) && matches!(file.as_bytes()[2], b'/' | b'\\')
+}
+
+fn has_drive_prefix(file: &str) -> bool {
     let bytes = file.as_bytes();
-    bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && (bytes[2] == b'/' || bytes[2] == b'\\' || file[2..].contains('\\'))
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// `start_line == 0` means the detector reported no line. Omitting the region

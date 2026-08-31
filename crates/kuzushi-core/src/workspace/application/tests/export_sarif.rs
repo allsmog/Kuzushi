@@ -144,12 +144,77 @@ fn a_backslash_is_escaped_rather_than_read_as_a_separator() {
         relative_uri_reference(r"src\app\main.rs"),
         "src%5Capp%5Cmain.rs"
     );
-    // A drive-letter path is not a URI scheme (`has_uri_scheme` rejects it), so
-    // the colon is escaped rather than left to look like one.
+    // A drive-*relative* path is not a URI scheme (`has_uri_scheme` rejects it)
+    // and has no absolute form, so the colon is escaped rather than left to look
+    // like one. The drive-absolute `C:\…` form never reaches this function; it
+    // leaves through `absolute_file_uri`.
     assert_eq!(
-        relative_uri_reference(r"C:\work dir\a.rs"),
-        "C%3A%5Cwork%20dir%5Ca.rs"
+        relative_uri_reference(r"C:work dir\a.rs"),
+        "C%3Awork%20dir%5Ca.rs"
     );
+}
+
+#[test]
+fn a_posix_absolute_path_becomes_its_own_file_uri_instead_of_a_workspace_child() {
+    let physical = physical_location_of("/opt/vendor/tls lib.py", 12, None);
+
+    assert_eq!(
+        physical["artifactLocation"]["uri"],
+        "file:///opt/vendor/tls%20lib.py"
+    );
+    assert!(physical["artifactLocation"].get("uriBaseId").is_none());
+    assert_eq!(physical["region"], json!({ "startLine": 12 }));
+}
+
+#[test]
+fn a_windows_drive_absolute_path_becomes_a_file_uri_with_a_literal_drive_letter() {
+    assert_eq!(
+        absolute_file_uri(r"C:\src\work dir\app.rs").as_deref(),
+        Some("file:///C:/src/work%20dir/app.rs")
+    );
+    assert_eq!(
+        absolute_file_uri("C:/src/app.rs").as_deref(),
+        Some("file:///C:/src/app.rs")
+    );
+
+    let physical = physical_location_of(r"C:\src\app.rs", 4, None);
+    assert_eq!(physical["artifactLocation"]["uri"], "file:///C:/src/app.rs");
+    assert!(physical["artifactLocation"].get("uriBaseId").is_none());
+}
+
+#[test]
+fn a_unc_share_path_keeps_its_host_in_the_authority() {
+    assert_eq!(
+        absolute_file_uri(r"\\build01\share\src\app.rs").as_deref(),
+        Some("file://build01/share/src/app.rs")
+    );
+}
+
+#[test]
+fn a_backslash_in_a_posix_absolute_path_is_escaped_rather_than_split() {
+    // Outside a Windows absolute path `\` is an ordinary filename byte, so the
+    // separator rewrite must not reach here.
+    assert_eq!(
+        absolute_file_uri(r"/srv/a\b.rs").as_deref(),
+        Some("file:///srv/a%5Cb.rs")
+    );
+}
+
+#[test]
+fn relative_and_drive_relative_paths_have_no_absolute_file_uri() {
+    assert_eq!(absolute_file_uri("src/main.rs"), None);
+    assert_eq!(absolute_file_uri(r"src\main.rs"), None);
+    assert_eq!(absolute_file_uri(r"C:main.rs"), None);
+    assert_eq!(absolute_file_uri(""), None);
+    assert_eq!(absolute_file_uri(r"\\"), None);
+}
+
+#[test]
+fn a_drive_relative_path_still_resolves_against_the_workspace_root() {
+    let physical = physical_location_of(r"C:src\app.rs", 0, None);
+
+    assert_eq!(physical["artifactLocation"]["uri"], "C%3Asrc%5Capp.rs");
+    assert_eq!(physical["artifactLocation"]["uriBaseId"], "WORKSPACE_ROOT");
 }
 
 #[test]
