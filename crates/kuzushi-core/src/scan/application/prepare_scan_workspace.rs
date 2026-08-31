@@ -2,10 +2,14 @@ use crate::findings::FindingStore;
 use crate::suppressions::SuppressionReconcileSummary;
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
+use std::fmt::Display;
 
-/// Scan-start workspace preparation outcome. The suppression sweep is
-/// load-bearing (its failure aborts the scan); the tree identity exists for
-/// provenance only and degrades to an operator-visible warning.
+/// Scan-start workspace preparation outcome. Both the suppression sweep and
+/// source-tree identity registration are load-bearing: a scan must not begin
+/// if either cannot be established. `tree_identity_warning` is retained for
+/// compatibility with callers compiled against the existing shape, but is
+/// always `None` because identity loss now aborts preparation instead of
+/// degrading to a transient warning.
 pub struct ScanWorkspacePreparation {
     pub suppressions: SuppressionReconcileSummary,
     pub tree_identity_warning: Option<String>,
@@ -27,31 +31,41 @@ pub fn prepare_scan_workspace_state_with_observer(
     store: &FindingStore,
     on_files_hashed: &mut dyn FnMut(usize),
 ) -> Result<ScanWorkspacePreparation> {
-    let tree_identity_warning = register_scan_tree_identity(workspace, on_files_hashed);
+    register_scan_tree_identity(workspace, on_files_hashed)?;
     let suppressions =
         crate::suppressions::run_suppression_sweep(store, workspace, "system:scan-start")
             .map(|sweep| sweep.summary)
             .context("suppression sweep failed at scan start; refusing to use stale state")?;
     Ok(ScanWorkspacePreparation {
         suppressions,
-        tree_identity_warning,
+        tree_identity_warning: None,
     })
 }
 
-/// Scan provenance needs a verifiable tree identity, not a full content
-/// index: the hash-only registration fits monorepo-scale targets whose file
-/// count blows the blob-store budget, and losing the identity costs
-/// verification of this scan's provenance only — never the scan itself.
+/// A scan without a registered tree identity cannot later prove which source
+/// tree its findings came from. Treat that as a preparation failure rather
+/// than running successfully with unverifiable provenance.
 fn register_scan_tree_identity(
     workspace: &WorkspaceTarget,
     on_files_hashed: &mut dyn FnMut(usize),
-) -> Option<String> {
-    crate::incremental_index::register_workspace_tree_identity_with_observer(
-        workspace,
-        on_files_hashed,
+) -> Result<()> {
+    require_scan_tree_identity(
+        crate::incremental_index::register_workspace_tree_identity_with_observer(
+            workspace,
+            on_files_hashed,
+        ),
     )
-    .err()
-    .map(|error| format!("workspace tree identity unavailable for this scan: {error:#}"))
+}
+
+fn require_scan_tree_identity<T, E>(result: std::result::Result<T, E>) -> Result<()>
+where
+    E: Display,
+{
+    result.map(|_| ()).map_err(|error| {
+        anyhow::anyhow!(
+            "workspace tree identity unavailable; refusing to start scan without verifiable source provenance: {error}"
+        )
+    })
 }
 
 #[cfg(test)]
@@ -87,22 +101,14 @@ mod tests {
         assert_eq!(indexed_file_count, 0);
     }
 
-    #[cfg(unix)]
     #[test]
-    fn identity_loss_degrades_to_a_warning_instead_of_aborting_the_scan() {
-        use std::os::unix::fs::PermissionsExt;
-        let target = tempfile::tempdir().unwrap();
-        let workspace = workspace_with_source(&target);
-        let unreadable = target.path().join("src/secret.rs");
-        std::fs::write(&unreadable, "pub fn hidden() {}\n").unwrap();
-        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
-        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    fn identity_registration_failure_is_a_scan_preparation_error() {
+        let error = require_scan_tree_identity::<(), _>(Err("source file could not be hashed"))
+            .expect_err("missing tree identity must fail closed");
 
-        let preparation = prepare_scan_workspace_state(&workspace, &store).unwrap();
-
-        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(preparation.suppressions.is_noop());
-        let warning = preparation.tree_identity_warning.expect("warning");
-        assert!(warning.contains("workspace tree identity unavailable"));
+        let message = error.to_string();
+        assert!(message.contains("workspace tree identity unavailable"));
+        assert!(message.contains("refusing to start scan without verifiable source provenance"));
+        assert!(message.contains("source file could not be hashed"));
     }
 }
