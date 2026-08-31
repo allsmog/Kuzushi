@@ -276,7 +276,9 @@ fn entry_detail_lines(width: usize, entry: &EntryPointItem) -> Vec<Line<'static>
         "not specified",
     );
     append_optional_field(&mut lines, width, "summary", &entry.description, "");
-    append_optional_field(&mut lines, width, "source", &entry.source, "not recorded");
+    if let Some(source) = entry.recorded_source() {
+        append_field(&mut lines, width, "source", source);
+    }
     append_optional_field(&mut lines, width, "risk", &entry.risk, "");
     append_targets(&mut lines, width, entry);
     append_optional_field(&mut lines, width, "evidence", &entry.evidence, "");

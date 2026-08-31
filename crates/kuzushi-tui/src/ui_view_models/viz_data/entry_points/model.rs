@@ -156,6 +156,11 @@ impl EntryPointDisposition {
     }
 }
 
+/// What `source_label` records for a row the catalog gave no path. One
+/// constant so the projection and every surface agree on which rows carry a
+/// real location instead of each re-spelling the sentinel.
+pub(super) const SOURCE_NOT_RECORDED: &str = "not recorded";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryPointItem {
     pub id: String,
@@ -171,6 +176,14 @@ pub(crate) struct EntryPointItem {
     pub disposition_note: String,
     pub targets: Vec<EntryPointTarget>,
     pub unresolved_target_count: usize,
+}
+
+impl EntryPointItem {
+    /// This row's own `path:line`, or `None` when the catalog recorded none.
+    pub(crate) fn recorded_source(&self) -> Option<&str> {
+        let source = self.source.trim();
+        (!source.is_empty() && source != SOURCE_NOT_RECORDED).then_some(source)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
