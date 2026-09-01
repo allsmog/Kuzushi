@@ -8,7 +8,7 @@ pub(crate) fn inspect_source_frameworks(
 ) {
     let lower = text.to_ascii_lowercase();
     for detector in SOURCE_FRAMEWORK_DETECTORS {
-        if detector.supports(language) && detector.matches(&lower) {
+        if detector.supports(language) && detector.matches(language, &lower) {
             builder.add_framework(
                 detector.framework,
                 language,
@@ -29,9 +29,49 @@ impl SourceFrameworkDetector {
         self.languages.contains(&language)
     }
 
-    fn matches(&self, lower: &str) -> bool {
+    fn matches(&self, language: &str, lower: &str) -> bool {
+        if language == "Python" {
+            return python_imports_any_module(lower, self.needles);
+        }
         contains_any(lower, self.needles)
     }
+}
+
+/// Source text is weaker evidence than a manifest: a string literal, comment,
+/// schema name, or local identifier that happens to contain `falcon.` is not a
+/// declaration that the target uses the Falcon web framework. For Python,
+/// accept only actual `import` / `from` statements and leave dependency-based
+/// discovery to the manifest inspector.
+fn python_imports_any_module(source: &str, modules: &[&str]) -> bool {
+    source.lines().any(|line| {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("from ") {
+            let imported = rest.split_ascii_whitespace().next().unwrap_or("");
+            return modules
+                .iter()
+                .any(|module| python_module_path_matches(imported, module));
+        }
+        let Some(rest) = trimmed.strip_prefix("import ") else {
+            return false;
+        };
+        rest.split(',').any(|binding| {
+            let imported = binding
+                .trim_start()
+                .split_ascii_whitespace()
+                .next()
+                .unwrap_or("");
+            modules
+                .iter()
+                .any(|module| python_module_path_matches(imported, module))
+        })
+    })
+}
+
+fn python_module_path_matches(imported: &str, module: &str) -> bool {
+    imported == module
+        || imported
+            .strip_prefix(module)
+            .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
 const SOURCE_FRAMEWORK_DETECTORS: &[SourceFrameworkDetector] = &[
@@ -94,62 +134,62 @@ const SOURCE_FRAMEWORK_DETECTORS: &[SourceFrameworkDetector] = &[
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from flask", "import flask", "flask("],
+        needles: &["flask"],
         framework: "Flask",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from bottle", "import bottle", "bottle."],
+        needles: &["bottle"],
         framework: "Bottle",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from aiohttp", "import aiohttp", "aiohttp."],
+        needles: &["aiohttp"],
         framework: "aiohttp",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["import falcon", "from falcon", "falcon."],
+        needles: &["falcon"],
         framework: "Falcon",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from fastapi", "import fastapi", "fastapi("],
+        needles: &["fastapi"],
         framework: "FastAPI",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from litestar", "import litestar", "litestar("],
+        needles: &["litestar"],
         framework: "Litestar",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from starlite", "import starlite", "starlite("],
+        needles: &["starlite"],
         framework: "Litestar",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from pyramid", "import pyramid", "pyramid."],
+        needles: &["pyramid"],
         framework: "Pyramid",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from sanic", "import sanic", "sanic("],
+        needles: &["sanic"],
         framework: "Sanic",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from starlette", "import starlette", "starlette("],
+        needles: &["starlette"],
         framework: "Starlette",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from tornado", "import tornado", "tornado."],
+        needles: &["tornado"],
         framework: "Tornado",
     },
     SourceFrameworkDetector {
         languages: &["Python"],
-        needles: &["from django", "import django"],
+        needles: &["django"],
         framework: "Django",
     },
     SourceFrameworkDetector {
@@ -234,3 +274,66 @@ const SOURCE_FRAMEWORK_DETECTORS: &[SourceFrameworkDetector] = &[
         framework: "Laravel",
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn detector(framework: &str) -> &'static SourceFrameworkDetector {
+        SOURCE_FRAMEWORK_DETECTORS
+            .iter()
+            .find(|detector| detector.framework == framework)
+            .unwrap_or_else(|| panic!("missing source framework detector for {framework}"))
+    }
+
+    #[test]
+    fn python_framework_detection_ignores_strings_comments_and_prefix_collisions() {
+        let falcon = detector("Falcon");
+        for source in [
+            r#"schema = "falcon.benchmark_run.v1""#,
+            r#"contract = "falcon.analysis_plan.v1""#,
+            "# import falcon",
+            "client = falcon.App()",
+            "import falconry",
+            "from falconry import Bird",
+        ] {
+            assert!(
+                !falcon.matches("Python", &source.to_ascii_lowercase()),
+                "non-import source must not establish Falcon usage: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn python_framework_detection_accepts_real_module_imports() {
+        let falcon = detector("Falcon");
+        for source in [
+            "import falcon",
+            "import falcon.asgi as falcon_asgi",
+            "import os, falcon",
+            "from falcon import App",
+            "    from falcon.asgi import App",
+        ] {
+            assert!(
+                falcon.matches("Python", &source.to_ascii_lowercase()),
+                "real Falcon import must establish framework usage: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_python_framework_detector_accepts_its_module_import() {
+        for detector in SOURCE_FRAMEWORK_DETECTORS
+            .iter()
+            .filter(|detector| detector.supports("Python"))
+        {
+            let module = detector.needles[0];
+            let source = format!("from {module}.app import App");
+            assert!(
+                detector.matches("Python", &source),
+                "{} detector must accept an import of {module}",
+                detector.framework
+            );
+        }
+    }
+}
