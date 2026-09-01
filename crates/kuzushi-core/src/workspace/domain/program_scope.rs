@@ -97,12 +97,16 @@ impl ProgramScope {
     /// scope. Out-of-scope wins over in-scope so deny rules dominate. Returns
     /// [`ScopeVerdict::Unknown`] only when no allow list exists and the target
     /// matches nothing.
+    ///
+    /// A target that two real URL parsers read as two different hosts is
+    /// judged as every host it could name: one deny match denies it, and an
+    /// allow list has to cover all of them. See [`candidate_hosts`].
     pub fn verdict(&self, target: &str) -> ScopeVerdict {
-        let host = extract_host(target);
-        if matches_any(&self.out_of_scope, &host) {
+        let hosts = candidate_hosts(target);
+        if hosts.iter().any(|host| matches_any(&self.out_of_scope, host)) {
             return ScopeVerdict::OutOfScope;
         }
-        if matches_any(&self.in_scope, &host) {
+        if hosts.iter().all(|host| matches_any(&self.in_scope, host)) {
             return ScopeVerdict::InScope;
         }
         unmatched_scope_verdict(!self.in_scope.is_empty())
@@ -176,12 +180,57 @@ fn mapped_ipv4(addr: IpAddr) -> Option<IpAddr> {
     }
 }
 
+/// Where the authority stops under RFC 3986, which Go's `net/url` and most
+/// non-browser HTTP clients implement. A backslash is an ordinary character
+/// there, so it stays inside the authority.
+const RFC_3986_AUTHORITY_END: &[char] = &['/', '?', '#'];
+
+/// Where the authority stops under the WHATWG URL Standard, which browsers and
+/// browser-derived clients implement: for a special scheme a backslash is a
+/// path separator, exactly like a slash.
+const URL_STANDARD_AUTHORITY_END: &[char] = &['/', '\\', '?', '#'];
+
+/// Every host a candidate target could name, deduplicated and never empty.
+///
+/// The two parser families above disagree about a target such as
+/// `https://evil.test\@in-scope.host`: RFC 3986 reads `evil.test\` as userinfo
+/// and reaches `in-scope.host`, while the URL Standard ends the authority at
+/// the backslash and reaches `evil.test`. The same split opens on an embedded
+/// tab, CR, or LF, which the URL Standard strips from the whole URL before
+/// parsing and RFC 3986 keeps. Whichever one a downstream scanner uses, this
+/// gate cannot know, so it refuses to pick the permissive reading: the caller
+/// weighs every host the target could reach.
+///
+/// Legitimate targets carry none of those characters, so both readings agree
+/// and this returns the single host [`extract_host`] always returned.
+fn candidate_hosts(target: &str) -> Vec<String> {
+    let mut hosts = vec![extract_host(target, RFC_3986_AUTHORITY_END)];
+    let url_standard = extract_host(
+        &strip_url_standard_whitespace(target),
+        URL_STANDARD_AUTHORITY_END,
+    );
+    if !hosts.contains(&url_standard) {
+        hosts.push(url_standard);
+    }
+    hosts
+}
+
+/// Drop the ASCII tab, CR, and LF that the URL Standard removes from a URL
+/// before parsing it, so `ev<TAB>il.test` is also read as the `evil.test` a
+/// browser would resolve.
+fn strip_url_standard_whitespace(target: &str) -> String {
+    target
+        .chars()
+        .filter(|character| !matches!(character, '\t' | '\r' | '\n'))
+        .collect()
+}
+
 /// Pull the host component out of a free-form target string. Accepts
 /// raw hosts, IP literals, `host:port`, and URLs with schemes. Falls
 /// back to the trimmed input so unknown formats still get a chance to
 /// match host globs. The result is normalized by [`normalize_host`] so a
 /// deny rule cannot be evaded by changing the case of a hostname.
-fn extract_host(target: &str) -> String {
+fn extract_host(target: &str, authority_end: &[char]) -> String {
     let trimmed = target.trim();
     let after_scheme = trimmed
         .split_once("://")
@@ -191,7 +240,7 @@ fn extract_host(target: &str) -> String {
     // userinfo strip must stay inside it: an `@` later in the URL
     // (`https://evil.test/@in-scope.host`) must not spoof the host.
     let authority = after_scheme
-        .split(['/', '?', '#'])
+        .split(authority_end)
         .next()
         .unwrap_or(after_scheme);
     let host_and_port = authority
@@ -351,6 +400,84 @@ mod tests {
         assert_eq!(
             scope.verdict("https://evil.test/#user@api.example.com"),
             ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn a_backslash_authority_delimiter_cannot_spoof_the_host() {
+        // The URL Standard ends the authority at the backslash and reaches
+        // `evil.test`; RFC 3986 reads `evil.test\` as userinfo and reaches
+        // `api.example.com`. The deny rule covers the first reading, so the
+        // target is refused rather than handed to whichever parser runs next.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["evil.test"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict(r"https://evil.test\@api.example.com/"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn an_allow_list_must_cover_both_readings_of_a_backslash_target() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["*.example.com"]
+            "#,
+        );
+        // Only the RFC 3986 reading lands inside the allow list; a browser
+        // would reach `evil.test`, which nothing allows.
+        assert_eq!(
+            scope.verdict(r"https://evil.test\@api.example.com/"),
+            ScopeVerdict::OutOfScope
+        );
+        // Reversed: only the URL Standard reading is allowed.
+        assert_eq!(
+            scope.verdict(r"https://api.example.com\@evil.test/"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn embedded_url_whitespace_cannot_evade_a_deny_rule() {
+        // The URL Standard strips tab, CR, and LF before parsing, so a client
+        // that implements it resolves `admin.example.com`.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example.com"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("https://admin.exa\tmple.com/panel"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("https://admin.exa\nmple.com/panel"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("https://admin.exa\r\nmple.com/panel"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn candidate_hosts_are_one_host_when_both_parsers_agree() {
+        // The overwhelmingly common case: no second reading is invented for an
+        // ordinary target, so nothing an operator writes is refused twice over.
+        assert_eq!(
+            candidate_hosts("https://user:pw@api.example.com:8443/path?q=1#f"),
+            vec!["api.example.com".to_string()]
+        );
+        assert_eq!(candidate_hosts("10.0.0.1"), vec!["10.0.0.1".to_string()]);
+        assert_eq!(
+            candidate_hosts(r"https://evil.test\@api.example.com/"),
+            vec!["api.example.com".to_string(), "evil.test".to_string()]
         );
     }
 
