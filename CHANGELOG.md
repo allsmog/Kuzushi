@@ -19,6 +19,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `.kuzushi/scope.toml` can no longer be walked past with a URL that two
+  parsers read as two different hosts. The gate extracted one host under RFC
+  3986 rules, so `https://evil.test\@in-scope.host` presented as the in-scope
+  host while a browser-derived client resolves `evil.test` — and an embedded
+  tab, CR, or LF split the readings the same way. Recon dispatch and the
+  amass/httpx/nuclei/nmap-xml/HAR/Burp import gates now weigh every host such a
+  target could name: one deny match refuses it, and an allow list has to cover
+  all of them. Ordinary targets carry none of those characters, so both
+  readings agree and their verdicts are unchanged.
+
 - Map's inventory no longer claims a web framework because a manifest happens
   to spell its name. Framework needles were matched as raw substrings of whole
   manifest text, so a Python package named `falcon-benchmarks` was reported as
