@@ -43,28 +43,91 @@ impl SourceFrameworkDetector {
 /// accept only actual `import` / `from` statements and leave dependency-based
 /// discovery to the manifest inspector.
 fn python_imports_any_module(source: &str, modules: &[&str]) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("from ") {
-            let imported = rest.split_ascii_whitespace().next().unwrap_or("");
-            return modules
-                .iter()
-                .any(|module| python_module_path_matches(imported, module));
-        }
-        let Some(rest) = trimmed.strip_prefix("import ") else {
-            return false;
-        };
-        rest.split(',').any(|binding| {
-            let imported = binding
-                .trim_start()
-                .split_ascii_whitespace()
-                .next()
-                .unwrap_or("");
-            modules
-                .iter()
-                .any(|module| python_module_path_matches(imported, module))
-        })
+    python_logical_code_lines(source)
+        .iter()
+        .any(|line| python_import_line_names_any_module(line, modules))
+}
+
+fn python_import_line_names_any_module(line: &str, modules: &[&str]) -> bool {
+    let trimmed = line.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("from ") {
+        let imported = rest.split_ascii_whitespace().next().unwrap_or("");
+        return modules
+            .iter()
+            .any(|module| python_module_path_matches(imported, module));
+    }
+    let Some(rest) = trimmed.strip_prefix("import ") else {
+        return false;
+    };
+    rest.split(',').any(|binding| {
+        let imported = binding
+            .trim_start()
+            .split_ascii_whitespace()
+            .next()
+            .unwrap_or("");
+        modules
+            .iter()
+            .any(|module| python_module_path_matches(imported, module))
     })
+}
+
+/// Joins backslash-continued physical lines and drops lines that begin inside
+/// a triple-quoted string, so import recognition sees Python statement text
+/// rather than continuation fragments or string/docstring contents. This stays
+/// a lexical heuristic, not a Python tokenizer: an unmatched triple quote
+/// inside a comment or single-quoted string can still suppress later lines.
+fn python_logical_code_lines(source: &str) -> Vec<String> {
+    let mut logical = Vec::new();
+    let mut open_string: Option<&'static str> = None;
+    let mut pending = String::new();
+    for line in source.lines() {
+        let starts_inside_string = open_string.is_some();
+        open_string = advance_triple_quote_state(line, open_string);
+        if starts_inside_string {
+            pending.clear();
+        } else if let Some(code) = line.strip_suffix('\\') {
+            pending.push_str(code);
+            pending.push(' ');
+        } else {
+            pending.push_str(line);
+            logical.push(std::mem::take(&mut pending));
+        }
+    }
+    logical
+}
+
+fn advance_triple_quote_state(
+    mut rest: &str,
+    mut open: Option<&'static str>,
+) -> Option<&'static str> {
+    loop {
+        match open {
+            Some(delimiter) => match rest.find(delimiter) {
+                Some(close) => {
+                    rest = &rest[close + delimiter.len()..];
+                    open = None;
+                }
+                None => return open,
+            },
+            None => match earliest_triple_quote(rest) {
+                Some((start, delimiter)) => {
+                    rest = &rest[start + delimiter.len()..];
+                    open = Some(delimiter);
+                }
+                None => return None,
+            },
+        }
+    }
+}
+
+fn earliest_triple_quote(rest: &str) -> Option<(usize, &'static str)> {
+    let double = rest.find("\"\"\"").map(|start| (start, "\"\"\""));
+    let single = rest.find("'''").map(|start| (start, "'''"));
+    match (double, single) {
+        (Some(a), Some(b)) => Some(if b.0 < a.0 { b } else { a }),
+        (found, None) => found,
+        (None, found) => found,
+    }
 }
 
 fn python_module_path_matches(imported: &str, module: &str) -> bool {
@@ -317,6 +380,40 @@ mod tests {
             assert!(
                 falcon.matches("Python", &source.to_ascii_lowercase()),
                 "real Falcon import must establish framework usage: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn python_framework_detection_ignores_imports_inside_triple_quoted_strings() {
+        let falcon = detector("Falcon");
+        for source in [
+            "\"\"\"\nimport falcon\n\"\"\"\nclient = falcon.App()",
+            "'''\nfrom falcon import App\n'''",
+            "doc = \"\"\"usage:\n    import falcon\n\"\"\"",
+        ] {
+            assert!(
+                !falcon.matches("Python", &source.to_ascii_lowercase()),
+                "string-literal text must not establish Falcon usage: {source}"
+            );
+        }
+        let closed_string_then_import = "x = \"\"\"doc\"\"\"\nimport falcon";
+        assert!(
+            falcon.matches("Python", &closed_string_then_import.to_ascii_lowercase()),
+            "a same-line closed string must not suppress later imports"
+        );
+    }
+
+    #[test]
+    fn python_framework_detection_accepts_backslash_continued_imports() {
+        let falcon = detector("Falcon");
+        for source in [
+            "import os, \\\n    falcon",
+            "from falcon \\\n    import App",
+        ] {
+            assert!(
+                falcon.matches("Python", &source.to_ascii_lowercase()),
+                "backslash-continued import must establish framework usage: {source}"
             );
         }
     }
