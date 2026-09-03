@@ -94,19 +94,21 @@ fn record_python_import_node(text: &str, imports: &mut Vec<String>) {
     let trimmed = normalized.trim_start();
 
     if let Some(rest) = trimmed.strip_prefix("from ") {
-        if let Some(imported) = rest.split_ascii_whitespace().next() {
-            record_python_module(imported, imports);
-        }
-        return;
+        record_python_module_token(rest, imports);
+    } else if let Some(rest) = trimmed.strip_prefix("import ") {
+        record_python_import_list(rest, imports);
     }
+}
 
-    let Some(rest) = trimmed.strip_prefix("import ") else {
-        return;
-    };
+fn record_python_import_list(rest: &str, imports: &mut Vec<String>) {
     for binding in rest.split(',') {
-        if let Some(imported) = binding.trim_start().split_ascii_whitespace().next() {
-            record_python_module(imported, imports);
-        }
+        record_python_module_token(binding, imports);
+    }
+}
+
+fn record_python_module_token(binding: &str, imports: &mut Vec<String>) {
+    if let Some(imported) = binding.trim_start().split_ascii_whitespace().next() {
+        record_python_module(imported, imports);
     }
 }
 
