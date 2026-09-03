@@ -37,6 +37,13 @@ pub(crate) enum Composition {
     /// One guided transaction form, horizontally centered (Scan configure,
     /// investigation configure).
     CenteredForm(PhaseSurfaceId),
+    /// One status card sized to its ask: the centered-form width cap plus a
+    /// height bound of the rows the card actually renders (Map readiness on a
+    /// Map that still needs an action).
+    StatusCard {
+        surface: PhaseSurfaceId,
+        content_rows: u16,
+    },
     /// One question card demanding an operator decision (Clarify).
     QuestionCard(PhaseSurfaceId),
     /// Three-column operational dashboard with an optional log strip at the
@@ -137,6 +144,10 @@ impl Composition {
                 solve_canvas_with_drawer(*canvas, *drawer, area)
             }
             Self::CenteredForm(id) => vec![(*id, centered_form_rect(area))],
+            Self::StatusCard {
+                surface,
+                content_rows,
+            } => vec![(*surface, status_card_rect(area, *content_rows))],
             Self::QuestionCard(id) => vec![(*id, centered_form_rect(area))],
             Self::OperationalColumns {
                 left,
@@ -284,6 +295,21 @@ fn centered_form_rect(area: Rect) -> Rect {
     Rect::new(x, area.y, width, area.height)
 }
 
+/// A pane block spends its top row on its title, so a card that renders
+/// `content_rows` lines occupies one row more than it writes.
+const CARD_TITLE_ROWS: u16 = 1;
+
+/// The card keeps the form's width cap and top edge but stops at its own last
+/// row. Content taller than the body still takes the whole body — the pane
+/// scrolls rather than dropping the rows it promised.
+fn status_card_rect(area: Rect, content_rows: u16) -> Rect {
+    let form = centered_form_rect(area);
+    let height = content_rows
+        .saturating_add(CARD_TITLE_ROWS)
+        .min(form.height);
+    Rect::new(form.x, form.y, form.width, height)
+}
+
 fn split_rows_bottom(area: Rect, bottom_rows: u16) -> (Rect, Rect) {
     let bottom_rows = bottom_rows.min(area.height);
     let top_rows = area.height - bottom_rows;
@@ -401,6 +427,30 @@ mod tests {
         let wide = dashboard.solve(WIDE);
         assert_eq!(wide.len(), 3);
         assert!(regions_are_disjoint(&wide));
+    }
+
+    #[test]
+    fn status_card_keeps_the_form_width_cap_and_stops_at_its_last_row() {
+        let card = Composition::StatusCard {
+            surface: PhaseSurfaceId::MapReadiness,
+            content_rows: 9,
+        };
+        let regions = card.solve(WIDE);
+        assert_eq!(ids(&regions), vec![PhaseSurfaceId::MapReadiness]);
+        let rect = regions[0].1;
+        assert_eq!(rect.width, CENTERED_FORM_MAX_COLUMNS);
+        assert_eq!(rect.y, WIDE.y, "the card stays at the top of the body");
+        assert_eq!(rect.height, 10, "nine rows plus the pane title");
+    }
+
+    #[test]
+    fn status_card_taller_than_the_body_keeps_the_body_and_scrolls() {
+        let card = Composition::StatusCard {
+            surface: PhaseSurfaceId::MapReadiness,
+            content_rows: 40,
+        };
+        let short = Rect::new(0, 0, 60, 12);
+        assert_eq!(card.solve(short)[0].1.height, short.height);
     }
 
     #[test]

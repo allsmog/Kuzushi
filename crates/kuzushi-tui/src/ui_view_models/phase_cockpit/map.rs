@@ -39,6 +39,25 @@ pub(crate) fn map_gallery_is_primary(app: &ShellApp) -> bool {
     !map_requires_action(&map_phase_model(app))
 }
 
+/// Receipt rows the Map status card shows. The renderer takes the same number
+/// of project rows, so the layout can size the card without the two surfaces
+/// disagreeing about how tall it is.
+pub(crate) const MAP_CONTEXT_ROW_LIMIT: usize = 8;
+
+/// The card's heading and its artifact status line, which it always renders.
+const MAP_CONTEXT_FIXED_ROWS: usize = 2;
+
+/// Content rows the Map status card renders: heading, the optional empty
+/// hint, the artifact status line, and the receipt rows. The layout bounds
+/// the card to these rows instead of stretching one short card over the whole
+/// body.
+pub(crate) fn map_status_card_rows(model: &MapPhaseModel) -> u16 {
+    let rows = MAP_CONTEXT_FIXED_ROWS
+        + usize::from(model.empty_hint.is_some())
+        + model.project.rows.len().min(MAP_CONTEXT_ROW_LIMIT);
+    u16::try_from(rows).unwrap_or(u16::MAX)
+}
+
 pub(super) fn map_requires_action(model: &MapPhaseModel) -> bool {
     model.empty_hint.is_some()
         || model.dfd.empty_hint.is_some()

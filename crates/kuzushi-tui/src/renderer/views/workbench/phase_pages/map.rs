@@ -2,7 +2,7 @@ use super::*;
 use crate::ui_view_models::{
     project_context_columns, AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel,
     MapPhaseModel, ModuleRisk, NextScansState, ProjectContextCell, ProjectContextRow,
-    ProjectModelOrigin, WorklistRowModel,
+    ProjectModelOrigin, WorklistRowModel, MAP_CONTEXT_ROW_LIMIT,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
@@ -387,7 +387,13 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
         artifact_state_style(model.context.state),
     ));
     let table = project_context_columns(&model.project, width);
-    lines.extend(table.rows.iter().take(8).map(context_row_line));
+    lines.extend(
+        table
+            .rows
+            .iter()
+            .take(MAP_CONTEXT_ROW_LIMIT)
+            .map(context_row_line),
+    );
     lines
 }
 
@@ -1066,5 +1072,71 @@ mod next_scan_tests {
         ] {
             assert!(rendered.contains(atom), "missing {atom:?}: {rendered}");
         }
+    }
+}
+
+#[cfg(test)]
+mod context_card_tests {
+    use super::*;
+    use crate::ui_view_models::{map_status_card_rows, ProjectModelOrigin, ProjectModelRow};
+
+    fn map_model() -> crate::ui_view_models::MapPhaseModel {
+        let app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            &app,
+            kuzushi_core::WorkflowPhase::Map,
+        );
+        let crate::ui_view_models::PhaseCockpitBody::Map(map) = model.body else {
+            panic!("map body expected");
+        };
+        map
+    }
+
+    fn receipt_rows(count: usize) -> Vec<ProjectModelRow> {
+        (0..count)
+            .map(|index| ProjectModelRow {
+                section: "context feed",
+                origin: ProjectModelOrigin::Local,
+                state: "present",
+                summary: format!("row {index}"),
+                action: "context build",
+            })
+            .collect()
+    }
+
+    /// The layout sizes the status card from `map_status_card_rows`, so a
+    /// disagreement with the lines this pane emits would either clip a receipt
+    /// row or leave the blank rows the card exists to remove.
+    #[test]
+    fn card_height_matches_the_lines_the_pane_renders() {
+        let mut model = map_model();
+        for (rows, hint) in [
+            (0, None),
+            (3, None),
+            (12, Some("no context yet".to_string())),
+        ] {
+            model.project.rows = receipt_rows(rows);
+            model.empty_hint = hint;
+            assert_eq!(
+                context_lines(&model, 100).len(),
+                map_status_card_rows(&model) as usize,
+                "{rows} receipt rows"
+            );
+        }
+    }
+
+    #[test]
+    fn receipt_rows_past_the_limit_do_not_grow_the_card() {
+        let mut model = map_model();
+        model.empty_hint = None;
+        model.project.rows = receipt_rows(MAP_CONTEXT_ROW_LIMIT + 5);
+        assert_eq!(
+            map_status_card_rows(&model) as usize,
+            context_lines(&model, 100).len()
+        );
+        assert_eq!(
+            map_status_card_rows(&model) as usize,
+            MAP_CONTEXT_ROW_LIMIT + 2
+        );
     }
 }
