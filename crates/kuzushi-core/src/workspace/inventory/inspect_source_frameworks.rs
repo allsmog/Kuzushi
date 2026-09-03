@@ -1,4 +1,5 @@
 use super::*;
+use tree_sitter::{Node, Parser};
 
 pub(crate) fn inspect_source_frameworks(
     relative: &str,
@@ -7,8 +8,14 @@ pub(crate) fn inspect_source_frameworks(
     builder: &mut InventoryBuilder,
 ) {
     let lower = text.to_ascii_lowercase();
+    let python_imports = if language == "Python" {
+        python_imported_modules(text)
+    } else {
+        Vec::new()
+    };
+
     for detector in SOURCE_FRAMEWORK_DETECTORS {
-        if detector.supports(language) && detector.matches(language, &lower) {
+        if detector.supports(language) && detector.matches(language, &lower, &python_imports) {
             builder.add_framework(
                 detector.framework,
                 language,
@@ -29,9 +36,12 @@ impl SourceFrameworkDetector {
         self.languages.contains(&language)
     }
 
-    fn matches(&self, language: &str, lower: &str) -> bool {
+    fn matches(&self, language: &str, lower: &str, python_imports: &[String]) -> bool {
         if language == "Python" {
-            return python_imports_any_module(lower, self.needles);
+            return self
+                .needles
+                .iter()
+                .any(|module| python_imports_module(python_imports, module));
         }
         contains_any(lower, self.needles)
     }
@@ -39,102 +49,82 @@ impl SourceFrameworkDetector {
 
 /// Source text is weaker evidence than a manifest: a string literal, comment,
 /// schema name, or local identifier that happens to contain `falcon.` is not a
-/// declaration that the target uses the Falcon web framework. For Python,
-/// accept only actual `import` / `from` statements and leave dependency-based
-/// discovery to the manifest inspector.
-fn python_imports_any_module(source: &str, modules: &[&str]) -> bool {
-    python_logical_code_lines(source)
-        .iter()
-        .any(|line| python_import_line_names_any_module(line, modules))
-}
-
-fn python_import_line_names_any_module(line: &str, modules: &[&str]) -> bool {
-    let trimmed = line.trim_start();
-    if let Some(rest) = trimmed.strip_prefix("from ") {
-        let imported = rest.split_ascii_whitespace().next().unwrap_or("");
-        return modules
-            .iter()
-            .any(|module| python_module_path_matches(imported, module));
+/// declaration that the target uses the Falcon web framework. Python already
+/// has a Tree-sitter grammar in kuzushi-core, so source-only framework claims
+/// are derived from syntactic import statements rather than a second ad-hoc
+/// lexer. Parser failure simply contributes no source claim; manifest evidence
+/// remains an independent path.
+fn python_imported_modules(source: &str) -> Vec<String> {
+    let mut parser = Parser::new();
+    if parser
+        .set_language(&tree_sitter_python::LANGUAGE.into())
+        .is_err()
+    {
+        return Vec::new();
     }
-    let Some(rest) = trimmed.strip_prefix("import ") else {
-        return false;
+    let Some(tree) = parser.parse(source.as_bytes(), None) else {
+        return Vec::new();
     };
-    rest.split(',').any(|binding| {
-        let imported = binding
-            .trim_start()
-            .split_ascii_whitespace()
-            .next()
-            .unwrap_or("");
-        modules
-            .iter()
-            .any(|module| python_module_path_matches(imported, module))
+
+    let mut imports = Vec::new();
+    collect_python_imports(tree.root_node(), source.as_bytes(), &mut imports);
+    imports
+}
+
+fn collect_python_imports(node: Node<'_>, source: &[u8], imports: &mut Vec<String>) {
+    if matches!(node.kind(), "import_statement" | "import_from_statement") {
+        if let Ok(text) = node.utf8_text(source) {
+            record_python_import_node(text, imports);
+        }
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_python_imports(child, source, imports);
+    }
+}
+
+/// Tree-sitter has already established that `text` is an import statement, so
+/// this helper only extracts module paths from that syntax node. Normalizing a
+/// backslash continuation here is safe: comments, strings, and docstrings never
+/// reach this function as import nodes.
+fn record_python_import_node(text: &str, imports: &mut Vec<String>) {
+    let normalized = text.replace("\\\r\n", " ").replace("\\\n", " ");
+    let trimmed = normalized.trim_start();
+
+    if let Some(rest) = trimmed.strip_prefix("from ") {
+        if let Some(imported) = rest.split_ascii_whitespace().next() {
+            record_python_module(imported, imports);
+        }
+        return;
+    }
+
+    let Some(rest) = trimmed.strip_prefix("import ") else {
+        return;
+    };
+    for binding in rest.split(',') {
+        if let Some(imported) = binding.trim_start().split_ascii_whitespace().next() {
+            record_python_module(imported, imports);
+        }
+    }
+}
+
+fn record_python_module(imported: &str, imports: &mut Vec<String>) {
+    let imported = imported.to_ascii_lowercase();
+    if imported.is_empty() || imports.iter().any(|existing| existing == &imported) {
+        return;
+    }
+    imports.push(imported);
+}
+
+fn python_imports_module(imports: &[String], module: &str) -> bool {
+    imports.iter().any(|imported| {
+        imported == module
+            || imported
+                .strip_prefix(module)
+                .is_some_and(|suffix| suffix.starts_with('.'))
     })
-}
-
-/// Joins backslash-continued physical lines and drops lines that begin inside
-/// a triple-quoted string, so import recognition sees Python statement text
-/// rather than continuation fragments or string/docstring contents. This stays
-/// a lexical heuristic, not a Python tokenizer: an unmatched triple quote
-/// inside a comment or single-quoted string can still suppress later lines.
-fn python_logical_code_lines(source: &str) -> Vec<String> {
-    let mut logical = Vec::new();
-    let mut open_string: Option<&'static str> = None;
-    let mut pending = String::new();
-    for line in source.lines() {
-        let starts_inside_string = open_string.is_some();
-        open_string = advance_triple_quote_state(line, open_string);
-        if starts_inside_string {
-            pending.clear();
-        } else if let Some(code) = line.strip_suffix('\\') {
-            pending.push_str(code);
-            pending.push(' ');
-        } else {
-            pending.push_str(line);
-            logical.push(std::mem::take(&mut pending));
-        }
-    }
-    logical
-}
-
-fn advance_triple_quote_state(
-    mut rest: &str,
-    mut open: Option<&'static str>,
-) -> Option<&'static str> {
-    loop {
-        match open {
-            Some(delimiter) => match rest.find(delimiter) {
-                Some(close) => {
-                    rest = &rest[close + delimiter.len()..];
-                    open = None;
-                }
-                None => return open,
-            },
-            None => match earliest_triple_quote(rest) {
-                Some((start, delimiter)) => {
-                    rest = &rest[start + delimiter.len()..];
-                    open = Some(delimiter);
-                }
-                None => return None,
-            },
-        }
-    }
-}
-
-fn earliest_triple_quote(rest: &str) -> Option<(usize, &'static str)> {
-    let double = rest.find("\"\"\"").map(|start| (start, "\"\"\""));
-    let single = rest.find("'''").map(|start| (start, "'''"));
-    match (double, single) {
-        (Some(a), Some(b)) => Some(if b.0 < a.0 { b } else { a }),
-        (found, None) => found,
-        (None, found) => found,
-    }
-}
-
-fn python_module_path_matches(imported: &str, module: &str) -> bool {
-    imported == module
-        || imported
-            .strip_prefix(module)
-            .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
 const SOURCE_FRAMEWORK_DETECTORS: &[SourceFrameworkDetector] = &[
@@ -349,6 +339,11 @@ mod tests {
             .unwrap_or_else(|| panic!("missing source framework detector for {framework}"))
     }
 
+    fn python_detector_matches(detector: &SourceFrameworkDetector, source: &str) -> bool {
+        let imports = python_imported_modules(source);
+        detector.matches("Python", &source.to_ascii_lowercase(), &imports)
+    }
+
     #[test]
     fn python_framework_detection_ignores_strings_comments_and_prefix_collisions() {
         let falcon = detector("Falcon");
@@ -361,7 +356,7 @@ mod tests {
             "from falconry import Bird",
         ] {
             assert!(
-                !falcon.matches("Python", &source.to_ascii_lowercase()),
+                !python_detector_matches(falcon, source),
                 "non-import source must not establish Falcon usage: {source}"
             );
         }
@@ -376,16 +371,17 @@ mod tests {
             "import os, falcon",
             "from falcon import App",
             "    from falcon.asgi import App",
+            "from falcon import (\n    App,\n)",
         ] {
             assert!(
-                falcon.matches("Python", &source.to_ascii_lowercase()),
+                python_detector_matches(falcon, source),
                 "real Falcon import must establish framework usage: {source}"
             );
         }
     }
 
     #[test]
-    fn python_framework_detection_ignores_imports_inside_triple_quoted_strings() {
+    fn python_framework_detection_ignores_import_text_inside_strings() {
         let falcon = detector("Falcon");
         for source in [
             "\"\"\"\nimport falcon\n\"\"\"\nclient = falcon.App()",
@@ -393,15 +389,25 @@ mod tests {
             "doc = \"\"\"usage:\n    import falcon\n\"\"\"",
         ] {
             assert!(
-                !falcon.matches("Python", &source.to_ascii_lowercase()),
+                !python_detector_matches(falcon, source),
                 "string-literal text must not establish Falcon usage: {source}"
             );
         }
-        let closed_string_then_import = "x = \"\"\"doc\"\"\"\nimport falcon";
-        assert!(
-            falcon.matches("Python", &closed_string_then_import.to_ascii_lowercase()),
-            "a same-line closed string must not suppress later imports"
-        );
+    }
+
+    #[test]
+    fn python_framework_detection_accepts_import_after_triple_quote_text_in_non_code_contexts() {
+        let falcon = detector("Falcon");
+        for source in [
+            "# unmatched doc marker \"\"\" in a comment\nimport falcon",
+            "marker = 'not a delimiter: \"\"\"'\nimport falcon",
+            "marker = \"not a delimiter: '''\"\nfrom falcon import App",
+        ] {
+            assert!(
+                python_detector_matches(falcon, source),
+                "comment/string contents must not suppress later real imports: {source}"
+            );
+        }
     }
 
     #[test]
@@ -412,7 +418,7 @@ mod tests {
             "from falcon \\\n    import App",
         ] {
             assert!(
-                falcon.matches("Python", &source.to_ascii_lowercase()),
+                python_detector_matches(falcon, source),
                 "backslash-continued import must establish framework usage: {source}"
             );
         }
@@ -427,7 +433,7 @@ mod tests {
             let module = detector.needles[0];
             let source = format!("from {module}.app import App");
             assert!(
-                detector.matches("Python", &source),
+                python_detector_matches(detector, &source),
                 "{} detector must accept an import of {module}",
                 detector.framework
             );
