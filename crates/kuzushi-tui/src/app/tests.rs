@@ -16690,6 +16690,41 @@ fn refused_threat_patch_commit_keeps_the_pending_patch_and_reports_no_success() 
     );
 }
 
+/// `threats apply` owns no Run Focus session, so refusing it must not stamp
+/// whichever session happens to be open. A terminal stamp there would clear
+/// `phase_attempt_in_flight` and let that run's half-written artifacts advance
+/// the phase chip while it is still running.
+#[test]
+fn refused_threat_patch_commit_leaves_an_unrelated_run_in_flight() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().to_path_buf();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.clone()));
+    save_persistent_threat_model(
+        &target,
+        &serde_json::json!({"trustZones": {"admin": "trusted"}}),
+        true,
+    )
+    .unwrap();
+    app.set_activity(Some(ActivitySession::for_phase(
+        "run-unrelated",
+        kuzushi_core::WorkflowPhase::Map,
+    )));
+    app.set_pending_threat_patch(pending_admin_zone_patch("isolated"));
+
+    update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::ThreatApply));
+
+    assert_eq!(
+        app.live_activity().map(|activity| activity.phase),
+        Some(LiveActivityPhase::Refused)
+    );
+    assert!(
+        app.activity()
+            .is_some_and(|session| session.completed_at.is_none()),
+        "an unrelated run must still read as in flight"
+    );
+}
+
 #[test]
 fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
     let temp = tempfile::tempdir().unwrap();

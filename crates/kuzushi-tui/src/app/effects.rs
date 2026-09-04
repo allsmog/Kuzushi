@@ -830,8 +830,18 @@ impl ShellApp {
         }
     }
 
+    /// `threats apply` is a synchronous command that owns no Run Focus
+    /// session, so the refusal is reported without `set_refused_activity`:
+    /// that helper stamps the current session terminal, and the only session
+    /// still open here belongs to some other run. Stamping it would clear the
+    /// `phase_attempt_in_flight` guard and let that run's half-written
+    /// artifacts advance the phase chip mid-flight.
     fn refuse_threat_patch_commit(&mut self, error: anyhow::Error) {
-        self.set_refused_activity("threat model", "pending patch not committed");
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Refused,
+            "threat model",
+            "pending patch not committed",
+        ));
         self.log(
             "error",
             with_next_step(
