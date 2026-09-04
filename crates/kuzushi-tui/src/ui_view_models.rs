@@ -234,15 +234,16 @@ pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    map_gallery_is_primary, phase_cockpit_model_for_phase, phase_presentation_plan,
-    phase_surface_specs, AttentionMode, ChainArtifactsModel, ChainCandidateModel, ChainLinkModel,
-    Composition, DrawerSize, DrawerSpec, EngagementHeaderModel, FixPhaseModel,
-    InvestigationPlanModel, LayoutDensity, LiveScanModel, MapPhaseModel, NextScanRow,
-    NextScansState, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan,
-    PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel,
-    RemediationLifecycleModel, RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel,
-    ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel, SelectionDisclosureModel,
-    SurfaceInteraction, SurfaceRole, SurfaceState, TraceEvidenceModel, TraceHopModel,
+    map_gallery_is_primary, map_status_card_rows, phase_cockpit_model_for_phase,
+    phase_presentation_plan, phase_surface_specs, AttentionMode, ChainArtifactsModel,
+    ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
+    EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
+    MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,
+    PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
+    ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
+    RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
+    ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
+    TraceEvidenceModel, TraceHopModel, MAP_CONTEXT_ROW_LIMIT,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{

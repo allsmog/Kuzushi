@@ -237,26 +237,30 @@ fn ready_map_composition(body: &PhaseCockpitBody, density: LayoutDensity) -> Opt
     })
 }
 
-/// An unbuilt Map has only its readiness card, so the generic column solver
-/// handed one status card the entire body: on a 160-column terminal every row
-/// stopped near column 90 inside a 124-column pane. A card that exists to ask
-/// for an action is a form, not a workspace, so it gets the centered-form
-/// width cap instead. Scoped to Map — the other phases keep their matrix.
+/// A Map that still needs an action has only its readiness card, so the
+/// generic column solver handed one status card the entire body: on a
+/// 160-column terminal every row stopped near column 90 inside a 124-column
+/// pane, and every row past the card's last line was blank to the bottom of
+/// the frame. A card that exists to ask for an action is a form, not a
+/// workspace, so it takes the centered-form width cap and stops at the rows it
+/// renders. A ready Map never reaches here — `ready_map_composition` claims it
+/// first. Scoped to Map — the other phases keep their matrix.
 fn sparse_map_status_composition(
     body: &PhaseCockpitBody,
     density: LayoutDensity,
     visible: &[&PhaseSurfaceSpec],
 ) -> Option<Composition> {
+    let PhaseCockpitBody::Map(model) = body else {
+        return None;
+    };
     let spec = visible.first()?;
-    let sparse_map = density == LayoutDensity::Sparse && matches!(body, PhaseCockpitBody::Map(_));
-    (sparse_map && awaits_operator_action(spec.state)).then_some(Composition::CenteredForm(spec.id))
-}
-
-fn awaits_operator_action(state: SurfaceState) -> bool {
-    matches!(
-        state,
-        SurfaceState::Missing | SurfaceState::Blocked | SurfaceState::Stale
-    )
+    if density != LayoutDensity::Sparse || spec.id != PhaseSurfaceId::MapReadiness {
+        return None;
+    }
+    Some(Composition::StatusCard {
+        surface: spec.id,
+        content_rows: super::map::map_status_card_rows(model),
+    })
 }
 
 fn rich_phase_composition(body: &PhaseCockpitBody, visible_count: usize) -> Option<Composition> {

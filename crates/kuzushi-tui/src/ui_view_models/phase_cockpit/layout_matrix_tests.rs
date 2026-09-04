@@ -561,13 +561,14 @@ fn live_scan_composes_the_operational_dashboard_and_degrades_to_center() {
     assert!(matches!(resting.composition, Composition::Columns(_)));
 }
 
-/// #172: a Map whose only surface is an unbuilt readiness card is a form
-/// asking for one action, not a workspace. The generic column solver handed
-/// it the entire body, so on a wide terminal a ~124-column pane carried rows
-/// that stopped near column 90. It is now capped at the centered-form width,
-/// while terminals narrower than that cap keep the full-width card.
+/// #172: a Map whose only surface is its readiness card is a form asking for
+/// one action, not a workspace. The generic column solver handed it the entire
+/// body, so on a wide terminal a ~124-column pane carried rows that stopped
+/// near column 90 above thirty blank rows. It is now capped at the
+/// centered-form width and bounded to the rows the card renders, while
+/// terminals narrower than that cap keep the full-width card.
 #[test]
-fn actionable_map_status_card_is_a_width_capped_centered_form() {
+fn actionable_map_status_card_is_bounded_to_its_own_content() {
     for state in [
         SemanticFixture::Empty,
         SemanticFixture::Blocked,
@@ -575,61 +576,125 @@ fn actionable_map_status_card_is_a_width_capped_centered_form() {
     ] {
         let body = fixture_body(WorkflowPhase::Map, state);
         for (width, height) in CANONICAL_SIZES {
-            assert_map_status_card_width(&body, state, Rect::new(7, 5, width, height));
+            assert_map_status_card_bounds(&body, state, Rect::new(7, 5, width, height));
         }
     }
 }
 
-fn assert_map_status_card_width(body: &PhaseCockpitBody, state: SemanticFixture, area: Rect) {
+fn assert_map_status_card_bounds(body: &PhaseCockpitBody, state: SemanticFixture, area: Rect) {
     let plan = phase_presentation_plan(body, area, None, None, AttentionMode::Normal);
-    let Composition::CenteredForm(id) = plan.composition else {
+    let Composition::StatusCard {
+        surface,
+        content_rows,
+    } = plan.composition
+    else {
         return;
     };
     let cell = cell_label(WorkflowPhase::Map, state, area.width, area.height);
     let card = plan
-        .surface(id)
-        .unwrap_or_else(|| panic!("{cell}: centered form has no rect"));
+        .surface(surface)
+        .unwrap_or_else(|| panic!("{cell}: status card has no rect"));
     assert_eq!(
         card.rect.width,
         area.width
             .min(super::composition::CENTERED_FORM_MAX_COLUMNS),
-        "{cell}: centered action-card width"
+        "{cell}: status-card width"
+    );
+    let PhaseCockpitBody::Map(model) = body else {
+        unreachable!("Map fixture body")
+    };
+    assert_eq!(
+        content_rows,
+        super::map::map_status_card_rows(model),
+        "{cell}: card sized from the rows the renderer emits"
     );
     assert!(
-        card.rect.width <= super::composition::CENTERED_FORM_MAX_COLUMNS,
-        "{cell}: action card must not span the whole body"
+        card.rect.height <= area.height,
+        "{cell}: card height {} exceeds the body",
+        card.rect.height
+    );
+    assert!(
+        card.rect.height <= content_rows + 1 || card.rect.height == area.height,
+        "{cell}: card height {} outgrew its {content_rows} content rows",
+        card.rect.height
     );
 }
 
-/// The 160x48 and 80x24 corners the defect report named, pinned explicitly so
-/// the cap and the full-width fallback cannot both drift at once.
-#[test]
-fn unbuilt_map_status_card_is_capped_wide_and_full_width_at_eighty_columns() {
+/// The unbuilt-Map card and the rows it promises, for one terminal size.
+fn unbuilt_map_card(area: Rect) -> (PlannedPhaseSurface, u16) {
     let body = fixture_body(WorkflowPhase::Map, SemanticFixture::Empty);
+    let PhaseCockpitBody::Map(model) = &body else {
+        unreachable!("Map fixture body")
+    };
+    let content_rows = super::map::map_status_card_rows(model);
+    let plan = phase_presentation_plan(&body, area, None, None, AttentionMode::Normal);
+    assert_eq!(plan.surfaces.len(), 1, "unbuilt Map shows one card");
+    (plan.surfaces[0], content_rows)
+}
 
-    let wide = phase_presentation_plan(
-        &body,
-        Rect::new(0, 0, 160, 48),
-        None,
-        None,
-        AttentionMode::Normal,
-    );
-    assert_eq!(wide.surfaces.len(), 1, "unbuilt Map shows one card");
+/// The 160x48 corner the defect report named: a ~124-column pane whose rows
+/// stopped near column 90, above thirty blank rows.
+#[test]
+fn unbuilt_map_status_card_is_capped_at_one_hundred_and_sixty_columns() {
+    let (card, content_rows) = unbuilt_map_card(Rect::new(0, 0, 160, 48));
     assert!(
-        wide.surfaces[0].rect.width <= 100,
+        card.rect.width <= 100,
         "160x48 card width was {}",
-        wide.surfaces[0].rect.width
-    );
-
-    let narrow = phase_presentation_plan(
-        &body,
-        Rect::new(0, 0, 80, 24),
-        None,
-        None,
-        AttentionMode::Normal,
+        card.rect.width
     );
     assert_eq!(
-        narrow.surfaces[0].rect.width, 80,
-        "80x24 keeps the full-width card"
+        card.rect.height,
+        content_rows + 1,
+        "160x48 card must stop at its last row, not fill 48 rows"
+    );
+}
+
+/// The 80x24 corner: narrower than the width cap, so the card keeps the full
+/// width and still stops at its last row.
+#[test]
+fn unbuilt_map_status_card_stays_full_width_at_eighty_columns() {
+    let (card, content_rows) = unbuilt_map_card(Rect::new(0, 0, 80, 24));
+    assert_eq!(card.rect.width, 80, "80x24 keeps the full-width card");
+    assert_eq!(
+        card.rect.height,
+        content_rows + 1,
+        "80x24 card must stop at its last row"
+    );
+}
+
+/// The audited state the earlier width cap did not reach: an accepted Map with
+/// a built context but no threat model has nothing missing, stale, or blocked,
+/// so its readiness card fell through to the generic column solver and was
+/// stretched over the whole body — six populated rows above thirty blank ones.
+#[test]
+fn map_awaiting_only_a_threat_model_gets_the_status_card_not_the_body() {
+    let mut body = fixture_body(WorkflowPhase::Map, SemanticFixture::Empty);
+    let PhaseCockpitBody::Map(model) = &mut body else {
+        unreachable!("Map fixture body")
+    };
+    // Context is built, so the readiness card is Available; only the missing
+    // threat model still asks for an action.
+    model.empty_hint = None;
+    model.project.rows = vec![crate::ui_view_models::ProjectModelRow {
+        section: "context feed",
+        origin: crate::ui_view_models::ProjectModelOrigin::Local,
+        state: "present",
+        summary: "1 snapshot".to_string(),
+        action: "context build",
+    }];
+    assert!(super::map::map_requires_action(model));
+    assert_eq!(phase_surface_specs(&body).len(), 1);
+
+    let area = Rect::new(0, 0, 160, 48);
+    let plan = phase_presentation_plan(&body, area, None, None, AttentionMode::Normal);
+    assert_eq!(plan.density, LayoutDensity::Sparse);
+    assert!(
+        matches!(plan.composition, Composition::StatusCard { .. }),
+        "sparse actionable Map composition was {:?}",
+        plan.composition
+    );
+    assert_eq!(
+        plan.surfaces[0].rect.height, 4,
+        "heading, status, one receipt row, and the pane title"
     );
 }
