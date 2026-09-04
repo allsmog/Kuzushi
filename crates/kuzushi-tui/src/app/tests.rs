@@ -16591,25 +16591,50 @@ fn merge_json_deep_merges_objects_and_handles_null_deletion() {
     );
 }
 
+/// A persisted threat model the persistence schema accepts, so an apply test
+/// exercises the commit rather than bouncing off document validation.
+fn seed_persisted_threat_model(target: &Path, admin_zone: &str) {
+    save_persistent_threat_model(
+        target,
+        &serde_json::json!({
+            "version": "2.0",
+            "methodology": "stride",
+            "trustZones": {"admin": admin_zone},
+            "dfd": {
+                "nodes": [{
+                    "id": "app",
+                    "name": "Admin API",
+                    "type": "process",
+                    "trustZone": "application"
+                }],
+                "flows": [],
+                "trustBoundaries": []
+            },
+            "threats": [],
+            "summary": {}
+        }),
+        true,
+    )
+    .unwrap();
+}
+
+fn pending_admin_zone_patch(admin_zone: &str) -> ThreatPatch {
+    ThreatPatch {
+        goal: "g".to_string(),
+        summary: "s".to_string(),
+        patch: serde_json::json!({"trustZones": {"admin": admin_zone}}),
+        unsupported: vec![],
+    }
+}
+
 #[test]
 fn apply_pending_threat_patch_writes_to_disk() {
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().to_path_buf();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(target.clone()));
-    // Seed an existing model.
-    save_persistent_threat_model(
-        &target,
-        &serde_json::json!({"trustZones":{"admin":"trusted"}}),
-        true,
-    )
-    .unwrap();
-    app.set_pending_threat_patch(ThreatPatch {
-        goal: "g".to_string(),
-        summary: "s".to_string(),
-        patch: serde_json::json!({"trustZones":{"admin":"isolated"}}),
-        unsupported: vec![],
-    });
+    seed_persisted_threat_model(&target, "trusted");
+    app.set_pending_threat_patch(pending_admin_zone_patch("isolated"));
     update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::ThreatApply));
     let written = load_persistent_threat_model(&target).unwrap().unwrap();
     assert_eq!(
@@ -16619,6 +16644,85 @@ fn apply_pending_threat_patch_writes_to_disk() {
         Some("isolated")
     );
     assert!(!app.engagement.has_pending_threat_patch());
+}
+
+/// A refused commit used to be announced as applied and the reviewed patch
+/// discarded anyway, so the operator lost it with nothing left to retry.
+#[test]
+fn refused_threat_patch_commit_keeps_the_pending_patch_and_reports_no_success() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().to_path_buf();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.clone()));
+    // No `version`, so the merged document fails persistence validation.
+    save_persistent_threat_model(
+        &target,
+        &serde_json::json!({"trustZones": {"admin": "trusted"}}),
+        true,
+    )
+    .unwrap();
+    app.set_pending_threat_patch(pending_admin_zone_patch("isolated"));
+
+    update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::ThreatApply));
+
+    assert!(
+        app.engagement.has_pending_threat_patch(),
+        "a refused commit must leave the reviewed patch pending"
+    );
+    let logs = app.log_lines();
+    assert!(
+        logs.iter()
+            .any(|line| line.body.contains("was not committed")),
+        "{logs:?}"
+    );
+    assert!(
+        !logs.iter().any(|line| line.body.contains("applied patch")),
+        "{logs:?}"
+    );
+    assert_eq!(
+        app.live_activity().map(|activity| activity.phase),
+        Some(LiveActivityPhase::Refused)
+    );
+    let stored = load_persistent_threat_model(&target).unwrap().unwrap();
+    assert_eq!(
+        stored.pointer("/trustZones/admin").and_then(|v| v.as_str()),
+        Some("trusted")
+    );
+}
+
+/// `threats apply` owns no Run Focus session, so refusing it must not stamp
+/// whichever session happens to be open. A terminal stamp there would clear
+/// `phase_attempt_in_flight` and let that run's half-written artifacts advance
+/// the phase chip while it is still running.
+#[test]
+fn refused_threat_patch_commit_leaves_an_unrelated_run_in_flight() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().to_path_buf();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.clone()));
+    save_persistent_threat_model(
+        &target,
+        &serde_json::json!({"trustZones": {"admin": "trusted"}}),
+        true,
+    )
+    .unwrap();
+    app.set_activity(Some(ActivitySession::for_phase(
+        "run-unrelated",
+        kuzushi_core::WorkflowPhase::Map,
+    )));
+    app.set_pending_threat_patch(pending_admin_zone_patch("isolated"));
+
+    update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::ThreatApply));
+
+    assert_eq!(
+        app.live_activity().map(|activity| activity.phase),
+        Some(LiveActivityPhase::Refused)
+    );
+    assert!(
+        app.activity()
+            .is_some_and(|session| session.completed_at.is_none()),
+        "an unrelated run must still read as in flight"
+    );
 }
 
 #[test]
