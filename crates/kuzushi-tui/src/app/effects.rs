@@ -799,16 +799,20 @@ impl ShellApp {
         );
     }
 
+    /// The commit decides the outcome, so nothing is announced or discarded
+    /// before it answers. A refused commit — a merged document the persistence
+    /// schema rejects, an unwritable store — leaves the reviewed patch pending
+    /// so the operator can correct the target and apply it again instead of
+    /// paying for another regeneration.
     pub(super) fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
-        let target = apply.target;
-        self.engagement.clear_pending_threat_patch();
-        self.set_completed_activity("threat model", "pending patch applied");
         match kuzushi_core::capabilities::apply_threat_model_patch_revision(
-            &target,
+            &apply.target,
             &apply.patch.patch,
             "tui:threats-apply",
         ) {
             Ok(committed) => {
+                self.engagement.clear_pending_threat_patch();
+                self.set_completed_activity("threat model", "pending patch applied");
                 self.log_applied_threat_patch(apply.patch.unsupported);
                 self.log(
                     "threats",
@@ -822,11 +826,19 @@ impl ShellApp {
                 }
                 self.hydrate_latest_threat_model_for_dfd();
             }
-            Err(error) => self.log(
-                "error",
-                format!("threat-model patch was not committed: {error:#}"),
-            ),
+            Err(error) => self.refuse_threat_patch_commit(error),
         }
+    }
+
+    fn refuse_threat_patch_commit(&mut self, error: anyhow::Error) {
+        self.set_refused_activity("threat model", "pending patch not committed");
+        self.log(
+            "error",
+            with_next_step(
+                format!("threat-model patch was not committed: {error:#}"),
+                "threats apply to retry once the reported problem is fixed, or threats reject",
+            ),
+        );
     }
 
     fn log_applied_threat_patch(&mut self, unsupported: Vec<String>) {
