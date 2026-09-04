@@ -93,11 +93,21 @@ fn record_python_import_node(text: &str, imports: &mut Vec<String>) {
     let normalized = text.replace("\\\r\n", " ").replace("\\\n", " ");
     let trimmed = normalized.trim_start();
 
-    if let Some(rest) = trimmed.strip_prefix("from ") {
+    if let Some(rest) = strip_python_keyword(trimmed, "from") {
         record_python_module_token(rest, imports);
-    } else if let Some(rest) = trimmed.strip_prefix("import ") {
+    } else if let Some(rest) = strip_python_keyword(trimmed, "import") {
         record_python_import_list(rest, imports);
     }
+}
+
+/// Python permits any whitespace (tabs, form feeds) between the keyword and
+/// the module path, so a literal-space prefix would drop legal imports.
+fn strip_python_keyword<'a>(text: &'a str, keyword: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix(keyword)?;
+    rest.chars()
+        .next()
+        .filter(|next| next.is_ascii_whitespace())
+        .map(|_| rest.trim_start())
 }
 
 fn record_python_import_list(rest: &str, imports: &mut Vec<String>) {
@@ -374,6 +384,9 @@ mod tests {
             "from falcon import App",
             "    from falcon.asgi import App",
             "from falcon import (\n    App,\n)",
+            "import\tfalcon",
+            "from\tfalcon import App",
+            "import\u{0c}falcon",
         ] {
             assert!(
                 python_detector_matches(falcon, source),
