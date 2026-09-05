@@ -111,19 +111,21 @@ code, tests, release workflows, and the npm registry remain the source of truth.
   merely share a line bucket; and rows are deliberately **not** merged across
   runs (only the identity is shared) so a per-run `--fail-on` gate stays honest.
   *Exit (supersedes "zero duplicate rows"): every finding gets a dedup key; the same defect re-observed shares one durable identity.*
-- [ ] **P1.4 Fail-loud structured output.** Two named fallbacks are fixed: the
+- [ ] **P1.4 Fail-loud structured output.** Three named fallbacks are fixed: the
   bridge no longer coerces an unparseable provider event to `{}` — it throws
   `invalidProviderResponseError()` (`scripts/langgraph-bridge/oauth-models.mjs`)
-  — and a corrupted persisted verdict now errors with
+  — a corrupted persisted verdict now errors with
   `unknown persisted proof verdict …` instead of deserializing to
-  `NotReproduced` (`findings/persistence/open/triage_and_verification.rs:302`).
-  Three remain: patch gating reads `/data/exploitable` with `unwrap_or(false)`
-  (`modules/application/sast_scan/run_sast_verification_and_patch.rs` ~245); an
-  unparseable classifier-gate response still scores a neutral `0.5`
-  (`capabilities/classifier_gate/application/likely_vuln_classifier.rs` ~146 —
-  it records a runtime diagnostic, but the neutral score is not a typed
-  degradation carried on the finding); and the deep auditor synthesizes a
-  `triggerable: false @ 0.25` vote out of unparseable output
+  `NotReproduced` (`findings/persistence/open/triage_and_verification.rs:302`)
+  — and the classifier gate no longer manufactures a neutral `0.5` from an
+  unreadable response: `ClassifierAssessment::ParseDegraded`
+  (`capabilities/classifier_gate/domain/classifier_assessment.rs`) escalates to
+  the deep auditor, trains no quantile, persists no triage row, and reports a
+  null score with `parseDegraded: true`.
+  Two remain: patch gating reads `/data/exploitable` with `unwrap_or(false)`
+  (`modules/application/sast_scan/run_sast_verification_and_patch.rs` ~245); and
+  the deep auditor synthesizes a `triggerable: false @ 0.25` vote out of
+  unparseable output
   (`capabilities/deep_auditor/application/parse_vuln_analysis.rs` ~27).
   Replace each with a typed `ParseDegraded` surfaced in trace + finding
   provenance.
