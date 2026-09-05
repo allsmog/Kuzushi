@@ -19,6 +19,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The classifier gate no longer turns a response it could not read into a
+  score. An unparseable answer became a neutral `0.5`, and `0.5` sits below the
+  default `0.6` cold-start floor — so the fallback meant to keep a real bug from
+  being rejected rejected it: the deep auditor never ran, and the finding was
+  left carrying a persisted `NeedsReview` row whose confidence was `0.50` and
+  whose rationale read `below adaptive triage threshold (score=0.50, …)`, a
+  parse failure presented as a model judgement. An unreadable response is now
+  `ParseDegraded`: it escalates to the deep auditor, trains no quantile,
+  persists no triage verdict, and `classifier-gate:score` reports a null
+  `score` with `parseDegraded: true` instead of a number nobody produced.
+  Responses the gate can read are scored, thresholded, and recorded exactly as
+  before.
+
 - `.kuzushi/scope.toml` can no longer be walked past with a URL that two
   parsers read as two different hosts. The gate extracted one host under RFC
   3986 rules, so `https://evil.test\@in-scope.host` presented as the in-scope
