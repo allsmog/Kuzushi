@@ -288,12 +288,13 @@ pub(crate) fn run_classifier_score_tool(
     let run = prepare_classifier_score(&input, ctx, runtime)?;
     let routed = classifier_routed_runtime(run.runtime, ctx, run.workspace.root())?;
     let gate = classifier_gate(&routed, run.workspace, run.target_percentile)?;
-    let (score, cost) = gate.score_with_cost(&run.finding, run.workspace.root())?;
-    let should_audit = gate.should_deep_audit(score);
+    let (assessment, cost) = gate.assess_with_cost(&run.finding, run.workspace.root())?;
+    let should_audit = gate.should_deep_audit(assessment);
     let threshold = gate.current_threshold();
     let n = gate.samples_seen();
-    save_classifier_skip_if_needed(&run, &gate, score, should_audit, cost)?;
-    let mut result = classifier_score_response(&run.finding, score, should_audit, threshold, n);
+    save_classifier_skip_if_needed(&run, &gate, assessment, should_audit, cost)?;
+    let mut result =
+        classifier_score_response(&run.finding, assessment, should_audit, threshold, n);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
 }
@@ -383,14 +384,20 @@ fn classifier_gate<'a>(
     LikelyVulnClassifier::new(runtime, cfg)
 }
 
+/// A skip is a claim that the model scored this finding below the threshold, so
+/// only a real score may be recorded as one. A degraded assessment always
+/// audits and therefore never reaches this path.
 fn save_classifier_skip_if_needed(
     run: &ClassifierScoreRun<'_>,
     gate: &crate::capabilities::classifier_gate::LikelyVulnClassifier<'_>,
-    score: f32,
+    assessment: crate::capabilities::classifier_gate::ClassifierAssessment,
     should_audit: bool,
     cost: crate::runtime::RuntimeCostReport,
 ) -> Result<()> {
-    let Some(id) = run.finding.id.filter(|_| !should_audit) else {
+    let Some(score) = assessment.score().filter(|_| !should_audit) else {
+        return Ok(());
+    };
+    let Some(id) = run.finding.id else {
         return Ok(());
     };
     let outcome = gate.skip_outcome_with_cost(score, cost);
@@ -399,20 +406,21 @@ fn save_classifier_skip_if_needed(
 
 fn classifier_score_response(
     finding: &crate::findings::Finding,
-    score: f32,
+    assessment: crate::capabilities::classifier_gate::ClassifierAssessment,
     should_audit: bool,
     threshold: f32,
     samples_seen: usize,
 ) -> Value {
-    let summary = format!(
-        "classifier-gate:score {:.3} ({})",
-        score,
-        if should_audit { "audit" } else { "skip" }
-    );
+    let decision = if should_audit { "audit" } else { "skip" };
+    let summary = match assessment.score() {
+        Some(score) => format!("classifier-gate:score {score:.3} ({decision})"),
+        None => format!("classifier-gate:score unscored/parse-degraded ({decision})"),
+    };
     let data = json!({
         "findingId": finding.id,
         "fingerprint": finding.fingerprint,
-        "score": score,
+        "score": assessment.score(),
+        "parseDegraded": assessment.is_parse_degraded(),
         "shouldDeepAudit": should_audit,
         "threshold": threshold,
         "samplesSeen": samples_seen,

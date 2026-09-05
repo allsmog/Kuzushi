@@ -1,4 +1,4 @@
-use super::domain::{ClassifierConfig, QuantileEstimator, Score};
+use super::domain::{ClassifierAssessment, ClassifierConfig, QuantileEstimator, Score};
 use super::persistence::{load_quantile, save_quantile};
 use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::findings::{Finding, TriageOutcome, TriageVerdict};

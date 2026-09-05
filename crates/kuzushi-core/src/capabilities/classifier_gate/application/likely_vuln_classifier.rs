@@ -13,23 +13,47 @@ impl<'a> LikelyVulnClassifier<'a> {
         })
     }
 
-    /// Score a finding via the cheap classifier model.
-    pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
-        self.score_with_cost(finding, cwd).map(|(score, _)| score)
+    /// Assess a finding via the cheap classifier model.
+    pub fn assess(&self, finding: &Finding, cwd: &Path) -> Result<ClassifierAssessment> {
+        self.assess_with_cost(finding, cwd)
+            .map(|(assessment, _)| assessment)
     }
 
-    pub(crate) fn score_with_cost(
+    /// Compatibility wrapper for callers written against the score-only API.
+    ///
+    /// It reports the score for a readable response and an error for one the
+    /// gate could not read — never the neutral `0.5` it used to manufacture,
+    /// which fell below the default cold-start floor and rejected the finding
+    /// it failed to read. Use [`Self::assess`], which makes that state
+    /// representable instead of collapsing it into a number or an error.
+    #[deprecated(
+        since = "0.24.0",
+        note = "use `assess`, which distinguishes a score from an unreadable response"
+    )]
+    pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
+        self.assess(finding, cwd)?.score().ok_or_else(|| {
+            anyhow::anyhow!("classifier gate response carried no usable verdict; call `assess`")
+        })
+    }
+
+    pub(crate) fn assess_with_cost(
         &self,
         finding: &Finding,
         cwd: &Path,
-    ) -> Result<(Score, crate::runtime::RuntimeCostReport)> {
+    ) -> Result<(ClassifierAssessment, crate::runtime::RuntimeCostReport)> {
         let response = self.query_classifier(finding, cwd)?;
         let cost = response.checked_cost_report()?;
-        let parsed_score = parsed_classifier_score(&response);
-        let parsed_response = parsed_score.is_some();
-        let raw = parsed_score.unwrap_or_else(neutral_classifier_score);
-        self.observe_parsed_score(parsed_response, raw);
-        Ok((raw, cost))
+        let assessment = match parsed_classifier_score(&response) {
+            Some(score) => {
+                self.observe_score(score);
+                ClassifierAssessment::Scored(score)
+            }
+            None => {
+                record_parse_degraded();
+                ClassifierAssessment::ParseDegraded
+            }
+        };
+        Ok((assessment, cost))
     }
 
     fn query_classifier(&self, finding: &Finding, cwd: &Path) -> Result<AgentQueryResponse> {
@@ -46,25 +70,27 @@ impl<'a> LikelyVulnClassifier<'a> {
             .context("classifier gate query failed")
     }
 
-    fn observe_parsed_score(&self, parsed_response: bool, raw: Score) {
-        if !parsed_response {
-            return;
-        }
+    fn observe_score(&self, score: Score) {
         let mut quantile = self.quantile.lock().expect("quantile mutex poisoned");
-        quantile.observe(raw);
+        quantile.observe(score);
         if let Some(ref db) = self.cfg.state_db {
             // Best-effort: a persistence failure must not block the scan.
             let _ = save_quantile(db, &quantile);
         }
     }
 
-    /// Whether a score graduates to the deep auditor.
-    pub fn should_deep_audit(&self, score: Score) -> bool {
-        let q = self.quantile.lock().expect("quantile mutex poisoned");
-        if q.count < self.cfg.cold_start_min_count {
-            score >= self.cfg.cold_start_floor
-        } else {
-            score >= q.estimate()
+    /// Whether an assessment graduates to the deep auditor.
+    ///
+    /// A degraded assessment escalates. The gate exists to save the deep
+    /// auditor's budget, and a gate that failed to read the model's answer has
+    /// learned nothing that could stand in for a negative verdict.
+    ///
+    /// A bare [`Score`] still converts, so callers written against the
+    /// score-only API keep compiling and keep their threshold semantics.
+    pub fn should_deep_audit(&self, assessment: impl Into<ClassifierAssessment>) -> bool {
+        match assessment.into() {
+            ClassifierAssessment::Scored(score) => score >= self.current_threshold(),
+            ClassifierAssessment::ParseDegraded => true,
         }
     }
 
@@ -138,12 +164,10 @@ fn classifier_response_score(response: ClassifierResponse) -> Score {
     score.clamp(0.0, 1.0)
 }
 
-fn neutral_classifier_score() -> Score {
+fn record_parse_degraded() {
     crate::runtime_diagnostics::record_runtime_diagnostic(
         "classifier",
-        "classifier gate response was unparseable; using neutral score without training quantile",
+        "classifier gate response carried no usable verdict; escalating to deep audit \
+         without a score and without training the quantile",
     );
-    // Conservative fallback: if we can't parse, score in the middle so the
-    // gate doesn't reject a real bug just because the model burped.
-    0.5
 }

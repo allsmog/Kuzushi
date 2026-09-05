@@ -93,13 +93,13 @@ mod tests {
         // Score 4 findings — still in cold-start.
         for i in 0..4 {
             let f = synth_finding(&format!("rule-{i}"));
-            let _ = gate.score(&f, Path::new(".")).unwrap();
+            let _ = gate.assess(&f, Path::new(".")).unwrap();
         }
         assert_eq!(gate.samples_seen(), 4);
         // 0.7 ≥ 0.5 → graduates.
-        assert!(gate.should_deep_audit(0.7));
+        assert!(gate.should_deep_audit(ClassifierAssessment::Scored(0.7)));
         // 0.4 < 0.5 → rejected.
-        assert!(!gate.should_deep_audit(0.4));
+        assert!(!gate.should_deep_audit(ClassifierAssessment::Scored(0.4)));
         // Threshold should still be the floor.
         assert!((gate.current_threshold() - 0.5).abs() < 1e-6);
     }
@@ -119,7 +119,7 @@ mod tests {
             let gate = LikelyVulnClassifier::new(&runtime, cfg).unwrap();
             for i in 0..60 {
                 let f = synth_finding(&format!("rule-{i}"));
-                let _ = gate.score(&f, Path::new(".")).unwrap();
+                let _ = gate.assess(&f, Path::new(".")).unwrap();
             }
             assert_eq!(gate.samples_seen(), 60);
         }
@@ -172,12 +172,12 @@ mod tests {
             None,
         );
         let gate = LikelyVulnClassifier::new(&runtime, ClassifierConfig::default()).unwrap();
-        let s = gate.score(&synth_finding("r"), Path::new(".")).unwrap();
+        let s = scored(&gate);
         assert!((s - 0.85).abs() < 1e-6, "got {s}");
     }
 
-    #[test]
-    fn unparseable_response_falls_back_to_neutral_score() {
+    /// A runtime whose answer the classifier gate cannot read.
+    fn routed_unparseable() -> RoutedRuntime<'static> {
         struct Q;
         impl AgentRuntime for Q {
             fn query_blocking(&self, _: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -192,16 +192,27 @@ mod tests {
             }
         }
         let inner: Arc<dyn AgentRuntime> = Arc::new(Q);
-        let runtime = RoutedRuntime::new(
+        RoutedRuntime::new(
             inner,
             Arc::new(router_with_classifier_role("anthropic:claude-haiku-4-5")),
             None,
-        );
+        )
+    }
+
+    #[test]
+    fn unparseable_response_is_degraded_rather_than_a_neutral_score() {
+        let runtime = routed_unparseable();
         let gate = LikelyVulnClassifier::new(&runtime, ClassifierConfig::default()).unwrap();
-        let s = gate.score(&synth_finding("r"), Path::new(".")).unwrap();
-        // Neutral fallback so a junk response doesn't auto-reject a real bug.
-        assert!((s - 0.5).abs() < 1e-6, "got {s}");
+        let assessment = gate.assess(&synth_finding("r"), Path::new(".")).unwrap();
+
+        // A response the gate could not read is not a score.
+        assert_eq!(assessment, ClassifierAssessment::ParseDegraded);
+        assert_eq!(assessment.score(), None);
         assert_eq!(gate.observed_score_count_for_test(), 0);
+        // The old neutral 0.5 sat *below* the default 0.6 cold-start floor, so
+        // the fallback meant to protect a real bug rejected it instead.
+        assert!(!gate.should_deep_audit(ClassifierAssessment::Scored(0.5)));
+        assert!(gate.should_deep_audit(assessment));
     }
 
     #[test]
@@ -227,7 +238,36 @@ mod tests {
             None,
         );
         let gate = LikelyVulnClassifier::new(&runtime, ClassifierConfig::default()).unwrap();
-        let s = gate.score(&synth_finding("r"), Path::new(".")).unwrap();
+        let s = scored(&gate);
         assert!((s - 0.92).abs() < 1e-6, "got {s}");
+    }
+
+    /// The score-only API stays source-compatible for downstream Rust callers,
+    /// but the deprecated `score` reports an unreadable response as an error
+    /// rather than the neutral `0.5` it used to manufacture.
+    #[test]
+    #[allow(deprecated)]
+    fn deprecated_score_api_still_compiles_and_refuses_to_invent_a_score() {
+        let runtime = routed(0.7, true);
+        let gate = LikelyVulnClassifier::new(&runtime, ClassifierConfig::default()).unwrap();
+        let s = gate.score(&synth_finding("r"), Path::new(".")).unwrap();
+        assert!((s - 0.7).abs() < 1e-6, "got {s}");
+        // A bare Score still reaches the assessment-taking gate.
+        assert!(gate.should_deep_audit(0.7));
+        assert!(!gate.should_deep_audit(0.4));
+
+        let unreadable = routed_unparseable();
+        let gate = LikelyVulnClassifier::new(&unreadable, ClassifierConfig::default()).unwrap();
+        let err = gate
+            .score(&synth_finding("r"), Path::new("."))
+            .expect_err("an unreadable response must not surface as a score");
+        assert!(err.to_string().contains("no usable verdict"), "{err}");
+    }
+
+    fn scored(gate: &LikelyVulnClassifier<'_>) -> Score {
+        gate.assess(&synth_finding("r"), Path::new("."))
+            .unwrap()
+            .score()
+            .expect("classifier returned a parseable score")
     }
 }

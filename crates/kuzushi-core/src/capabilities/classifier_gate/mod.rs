@@ -6,6 +6,7 @@ mod persistence;
 mod tests;
 
 pub use application::LikelyVulnClassifier;
+pub use domain::ClassifierAssessment;
 pub use domain::ClassifierConfig;
 pub use domain::QuantileEstimator;
 pub use domain::Score;

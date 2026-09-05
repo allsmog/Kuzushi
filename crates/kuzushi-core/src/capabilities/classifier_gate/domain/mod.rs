@@ -1,8 +1,10 @@
+mod classifier_assessment;
 mod config;
 mod marker_adjustment;
 mod quantile_estimator;
 mod quantile_estimator_update;
 
+pub use classifier_assessment::ClassifierAssessment;
 pub use config::ClassifierConfig;
 pub use config::Score;
 pub use quantile_estimator::QuantileEstimator;

@@ -5220,6 +5220,89 @@ OUT
         );
     }
 
+    /// A classifier response with no readable verdict used to score a neutral
+    /// 0.5, which sits below the default 0.6 cold-start floor — so the finding
+    /// was skipped and a triage row was persisted claiming the model had scored
+    /// it. The gate must now escalate instead and record no verdict.
+    #[test]
+    fn classifier_gate_parse_degraded_audits_and_records_no_triage() {
+        struct UnreadableClassifierRuntime;
+        impl AgentRuntime for UnreadableClassifierRuntime {
+            fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+                Ok(AgentQueryResponse {
+                    text: "I am unable to answer that.".to_string(),
+                    structured: None,
+                    ..Default::default()
+                })
+            }
+            fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+                anyhow::bail!("classifier gate only issues structured queries")
+            }
+        }
+
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-1", workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.sql",
+            "src/db.ts",
+            9,
+            Some(9),
+            Severity::High,
+            "SQL injection in search",
+        );
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = UnreadableClassifierRuntime;
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "classifier-gate:score",
+                json!({ "findingFingerprint": finding.fingerprint.clone() }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert!(
+            result.pointer("/data/score").is_some_and(Value::is_null),
+            "a parse failure must not be reported as a score: {result}"
+        );
+        assert_eq!(
+            result.pointer("/data/parseDegraded").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/shouldDeepAudit")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        let reloaded = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        assert!(
+            reloaded.triage.is_none(),
+            "an unread verdict must not persist as a triage decision"
+        );
+    }
+
     #[test]
     fn dispatches_deep_audit_through_runtime_and_persists_result() {
         let temp = tempdir().unwrap();

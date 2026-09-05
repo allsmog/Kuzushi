@@ -11,7 +11,7 @@ pub use crate::attack_surface::{
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceRisk, AttackSurfaceSummary,
 };
 pub use crate::capabilities::classifier_gate::{
-    ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
+    ClassifierAssessment, ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
 };
 pub use crate::capabilities::deep_auditor::{
     record_evidence, run_deep_auditor, run_deep_auditor_traced, DeepAuditConfig, DeepAuditOutcome,
