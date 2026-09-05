@@ -26,3 +26,11 @@ impl ClassifierAssessment {
         matches!(self, Self::ParseDegraded)
     }
 }
+
+/// A bare score is a scored assessment. This keeps callers written against the
+/// score-only gate API compiling against the assessment-taking one.
+impl From<Score> for ClassifierAssessment {
+    fn from(score: Score) -> Self {
+        Self::Scored(score)
+    }
+}

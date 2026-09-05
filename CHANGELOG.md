@@ -30,7 +30,10 @@ Notable changes to Kuzushi. Release procedure lives in
   persists no triage verdict, and `classifier-gate:score` reports a null
   `score` with `parseDegraded: true` instead of a number nobody produced.
   Responses the gate can read are scored, thresholded, and recorded exactly as
-  before.
+  before. The score-only Rust API stays source-compatible: `should_deep_audit`
+  still takes a bare score, and `LikelyVulnClassifier::score` remains as a
+  deprecated wrapper that errors on an unreadable response instead of inventing
+  one.
 
 - `.kuzushi/scope.toml` can no longer be walked past with a URL that two
   parsers read as two different hosts. The gate extracted one host under RFC

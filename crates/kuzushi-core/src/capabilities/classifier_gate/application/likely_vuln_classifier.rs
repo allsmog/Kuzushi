@@ -19,6 +19,23 @@ impl<'a> LikelyVulnClassifier<'a> {
             .map(|(assessment, _)| assessment)
     }
 
+    /// Compatibility wrapper for callers written against the score-only API.
+    ///
+    /// It reports the score for a readable response and an error for one the
+    /// gate could not read — never the neutral `0.5` it used to manufacture,
+    /// which fell below the default cold-start floor and rejected the finding
+    /// it failed to read. Use [`Self::assess`], which makes that state
+    /// representable instead of collapsing it into a number or an error.
+    #[deprecated(
+        since = "0.24.0",
+        note = "use `assess`, which distinguishes a score from an unreadable response"
+    )]
+    pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
+        self.assess(finding, cwd)?.score().ok_or_else(|| {
+            anyhow::anyhow!("classifier gate response carried no usable verdict; call `assess`")
+        })
+    }
+
     pub(crate) fn assess_with_cost(
         &self,
         finding: &Finding,
@@ -67,8 +84,11 @@ impl<'a> LikelyVulnClassifier<'a> {
     /// A degraded assessment escalates. The gate exists to save the deep
     /// auditor's budget, and a gate that failed to read the model's answer has
     /// learned nothing that could stand in for a negative verdict.
-    pub fn should_deep_audit(&self, assessment: ClassifierAssessment) -> bool {
-        match assessment {
+    ///
+    /// A bare [`Score`] still converts, so callers written against the
+    /// score-only API keep compiling and keep their threshold semantics.
+    pub fn should_deep_audit(&self, assessment: impl Into<ClassifierAssessment>) -> bool {
+        match assessment.into() {
             ClassifierAssessment::Scored(score) => score >= self.current_threshold(),
             ClassifierAssessment::ParseDegraded => true,
         }
