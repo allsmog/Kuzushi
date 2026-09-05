@@ -224,7 +224,10 @@ fn run_optional_sast_patch(
     fingerprint: &str,
     verification: &Value,
 ) -> Result<Option<Value>> {
-    if !requests.auto_patch || !sast_verification_exploitable(verification) {
+    if !requests.auto_patch {
+        return Ok(None);
+    }
+    if !sast_verification_exploitable(verification)? {
         return Ok(None);
     }
     let patch = run_sast_phase_subtool(
@@ -242,11 +245,15 @@ fn run_optional_sast_patch(
     Ok(Some(patch))
 }
 
-fn sast_verification_exploitable(verification: &Value) -> bool {
+fn sast_verification_exploitable(verification: &Value) -> Result<bool> {
     verification
         .pointer("/data/exploitable")
         .and_then(Value::as_bool)
-        .unwrap_or(false)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "SAST auto-patch requires verification to contain boolean data.exploitable"
+            )
+        })
 }
 
 pub(in crate::modules) fn sast_output_lines(
@@ -325,10 +332,97 @@ mod tests {
     fn empirical_exploitability_is_eligible_for_fix() {
         assert!(sast_verification_exploitable(&json!({
             "data": {"exploitable": true}
-        })));
+        }))
+        .unwrap());
         assert!(!sast_verification_exploitable(&json!({
             "data": {"exploitable": false}
-        })));
+        }))
+        .unwrap());
+    }
+
+    #[test]
+    fn malformed_exploitability_is_not_a_negative_verdict() {
+        for malformed in [
+            json!({}),
+            json!({"data": {}}),
+            json!({"data": {"exploitable": "true"}}),
+        ] {
+            let error = sast_verification_exploitable(&malformed).unwrap_err();
+            assert!(
+                error.to_string().contains("boolean data.exploitable"),
+                "unexpected error: {error:#}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_verification_refuses_auto_patch_before_dispatch() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let artifacts = SastRunArtifacts::create(&workspace, "scan-malformed-verdict").unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = crate::config::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let requests = SastScanRequests::from_input(&json!({"autoPatch": true})).unwrap();
+
+        let error = run_optional_sast_patch(
+            &registry,
+            &json!({}),
+            &ctx,
+            None,
+            &crate::options::ToolOptionStore::new(),
+            &artifacts,
+            &requests,
+            "scan-malformed-verdict",
+            "finding-malformed-verdict",
+            &json!({"data": {}}),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("boolean data.exploitable"));
+        assert!(load_sast_phase_stages(&artifacts).unwrap().is_empty());
+    }
+
+    #[test]
+    fn disabled_auto_patch_does_not_require_an_exploitability_verdict() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let artifacts = SastRunArtifacts::create(&workspace, "scan-no-autopatch").unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = crate::config::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let requests = SastScanRequests::from_input(&json!({})).unwrap();
+
+        let patch = run_optional_sast_patch(
+            &registry,
+            &json!({}),
+            &ctx,
+            None,
+            &crate::options::ToolOptionStore::new(),
+            &artifacts,
+            &requests,
+            "scan-no-autopatch",
+            "finding-no-autopatch",
+            &json!({"data": {}}),
+        )
+        .unwrap();
+
+        assert!(patch.is_none());
+        assert!(load_sast_phase_stages(&artifacts).unwrap().is_empty());
     }
 
     #[test]
