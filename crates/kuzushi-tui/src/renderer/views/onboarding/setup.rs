@@ -122,22 +122,23 @@ fn setup_summary_line(
 }
 
 /// What committing this plan will actually execute. Selected planning tasks
-/// are not the whole Map execution envelope: after Map drains, Kuzushi may run
-/// one deterministic module-recommendation refresh when that artifact is
-/// absent. Keep that expected run next to the selected-task count so the fact
-/// survives the summary's width cap instead of being ellipsized off the tail.
+/// are not the whole Map execution envelope: after a non-skipped Map drains,
+/// Kuzushi may run one deterministic module-recommendation refresh when that
+/// artifact is absent. Keep that expected run next to the selected-task count
+/// so the fact survives the summary's width cap instead of being ellipsized
+/// off the tail. An empty plan records an explicit Map skip, so it must never
+/// promise the post-Map refresh.
 fn setup_execution_summary(
     app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
 ) -> String {
-    let expected_refresh = crate::ui_view_models::recommendation_artifact_needs_refresh(app)
-        .then_some(" · +1 expected background recommendation run")
-        .unwrap_or_default();
+    let expected_refresh = (model.selected_tasks > 0
+        && crate::ui_view_models::recommendation_artifact_needs_refresh(app))
+    .then_some(" · +1 expected background recommendation run")
+    .unwrap_or_default();
 
     if model.selected_tasks == 0 {
-        return format!(
-            "no selected Map task will run{expected_refresh} · cached Map artifacts reused"
-        );
+        return "no selected Map task will run · cached Map artifacts reused".to_string();
     }
 
     let execution = if model.selected_model_tasks == 0 {
@@ -355,6 +356,10 @@ mod tests {
         assert!(text.contains("cached Map artifacts reused"), "{text}");
         assert!(!text.contains("BLOCKED"), "{text}");
         assert!(!text.contains("0 Map task(s)"), "{text}");
+        assert!(
+            !text.contains("+1 expected background recommendation run"),
+            "an empty plan records an explicit Map skip and cannot launch the post-Map refresh: {text}"
+        );
     }
 
     #[test]
