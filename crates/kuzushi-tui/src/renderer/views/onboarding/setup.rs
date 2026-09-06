@@ -17,7 +17,7 @@ pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.extend(setup_readiness_lines(app, &model.rows, width, compact));
     lines.extend(setup_editor_lines(app, width));
     lines.push(blank());
-    lines.push(setup_summary_line(&model, width));
+    lines.push(setup_summary_line(app, &model, width));
     lines
 }
 
@@ -95,6 +95,7 @@ fn setup_editor_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
 }
 
 fn setup_summary_line(
+    app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
     width: usize,
 ) -> Line<'static> {
@@ -103,7 +104,7 @@ fn setup_summary_line(
             &fit(
                 &format!(
                     " READY · {} · move to Start Map and press Enter",
-                    setup_execution_summary(model),
+                    setup_execution_summary(app, model),
                 ),
                 width,
             ),
@@ -120,18 +121,30 @@ fn setup_summary_line(
     }
 }
 
-/// What committing this plan will actually execute. "0 Map task(s)" reads as a
-/// misconfiguration, so an empty-but-ready plan says what it will do instead.
-fn setup_execution_summary(model: &crate::ui_view_models::SetupReadinessModel) -> String {
-    if model.selected_tasks == 0 {
-        return "no task will run · cached Map artifacts reused".to_string();
-    }
-    let execution = if model.selected_model_tasks == 0 {
-        "deterministic/runtime-free · no model or credentials".to_string()
+/// What committing this plan will actually execute. Selected planning tasks
+/// are not the whole Map execution envelope: after Map drains, Kuzushi may run
+/// one deterministic module-recommendation refresh when that artifact is
+/// absent. Disclose that expected background run here so Setup does not imply
+/// that the selected task count is also the final run count.
+fn setup_execution_summary(
+    app: &ShellApp,
+    model: &crate::ui_view_models::SetupReadinessModel,
+) -> String {
+    let mut summary = if model.selected_tasks == 0 {
+        "no selected Map task will run · cached Map artifacts reused".to_string()
     } else {
-        format!("{} model-backed task(s)", model.selected_model_tasks)
+        let execution = if model.selected_model_tasks == 0 {
+            "deterministic/runtime-free · no model or credentials".to_string()
+        } else {
+            format!("{} model-backed task(s)", model.selected_model_tasks)
+        };
+        format!("{} selected Map task(s) · {execution}", model.selected_tasks)
     };
-    format!("{} Map task(s) · {execution}", model.selected_tasks)
+
+    if crate::ui_view_models::recommendation_artifact_needs_refresh(app) {
+        summary.push_str(" · +1 expected background recommendation run after Map");
+    }
+    summary
 }
 
 fn setup_row_line(
@@ -202,6 +215,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn setup_summary_discloses_the_expected_post_map_recommendation_run() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        let model = setup_readiness_model(&app);
+
+        let summary = setup_execution_summary(&app, &model);
+
+        assert!(
+            summary.contains("+1 expected background recommendation run after Map"),
+            "{summary}"
+        );
     }
 
     #[test]
