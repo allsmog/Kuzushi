@@ -9,9 +9,9 @@ impl CodeqlScanner {
         cancel: &ScanCancellation,
     ) -> Result<ScanEngineOutput> {
         let languages = detect_all_codeql_languages(target, binary, cancel)?;
-        let (output, errors) =
+        let (output, tally) =
             self.collect_codeql_language_outputs(target, binary, repo_name, cancel, languages)?;
-        codeql_multi_language_output(output, errors)
+        codeql_multi_language_output(output, tally)
     }
 
     pub(crate) fn collect_codeql_language_outputs(
@@ -21,9 +21,9 @@ impl CodeqlScanner {
         repo_name: &str,
         cancel: &ScanCancellation,
         languages: Vec<String>,
-    ) -> Result<(ScanEngineOutput, Vec<String>)> {
+    ) -> Result<(ScanEngineOutput, LanguageAnalysisTally)> {
         let mut output = ScanEngineOutput::default();
-        let mut errors = Vec::new();
+        let mut tally = LanguageAnalysisTally::default();
         for language in languages {
             self.scan_one_detected_language(
                 target,
@@ -32,10 +32,10 @@ impl CodeqlScanner {
                 cancel,
                 &language,
                 &mut output,
-                &mut errors,
+                &mut tally,
             )?;
         }
-        Ok((output, errors))
+        Ok((output, tally))
     }
 
     pub(crate) fn scan_one_detected_language(
@@ -46,13 +46,13 @@ impl CodeqlScanner {
         cancel: &ScanCancellation,
         language: &str,
         output: &mut ScanEngineOutput,
-        errors: &mut Vec<String>,
+        tally: &mut LanguageAnalysisTally,
     ) -> Result<()> {
         let mut scanner = self.clone();
         scanner.language = Some(language.to_string());
         scanner.multi_language = false;
         let result = scanner.scan_single_language_artifacts(target, binary, repo_name, cancel);
-        merge_detected_language_output(result, language, cancel, output, errors)
+        merge_detected_language_output(result, language, cancel, output, tally)
     }
 
     pub(crate) fn scan_single_language_artifacts(
@@ -71,6 +71,7 @@ impl CodeqlScanner {
         Ok(ScanEngineOutput {
             findings,
             codeql_sarif_documents: vec![sarif],
+            scan_errors: Vec::new(),
         })
     }
 }

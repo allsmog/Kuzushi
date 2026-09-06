@@ -19,6 +19,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A multi-language `codeql:scan` no longer hides the languages it failed to
+  analyze. Per-language failures — a database that would not build, an
+  analysis that died — were collected and then dropped whenever any other
+  language produced a finding, so a run that never analyzed Java or C++
+  reported `codeql: 4 findings under <target>` with nothing to say that two
+  thirds of the repository went unscanned. This is the recommended
+  invocation: the module recommender asks for `multiLanguage: true` whenever
+  a target has more than one CodeQL language. Those failures now travel with
+  the scan as `scanErrors`, and the report marks the run
+  `(coverage incomplete: N scan errors)` and lists what was missed, matching
+  what `semgrep:scan` already discloses. The hard failure when *no* language
+  could be analyzed is unchanged; a run where one language succeeded with
+  zero findings and another failed is now reported as an honest empty result
+  with its gaps disclosed, rather than as `all language analyses failed` —
+  a claim that was untrue whenever an analysis had in fact succeeded.
+
 - The classifier gate no longer turns a response it could not read into a
   score. An unparseable answer became a neutral `0.5`, and `0.5` sits below the
   default `0.6` cold-start floor — so the fallback meant to keep a real bug from

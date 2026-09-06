@@ -13,7 +13,7 @@ use crate::sbom_scan::scan_sbom;
 use crate::scan::{
     index_codeql_sarif_as_static_evidence, scan_exploit_chains_with_runtime, CodeqlPersistedRun,
     CodeqlScanReport, CodeqlScanner, ExploitChainReport, ExploitChainScanner, GovulncheckScanner,
-    ScanEngine, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
+    ScanEngine, ScanEngineOutput, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::whitebox_static::{
     mark_whitebox_static_findings, whitebox_static_profile_requested,

@@ -46,37 +46,45 @@ impl SemgrepScanReport {
 fn semgrep_output_lines(report: &SemgrepScanReport) -> Vec<String> {
     let mut lines = vec![semgrep_summary_line(report)];
     append_semgrep_persisted_run(&mut lines, report.persisted.as_ref());
-    append_semgrep_scan_errors(&mut lines, &report.scan_errors);
+    append_scan_errors(
+        &mut lines,
+        "  Semgrep skipped some files or rules:",
+        &report.scan_errors,
+    );
     append_top_findings(&mut lines, &report.findings);
     lines
 }
 
 fn semgrep_summary_line(report: &SemgrepScanReport) -> String {
-    let coverage_note = if report.scan_errors.is_empty() {
-        String::new()
-    } else {
-        format!(
-            " (coverage incomplete: {} scan error{})",
-            report.scan_errors.len(),
-            plural_suffix(report.scan_errors.len())
-        )
-    };
     format!(
         "semgrep: {} finding{} under {}{}",
         report.count,
         plural_suffix(report.count),
         report.target,
-        coverage_note
+        coverage_note(&report.scan_errors)
     )
 }
 
 const MAX_LISTED_SCAN_ERRORS: usize = 3;
 
-fn append_semgrep_scan_errors(lines: &mut Vec<String>, scan_errors: &[String]) {
+/// The summary-line suffix that keeps a partial scan from reading as a full
+/// one. Empty when the engine covered everything it was asked to.
+fn coverage_note(scan_errors: &[String]) -> String {
+    if scan_errors.is_empty() {
+        return String::new();
+    }
+    format!(
+        " (coverage incomplete: {} scan error{})",
+        scan_errors.len(),
+        plural_suffix(scan_errors.len())
+    )
+}
+
+fn append_scan_errors(lines: &mut Vec<String>, header: &str, scan_errors: &[String]) {
     if scan_errors.is_empty() {
         return;
     }
-    lines.push("  Semgrep skipped some files or rules:".to_string());
+    lines.push(header.to_string());
     lines.extend(
         scan_errors
             .iter()
@@ -119,6 +127,10 @@ pub struct CodeqlScanReport {
     pub persisted: Option<CodeqlPersistedRun>,
     #[serde(rename = "reportSarif", skip_serializing_if = "Option::is_none")]
     pub report_sarif: Option<Value>,
+    /// Detected languages CodeQL could not analyze. Non-empty means the run
+    /// completed with incomplete coverage, and the report says so.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scan_errors: Vec<String>,
 }
 
 impl CodeqlScanReport {
@@ -133,11 +145,17 @@ impl CodeqlScanReport {
             findings,
             persisted,
             report_sarif: None,
+            scan_errors: Vec::new(),
         }
     }
 
     pub fn with_sarif_documents(mut self, documents: Vec<String>) -> Self {
         self.report_sarif = sarif_report_value(documents);
+        self
+    }
+
+    pub fn with_scan_errors(mut self, scan_errors: Vec<String>) -> Self {
+        self.scan_errors = scan_errors;
         self
     }
 
@@ -197,16 +215,22 @@ pub struct CodeqlPersistedRun {
 fn codeql_output_lines(report: &CodeqlScanReport) -> Vec<String> {
     let mut lines = vec![codeql_summary_line(report)];
     append_codeql_persisted_run(&mut lines, report.persisted.as_ref());
+    append_scan_errors(
+        &mut lines,
+        "  CodeQL could not analyze every detected language:",
+        &report.scan_errors,
+    );
     append_codeql_top_findings(&mut lines, &report.findings);
     lines
 }
 
 fn codeql_summary_line(report: &CodeqlScanReport) -> String {
     format!(
-        "codeql: {} finding{} under {}",
+        "codeql: {} finding{} under {}{}",
         report.count,
         plural_suffix(report.count),
-        report.target
+        report.target,
+        coverage_note(&report.scan_errors)
     )
 }
 

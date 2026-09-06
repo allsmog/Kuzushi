@@ -1092,31 +1092,34 @@ printf '{"results":[]}'
     #[test]
     fn merge_detected_language_output_accumulates_success_errors_and_cancellation() {
         let mut output = ScanEngineOutput::default();
-        let mut errors = Vec::new();
+        let mut tally = LanguageAnalysisTally::default();
         let cancel = ScanCancellation::default();
 
         merge_detected_language_output(
             Ok(ScanEngineOutput {
                 findings: Vec::new(),
                 codeql_sarif_documents: vec!["sarif".to_string()],
+                scan_errors: Vec::new(),
             }),
             "rust",
             &cancel,
             &mut output,
-            &mut errors,
+            &mut tally,
         )
         .unwrap();
         assert_eq!(output.codeql_sarif_documents, vec!["sarif"]);
+        assert_eq!(tally.analyzed, 1);
 
         merge_detected_language_output(
             Err(anyhow::anyhow!("missing db")),
             "go",
             &cancel,
             &mut output,
-            &mut errors,
+            &mut tally,
         )
         .unwrap();
-        assert_eq!(errors, vec!["go: missing db"]);
+        assert_eq!(tally.errors, vec!["go: missing db"]);
+        assert_eq!(tally.analyzed, 1);
 
         let cancel = ScanCancellation::default();
         cancel.cancel();
@@ -1125,10 +1128,168 @@ printf '{"results":[]}'
             "c",
             &cancel,
             &mut output,
-            &mut errors,
+            &mut tally,
         )
         .unwrap_err();
         assert_eq!(err.to_string(), "cancelled");
+    }
+
+    #[test]
+    fn codeql_multi_language_output_discloses_the_languages_it_could_not_analyze() {
+        let output = codeql_multi_language_output(
+            ScanEngineOutput::from_findings(vec![codeql_scan_error_finding()]),
+            LanguageAnalysisTally {
+                analyzed: 1,
+                errors: vec!["go: missing db".to_string()],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(output.scan_errors, vec!["go: missing db"]);
+    }
+
+    #[test]
+    fn codeql_multi_language_output_reports_a_zero_finding_partial_run_instead_of_failing() {
+        let output = codeql_multi_language_output(
+            ScanEngineOutput::default(),
+            LanguageAnalysisTally {
+                analyzed: 1,
+                errors: vec!["go: missing db".to_string()],
+            },
+        )
+        .unwrap();
+
+        assert!(output.findings.is_empty());
+        assert_eq!(output.scan_errors, vec!["go: missing db"]);
+    }
+
+    #[test]
+    fn codeql_multi_language_output_fails_when_no_language_was_analyzed() {
+        let error = codeql_multi_language_output(
+            ScanEngineOutput::default(),
+            LanguageAnalysisTally {
+                analyzed: 0,
+                errors: vec!["go: missing db".to_string(), "c: build failed".to_string()],
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(
+            error,
+            "codeql: all language analyses failed: go: missing db; c: build failed"
+        );
+    }
+
+    #[test]
+    fn codeql_report_marks_a_partial_run_as_coverage_incomplete() {
+        let report = CodeqlScanReport::new("/repo", vec![codeql_scan_error_finding()], None)
+            .with_scan_errors(vec!["go: missing db".to_string()]);
+        let output = report.output();
+
+        assert!(
+            output.starts_with("codeql: 1 finding under /repo (coverage incomplete: 1 scan error)"),
+            "{output}"
+        );
+        assert!(
+            output.contains("  CodeQL could not analyze every detected language:\n  ! go: missing db"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn codeql_report_stays_silent_about_coverage_when_every_language_was_analyzed() {
+        let report = CodeqlScanReport::new("/repo", vec![codeql_scan_error_finding()], None);
+
+        assert_eq!(report.output().lines().next(), Some("codeql: 1 finding under /repo"));
+        assert_eq!(report.to_tool_json()["data"].get("scanErrors"), None);
+    }
+
+    #[test]
+    fn an_empty_result_with_coverage_gaps_fails_a_caller_that_cannot_report_them() {
+        let output = ScanEngineOutput {
+            scan_errors: vec!["go: missing db".to_string()],
+            ..ScanEngineOutput::default()
+        };
+
+        let error = output
+            .ensure_empty_result_is_complete()
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "scan produced no findings while 1 part of the target went unanalyzed: go: missing db"
+        );
+    }
+
+    #[test]
+    fn a_complete_or_non_empty_result_passes_a_caller_that_cannot_report_coverage_gaps() {
+        assert!(ScanEngineOutput::default()
+            .ensure_empty_result_is_complete()
+            .is_ok());
+
+        let partial_with_findings = ScanEngineOutput {
+            findings: vec![codeql_scan_error_finding()],
+            scan_errors: vec!["go: missing db".to_string()],
+            ..ScanEngineOutput::default()
+        };
+        assert!(partial_with_findings
+            .ensure_empty_result_is_complete()
+            .is_ok());
+    }
+
+    #[test]
+    fn scan_runner_refuses_an_empty_engine_result_that_left_coverage_gaps() {
+        struct PartialScanner;
+
+        impl ScanEngine for PartialScanner {
+            fn id(&self) -> &'static str {
+                "codeql"
+            }
+
+            fn scan(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                Ok(Vec::new())
+            }
+
+            fn scan_artifacts(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<ScanEngineOutput> {
+                Ok(ScanEngineOutput {
+                    scan_errors: vec!["go: missing db".to_string()],
+                    ..ScanEngineOutput::default()
+                })
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(PartialScanner)];
+
+        let error = run_scan_engines(&workspace, &store, &scanners)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("go: missing db"), "{error}");
+    }
+
+    fn codeql_scan_error_finding() -> Finding {
+        Finding::new_tool(
+            "codeql",
+            "rule.id",
+            "src/main.rs",
+            7,
+            None,
+            Severity::High,
+            "message",
+        )
     }
 
     #[test]
@@ -1385,6 +1546,7 @@ exit 2
                 Ok(ScanEngineOutput {
                     findings: self.findings.clone(),
                     codeql_sarif_documents: vec![self.raw.clone()],
+                    scan_errors: Vec::new(),
                 })
             }
         }
