@@ -1092,31 +1092,34 @@ printf '{"results":[]}'
     #[test]
     fn merge_detected_language_output_accumulates_success_errors_and_cancellation() {
         let mut output = ScanEngineOutput::default();
-        let mut errors = Vec::new();
+        let mut tally = LanguageAnalysisTally::default();
         let cancel = ScanCancellation::default();
 
         merge_detected_language_output(
             Ok(ScanEngineOutput {
                 findings: Vec::new(),
                 codeql_sarif_documents: vec!["sarif".to_string()],
+                scan_errors: Vec::new(),
             }),
             "rust",
             &cancel,
             &mut output,
-            &mut errors,
+            &mut tally,
         )
         .unwrap();
         assert_eq!(output.codeql_sarif_documents, vec!["sarif"]);
+        assert_eq!(tally.analyzed, 1);
 
         merge_detected_language_output(
             Err(anyhow::anyhow!("missing db")),
             "go",
             &cancel,
             &mut output,
-            &mut errors,
+            &mut tally,
         )
         .unwrap();
-        assert_eq!(errors, vec!["go: missing db"]);
+        assert_eq!(tally.errors, vec!["go: missing db"]);
+        assert_eq!(tally.analyzed, 1);
 
         let cancel = ScanCancellation::default();
         cancel.cancel();
@@ -1125,10 +1128,93 @@ printf '{"results":[]}'
             "c",
             &cancel,
             &mut output,
-            &mut errors,
+            &mut tally,
         )
         .unwrap_err();
         assert_eq!(err.to_string(), "cancelled");
+    }
+
+    #[test]
+    fn codeql_multi_language_output_discloses_the_languages_it_could_not_analyze() {
+        let output = codeql_multi_language_output(
+            ScanEngineOutput::from_findings(vec![codeql_scan_error_finding()]),
+            LanguageAnalysisTally {
+                analyzed: 1,
+                errors: vec!["go: missing db".to_string()],
+            },
+        )
+        .unwrap();
+
+        assert_eq!(output.scan_errors, vec!["go: missing db"]);
+    }
+
+    #[test]
+    fn codeql_multi_language_output_reports_a_zero_finding_partial_run_instead_of_failing() {
+        let output = codeql_multi_language_output(
+            ScanEngineOutput::default(),
+            LanguageAnalysisTally {
+                analyzed: 1,
+                errors: vec!["go: missing db".to_string()],
+            },
+        )
+        .unwrap();
+
+        assert!(output.findings.is_empty());
+        assert_eq!(output.scan_errors, vec!["go: missing db"]);
+    }
+
+    #[test]
+    fn codeql_multi_language_output_fails_when_no_language_was_analyzed() {
+        let error = codeql_multi_language_output(
+            ScanEngineOutput::default(),
+            LanguageAnalysisTally {
+                analyzed: 0,
+                errors: vec!["go: missing db".to_string(), "c: build failed".to_string()],
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(
+            error,
+            "codeql: all language analyses failed: go: missing db; c: build failed"
+        );
+    }
+
+    #[test]
+    fn codeql_report_marks_a_partial_run_as_coverage_incomplete() {
+        let report = CodeqlScanReport::new("/repo", vec![codeql_scan_error_finding()], None)
+            .with_scan_errors(vec!["go: missing db".to_string()]);
+        let output = report.output();
+
+        assert!(
+            output.starts_with("codeql: 1 finding under /repo (coverage incomplete: 1 scan error)"),
+            "{output}"
+        );
+        assert!(
+            output.contains("  CodeQL could not analyze every detected language:\n  ! go: missing db"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn codeql_report_stays_silent_about_coverage_when_every_language_was_analyzed() {
+        let report = CodeqlScanReport::new("/repo", vec![codeql_scan_error_finding()], None);
+
+        assert_eq!(report.output().lines().next(), Some("codeql: 1 finding under /repo"));
+        assert_eq!(report.to_tool_json()["data"].get("scanErrors"), None);
+    }
+
+    fn codeql_scan_error_finding() -> Finding {
+        Finding::new_tool(
+            "codeql",
+            "rule.id",
+            "src/main.rs",
+            7,
+            None,
+            Severity::High,
+            "message",
+        )
     }
 
     #[test]
@@ -1385,6 +1471,7 @@ exit 2
                 Ok(ScanEngineOutput {
                     findings: self.findings.clone(),
                     codeql_sarif_documents: vec![self.raw.clone()],
+                    scan_errors: Vec::new(),
                 })
             }
         }

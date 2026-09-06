@@ -24,6 +24,10 @@ pub trait ScanEngine: Send + Sync {
 pub struct ScanEngineOutput {
     pub findings: Vec<Finding>,
     pub codeql_sarif_documents: Vec<String>,
+    /// What the engine could not analyze. A run can produce findings while
+    /// leaving part of the target unscanned; callers that report scan
+    /// completion disclose these gaps instead of implying full coverage.
+    pub scan_errors: Vec<String>,
 }
 
 impl ScanEngineOutput {
@@ -31,6 +35,7 @@ impl ScanEngineOutput {
         Self {
             findings,
             codeql_sarif_documents: Vec::new(),
+            scan_errors: Vec::new(),
         }
     }
 }

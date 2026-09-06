@@ -1,17 +1,36 @@
 use super::*;
 use crate::scan::domain::scanner_binary_available;
 
+/// How many of the detected languages CodeQL actually analyzed, and why the
+/// rest were not. A multi-language run reports per-language failures as
+/// coverage gaps, so the analyzed count — not the finding count — decides
+/// whether anything was scanned at all.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct LanguageAnalysisTally {
+    pub(crate) analyzed: usize,
+    pub(crate) errors: Vec<String>,
+}
+
+impl LanguageAnalysisTally {
+    pub(crate) fn nothing_analyzed(&self) -> bool {
+        self.analyzed == 0
+    }
+}
+
 pub(crate) fn merge_detected_language_output(
     result: Result<ScanEngineOutput>,
     language: &str,
     cancel: &ScanCancellation,
     output: &mut ScanEngineOutput,
-    errors: &mut Vec<String>,
+    tally: &mut LanguageAnalysisTally,
 ) -> Result<()> {
     match result {
-        Ok(language_output) => merge_scan_engine_output(output, language_output),
+        Ok(language_output) => {
+            tally.analyzed += 1;
+            merge_scan_engine_output(output, language_output)
+        }
         Err(error) if cancel.is_cancelled() => Err(error),
-        Err(error) => record_detected_language_error(errors, language, error),
+        Err(error) => record_detected_language_error(&mut tally.errors, language, error),
     }
 }
 
@@ -23,6 +42,7 @@ pub(crate) fn merge_scan_engine_output(
     output
         .codeql_sarif_documents
         .append(&mut language_output.codeql_sarif_documents);
+    output.scan_errors.append(&mut language_output.scan_errors);
     Ok(())
 }
 
@@ -83,15 +103,16 @@ pub(crate) fn codeql_repo_name(target: &Path) -> String {
 }
 
 pub(crate) fn codeql_multi_language_output(
-    output: ScanEngineOutput,
-    errors: Vec<String>,
+    mut output: ScanEngineOutput,
+    mut tally: LanguageAnalysisTally,
 ) -> Result<ScanEngineOutput> {
-    if output.findings.is_empty() && !errors.is_empty() {
+    if tally.nothing_analyzed() && !tally.errors.is_empty() {
         anyhow::bail!(
             "codeql: all language analyses failed: {}",
-            errors.join("; ")
+            tally.errors.join("; ")
         );
     }
+    output.scan_errors.append(&mut tally.errors);
     Ok(output)
 }
 

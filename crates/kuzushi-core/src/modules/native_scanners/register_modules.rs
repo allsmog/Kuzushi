@@ -59,7 +59,7 @@ pub(in crate::modules) fn run_semgrep_scan(
             Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
         };
     let mut findings = outcome.findings;
-    emit_semgrep_coverage_gaps(ctx, &outcome.scan_errors);
+    emit_scan_coverage_gaps(ctx, "semgrep", &outcome.scan_errors);
     let index_static_evidence = whitebox_static_profile_requested(&input)?;
     if index_static_evidence {
         let static_proof_state =
@@ -75,7 +75,11 @@ pub(in crate::modules) fn run_semgrep_scan(
     )
 }
 
-fn emit_semgrep_coverage_gaps(ctx: &ToolExecutionContext<'_>, scan_errors: &[String]) {
+fn emit_scan_coverage_gaps(
+    ctx: &ToolExecutionContext<'_>,
+    scanner: &str,
+    scan_errors: &[String],
+) {
     if scan_errors.is_empty() {
         return;
     }
@@ -85,7 +89,7 @@ fn emit_semgrep_coverage_gaps(ctx: &ToolExecutionContext<'_>, scan_errors: &[Str
                 "tool",
                 "scan",
                 format!(
-                    "semgrep reported {} scan error{} · coverage incomplete",
+                    "{scanner} reported {} scan error{} · coverage incomplete",
                     scan_errors.len(),
                     if scan_errors.len() == 1 { "" } else { "s" },
                 ),
@@ -115,20 +119,33 @@ pub(in crate::modules) fn run_codeql_scan(
             whitebox_static_proof_state_from_input(&input)?.unwrap_or(StaticProofState::SignalOnly);
         mark_whitebox_static_findings(&mut output.findings, static_proof_state)?;
     }
-    let finding_count = output.findings.len();
-    let findings = output.findings;
-    let sarif_documents = output.codeql_sarif_documents;
+    persist_and_report_codeql_scan(&target, output, ctx, index_static_evidence)
+}
+
+fn persist_and_report_codeql_scan(
+    target: &Path,
+    output: ScanEngineOutput,
+    ctx: &ToolExecutionContext<'_>,
+    index_static_evidence: bool,
+) -> Result<Value> {
+    let ScanEngineOutput {
+        findings,
+        codeql_sarif_documents,
+        scan_errors,
+    } = output;
+    emit_scan_coverage_gaps(ctx, "codeql", &scan_errors);
     let persisted = persist_codeql_findings(
-        &target,
+        target,
         &findings,
         ctx,
-        &sarif_documents,
+        &codeql_sarif_documents,
         index_static_evidence,
     )?;
-    emit_scan_done(ctx, "codeql", finding_count);
+    emit_scan_done(ctx, "codeql", findings.len());
     Ok(
         CodeqlScanReport::new(target.display().to_string(), findings, persisted)
-            .with_sarif_documents(sarif_documents)
+            .with_sarif_documents(codeql_sarif_documents)
+            .with_scan_errors(scan_errors)
             .to_tool_json(),
     )
 }
