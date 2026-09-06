@@ -124,27 +124,31 @@ fn setup_summary_line(
 /// What committing this plan will actually execute. Selected planning tasks
 /// are not the whole Map execution envelope: after Map drains, Kuzushi may run
 /// one deterministic module-recommendation refresh when that artifact is
-/// absent. Disclose that expected background run here so Setup does not imply
-/// that the selected task count is also the final run count.
+/// absent. Keep that expected run next to the selected-task count so the fact
+/// survives the summary's width cap instead of being ellipsized off the tail.
 fn setup_execution_summary(
     app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
 ) -> String {
-    let mut summary = if model.selected_tasks == 0 {
-        "no selected Map task will run · cached Map artifacts reused".to_string()
-    } else {
-        let execution = if model.selected_model_tasks == 0 {
-            "deterministic/runtime-free · no model or credentials".to_string()
-        } else {
-            format!("{} model-backed task(s)", model.selected_model_tasks)
-        };
-        format!("{} selected Map task(s) · {execution}", model.selected_tasks)
-    };
+    let expected_refresh = crate::ui_view_models::recommendation_artifact_needs_refresh(app)
+        .then_some(" · +1 expected background recommendation run")
+        .unwrap_or_default();
 
-    if crate::ui_view_models::recommendation_artifact_needs_refresh(app) {
-        summary.push_str(" · +1 expected background recommendation run after Map");
+    if model.selected_tasks == 0 {
+        return format!(
+            "no selected Map task will run{expected_refresh} · cached Map artifacts reused"
+        );
     }
-    summary
+
+    let execution = if model.selected_model_tasks == 0 {
+        "deterministic/runtime-free · no model or credentials".to_string()
+    } else {
+        format!("{} model-backed task(s)", model.selected_model_tasks)
+    };
+    format!(
+        "{} selected Map task(s){expected_refresh} · {execution}",
+        model.selected_tasks
+    )
 }
 
 fn setup_row_line(
@@ -226,11 +230,13 @@ mod tests {
         let model = setup_readiness_model(&app);
 
         let summary = setup_execution_summary(&app, &model);
-
         assert!(
-            summary.contains("+1 expected background recommendation run after Map"),
+            summary.contains("+1 expected background recommendation run"),
             "{summary}"
         );
+
+        let rendered = setup_summary_line(&app, &model, 60).to_string();
+        assert!(rendered.contains("+1"), "{rendered}");
     }
 
     #[test]
