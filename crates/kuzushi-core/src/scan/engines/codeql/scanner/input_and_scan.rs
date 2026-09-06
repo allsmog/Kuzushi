@@ -40,7 +40,9 @@ impl CodeqlScanner {
         target: &Path,
         cancel: &ScanCancellation,
     ) -> Result<Vec<Finding>> {
-        Ok(self.scan_with_artifacts(target, cancel)?.findings)
+        let output = self.scan_with_artifacts(target, cancel)?;
+        output.ensure_empty_result_is_complete()?;
+        Ok(output.findings)
     }
 
     pub fn scan_with_artifacts(

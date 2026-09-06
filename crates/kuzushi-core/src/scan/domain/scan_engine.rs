@@ -38,6 +38,21 @@ impl ScanEngineOutput {
             scan_errors: Vec::new(),
         }
     }
+
+    /// For callers that have no channel for `scan_errors`. An empty result
+    /// whose coverage gaps they cannot report would reach the operator as a
+    /// clean scan, so it fails instead. A caller that reports `scan_errors`
+    /// reads the output directly and never calls this.
+    pub fn ensure_empty_result_is_complete(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.findings.is_empty() || self.scan_errors.is_empty(),
+            "scan produced no findings while {} part{} of the target went unanalyzed: {}",
+            self.scan_errors.len(),
+            if self.scan_errors.len() == 1 { "" } else { "s" },
+            self.scan_errors.join("; ")
+        );
+        Ok(())
+    }
 }
 
 /// Findings plus semgrep's own account of what it failed to scan. A run can

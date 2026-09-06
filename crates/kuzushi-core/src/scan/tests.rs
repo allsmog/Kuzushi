@@ -1205,6 +1205,81 @@ printf '{"results":[]}'
         assert_eq!(report.to_tool_json()["data"].get("scanErrors"), None);
     }
 
+    #[test]
+    fn an_empty_result_with_coverage_gaps_fails_a_caller_that_cannot_report_them() {
+        let output = ScanEngineOutput {
+            scan_errors: vec!["go: missing db".to_string()],
+            ..ScanEngineOutput::default()
+        };
+
+        let error = output
+            .ensure_empty_result_is_complete()
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            error,
+            "scan produced no findings while 1 part of the target went unanalyzed: go: missing db"
+        );
+    }
+
+    #[test]
+    fn a_complete_or_non_empty_result_passes_a_caller_that_cannot_report_coverage_gaps() {
+        assert!(ScanEngineOutput::default()
+            .ensure_empty_result_is_complete()
+            .is_ok());
+
+        let partial_with_findings = ScanEngineOutput {
+            findings: vec![codeql_scan_error_finding()],
+            scan_errors: vec!["go: missing db".to_string()],
+            ..ScanEngineOutput::default()
+        };
+        assert!(partial_with_findings
+            .ensure_empty_result_is_complete()
+            .is_ok());
+    }
+
+    #[test]
+    fn scan_runner_refuses_an_empty_engine_result_that_left_coverage_gaps() {
+        struct PartialScanner;
+
+        impl ScanEngine for PartialScanner {
+            fn id(&self) -> &'static str {
+                "codeql"
+            }
+
+            fn scan(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                Ok(Vec::new())
+            }
+
+            fn scan_artifacts(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<ScanEngineOutput> {
+                Ok(ScanEngineOutput {
+                    scan_errors: vec!["go: missing db".to_string()],
+                    ..ScanEngineOutput::default()
+                })
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(PartialScanner)];
+
+        let error = run_scan_engines(&workspace, &store, &scanners)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("go: missing db"), "{error}");
+    }
+
     fn codeql_scan_error_finding() -> Finding {
         Finding::new_tool(
             "codeql",

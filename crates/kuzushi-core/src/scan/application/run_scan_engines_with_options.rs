@@ -208,6 +208,7 @@ fn collect_scan_root_outputs(
 ) -> Result<()> {
     for scanner in scanners {
         let mut scanner_output = scanner.scan_artifacts(&root.path, cancellation)?;
+        scanner_output.ensure_empty_result_is_complete()?;
         rewrite_scoped_findings(root, &mut scanner_output.findings);
         output.findings.append(&mut scanner_output.findings);
         output
