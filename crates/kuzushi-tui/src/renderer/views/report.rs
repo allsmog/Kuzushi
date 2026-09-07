@@ -8,7 +8,12 @@ pub(crate) fn report_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     append_report_status(&mut lines, route, area.width);
     lines.push(blank());
     lines.push(command_list_line(
-        &report_actions(route.receipt().is_some()),
+        &report_actions(
+            route.receipt().is_some(),
+            route
+                .receipt()
+                .is_some_and(|receipt| receipt.error.is_some()),
+        ),
         area.width as usize,
     ));
     lines
@@ -88,14 +93,24 @@ fn append_report_status(
     }
 }
 
-fn report_actions(has_receipt: bool) -> [&'static str; 6] {
+fn report_actions(has_receipt: bool, failed: bool) -> [&'static str; 6] {
+    if has_receipt && !failed {
+        return [
+            "j/k format",
+            "c completeness",
+            "e edit path",
+            "Enter export again",
+            "o Reveal Destination",
+            "Esc Return",
+        ];
+    }
     if has_receipt {
         [
             "j/k format",
             "c completeness",
             "e edit path",
             "Enter Retry",
-            "o Reveal Destination",
+            "o reveal after successful export",
             "Esc Return",
         ]
     } else {
@@ -164,5 +179,30 @@ mod tests {
             .join("\n");
         assert!(text.contains("TREND  FP rate — (no decisions)"), "{text}");
         assert!(text.contains("$8.00 spent"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod export_action_tests {
+    use super::report_actions;
+
+    #[test]
+    fn successful_export_is_not_presented_as_a_failure_to_retry() {
+        let actions = report_actions(true, false);
+        assert!(actions.contains(&"Enter export again"));
+        assert!(actions.contains(&"o Reveal Destination"));
+        assert!(!actions.contains(&"Enter Retry"));
+    }
+
+    #[test]
+    fn failed_export_offers_retry_without_claiming_a_revealable_file() {
+        let actions = report_actions(true, true);
+        assert!(actions.contains(&"Enter Retry"));
+        assert!(!actions.contains(&"o Reveal Destination"));
+    }
+
+    #[test]
+    fn new_export_keeps_the_original_export_action() {
+        assert!(report_actions(false, false).contains(&"Enter export"));
     }
 }

@@ -83,7 +83,7 @@ fn investigation_plan_model(
             "evidence {} · proof {} — the claims below stay unproven until an investigation records them",
             detail.evidence_state, detail.proof_confidence_label
         ),
-        evidence_goals: investigation_evidence_goals(raw, proof),
+        evidence_goals: investigation_evidence_goals(raw, proof, boundary),
         empirical: boundary == crate::app::InvestigationBoundary::LocalReproduction,
         model_ladder: investigation_model_ladder(app),
         command: investigation_verify_command(app, &raw.fingerprint, boundary),
@@ -166,6 +166,7 @@ fn investigation_model_ladder(app: &ShellApp) -> Vec<String> {
 fn investigation_evidence_goals(
     finding: &kuzushi_core::Finding,
     proof: Option<&ProofReplayModel>,
+    boundary: crate::app::InvestigationBoundary,
 ) -> Vec<String> {
     let mut goals = Vec::new();
     if finding.evidence.is_empty() {
@@ -178,17 +179,28 @@ fn investigation_evidence_goals(
         .verification
         .as_ref()
         .is_some_and(PersistedVerification::has_terminal_runtime_verification);
+    if boundary == crate::app::InvestigationBoundary::LocalReproduction {
+        append_runtime_investigation_goals(&mut goals, has_runtime_attempt, proof);
+    }
+    goals.push("Record the verifier verdict and rationale as durable evidence".to_string());
+    goals
+}
+
+/// Only an explicitly selected local-reproduction run can promise runtime work.
+fn append_runtime_investigation_goals(
+    goals: &mut Vec<String>,
+    has_runtime_attempt: bool,
+    proof: Option<&ProofReplayModel>,
+) {
     match (has_runtime_attempt, proof) {
         (false, _) => {
-            goals.push("Attempt safe reproduction and record a runtime witness".to_string());
+            goals.push("Attempt safe reproduction and record a runtime witness".to_string())
         }
         (true, Some(replay)) if replay.requires_revalidation => {
             goals.push("Re-validate the stale proof against the current observation".to_string());
         }
         _ => {}
     }
-    goals.push("Record the verifier verdict and rationale as durable evidence".to_string());
-    goals
 }
 
 fn proof_replay_model(
@@ -279,8 +291,36 @@ mod investigation_goal_tests {
     }
 
     #[test]
+    fn static_only_goals_never_promise_a_runtime_witness() {
+        let goals = investigation_evidence_goals(
+            &bare_finding(),
+            None,
+            crate::app::InvestigationBoundary::StaticOnly,
+        );
+        assert!(goals.iter().any(|goal| goal.contains("evidence anchors")));
+        assert!(!goals.iter().any(|goal| goal.contains("runtime witness")));
+        assert!(!goals.iter().any(|goal| goal.contains("safe reproduction")));
+    }
+
+    #[test]
+    fn static_only_does_not_promise_to_refresh_stale_runtime_proof() {
+        let mut finding = bare_finding();
+        finding.verification = Some(crate::test_support::test_empirical_verification(3));
+        let goals = investigation_evidence_goals(
+            &finding,
+            Some(&replay(true)),
+            crate::app::InvestigationBoundary::StaticOnly,
+        );
+        assert!(!goals.iter().any(|goal| goal.contains("stale proof")));
+    }
+
+    #[test]
     fn unproven_uncorroborated_finding_derives_every_gap_as_a_goal() {
-        let goals = investigation_evidence_goals(&bare_finding(), None);
+        let goals = investigation_evidence_goals(
+            &bare_finding(),
+            None,
+            crate::app::InvestigationBoundary::LocalReproduction,
+        );
         assert!(goals.iter().any(|goal| goal.contains("evidence anchors")));
         assert!(goals.iter().any(|goal| goal.contains("independent source")));
         assert!(goals.iter().any(|goal| goal.contains("runtime witness")));
@@ -297,11 +337,19 @@ mod investigation_goal_tests {
         verification.verified_scan_id = finding.scan_id.clone();
         finding.verification = Some(verification);
 
-        let fresh = investigation_evidence_goals(&finding, Some(&replay(false)));
+        let fresh = investigation_evidence_goals(
+            &finding,
+            Some(&replay(false)),
+            crate::app::InvestigationBoundary::LocalReproduction,
+        );
         assert!(!fresh.iter().any(|goal| goal.contains("runtime witness")));
         assert!(!fresh.iter().any(|goal| goal.contains("stale proof")));
 
-        let stale = investigation_evidence_goals(&finding, Some(&replay(true)));
+        let stale = investigation_evidence_goals(
+            &finding,
+            Some(&replay(true)),
+            crate::app::InvestigationBoundary::LocalReproduction,
+        );
         assert!(stale.iter().any(|goal| goal.contains("stale proof")));
     }
 
@@ -324,7 +372,11 @@ mod investigation_goal_tests {
             created_at: "now".to_string(),
         });
 
-        let goals = investigation_evidence_goals(&finding, Some(&replay(false)));
+        let goals = investigation_evidence_goals(
+            &finding,
+            Some(&replay(false)),
+            crate::app::InvestigationBoundary::LocalReproduction,
+        );
         assert!(goals.iter().any(|goal| goal.contains("runtime witness")));
     }
 }

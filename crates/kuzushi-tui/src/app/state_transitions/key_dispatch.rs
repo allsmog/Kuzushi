@@ -167,6 +167,7 @@ impl ShellApp {
 
     fn handle_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         if self.input_mode() != InputMode::Navigate
+            || !self.input().is_empty()
             || !self.phase_result_is_open()
             || !key.modifiers.is_empty()
         {
@@ -187,7 +188,10 @@ impl ShellApp {
     }
 
     fn handle_configured_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if self.input_mode() != InputMode::Navigate || !self.phase_result_is_open() {
+        if self.input_mode() != InputMode::Navigate
+            || !self.input().is_empty()
+            || !self.phase_result_is_open()
+        {
             return None;
         }
         let result =
@@ -223,25 +227,18 @@ impl ShellApp {
         self.phase_result_target_phase().is_some()
     }
 
-    /// Phase whose unresolved RESULT READY attempt the result-card keys act
-    /// on. Prefer the page in view; when reality derivation has moved the
-    /// page away from the phase that actually finished (e.g. a Map result
-    /// while prior findings derive Review), fall back to the earliest phase
-    /// with an unresolved attempt — advertised keys must work where
-    /// advertised.
+    /// Result ownership follows the displayed workbench page. An unresolved
+    /// attempt on another page remains durable and inspectable, but cannot
+    /// capture this page's keyboard or mouse. The header projects its result
+    /// from the same active page; visiting the owning page restores controls.
     pub(crate) fn phase_result_target_phase(&self) -> Option<WorkflowPhase> {
-        let page_phase = crate::ui_view_models::active_workbench_page(self).phase();
-        if self
-            .engagement
-            .unresolved_phase_attempt(page_phase)
-            .is_some()
-        {
-            return Some(page_phase);
+        if self.shell_view() != ShellView::Workbench {
+            return None;
         }
-        WorkflowPhase::ORDER
-            .iter()
-            .copied()
-            .find(|phase| self.engagement.unresolved_phase_attempt(*phase).is_some())
+        let phase = crate::ui_view_models::active_workbench_page(self).phase();
+        self.engagement
+            .unresolved_phase_attempt(phase)
+            .map(|_| phase)
     }
 
     fn phase_result_command_is_available(&self, command: PhaseResultCommand) -> bool {

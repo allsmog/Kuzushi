@@ -33,6 +33,10 @@ test("CI plan includes every host-independent hard gate", () => {
   assert.ok(quick.includes("secrets"));
   assert.ok(quick.includes("tests"));
   assert.ok(quick.includes("cargo-check"));
+  assert.ok(quick.includes("tui-tests"));
+  assert.deepEqual(stepArgs(quickPlan, "tui-tests"), [
+    "test", "-p", "kuzushi-tui", "--lib", "--locked",
+  ]);
   assert.ok(ci.includes("coverage"));
   assert.ok(ci.includes("clippy"));
   assert.ok(ci.includes("cargo-deny"));

@@ -14,6 +14,7 @@ const quickPlan = Object.freeze([
   step("tests", pnpm, ["test"]),
   step("format", cargo, ["fmt", "--all", "--", "--check"]),
   step("cargo-check", cargo, ["check", "--workspace", "--all-targets", "--locked"]),
+  step("tui-tests", cargo, ["test", "-p", "kuzushi-tui", "--lib", "--locked"]),
   step("architecture", pnpm, ["quality:architecture"]),
   step("model-safety", pnpm, ["quality:model-safety"]),
   step("docs", pnpm, ["check:docs"]),

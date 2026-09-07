@@ -72,6 +72,16 @@ fn investigation_lines(plan: &InvestigationPlanModel, width: usize) -> Vec<Line<
         Line::styled(fit("EVIDENCE GOALS", width), theme::label()),
     ];
     append_evidence_goals(&mut lines, plan, width);
+    if !plan.empirical {
+        lines.extend(
+            crate::renderer::shared::text::wrap_text(
+                "This static-only run will not produce or refresh a runtime witness.",
+                width,
+            )
+            .into_iter()
+            .map(|text| Line::styled(text, theme::muted())),
+        );
+    }
     lines.push(Line::styled(fit("SAFETY BOUNDARY", width), theme::label()));
     lines.extend(boundary_lines(plan.empirical, width));
     append_model_ladder(&mut lines, plan, width);

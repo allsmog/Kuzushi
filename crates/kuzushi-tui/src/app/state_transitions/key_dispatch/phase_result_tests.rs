@@ -328,3 +328,59 @@ fn phase_rerun_action_overrides_are_narrowly_scoped() {
     assert!(phase_rerun_action_overrides(Some(Refine), "context:build").is_empty());
     assert!(phase_rerun_action_overrides(Some(Regenerate), "context:build").is_empty());
 }
+
+#[test]
+fn off_page_result_never_owns_the_visible_pages_shortcuts() {
+    for key in ['u', 'n', 'r', 'd', 'o'] {
+        let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+        fixture
+            .app
+            .router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Review));
+        assert_eq!(fixture.app.phase_result_target_phase(), None);
+        assert!(crate::ui_view_models::phase_cockpit_model_for_phase(
+            &fixture.app,
+            WorkflowPhase::Review
+        )
+        .header
+        .result_card
+        .is_none());
+        fixture.press(key);
+        assert!(
+            fixture.attempt_is_unresolved(WorkflowPhase::Map),
+            "off-page Map attempt was changed by {key}"
+        );
+        assert!(fixture.app.engagement.pending_phase_rerun().is_none());
+    }
+}
+
+#[test]
+fn returning_to_the_result_page_restores_its_advertised_action() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture
+        .app
+        .router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    assert_eq!(fixture.app.phase_result_target_phase(), None);
+    fixture
+        .app
+        .router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Map));
+    assert_eq!(
+        fixture.app.phase_result_target_phase(),
+        Some(WorkflowPhase::Map)
+    );
+    fixture.press('u');
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+}
+
+#[test]
+fn contextual_views_do_not_inherit_workbench_result_ownership() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture.app.set_shell_view(ShellView::Report);
+    assert_eq!(fixture.app.phase_result_target_phase(), None);
+    assert!(fixture.attempt_is_unresolved(WorkflowPhase::Map));
+}
