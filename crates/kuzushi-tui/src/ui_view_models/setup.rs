@@ -1,4 +1,6 @@
-use crate::app::{auth_ready_for_provider, oauth_provider_status, SetupRowId};
+use crate::app::{
+    auth_ready_for_provider, build_execution_plan, oauth_provider_status, SetupRowId,
+};
 use crate::ShellApp;
 
 mod readiness_rows;
@@ -52,6 +54,10 @@ pub(crate) struct SetupReadinessModel {
     pub(crate) first_blocker: Option<usize>,
     pub(crate) can_start: bool,
     pub(crate) selected_tasks: usize,
+    /// How many of those selected rows Start Map will actually execute.
+    /// Checked-but-cached rows are `Reused` — the committed plan drops them —
+    /// so this, not `selected_tasks`, says whether any Map work will run.
+    pub(crate) runnable_tasks: usize,
     pub(crate) selected_model_tasks: usize,
     pub(crate) credential_readiness: CredentialReadiness,
 }
@@ -81,9 +87,18 @@ pub(crate) fn setup_readiness_model(app: &ShellApp) -> SetupReadinessModel {
         first_blocker,
         can_start,
         selected_tasks: selected_rows.len(),
+        runnable_tasks: runnable_task_count(app),
         selected_model_tasks,
         credential_readiness,
     }
+}
+
+/// The size of the plan Start Map commits, folded by the same
+/// `build_execution_plan` the picker's accept path uses — Setup must not carry
+/// a second copy of the reuse policy.
+fn runnable_task_count(app: &ShellApp) -> usize {
+    let picker = app.engagement.planning_picker();
+    build_execution_plan(picker.tasks(), picker.selected(), picker.rebuild()).len()
 }
 
 fn selected_setup_rows(app: &ShellApp) -> Vec<&crate::app::PlanningTaskRow> {
