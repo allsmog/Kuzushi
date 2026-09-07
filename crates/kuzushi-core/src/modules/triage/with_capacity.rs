@@ -88,6 +88,13 @@ impl TriageRunStats {
         self.failed > 0 || self.vote_failures > 0 || self.persistence_failures > 0
     }
 
+    /// True when the configured cost cap is the *only* reason this run is
+    /// incomplete. A consumer may keep the partial output and continue; a
+    /// partial caused by any failure has no such guarantee.
+    pub(in crate::modules) fn stopped_at_budget(&self) -> bool {
+        self.pending_after_cap > 0 && !self.degraded()
+    }
+
     pub(in crate::modules) fn high_confidence_false_positive_count(&self) -> usize {
         self.results
             .iter()

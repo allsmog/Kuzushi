@@ -230,8 +230,19 @@ fn record_phase_dispatch(
     }
 }
 
+/// A subtool that stopped at a configured budget reports `partial` truthfully
+/// and still hands back the work it did finish, so the pipeline keeps that
+/// output and its partial phase receipt. Every other failure-like result ends
+/// the run: a partial caused by an actual failure makes no such guarantee.
+fn stopped_at_configured_budget(output: &Value) -> bool {
+    crate::module_result::tool_result_status(output) == crate::module_result::ToolResultStatus::Partial
+        && output.pointer("/data/stoppedAtBudget").and_then(Value::as_bool) == Some(true)
+}
+
 pub(in crate::modules) fn validate_sast_subtool_result(name: &str, output: &Value) -> Result<()> {
-    if crate::module_result::tool_result_status(&output).is_failure_like() {
+    if crate::module_result::tool_result_status(&output).is_failure_like()
+        && !stopped_at_configured_budget(output)
+    {
         let details = output
             .get("errors")
             .and_then(Value::as_array)
@@ -316,6 +327,57 @@ mod result_truth_tests {
         let stages = load_sast_phase_stages(&artifacts).unwrap();
         assert_eq!(stages[0]["phase"], "prove");
         assert_eq!(stages[0]["outcome"], "partial");
+    }
+
+    #[test]
+    fn a_budget_stopped_partial_keeps_its_output_and_its_partial_receipt() {
+        let (_target, artifacts) = stage_artifacts("scan-budget-stop");
+        let output = json!({
+            "ok": true,
+            "status": "partial",
+            "data": {"costCapHit": true, "pendingAfterCap": 3, "stoppedAtBudget": true}
+        });
+
+        let kept = record_phase_dispatch(
+            Ok(output.clone()),
+            "triage:run",
+            &artifacts,
+            WorkflowPhase::Review,
+            "scan-budget-stop",
+        )
+        .unwrap();
+
+        assert_eq!(kept, output);
+        let stages = load_sast_phase_stages(&artifacts).unwrap();
+        assert_eq!(stages[0]["outcome"], "partial");
+    }
+
+    #[test]
+    fn a_partial_that_did_not_stop_at_a_budget_still_ends_the_run() {
+        let output = json!({
+            "ok": true,
+            "status": "partial",
+            "data": {"costCapHit": true, "pendingAfterCap": 3, "stoppedAtBudget": false},
+            "errors": ["classification failed"]
+        });
+
+        let error = validate_sast_subtool_result("triage:run", &output).unwrap_err();
+
+        assert!(error.to_string().contains("classification failed"));
+    }
+
+    #[test]
+    fn a_failed_envelope_cannot_claim_a_budget_stop() {
+        let output = json!({
+            "ok": false,
+            "status": "failed",
+            "data": {"stoppedAtBudget": true},
+            "errors": ["runtime unavailable"]
+        });
+
+        let error = validate_sast_subtool_result("triage:run", &output).unwrap_err();
+
+        assert!(error.to_string().contains("runtime unavailable"));
     }
 
     #[test]

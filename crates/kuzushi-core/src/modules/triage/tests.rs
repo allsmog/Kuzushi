@@ -923,6 +923,36 @@ mod tests {
             json!("Cost cap hit; 2 finding(s) remain unevaluated.")
         );
         assert!(triage_summary(&stage1, &stats, &[]).starts_with("[!]"));
+        // The SAST pipeline keeps a budget-stopped partial rather than ending
+        // the scan, so the envelope must say the cap was the only cause.
+        assert_eq!(response["data"]["stoppedAtBudget"], json!(true));
+    }
+
+    #[test]
+    fn a_cost_capped_run_with_a_failure_does_not_claim_a_clean_budget_stop() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = stats_with_one_success();
+        stats.record_runtime_error(
+            &finding_with(Severity::High, "semgrep", "sql injection"),
+            &anyhow::anyhow!("provider unavailable"),
+        );
+        stats.record_cost_cap_pending();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(response["status"], json!("partial"));
+        assert_eq!(response["data"]["costCapHit"], json!(true));
+        assert_eq!(response["data"]["stoppedAtBudget"], json!(false));
+    }
+
+    #[test]
+    fn a_run_without_a_cap_never_claims_a_budget_stop() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let stats = stats_with_one_success();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(response["data"]["stoppedAtBudget"], json!(false));
     }
 
     /// A cap reached before anything succeeded still did no failing work, so
