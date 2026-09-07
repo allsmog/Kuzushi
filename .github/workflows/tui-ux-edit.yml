@@ -1,65 +1,27 @@
-name: TUI UX branch edits
+name: TUI UX branch source
 
 on:
   push:
     branches: [daily/2026-09-06-tui-ux-contracts]
-    paths:
-      - .github/tui-ux-edit.mjs
-      - .github/workflows/tui-ux-edit.yml
+    paths: [.github/workflows/tui-ux-edit.yml]
 
 permissions:
-  contents: write
-
-concurrency:
-  group: tui-ux-branch-edits
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  apply:
+  snapshot:
     if: github.repository == 'allsmog/Kuzushi' && github.ref == 'refs/heads/daily/2026-09-06-tui-ux-contracts'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
-      - name: Refuse any unexpected base or concurrent source edits
-        env:
-          BASE: a59e1433321bf2f110c8f1bef93a6ba6167a42fc
-        run: |
-          git merge-base --is-ancestor "$BASE" HEAD
-          test "$(git ls-remote origin refs/heads/daily/2026-09-06-tui-ux-contracts | cut -f1)" = "$(git rev-parse HEAD)"
-          git diff --name-only "$BASE" HEAD > /tmp/edit-input-paths
-          diff -u <(printf '%s\n' '.github/tui-ux-edit.mjs' '.github/workflows/tui-ux-edit.yml') /tmp/edit-input-paths
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - name: Archive only tracked source, never credentials or runtime state
+        run: git archive --format=tar.gz HEAD > /tmp/kuzushi-ux-source.tar.gz
+      - uses: actions/upload-artifact@v7
         with:
-          node-version: '22'
-      - uses: moonrepo/setup-rust@v1
-        with:
-          inherit-toolchain: true
-      - name: Apply exact-context source edits
-        run: |
-          node --check .github/tui-ux-edit.mjs
-          node .github/tui-ux-edit.mjs
-      - name: Format only changed Rust sources
-        run: |
-          edition=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["edition"])')
-          git diff --name-only -z -- '*.rs' | xargs -0 -r rustfmt --edition "$edition" --config skip_children=true
-          git diff --check
-      - name: Commit only the reviewed source paths to this branch
-        run: |
-          git add crates/kuzushi-tui/src/app/state_transitions/key_dispatch.rs \
-            crates/kuzushi-tui/src/app/state_transitions/key_dispatch/phase_result_tests.rs \
-            crates/kuzushi-tui/src/ui_view_models/phase_cockpit/confirm.rs \
-            crates/kuzushi-tui/src/renderer/views/workbench/phase_pages/confirm.rs \
-            crates/kuzushi-tui/src/renderer/views/report.rs \
-            scripts/verify-repository.mjs scripts/verify-repository.test.mjs
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git -c core.hooksPath=/dev/null commit -m 'fix(tui): scope result input and align verification and export feedback'
-          git push origin HEAD:refs/heads/daily/2026-09-06-tui-ux-contracts
-      - name: Verify the repository check plan
-        run: node --test scripts/verify-repository.test.mjs
-      - name: Execute native TUI regressions
-        run: cargo test -p kuzushi-tui --lib --locked
+          name: kuzushi-ux-source
+          path: /tmp/kuzushi-ux-source.tar.gz
+          retention-days: 1
