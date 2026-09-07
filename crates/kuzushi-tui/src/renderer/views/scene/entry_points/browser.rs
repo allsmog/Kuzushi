@@ -84,12 +84,13 @@ fn render_browser(
 
 fn frame_summary_text(area: Rect, model: &EntryPointBreakdown) -> (Vec<String>, bool) {
     let width = area.width as usize;
-    let mut lines = vec![
-        responsive_summary(width, model),
-        disposition_summary(width, model),
-        provenance_summary(width, model),
-        receipt_count_summary(width, model),
-    ];
+    // Reserve the body for identifiable rows and useful selected evidence.
+    // All omitted receipt details remain in the scrollable detail pane.
+    let mut lines = vec![responsive_summary(width, model)];
+    if area.height >= 16 {
+        lines.push(disposition_summary(width, model));
+    }
+    lines.push(provenance_summary(width, model));
     if !model.receipt.warnings.is_empty() {
         lines.push(fit(
             &format!("WARNING · {}", model.receipt.warnings.join(" · ")),
@@ -402,6 +403,8 @@ fn receipt_detail_lines(
     model: &EntryPointBreakdown,
 ) -> impl Iterator<Item = Line<'static>> {
     [
+        disposition_summary(width, model),
+        receipt_count_summary(width, model),
         revision_summary(width, model),
         digest_summary(width, "C SHA256", model.receipt.catalog_digest.as_deref()),
         digest_summary(
@@ -525,6 +528,21 @@ mod tests {
                 assert!(text.contains("internet"), "{width}x{height}\n{text}");
             }
         }
+    }
+
+    #[test]
+    fn compact_header_reserves_space_for_evidence_and_keeps_receipt_reachable() {
+        let model = sample_model();
+        let (header, compact) = frame_summary_text(Rect::new(0, 0, 80, 13), &model);
+        assert!(compact);
+        assert!(header.len() <= 3, "compact header: {header:?}");
+        let detail = receipt_detail_lines(80, &model)
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(detail.contains("catalog"), "{detail}");
+        assert!(detail.contains("grounding"), "{detail}");
+        assert!(detail.contains("COVERAGE"), "{detail}");
     }
 
     #[test]

@@ -76,14 +76,18 @@ pub(crate) fn map_summary_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<
             theme::muted(),
         ),
     ];
+    lines.extend(summary_lines_for_app(app, width));
+    lines
+}
+
+/// Shared non-TTY summary for both Map and the contextual gallery.
+fn summary_lines_for_app(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     if dfd_model(app).empty_hint.is_some()
         && crate::ui_view_models::map_local_artifacts_available(app)
     {
-        lines.extend(local_inventory_summary_lines(app, width));
-    } else {
-        lines.extend(summary_plain_lines(width, &dfd_model(app)));
+        return local_inventory_summary_lines(app, width);
     }
-    lines
+    summary_plain_lines(width, &dfd_model(app))
 }
 
 /// The keyless Summary describes existing source inventory, never a modeled architecture.
@@ -159,7 +163,7 @@ pub(super) fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw
         // in the line/plain path; show a short note instead.
         VizPage::AttackSurface => attack_surface_plain_lines(app, width),
-        VizPage::Summary => summary_plain_lines(width, &dfd_model(app)),
+        VizPage::Summary => summary_lines_for_app(app, width),
         VizPage::Dfd => dfd_plain_lines(width, &dfd_model(app)),
         VizPage::ExploitChain => exploit_chain_plain_lines(width, &attack_tree(app)),
     }

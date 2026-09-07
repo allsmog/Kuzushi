@@ -133,6 +133,11 @@ mod tests {
     fn fielded_search_preserves_ids_and_canonical_evidence_totals() {
         let source = EntryPointBreakdown {
             entries: vec![entry("a", "src/auth.rs:2"), entry("b", "src/net.rs:3")],
+            counts: super::super::EntryPointCounts {
+                extracted: 2,
+                union: 2,
+                ..Default::default()
+            },
             dispositions: vec![EntryPointGroup {
                 name: "extracted only".into(),
                 count: 2,
