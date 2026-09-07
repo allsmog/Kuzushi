@@ -1,0 +1,34 @@
+name: TUI UX bounded verification kit
+on:
+  push:
+    branches: [daily/2026-09-06-tui-ux-contracts]
+    paths: [.github/workflows/tui-ux-devkit-parts.yml]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  split:
+    if: github.repository == 'allsmog/Kuzushi' && github.ref == 'refs/heads/daily/2026-09-06-tui-ux-contracts'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Split the previously prepared credential-free kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/allsmog/Kuzushi/actions/artifacts/10032204529/zip > /tmp/tooling.zip
+          unzip -q /tmp/tooling.zip -d /tmp/tooling
+          sha256sum /tmp/tooling/ux-kit-tooling.tar.gz
+          split -b 320M /tmp/tooling/ux-kit-tooling.tar.gz /tmp/tooling-part-
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kuzushi-ux-tooling-a
+          path: /tmp/tooling-part-aa
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kuzushi-ux-tooling-b
+          path: /tmp/tooling-part-ab
+          retention-days: 1
+          compression-level: 0
