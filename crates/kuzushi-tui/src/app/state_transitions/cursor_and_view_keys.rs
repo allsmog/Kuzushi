@@ -248,6 +248,11 @@ impl ShellApp {
             KeyCode::PageDown => self.scroll_entry_point_detail(1),
             KeyCode::PageUp => self.scroll_entry_point_detail(-1),
             _ if self.input_mode() != InputMode::Navigate => return InputUpdate::ignored(),
+            KeyCode::Char('/') => self.router.scene_mut().set_entry_point_searching(true),
+            KeyCode::Char('C') => {
+                self.router.scene_mut().reset_entry_point_search();
+                self.select_first_entry_point_match();
+            }
             KeyCode::Char('j') => self.cycle_entry_point_selection(1),
             KeyCode::Char('k') => self.cycle_entry_point_selection(-1),
             KeyCode::Char('g') => self.jump_entry_point_selection(false),
@@ -552,22 +557,23 @@ impl ShellApp {
     }
 
     fn cycle_entry_point_selection(&mut self, direction: i32) {
-        let len = crate::ui_view_models::entry_point_breakdown(self)
-            .entries
-            .len();
-        self.router
-            .scene_mut()
-            .cycle_entry_point_selection(direction, len);
+        let model = crate::ui_view_models::entry_point_browser_model(self);
+        let len = model.entries.len();
+        if len == 0 {
+            return;
+        }
+        let current = crate::ui_view_models::entry_point_browser_selection(self, &model);
+        let next = current.map_or(0, |index| {
+            (index as i64 + i64::from(direction)).rem_euclid(len as i64) as usize
+        });
+        self.bind_entry_point_browser_index(next);
     }
 
     fn jump_entry_point_selection(&mut self, last: bool) {
-        let len = crate::ui_view_models::entry_point_breakdown(self)
+        let len = crate::ui_view_models::entry_point_browser_model(self)
             .entries
             .len();
-        let selection = if last { len.saturating_sub(1) } else { 0 };
-        self.router
-            .scene_mut()
-            .set_entry_point_selection(selection, len);
+        self.bind_entry_point_browser_index(if last { len.saturating_sub(1) } else { 0 });
     }
 
     fn scroll_entry_point_detail(&mut self, direction: i32) {
@@ -577,14 +583,17 @@ impl ShellApp {
     }
 
     fn activate_entry_point_selection(&mut self) -> InputUpdate {
-        let breakdown = crate::ui_view_models::entry_point_breakdown(self);
-        let entries = &breakdown.entries;
-        let selection = self
-            .router
-            .scene()
-            .entry_point_selection()
-            .min(entries.len().saturating_sub(1));
-        let selected = entries.get(selection);
+        let breakdown = crate::ui_view_models::entry_point_browser_model(self);
+        let Some(selection) =
+            crate::ui_view_models::entry_point_browser_selection(self, &breakdown)
+        else {
+            self.set_warn_notice(
+                "entry points",
+                "no visible entry selected — use the list keys or clear the filter",
+            );
+            return InputUpdate::handled();
+        };
+        let selected = breakdown.entries.get(selection);
         let disposition = selected.map(|entry| entry.disposition);
         let target = selected
             .and_then(|entry| entry.targets.first())

@@ -21,6 +21,7 @@ pub(super) fn fixture_body(phase: WorkflowPhase, state: SemanticFixture) -> Phas
 fn map_fixture(state: SemanticFixture) -> MapPhaseModel {
     let richness = state.richness();
     MapPhaseModel {
+        inspectable_local_artifacts: false,
         context: fixture_context(state, richness),
         project: ProjectModel {
             scope_label: "fixture".to_string(),

@@ -31,7 +31,7 @@ fn map_specs(model: &MapPhaseModel) -> Vec<PhaseSurfaceSpec> {
     );
     push_if(
         &mut specs,
-        model.dfd.empty_hint.is_none(),
+        model.inspectable_local_artifacts || model.dfd.empty_hint.is_none(),
         diagram(PhaseSurfaceId::MapDfd),
     );
     specs

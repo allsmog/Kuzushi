@@ -12,7 +12,7 @@ use crate::scene3d::{
     active_palette, attack_surface_scene, brighten, render_to_framebuffer, Camera, Projector,
     SceneLabel, VizPage, BACKGROUND,
 };
-use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model, entry_point_breakdown};
+use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::{Color, Style};
@@ -80,6 +80,23 @@ fn render_scene_body(
 }
 
 fn render_summary_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if dfd_model(app).empty_hint.is_some()
+        && crate::ui_view_models::map_local_artifacts_available(app)
+    {
+        frame.render_widget(
+            Paragraph::new(super::gallery::local_inventory_summary_lines(
+                app,
+                area.width as usize,
+            ))
+            .wrap(Wrap { trim: false })
+            .scroll((
+                u16::try_from(app.router.scene().summary_scroll().max(0)).unwrap_or(u16::MAX),
+                0,
+            )),
+            area,
+        );
+        return;
+    }
     frame.render_widget(
         DfdSummary {
             model: dfd_model(app),
@@ -113,14 +130,59 @@ fn render_exploit_chain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) 
 }
 
 fn render_entry_points_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
-    frame.render_widget(
-        EntryPointBrowser {
-            model: entry_point_breakdown(app),
-            selection: app.router.scene().entry_point_selection(),
-            detail_scroll: app.router.scene().entry_point_detail_scroll(),
-        },
-        area,
+    let model = crate::ui_view_models::entry_point_browser_model(app);
+    if model.empty_hint.is_some() {
+        frame.render_widget(
+            EntryPointBrowser {
+                model,
+                selection: 0,
+                detail_scroll: 0,
+            },
+            area,
+        );
+        return;
+    }
+    let selected = crate::ui_view_models::entry_point_browser_selection(app, &model);
+    let hint = format!(
+        "/ search · C clear · {}/{} · {}{}",
+        model.entries.len(),
+        model.counts.union,
+        app.router.scene().entry_point_query(),
+        if app.router.scene().entry_point_searching() {
+            "_ · Enter/Esc finish"
+        } else {
+            ""
+        }
     );
+    let body = Rect {
+        y: area.y.saturating_add(1),
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    frame.render_widget(
+        Paragraph::new(hint),
+        Rect {
+            height: area.height.min(1),
+            ..area
+        },
+    );
+    if let Some(selection) = selected {
+        frame.render_widget(
+            EntryPointBrowser {
+                model,
+                selection,
+                detail_scroll: app.router.scene().entry_point_detail_scroll(),
+            },
+            body,
+        );
+    } else {
+        frame.render_widget(
+            Paragraph::new(
+                "No visible selection. Change the search, clear it with C, or use the list keys.",
+            ),
+            body,
+        );
+    }
 }
 
 fn render_line_page_body(

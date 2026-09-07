@@ -46,6 +46,7 @@ mod budget_guard;
 mod confirmation_keys;
 mod control_keys;
 mod cursor_and_view_keys;
+mod entry_point_search;
 mod exit_requests;
 mod key_dispatch;
 mod keybinding_types;

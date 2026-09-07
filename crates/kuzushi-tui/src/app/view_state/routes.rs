@@ -600,7 +600,6 @@ impl ReportRouteState {
             .saturating_add_signed(delta)
             .min(Self::FORMATS.len() - 1);
         self.path_draft = default_report_path(self.format()).to_string();
-        self.receipt = None;
         self.reveal_error = None;
     }
 
@@ -620,7 +619,6 @@ impl ReportRouteState {
                 kuzushi_core::WorkspaceExportCompleteness::All
             }
         };
-        self.receipt = None;
         self.reveal_error = None;
     }
 
@@ -707,6 +705,24 @@ mod report_route_tests {
                 route.move_format(1);
             }
         }
+    }
+
+    #[test]
+    fn editing_the_next_export_preserves_the_previous_receipt() {
+        let mut route = ReportRouteState::default();
+        let receipt = ReportReceipt {
+            format: WorkspaceExportFormat::Sarif,
+            completeness: WorkspaceExportCompleteness::All,
+            count: Some(2),
+            absolute_path: Some(PathBuf::from("/tmp/previous.sarif")),
+            error: None,
+            timestamp: "recorded".into(),
+        };
+        route.set_receipt(receipt.clone());
+        route.move_format(1);
+        route.cycle_completeness();
+        *route.path_draft_mut() = "next-report".into();
+        assert_eq!(route.receipt(), Some(&receipt));
     }
 
     #[test]
@@ -1092,6 +1108,9 @@ pub struct SceneRouteState {
     entry_point_selection: usize,
     /// Requested first row in the selected entry-point detail pane.
     entry_point_detail_scroll: usize,
+    entry_point_query: String,
+    entry_point_searching: bool,
+    entry_point_selected_id: Option<String>,
 }
 
 impl Default for SceneRouteState {
@@ -1111,6 +1130,9 @@ impl Default for SceneRouteState {
             summary_scroll: 0,
             entry_point_selection: 0,
             entry_point_detail_scroll: 0,
+            entry_point_query: String::new(),
+            entry_point_searching: false,
+            entry_point_selected_id: None,
         }
     }
 }
@@ -1190,6 +1212,44 @@ impl SceneRouteState {
 
     pub(crate) fn entry_point_selection(&self) -> usize {
         self.entry_point_selection
+    }
+
+    pub(crate) fn entry_point_query(&self) -> &str {
+        &self.entry_point_query
+    }
+
+    pub(crate) fn entry_point_query_mut(&mut self) -> &mut String {
+        &mut self.entry_point_query
+    }
+
+    pub(crate) fn entry_point_searching(&self) -> bool {
+        self.entry_point_searching
+    }
+
+    pub(crate) fn set_entry_point_searching(&mut self, active: bool) {
+        self.entry_point_searching = active;
+    }
+
+    pub(crate) fn entry_point_selected_id(&self) -> Option<&str> {
+        self.entry_point_selected_id.as_deref()
+    }
+
+    pub(crate) fn bind_entry_point_selection(
+        &mut self,
+        id: Option<String>,
+        index: usize,
+        len: usize,
+    ) {
+        self.entry_point_selected_id = id;
+        self.set_entry_point_selection(index, len);
+    }
+
+    pub(crate) fn reset_entry_point_search(&mut self) {
+        self.entry_point_query.clear();
+        self.entry_point_searching = false;
+        self.entry_point_selected_id = None;
+        self.entry_point_selection = 0;
+        self.entry_point_detail_scroll = 0;
     }
 
     pub(crate) fn entry_point_detail_scroll(&self) -> usize {
@@ -1276,16 +1336,6 @@ impl SceneRouteState {
     pub(crate) fn reset_summary_navigation(&mut self) {
         self.summary_component_selection = 0;
         self.summary_scroll = 0;
-    }
-
-    pub(crate) fn cycle_entry_point_selection(&mut self, direction: i32, len: usize) {
-        if len == 0 {
-            self.entry_point_selection = 0;
-            return;
-        }
-        let current = self.entry_point_selection.min(len - 1) as i32;
-        self.entry_point_selection = (current + direction).rem_euclid(len as i32) as usize;
-        self.entry_point_detail_scroll = 0;
     }
 
     pub(crate) fn set_entry_point_selection(&mut self, selection: usize, len: usize) {

@@ -60,6 +60,7 @@ pub(crate) use view_model_fragments::{
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkbenchCache {
+    pub(crate) entry_point_search: Option<crate::ui_view_models::EntryPointSearchCache>,
     target_base: Option<TargetBaseCache>,
     target_profile: Option<TargetProfileCache>,
     #[cfg(test)]

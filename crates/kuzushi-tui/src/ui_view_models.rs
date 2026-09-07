@@ -34,6 +34,7 @@ mod context_snapshot;
 mod context_strip;
 mod cost;
 mod display_text;
+mod entry_point_search;
 mod failure_handoff;
 mod finding_search;
 mod finding_summary;
@@ -65,6 +66,9 @@ mod quit_confirm;
 mod rail;
 mod recent_module_activity;
 mod recommendation;
+pub(crate) use entry_point_search::{
+    entry_point_browser_model, entry_point_browser_selection, EntryPointSearchCache,
+};
 mod report_preview;
 mod retry_card;
 pub(crate) mod review_conflicts;
@@ -234,9 +238,9 @@ pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    map_gallery_is_primary, map_status_card_rows, phase_cockpit_model_for_phase,
-    phase_presentation_plan, phase_surface_specs, AttentionMode, ChainArtifactsModel,
-    ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
+    map_gallery_is_primary, map_local_artifacts_available, map_status_card_rows,
+    phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
+    ChainArtifactsModel, ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
     EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
     MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,
     PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
@@ -337,7 +341,7 @@ pub(crate) use strategy_queue::{
     strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
     StrategyQueueRow,
 };
-pub(crate) use target_facts::target_fact_detail_lines;
+pub(crate) use target_facts::{target_fact_detail_lines, target_fact_labels};
 pub(crate) use terminal_title::terminal_title;
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_model::{

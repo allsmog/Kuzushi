@@ -142,7 +142,7 @@ fn append_report_receipt(
     width: u16,
 ) {
     lines.push(blank());
-    lines.push(divider("EXPORT RECEIPT", width));
+    lines.push(divider("LAST EXPORT RECEIPT", width));
     lines.push(detail("format", receipt.format.as_str()));
     lines.push(detail("completeness", receipt.completeness.as_str()));
     lines.push(detail("timestamp", &receipt.timestamp));

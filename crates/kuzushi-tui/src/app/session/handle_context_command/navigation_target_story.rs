@@ -173,6 +173,8 @@ impl ShellApp {
         self.engagement.reset_for_target();
         self.router.findings_mut().reset_for_target();
         self.router.workbench_mut().reset_for_target();
+        self.router.scene_mut().reset_entry_point_search();
+        self.workbench_cache().borrow_mut().entry_point_search = None;
         *self.router.activity_mut() = crate::app::ActivityRouteState::default();
         self.session.set_option_store(option_store);
         self.config_mut().phases = phases;

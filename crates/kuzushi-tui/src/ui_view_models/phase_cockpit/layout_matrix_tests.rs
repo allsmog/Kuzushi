@@ -177,7 +177,7 @@ fn expected_map_surfaces(
     let PhaseCockpitBody::Map(map) = body else {
         unreachable!("Map phase body")
     };
-    if !super::map::map_requires_action(map) && !guided {
+    if super::map::map_has_gallery(map) && !guided {
         return vec![PhaseSurfaceId::MapDfd];
     }
     if multi_surface {

@@ -46,7 +46,7 @@ impl ShellApp {
         if let Some(update) = self.reduce_modal_key(key) {
             return Some(update);
         }
-        None
+        self.handle_entry_point_search_key(key)
     }
 
     fn reduce_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {

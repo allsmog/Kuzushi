@@ -55,6 +55,11 @@ pub(super) fn plain_lines(
     if crate::ui_view_models::map_gallery_is_primary(app) {
         let mut lines = crate::renderer::views::scene::map_summary_plain_lines(app, width);
         lines.push(map_artifact_status_line(model, width));
+        lines.extend(divider_lines(
+            "WORKLIST",
+            worklist_pane_lines(model, width),
+            width,
+        ));
         return lines;
     }
     let mut lines = divider_lines("PROJECT CONTEXT", context_lines(model, width), width);

@@ -35,8 +35,12 @@ fn setup_readiness_lines(
             width,
             compact,
         ));
-        if !compact && row.id == crate::app::SetupRowId::Target {
-            lines.extend(setup_target_fact_lines(app, width));
+        if row.id == crate::app::SetupRowId::Target {
+            if compact {
+                lines.extend(compact_setup_target_fact_lines(app, width));
+            } else {
+                lines.extend(setup_target_fact_lines(app, width));
+            }
         }
         lines.extend(setup_selected_row_detail(app, row, index, width, compact));
     }
@@ -68,6 +72,18 @@ fn compact_setup_detail(row: &SetupReadinessRow, compact: bool) -> String {
         return crate::ui_view_models::compact_target_path(&row.detail);
     }
     row.detail.clone()
+}
+
+fn compact_setup_target_fact_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let Some(facts) = app.active_target_facts() else {
+        return vec![muted("    target facts: not yet available")];
+    };
+    let labels = crate::ui_view_models::target_fact_labels(facts);
+    let status = format!("    revision {} · {}", labels.revision, labels.dirty);
+    wrap_text(&status, width)
+        .into_iter()
+        .map(|line| muted(&line))
+        .collect()
 }
 
 fn setup_target_fact_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {

@@ -76,8 +76,67 @@ pub(crate) fn map_summary_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<
             theme::muted(),
         ),
     ];
-    lines.extend(summary_plain_lines(width, &dfd_model(app)));
+    if dfd_model(app).empty_hint.is_some()
+        && crate::ui_view_models::map_local_artifacts_available(app)
+    {
+        lines.extend(local_inventory_summary_lines(app, width));
+    } else {
+        lines.extend(summary_plain_lines(width, &dfd_model(app)));
+    }
     lines
+}
+
+/// The keyless Summary describes existing source inventory, never a modeled architecture.
+pub(super) fn local_inventory_summary_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let entries = entry_point_breakdown(app);
+    let mut lines = vec![
+        Line::styled(
+            "LOCAL INVENTORY · inspect available evidence",
+            theme::heading(),
+        ),
+        Line::from(fit_plain(
+            &format!(
+                "Entry points: {} extracted · {} modeled",
+                entries.counts.extracted, entries.counts.modeled
+            ),
+            width,
+        )),
+        Line::from(fit_plain(
+            &format!(
+                "Catalog: {} · {}",
+                entries.receipt.catalog_artifact.label(),
+                entries.receipt.freshness.label()
+            ),
+            width,
+        )),
+    ];
+    lines.extend(component_inventory_summary_lines(app, width));
+    lines.push(Line::from("Threat model / DFD: not available on this view"));
+    lines.push(Line::from(
+        "Tab: browse entry points and components · Enter: request threat model",
+    ));
+    lines.push(Line::from(
+        "Inspection does not accept Map evidence or advance the workflow.",
+    ));
+    lines
+}
+
+fn component_inventory_summary_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let components = component_stack(app);
+    let text = match components.empty_hint {
+        Some(hint) => format!("Components: {hint}"),
+        None => format!(
+            "Components: {} manifests · {} lockfiles · {} declared · {} resolved",
+            components.manifest_count,
+            components.lockfile_count,
+            components.declared_count,
+            components.resolved_count
+        ),
+    };
+    crate::renderer::shared::text::wrap_text(&text, width)
+        .into_iter()
+        .map(Line::from)
+        .collect()
 }
 
 /// Line-based entry for the gallery (2D pages always; the 3D page only in plain

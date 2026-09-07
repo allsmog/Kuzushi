@@ -22,6 +22,7 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     let threat_model_freshness = crate::ui_view_models::threat_model_freshness(app);
     let empty_hint = map_empty_hint(app, &context, attack_surface.is_some(), &dfd);
     MapPhaseModel {
+        inspectable_local_artifacts: map_local_artifacts_available(app),
         context,
         project,
         attack_surface,
@@ -36,7 +37,24 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
 }
 
 pub(crate) fn map_gallery_is_primary(app: &ShellApp) -> bool {
-    !map_requires_action(&map_phase_model(app))
+    map_has_gallery(&map_phase_model(app))
+}
+
+/// This presentation predicate never supplies a workflow checkpoint.
+pub(super) fn map_has_gallery(model: &MapPhaseModel) -> bool {
+    model.inspectable_local_artifacts || !map_requires_action(model)
+}
+
+pub(crate) fn map_local_artifacts_available(app: &ShellApp) -> bool {
+    if !crate::ui_view_models::entry_point_breakdown(app)
+        .entries
+        .is_empty()
+    {
+        return true;
+    }
+    app.active_target_facts()
+        .and_then(|facts| facts.component_inventory.as_ref())
+        .is_some_and(|report| report.manifests_scanned > 0 || !report.lockfiles.is_empty())
 }
 
 /// Receipt rows the Map status card shows. The renderer takes the same number
@@ -160,6 +178,18 @@ mod tests {
     use super::*;
     use crate::ActivitySession;
     use kuzushi_core::V2Config;
+
+    #[test]
+    fn local_inventory_opens_the_gallery_without_clearing_map_prerequisites() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let mut model = map_phase_model(&app);
+        assert!(map_requires_action(&model));
+        assert!(!map_has_gallery(&model));
+        model.inspectable_local_artifacts = true;
+        assert!(map_has_gallery(&model));
+        assert!(map_requires_action(&model));
+        assert!(model.dfd.empty_hint.is_some());
+    }
 
     #[test]
     fn retained_activity_never_changes_the_durable_map_projection() {

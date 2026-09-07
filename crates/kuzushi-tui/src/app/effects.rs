@@ -691,6 +691,7 @@ impl ShellApp {
             .router
             .report()
             .receipt()
+            .filter(|receipt| receipt.error.is_none())
             .and_then(|receipt| receipt.absolute_path.clone());
         let result = path
             .as_deref()

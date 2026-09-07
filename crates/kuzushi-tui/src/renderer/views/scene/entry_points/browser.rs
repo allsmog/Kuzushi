@@ -1,7 +1,7 @@
 use super::{
-    browser_summary_text, digest_summary, disposition_summary, entry_detail_lines, fit,
-    paired_digest_summary, provenance_summary, receipt_count_summary, responsive_summary,
-    revision_summary, timestamp_summary,
+    digest_summary, disposition_summary, entry_detail_lines, fit, paired_digest_summary,
+    provenance_summary, receipt_count_summary, responsive_summary, revision_summary,
+    timestamp_summary,
 };
 use crate::renderer::shared::text::{display_width, fit_path, pad};
 use crate::theme;
@@ -83,11 +83,6 @@ fn render_browser(
 }
 
 fn frame_summary_text(area: Rect, model: &EntryPointBreakdown) -> (Vec<String>, bool) {
-    let full = browser_summary_text(area.width as usize, model);
-    let compact = area.height.saturating_sub(full.len() as u16) < 10;
-    if !compact {
-        return (full, false);
-    }
     let width = area.width as usize;
     let mut lines = vec![
         responsive_summary(width, model),

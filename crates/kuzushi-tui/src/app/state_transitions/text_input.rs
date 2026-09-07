@@ -66,6 +66,9 @@ impl ShellApp {
             return update;
         }
         let normalised = normalise_paste_text(text);
+        if self.paste_entry_point_search(&normalised) {
+            return InputUpdate::handled();
+        }
         if let Some(update) = self.capture_picker_editor_paste(&normalised) {
             return update;
         }

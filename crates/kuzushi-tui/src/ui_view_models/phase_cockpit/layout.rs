@@ -231,7 +231,7 @@ fn ready_map_composition(body: &PhaseCockpitBody, density: LayoutDensity) -> Opt
     if density == LayoutDensity::Guided {
         return None;
     }
-    (!super::map::map_requires_action(model)).then_some(Composition::CanvasWithDrawer {
+    super::map::map_has_gallery(model).then_some(Composition::CanvasWithDrawer {
         canvas: PhaseSurfaceId::MapDfd,
         drawer: None,
     })

@@ -35,7 +35,10 @@ pub(crate) use layout::{
     PhasePresentationPlan, PhaseSurfaceId, PlannedPhaseSurface, SurfaceInteraction, SurfaceState,
 };
 use map::map_phase_model;
-pub(crate) use map::{map_gallery_is_primary, map_status_card_rows, MAP_CONTEXT_ROW_LIMIT};
+pub(crate) use map::{
+    map_gallery_is_primary, map_local_artifacts_available, map_status_card_rows,
+    MAP_CONTEXT_ROW_LIMIT,
+};
 use phase_bodies::{fix_phase_model, review_phase_model};
 use scan::scan_phase_model;
 
@@ -164,6 +167,8 @@ pub(crate) struct EngagementHeaderModel {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct MapPhaseModel {
+    /// Read-only inventory can be useful before workflow Map acceptance or modeling.
+    pub(crate) inspectable_local_artifacts: bool,
     pub(crate) context: ContextSnapshotModel,
     pub(crate) project: ProjectModel,
     pub(crate) attack_surface: Option<AttackSurfaceRiskModel>,
