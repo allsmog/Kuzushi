@@ -1,0 +1,35 @@
+name: TUI UX verification support
+on:
+  push:
+    branches: [daily/2026-09-06-tui-ux-contracts]
+    paths: [.github/workflows/tui-ux-kit-support.yml]
+permissions:
+  contents: read
+jobs:
+  support:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Capture required non-crate includes and dynamic libraries only
+        run: |
+          cargo fetch --locked
+          mkdir -p /tmp/ux-support/lib
+          root=$(find "$HOME/.cargo/git/checkouts" -path '*/iris/packs' -type d | head -1)
+          test -n "$root"
+          cp -a "$(dirname "$root")" /tmp/ux-support/iris
+          sudo apt-get update -qq
+          sudo apt-get install -y tmux bubblewrap
+          cp /usr/bin/tmux /usr/bin/bwrap /tmp/ux-support/
+          ldd /usr/bin/tmux /usr/bin/bwrap | awk '/=> \/.*(libevent|libtinfo|libcap)/ {print $3}' | sort -u | while read -r lib; do cp -L "$lib" /tmp/ux-support/lib/; done
+          tar -czf /tmp/ux-support.tar.gz -C /tmp/ux-support .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kuzushi-ux-verification-support
+          path: /tmp/ux-support.tar.gz
+          retention-days: 1
