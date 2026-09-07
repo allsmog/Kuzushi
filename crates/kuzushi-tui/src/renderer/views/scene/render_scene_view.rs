@@ -142,7 +142,6 @@ fn render_entry_points_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         );
         return;
     }
-    let selected = crate::ui_view_models::entry_point_browser_selection(app, &model);
     let (hint_area, body) = entry_point_browser_areas(area);
     frame.render_widget(
         Paragraph::new(entry_point_search_hint(
@@ -152,7 +151,7 @@ fn render_entry_points_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         )),
         hint_area,
     );
-    if let Some(selection) = selected {
+    if let Some(selection) = crate::ui_view_models::entry_point_browser_selection(app, &model) {
         frame.render_widget(
             EntryPointBrowser {
                 model,
