@@ -1,27 +1,124 @@
-name: TUI UX branch source
+name: TUI UX integration verification
 
 on:
   push:
     branches: [daily/2026-09-06-tui-ux-contracts]
-    paths: [.github/workflows/tui-ux-edit.yml]
+    paths:
+      - .github/workflows/tui-ux-edit.yml
+      - .github/tui-ux-repair.json
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: tui-ux-integration
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_BUILD_JOBS: '2'
 
 jobs:
-  snapshot:
+  integration:
     if: github.repository == 'allsmog/Kuzushi' && github.ref == 'refs/heads/daily/2026-09-06-tui-ux-contracts'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Archive only tracked source, never credentials or runtime state
-        run: git archive --format=tar.gz HEAD > /tmp/kuzushi-ux-source.tar.gz
-      - uses: actions/upload-artifact@v7
+          fetch-depth: 0
+      - name: Validate and apply the exact patch
+        run: |
+          mkdir -p /tmp/ux-verification
+          git rev-parse HEAD > /tmp/ux-verification/input-sha.txt
+          git merge-base --is-ancestor 8c61990103f612ae8ac545f7e8bd681a57fe83de HEAD
+          test "$(git ls-remote origin refs/heads/daily/2026-09-06-tui-ux-contracts | cut -f1)" = "$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import base64, hashlib, json, pathlib, subprocess, zlib
+          text = pathlib.Path('.github/tui-ux-patch.b64').read_text().strip()
+          correction = pathlib.Path('.github/tui-ux-repair.json')
+          if correction.exists():
+              for before, after in json.loads(correction.read_text()):
+                  assert text.count(before) == 1, before
+                  text = text.replace(before, after)
+          patch = zlib.decompress(base64.b64decode(text, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'd5102949c3014e07573b54ab86ca707173713ef28d9e63846f9fb7a4c2d87b1f'
+          subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
+          subprocess.run(['git', 'apply', '-'], input=patch, check=True)
+          PY
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
-          name: kuzushi-ux-source
-          path: /tmp/kuzushi-ux-source.tar.gz
-          retention-days: 1
+          node-version: '26.3.1'
+          cache: pnpm
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: true
+      - name: Install project tooling and preserve normal hooks
+        run: pnpm install --frozen-lockfile
+      - name: Format changed source and remove temporary transport files
+        run: |
+          edition=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["edition"])')
+          { git diff --name-only -- '*.rs'; git ls-files --others --exclude-standard -- '*.rs'; } | sort -u | while IFS= read -r path; do
+            rustfmt --edition "$edition" --config skip_children=true "$path"
+          done
+          pnpm exec biome check --write scripts/verify-repository.mjs scripts/verify-repository.test.mjs
+          git rm .github/tui-ux-edit.mjs .github/workflows/tui-ux-edit.yml .github/tui-ux-patch.b64
+          if test -f .github/tui-ux-repair.json; then git rm .github/tui-ux-repair.json; fi
+          git add crates/kuzushi-tui/src scripts/verify-repository.mjs scripts/verify-repository.test.mjs
+          git diff --cached --check
+      - name: Commit the source integration to this branch only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(tui): add identity-safe catalog search and artifact-first Map browsing'
+          git push origin HEAD:refs/heads/daily/2026-09-06-tui-ux-contracts
+          git rev-parse HEAD > /tmp/ux-verification/tested-sha.txt
+      - name: Static repository contracts
+        id: contracts
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          { node --test scripts/verify-repository.test.mjs; node scripts/check-ddd-boundaries.mjs; node scripts/check-model-safety.mjs; git diff --check; } 2>&1 | tee /tmp/ux-verification/contracts.log
+      - name: Compile and run native TUI behavior
+        id: native
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          cargo test -p kuzushi-tui --lib --locked 2>&1 | tee /tmp/ux-verification/native-tests.log
+      - name: Clippy for the changed native crate
+        id: clippy
+        if: success() && steps.native.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy -p kuzushi-tui --all-targets --locked -- -D warnings 2>&1 | tee /tmp/ux-verification/clippy.log
+      - name: Capture exact source and status even on failure
+        if: always()
+        env:
+          CONTRACTS: ${{ steps.contracts.outcome }}
+          NATIVE: ${{ steps.native.outcome }}
+          CLIPPY: ${{ steps.clippy.outcome }}
+        run: |
+          mkdir -p /tmp/ux-verification
+          printf 'contracts=%s\nnative=%s\nclippy=%s\n' "$CONTRACTS" "$NATIVE" "$CLIPPY" > /tmp/ux-verification/outcomes.txt
+          git archive --format=tar.gz HEAD > /tmp/ux-verification/source.tar.gz
+          if test -f .github/tui-ux-patch.b64; then cp .github/tui-ux-patch.b64 /tmp/ux-verification/; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: kuzushi-ux-verification
+          path: /tmp/ux-verification
+          retention-days: 2
+      - name: Require executed successful checks
+        if: always()
+        env:
+          CONTRACTS: ${{ steps.contracts.outcome }}
+          NATIVE: ${{ steps.native.outcome }}
+          CLIPPY: ${{ steps.clippy.outcome }}
+        run: test "$CONTRACTS" = success && test "$NATIVE" = success && test "$CLIPPY" = success
