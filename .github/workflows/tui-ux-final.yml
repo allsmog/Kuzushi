@@ -1,0 +1,151 @@
+name: TUI UX baseline comparison
+
+on:
+  push:
+    branches: [daily/2026-09-06-tui-ux-contracts]
+    paths: [.github/workflows/tui-ux-final.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tui-ux-final
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_BUILD_JOBS: '2'
+
+jobs:
+  verify:
+    if: github.repository == 'allsmog/Kuzushi' && github.ref == 'refs/heads/daily/2026-09-06-tui-ux-contracts'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Apply exact-context repairs on the unchanged branch head
+        run: |
+          mkdir -p /tmp/ux-final
+          git merge-base --is-ancestor 4f1b58424ed1f42a38fc577912224dacbdcfb31f HEAD
+          test "$(git ls-remote origin refs/heads/daily/2026-09-06-tui-ux-contracts | cut -f1)" = "$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import json, pathlib
+          changes = {}
+          for path, before, after in json.loads(pathlib.Path('.github/tui-ux-final-edits.json').read_text()):
+              assert path.startswith('crates/kuzushi-tui/src/') and path.endswith('.rs'), path
+              text = changes.get(path, pathlib.Path(path).read_text())
+              assert text.count(before) == 1, (path, before)
+              changes[path] = text.replace(before, after)
+          for path, text in changes.items():
+              pathlib.Path(path).write_text(text)
+          PY
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.3.1'
+          cache: pnpm
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: true
+      - name: Install dependencies, format and commit with repository hooks
+        run: |
+          pnpm install --frozen-lockfile
+          edition=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["edition"])')
+          git diff --name-only -- '*.rs' | while IFS= read -r path; do
+            rustfmt --edition "$edition" --config skip_children=true "$path"
+          done
+          git rm .github/tui-ux-final-edits.json .github/workflows/tui-ux-final.yml
+          git add crates/kuzushi-tui/src
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(tui): preserve narrow evidence detail and plain summary parity'
+          git push origin HEAD:refs/heads/daily/2026-09-06-tui-ux-contracts
+          git rev-parse HEAD > /tmp/ux-final/tested-sha.txt
+          printf 'CARGO_TARGET_DIR=%s/target\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Verify static contracts and changed-code risk
+        continue-on-error: true
+        run: |
+          set +e
+          (
+            set -e
+            node --test scripts/verify-repository.test.mjs
+            pnpm quality:architecture
+            pnpm quality:model-safety
+            pnpm quality:secrets
+            pnpm check:docs
+            KUZUSHI_CRAP_RISK_BASE_REF=a59e1433321bf2f110c8f1bef93a6ba6167a42fc pnpm quality:crap-risk
+            cargo fmt --all -- --check
+            git diff --check
+          ) 2>&1 | tee /tmp/ux-final/contracts.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > /tmp/ux-final/contracts.exit
+          exit "$code"
+      - name: Execute repaired native suite
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          set +e
+          cargo test -p kuzushi-tui --lib --locked 2>&1 | tee /tmp/ux-final/branch-tests.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > /tmp/ux-final/branch-tests.exit
+          exit "$code"
+      - name: Check Clippy on the repaired source
+        continue-on-error: true
+        timeout-minutes: 8
+        run: |
+          set +e
+          cargo clippy -p kuzushi-tui --all-targets --locked -- -D warnings 2>&1 | tee /tmp/ux-final/clippy.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > /tmp/ux-final/clippy.exit
+          exit "$code"
+      - name: Execute untouched baseline in a detached worktree
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/ux-baseline" a59e1433321bf2f110c8f1bef93a6ba6167a42fc
+          cd "$RUNNER_TEMP/ux-baseline"
+          pnpm install --frozen-lockfile --offline
+          git rev-parse HEAD > /tmp/ux-final/baseline-sha.txt
+          set +e
+          cargo test -p kuzushi-tui --lib --locked 2>&1 | tee /tmp/ux-final/baseline-tests.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > /tmp/ux-final/baseline-tests.exit
+          exit "$code"
+      - name: Capture exact source and check outcomes
+        if: always()
+        run: |
+          mkdir -p /tmp/ux-final
+          git archive --format=tar.gz HEAD > /tmp/ux-final/source.tar.gz
+          python3 - <<'PY'
+          import json, pathlib, re
+          root = pathlib.Path('/tmp/ux-final')
+          results = {}
+          for name in ['contracts', 'branch-tests', 'clippy', 'baseline-tests']:
+              status = root / (name + '.exit')
+              log = root / (name + '.log')
+              text = log.read_text(errors='replace') if log.exists() else ''
+              results[name] = {'exit_code': int(status.read_text()) if status.exists() else None,
+                  'summary': re.findall(r'test result:.*', text),
+                  'failed_tests': sorted(set(re.findall(r'^test (\S+) \.\.\. FAILED$', text, re.M)))}
+          results['new_failed_tests'] = sorted(set(results['branch-tests']['failed_tests']) - set(results['baseline-tests']['failed_tests']))
+          (root / 'comparison.json').write_text(json.dumps(results, indent=2))
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: kuzushi-ux-final-verification
+          path: /tmp/ux-final
+          retention-days: 2
+      - name: Require genuinely passing candidate gates
+        if: always()
+        run: |
+          test "$(cat /tmp/ux-final/contracts.exit 2>/dev/null)" = 0
+          test "$(cat /tmp/ux-final/branch-tests.exit 2>/dev/null)" = 0
+          test "$(cat /tmp/ux-final/clippy.exit 2>/dev/null)" = 0
