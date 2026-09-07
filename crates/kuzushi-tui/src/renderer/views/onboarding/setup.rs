@@ -17,7 +17,7 @@ pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.extend(setup_readiness_lines(app, &model.rows, width, compact));
     lines.extend(setup_editor_lines(app, width));
     lines.push(blank());
-    lines.push(setup_summary_line(app, &model, width));
+    lines.extend(setup_summary_lines(app, &model, width));
     lines
 }
 
@@ -94,49 +94,86 @@ fn setup_editor_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     lines
 }
 
-fn setup_summary_line(
+const START_MAP_CALL_TO_ACTION: &str = "move to Start Map and press Enter";
+
+/// The closing verdict for the plan. The execution segments, the call to
+/// action, and the expected post-Map recommendation run are each load-bearing
+/// and together they overflow one 120-column line, so the summary spends extra
+/// lines instead of ellipsizing any of them away.
+fn setup_summary_lines(
     app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
     width: usize,
-) -> Line<'static> {
-    if model.can_start {
-        styled(
-            &fit(
-                &format!(
-                    " READY · {} · move to Start Map and press Enter",
-                    setup_execution_summary(app, model),
-                ),
-                width,
-            ),
-            theme::success(),
-        )
-    } else {
-        styled(
+) -> Vec<Line<'static>> {
+    if !model.can_start {
+        return vec![styled(
             &fit(
                 " BLOCKED · resolve the first highlighted readiness row",
                 width,
             ),
             theme::warn(),
-        )
+        )];
     }
+    let mut lines = setup_ready_lines(model, width);
+    lines.extend(setup_refresh_disclosure_lines(app, model, width));
+    lines
 }
 
-/// What committing this plan will actually execute. Selected planning tasks
-/// are not the whole Map execution envelope: after a non-skipped Map drains,
-/// Kuzushi may run one deterministic module-recommendation refresh when that
-/// artifact is absent. Keep that expected run next to the selected-task count
-/// so the fact survives the summary's width cap instead of being ellipsized
-/// off the tail. An empty plan records an explicit Map skip, so it must never
-/// promise the post-Map refresh.
-fn setup_execution_summary(
+/// Keep the verdict and its call to action on one line while they fit, and
+/// split them at that seam rather than letting a word wrap orphan the tail.
+fn setup_ready_lines(
+    model: &crate::ui_view_models::SetupReadinessModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let verdict = format!("READY · {}", setup_execution_summary(model));
+    let joined = format!("{verdict} · {START_MAP_CALL_TO_ACTION}");
+    if display_width(&joined) <= width.saturating_sub(1) {
+        return wrapped_lines(&joined, " ", width, theme::success());
+    }
+    let mut lines = wrapped_lines(&verdict, " ", width, theme::success());
+    lines.extend(wrapped_lines(
+        START_MAP_CALL_TO_ACTION,
+        " ",
+        width,
+        theme::success(),
+    ));
+    lines
+}
+
+/// Selected planning tasks are not the whole Map execution envelope: after a
+/// non-skipped Map drains, Kuzushi may run one deterministic
+/// module-recommendation refresh when that artifact is absent. An empty plan
+/// records an explicit Map skip, so it must never promise the post-Map refresh.
+fn setup_refresh_disclosure_lines(
     app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
-) -> String {
-    let expected_refresh = (model.selected_tasks > 0
-        && crate::ui_view_models::recommendation_artifact_needs_refresh(app))
-    .then_some(" · +1 expected background recommendation run")
-    .unwrap_or_default();
+    width: usize,
+) -> Vec<Line<'static>> {
+    if model.selected_tasks == 0
+        || !crate::ui_view_models::recommendation_artifact_needs_refresh(app)
+    {
+        return Vec::new();
+    }
+    wrapped_lines(
+        "+1 expected background recommendation run after Map",
+        "   ",
+        width,
+        theme::muted(),
+    )
+}
 
+/// Wrap `value` under a fixed left indent. Wrapping keeps every segment of the
+/// summary readable at narrow widths instead of ellipsizing the tail away.
+fn wrapped_lines(value: &str, indent: &str, width: usize, style: Style) -> Vec<Line<'static>> {
+    wrap_text(value, width.saturating_sub(indent.chars().count()))
+        .into_iter()
+        .map(|line| styled(&format!("{indent}{line}"), style))
+        .collect()
+}
+
+/// What committing this plan will actually execute. "0 Map task(s)" reads as a
+/// misconfiguration, so an empty-but-ready plan says what it will do instead.
+fn setup_execution_summary(model: &crate::ui_view_models::SetupReadinessModel) -> String {
     if model.selected_tasks == 0 {
         return "no selected Map task will run · cached Map artifacts reused".to_string();
     }
@@ -147,7 +184,7 @@ fn setup_execution_summary(
         format!("{} model-backed task(s)", model.selected_model_tasks)
     };
     format!(
-        "{} selected Map task(s){expected_refresh} · {execution}",
+        "{} selected Map task(s) · {execution}",
         model.selected_tasks
     )
 }
@@ -218,6 +255,15 @@ mod tests {
                     text.contains("deterministic/runtime-free · no model or credentials"),
                     "{text}"
                 );
+                assert!(
+                    text.contains("+1 expected background recommendation run"),
+                    "the plan segments and the refresh disclosure must both survive \
+                     a 120-column projection: {text}"
+                );
+                assert!(
+                    text.contains(START_MAP_CALL_TO_ACTION),
+                    "the call to action must stay on one unbroken line: {text}"
+                );
             }
         }
     }
@@ -229,15 +275,50 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         app.open_setup();
         let model = setup_readiness_model(&app);
+        assert!(model.selected_tasks > 0, "{model:?}");
 
-        let summary = setup_execution_summary(&app, &model);
+        for width in [60u16, 120] {
+            let rendered = setup_summary_lines(&app, &model, width as usize)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                rendered.contains("+1 expected background recommendation run"),
+                "width {width}: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_ready_summary_wraps_instead_of_ellipsizing_its_execution_segments() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        let model = setup_readiness_model(&app);
+
+        let lines = setup_summary_lines(&app, &model, 60);
+        let rendered = lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let unwrapped = lines
+            .iter()
+            .map(|line| line.to_string().trim().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(!rendered.contains('…'), "{rendered}");
         assert!(
-            summary.contains("+1 expected background recommendation run"),
-            "{summary}"
+            unwrapped.contains(&setup_execution_summary(&model)),
+            "{rendered}"
         );
-
-        let rendered = setup_summary_line(&app, &model, 60).to_string();
-        assert!(rendered.contains("+1"), "{rendered}");
+        assert!(unwrapped.contains(START_MAP_CALL_TO_ACTION), "{rendered}");
+        for line in &lines {
+            assert!(line.to_string().chars().count() <= 60, "{rendered}");
+        }
     }
 
     #[test]
