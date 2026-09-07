@@ -143,28 +143,14 @@ fn render_entry_points_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         return;
     }
     let selected = crate::ui_view_models::entry_point_browser_selection(app, &model);
-    let hint = format!(
-        "/ search · C clear · {}/{} · {}{}",
-        model.entries.len(),
-        model.counts.union,
-        app.router.scene().entry_point_query(),
-        if app.router.scene().entry_point_searching() {
-            "_ · Enter/Esc finish"
-        } else {
-            ""
-        }
-    );
-    let body = Rect {
-        y: area.y.saturating_add(1),
-        height: area.height.saturating_sub(1),
-        ..area
-    };
+    let (hint_area, body) = entry_point_browser_areas(area);
     frame.render_widget(
-        Paragraph::new(hint),
-        Rect {
-            height: area.height.min(1),
-            ..area
-        },
+        Paragraph::new(entry_point_search_hint(
+            app,
+            model.entries.len(),
+            model.counts.union,
+        )),
+        hint_area,
     );
     if let Some(selection) = selected {
         frame.render_widget(
@@ -183,6 +169,31 @@ fn render_entry_points_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             body,
         );
     }
+}
+
+fn entry_point_search_hint(app: &ShellApp, visible: usize, total: usize) -> String {
+    let editing = if app.router.scene().entry_point_searching() {
+        "_ · Enter/Esc finish"
+    } else {
+        ""
+    };
+    format!(
+        "/ search · C clear · {visible}/{total} · {}{editing}",
+        app.router.scene().entry_point_query()
+    )
+}
+
+fn entry_point_browser_areas(area: Rect) -> (Rect, Rect) {
+    let hint = Rect {
+        height: area.height.min(1),
+        ..area
+    };
+    let body = Rect {
+        y: area.y.saturating_add(1),
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+    (hint, body)
 }
 
 fn render_line_page_body(
