@@ -17,7 +17,7 @@ pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.extend(setup_readiness_lines(app, &model.rows, width, compact));
     lines.extend(setup_editor_lines(app, width));
     lines.push(blank());
-    lines.extend(setup_summary_lines(app, &model, width));
+    lines.extend(setup_summary_lines(&model, width));
     lines
 }
 
@@ -101,7 +101,6 @@ const START_MAP_CALL_TO_ACTION: &str = "move to Start Map and press Enter";
 /// and together they overflow one 120-column line, so the summary spends extra
 /// lines instead of ellipsizing any of them away.
 fn setup_summary_lines(
-    app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
     width: usize,
 ) -> Vec<Line<'static>> {
@@ -115,7 +114,7 @@ fn setup_summary_lines(
         )];
     }
     let mut lines = setup_ready_lines(model, width);
-    lines.extend(setup_refresh_disclosure_lines(app, model, width));
+    lines.extend(setup_refresh_disclosure_lines(model, width));
     lines
 }
 
@@ -140,18 +139,27 @@ fn setup_ready_lines(
     lines
 }
 
-/// Selected planning tasks are not the whole Map execution envelope: after a
-/// non-skipped Map drains, Kuzushi may run one deterministic
-/// module-recommendation refresh when that artifact is absent. An empty plan
-/// records an explicit Map skip, so it must never promise the post-Map refresh.
+/// Planned tasks are not the whole Map execution envelope: once a non-skipped
+/// Map drains, Kuzushi runs one deterministic module-recommendation refresh
+/// when the latest run holds no `recommendations.json`.
+///
+/// That freshness check belongs to the post-Map state, and Setup cannot read it
+/// early. Every task the plan runs mints a new run whose summary moves the
+/// latest-run pointer, and no Map tool writes `recommendations.json`, so a
+/// committed non-empty plan always leaves the post-Map check looking at a run
+/// without that artifact — even for a hydrated engagement whose current latest
+/// run has a readable one. Judging freshness here would understate the envelope
+/// exactly for those cached engagements, so the disclosure follows the plan.
+///
+/// The plan, not the selection, decides: checked-but-cached rows are reused
+/// without running, and an all-reused (or empty) plan never completes Map at
+/// all, so neither may promise the refresh. `expected` carries the residual
+/// uncertainty — a plan whose tasks all fail stops at the retry gate instead.
 fn setup_refresh_disclosure_lines(
-    app: &ShellApp,
     model: &crate::ui_view_models::SetupReadinessModel,
     width: usize,
 ) -> Vec<Line<'static>> {
-    if model.selected_tasks == 0
-        || !crate::ui_view_models::recommendation_artifact_needs_refresh(app)
-    {
+    if model.runnable_tasks == 0 {
         return Vec::new();
     }
     wrapped_lines(
@@ -275,10 +283,10 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         app.open_setup();
         let model = setup_readiness_model(&app);
-        assert!(model.selected_tasks > 0, "{model:?}");
+        assert!(model.runnable_tasks > 0, "{model:?}");
 
         for width in [60u16, 120] {
-            let rendered = setup_summary_lines(&app, &model, width as usize)
+            let rendered = setup_summary_lines(&model, width as usize)
                 .into_iter()
                 .map(|line| line.to_string())
                 .collect::<Vec<_>>()
@@ -290,6 +298,99 @@ mod tests {
         }
     }
 
+    /// A hydrated engagement whose current latest run already holds a readable
+    /// `recommendations.json` still commits the refresh: its Map tasks move the
+    /// latest-run pointer to runs without that artifact, and the post-Map check
+    /// reads the new pointer. Setup must disclose the run it is committing to.
+    #[test]
+    fn a_fresh_recommendations_artifact_does_not_hide_the_post_map_refresh() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        write_latest_run_with_recommendations(target.path(), "run-cached-rec");
+        app.invalidate_view_hydration();
+        app.hydrate_all_view_data_for_test();
+        assert!(
+            !crate::ui_view_models::recommendation_artifact_needs_refresh(&app),
+            "fixture must present a readable recommendations.json on the latest run"
+        );
+        let model = setup_readiness_model(&app);
+        assert!(model.runnable_tasks > 0, "{model:?}");
+
+        let rendered = setup_summary_lines(&model, 120)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            rendered.contains("+1 expected background recommendation run"),
+            "{rendered}"
+        );
+    }
+
+    /// The mirror case: every checked row is cached and reused, so the plan is
+    /// empty, Map never runs, and the refresh must not be promised — even
+    /// though no `recommendations.json` exists yet.
+    #[test]
+    fn an_all_reused_plan_does_not_promise_the_post_map_refresh() {
+        let (target, mut app) = reusable_map_app();
+        assert!(
+            crate::ui_view_models::recommendation_artifact_needs_refresh(&app),
+            "fixture must have no recommendations artifact"
+        );
+        let checked = check_every_cached_row(&mut app);
+        assert!(checked > 0, "fixture must offer cached Map rows");
+        let model = setup_readiness_model(&app);
+        assert_eq!(model.selected_tasks, checked, "{model:?}");
+        assert_eq!(model.runnable_tasks, 0, "{model:?}");
+
+        let rendered = setup_summary_lines(&model, 120)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            !rendered.contains("+1 expected background recommendation run"),
+            "a reused-only plan never completes Map: {rendered}"
+        );
+        drop(target);
+    }
+
+    fn write_latest_run_with_recommendations(target: &std::path::Path, run_id: &str) {
+        let run_dir = kuzushi_core::run_dir(target, run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(
+            run_dir.join("recommendations.json"),
+            serde_json::json!({"recommendations": []}).to_string(),
+        )
+        .unwrap();
+        let summary =
+            kuzushi_core::RunSummary::running(run_id, "tool", None, target.display().to_string());
+        kuzushi_core::write_run_summary(target, &summary).unwrap();
+    }
+
+    /// Check every row whose artifact is already on disk. Cached rows carry no
+    /// rebuild mark, so the picker reports them as reused and the committed
+    /// plan drops them — the same transition `cycle_planning_row` performs.
+    fn check_every_cached_row(app: &mut ShellApp) -> usize {
+        let cached = app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .filter(|row| row.artifact_state == crate::app::PlanningArtifactState::Cached)
+            .map(|row| row.id)
+            .collect::<Vec<_>>();
+        let picker = app.engagement.planning_picker_mut();
+        for task in &cached {
+            picker.selected_mut().insert(*task);
+        }
+        cached.len()
+    }
+
     #[test]
     fn the_ready_summary_wraps_instead_of_ellipsizing_its_execution_segments() {
         let target = tempfile::tempdir().unwrap();
@@ -298,7 +399,7 @@ mod tests {
         app.open_setup();
         let model = setup_readiness_model(&app);
 
-        let lines = setup_summary_lines(&app, &model, 60);
+        let lines = setup_summary_lines(&model, 60);
         let rendered = lines
             .iter()
             .map(|line| line.to_string())
@@ -404,8 +505,9 @@ mod tests {
         assert_eq!(text.matches('▸').count(), 1, "{text}");
     }
 
-    #[test]
-    fn a_reusable_map_plan_is_not_announced_as_blocked() {
+    /// A target whose recommended Map artifacts were all produced by a prior
+    /// run, so every offered row rests as cached.
+    fn reusable_map_app() -> (tempfile::TempDir, ShellApp) {
         let target = tempfile::tempdir().unwrap();
         std::fs::write(
             target.path().join("Cargo.toml"),
@@ -426,6 +528,12 @@ mod tests {
             app.apply_view_hydration_results();
             std::thread::yield_now();
         }
+        (target, app)
+    }
+
+    #[test]
+    fn a_reusable_map_plan_is_not_announced_as_blocked() {
+        let (_target, app) = reusable_map_app();
 
         let text = setup_lines(&app, Rect::new(0, 0, 120, 36))
             .into_iter()
