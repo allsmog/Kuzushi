@@ -887,6 +887,91 @@ mod tests {
         assert!(!triage_cost_cap_reached(Some(1.0), stats.cost_report()));
     }
 
+    #[test]
+    fn a_run_that_evaluated_every_finding_stays_completed() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let stats = stats_with_one_success();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Completed
+        );
+        assert_eq!(response["status"], json!("completed"));
+        assert!(triage_summary(&stage1, &stats, &[]).starts_with("[+]"));
+    }
+
+    #[test]
+    fn a_cost_capped_run_is_partial_rather_than_completed() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = stats_with_one_success();
+        stats.record_cost_cap_pending();
+        stats.record_cost_cap_pending();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Partial
+        );
+        assert_eq!(response["status"], json!("partial"));
+        assert_eq!(response["data"]["costCapHit"], json!(true));
+        assert_eq!(response["data"]["pendingAfterCap"], json!(2));
+        assert_eq!(
+            response["warnings"][0],
+            json!("Cost cap hit; 2 finding(s) remain unevaluated.")
+        );
+        assert!(triage_summary(&stage1, &stats, &[]).starts_with("[!]"));
+    }
+
+    /// A cap reached before anything succeeded still did no failing work, so
+    /// the run is incomplete rather than failed.
+    #[test]
+    fn a_cost_cap_reached_before_any_success_is_partial() {
+        let mut stats = TriageRunStats::default();
+        stats.record_cost_cap_pending();
+
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Partial
+        );
+    }
+
+    #[test]
+    fn a_cost_cap_does_not_soften_a_run_whose_classifications_all_failed() {
+        let mut stats = TriageRunStats::default();
+        stats.record_runtime_error(
+            &finding_with(Severity::High, "semgrep", "sql injection"),
+            &anyhow::anyhow!("provider unavailable"),
+        );
+        stats.record_cost_cap_pending();
+
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Failed
+        );
+    }
+
+    fn stats_with_one_success() -> TriageRunStats {
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.01,
+                    cost_usd_exact: true,
+                },
+            )
+            .unwrap();
+        stats
+    }
+
     fn one_finding_triage_context() -> (
         TriageRunInput,
         TriageExecutionConfig,
