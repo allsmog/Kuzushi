@@ -32,7 +32,11 @@ Notable changes to Kuzushi. Release procedure lives in
   of a non-UTF-8 body with its undecodable bytes shown as `U+FFFD`, and
   state in the evidence rationale exactly how the stored blob differs from
   what the capture carried; a field that does not decode keeps its literal
-  text and says so. Separately, an item with no URL was dropped from both
+  text and says so. Decoding is now strict standard base64 (the `base64`
+  crate, padded or unpadded), because the hand-rolled decoder accepted a
+  truncated field — `"A"` decoded to an empty body and `"AAAAA"` dropped its
+  last symbol, both as valid UTF-8, so the disclosure never fired on exactly
+  the fields that needed it. Separately, an item with no URL was dropped from both
   importers with no counter, so `imported` plus `skippedOutOfScope` silently
   failed to add up to the capture's entry count. Those entries are now
   counted as `skippedUnusable` and named in the tool output line

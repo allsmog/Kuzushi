@@ -6,11 +6,14 @@
 //! blob they store relates to what the capture held instead of presenting an
 //! encoded or lossily decoded payload as the raw HTTP message.
 //!
-//! The base64 decoder is inlined rather than pulled from a crate: it is a
-//! tiny parser, tolerates whitespace, and errors on any non-alphabet byte or
-//! pad in the middle of the input.
+//! Decoding is strict on purpose. A field that is truncated, non-canonical,
+//! or not base64 at all must fail here rather than decode to a body that is
+//! silently shorter than the capture's: the caller answers a failure by
+//! preserving the field verbatim and disclosing it.
 
 use anyhow::Result;
+use base64::engine::general_purpose::{STANDARD as BASE64, STANDARD_NO_PAD as BASE64_NO_PAD};
+use base64::Engine as _;
 
 /// One capture field after decoding, with the disclosure an operator needs to
 /// read the stored blob honestly. `note` is `None` only when the stored text
@@ -27,7 +30,7 @@ pub(super) struct DecodedField {
 /// not decode at all keeps its literal text: the importer cannot know whether
 /// the producer mislabeled the encoding or truncated the payload.
 pub(super) fn decode_base64_field(raw: &str) -> DecodedField {
-    let Ok(bytes) = decode_base64_bytes(raw.trim().as_bytes()) else {
+    let Ok(bytes) = decode_base64_bytes(raw) else {
         return DecodedField {
             text: raw.to_string(),
             note: Some("was declared base64 but did not decode; the encoded field text is preserved verbatim"),
@@ -59,85 +62,28 @@ pub(super) fn rationale_with(provenance: &str, notes: &[String]) -> String {
     rationale
 }
 
-pub(super) fn decode_base64_bytes(input: &[u8]) -> Result<Vec<u8>> {
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-    let mut state = Base64State::default();
-    for &byte in input {
-        accumulate_base64_byte(byte, &mut state, &mut out)?;
-    }
-    Ok(out)
-}
-
-#[derive(Default)]
-struct Base64State {
-    buf: u32,
-    bits: u8,
-    padding: u8,
-}
-
-fn accumulate_base64_byte(byte: u8, state: &mut Base64State, out: &mut Vec<u8>) -> Result<()> {
-    if byte.is_ascii_whitespace() {
-        return Ok(());
-    }
-    if byte == b'=' {
-        state.padding += 1;
-        return Ok(());
-    }
-    let value = base64_alphabet_value(byte, state.padding)?;
-    feed_base64_state(state, value, out);
-    Ok(())
-}
-
-fn feed_base64_state(state: &mut Base64State, value: u8, out: &mut Vec<u8>) {
-    state.buf = (state.buf << 6) | (value as u32);
-    state.bits += 6;
-    if state.bits >= 8 {
-        state.bits -= 8;
-        out.push(((state.buf >> state.bits) & 0xFF) as u8);
-    }
-}
-
-fn base64_alphabet_value(byte: u8, padding: u8) -> Result<u8> {
-    if padding > 0 {
-        anyhow::bail!("invalid base64: non-pad after padding");
-    }
-    match byte {
-        b'A'..=b'Z' => Ok(byte - b'A'),
-        b'a'..=b'z' => Ok(byte - b'a' + 26),
-        b'0'..=b'9' => Ok(byte - b'0' + 52),
-        b'+' => Ok(62),
-        b'/' => Ok(63),
-        _ => anyhow::bail!("invalid base64 character"),
-    }
+/// Standard base64, tolerating only the line wrapping a capture may have
+/// added around it.
+///
+/// Both engines reject a truncated field: a final quantum of one symbol
+/// cannot exist, and neither accepts non-canonical trailing bits. That is the
+/// whole point of decoding here — `"A"` must not become an empty body, and
+/// `"AAAAA"` must not quietly lose its last symbol. Padded and unpadded input
+/// are both accepted because captures come from more than one encoder, but
+/// each form is decoded strictly.
+pub(super) fn decode_base64_bytes(raw: &str) -> Result<Vec<u8>> {
+    let compact: String = raw.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    BASE64
+        .decode(&compact)
+        .or_else(|_| BASE64_NO_PAD.decode(&compact))
+        .map_err(|err| anyhow::anyhow!("invalid base64: {err}"))
 }
 
 /// Standard base64 encoder for the importer tests, so a fixture can carry the
 /// exact bytes a capture would have encoded.
 #[cfg(test)]
 pub(super) fn encode_base64(input: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let len = chunk.len();
-        let b1 = if len > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if len > 2 { chunk[2] as u32 } else { 0 };
-        let triple = ((chunk[0] as u32) << 16) | (b1 << 8) | b2;
-        out.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
-        out.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
-        out.push(base64_tail(len > 1, (triple >> 6) & 0x3F));
-        out.push(base64_tail(len > 2, triple & 0x3F));
-    }
-    out
-}
-
-#[cfg(test)]
-fn base64_tail(present: bool, value: u32) -> char {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    if present {
-        ALPHABET[value as usize] as char
-    } else {
-        '='
-    }
+    BASE64.encode(input)
 }
 
 #[cfg(test)]
@@ -161,10 +107,34 @@ mod tests {
     fn encoder_helper_round_trips_through_the_decoder() {
         for payload in [&b"a"[..], b"ab", b"abc", b"abcd", &[0x00, 0xFF, 0x10]] {
             assert_eq!(
-                decode_base64_bytes(encode_base64(payload).as_bytes()).unwrap(),
+                decode_base64_bytes(&encode_base64(payload)).unwrap(),
                 payload
             );
         }
+    }
+
+    #[test]
+    fn a_truncated_quantum_does_not_decode_to_a_shortened_body() {
+        // "A" carries no complete byte and "AAAAA" ends mid-quantum: a lax
+        // decoder answers both with a body shorter than the capture's, and
+        // that body is valid UTF-8, so no disclosure would ever fire.
+        for truncated in ["A", "AAAAA"] {
+            let decoded = decode_base64_field(truncated);
+
+            assert_eq!(decoded.text, truncated);
+            assert!(
+                decoded.note.is_some(),
+                "{truncated:?} must be disclosed, not silently shortened"
+            );
+        }
+    }
+
+    #[test]
+    fn unpadded_canonical_base64_still_decodes() {
+        let decoded = decode_base64_field("SGVsbG8gd29ybGQ");
+
+        assert_eq!(decoded.text, "Hello world");
+        assert!(decoded.note.is_none());
     }
 
     #[test]
@@ -196,7 +166,7 @@ mod tests {
 
     #[test]
     fn rejects_payload_after_padding() {
-        assert!(decode_base64_bytes(b"AB==CD").is_err());
+        assert!(decode_base64_bytes("AB==CD").is_err());
     }
 
     #[test]
