@@ -218,7 +218,7 @@ fn bounty_import_har_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Resu
         "output": format!(
             "bounty:import-har imported {} finding(s){} from {}",
             summary.imported,
-            scope_skip_suffix(summary.skipped_out_of_scope),
+            capture_skip_suffix(summary.skipped_out_of_scope, summary.skipped_unusable),
             summary.source_path,
         ),
         "data": summary,
@@ -236,7 +236,7 @@ fn bounty_import_burp_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Res
         "output": format!(
             "bounty:import-burp imported {} finding(s){} from {}",
             summary.imported,
-            scope_skip_suffix(summary.skipped_out_of_scope),
+            capture_skip_suffix(summary.skipped_out_of_scope, summary.skipped_unusable),
             summary.source_path,
         ),
         "data": summary,
@@ -253,12 +253,13 @@ fn bounty_import_path(input: &Value, tool: &str) -> Result<std::path::PathBuf> {
     Ok(std::path::PathBuf::from(raw))
 }
 
-fn scope_skip_suffix(skipped: usize) -> String {
-    if skipped == 0 {
-        String::new()
-    } else {
-        format!(" ({skipped} out-of-scope skipped)")
-    }
+/// Name every entry the capture carried that did not become a finding. A
+/// silent drop would leave the operator comparing the import count against
+/// their capture with no explanation for the difference.
+fn capture_skip_suffix(out_of_scope: usize, unusable: usize) -> String {
+    crate::findings::import::capture_skip_phrase(out_of_scope, unusable)
+        .map(|phrase| format!(" ({phrase})"))
+        .unwrap_or_default()
 }
 
 pub(in crate::modules) fn workspace_status_json(ctx: &ToolExecutionContext<'_>) -> Value {
