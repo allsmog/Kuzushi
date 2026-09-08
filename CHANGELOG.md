@@ -19,6 +19,25 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Capture imports no longer present an encoded payload as the raw HTTP
+  message, and no longer drop entries without saying so. Burp marks a
+  request/response `base64="true"` and HAR marks a body
+  `encoding = "base64"` precisely when the payload is binary or compressed —
+  a gzip'd response, an image, anything not UTF-8 text. `bounty:import-burp`
+  answered a failed decode by storing the base64 text itself under
+  `request_blob`/`response_blob`, and `bounty:import-har` never decoded a
+  declared-base64 body at all, so evidence labeled `http-request` held
+  base64 that an operator reading the finding had no way to recognize as
+  undecoded. Both importers now decode the payload, keep the readable part
+  of a non-UTF-8 body with its undecodable bytes shown as `U+FFFD`, and
+  state in the evidence rationale exactly how the stored blob differs from
+  what the capture carried; a field that does not decode keeps its literal
+  text and says so. Separately, an item with no URL was dropped from both
+  importers with no counter, so `imported` plus `skippedOutOfScope` silently
+  failed to add up to the capture's entry count. Those entries are now
+  counted as `skippedUnusable` and named in the tool output line
+  (`recon:import` and the two `bounty:import-*` verbs alike).
+
 - A multi-language `codeql:scan` no longer hides the languages it failed to
   analyze. Per-language failures — a database that would not build, an
   analysis that died — were collected and then dropped whenever any other

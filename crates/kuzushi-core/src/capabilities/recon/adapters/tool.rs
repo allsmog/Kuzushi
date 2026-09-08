@@ -121,28 +121,38 @@ fn import_bounty_capture(
         .context("recon:import needs a `path` field")?;
     if is_har {
         let summary = crate::findings::import::import_har(workspace, &path)?;
-        return Ok(import_capture_output("har", summary.imported, summary.skipped_out_of_scope, summary));
+        let counts = CaptureImportCounts {
+            imported: summary.imported,
+            out_of_scope: summary.skipped_out_of_scope,
+            unusable: summary.skipped_unusable,
+        };
+        return Ok(import_capture_output("har", counts, summary));
     }
     let summary = crate::findings::import::import_burp_xml(workspace, &path)?;
-    Ok(import_capture_output(
-        "burp-xml",
-        summary.imported,
-        summary.skipped_out_of_scope,
-        summary,
-    ))
+    let counts = CaptureImportCounts {
+        imported: summary.imported,
+        out_of_scope: summary.skipped_out_of_scope,
+        unusable: summary.skipped_unusable,
+    };
+    Ok(import_capture_output("burp-xml", counts, summary))
+}
+
+/// What one capture import did with the entries it read.
+struct CaptureImportCounts {
+    imported: usize,
+    out_of_scope: usize,
+    unusable: usize,
 }
 
 fn import_capture_output(
     format: &str,
-    imported: usize,
-    skipped_out_of_scope: usize,
+    counts: CaptureImportCounts,
     summary: impl serde::Serialize,
 ) -> Value {
-    let skipped = if skipped_out_of_scope == 0 {
-        String::new()
-    } else {
-        format!(" · {skipped_out_of_scope} out-of-scope skipped")
-    };
+    let skipped = crate::findings::import::capture_skip_phrase(counts.out_of_scope, counts.unusable)
+        .map(|phrase| format!(" · {phrase}"))
+        .unwrap_or_default();
+    let imported = counts.imported;
     let output = format!("recon:import {format} imported {imported} finding(s){skipped}");
     crate::module_result::completed_output_result(output.clone(), output, json!(summary))
 }
