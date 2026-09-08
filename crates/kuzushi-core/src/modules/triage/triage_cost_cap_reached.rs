@@ -394,16 +394,32 @@ fn triage_response_data(
         "concurrency": input.concurrency,
         "votes": input.votes,
         "stage2Tier": triage_tier_label(input.stage2_tier),
-        "costCapUsd": input.cost_cap_usd,
-        "costCapHit": stats.cost_cap_hit,
-        "pendingAfterCap": stats.pending_after_cap,
         "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
         "stages": triage_stages(input, config, stage1, stats, dropped_high_conf_fp),
         "results": stats.results,
         "findings": stats.results,
     });
+    apply_triage_budget_fields(&mut data, input, stats);
     crate::module_result::apply_runtime_cost_report(&mut data, stats.cost_report());
     data
+}
+
+/// The run's budget facts, kept together so the cap, what it left pending, and
+/// whether it was the sole cause of an incomplete run cannot drift apart.
+fn apply_triage_budget_fields(data: &mut Value, input: &TriageRunInput, stats: &TriageRunStats) {
+    let Some(object) = data.as_object_mut() else {
+        return;
+    };
+    object.insert("costCapUsd".to_string(), json!(input.cost_cap_usd));
+    object.insert("costCapHit".to_string(), json!(stats.cost_cap_hit));
+    object.insert(
+        "pendingAfterCap".to_string(),
+        json!(stats.pending_after_cap),
+    );
+    object.insert(
+        "stoppedAtBudget".to_string(),
+        json!(stats.stopped_at_budget()),
+    );
 }
 
 fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> Vec<String> {
