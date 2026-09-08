@@ -65,14 +65,34 @@ impl TriageRunStats {
         self.cost
     }
 
+    /// `Completed` means every selected finding was evaluated. A cost cap that
+    /// defers findings leaves real work undone, so it downgrades the run to
+    /// `Partial` even when nothing failed — otherwise scan-stage receipts, the
+    /// `kuzushi run` envelope, and the shell's partial-attempt acknowledgement
+    /// would read a truncated triage as full coverage.
     pub(in crate::modules) fn result_status(&self) -> crate::module_result::ToolResultStatus {
-        if self.failed == 0 && self.vote_failures == 0 && self.persistence_failures == 0 {
-            crate::module_result::ToolResultStatus::Completed
-        } else if self.successful == 0 {
-            crate::module_result::ToolResultStatus::Failed
-        } else {
-            crate::module_result::ToolResultStatus::Partial
+        if self.degraded() {
+            return if self.successful == 0 {
+                crate::module_result::ToolResultStatus::Failed
+            } else {
+                crate::module_result::ToolResultStatus::Partial
+            };
         }
+        if self.pending_after_cap > 0 {
+            return crate::module_result::ToolResultStatus::Partial;
+        }
+        crate::module_result::ToolResultStatus::Completed
+    }
+
+    fn degraded(&self) -> bool {
+        self.failed > 0 || self.vote_failures > 0 || self.persistence_failures > 0
+    }
+
+    /// True when the configured cost cap is the *only* reason this run is
+    /// incomplete. A consumer may keep the partial output and continue; a
+    /// partial caused by any failure has no such guarantee.
+    pub(in crate::modules) fn stopped_at_budget(&self) -> bool {
+        self.pending_after_cap > 0 && !self.degraded()
     }
 
     pub(in crate::modules) fn high_confidence_false_positive_count(&self) -> usize {
