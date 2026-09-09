@@ -21,7 +21,7 @@ documentation alone is not functional evidence.
 - [ ] Explicit allowance, durable reservations, and honest unknown-cost states.
 - [ ] Accepted context references independent of the global active model.
 - [ ] Finite study plans with three-pass defaults and restart recovery.
-- [ ] Optional AI scope proposals, validated coverage, and TUI scope editing.
+- [ ] Optional AI scope proposals, coverage checks, and TUI scope editing.
 - [ ] Comparable context experiments and complete observation provenance.
 - [ ] Reversible review relationships and accepted reusable lessons.
 - [ ] Complete TUI journey, report, layout and recovery verification.
