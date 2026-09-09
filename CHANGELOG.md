@@ -19,6 +19,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `.kuzushi/scope.toml` can no longer be walked past with a percent-escaped
+  host. The gate compared rules against the authority exactly as written, so
+  `https://admin.example%2ecom/panel` matched no rule naming
+  `admin.example.com` — while every browser, and any client following RFC 3986
+  §3.2.2, percent-decodes the domain and reaches the denied host. A deny-list
+  file therefore returned `Unknown` and let recon dispatch and the
+  amass/httpx/nuclei/nmap-xml/HAR/Burp import gates through. Each of the two
+  parser readings the gate already weighs is now weighed in its decoded form
+  too: one deny match on either refuses the target, and an allow list has to
+  cover both. An escape that decodes to a code point the URL Standard forbids
+  in a domain (`/`, `:`, a literal `%`, a control) names no host a client can
+  reach, so it contributes no candidate rather than a guessed one, and a
+  target whose host carries no `%` keeps exactly the verdict it had. IDNA is
+  still not applied — a decoded non-ASCII domain is judged in the Unicode form
+  it was written in, as a raw non-ASCII target already was.
+
 - Capture imports no longer present an encoded payload as the raw HTTP
   message, and no longer drop entries without saying so. Burp marks a
   request/response `base64="true"` and HAR marks a body
