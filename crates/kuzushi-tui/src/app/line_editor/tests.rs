@@ -4,6 +4,16 @@ mod tests {
     use kuzushi_core::V2Config;
 
     #[test]
+    fn model_catalog_completion_offers_current_suggestions_only() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let candidates = app.completion_candidates("model ");
+        assert!(candidates.contains(&"model openai-oauth:gpt-5.6-terra".into()));
+        assert!(!candidates.contains(&"model openai-oauth:gpt-5.4".into()));
+        assert!(!candidates.contains(&"model openai:gpt-5.5-mini".into()));
+        assert!(!candidates.contains(&"model 3".into()));
+    }
+
+    #[test]
     fn word_boundary_right_skips_current_word_then_separator() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_input("./path/to foo");

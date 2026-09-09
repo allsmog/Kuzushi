@@ -125,6 +125,10 @@ impl ShellApp {
     }
 
     pub(super) fn paste_operator_question_other(&mut self, text: &str) -> bool {
+        if !self.operator_question_is_open() {
+            return false;
+        }
+        self.with_operator_question_mut(PendingOperatorQuestion::open_other);
         self.activity_mut()
             .and_then(|session| session.operator_question.as_mut())
             .is_some_and(|card| card.paste_other(text))

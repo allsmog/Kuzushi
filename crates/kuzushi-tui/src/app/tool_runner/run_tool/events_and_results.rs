@@ -4,6 +4,8 @@ use kuzushi_core::run_artifacts::{
 };
 use std::path::{Path, PathBuf};
 
+mod trace_receipt;
+
 struct ToolEventState {
     abort_reason: Option<AbortReason>,
     run_id: Option<String>,
@@ -678,6 +680,7 @@ impl ShellApp {
 
     pub(crate) fn record_tool_run_effect(&mut self, record: ToolRunRecordEffect) {
         let usable_result = tool_run_outcome_has_usable_result(&record.outcome);
+        let trace_receipt = trace_receipt::pending_refresh(&record);
         let run_id = record.run_id.clone();
         let persistence = self.persist_tool_run_outcome(
             record.target.as_deref(),
@@ -692,6 +695,8 @@ impl ShellApp {
                 usable_result,
                 error,
             );
+        } else {
+            self.refresh_recorded_trace_receipt(trace_receipt);
         }
         self.invalidate_view_hydration();
         let mut cache = self.workbench_cache().borrow_mut();
@@ -1102,6 +1107,9 @@ fn failed_tool_artifacts(target: Option<&Path>, run_id: Option<&str>) -> serde_j
         .and_then(|summary| serde_json::to_value(summary.artifacts).ok())
         .unwrap_or_else(|| serde_json::json!([]))
 }
+
+#[cfg(test)]
+mod trace_receipt_tests;
 
 #[cfg(test)]
 mod tests {

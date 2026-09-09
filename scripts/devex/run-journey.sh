@@ -25,7 +25,7 @@
 # machine checks passed but human judgment is still required.
 set -eo pipefail
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 JOURNEY_DIR="$SCRIPT_DIR/journeys"
 DEFAULT_ARTIFACT_ROOT="$SCRIPT_DIR/artifacts"
@@ -674,6 +674,12 @@ d_wait_snap_kind() { # <automatic|live> <[timeout] substring[ || substring] | la
 d_wait_snap() { d_wait_snap_kind automatic "$1"; }
 d_wait_live_snap() { d_wait_snap_kind live "$1"; }
 
+d_require_live_snap() {
+  local failures_before=$FAIL_N
+  d_wait_live_snap "$1"
+  [ "$FAIL_N" -eq "$failures_before" ]
+}
+
 d_snap_kind() { # <automatic|live|saved> <label>
   ensure_session
   local requested_kind=$1 label=$2 recorded_kind
@@ -820,6 +826,7 @@ dispatch() { # <directive> <value>
     wait-for)        d_wait_for "$2";;
     wait-snap)       d_wait_snap "$2";;
     wait-live-snap)  d_wait_live_snap "$2";;
+    require-live-snap) d_require_live_snap "$2";;
     snap)            d_snap "$2";;
     live-snap)       d_live_snap "$2";;
     saved-snap)      d_saved_snap "$2";;
@@ -970,4 +977,6 @@ main() {
   [ "$total_review_required" -eq 0 ] || exit "$DEVEX_REVIEW_REQUIRED_EXIT"
 }
 
-main "$@"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

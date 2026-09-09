@@ -95,10 +95,31 @@ pub fn cost_label(cost: RuntimeCostReport) -> String {
         return "cost not recorded".to_string();
     }
     if cost.is_complete() {
-        if cost.observed_usd() == 0.0 {
-            return "$0.00 (no model calls)".to_string();
-        }
         return format!("${:.4} exact", cost.observed_usd());
     }
     format!(">=${:.4} (metering incomplete)", cost.observed_usd())
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+    use crate::runtime::RuntimeCost;
+
+    #[test]
+    fn cost_labels_do_not_infer_model_call_counts() {
+        for (cost, expected) in [
+            (RuntimeCostReport::UNAVAILABLE, "cost not recorded"),
+            (
+                RuntimeCostReport::INCOMPLETE_ZERO,
+                ">=$0.0000 (metering incomplete)",
+            ),
+            (RuntimeCostReport::known(RuntimeCost::ZERO), "$0.0000 exact"),
+            (
+                RuntimeCostReport::known(RuntimeCost::from_usd(0.25, "test").unwrap()),
+                "$0.2500 exact",
+            ),
+        ] {
+            assert_eq!(cost_label(cost), expected);
+        }
+    }
 }

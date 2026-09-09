@@ -346,7 +346,7 @@ fn render_review_detail(
     render_lines_pane(
         frame,
         area,
-        "SELECTED FINDING · Enter prove · z heatmap",
+        "SELECTED FINDING",
         review_detail_lines(model, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ReviewDetail,
         state,
@@ -361,13 +361,29 @@ fn review_detail_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'stat
             &[("Enter", "open selected finding in Prove")],
         );
     };
-    let mut lines = proof_ladder_lines(finding, width);
+    let mut lines = review_identity_lines(finding, width);
+    lines.extend(proof_ladder_lines(finding, width));
     lines.extend(super::super::detail_pane::detail_pane_lines(
         &Some(finding.clone()),
         width,
         None,
     ));
     lines
+}
+
+fn review_identity_lines(
+    finding: &crate::ui_view_models::FindingDetailModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let alias = finding.alias.as_deref().unwrap_or(&finding.identity_label);
+    let text = format!(
+        "{alias} · {} · sources:{}",
+        finding.severity_label, finding.source_count
+    );
+    wrap_text(&text, width)
+        .into_iter()
+        .map(|line| Line::styled(line, theme::label()))
+        .collect()
 }
 
 /// A finding is a claim moving through an adversarial ladder. The strip makes

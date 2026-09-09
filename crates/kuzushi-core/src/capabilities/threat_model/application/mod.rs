@@ -1,7 +1,7 @@
 use super::*;
 
-pub(crate) use build_threat_model::*;
 use build_summary::*;
+pub(crate) use build_threat_model::*;
 pub(crate) use collect_s2::*;
 pub(crate) use collect_s3::*;
 pub(crate) use deterministic_build::*;
@@ -21,24 +21,24 @@ pub(crate) use revision_commit::{
     should_preserve_selected_user_edited_model, BuildRevisionSelection,
 };
 pub(crate) use schema_markdown::*;
-pub use scope_binding::{classify_scope_binding, current_scope_ref_for_path, ScopeBindingStatus};
 pub(crate) use scope_binding::{bind_scope_ref, root_scope};
+pub use scope_binding::{classify_scope_binding, current_scope_ref_for_path, ScopeBindingStatus};
 pub(crate) use source_bundle::*;
+pub(crate) use source_code::CodeEvidence;
 pub(crate) use staged::*;
-pub use verify::{
-    stamp_verification, verification_warning, verify_threat_model_document,
-    ThreatModelVerification,
-};
 pub(crate) use verify::verify_threat_model_document_with_roots;
+pub use verify::{
+    stamp_verification, verification_warning, verify_threat_model_document, ThreatModelVerification,
+};
 
-mod build_threat_model;
 mod build_summary;
+mod build_threat_model;
 mod collect_s2;
 mod collect_s3;
 mod deterministic_build;
 mod deterministic_dfd;
-mod deterministic_dfd_surface_specs;
 mod deterministic_dfd_specs;
+mod deterministic_dfd_surface_specs;
 mod deterministic_input;
 mod deterministic_route_context;
 mod grounding;
@@ -53,5 +53,6 @@ mod revision_commit;
 mod schema_markdown;
 mod scope_binding;
 mod source_bundle;
+mod source_code;
 mod staged;
 mod verify;

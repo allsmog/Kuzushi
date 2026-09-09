@@ -15,6 +15,41 @@ pub(crate) fn render_carlini_inventory_block(inventory: &[(String, String)]) -> 
     render_untrusted_repo_blocks(inventory)
 }
 
+/// One actor prompt split at the boundary every actor in a run shares. The
+/// target rule, attachments, artifact context, and repository inventory are
+/// identical for every actor and form `cacheable_prefix`; the actor identity,
+/// flows, threats, and mission follow as the per-actor remainder. `prompt` is
+/// the complete text and always starts with `cacheable_prefix`, so the runtime
+/// can bill the shared block at cache-read rates from the second actor on.
+pub(crate) struct ActorPromptParts {
+    pub(crate) cacheable_prefix: String,
+    pub(crate) prompt: String,
+}
+
+pub(crate) fn build_actor_prompt_parts(
+    target: &Path,
+    hunt: &ActorHunt,
+    options: &CarliniInput,
+    inventory_block: &str,
+    actor_fingerprint: &str,
+) -> ActorPromptParts {
+    let mut shared_lines = actor_prompt_preamble(target, options);
+    append_actor_inventory(&mut shared_lines, inventory_block);
+    let mut actor_lines = actor_identity_lines(hunt, actor_fingerprint).to_vec();
+    append_actor_flows(&mut actor_lines, hunt);
+    append_actor_threats(&mut actor_lines, hunt, options);
+    append_actor_mission(&mut actor_lines, options);
+    actor_lines.push(actor_findings_contract_line());
+    actor_lines.push("Return exactly one JSON object and no prose. Use {\"findings\":[]} when there are no concrete exploitable findings.".to_string());
+    let cacheable_prefix = format!("{}\n", shared_lines.join("\n"));
+    let prompt = format!("{cacheable_prefix}{}", actor_lines.join("\n"));
+    ActorPromptParts {
+        cacheable_prefix,
+        prompt,
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn build_actor_prompt(
     target: &Path,
     hunt: &ActorHunt,
@@ -22,15 +57,7 @@ pub(crate) fn build_actor_prompt(
     inventory_block: &str,
     actor_fingerprint: &str,
 ) -> String {
-    let mut lines = actor_prompt_preamble(target, options);
-    append_actor_inventory(&mut lines, inventory_block);
-    lines.extend(actor_identity_lines(hunt, actor_fingerprint));
-    append_actor_flows(&mut lines, hunt);
-    append_actor_threats(&mut lines, hunt, options);
-    append_actor_mission(&mut lines, options);
-    lines.push(actor_findings_contract_line());
-    lines.push("Return exactly one JSON object and no prose. Use {\"findings\":[]} when there are no concrete exploitable findings.".to_string());
-    lines.join("\n")
+    build_actor_prompt_parts(target, hunt, options, inventory_block, actor_fingerprint).prompt
 }
 
 /// The exact per-finding shape, rendered from the same schema the

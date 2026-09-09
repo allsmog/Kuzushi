@@ -8,6 +8,7 @@ use crate::workspace::{
 /// plus the evidence index that later validates every ref the model cites.
 pub(crate) struct ResearchDossier {
     pub(crate) grounding: PromptGrounding,
+    pub(crate) code_evidence: CodeEvidence,
     pub(crate) vuln_commits: Vec<VulnCommit>,
     pub(crate) history_mined: bool,
     pub(crate) advisories: Vec<AdvisoryRecord>,
@@ -38,6 +39,7 @@ pub(crate) fn run_research(
     evidence_index.extend(input.vulns.iter().map(|row| row.id.clone()));
     Ok(ResearchDossier {
         grounding,
+        code_evidence: CodeEvidence::default(),
         vuln_commits,
         history_mined,
         advisories,
@@ -80,8 +82,7 @@ fn read_first_doc(target: &Path, candidates: &[&str], budget: usize) -> Option<(
     }
     candidates.iter().find_map(|name| {
         let limit = budget.min(MAX_DOC_BYTES_PER_FILE);
-        let read =
-            crate::bounded_file::read_utf8_text_prefix(&target.join(name), limit).ok()?;
+        let read = crate::bounded_file::read_utf8_text_prefix(&target.join(name), limit).ok()?;
         let content = read.text.trim().to_string();
         (!content.is_empty()).then(|| (name.to_string(), content))
     })
@@ -111,8 +112,7 @@ fn mine_history(
         .iter()
         .map(|surface| surface.language.clone())
         .collect();
-    let keywords =
-        security_keywords_for_languages(languages.iter().map(String::as_str));
+    let keywords = security_keywords_for_languages(languages.iter().map(String::as_str));
     let cfg = GitHistoryMiningConfig {
         max_commits: input.history_depth,
         ..Default::default()
@@ -259,7 +259,10 @@ mod docs_reader_tests {
         )
         .unwrap();
         let docs = read_project_docs(temp.path());
-        let labels = docs.iter().map(|doc| doc.label.as_str()).collect::<Vec<_>>();
+        let labels = docs
+            .iter()
+            .map(|doc| doc.label.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(labels, vec!["README.md", ".github/SECURITY.md"]);
 
         let section = project_docs_section(&docs);

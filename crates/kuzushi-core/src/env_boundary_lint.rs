@@ -48,6 +48,8 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Provenance / characterization.
     "run_artifacts/run_reproducibility_metadata.rs", // env fingerprint on run summaries
     "run_lifecycle/persistence/writer_characterization.rs", // ignored-test baseline input
+    // Test-only fault-injection hooks (KUZUSHI_TEST_* names; inert unless set).
+    "storage_v3/writer_actor/test_hooks.rs", // pause-after-append hook for writer-crash tests
     // Env reads confined to the file's inline test module.
     "scan/subprocess/scan_cancellation.rs", // owner-process re-exec test hook
     "test_env.rs", // shared cfg(test) ScopedEnv guard (reads to save/restore)

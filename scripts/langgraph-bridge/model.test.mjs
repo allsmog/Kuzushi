@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
 import { BridgePublicError } from "./errors.mjs";
 import {
   bridgeQueryResult,
   credentialForRequest,
+  humanMessageForRequest,
   isTruncatedStopReason,
   openAiAccountIdFromJwt,
   openAiCredentialFromRefreshResponse,
+  promptCacheSplit,
+  usageFromMessages,
 } from "./model.mjs";
 import { oauthModelForRequest, openAiOauthHeaders } from "./oauth-models.mjs";
 
@@ -373,3 +376,124 @@ function jwt(claims) {
   const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
   return `${header}.${payload}.signature`;
 }
+
+test("a declared prompt prefix is honoured only when it really leads the prompt", () => {
+  assert.deepEqual(
+    promptCacheSplit({ prompt: "inventory\nactor", cacheablePromptPrefix: "inventory\n" }),
+    { prefix: "inventory\n", remainder: "actor" },
+  );
+  assert.equal(promptCacheSplit({ prompt: "actor", cacheablePromptPrefix: "inventory" }), undefined);
+  assert.equal(promptCacheSplit({ prompt: "   actor", cacheablePromptPrefix: "   " }), undefined);
+  assert.equal(promptCacheSplit({ prompt: "actor" }), undefined);
+});
+
+test("the opening user turn carries the prefix as its own cache-marked block", () => {
+  const marked = humanMessageForRequest({
+    prompt: "inventory\nactor",
+    cacheablePromptPrefix: "inventory\n",
+  });
+  assert.deepEqual(marked.content, [
+    { type: "text", text: "inventory\n", cache_control: { type: "ephemeral" } },
+    { type: "text", text: "actor" },
+  ]);
+
+  const whole = humanMessageForRequest({ prompt: "inventory", cacheablePromptPrefix: "inventory" });
+  assert.deepEqual(whole.content, [
+    { type: "text", text: "inventory", cache_control: { type: "ephemeral" } },
+  ]);
+
+  assert.equal(humanMessageForRequest({ prompt: "actor", cacheablePromptPrefix: "stale" }).content, "actor");
+  assert.equal(humanMessageForRequest({ prompt: "actor" }).content, "actor");
+});
+
+test("Anthropic OAuth forwards the prefix cache block intact and stays within four breakpoints", async (t) => {
+  let body;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    body = JSON.parse(init.body);
+    return anthropicOauthResponse({ content: [{ type: "text", text: "ok" }] });
+  });
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+  const opening = humanMessageForRequest({
+    prompt: "inventory\nactor",
+    cacheablePromptPrefix: "inventory\n",
+  });
+
+  await model.invoke([opening]);
+  assert.deepEqual(body.messages, [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "inventory\n", cache_control: { type: "ephemeral" } },
+        { type: "text", text: "actor" },
+      ],
+    },
+  ]);
+  assert.equal(cacheBreakpointCount(body), 1);
+
+  await model.invoke([opening, new AIMessage("looking"), new HumanMessage("continue")]);
+  assert.deepEqual(body.messages[0].content[0].cache_control, { type: "ephemeral" });
+  assert.deepEqual(body.messages.at(-1).content, [
+    { type: "text", text: "continue", cache_control: { type: "ephemeral" } },
+  ]);
+  assert.ok(cacheBreakpointCount(body) <= 4, `breakpoints: ${cacheBreakpointCount(body)}`);
+});
+
+function cacheBreakpointCount(body) {
+  return JSON.stringify(body).split('"cache_control"').length - 1;
+}
+
+test("cache counters ride the aggregated usage only when a call reported them", () => {
+  const uncached = bridgeQueryResult(
+    [new AIMessage({ content: "a", usage_metadata: { input_tokens: 10, output_tokens: 2 } })],
+    "stop",
+  );
+  assert.equal(uncached.cache_read_input_tokens, undefined);
+  assert.equal(uncached.cache_creation_input_tokens, undefined);
+  assert.equal(uncached.cache_reported_calls, 0);
+
+  const cached = bridgeQueryResult(
+    [
+      new AIMessage({
+        content: "a",
+        usage_metadata: {
+          input_tokens: 10,
+          output_tokens: 2,
+          cache_read_input_tokens: 4000,
+          cache_creation_input_tokens: 0,
+        },
+      }),
+      new AIMessage({
+        content: "b",
+        usage_metadata: {
+          input_tokens: 5,
+          output_tokens: 1,
+          input_token_details: { cache_read: 4000, cache_creation: 300 },
+        },
+      }),
+    ],
+    "stop",
+  );
+  assert.equal(cached.input_tokens, 15);
+  assert.equal(cached.cache_read_input_tokens, 8000);
+  assert.equal(cached.cache_creation_input_tokens, 300);
+  assert.equal(cached.cache_reported_calls, 2);
+  assert.equal(usageFromMessages([]).cacheReportedCalls, 0);
+});
+
+test("Anthropic OAuth passes prompt-cache usage through to the message usage", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    anthropicOauthResponse({
+      content: [{ type: "text", text: "ok" }],
+      usage: { input_tokens: 12, output_tokens: 3, cache_read_input_tokens: 900 },
+    }),
+  );
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  const message = await model.invoke([new HumanMessage("hi")]);
+
+  assert.deepEqual(message.usage_metadata, {
+    input_tokens: 12,
+    output_tokens: 3,
+    cache_read_input_tokens: 900,
+  });
+});

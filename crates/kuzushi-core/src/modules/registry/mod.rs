@@ -51,4 +51,6 @@ mod module_registry;
 mod run_taint_iris_tool;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod map_source_identity_tests;
 pub use module_registry::ModuleRegistry;

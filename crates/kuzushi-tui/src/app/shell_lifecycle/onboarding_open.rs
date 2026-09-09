@@ -45,20 +45,6 @@ impl ShellApp {
         self.log("mcps", summary);
     }
 
-    pub(crate) fn open_model_picker(&mut self) {
-        let visible = visible_model_choices(self.config());
-        let selected_index = preferred_visible_model_choice_cursor(self.config());
-        self.router
-            .model_picker_mut()
-            .open(selected_index, visible.len());
-        self.router.setup_mut().begin_editor(SetupEditor::Model);
-        self.set_shell_view(ShellView::Setup);
-        self.log(
-            "onboarding",
-            "choose a model with ↑/↓/Enter (Esc defers onboarding)",
-        );
-    }
-
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
         self.router.auth_picker_mut().open(provider.clone());
         self.router

@@ -230,13 +230,19 @@ fn model_row(app: &ShellApp, selected_model_tasks: usize) -> SetupReadinessRow {
             SetupRowId::Model,
             "Model",
             "OPTIONAL",
-            format!("{model} selected, but this plan does not require it"),
+            format!(
+                "{} selected, but this plan does not require it",
+                crate::app::display_model_selector(model)
+            ),
         ),
         (_, Some(model)) => ready_row(
             SetupRowId::Model,
             "Model",
-            "EXPLICIT",
-            format!("{model} · no fallback model"),
+            &crate::app::display_model_selector(model),
+            format!(
+                "{} · no fallback model",
+                crate::app::display_model_selector(model)
+            ),
         ),
         (_, None) => blocked_row(
             SetupRowId::Model,
@@ -280,7 +286,7 @@ fn credential_row(
         return ready_row(
             SetupRowId::Credentials,
             "Credentials",
-            "READY",
+            readiness.label(),
             readiness.label(),
         );
     }
@@ -345,14 +351,14 @@ fn budget_row(app: &ShellApp) -> SetupReadinessRow {
             SetupRowId::Budget,
             "Budget",
             "OVER CEILING",
-            format!("${budget:.2} exceeds the hard ceiling ${ceiling:.2}"),
+            format!("${budget:?} exceeds the hard ceiling ${ceiling:?}"),
         );
     }
     ready_row(
         SetupRowId::Budget,
         "Budget",
         "ENFORCED",
-        format!("${budget:.2} session cap"),
+        format!("${budget:?} session cap"),
     )
 }
 

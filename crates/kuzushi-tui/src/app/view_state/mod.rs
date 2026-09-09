@@ -1,5 +1,6 @@
 use super::*;
 pub(crate) use super::*;
+pub(crate) use routes::AnswerFocus;
 
 use self::PendingConfirm;
 pub(crate) use activity::*;
@@ -96,16 +97,17 @@ pub use rank::PlanChange;
 pub use rank::PlanProposal;
 pub use rank::ThrottleAdvisory;
 pub use rank::TuneAction;
+pub(crate) use routes::ConfigModelPickerOrigin;
+pub(crate) use routes::FilePickerPurpose;
 pub(crate) use routes::PendingTargetIntent;
 pub(crate) use routes::ReportOrigin;
 pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
-    InvestigationBoundary, MapRunConfigRouteState, MapRunConfigRowId, ModelCatalogRouteState,
-    ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState, PromptDocumentMode,
-    PromptDocumentState, ReportReceipt, ReportRouteState, RouterState, SceneRouteState,
-    ScrollRouteState, SetupEditor, SetupRouteState, SetupRowId, TargetPickerRouteState,
-    ToolsRouteState, WorkbenchRouteState,
+    InvestigationBoundary, MapRunConfigRouteState, MapRunConfigRowId, ModelPickerRouteState,
+    NavigationRouteState, PlanningPickerRouteState, PromptDocumentMode, PromptDocumentState,
+    ReportReceipt, ReportRouteState, RouterState, SceneRouteState, ScrollRouteState, SetupEditor,
+    SetupRouteState, SetupRowId, TargetPickerRouteState, ToolsRouteState, WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;

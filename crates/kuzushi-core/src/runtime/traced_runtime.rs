@@ -286,9 +286,15 @@ fn model_call_failure<T>(
     stage: &str,
 ) -> Option<crate::runtime::RuntimeFailureMetadata> {
     let error = result.as_ref().err()?;
-    let metadata = crate::runtime::runtime_failure_metadata(error)
-        .unwrap_or_else(|| fallback_runtime_failure_metadata(error));
+    let metadata = model_failure_metadata(error);
     Some(metadata.with_model_call(lifecycle.call_id, Some(stage)))
+}
+
+/// Preserve typed runtime failures across application boundaries, with a
+/// bounded category-only projection for legacy errors. Never retain raw text.
+pub fn model_failure_metadata(error: &anyhow::Error) -> crate::runtime::RuntimeFailureMetadata {
+    crate::runtime::runtime_failure_metadata(error)
+        .unwrap_or_else(|| fallback_runtime_failure_metadata(error))
 }
 
 fn fallback_runtime_failure_metadata(

@@ -7,16 +7,12 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
     lines.push(blank());
     lines.push(divider("REPLAY", area.width));
     lines.push(detail("run", &model.run_id));
-    let typed = model.presentation.as_ref().is_some_and(|presentation| {
-        presentation.source == kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
-    });
-    if let Some(presentation) = model.presentation.as_ref() {
-        append_run_presentation(&mut lines, presentation, area.width);
-    } else if let Some(error) = model.projection_error.as_deref() {
-        lines.push(muted(&format!("semantic replay unavailable: {error}")));
-    } else {
-        lines.push(muted("semantic replay loading…"));
-    }
+    let typed = append_optional_presentation(
+        &mut lines,
+        model.presentation.as_ref(),
+        model.projection_error.as_deref(),
+        area.width,
+    );
     if !typed {
         append_run_artifacts(&mut lines, &model.artifacts, area.width);
     }
@@ -27,7 +23,24 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
         ));
     }
     lines.extend(alias_reference_lines(app, area));
-    lines
+    wrap_document_lines(lines, area.width)
+}
+
+fn append_optional_presentation(
+    lines: &mut Vec<Line<'static>>,
+    presentation: Option<&kuzushi_core::run_lifecycle::RunPresentationV1>,
+    error: Option<&str>,
+    width: u16,
+) -> bool {
+    let Some(presentation) = presentation else {
+        let message = error
+            .map(|error| format!("semantic replay unavailable: {error}"))
+            .unwrap_or_else(|| "semantic replay loading…".to_string());
+        lines.push(muted(&message));
+        return false;
+    };
+    append_run_presentation(lines, presentation, width);
+    presentation.source == kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
 }
 
 fn append_run_presentation(
@@ -112,7 +125,7 @@ pub(crate) fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<
             lines.push(trace_step_line(step, area.width));
         }
     }
-    lines
+    wrap_document_lines(lines, area.width)
 }
 
 fn append_run_artifacts(
@@ -135,6 +148,9 @@ fn run_artifact_value(artifact: &RunArtifactDetail, width: u16) -> String {
     let path_budget = budget.saturating_sub(display_width(&state));
     format!("{state}{}", fit_path(&artifact.detail, path_budget))
 }
+
+#[cfg(test)]
+mod reader_tests;
 
 #[cfg(test)]
 mod tests {

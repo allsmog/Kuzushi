@@ -11,21 +11,23 @@ pub(crate) struct NoticeBannerModel {
     pub(crate) source: String,
     pub(crate) message: String,
     pub(crate) severity: NoticeSeverity,
+    pub(crate) dismiss_on_escape: bool,
 }
 
 pub(crate) fn notice_banner_model(app: &ShellApp) -> Option<NoticeBannerModel> {
     app.advisory()
         .notice
         .as_ref()
-        .map(NoticeBannerModel::from_notice)
+        .map(|notice| NoticeBannerModel::from_notice(notice, app.notice_captures_escape()))
 }
 
 impl NoticeBannerModel {
-    fn from_notice(notice: &Notice) -> Self {
+    fn from_notice(notice: &Notice, dismiss_on_escape: bool) -> Self {
         Self {
             source: notice.source.clone(),
             message: notice.message.clone(),
             severity: notice.severity,
+            dismiss_on_escape,
         }
     }
 }

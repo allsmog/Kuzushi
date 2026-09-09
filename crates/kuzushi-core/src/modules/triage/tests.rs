@@ -546,7 +546,14 @@ mod tests {
             ("scan-c", finding.clone()),
             ("scan-d", finding),
         ]);
-        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        // Identity-wide fan-out is opt-in: without an identity-audit approval
+        // receipt an omitted `identityReconcile` resolves to `off` (ADR 0003),
+        // and the verdict would stay on the triaged row alone.
+        let input = TriageRunInput::from_tool_input(
+            &json!({"identityReconcile": "auto"}),
+            Path::new("."),
+        )
+        .unwrap();
 
         let (selected, missing) = select_triage_findings(&store, &input).unwrap();
         assert!(missing.is_empty());

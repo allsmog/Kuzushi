@@ -102,7 +102,26 @@ pub(crate) fn resolve_activity_footer_bindings(
         .filter_map(|hint| resolve_hint_binding(hint, app))
         .collect();
     model.hint_rows = wrap_hints(&model.hints, width as usize);
+    resolve_output_body(&mut model, app, width);
     model
+}
+
+fn resolve_output_body(model: &mut ActivityFooterModel, app: &ShellApp, width: u16) {
+    if super::activity_view::activity_abort_pending(app) {
+        return;
+    }
+    let Some(session) = app.activity() else {
+        return;
+    };
+    if app.router.activity().effective_pane_focus(session) != crate::PaneFocus::Right {
+        return;
+    }
+    let interrupt = super::keybindings::interrupt_binding(app);
+    model.body = format!(
+        " ● OUTPUT  j/k scroll · {} {}",
+        interrupt.key, interrupt.label
+    );
+    model.body_line = fit(&model.body, width as usize);
 }
 
 fn resolve_hint_binding(hint: ActivityFooterHint, app: &ShellApp) -> Option<ActivityFooterHint> {
@@ -174,8 +193,7 @@ fn focus_body(
 
 fn tasked_body(session: &ActivitySession, route: &ActivityRouteState) -> String {
     if route.effective_pane_focus(session) == crate::PaneFocus::Right {
-        return " ● OUTPUT  live trace · j/k scroll · switch pane for steps · Ctrl+C aborts"
-            .to_string();
+        return " ● OUTPUT  j/k scroll · switch pane for steps".to_string();
     }
     match route.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
@@ -375,7 +393,7 @@ mod tests {
     }
 
     #[test]
-    fn output_footer_names_the_live_output_window() {
+    fn output_footer_names_its_scroll_and_pane_controls() {
         let mut session = ActivitySession::new("r-1");
         let mut route = ActivityRouteState::default();
         session.tasks.insert(
@@ -390,7 +408,7 @@ mod tests {
 
         assert_eq!(
             activity_footer_model(&session, &route, 100, None, false, InputMode::Navigate).body,
-            " ● OUTPUT  live trace · j/k scroll · switch pane for steps · Ctrl+C aborts"
+            " ● OUTPUT  j/k scroll · switch pane for steps"
         );
     }
 

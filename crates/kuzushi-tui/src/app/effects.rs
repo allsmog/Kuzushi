@@ -684,6 +684,7 @@ impl ShellApp {
         };
         self.router.report_mut().set_receipt(receipt);
         self.set_shell_view(ShellView::Report);
+        self.scroll_to_top();
     }
 
     pub(super) fn reveal_report_destination_effect(&mut self) {
@@ -1518,6 +1519,53 @@ mod tests {
             receipt.completeness,
             kuzushi_core::WorkspaceExportCompleteness::Complete
         );
+    }
+
+    #[test]
+    fn report_export_corrected_retry_writes_readable_findings_without_source_drift() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("source.rs"), "pub fn example() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("export-run", workspace.root(), "completed")
+            .unwrap();
+        let finding = kuzushi_core::Finding::new_semgrep(
+            "report.rule",
+            "source.rs",
+            1,
+            Some(1),
+            kuzushi_core::Severity::Medium,
+            "review candidate",
+        );
+        store.insert_finding("export-run", &finding).unwrap();
+        let before = index_workspace_snapshot(&workspace).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let output = PathBuf::from(app.router.report().path_draft());
+        assert!(output.starts_with(".kuzushi/reports"));
+        let attempt = |output: PathBuf| ReportExport {
+            format: kuzushi_core::WorkspaceExportFormat::Sarif,
+            completeness: kuzushi_core::WorkspaceExportCompleteness::All,
+            output,
+            target: Some(workspace.root().to_path_buf()),
+        };
+        app.export_report_effect(attempt(PathBuf::from("source.rs/report.sarif")));
+        assert!(app.router.report().receipt().unwrap().error.is_some());
+        assert_eq!(app.shell_view(), ShellView::Report);
+        app.export_report_effect(attempt(output.clone()));
+        let receipt = app.router.report().receipt().unwrap();
+        assert!(receipt.error.is_none(), "{:?}", receipt.error);
+        assert_eq!(receipt.count, Some(1));
+        let exported: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(workspace.root().join(output)).unwrap()).unwrap();
+        assert_eq!(exported["runs"][0]["results"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            exported["runs"][0]["results"][0]["message"]["text"],
+            "review candidate"
+        );
+        let after = index_workspace_snapshot(&workspace).unwrap();
+        assert_eq!(before.snapshot_hash, after.snapshot_hash);
+        assert_eq!(before.file_count, after.file_count);
     }
 
     #[test]

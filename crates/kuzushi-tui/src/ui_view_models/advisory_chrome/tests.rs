@@ -50,9 +50,10 @@ fn notice_banner_model_copies_source_message_and_severity() {
         since: Instant::now(),
     };
 
-    let model = NoticeBannerModel::from_notice(&notice);
+    let model = NoticeBannerModel::from_notice(&notice, true);
 
     assert_eq!(model.source, "tool");
     assert_eq!(model.message, "semgrep:scan failed");
     assert_eq!(model.severity, NoticeSeverity::Error);
+    assert!(model.dismiss_on_escape);
 }

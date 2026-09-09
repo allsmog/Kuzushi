@@ -75,7 +75,8 @@ impl FindingStore {
     ) -> Result<std::collections::BTreeMap<String, ReviewDecision>> {
         let requested = findings
             .iter()
-            .filter_map(review_decision_request)
+            .map(ReviewDecisionSubject::from)
+            .filter_map(|subject| review_decision_request(&subject))
             .collect::<Vec<_>>();
         if requested.is_empty() {
             return Ok(std::collections::BTreeMap::new());
@@ -96,7 +97,27 @@ impl FindingStore {
         &self,
         findings: &[Finding],
     ) -> Result<Vec<ReviewDecisionRecord>> {
-        let requested = findings
+        let subjects = findings
+            .iter()
+            .map(ReviewDecisionSubject::from)
+            .collect::<Vec<_>>();
+        self.list_review_decisions_for_subjects(&subjects)
+    }
+
+    /// Every review decision recorded against a current finding, without
+    /// loading the findings: the store projects only the lookup subjects.
+    /// Returns exactly the rows `list_review_decisions_for_findings` would
+    /// for `list_all_findings()`, at a fraction of the read cost.
+    pub fn list_all_review_decisions(&self) -> Result<Vec<ReviewDecisionRecord>> {
+        let subjects = self.v3_review_decision_subjects()?;
+        self.list_review_decisions_for_subjects(&subjects)
+    }
+
+    pub fn list_review_decisions_for_subjects(
+        &self,
+        subjects: &[ReviewDecisionSubject],
+    ) -> Result<Vec<ReviewDecisionRecord>> {
+        let requested = subjects
             .iter()
             .filter_map(review_decision_request)
             .collect::<Vec<_>>();
@@ -474,19 +495,19 @@ fn commit_review_decision(
         .unwrap_or(receipt.committed_seq as i64))
 }
 
-fn review_decision_request(finding: &Finding) -> Option<serde_json::Value> {
-    finding
+fn review_decision_request(subject: &ReviewDecisionSubject) -> Option<serde_json::Value> {
+    subject
         .identity_id
         .as_ref()
         .map(|identity_id| {
             serde_json::json!({
                 "key": format!("identity:{identity_id}"),
                 "identityId": identity_id,
-                "findingId": finding.id,
+                "findingId": subject.finding_id,
             })
         })
         .or_else(|| {
-            finding.id.map(|finding_id| {
+            subject.finding_id.map(|finding_id| {
                 serde_json::json!({
                     "key": format!("finding:{finding_id}"),
                     "identityId": null,
@@ -556,4 +577,91 @@ fn review_decision_record_from_row(
         created_at: row.get(8)?,
         provenance: review_decision_provenance_from_row(row)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::findings::{ReviewDecisionVerdict, Severity};
+
+    fn decision(verdict: ReviewDecisionVerdict) -> ReviewDecision {
+        ReviewDecision {
+            verdict,
+            author: TriageAuthor::Human,
+            confidence: 1.0,
+            rationale: "test".to_string(),
+            dismiss_reason: None,
+            actor: None,
+        }
+    }
+
+    fn store_with_decided_findings(tmp: &std::path::Path) -> FindingStore {
+        let store = FindingStore::open(tmp.join("findings.db")).unwrap();
+        store
+            .with_run_lifecycle("run-decisions", tmp, || {
+                let mut ids = Vec::new();
+                for index in 0..3usize {
+                    let finding = Finding::new_tool(
+                        "decision-test",
+                        "decision/rule",
+                        &format!("src/f{index}.c"),
+                        1,
+                        None,
+                        Severity::Low,
+                        &format!("decided row {index}"),
+                    );
+                    ids.push(store.insert_finding("run-decisions", &finding)?);
+                }
+                store.append_user_review_decision(ids[0], &decision(ReviewDecisionVerdict::Confirmed))?;
+                store.append_user_review_decision(
+                    ids[0],
+                    &decision(ReviewDecisionVerdict::RejectedFalsePositive),
+                )?;
+                store.append_user_review_decision(ids[2], &decision(ReviewDecisionVerdict::Deferred))?;
+                Ok(((), 3usize))
+            })
+            .unwrap();
+        store
+    }
+
+    #[test]
+    fn list_all_review_decisions_matches_the_full_finding_walk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store_with_decided_findings(tmp.path());
+
+        let via_findings = store
+            .list_review_decisions_for_findings(&store.list_all_findings().unwrap())
+            .unwrap();
+        let narrow = store.list_all_review_decisions().unwrap();
+
+        assert_eq!(narrow.len(), 3);
+        assert_eq!(narrow, via_findings);
+    }
+
+    #[test]
+    fn review_decision_subjects_project_the_same_lookup_keys_as_the_findings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = store_with_decided_findings(tmp.path());
+
+        let mut from_findings = store
+            .list_all_findings()
+            .unwrap()
+            .iter()
+            .map(ReviewDecisionSubject::from)
+            .collect::<Vec<_>>();
+        let mut projected = store.v3_review_decision_subjects().unwrap();
+        from_findings.sort_by_key(|subject| subject.finding_id);
+        projected.sort_by_key(|subject| subject.finding_id);
+
+        assert_eq!(projected, from_findings);
+        assert!(projected.iter().all(|subject| subject.finding_id.is_some()));
+    }
+
+    #[test]
+    fn list_all_review_decisions_is_empty_for_an_undecided_ledger() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(tmp.path().join("findings.db")).unwrap();
+
+        assert!(store.list_all_review_decisions().unwrap().is_empty());
+    }
 }

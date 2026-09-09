@@ -15,6 +15,7 @@ pub struct LangGraphRuntime {
     pub(crate) oauth_credentials_path: PathBuf,
     pub(crate) oauth_allow_env_token: bool,
     pub(crate) cancellation: Option<ScanCancellation>,
+    pub(crate) response_text: Option<super::ResponseTextObserver>,
     pub(crate) retry: BridgeRetryPolicy,
 }
 
@@ -106,12 +107,18 @@ impl LangGraphRuntime {
             oauth_credentials_path,
             oauth_allow_env_token: oauth.allow_env_token,
             cancellation: None,
+            response_text: None,
             retry: BridgeRetryPolicy::from_runtime_config(runtime),
         })
     }
 
     pub fn command(&self) -> &[String] {
         &self.command
+    }
+
+    pub fn with_response_text(mut self, observer: super::ResponseTextObserver) -> Self {
+        self.response_text = Some(observer);
+        self
     }
 
     pub fn with_thinking_level(mut self, thinking_level: Option<String>) -> Self {

@@ -51,6 +51,9 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     if full.height == 0 || full.width == 0 {
         return;
     }
+    if render_compact_quit(frame, app) {
+        return;
+    }
 
     let (area, rail) = split_context_rail(app, full);
     if let Some(rail_area) = rail {
@@ -91,7 +94,23 @@ pub(crate) fn split_context_rail(app: &ShellApp, full: Rect) -> (Rect, Option<Re
     (body, Some(rail))
 }
 
+/// Page by the same focused pane interior used to paint its text.
+pub(crate) fn workbench_scroll_page_rows(app: &ShellApp) -> Option<usize> {
+    let viewport = app.viewport();
+    let plan = workbench_phase_plan_for_app(app, Rect::new(0, 0, viewport.columns, viewport.rows))?;
+    let surface = plan.surface(plan.effective_focus)?;
+    if surface.interaction != crate::ui_view_models::SurfaceInteraction::Scrollable {
+        return None;
+    }
+    let inner = cockpit_pane_block("detail", false).inner(surface.rect);
+    Some(usize::from(inner.height).max(1))
+}
+
 pub(crate) fn workbench_primary_area(app: &ShellApp, full: Rect) -> Rect {
+    crate::ui_view_models::answers_layout(app, primary_body_area(app, full)).workspace
+}
+
+pub(crate) fn primary_body_area(app: &ShellApp, full: Rect) -> Rect {
     let (area, _) = split_context_rail(app, full);
     let prompt_height = prompt_height(app, area);
     let sections = fit_sections_to_height(render_sections(app, area), area.height, prompt_height);
@@ -105,7 +124,20 @@ pub(crate) fn workbench_primary_area(app: &ShellApp, full: Rect) -> Rect {
 }
 
 fn render_primary_layer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, primary: PrimaryLayer) {
-    render_primary_view(frame, area, app, primary.view, primary.mode, primary.lines);
+    let layout = crate::ui_view_models::answers_layout(app, area);
+    if !layout.workspace.is_empty() {
+        render_primary_view(
+            frame,
+            layout.workspace,
+            app,
+            primary.view,
+            primary.mode,
+            primary.lines,
+        );
+    }
+    if let Some(answers) = layout.answers {
+        render_answers(frame, answers, app, layout.compact);
+    }
     if primary.has_overlay {
         render_contextual_overlay(frame, area, app);
     }
@@ -115,11 +147,14 @@ fn primary_layer(app: &ShellApp, area: Rect, max_height: u16) -> PrimaryLayer {
     let overlay = contextual_overlay_origin(app);
     let view = overlay.unwrap_or_else(|| app.shell_view());
     let mode = primary_render_mode(app, view);
-    let force_full_height = mode != PrimaryRenderMode::Lines || overlay.is_some();
+    let force_full_height = mode != PrimaryRenderMode::Lines
+        || overlay.is_some()
+        || crate::ui_view_models::answers_visible(app);
     let view_area = Rect {
         height: max_height,
         ..area
     };
+    let view_area = crate::ui_view_models::answers_layout(app, view_area).workspace;
     let (height, lines) =
         main_view_layout(app, view, mode, force_full_height, max_height, view_area);
     PrimaryLayer {
@@ -154,7 +189,7 @@ fn render_input_surface(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, body:
             return;
         }
     }
-    if render_operator_question_input(frame, area, app) {
+    if render_operator_question_input(frame, area, app) || render_answer_prompt(frame, area, app) {
         return;
     }
     render_prompt(frame, area, app);
@@ -246,26 +281,37 @@ fn render_contextual_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) 
 pub(crate) const PROMPT_HEIGHT: u16 = 1;
 
 fn prompt_height(app: &ShellApp, area: Rect) -> u16 {
-    if let Some(question) = app.guided_scan_question_model() {
-        if !crate::renderer::guided_question_hosted_in_body(area.width, area.height) {
-            return crate::renderer::guided_question_height(area, &question);
-        }
-        return PROMPT_HEIGHT;
-    }
-    if let Some(height) = operator_question_input_height(app, area) {
-        return height;
-    }
-    if activity_navigation_owns_input_surface(app) {
-        0
+    guided_prompt_height(app, area)
+        .or_else(|| operator_question_input_height(app, area))
+        .or_else(|| answer_prompt_height(app, area))
+        .unwrap_or_else(|| u16::from(!view_supplies_own_input_surface(app)))
+}
+
+fn guided_prompt_height(app: &ShellApp, area: Rect) -> Option<u16> {
+    let question = app.guided_scan_question_model()?;
+    if crate::renderer::guided_question_hosted_in_body(area.width, area.height) {
+        Some(PROMPT_HEIGHT)
     } else {
-        PROMPT_HEIGHT
+        Some(crate::renderer::guided_question_height(area, &question))
     }
 }
 
-fn activity_navigation_owns_input_surface(app: &ShellApp) -> bool {
+fn answer_prompt_height(app: &ShellApp, area: Rect) -> Option<u16> {
+    if !crate::ui_view_models::answers_own_input(app) {
+        return None;
+    }
+    let height = if app.router.answers().focus == crate::app::AnswerFocus::Reply {
+        4
+    } else {
+        1
+    };
+    Some(height.min(area.height))
+}
+
+fn view_supplies_own_input_surface(app: &ShellApp) -> bool {
     matches!(
         (app.shell_view(), app.input_mode()),
-        (ShellView::Activity, crate::InputMode::Navigate)
+        (ShellView::Activity, crate::InputMode::Navigate) | (ShellView::Keymap, _)
     )
 }
 

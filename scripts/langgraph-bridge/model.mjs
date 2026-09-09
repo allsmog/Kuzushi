@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
 import { ChatAnthropic } from "@langchain/anthropic";
-import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { BridgePublicError } from "./errors.mjs";
 import { oauthModelForRequest } from "./oauth-models.mjs";
@@ -392,6 +392,29 @@ export function cacheableTextBlock(text) {
   };
 }
 
+// The Rust runtime may declare a stable leading portion of the user prompt (a
+// repository inventory, a shared briefing) that repeats byte-for-byte across
+// the calls of one run. It is honoured only when it really leads the prompt;
+// otherwise the prompt ships whole and unmarked rather than split at a wrong
+// boundary. Returns undefined when there is nothing to split.
+export function promptCacheSplit(request) {
+  const prompt = String(request?.prompt ?? "");
+  const prefix = request?.cacheablePromptPrefix ?? request?.cacheable_prompt_prefix;
+  if (typeof prefix !== "string" || !prefix.trim() || !prompt.startsWith(prefix)) return undefined;
+  return { prefix, remainder: prompt.slice(prefix.length) };
+}
+
+// The opening user turn: one plain string, or — with a verified cacheable
+// prefix — a cache-marked block followed by the per-call remainder, so every
+// later call sharing that prefix reads it at cache-read rates.
+export function humanMessageForRequest(request) {
+  const split = promptCacheSplit(request);
+  if (!split) return new HumanMessage(String(request?.prompt ?? ""));
+  const content = [cacheableTextBlock(split.prefix)];
+  if (split.remainder) content.push({ type: "text", text: split.remainder });
+  return new HumanMessage({ content });
+}
+
 function providerForRequest(request) {
   try {
     return parseModelSpec(request.model)[0];
@@ -436,6 +459,7 @@ export function messageText(message) {
 
 function contentPartText(part) {
   if (typeof part === "string") return part;
+  if (part?.type && !["text", "input_text", "output_text"].includes(part.type)) return "";
   return part?.text ?? part?.content ?? "";
 }
 
@@ -447,7 +471,7 @@ export function usageFromMessage(message) {
   const outputTokens = optionalTokenCount(
     usage.output_tokens ?? usage.completionTokens ?? usage.outputTokens,
   );
-  const result = { inputTokens, outputTokens };
+  const result = { inputTokens, outputTokens, ...promptCacheUsage(usage) };
   const rawCost =
     usage.cost_usd ??
     usage.costUsd ??
@@ -461,6 +485,22 @@ export function usageFromMessage(message) {
   return { ...result, costUsd };
 }
 
+// Prompt-cache counters under the provider's raw names (Anthropic) or
+// LangChain's `input_token_details` shape. Absent counters stay absent — a
+// provider that never reports caching is not reporting zero cache traffic.
+function promptCacheUsage(usage) {
+  const cacheReadInputTokens = optionalTokenCount(
+    usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? usage.input_token_details?.cache_read,
+  );
+  const cacheCreationInputTokens = optionalTokenCount(
+    usage.cache_creation_input_tokens ??
+      usage.cacheCreationInputTokens ??
+      usage.input_token_details?.cache_creation,
+  );
+  if (cacheReadInputTokens === undefined && cacheCreationInputTokens === undefined) return {};
+  return { cacheReadInputTokens, cacheCreationInputTokens };
+}
+
 export function usageFromMessages(messages) {
   return (messages ?? []).filter(isAiMessage).reduce(addMessageUsage, emptyUsage());
 }
@@ -469,9 +509,13 @@ export function bridgeUsageFields(usage) {
   const hasInput = usage.inputReportedCalls > 0;
   const hasOutput = usage.outputReportedCalls > 0;
   const hasCost = usage.costReportedCalls > 0;
+  const hasCache = usage.cacheReportedCalls > 0;
   return {
     input_tokens: hasInput ? usage.inputTokens : undefined,
     output_tokens: hasOutput ? usage.outputTokens : undefined,
+    cache_read_input_tokens: hasCache ? usage.cacheReadInputTokens : undefined,
+    cache_creation_input_tokens: hasCache ? usage.cacheCreationInputTokens : undefined,
+    cache_reported_calls: usage.cacheReportedCalls,
     cost_usd: hasCost ? usage.costUsd : undefined,
     input_reported_calls: usage.inputReportedCalls,
     output_reported_calls: usage.outputReportedCalls,
@@ -556,6 +600,14 @@ function addMessageUsage(total, message) {
     outputTokens: checkedTokenSum(total.outputTokens, usage.outputTokens),
     inputReportedCalls: total.inputReportedCalls + Number(usage.inputTokens !== undefined),
     outputReportedCalls: total.outputReportedCalls + Number(usage.outputTokens !== undefined),
+    cacheReadInputTokens: checkedTokenSum(total.cacheReadInputTokens, usage.cacheReadInputTokens),
+    cacheCreationInputTokens: checkedTokenSum(
+      total.cacheCreationInputTokens,
+      usage.cacheCreationInputTokens,
+    ),
+    cacheReportedCalls:
+      total.cacheReportedCalls +
+      Number(usage.cacheReadInputTokens !== undefined || usage.cacheCreationInputTokens !== undefined),
     costUsd: checkedCostSum(total.costUsd, usage.costUsd),
     costReportedCalls: total.costReportedCalls + Number(usage.costUsd !== undefined),
     modelCalls: total.modelCalls + 1,
@@ -568,6 +620,9 @@ function emptyUsage() {
     outputTokens: 0,
     inputReportedCalls: 0,
     outputReportedCalls: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReportedCalls: 0,
     costUsd: 0,
     costReportedCalls: 0,
     modelCalls: 0,

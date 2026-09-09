@@ -123,7 +123,7 @@ pub(crate) async fn verify_finding_with_payload(
 ) -> Result<VerificationOutcome> {
     let backend = detect_backend(opts.backend);
     let language = infer_language(&finding.file_path);
-    if backend != SandboxBackend::Bwrap {
+    if !application::LocalVerificationReadiness::for_backend(backend).can_attempt() {
         return Ok(unsupported_backend_outcome(backend, &language));
     }
     let source_identity = match capture_verification_source_identity(workspace_root) {
@@ -150,17 +150,19 @@ pub(crate) async fn verify_finding_with_payload(
 
 fn unsupported_backend_outcome(backend: SandboxBackend, language: &Lang) -> VerificationOutcome {
     language_outcome(
-        VerificationOutcome::not_attempted(backend, unsupported_backend_reason(backend)),
+        VerificationOutcome::not_attempted(
+            backend,
+            format!(
+                "{}; target and harness code were not executed",
+                unsupported_backend_reason(backend)
+            ),
+        ),
         language,
     )
 }
 
 fn unsupported_backend_reason(backend: SandboxBackend) -> &'static str {
-    if backend == SandboxBackend::Podman {
-        "the Podman verifier has no pinned image contract; target and harness code were not executed"
-    } else {
-        "no supported isolating sandbox backend is available; target and harness code were not executed"
-    }
+    application::LocalVerificationReadiness::for_backend(backend).message()
 }
 
 fn source_capture_error(

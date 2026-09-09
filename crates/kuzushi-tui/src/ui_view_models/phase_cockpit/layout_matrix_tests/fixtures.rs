@@ -145,6 +145,7 @@ fn review_fixture(state: SemanticFixture) -> ReviewPhaseModel {
 fn prove_fixture(state: SemanticFixture) -> ProvePhaseModel {
     let richness = state.richness();
     ProvePhaseModel {
+        pending_result: None,
         deferral: None,
         finding: (richness >= 1).then(fixture_finding),
         attack_path: fixture_attack_path(richness >= 1),

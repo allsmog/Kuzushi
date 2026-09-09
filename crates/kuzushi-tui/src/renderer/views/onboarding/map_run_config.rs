@@ -1,12 +1,20 @@
 use super::*;
 use crate::app::MapRunConfigRowId;
+mod scope_selection;
+mod text_entries;
 
 pub(crate) fn map_run_config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if app.map_scope_picker_open() {
+        return scope_selection::scope_selection_lines(app, area);
+    }
+    if app.router.setup().map_run_config().text().is_some() {
+        return text_entries::map_text_lines(app, area);
+    }
     let width = area.width as usize;
     let summary = app.map_run_config_summary();
     let mut lines = vec![divider("SETUP · THREAT MODEL", area.width)];
     lines.push(muted(&fit(
-        "Configure the descriptor input used by shell, run, and expanded scoped builds.",
+        "Choose the method, scope, and context for the threat model.",
         width,
     )));
     lines.push(blank());
@@ -18,7 +26,6 @@ pub(crate) fn map_run_config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
             width,
         ));
     }
-    lines.extend(editor_lines(app, width));
     lines.push(blank());
     lines.push(muted(&fit(
         &format!(
@@ -47,26 +54,6 @@ fn row_value(row: MapRunConfigRowId, summary: &crate::app::MapRunConfigSummary) 
         MapRunConfigRowId::DesignDocs => format!("{} source(s)", summary.design_docs),
         MapRunConfigRowId::Context => format!("{} row(s)", summary.context_rows),
     }
-}
-
-fn editor_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
-    let state = app.router.setup().map_run_config();
-    let Some(row) = state.edit() else {
-        return Vec::new();
-    };
-    let value = if state.draft().is_empty() {
-        "<none>"
-    } else {
-        state.draft()
-    };
-    vec![
-        blank(),
-        styled(
-            &fit(&format!(" edit {} · {value}", row_label(row)), width),
-            theme::accent(),
-        ),
-        muted(" comma or newline separates values · Enter saves · Esc cancels"),
-    ]
 }
 
 fn scope_notice_lines(

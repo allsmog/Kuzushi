@@ -41,6 +41,9 @@ const requiredPackageFiles = [
   "LICENSE",
   "schemas/module.manifest.schema.json",
   "schemas/kuzushi.lock.schema.json",
+  "schemas/finding-identity-audit.schema.json",
+  "schemas/finding-identity-audit-approval-request.schema.json",
+  "schemas/finding-identity-audit-approval.schema.json",
   "schemas/review-yield.dataset-manifest.schema.json",
   "schemas/review-yield.model.schema.json",
   "schemas/review-yield.training-example.schema.json",
@@ -49,6 +52,7 @@ const requiredPackageFiles = [
 const allowedPackageEntries = [
   "bin",
   "scripts/native-runtime-contract.mjs",
+  "scripts/source-native-runtime.mjs",
   "scripts/langgraph-bridge.mjs",
   "scripts/langgraph-bridge/confined-file-read.mjs",
   "scripts/langgraph-bridge/diagnostics.mjs",

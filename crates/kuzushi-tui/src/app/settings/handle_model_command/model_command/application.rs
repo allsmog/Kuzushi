@@ -59,7 +59,6 @@ impl ShellApp {
     ) -> Vec<ShellEffect> {
         self.config_mut().model = Some(model.clone());
         self.set_session_thinking_level(thinking_level.clone());
-        self.sync_selected_model_index();
         self.log(
             "model",
             format!(

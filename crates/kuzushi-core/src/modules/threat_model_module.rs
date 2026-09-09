@@ -240,10 +240,10 @@ fn threat_model_source_options() -> Vec<OptionSpec> {
         opt(
             "sources",
             OptionType::StringList,
-            "Parent artifacts for the model: context, threat-model, x-ray, entry-points, or opt-in threat-model attachments. Attachment text is workspace-confined, byte-bounded, and untrusted. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
+            "Evidence for the model: context, source-code, threat-model, x-ray, entry-points, or opt-in threat-model attachments. source-code attaches file/line excerpts within maxSourceBytes and contextLimit, prioritizing grounded surfaces and disclosing omissions. All source text is workspace-confined and untrusted. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
         )
             .aliases(&["sourceArtifacts", "source_artifacts"])
-            .default(json!(["context", "threat-model"])),
+            .default(json!(crate::capabilities::threat_model::DEFAULT_THREAT_MODEL_SOURCES)),
         opt("seed", OptionType::StringList, "Inline or workspace-file seed context.")
             .inline_or_workspace_files(),
         opt("designDocs", OptionType::StringList, "Architecture document sources.")

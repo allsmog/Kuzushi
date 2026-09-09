@@ -8,8 +8,18 @@ pub(crate) const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];
 
 pub(crate) const VALID_METHODOLOGIES: &[&str] = &["pasta", "stride", "dread"];
 
-pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] =
-    &["context", "threat-model", "x-ray", "entry-points", "attachments", "none"];
+pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] = &[
+    "context",
+    "source-code",
+    "threat-model",
+    "x-ray",
+    "entry-points",
+    "attachments",
+    "none",
+];
+
+pub(crate) const DEFAULT_THREAT_MODEL_SOURCES: &[&str] =
+    &["context", "source-code", "threat-model"];
 
 pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", "off"];
 

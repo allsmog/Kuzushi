@@ -4,6 +4,8 @@
 //! separate from stores, scanners, and runtime dispatch.
 
 use crate::ShellApp;
+mod answers;
+pub(crate) use answers::*;
 
 mod active_stage;
 mod activity_dag_rows;
@@ -43,13 +45,17 @@ mod help;
 mod home_cockpit;
 mod jobs_registry;
 mod journey;
+mod report_summary;
+pub(crate) use report_summary::{report_cost_coverage, report_review_summary};
 mod keybindings;
 mod keymap;
 mod knowledge_base;
 mod live_activity;
+mod model_failure;
 mod module_detail;
 mod module_progress;
 mod module_run;
+pub(crate) use model_failure::model_failure_text;
 mod options;
 mod patch_review;
 mod permission_policy;
@@ -120,6 +126,7 @@ pub(crate) use activity_view::{
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
 pub(crate) use advisory_chrome::{
     cost_cap_halt_model, notice_banner_model, throttle_banner_model, CostCapHaltModel,
+    NoticeBannerModel,
 };
 pub(crate) use ambient_progress::ambient_progress_chip;
 pub(crate) use attack_surface::{
@@ -193,10 +200,10 @@ pub(crate) use jobs_registry::{
 };
 pub(crate) use journey::{
     attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
-    finding_ledger_counts, journey_footer_segment, journey_model, journey_phase_segment,
-    journey_reality_projection, CheckpointDrift, JourneyDestination, JourneyModel,
-    JourneyPhaseAccess, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
-    JourneyRealityProjection, ReportReason,
+    finding_ledger_counts, journey_destination_after_selection, journey_footer_segment,
+    journey_model, journey_phase_segment, journey_reality_projection, CheckpointDrift,
+    JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState, JourneyPhaseStatus,
+    JourneyPhaseTone, JourneyRealityProjection, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};

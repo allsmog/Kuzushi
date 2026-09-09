@@ -9,6 +9,9 @@ mod git_history_mining;
 mod git_metadata;
 mod infrastructure;
 pub mod inventory;
+pub(crate) mod rust_test_source;
+pub(crate) mod rust_surface_policy;
+pub(crate) mod source_snapshot;
 pub mod source_span;
 pub mod tool_shelf;
 

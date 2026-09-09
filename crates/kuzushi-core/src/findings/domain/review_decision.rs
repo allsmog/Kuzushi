@@ -1,4 +1,4 @@
-use super::{FindingIdentityBasis, TriageAuthor, TriageOutcome, TriageVerdict};
+use super::{Finding, FindingIdentityBasis, TriageAuthor, TriageOutcome, TriageVerdict};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -196,6 +196,25 @@ pub struct ReviewDecisionProvenance {
 pub struct ReviewDecisionPropagation {
     pub basis: FindingIdentityBasis,
     pub source_finding_ids: Vec<i64>,
+}
+
+/// What a review decision is looked up by: the durable identity when the
+/// finding carries one, otherwise the projected finding row id. Deliberately
+/// narrow so a ledger-wide decision read can project these two columns
+/// instead of deserializing and hydrating every finding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewDecisionSubject {
+    pub finding_id: Option<i64>,
+    pub identity_id: Option<String>,
+}
+
+impl From<&Finding> for ReviewDecisionSubject {
+    fn from(finding: &Finding) -> Self {
+        Self {
+            finding_id: finding.id,
+            identity_id: finding.identity_id.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

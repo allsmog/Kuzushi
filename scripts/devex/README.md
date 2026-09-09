@@ -145,6 +145,10 @@ Notes:
   (the first digit-run is parsed as seconds).
 - `wait-snap:` uses the same timeout grammar, followed by ` | <label>`, and
   saves the exact pane frame that satisfied the substring check.
+- `require-live-snap:` uses that grammar and stops the journey if the required
+  live state is absent. Use it before keys that launch work. Diagnostic waits
+  record a failure and continue; a required wait preserves its timeout capture
+  and ends the owned terminal session before later directives can run.
 - `live-snap:` and `wait-live-snap:` never substitute saved or ordinary shell
   output; they fail unless `tmux` reports `alternate_on=1`. `saved-snap:` is
   the explicit post-exit path. Legacy `snap:` / `wait-snap:` retain automatic

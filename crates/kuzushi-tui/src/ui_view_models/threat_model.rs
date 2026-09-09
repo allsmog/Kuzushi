@@ -1019,6 +1019,29 @@ mod tests {
         assert!(threat_model_absence_hint(&app).contains("integrity error"));
     }
 
+    #[test]
+    fn explicit_dfd_refresh_reloads_model_authority_and_refuses_corrupt_revisions() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_latest_threat_model_for_dfd();
+        assert!(threat_model_doc(&app).is_none());
+
+        commit_test_model(temp.path(), "stride");
+        app.hydrate_latest_threat_model_for_dfd();
+        assert_eq!(threat_model_doc(&app).unwrap()["methodology"], "stride");
+
+        let active = commit_test_model(temp.path(), "pasta");
+        app.hydrate_latest_threat_model_for_dfd();
+        assert_eq!(threat_model_doc(&app).unwrap()["methodology"], "pasta");
+
+        let object = kuzushi_core::threat_model_object_path(temp.path(), &active.sha256).unwrap();
+        std::fs::write(object, b"corrupt").unwrap();
+        app.hydrate_latest_threat_model_for_dfd();
+        assert!(threat_model_doc(&app).is_none());
+        assert!(threat_model_absence_hint(&app).contains("integrity error"));
+    }
+
     fn commit_test_model(root: &std::path::Path, methodology: &str) -> ThreatModelRef {
         let scope = kuzushi_core::capabilities::threat_model::current_scope_ref_for_path(root, ".")
             .unwrap()

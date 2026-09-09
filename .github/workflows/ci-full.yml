@@ -349,4 +349,7 @@ jobs:
       - name: Run smoke tests against native CLI
         env:
           KUZUSHI_CMD: node bin/kuzushi-rs.mjs
-        run: pnpm test:e2e
+        run: |
+          slug=$(node -p 'process.platform + "-" + process.arch')
+          export KUZUSHI_NATIVE_BIN="$PWD/native/$slug/kuzushi"
+          pnpm test:e2e

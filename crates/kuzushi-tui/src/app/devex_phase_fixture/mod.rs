@@ -37,6 +37,7 @@ fn hydrate_reference_security_artifacts(app: &mut ShellApp, target: &Path) {
     app.hydrate_view_keys_blocking(
         &hydration_target,
         vec![
+            ViewHydrationKey::ThreatModelStore,
             ViewHydrationKey::JsonFile {
                 path: kuzushi_core::capabilities::persistent_threat_model_path(&hydration_target),
             },

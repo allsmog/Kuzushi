@@ -1,10 +1,6 @@
 use super::page_scroll::{page_scroll_kind, PageScrollKind};
 use super::*;
 
-/// Rows the Logs view spends on chrome above the scrolling body: the context
-/// strip, blank, `LOGS` divider, summary hint, and the position row.
-const LOGS_CHROME_ROWS: usize = 8;
-
 impl ShellApp {
     pub(super) fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
         if self.handle_catalog_row_hotkey(key) {
@@ -32,35 +28,11 @@ impl ShellApp {
     }
 
     pub(super) fn scroll_current_view_up(&mut self, amount: usize) {
-        if self.scroll_logs_up(amount) {
-            return;
-        }
         if let Some(kind) = self.current_page_scroll_kind() {
             self.subtract_page_scroll(kind, amount);
         } else {
             self.scroll_up(amount.min(u16::MAX as usize) as u16);
         }
-    }
-
-    /// Scrolling back from the tail must land one line above the last row, not
-    /// one below the `usize::MAX` tail sentinel — otherwise the viewport stays
-    /// clamped to the bottom and keeps following new output. Resolving the
-    /// real row count here is what makes the released tail actually hold.
-    fn scroll_logs_up(&mut self, amount: usize) -> bool {
-        if !matches!(self.shell_view(), ShellView::Logs) {
-            return false;
-        }
-        let anchor = self.logs_bottom_scroll().min(self.router.logs().scroll());
-        self.router.logs_mut().set_scroll(anchor);
-        self.router.logs_mut().scroll_up(amount);
-        true
-    }
-
-    /// The scroll offset that shows the final row of the Logs document.
-    fn logs_bottom_scroll(&self) -> usize {
-        let rows = crate::ui_view_models::logs_model(self).rows.len();
-        let visible = usize::from(self.viewport().rows).saturating_sub(LOGS_CHROME_ROWS);
-        rows.saturating_sub(visible.max(1))
     }
 
     pub(super) fn scroll_current_view_to_top(&mut self) {
@@ -145,10 +117,14 @@ impl ShellApp {
     }
 
     fn current_page_step(&self) -> usize {
-        if self.shell_view() == ShellView::Keymap {
-            return usize::from(self.viewport().rows.saturating_sub(11)).max(1);
-        }
-        VIEWPORT_PAGE_LINES
+        crate::renderer::workbench_scroll_page_rows(self)
+            .or_else(|| {
+                crate::renderer::activity_output_scroll(self).map(|scroll| scroll.page_rows)
+            })
+            .or_else(|| crate::renderer::run_artifact_page_rows(self))
+            .or_else(|| crate::renderer::logs_reader_scroll(self).map(|reader| reader.page_rows))
+            .or_else(|| crate::renderer::keymap_reader_scroll(self).map(|reader| reader.page_rows))
+            .unwrap_or(VIEWPORT_PAGE_LINES)
     }
 
     fn page_findings_down(&mut self) -> bool {
@@ -191,11 +167,19 @@ impl ShellApp {
     }
 
     fn add_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
+        if matches!(kind, PageScrollKind::Logs) {
+            self.scroll_down(step.min(u16::MAX as usize) as u16);
+            return;
+        }
         let scroll = self.page_scroll_mut(kind);
         *scroll = scroll.saturating_add(step);
     }
 
     fn subtract_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
+        if matches!(kind, PageScrollKind::Logs) {
+            self.scroll_up(step.min(u16::MAX as usize) as u16);
+            return;
+        }
         let scroll = self.page_scroll_mut(kind);
         *scroll = scroll.saturating_sub(step);
     }
@@ -248,6 +232,7 @@ impl ShellApp {
             | ShellView::Tune
             | ShellView::ActorDetail
             | ShellView::ModuleRun
+            | ShellView::Report
             | ShellView::Workbench => true,
             ShellView::Scene => !self.router.scene().page().is_frame_rendered(),
             _ => false,

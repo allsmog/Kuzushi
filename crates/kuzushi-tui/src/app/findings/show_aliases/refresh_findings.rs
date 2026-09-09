@@ -529,6 +529,55 @@ mod tests {
     use kuzushi_core::{OptionScope, OptionTarget, Severity, V2Config};
 
     #[test]
+    fn refresh_reads_current_generation_local_decisions_into_queue_and_journey_counts() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("lib.rs"), "fn candidate() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let mut finding = Finding::new_tool(
+            "audit",
+            "rule",
+            "lib.rs",
+            1,
+            None,
+            Severity::High,
+            "older candidate",
+        );
+        store
+            .record_run_started("older", target.path(), "running")
+            .unwrap();
+        store.insert_finding("older", &finding).unwrap();
+        finding.severity = Severity::Medium;
+        finding.message = "current candidate".to_string();
+        store
+            .record_run_started("current", target.path(), "running")
+            .unwrap();
+        let current_id = store.insert_finding("current", &finding).unwrap();
+        store
+            .record_auto_triage_locally(
+                current_id,
+                &kuzushi_core::TriageOutcome {
+                    verdict: kuzushi_core::TriageVerdict::FalsePositive,
+                    confidence: 0.8,
+                    rationale: "No reachable sink".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let operator = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings_with_operator_state(false, operator.path());
+        assert_eq!(app.findings().len(), 1);
+        assert_eq!(app.findings()[0].id, Some(current_id));
+        assert_eq!(app.findings()[0].severity, Severity::Medium);
+        assert_eq!(app.findings()[0].sources.len(), 2);
+        let counts = app.domain().finding_ledger_counts().unwrap();
+        assert_eq!(counts.total, 1);
+        assert_eq!(counts.reviewed, 1);
+        assert_eq!(counts.confirmed, 0);
+    }
+
+    #[test]
     fn finding_generation_key_never_collapses_distinct_identity_generations() {
         let mut finding = Finding {
             fingerprint: "legacy-fingerprint".to_string(),

@@ -116,6 +116,7 @@ fn job_drain_finishes_agent_slot_and_clears_liveness() {
             cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
             call_attempted: true,
             tool_policy_receipt: None,
+            failure: None,
         },
     }));
     let agent = AgentChatView {
@@ -134,10 +135,10 @@ fn job_drain_finishes_agent_slot_and_clears_liveness() {
     assert!(!agent.running);
     assert!(app.agent_cancel_token().is_none());
     assert!(!app.jobs().is_running(JobKind::Agent));
-    assert!(agent
-        .error
-        .as_deref()
-        .is_some_and(|error| error == "model request failed (runtime_error)"));
+    assert_eq!(
+        agent.error.as_deref(),
+        Some("model request failed (runtime_error)\nNext: Open /doctor to check the runtime before retrying. Inspect the run if the failure persists.\nCommands: Ctrl+G opens the command palette.")
+    );
 }
 
 #[test]

@@ -9,6 +9,47 @@ use crate::run_artifacts::{
 use serde_json::json;
 
 #[test]
+fn partial_model_result_cannot_replace_previously_selected_proof() {
+    let (_target, workspace, finding) = proof_fixture("scan-current");
+    let accepted_run = "tool-proof-accepted";
+    record_model_proof_run(&workspace, accepted_run, &finding, "scan-current");
+    materialize_selected_proof_attempt(&workspace, &prove_attempt(&workspace, accepted_run))
+        .unwrap();
+    let incomplete_run = "tool-proof-incomplete";
+    let record = ToolRunRecord::new(workspace.root(), incomplete_run, "tool", "verify:finding");
+    try_record_tool_run_started_with_reproducibility(
+        record,
+        &json!({"fingerprint":finding.fingerprint}),
+        None,
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+    let mut result = model_proof_result(&finding, "scan-current", 2);
+    result["status"] = json!("partial");
+    result["data"]["exploitable"] = Value::Null;
+    try_record_tool_run_complete(record, &result).unwrap();
+    assert!(materialize_selected_proof_attempt(
+        &workspace,
+        &prove_attempt(&workspace, incomplete_run)
+    )
+    .is_err());
+    let restored = FindingStore::open(workspace.findings_db_path())
+        .unwrap()
+        .get_finding_by_fingerprint(&finding.fingerprint)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        restored
+            .verification
+            .unwrap()
+            .verification_run_id
+            .as_deref(),
+        Some(accepted_run)
+    );
+}
+
+#[test]
 fn selected_model_proof_materializes_and_survives_reopen() {
     let (_target, workspace, finding) = proof_fixture("scan-current");
     let run_id = "tool-proof-model-current";
@@ -282,7 +323,10 @@ fn stage_blocks_are_carried_outside_the_compared_candidate_fields() {
         .pointer_mut("/data")
         .and_then(serde_json::Value::as_object_mut)
         .unwrap()
-        .insert("stageNote".to_string(), json!("stages: panel(2) split · tie-break openai:bigger"));
+        .insert(
+            "stageNote".to_string(),
+            json!("stages: panel(2) split · tie-break openai:bigger"),
+        );
     result
         .pointer_mut("/proof")
         .and_then(serde_json::Value::as_object_mut)
@@ -306,7 +350,10 @@ fn stage_blocks_are_carried_outside_the_compared_candidate_fields() {
     let error = ModelProofCandidate::from_result(&result)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("conflicting candidate identities"), "{error}");
+    assert!(
+        error.contains("conflicting candidate identities"),
+        "{error}"
+    );
 }
 
 fn model_proof_result(finding: &Finding, verified_scan_id: &str, proof_level: u8) -> Value {
@@ -367,4 +414,150 @@ fn prove_attempt(workspace: &WorkspaceTarget, run_id: &str) -> PhaseAttemptCompl
         PhaseTargetSnapshot::capture(workspace.root()),
         PhaseAttemptOutcome::Completed,
     )
+}
+
+// Test-only unavailable-backend receipts exercise selection without executing
+// a target, inventing a reproduction, or adding live operator findings.
+fn record_empirical_test_run(
+    workspace: &WorkspaceTarget,
+    finding: &Finding,
+    tool: &str,
+    run_id: &str,
+    mode: &str,
+    change: impl FnOnce(&mut Value),
+) {
+    let record = ToolRunRecord::new(workspace.root(), run_id, "tool", tool);
+    try_record_tool_run_started_with_reproducibility(
+        record,
+        &json!({"fingerprint": finding.fingerprint, "mode":mode}),
+        None,
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+    let mut proof = crate::verification::VerificationOutcome::not_attempted(
+        kuzushi_sandbox::SandboxBackend::Plain,
+        "test-only unavailable backend",
+    )
+    .to_persisted();
+    proof.verification_run_id = Some(run_id.to_string());
+    proof.verified_scan_id = finding.scan_id.clone();
+    FindingStore::open(workspace.findings_db_path())
+        .unwrap()
+        .save_verification(finding.id.unwrap(), &proof)
+        .unwrap();
+    let mut result = json!({"ok":true,"status":"completed","proof":{
+        "kind":"empirical-verification","empirical":true,"fingerprint":finding.fingerprint,
+        "proofLevel":proof.proof_level,"proofVerdict":proof.proof_verdict.as_str(),"backend":"Plain",
+        "durationMs":proof.duration_ms,"costUsd":proof.cost_usd,"provenance":null
+    }});
+    change(&mut result);
+    try_record_tool_run_complete(record, &result).unwrap();
+}
+
+#[test]
+fn empirical_receipt_selection_accepts_both_tool_identities_without_fabricating_proof() {
+    for tool in ["verify:finding", "verify:exploit"] {
+        let (_target, workspace, finding) = proof_fixture("scan-current");
+        record_empirical_test_run(
+            &workspace,
+            &finding,
+            tool,
+            "empirical-test",
+            "empirical",
+            |_| {},
+        );
+        assert_eq!(
+            materialize_selected_proof_attempt(
+                &workspace,
+                &prove_attempt(&workspace, "empirical-test")
+            )
+            .unwrap(),
+            0
+        );
+        let proof = FindingStore::open(workspace.findings_db_path())
+            .unwrap()
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap()
+            .verification
+            .unwrap();
+        assert_eq!(proof.proof_verdict, PersistedProofVerdict::NotAttempted);
+        assert!(!proof.has_terminal_runtime_verification());
+    }
+}
+
+#[test]
+fn empirical_selection_rejects_mismatched_snapshot_fields() {
+    for (key, value) in [
+        ("fingerprint", json!("different")),
+        ("empirical", json!(false)),
+        ("kind", json!("model")),
+        ("proofLevel", json!(5)),
+        ("backend", json!("Model")),
+    ] {
+        let (_target, workspace, finding) = proof_fixture("scan-current");
+        record_empirical_test_run(
+            &workspace,
+            &finding,
+            "verify:finding",
+            "empirical-test",
+            "empirical",
+            |result| result["proof"][key] = value,
+        );
+        let error = materialize_selected_proof_attempt(
+            &workspace,
+            &prove_attempt(&workspace, "empirical-test"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("snapshot differs"), "{error}");
+    }
+}
+
+#[test]
+fn model_dispatch_cannot_select_an_empirical_snapshot() {
+    let (_target, workspace, finding) = proof_fixture("scan-current");
+    record_empirical_test_run(
+        &workspace,
+        &finding,
+        "verify:finding",
+        "empirical-test",
+        "model",
+        |_| {},
+    );
+    let error = materialize_selected_proof_attempt(
+        &workspace,
+        &prove_attempt(&workspace, "empirical-test"),
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("model verification cannot claim"),
+        "{error}"
+    );
+}
+
+#[test]
+fn empirical_selection_rejects_a_proof_replaced_by_another_run() {
+    let (_target, workspace, finding) = proof_fixture("scan-current");
+    record_empirical_test_run(
+        &workspace,
+        &finding,
+        "verify:finding",
+        "first",
+        "empirical",
+        |_| {},
+    );
+    record_empirical_test_run(
+        &workspace,
+        &finding,
+        "verify:finding",
+        "second",
+        "empirical",
+        |_| {},
+    );
+    let error = materialize_selected_proof_attempt(&workspace, &prove_attempt(&workspace, "first"))
+        .unwrap_err();
+    assert!(error.to_string().contains("does not belong"), "{error}");
 }

@@ -74,6 +74,7 @@ pub(crate) fn carlini_actor_response_artifact_payload(
         "estimatedCostUsd": response.estimated_cost_usd,
         "inputTokens": response.input_tokens,
         "outputTokens": response.output_tokens,
+        "promptCache": response.prompt_cache,
         "truncated": response.truncated,
         "stopReason": response.stop_reason,
     });

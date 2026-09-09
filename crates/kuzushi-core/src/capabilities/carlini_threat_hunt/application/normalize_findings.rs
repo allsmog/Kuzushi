@@ -359,12 +359,14 @@ pub(crate) fn persist_findings(
     };
     workspace.ensure_state_dir()?;
     let run_id = ctx.finding_run_id();
+    let counts = store.fingerprint_delta(findings)?;
     store.with_run_lifecycle(&run_id, target, || {
         for finding in findings {
             store.insert_finding(&run_id, finding)?;
         }
         Ok(((), findings.len()))
     })?;
+    crate::findings::emit_persisted_finding_delta(ctx, findings, counts)?;
     Ok(Some(CarliniThreatHuntPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),

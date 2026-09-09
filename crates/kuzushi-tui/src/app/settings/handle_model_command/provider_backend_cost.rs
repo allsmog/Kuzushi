@@ -1,6 +1,17 @@
 use super::*;
 
 impl ShellApp {
+    pub(crate) fn provider_label(&self) -> String {
+        self.config()
+            .model
+            .as_deref()
+            .and_then(|model| model.split_once(':').map(|(provider, _)| provider))
+            .map(display_model_provider)
+            .filter(|provider| !provider.trim().is_empty())
+            .unwrap_or("— none active (open /model)")
+            .to_string()
+    }
+
     pub(crate) fn handle_provider_command(&mut self, provider: Option<String>) {
         self.set_shell_view(ShellView::Config);
         if let Some(provider) = provider {

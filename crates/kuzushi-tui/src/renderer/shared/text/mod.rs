@@ -2,6 +2,16 @@ pub(in crate::renderer) use super::*;
 pub(crate) use crate::ui_view_models::format_session_cost;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+pub(super) mod styled_wrap;
+
+/// Wrap display rows without dropping styles or meaningful path whitespace.
+pub(crate) fn wrap_document_lines(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    lines
+        .into_iter()
+        .flat_map(|line| styled_wrap::document_line(line, width as usize))
+        .collect()
+}
+
 pub(crate) fn join_segments(values: &[String]) -> String {
     values
         .iter()

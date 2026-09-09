@@ -11,6 +11,36 @@ pub(crate) struct ThreatModelSourceBundle {
 }
 
 impl ThreatModelSourceBundle {
+    /// Code depends on the authenticated selected surfaces. Load it only after
+    /// parent context exists and catalog grounding has been resolved.
+    pub(crate) fn attach_source_code(
+        &mut self,
+        input: &BuildInput,
+        surfaces: &[crate::attack_surface::AttackSurface],
+        tree_hash: Option<&str>,
+        ctx: &ToolExecutionContext<'_>,
+    ) -> Result<CodeEvidence> {
+        if !input.sources.iter().any(|source| source == "source-code") {
+            return Ok(CodeEvidence::default());
+        }
+        emit_source_step(ctx, "source:code collect");
+        let source = super::source_code::collect_source_code(input, surfaces, tree_hash, ctx)?;
+        let mut record = ThreatModelSourceRecord::loaded(
+            "derived",
+            "source-code",
+            None,
+            source.content,
+            input.max_source_bytes,
+        );
+        record.truncated = source.partial;
+        let evidence = CodeEvidence {
+            prompt: record.prompt_block().unwrap_or_default(),
+            references: source.references,
+        };
+        self.records.push(record);
+        Ok(evidence)
+    }
+
     pub(crate) fn metadata_json(&self) -> Value {
         Value::Array(
             self.records
@@ -281,6 +311,7 @@ fn load_parent_artifacts(
             "x-ray" => records.push(load_x_ray_source(input)?),
             "entry-points" => records.push(load_entry_points_source(input)?),
             "attachments" => load_attachment_sources(ctx, input, records)?,
+            "source-code" => {} // Materialized after context/catalog grounding.
             "none" => {}
             _ => anyhow::bail!("unsupported threat-model source {source:?}"),
         }
@@ -369,19 +400,16 @@ fn load_path_attachment(
     remaining: usize,
 ) -> Result<ThreatModelSourceRecord> {
     let path = crate::attachments::resolve_safe_attachment_path(workspace, &attachment.source)?;
-    let bounded = crate::bounded_file::read_utf8_text_prefix_within(
-        workspace.root(),
-        &path,
-        remaining,
-    )
-    .with_context(|| format!("Could not read threat-model attachment {}", attachment.source))?;
-    let mut record = ThreatModelSourceRecord::loaded(
-        "operator",
-        label,
-        Some(path),
-        bounded.text,
-        remaining,
-    );
+    let bounded =
+        crate::bounded_file::read_utf8_text_prefix_within(workspace.root(), &path, remaining)
+            .with_context(|| {
+                format!(
+                    "Could not read threat-model attachment {}",
+                    attachment.source
+                )
+            })?;
+    let mut record =
+        ThreatModelSourceRecord::loaded("operator", label, Some(path), bounded.text, remaining);
     record.bytes = attachment
         .byte_count
         .and_then(|bytes| usize::try_from(bytes).ok())
@@ -501,7 +529,7 @@ fn build_context_source_content(input: &BuildInput) -> Result<String> {
         input.workspace_root(),
         input.context_limit,
     )
-        .with_context(|| "Could not build context snapshot for threat-model:build")?;
+    .with_context(|| "Could not build context snapshot for threat-model:build")?;
     let path = crate::context::context_snapshot_path(input.workspace_root());
     read_context_json_source(input.workspace_root(), &path)
 }
@@ -593,7 +621,12 @@ fn load_entry_points_source(input: &BuildInput) -> Result<ThreatModelSourceRecor
     let original = serde_json::to_string(&catalog)?;
     retain_scoped_entry_points(input, &mut catalog);
     let mut document = serde_json::to_value(catalog)?;
-    if let Some(scope) = input.roots.scope.as_ref().filter(|_| source_scope_is_non_root(input)) {
+    if let Some(scope) = input
+        .roots
+        .scope
+        .as_ref()
+        .filter(|_| source_scope_is_non_root(input))
+    {
         document["scopePath"] = json!(scope.rel_path.to_string_lossy().replace('\\', "/"));
     }
     let (content, truncated) = project_entry_points_source(&document, input.max_source_bytes)?;
@@ -633,14 +666,11 @@ fn entry_points_source_catalog(
     input: &BuildInput,
 ) -> Result<crate::capabilities::entry_points::EntryPointCatalogResolution> {
     if input.context_mode == "off" {
-        crate::capabilities::entry_points::load_explicit_entry_point_catalog(
-            input.workspace_root(),
-        )
+        crate::capabilities::entry_points::load_explicit_entry_point_catalog(input.workspace_root())
     } else {
-        let resolution =
-            crate::capabilities::entry_points::ensure_current_entry_point_catalog(
-                input.workspace_root(),
-            )?;
+        let resolution = crate::capabilities::entry_points::ensure_current_entry_point_catalog(
+            input.workspace_root(),
+        )?;
         if resolution.catalog.is_none() {
             crate::capabilities::entry_points::load_explicit_entry_point_catalog(
                 input.workspace_root(),
@@ -908,14 +938,26 @@ mod source_size_contract_tests {
         let bundle = ThreatModelSourceBundle { records };
         let prompt = bundle.prompt_blocks();
 
-        assert_eq!(attachments.len(), 2, "context attachments stay module-scoped");
+        assert_eq!(
+            attachments.len(),
+            2,
+            "context attachments stay module-scoped"
+        );
         assert!(prompt.contains("<untrusted-source"));
         assert!(prompt.contains("IGNORE PREVIOUS INSTRUCTIONS"));
         assert!(!prompt.contains("not selected"));
-        assert!(bundle.records.iter().map(|record| record.content.as_ref().map_or(0, String::len)).sum::<usize>() <= 32);
+        assert!(
+            bundle
+                .records
+                .iter()
+                .map(|record| record.content.as_ref().map_or(0, String::len))
+                .sum::<usize>()
+                <= 32
+        );
         assert!(bundle.records.iter().any(|record| {
             record.status == "skipped"
-                && record.note.as_deref() == Some("URL attachment is metadata-only and was not fetched")
+                && record.note.as_deref()
+                    == Some("URL attachment is metadata-only and was not fetched")
         }));
     }
 
@@ -1105,7 +1147,7 @@ mod source_size_contract_tests {
             route: Some("/one".to_string()),
             boundary: None,
             risk: crate::attack_surface::AttackSurfaceRisk::default(),
-            metadata: Value::Null,
+            metadata: json!({"sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY}),
         };
         surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
         let expected_id = surface.id.clone();
@@ -1192,7 +1234,7 @@ mod source_size_contract_tests {
                 route: Some(format!("/{title}")),
                 boundary: None,
                 risk: crate::attack_surface::AttackSurfaceRisk::default(),
-                metadata: Value::Null,
+                metadata: json!({"sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY}),
             };
             surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
             surface
@@ -1202,12 +1244,14 @@ mod source_size_contract_tests {
             surface("services/web/src/routes.rs", "web"),
         ]
         .into_iter()
-        .map(|surface| crate::capabilities::entry_points::EntryPointRecord {
-            name: json!(surface.title),
-            location: json!(surface.path),
-            surface,
-            extra: Map::new(),
-        })
+        .map(
+            |surface| crate::capabilities::entry_points::EntryPointRecord {
+                name: json!(surface.title),
+                location: json!(surface.path),
+                surface,
+                extra: Map::new(),
+            },
+        )
         .collect();
         let catalog = explicit_test_catalog(target.path(), entries);
         let state = crate::workspace::workspace_state_root(target.path());

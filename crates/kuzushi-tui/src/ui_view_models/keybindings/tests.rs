@@ -230,7 +230,13 @@ fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
     app.router
         .workbench_mut()
         .set_focus(PhaseSurfaceId::ReviewQueue);
-    assert!(footer_keybindings(&app).contains(&bind("Enter", "review")));
+    assert!(footer_keybindings(&app).contains(&bind("Enter", "open Prove")));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
+    assert!(footer_keybindings(&app)
+        .iter()
+        .all(|binding| binding.key != "Enter"));
 
     app.router
         .workbench_mut()
@@ -431,6 +437,14 @@ fn file_picker_footer_names_filter_and_attach_controls() {
     assert!(bindings.contains(&bind("Enter", "attach")));
     assert!(bindings.contains(&bind("Esc", "close")));
     assert!(!bindings.contains(&bind(":", "type command")));
+    assert!(bindings.contains(&bind("↑/↓", "move")));
+    assert!(!bindings.contains(&bind("j/k", "move")));
+    app.router
+        .file_picker_mut()
+        .set_purpose(crate::app::FilePickerPurpose::MapDocument);
+    let document = footer_keybindings(&app);
+    assert!(document.contains(&bind("Enter", "choose")));
+    assert!(!document.contains(&bind("Enter", "attach")));
 }
 
 #[test]

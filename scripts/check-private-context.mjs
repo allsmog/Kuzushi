@@ -56,7 +56,7 @@ const OPENAI_SPARK_CATALOG = new RegExp(
 );
 const OPENAI_SPARK_CATALOG_SPAN = new RegExp(OPENAI_SPARK_CATALOG.source, "gi");
 const OPENAI_SPARK_ALIAS = new RegExp(
-  `(?:\\blet ${SPARK_TERM}\\b|\\b${SPARK_TERM}\\.(?:provider|auth)\\b|resolve_model_selector\\("${SPARK_TERM}"\\)|\\|\\s*"${SPARK_TERM}"|OpenAI OAuth GPT-5\\.3 Codex ${SPARK_TERM}|Codex ${SPARK_TERM} catalog row|codex_oauth_selectors_expose_gpt_5_4_and_${SPARK_TERM}_without_legacy_provider_aliases)`,
+  `(?:\\blet ${SPARK_TERM}\\b|\\b${SPARK_TERM}\\.(?:provider|auth)\\b|resolve_model_selector\\("${SPARK_TERM}"\\)|\\|\\s*"${SPARK_TERM}"|^\\s*"${SPARK_TERM}",\\s*$|OpenAI OAuth GPT-5\\.3 Codex ${SPARK_TERM}|Codex ${SPARK_TERM} catalog row|codex_oauth_selectors_expose_gpt_5_4_and_${SPARK_TERM}_without_legacy_provider_aliases)`,
   "gi",
 );
 const OPENAI_SPARK_MODEL_FILES = new Set([
@@ -192,7 +192,12 @@ function requiredPolicyFailures(root, files) {
 }
 
 function trackedFiles(root) {
-  const bytes = execFileSync("git", ["-C", root, "ls-files", "-z"]);
+  const deleted = new Set(gitFileList(root, ["--deleted"]));
+  return gitFileList(root, []).filter((file) => !deleted.has(file));
+}
+
+function gitFileList(root, flags) {
+  const bytes = execFileSync("git", ["-C", root, "ls-files", "-z", ...flags]);
   return bytes.toString("utf8").split("\0").filter(Boolean);
 }
 

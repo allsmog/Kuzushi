@@ -3,7 +3,7 @@ use crate::ui_view_models::{EntryPointBreakdown, EntryPointItem};
 use ratatui::prelude::{Line, Span};
 
 mod browser;
-pub(crate) use browser::EntryPointBrowser;
+pub(crate) use browser::{entry_point_page_scroll, EntryPointBrowser};
 
 pub(super) fn entry_point_lines(width: usize, model: &EntryPointBreakdown) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
@@ -242,23 +242,23 @@ fn append_entry(
     entry: &EntryPointItem,
 ) {
     lines.push(Line::from(String::new()));
-    lines.push(Line::styled(
-        fit(
-            &format!(
-                "{}. [{}] {}",
-                index + 1,
-                entry.kind.replace('_', " "),
-                entry.name
-            ),
-            width,
-        ),
-        theme::heading(),
-    ));
+    let heading = format!(
+        "{}. [{}] {}",
+        index + 1,
+        entry.kind.replace('_', " "),
+        entry.name
+    );
+    lines.extend(
+        crate::renderer::shared::text::wrap_text(&heading, width)
+            .into_iter()
+            .map(|text| Line::styled(text, theme::heading())),
+    );
     lines.extend(entry_detail_lines(width, entry).into_iter().skip(1));
 }
 
 fn entry_detail_lines(width: usize, entry: &EntryPointItem) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled(fit(&entry.name, width), theme::heading())];
+    append_field(&mut lines, width, "id", &entry.id);
     append_field(&mut lines, width, "kind", &entry.kind.replace('_', " "));
     append_field(&mut lines, width, "state", entry.disposition.label());
     append_optional_field(&mut lines, width, "decision", &entry.disposition_note, "");
@@ -282,7 +282,6 @@ fn entry_detail_lines(width: usize, entry: &EntryPointItem) -> Vec<Line<'static>
     append_optional_field(&mut lines, width, "risk", &entry.risk, "");
     append_targets(&mut lines, width, entry);
     append_optional_field(&mut lines, width, "evidence", &entry.evidence, "");
-    append_field(&mut lines, width, "id", &entry.id);
     lines
 }
 

@@ -1,0 +1,96 @@
+# J54 — Isolated missing-helper failure, same selected model.
+name: Read the complete control map and dismiss a Trace error
+size: 40x12
+cwd: @TARGET
+require-env: KUZUSHI_DEVEX_TARGET
+env-unset: KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: KUZUSHI_REDUCED_MOTION=1
+env: KUZUSHI_MCP_TREESITTER_BIN=/dev/null/kuzushi-intentionally-absent-helper
+launch: --target @TARGET
+require-live-snap: 30 Viewing Review || Viewing Prove | resumed-engagement
+require-live-snap: 10 Esc nav mode | prompt-ready
+type: open F-0001
+require-live-snap: 10 open F-0001 | finding-command-ready
+keys: Enter
+require-live-snap: 10 Viewing Review | selected-finding
+nav-mode:
+keys: BTab
+require-live-snap: 10 verify:finding | pending-verification
+keys: t
+require-live-snap: 10 TRACE · F-0001 | trace-before
+keys: Enter
+keys: Home
+require-live-snap: 10 run trace:expand | expansion-draft
+keys: Enter
+require-live-snap: 30 ERROR | failure-preview
+require-live-snap: 10 TRACE · F-0001 | trace-error-owned
+expect: Esc dismiss
+expect-not: Esc back
+ask: Does the actual Trace screen consistently say Escape dismisses the error?
+keys: Escape
+require-live-snap: 10 TRACE · F-0001 | trace-after-dismissal
+expect-not: ERROR
+expect: Esc back
+keys: Escape
+require-live-snap: 10 verify:finding | verification-after-back
+keys: C-g
+require-live-snap: 10 COMMAND PALETTE || type to filter · Enter load · Esc close | activity-palette
+type: activity
+require-live-snap: 10 ▸ activity | activity-selected
+keys: Enter
+require-live-snap: 10 RUN FOCUS | failed-run-details
+keys: V
+keys: Tab
+keys: g
+keys: NPage
+require-live-snap: 10 above · replay | output-before-controls
+keys: C-g
+require-live-snap: 10 COMMAND PALETTE | control-map-palette
+type: keys
+require-live-snap: 10 ▸ keys | controls-selected
+keys: Enter
+require-live-snap: 10 KEYMAP | control-map-top
+expect: VIEW · Activity
+expect: Esc/q close
+ask: Does the control map expose useful reading space and the originating Activity controls first?
+keys: NPage
+live-snap: control-map-page-02
+keys: NPage
+live-snap: control-map-page-03
+keys: NPage
+live-snap: control-map-page-04
+keys: NPage
+live-snap: control-map-page-05
+keys: NPage
+live-snap: control-map-page-06
+keys: NPage
+live-snap: control-map-page-07
+keys: NPage
+live-snap: control-map-page-08
+keys: NPage
+live-snap: control-map-page-09
+keys: NPage
+live-snap: control-map-page-10
+keys: NPage
+live-snap: control-map-page-11
+keys: NPage
+live-snap: control-map-page-12
+keys: NPage
+live-snap: control-map-page-13
+keys: NPage
+live-snap: control-map-page-14
+keys: NPage
+live-snap: control-map-page-15
+keys: NPage
+live-snap: control-map-page-16
+keys: G
+live-snap: control-map-tail
+keys: k
+live-snap: control-map-leaves-tail
+ask: Are all control sections reachable without clipped key descriptions or skipped rows, and can scrolling leave the tail?
+keys: Escape
+require-live-snap: 10 RUN FOCUS | controls-return
+ask: Did closing the control map return to the same failed run and preserve its output position?
+keys: C-c
+wait: 1
+snap: control-reading-exit

@@ -95,7 +95,7 @@ fn run_verify_gate(execution: &VerifyExecution<'_>) -> Result<VerifyGateOutcome>
         &execution.input,
     )?;
     let cost = zero_cost.checked_add(gate_pass.cost_report()?, "verification gate cost")?;
-    if gate_pass_is_exploitable(&gate_pass.value) {
+    if !gate_pass_rejects(&gate_pass.value) {
         return Ok(VerifyGateOutcome {
             cost,
             response: None,
@@ -103,8 +103,7 @@ fn run_verify_gate(execution: &VerifyExecution<'_>) -> Result<VerifyGateOutcome>
     }
     let mut result = gate_pass.value;
     annotate_gate_stage(&mut result, gate_model, false);
-    let response =
-        bind_verification_result(result, execution.finding, &execution.source_identity)
+    let response = bind_verification_result(result, execution.finding, &execution.source_identity)
         .and_then(|result| verify_finding_response(result, cost))?;
     Ok(VerifyGateOutcome {
         cost,
@@ -112,11 +111,8 @@ fn run_verify_gate(execution: &VerifyExecution<'_>) -> Result<VerifyGateOutcome>
     })
 }
 
-fn gate_pass_is_exploitable(result: &Value) -> bool {
-    result
-        .get("exploitable")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+fn gate_pass_rejects(result: &Value) -> bool {
+    result.get("exploitable").and_then(Value::as_bool) == Some(false)
 }
 
 fn run_verify_panel(
@@ -159,10 +155,7 @@ fn run_verify_panel(
 /// is forced through a live runtime call, so the count is fresh-sample support;
 /// it deliberately does not claim statistical independence between samples.
 fn annotate_fresh_sample_support(result: &mut Value, fresh_sample_support: u32) {
-    let Some(consensus) = result
-        .get_mut("consensus")
-        .and_then(Value::as_object_mut)
-    else {
+    let Some(consensus) = result.get_mut("consensus").and_then(Value::as_object_mut) else {
         return;
     };
     consensus.insert(
@@ -231,11 +224,22 @@ fn run_escalation_pass(
     cost: RuntimeCostReport,
     trace: Option<&crate::run_artifacts::TraceHandle>,
 ) -> Result<RuntimeCostReport> {
-    let _scope = stage_scope(trace, format!("escalation · tie-break ({escalation_model})"));
+    let _scope = stage_scope(
+        trace,
+        format!("escalation · tie-break ({escalation_model})"),
+    );
     // A best-effort tie-breaker's failure must never destroy the already-paid
     // split verdict: on error we keep the split, disclose the failure, and the
     // cost stays at the panel subtotal (no escalation pass was billed).
-    match attempt_escalation_pass(runtime, escalation_model, workspace_root, prompt, finding, input, cost) {
+    match attempt_escalation_pass(
+        runtime,
+        escalation_model,
+        workspace_root,
+        prompt,
+        finding,
+        input,
+        cost,
+    ) {
         Ok((pass_value, escalated_cost)) => {
             apply_escalation_verdict(result, &pass_value, escalation_model);
             Ok(escalated_cost)
@@ -265,12 +269,17 @@ fn attempt_escalation_pass(
         &finding.fingerprint,
         input,
     )?;
-    let escalated_cost =
-        cost.checked_add(pass.cost_report()?, "verification tie-break escalation cost")?;
+    let escalated_cost = cost.checked_add(
+        pass.cost_report()?,
+        "verification tie-break escalation cost",
+    )?;
     Ok((pass.value, escalated_cost))
 }
 
-fn emit_escalation_failure(trace: Option<&crate::run_artifacts::TraceHandle>, error: &anyhow::Error) {
+fn emit_escalation_failure(
+    trace: Option<&crate::run_artifacts::TraceHandle>,
+    error: &anyhow::Error,
+) {
     if let Some(trace) = trace {
         let _ = trace
             .step(
@@ -373,6 +382,13 @@ mod tests {
             gate_model: None,
             escalation_model: None,
         }
+    }
+
+    #[test]
+    fn gate_rejects_only_a_supported_negative_assessment() {
+        assert!(gate_pass_rejects(&json!({"exploitable":false})));
+        assert!(!gate_pass_rejects(&json!({"exploitable":true})));
+        assert!(!gate_pass_rejects(&json!({"exploitable":null})));
     }
 
     #[test]

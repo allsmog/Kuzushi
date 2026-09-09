@@ -97,7 +97,7 @@ pub(crate) fn evidence_state_label(finding: &Finding) -> String {
         return format!("evidence:{}", finding.evidence.len());
     }
     if finding.corroboration_count > 1 || finding.sources.len() > 1 {
-        return "corroborated".to_string();
+        return "multiple observations".to_string();
     }
     if !finding.sources.is_empty() || finding.source_signature.is_some() {
         return "source-linked".to_string();

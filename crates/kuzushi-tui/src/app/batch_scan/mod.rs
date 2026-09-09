@@ -1,6 +1,7 @@
 mod config;
 mod controller;
 mod launch;
+mod number_edit;
 mod worker_resolution;
 
 pub(crate) use config::{

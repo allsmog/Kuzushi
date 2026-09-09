@@ -17,7 +17,7 @@ fn context_strip_model_reports_idle_shell_state() {
     assert_eq!(model.findings, "0 findings");
     assert_eq!(model.view, "capabilities");
     assert_eq!(model.phase, None);
-    assert_eq!(model.cost, Some("$0.00 (no model calls)".to_string()));
+    assert_eq!(model.cost, Some("$0.00".to_string()));
     assert_eq!(
         model.compact_segments(),
         [
@@ -26,7 +26,7 @@ fn context_strip_model_reports_idle_shell_state() {
             "target:none",
             "model:unconfigured",
             "context not built",
-            "cost:$0.00 (no model calls)"
+            "cost:$0.00"
         ]
     );
 }

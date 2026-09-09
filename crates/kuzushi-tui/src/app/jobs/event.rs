@@ -44,7 +44,8 @@ impl ShellEvent {
     pub(crate) fn is_run_lifecycle(&self) -> bool {
         matches!(
             self,
-            Self::RunItem(_)
+            Self::Agent(AgentEvent::ResponseText(_))
+                | Self::RunItem(_)
                 | Self::RunItemsDurable { .. }
                 | Self::RunItemsDerivativesApplied { .. }
                 | Self::RunItemsFault { .. }
@@ -63,7 +64,8 @@ impl ShellEvent {
 
     pub(crate) fn kind(&self) -> JobKind {
         match self {
-            Self::RunItem(_)
+            Self::Agent(AgentEvent::ResponseText(_))
+            | Self::RunItem(_)
             | Self::RunItemsDurable { .. }
             | Self::RunItemsDerivativesApplied { .. }
             | Self::RunItemsFault { .. }
@@ -81,7 +83,8 @@ impl ShellEvent {
 
     pub(crate) fn is_terminal(&self) -> bool {
         match self {
-            Self::RunItem(_)
+            Self::Agent(AgentEvent::ResponseText(_))
+            | Self::RunItem(_)
             | Self::RunItemsDurable { .. }
             | Self::RunItemsDerivativesApplied { .. }
             | Self::RunItemsFault { .. }
@@ -137,5 +140,6 @@ fn disconnected_job_audit() -> AgentCallAudit {
         cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
         call_attempted: true,
         tool_policy_receipt: None,
+        failure: None,
     }
 }

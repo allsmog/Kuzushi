@@ -4,6 +4,9 @@ use crate::app::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod map_config;
+pub use map_config::MapRunConfigRouteState;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupRowId {
     Target,
@@ -58,94 +61,11 @@ impl MapRunConfigRowId {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MapRunConfigRouteState {
-    cursor: usize,
-    edit: Option<MapRunConfigRowId>,
-    draft: String,
-    error: Option<String>,
-    reviewed_all_scope_key: Option<String>,
-}
-
-impl MapRunConfigRouteState {
-    pub(crate) fn open(&mut self) {
-        self.edit = None;
-        self.draft.clear();
-        self.error = None;
-        self.cursor = self
-            .cursor
-            .min(MapRunConfigRowId::ALL.len().saturating_sub(1));
-    }
-
-    pub(crate) fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    pub(crate) fn row(&self) -> MapRunConfigRowId {
-        MapRunConfigRowId::ALL[self.cursor.min(MapRunConfigRowId::ALL.len() - 1)]
-    }
-
-    pub(crate) fn move_cursor(&mut self, delta: isize) {
-        self.cursor = wrapped_cursor(self.cursor, delta, MapRunConfigRowId::ALL.len());
-        self.error = None;
-    }
-
-    pub(crate) fn begin_edit(&mut self, row: MapRunConfigRowId, draft: String) {
-        self.edit = Some(row);
-        self.draft = draft;
-        self.error = None;
-    }
-
-    pub(crate) fn finish_edit(&mut self) {
-        self.edit = None;
-        self.draft.clear();
-        self.error = None;
-    }
-
-    pub(crate) fn edit(&self) -> Option<MapRunConfigRowId> {
-        self.edit
-    }
-
-    pub(crate) fn draft(&self) -> &str {
-        &self.draft
-    }
-
-    pub(crate) fn push_char(&mut self, ch: char) {
-        self.draft.push(ch);
-        self.error = None;
-    }
-
-    pub(crate) fn pop_char(&mut self) {
-        self.draft.pop();
-        self.error = None;
-    }
-
-    pub(crate) fn error(&self) -> Option<&str> {
-        self.error.as_deref()
-    }
-
-    pub(crate) fn set_error(&mut self, error: impl Into<String>) {
-        self.error = Some(error.into());
-    }
-
-    pub(crate) fn clear_error(&mut self) {
-        self.error = None;
-    }
-
-    pub(crate) fn all_scopes_reviewed(&self, key: &str) -> bool {
-        self.reviewed_all_scope_key.as_deref() == Some(key)
-    }
-
-    pub(crate) fn set_all_scopes_reviewed(&mut self, key: Option<String>) {
-        self.reviewed_all_scope_key = key;
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SetupRouteState {
     cursor: usize,
     focus: PickerFocus,
     editor: Option<SetupEditor>,
-    budget_draft: String,
+    budget_draft: crate::app::FieldEditor,
     budget_error: Option<String>,
     map_run_config: MapRunConfigRouteState,
 }
@@ -154,7 +74,7 @@ impl SetupRouteState {
     pub(crate) fn open(&mut self) {
         self.focus = PickerFocus::List;
         self.editor = None;
-        self.budget_draft.clear();
+        self.budget_draft = crate::app::FieldEditor::default();
         self.budget_error = None;
         self.cursor = self.cursor.min(SetupRowId::ALL.len().saturating_sub(1));
     }
@@ -199,12 +119,17 @@ impl SetupRouteState {
 
     pub(crate) fn begin_budget_edit(&mut self, current: Option<f64>) {
         self.begin_editor(SetupEditor::Budget);
-        self.budget_draft = current
-            .map(|value| format!("{value:.2}"))
-            .unwrap_or_default();
+        self.focus = PickerFocus::List;
+        self.budget_draft = crate::app::FieldEditor::new(
+            current.map(|value| value.to_string()).unwrap_or_default(),
+        );
     }
 
     pub(crate) fn budget_draft(&self) -> &str {
+        self.budget_draft.text()
+    }
+
+    pub(crate) fn budget_field(&self) -> &crate::app::FieldEditor {
         &self.budget_draft
     }
 
@@ -216,18 +141,16 @@ impl SetupRouteState {
         &mut self.map_run_config
     }
 
-    pub(crate) fn push_budget_char(&mut self, ch: char) {
-        self.budget_draft.push(ch);
-        self.budget_error = None;
+    pub(crate) fn edit_budget_key(&mut self, key: crossterm::event::KeyEvent) {
+        let previous = self.budget_draft.text().to_string();
+        self.budget_draft.handle_key(key);
+        if self.budget_draft.text() != previous {
+            self.budget_error = None;
+        }
     }
 
-    pub(crate) fn pop_budget_char(&mut self) {
-        self.budget_draft.pop();
-        self.budget_error = None;
-    }
-
-    pub(crate) fn clear_budget_draft(&mut self) {
-        self.budget_draft.clear();
+    pub(crate) fn insert_budget_text(&mut self, text: &str) {
+        self.budget_draft.insert(text);
         self.budget_error = None;
     }
 
@@ -242,22 +165,48 @@ impl SetupRouteState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelPickerRouteState {
-    cursor: usize,
+    selected_id: Option<String>,
     focus: PickerFocus,
+    config_origin: Option<ConfigModelPickerOrigin>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigModelPickerOrigin {
+    pub(crate) input_mode: crate::app::InputMode,
+    pub(crate) scroll: u16,
+    pub(crate) navigation: super::NavigationRouteState,
 }
 
 impl ModelPickerRouteState {
-    pub(crate) fn open(&mut self, cursor: usize, len: usize) {
-        self.cursor = cursor.min(len.saturating_sub(1));
+    pub(crate) fn open(&mut self, selected_id: Option<&str>) {
+        self.selected_id = selected_id.map(str::to_string);
         self.focus = PickerFocus::List;
+        self.config_origin = None;
     }
 
-    pub(crate) fn cursor(&self) -> usize {
-        self.cursor
+    pub(crate) fn config_origin(&self) -> Option<&ConfigModelPickerOrigin> {
+        self.config_origin.as_ref()
     }
 
-    pub(crate) fn move_cursor(&mut self, delta: isize, len: usize) {
-        self.cursor = wrapped_cursor(self.cursor, delta, len);
+    pub(crate) fn set_config_origin(&mut self, origin: Option<ConfigModelPickerOrigin>) {
+        self.config_origin = origin;
+    }
+
+    pub(crate) fn take_config_origin(&mut self) -> Option<ConfigModelPickerOrigin> {
+        self.config_origin.take()
+    }
+
+    pub(crate) fn selected_id(&self) -> Option<&str> {
+        self.selected_id.as_deref()
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize, ids: &[&str]) {
+        let current = ids
+            .iter()
+            .position(|id| Some(*id) == self.selected_id())
+            .unwrap_or(0);
+        let next = wrapped_cursor(current, delta, ids.len());
+        self.selected_id = ids.get(next).map(|id| id.to_string());
     }
 
     pub(crate) fn focus(&self) -> PickerFocus {
@@ -856,11 +805,19 @@ impl PlanningPickerRouteState {
     }
 
     pub(crate) fn set_option_error(&mut self, error: impl Into<String>) {
+        self.reset_option_error_scroll();
         self.option_error = Some(error.into());
     }
 
     pub(crate) fn clear_option_error(&mut self) {
+        self.reset_option_error_scroll();
         self.option_error = None;
+    }
+
+    fn reset_option_error_scroll(&mut self) {
+        if let Some(edit) = self.option_edit.as_mut() {
+            edit.error_scroll = 0;
+        }
     }
 
     #[cfg(test)]

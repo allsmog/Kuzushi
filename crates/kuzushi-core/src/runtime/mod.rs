@@ -25,9 +25,9 @@ pub use domain::{
     AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy,
     AgentToolPolicyAuthorization, AgentToolPolicyReceipt, LoopHistoryEntry, McpAttachment,
-    ModelTier, ModelTokenUsage, Observed, RuntimeCost, RuntimeCostReport, RuntimeFailure,
-    RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
-    ToolResult, TriageRequest, DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE,
+    ModelTier, ModelTokenUsage, Observed, PromptCacheUsage, RuntimeCost, RuntimeCostReport,
+    RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall,
+    ToolCallHandler, ToolResult, TriageRequest, DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE,
     READ_ONLY_ASK_POLICY_ID, READ_ONLY_ASK_POLICY_PROTOCOL_VERSION, READ_ONLY_ASK_TOOLS,
     REQUEST_USER_INPUT_TOOL_NAME,
 };
@@ -42,8 +42,8 @@ pub use policy::{
     PublicAuthProvider, TieBreakEscalation, TieBreakRefusal,
 };
 pub use traced_runtime::{
-    model_error_class_from_message, model_provider, prompt_pair_hash, safe_model_failure_message,
-    TracedRuntime,
+    model_error_class_from_message, model_failure_metadata, model_provider, prompt_pair_hash,
+    safe_model_failure_message, TracedRuntime,
 };
 
 pub fn missing_agent_runtime_message(tool_name: &str) -> String {

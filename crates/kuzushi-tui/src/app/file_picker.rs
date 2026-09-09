@@ -14,6 +14,17 @@ const FILE_PICKER_PAGE_STEP: usize = 10;
 
 impl ShellApp {
     pub(crate) fn open_file_picker(&mut self) {
+        self.open_file_picker_for(FilePickerPurpose::KnowledgeBase);
+    }
+
+    pub(crate) fn open_map_document_picker(&mut self) {
+        let Some(_) = self.router.setup().map_run_config().text() else {
+            return;
+        };
+        self.open_file_picker_for(FilePickerPurpose::MapDocument);
+    }
+
+    fn open_file_picker_for(&mut self, purpose: FilePickerPurpose) {
         let workspace = match self.current_workspace() {
             Ok(workspace) => workspace,
             Err(error) => {
@@ -27,6 +38,7 @@ impl ShellApp {
         let origin = self.shell_view();
         self.router.navigation_mut().push_overlay_origin(origin);
         self.router.file_picker_mut().open(index.values, truncated);
+        self.router.file_picker_mut().set_purpose(purpose);
         self.set_shell_view(ShellView::FilePicker);
         self.log_file_picker_open(workspace.root(), truncation_hint);
     }
@@ -39,7 +51,7 @@ impl ShellApp {
         self.log(
             "files",
             format!(
-                "{} attachable file(s) under {}{suffix}",
+                "{} file(s) under {}{suffix}",
                 route.files().len(),
                 root.display()
             ),
@@ -47,12 +59,9 @@ impl ShellApp {
     }
 
     pub(crate) fn handle_file_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let query_empty = self.router.file_picker().query().is_empty();
         match key.code {
             KeyCode::Up => self.router.file_picker_mut().move_cursor(-1),
             KeyCode::Down => self.router.file_picker_mut().move_cursor(1),
-            KeyCode::Char('k') if query_empty => self.router.file_picker_mut().move_cursor(-1),
-            KeyCode::Char('j') if query_empty => self.router.file_picker_mut().move_cursor(1),
             KeyCode::PageUp => self
                 .router
                 .file_picker_mut()
@@ -61,13 +70,9 @@ impl ShellApp {
                 .router
                 .file_picker_mut()
                 .move_cursor(FILE_PICKER_PAGE_STEP as isize),
-            KeyCode::Backspace => self.router.file_picker_mut().pop_query(),
-            KeyCode::Delete => self.router.file_picker_mut().clear_query(),
             KeyCode::Enter => return self.accept_file_picker_selection(),
             KeyCode::Esc => self.close_file_picker(),
-            KeyCode::Char('q') if query_empty => self.close_file_picker(),
-            KeyCode::Char(ch) if !ch.is_control() => self.router.file_picker_mut().push_query(ch),
-            _ => return InputUpdate::ignored(),
+            _ => self.router.file_picker_mut().edit_query(key),
         }
         InputUpdate::handled()
     }
@@ -108,7 +113,28 @@ impl ShellApp {
             self.log("files", "no file matches the current filter");
             return InputUpdate::handled();
         };
+        if self.router.file_picker().purpose() == FilePickerPurpose::MapDocument {
+            return self.accept_map_document_selection(source);
+        }
         InputUpdate::handled_with_effects(vec![attachment_effect(source)])
+    }
+
+    fn accept_map_document_selection(&mut self, source: String) -> InputUpdate {
+        self.go_back();
+        if let Some(list) = self.router.setup_mut().map_run_config_mut().text_mut() {
+            if list.field.is_none() {
+                list.add();
+            }
+            list.field = Some(FieldEditor::new(source));
+        }
+        let result = self.commit_map_text_edit();
+        if let Err(error) = result {
+            self.router
+                .setup_mut()
+                .map_run_config_mut()
+                .set_error(error.to_string());
+        }
+        InputUpdate::handled()
     }
 
     fn close_file_picker(&mut self) {

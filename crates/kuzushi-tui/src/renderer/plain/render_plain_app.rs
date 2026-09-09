@@ -50,6 +50,7 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         } => plain_line_based_view_lines(app, width, include_context_strip),
     };
 
+    lines.extend(crate::renderer::answer_plain_lines(app, width));
     lines = prepend_plain_activity_lines(app, width, include_run_projection, lines);
 
     lines = finalize_width_safe_plain_lines(lines, width);

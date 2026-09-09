@@ -4,52 +4,47 @@ mod tests {
 
     #[test]
     fn preferred_model_choice_state_respects_configured_then_oauth_openai_anthropic() {
+        let selected = |model, oauth, key, anthropic| {
+            MODEL_CHOICES[preferred_model_choice_index_for_state(model, oauth, key, anthropic)].id
+        };
         assert_eq!(
-            preferred_model_choice_index_for_state(
-                Some("anthropic:claude-opus-4-7"),
-                true,
-                true,
-                true
-            ),
-            5
+            selected(Some("anthropic:claude-opus-4-7"), true, true, true),
+            "anthropic:claude-opus-4-7"
         );
         assert_eq!(
-            preferred_model_choice_index_for_state(None, true, true, true),
-            2
+            selected(None, true, true, true),
+            "openai-codex:gpt-5.6-terra"
+        );
+        assert_eq!(selected(None, false, true, true), "openai:gpt-5.5");
+        assert_eq!(
+            selected(None, false, false, true),
+            "anthropic:claude-sonnet-4-6"
         );
         assert_eq!(
-            preferred_model_choice_index_for_state(None, false, true, true),
-            0
-        );
-        assert_eq!(
-            preferred_model_choice_index_for_state(None, false, false, true),
-            4
-        );
-        assert_eq!(
-            preferred_model_choice_index_for_state(Some("unknown:model"), false, false, false),
-            0
+            selected(Some("unknown:model"), false, false, false),
+            "openai:gpt-5.5"
         );
     }
 
     #[test]
     fn onboarding_cursor_selects_the_same_stable_model_identity_it_highlights() {
-        for configured in [
-            "openai:gpt-5.5",
-            "openai:gpt-5.5-mini",
-            "openai-codex:gpt-5.4",
-            "openai-codex:gpt-5.3-codex-spark",
-            "anthropic:claude-sonnet-4-6",
-            "anthropic:claude-opus-4-7",
-        ] {
+        for configured in MODEL_CHOICES
+            .iter()
+            .filter(|choice| choice.catalog_note.is_none())
+            .map(|choice| choice.id)
+        {
             let mut config = V2Config::default();
             config.model = Some(configured.to_string());
             let visible = visible_model_choices(&config);
-            let cursor = preferred_visible_model_choice_cursor(&config);
+            let mut app = ShellApp::new(config, None);
+            app.open_model_picker();
+            let cursor = model_picker_cursor(&app);
             assert_eq!(
                 visible.get(cursor).map(|choice| choice.id),
                 Some(configured),
                 "visible picker cursor drifted for {configured}"
             );
+            assert_eq!(app.router.model_picker().selected_id(), Some(configured));
         }
     }
 
@@ -66,18 +61,25 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
 
         assert_eq!(ids.first().copied(), Some(configured));
-        assert_eq!(ids.len(), MODEL_CHOICES.len());
-        assert_eq!(unique.len(), MODEL_CHOICES.len());
-        assert!(MODEL_CHOICES.iter().all(|choice| ids.contains(&choice.id)));
+        let suggested = MODEL_CHOICES
+            .iter()
+            .filter(|choice| choice.catalog_note.is_none())
+            .collect::<Vec<_>>();
+        assert_eq!(ids.len(), suggested.len());
+        assert_eq!(unique.len(), suggested.len());
+        assert!(suggested.iter().all(|choice| ids.contains(&choice.id)));
     }
 
     #[test]
-    fn codex_oauth_selectors_expose_gpt_5_4_and_spark_without_legacy_provider_aliases() {
+    fn codex_oauth_selectors_preserve_legacy_ids_and_offer_gpt_5_5() {
         assert!(normalize_auth_provider("codex").is_err());
         assert!(normalize_auth_provider("openai-codex").is_err());
         assert!(resolve_model_selector("codex:gpt-5.5").is_none());
         assert!(resolve_model_selector("codex-mini").is_none());
-        assert!(resolve_model_selector("openai-codex:gpt-5.5").is_none());
+        assert_eq!(
+            resolve_model_selector("openai-codex:gpt-5.5").map(|choice| choice.index),
+            Some(12)
+        );
         assert_eq!(
             resolve_model_selector("openai-oauth:gpt-5.4").map(|choice| choice.index),
             Some(3)

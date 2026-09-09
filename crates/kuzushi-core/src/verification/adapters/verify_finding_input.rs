@@ -147,9 +147,7 @@ by finding the mitigation, guard, validator, type constraint, privilege gate, or
 barrier that makes it unexploitable.
 
 Set exploitable=true only when you have traced attacker-controlled input to the sink with no \
-blocking control in between. Set exploitable=false when evidence is incomplete, when attacker \
-control is not established, when the path is unreachable, or when a cited guard defeats the \
-claim.";
+blocking control in between. Set exploitable=false only when cited evidence establishes that the path is unreachable or a guard defeats the claim. Set exploitable=null and proofVerdict=insufficient_finding_detail when evidence or attacker control is incomplete. Missing caller context is not evidence that a claim is false.";
 
 const VERIFY_INDEPENDENCE_RULES: &str = "Do not inherit confidence from discovery or triage. Do not rely on prior rationale. Inspect the \
 claim and cited code independently.
@@ -179,7 +177,7 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
         "additionalProperties": true,
         "properties": {
             "fingerprint": {"type": "string"},
-            "exploitable": {"type": "boolean"},
+            "exploitable": {"type": ["boolean", "null"], "description": "true for a supported path, false for a claim defeated by cited evidence, null when evidence is incomplete or the language is unsupported"},
             "pocPayload": {"type": ["string", "null"]},
             "poc_payload": {"type": ["string", "null"]},
             "pocDescription": {"type": "string"},
@@ -200,9 +198,10 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
                     "exploited",
                     "not_reproduced",
                     "insufficient_finding_detail",
-                    "language_unsupported_yet"
+                    "language_unsupported_yet",
+                    "inconclusive"
                 ],
-                "description": "Verdict of this review: `exploited` when the traced path stands with no blocking control, `not_reproduced` when the claim is defeated or unsupported, `insufficient_finding_detail` when the finding lacks the detail needed to judge it."
+                "description": "Verdict of this review: `exploited` when the traced path stands with no blocking control, `not_reproduced` only when cited evidence defeats the claim, `insufficient_finding_detail` when the finding lacks the detail needed to judge it (exploitable=null); language_unsupported_yet also requires exploitable=null."
             }
         }
     })

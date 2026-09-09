@@ -13,6 +13,7 @@ pub(crate) fn inspect_source_file(
         return Ok(());
     }
     let text = String::from_utf8_lossy(&bytes);
+    let text = crate::workspace::rust_test_source::surface_source(&source_file.language, &text);
     let framework = framework_for_source(&source_file.language, &text);
 
     inspect_file_level_surfaces(

@@ -40,16 +40,66 @@ fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
     if let Some(text) = captured_overlay_prompt(app.shell_view()) {
         return Some(disabled_prompt_line(text));
     }
-    if app.input_mode() == crate::InputMode::Navigate {
-        return Some(navigation_prompt_line(app));
+    if let Some(text) = captured_field_prompt(app) {
+        return Some(disabled_prompt_line(text));
     }
-    if matches!(app.shell_view(), crate::ShellView::FilePicker) {
-        return Some(disabled_prompt_line(
-            "file picker active — type to filter · Enter attach · Esc close",
-        ));
+    if app.is_picker_view() {
+        return (!app.picker_prompt_focused()).then(|| {
+            disabled_prompt_line("type a command · ↑/↓ moves the picker · Enter selects")
+        });
     }
-    (app.is_picker_view() && !app.picker_prompt_focused())
-        .then(|| disabled_prompt_line("type a command · ↑/↓ moves the picker · Enter selects"))
+    (app.input_mode() == crate::InputMode::Navigate).then(|| navigation_prompt_line(app))
+}
+
+#[cfg(test)]
+mod tests;
+
+fn captured_field_prompt(app: &ShellApp) -> Option<&'static str> {
+    if app.shell_view() == crate::ShellView::Report && app.router.report().editing_path() {
+        return Some("editing destination · Enter saves · Esc cancels");
+    }
+    if app.budget_editor_open() {
+        return Some("editing budget · Enter saves · Esc cancels");
+    }
+    if app.batch_number_editor_open() {
+        return Some("editing number · Enter saves · Esc cancels");
+    }
+    if app.batch_config_open() {
+        return Some("↑/↓ choose a setting · Enter edits · L review/launch · Esc back");
+    }
+    if app.shell_view() == crate::ShellView::FilePicker {
+        return Some("type to filter · ↑/↓ select · Enter choose · Esc back");
+    }
+    captured_map_prompt(app)
+}
+
+fn captured_map_prompt(app: &ShellApp) -> Option<&'static str> {
+    if app.planning_option_editor_open() {
+        return Some("editing option · Shift+Enter new line");
+    }
+    if app.shell_view() != crate::ShellView::Setup
+        || app.router.setup().editor() != Some(crate::app::SetupEditor::ThreatModel)
+    {
+        return None;
+    }
+    if app.map_scope_picker_open() {
+        return Some("type to filter scopes · ↑/↓ select · Enter choose · Esc cancels");
+    }
+    let Some(list) = app.router.setup().map_run_config().text() else {
+        return Some("↑/↓ choose a setting · Enter edits · Esc returns to Setup");
+    };
+    map_field_prompt(
+        list.field.is_some(),
+        list.row == crate::app::MapRunConfigRowId::DesignDocs,
+    )
+}
+
+fn map_field_prompt(editing: bool, document: bool) -> Option<&'static str> {
+    match (editing, document) {
+        (true, true) => Some("editing document · Enter saves · Ctrl+O choose a file · Esc cancels"),
+        (true, false) => Some("editing context · Enter new line · Ctrl+S saves · Esc cancels"),
+        (false, _) => Some("↑/↓ choose an entry · Enter edits · a adds · Esc back"),
+    }
 }
 
 fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::Style {
@@ -64,6 +114,9 @@ fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::St
 }
 
 fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
+    if app.shell_view() == crate::ShellView::Report {
+        return disabled_prompt_line("e edits path · Enter exports · Esc returns");
+    }
     let Some(page) = crate::ui_view_models::workbench_prompt_mode(app) else {
         return disabled_prompt_line("NAVIGATION MODE — view keys active · Esc returns to prompt");
     };

@@ -2,9 +2,7 @@ use super::{
     append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptDisposition,
     PhaseAttemptDispositionRecorded, RecoveredPhaseAttemptLedger,
 };
-use crate::run_lifecycle::{
-    RunAttemptId, RunId, RunItemEnvelopeV1, RunItemId, SafeText,
-};
+use crate::run_lifecycle::{RunAttemptId, RunId, RunItemEnvelopeV1, RunItemId, SafeText};
 use crate::WorkflowPhase;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -22,6 +20,8 @@ const MAX_EVENT_BYTES: usize = 64 * 1024;
 mod failure_remediation;
 mod identity;
 mod legacy_projection;
+#[cfg(test)]
+mod phase_result_tests;
 mod receipt;
 mod receipt_builder;
 mod resolution;
@@ -133,6 +133,7 @@ pub fn append_phase_attempt_completed_with_v2_receipt(
     mut completed: PhaseAttemptCompleted,
 ) -> Result<PhaseAttemptAppendV2> {
     let target = target.as_ref();
+    super::phase_result_policy::ensure_phase_result_refs(target, &completed.run_refs)?;
     let attempt_id = RunAttemptId::parse(&completed.attempt_id)
         .context("typed phase attempt ID must be a UUID minted before launch")?;
     let referenced = referenced_run_state(target, &completed.run_refs);
@@ -161,11 +162,20 @@ pub fn append_phase_attempt_disposition_v2_if_present(
     let Ok(attempt_id) = RunAttemptId::parse(&disposition.attempt_id) else {
         return Ok(None);
     };
-    if !load_phase_attempt_ledger_v2(target.as_ref())?
-        .attempts
-        .contains_key(&attempt_id)
-    {
+    let ledger = load_phase_attempt_ledger_v2(target.as_ref())?;
+    let Some(completed) = ledger.attempts.get(&attempt_id) else {
         return Ok(None);
+    };
+    if matches!(
+        disposition.disposition,
+        PhaseAttemptDisposition::Selected { .. }
+    ) {
+        let run_refs = completed
+            .run_refs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        super::phase_result_policy::ensure_phase_result_refs(target.as_ref(), &run_refs)?;
     }
     append_v2_event(
         target.as_ref(),
@@ -189,7 +199,7 @@ pub fn load_phase_attempt_ledger_v2(target: impl AsRef<Path>) -> Result<PhaseAtt
     Ok(reduce_v2_lines(BufReader::new(file)))
 }
 
-pub fn load_phase_attempt_ledger_prefer_v2_recovering(
+fn load_phase_attempt_history_recovering(
     target: impl AsRef<Path>,
 ) -> Result<RecoveredPhaseAttemptLedger> {
     let target = target.as_ref();
@@ -211,5 +221,15 @@ pub fn load_phase_attempt_ledger_prefer_v2_recovering(
     if !failures.is_empty() {
         recovered.degraded_reason = Some(failures.join("; "));
     }
+    Ok(recovered)
+}
+
+/// Project eligible phase results while retaining the complete persisted history.
+pub fn load_phase_attempt_ledger_prefer_v2_recovering(
+    target: impl AsRef<Path>,
+) -> Result<RecoveredPhaseAttemptLedger> {
+    let target = target.as_ref();
+    let mut recovered = load_phase_attempt_history_recovering(target)?;
+    super::phase_result_policy::exclude_non_phase_results(target, &mut recovered.ledger);
     Ok(recovered)
 }

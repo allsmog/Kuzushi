@@ -4,6 +4,8 @@ use kuzushi_core::ProofConfidence;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Line, Span};
 
+mod compact;
+
 const REVIEW_FULL_SIGNAL_MIN_WIDTH: usize = 96;
 const REVIEW_FULL_METADATA_MIN_WIDTH: usize = 96;
 
@@ -33,6 +35,9 @@ fn review_queue_empty_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'
 }
 
 fn populated_review_queue_pane_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
+    if inner.width < 72 && inner.height != u16::MAX {
+        return compact::lines(model, inner);
+    }
     let width = inner.width as usize;
     let mut lines = review_queue_chrome_lines(model, inner);
     let viewport = review_queue_viewport(model, inner, lines.len());
@@ -98,17 +103,19 @@ fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
         append_or_wrap(&mut lines, &format!("[{chip}]"), width);
     }
     if let Some(indicator) = model.ordering_indicator {
-        let indicator = if width < 48 {
-            "order: proof > severity"
-        } else {
-            indicator
-        };
-        lines.push(format!("[{indicator}]"));
+        lines.push(format!("[{}]", ordering_label(indicator, width)));
     }
     if model.operator_calibration.is_available() {
         lines.push(model.operator_calibration.label(width < 72));
     }
     lines
+}
+
+fn ordering_label(indicator: &str, width: usize) -> &str {
+    if width < 48 && indicator != crate::ui_view_models::LEARN_ORDERING_INDICATOR {
+        return "order: proof > severity";
+    }
+    indicator
 }
 
 fn append_or_wrap(lines: &mut Vec<String>, value: &str, width: usize) {
@@ -498,6 +505,8 @@ mod tests {
     use super::*;
     use crate::ui_view_models::ReviewWorkflowGroup;
 
+    mod compact_reading;
+
     fn review_row() -> ReviewQueueRow {
         ReviewQueueRow {
             alias: "F-0001".to_string(),
@@ -653,15 +662,15 @@ mod tests {
     }
 
     #[test]
-    fn compact_queue_externalizes_metadata_codes() {
+    fn compact_queue_names_evidence_and_source_count() {
         let text = lines_text(populated_review_queue_pane_lines(
             &review_model(vec![review_row()]),
             Rect::new(0, 0, 60, 6),
         ));
 
-        assert!(text.contains("s# count"), "{text}");
-        assert!(text.contains("@H human"), "{text}");
-        assert!(text.contains("@A auto"), "{text}");
+        assert!(text.contains("sources:2"), "{text}");
+        assert!(text.contains("runtime verified"), "{text}");
+        assert!(text.contains("@?"), "{text}");
     }
 
     #[test]
@@ -726,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_viewport_keeps_moved_selection_details_and_action_visible() {
+    fn compact_viewport_keeps_moved_identity_title_and_location_visible() {
         for selected_index in [3, 7] {
             let rows = (0..8)
                 .map(|index| {
@@ -746,8 +755,7 @@ mod tests {
             assert!(text.contains(&format!("▸{alias}")), "{text}");
             assert!(text.contains("request reaches sink"), "{text}");
             assert!(text.contains("example.rs:42"), "{text}");
-            assert!(text.contains("▸ next:validate"), "{text}");
-            assert!(text.contains("Enter open"), "{text}");
+            assert!(text.contains("sources:2"), "{text}");
             assert!(text.lines().count() <= 6, "{text}");
         }
     }
@@ -810,7 +818,7 @@ mod tests {
             Rect::new(0, 0, 48, 6),
         ));
 
-        assert!(text.contains("Esc nav, then Enter open"), "{text}");
+        assert!(!text.contains("Enter"), "{text}");
     }
 
     #[test]

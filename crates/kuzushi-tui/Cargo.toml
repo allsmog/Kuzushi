@@ -13,12 +13,14 @@ anyhow.workspace = true
 crossterm.workspace = true
 kuzushi-core = { path = "../kuzushi-core" }
 kuzushi-openai = { path = "../kuzushi-openai" }
-ratatui.workspace = true
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 serde_json.workspace = true
 serde.workspace = true
 shlex.workspace = true
 uuid.workspace = true
 unicode-width.workspace = true
+unicode-segmentation.workspace = true
+pulldown-cmark.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }

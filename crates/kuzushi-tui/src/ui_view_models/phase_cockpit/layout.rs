@@ -42,6 +42,7 @@ pub(crate) enum PhaseSurfaceId {
     ProveReceipt,
     ProveNextAction,
     ProveInvestigation,
+    ProveResult,
     ProveTrace,
     FixRemediation,
     FixCandidate,
@@ -72,6 +73,7 @@ impl PhaseSurfaceId {
             | Self::ProveReceipt
             | Self::ProveNextAction
             | Self::ProveInvestigation
+            | Self::ProveResult
             | Self::ProveTrace => WorkbenchPage::Prove,
             Self::FixRemediation
             | Self::FixCandidate
@@ -101,6 +103,7 @@ impl PhaseSurfaceId {
             Self::ProveReceipt => "Verification Receipt",
             Self::ProveNextAction => "Next Action",
             Self::ProveInvestigation => "Investigation Plan",
+            Self::ProveResult => "Prove Result",
             Self::ProveTrace => "Trace",
             Self::FixRemediation => "Remediation",
             Self::FixCandidate => "Patch Candidate",
@@ -175,14 +178,15 @@ pub(crate) fn phase_presentation_plan(
     let specs = phase_surface_specs(body);
     let primary = specs[0].id;
     let (density, visible) = visible_specs(&specs, area, zoomed, attention);
-    let planned_area = if density == LayoutDensity::Guided {
-        Rect {
-            height: area.height.min(5),
-            ..area
-        }
-    } else {
-        area
-    };
+    let planned_area =
+        if density == LayoutDensity::Guided && prove_reading_composition(body).is_none() {
+            Rect {
+                height: area.height.min(5),
+                ..area
+            }
+        } else {
+            area
+        };
     let composition = screen_composition(body, density, &visible);
     let surfaces = composition
         .solve(planned_area)
@@ -209,7 +213,9 @@ fn screen_composition(
     visible: &[&PhaseSurfaceSpec],
 ) -> Composition {
     let columns = || Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
-    if let Some(composition) = ready_map_composition(body, density) {
+    if let Some(composition) =
+        prove_reading_composition(body).or_else(|| ready_map_composition(body, density))
+    {
         return composition;
     }
     if let Some(composition) = sparse_map_status_composition(body, density, visible) {
@@ -219,6 +225,24 @@ fn screen_composition(
         return columns();
     }
     rich_phase_composition(body, visible.len()).unwrap_or_else(columns)
+}
+
+fn prove_reading_composition(body: &PhaseCockpitBody) -> Option<Composition> {
+    let PhaseCockpitBody::Prove(model) = body else {
+        return None;
+    };
+    if model.pending_result.is_some() {
+        return Some(Composition::FullScreen(PhaseSurfaceId::ProveResult));
+    }
+    if model.investigation.is_some() {
+        return Some(Composition::CenteredForm(
+            PhaseSurfaceId::ProveInvestigation,
+        ));
+    }
+    model
+        .trace
+        .as_ref()
+        .map(|_| Composition::FullScreen(PhaseSurfaceId::ProveTrace))
 }
 
 /// A completed Map is one coherent gallery at every terminal size. Letting
@@ -275,14 +299,6 @@ fn prove_composition(body: &PhaseCockpitBody) -> Option<Composition> {
     let PhaseCockpitBody::Prove(model) = body else {
         return None;
     };
-    if model.trace.is_some() {
-        return Some(Composition::FullScreen(PhaseSurfaceId::ProveTrace));
-    }
-    if model.investigation.is_some() {
-        return Some(Composition::CenteredForm(
-            PhaseSurfaceId::ProveInvestigation,
-        ));
-    }
     model.finding.is_some().then_some(Composition::FocusDetail {
         body: PhaseSurfaceId::ProveStatus,
         action_menu: Some(PhaseSurfaceId::ProveNextAction),

@@ -111,10 +111,11 @@ pub struct TaintStage {
 
 /// One finding's operator-requested trace expansion. Steps hydrate from the
 /// durable static-evidence store (or the `trace:expand` result on
-/// completion); open questions and evidence deltas are session-scoped
-/// advisory copy from the last expansion run.
+/// completion); the last canonical result supplies questions, evidence notes
+/// and its completion receipt, including a zero-step outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceExpansionSnapshot {
+    pub last_outcome: Option<String>,
     pub finding_fingerprint: String,
     pub steps: Vec<TraceExpansionStep>,
     pub open_questions: Vec<String>,

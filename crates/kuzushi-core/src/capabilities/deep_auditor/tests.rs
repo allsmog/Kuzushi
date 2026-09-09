@@ -148,7 +148,7 @@ mod tests {
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
-        assert!(analysis.triggerable);
+        assert_eq!(analysis.triggerable, Some(true));
         assert!((analysis.confidence - 0.85).abs() < 1e-6);
         assert_eq!(analysis.evidence.len(), 1);
         let triage = build_triage_outcome(&analysis, &outcome);
@@ -167,7 +167,7 @@ mod tests {
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
-        assert!(!analysis.triggerable);
+        assert_eq!(analysis.triggerable, Some(false));
         assert!((analysis.confidence - 0.9).abs() < 1e-6);
         let triage = build_triage_outcome(&analysis, &outcome);
         assert_eq!(triage.verdict, TriageVerdict::FalsePositive);
@@ -185,7 +185,7 @@ mod tests {
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
-        assert!(!analysis.triggerable);
+        assert_eq!(analysis.triggerable, None);
         assert!(analysis.confidence < 0.5);
         assert!(
             analysis.rationale.contains("synthesized fallback"),
@@ -442,7 +442,10 @@ mod tests {
             target_dir: None,
         })
         .unwrap();
-        (RoutedRuntime::new(runtime, Arc::new(loaded), None), scripted)
+        (
+            RoutedRuntime::new(runtime, Arc::new(loaded), None),
+            scripted,
+        )
     }
 
     fn split_panel_config(workspace: &std::path::Path) -> DeepAuditConfig {
@@ -493,7 +496,11 @@ mod tests {
         std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
         // 2 split passes + 1 escalation pass that returns a true positive.
         let (runtime, scripted) = routed_runtime_with_escalation(
-            vec![verdict_final(true), verdict_final(false), verdict_final(true)],
+            vec![
+                verdict_final(true),
+                verdict_final(false),
+                verdict_final(true),
+            ],
             Some("openai:escalation-model"),
         );
 
@@ -528,7 +535,11 @@ mod tests {
         // The escalation pass itself is inconclusive — the verdict must stay
         // NeedsReview, never a manufactured TP/FP.
         let (runtime, _scripted) = routed_runtime_with_escalation(
-            vec![verdict_final(true), verdict_final(false), needs_review_final()],
+            vec![
+                verdict_final(true),
+                verdict_final(false),
+                needs_review_final(),
+            ],
             Some("openai:escalation-model"),
         );
 

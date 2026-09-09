@@ -172,8 +172,12 @@ pub(crate) fn inspect_source_file(
     text: &str,
     builder: &mut InventoryBuilder,
 ) {
-    inspect_entrypoints(relative, language, text, builder);
-    inspect_source_frameworks(relative, language, text, builder);
-    inspect_routes(relative, language, text, builder);
+    let text = crate::workspace::rust_test_source::surface_source(language, text);
+    if text.trim().is_empty() {
+        return;
+    }
+    inspect_entrypoints(relative, language, &text, builder);
+    inspect_source_frameworks(relative, language, &text, builder);
+    inspect_routes(relative, language, &text, builder);
     inspect_controller_path(relative, builder);
 }

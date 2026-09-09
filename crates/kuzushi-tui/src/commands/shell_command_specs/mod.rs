@@ -223,6 +223,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "setup" | "onboarding" | "planning" => Some(ShellCommand::Onboarding),
         "next" | "continue" => Some(ShellCommand::Next),
         "logs" | "log" | "transcript" => Some(ShellCommand::Logs),
+        "answers" | "chat" => Some(ShellCommand::Answers),
         "background" | "bg" => Some(ShellCommand::Background),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
         "scene" | "viz" => Some(ShellCommand::Scene),

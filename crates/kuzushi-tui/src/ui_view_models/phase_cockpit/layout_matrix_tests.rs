@@ -428,6 +428,7 @@ fn trace_view_composes_full_screen_over_the_prove_page() {
         panic!("prove fixture body");
     };
     model.trace = Some(crate::ui_view_models::TraceEvidenceModel {
+        last_outcome: None,
         reference: "F-1".to_string(),
         severity: "HIGH".to_string(),
         identity: None,
@@ -464,15 +465,7 @@ fn investigation_card_composes_a_centered_form_over_the_prove_page() {
     let PhaseCockpitBody::Prove(model) = &mut body else {
         panic!("prove fixture body");
     };
-    model.investigation = Some(InvestigationPlanModel {
-        reference: "F-7".to_string(),
-        severity: "HIGH".to_string(),
-        why: "evidence message-only".to_string(),
-        evidence_goals: vec!["Recover structured evidence anchors".to_string()],
-        empirical: false,
-        model_ladder: vec!["gate: not set (rejection only)".to_string()],
-        command: "run verify:finding {}".to_string(),
-    });
+    model.investigation = Some(investigation_layout_fixture());
     let wide = Rect::new(0, 0, 160, 48);
 
     let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
@@ -492,12 +485,49 @@ fn investigation_card_composes_a_centered_form_over_the_prove_page() {
     );
     assert_eq!(focused.effective_focus, PhaseSurfaceId::ProveInvestigation);
 
+    assert_compact_investigation(&body);
+
     let PhaseCockpitBody::Prove(model) = &mut body else {
         panic!("prove fixture body");
     };
     model.investigation = None;
     let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
     assert!(matches!(plan.composition, Composition::FocusDetail { .. }));
+}
+
+fn investigation_layout_fixture() -> InvestigationPlanModel {
+    InvestigationPlanModel {
+        reference: "F-7".to_string(),
+        severity: "HIGH".to_string(),
+        why: "evidence message-only".to_string(),
+        evidence_goals: vec!["Recover structured evidence anchors".to_string()],
+        empirical: false,
+        local_readiness: None,
+        model_ladder: vec!["gate: not set (rejection only)".to_string()],
+        command: "run verify:finding {}".to_string(),
+    }
+}
+
+fn assert_compact_investigation(body: &PhaseCockpitBody) {
+    for area in [Rect::new(0, 0, 40, 4), Rect::new(0, 0, 80, 12)] {
+        let compact = phase_presentation_plan(
+            body,
+            area,
+            Some(PhaseSurfaceId::ProveInvestigation),
+            None,
+            AttentionMode::Normal,
+        );
+        assert_eq!(compact.effective_focus, PhaseSurfaceId::ProveInvestigation);
+        assert_eq!(compact.surfaces.len(), 1);
+        assert_eq!(
+            compact.surfaces[0].interaction,
+            SurfaceInteraction::Scrollable
+        );
+        assert!(matches!(
+            compact.composition,
+            Composition::CenteredForm(PhaseSurfaceId::ProveInvestigation)
+        ));
+    }
 }
 
 /// terminals shed the strip first, then degrade to the center column.

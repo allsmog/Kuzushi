@@ -74,6 +74,9 @@ impl ShellApp {
         if self.guided_scan_question_is_open() && !guided_question_yields_to_control_c(key) {
             return Some(self.reduce_guided_scan_key(key));
         }
+        if let Some(update) = self.handle_answer_key(key) {
+            return Some(update);
+        }
         if let Some(update) = self.handle_autonomy_key(key, modifiers) {
             return Some(update);
         }
@@ -230,6 +233,9 @@ impl ShellApp {
     /// with an unresolved attempt — advertised keys must work where
     /// advertised.
     pub(crate) fn phase_result_target_phase(&self) -> Option<WorkflowPhase> {
+        if self.prove_detail_owns_controls() {
+            return None;
+        }
         let page_phase = crate::ui_view_models::active_workbench_page(self).phase();
         if self
             .engagement
@@ -307,16 +313,10 @@ impl ShellApp {
         use kuzushi_core::workflow_attempts::{
             PhaseAttemptDisposition, PhaseAttemptDispositionRecorded, PhaseAttemptOutcome,
         };
-        let Some(phase) = self.phase_result_target_phase() else {
+        let Some((phase, record)) = self.current_phase_result_selection() else {
             return InputUpdate::handled();
         };
-        let Some(record) = self.engagement.unresolved_phase_attempt(phase).cloned() else {
-            return InputUpdate::handled();
-        };
-        if !self.materialize_phase_result_reality(phase, &record) {
-            return InputUpdate::handled();
-        }
-        let Some(selected_fix_patch) = self.phase_result_selection_patch(phase, &record) else {
+        let Some(selected_fix_patch) = self.prepare_phase_result_selection(phase, &record) else {
             return InputUpdate::handled();
         };
         let acknowledged_partial = record.completed.outcome == PhaseAttemptOutcome::Partial;
@@ -331,6 +331,42 @@ impl ShellApp {
         }
         self.finish_phase_result_selection(phase, &record, selected_fix_patch, continue_after);
         InputUpdate::handled()
+    }
+
+    fn current_phase_result_selection(
+        &mut self,
+    ) -> Option<(
+        WorkflowPhase,
+        kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+    )> {
+        let phase = self.phase_result_target_phase()?;
+        let attempt_id = self
+            .engagement
+            .unresolved_phase_attempt(phase)?
+            .completed
+            .attempt_id
+            .clone();
+        self.refresh_phase_attempt_projection();
+        let record = self
+            .engagement
+            .unresolved_phase_attempt_by_id(phase, &attempt_id)?
+            .clone();
+        if let Some(reason) = self.effective_phase_attempt_blocker(&record.completed) {
+            self.refuse_phase_result_action(reason);
+            return None;
+        }
+        Some((phase, record))
+    }
+
+    fn prepare_phase_result_selection(
+        &mut self,
+        phase: WorkflowPhase,
+        record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+    ) -> Option<Option<crate::PendingPatch>> {
+        if !self.materialize_phase_result_reality(phase, record) {
+            return None;
+        }
+        self.phase_result_selection_patch(phase, record)
     }
 
     /// A refused result-card action leaves the card exactly as it was, so a
@@ -1333,45 +1369,6 @@ impl ShellApp {
             .handled
     }
 
-    fn handle_report_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if !matches!(self.shell_view(), ShellView::Report) {
-            return InputUpdate::ignored();
-        }
-        if self.router.report().editing_path() {
-            return self.handle_report_path_edit_key(key);
-        }
-        self.handle_report_escape_key(key)
-    }
-
-    fn handle_report_escape_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if self.input_mode() == InputMode::Navigate && key.code == KeyCode::Esc {
-            self.close_report_to_origin();
-            return InputUpdate::handled();
-        }
-        InputUpdate::ignored()
-    }
-
-    fn handle_report_path_edit_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
-            return InputUpdate::handled();
-        }
-        self.apply_report_path_edit_key(key.code);
-        InputUpdate::handled()
-    }
-
-    fn apply_report_path_edit_key(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Esc | KeyCode::Enter => {
-                self.router.report_mut().set_editing_path(false);
-            }
-            KeyCode::Backspace => {
-                self.router.report_mut().path_draft_mut().pop();
-            }
-            KeyCode::Char(ch) => self.router.report_mut().path_draft_mut().push(ch),
-            _ => {}
-        }
-    }
-
     fn handle_run_focus_steer_editor_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !self.run_focus_steer_editor_is_open() {
             return InputUpdate::ignored();
@@ -1523,6 +1520,9 @@ impl ShellApp {
         if update.handled {
             return update;
         }
+        if let Some(update) = self.handle_batch_config_key(key) {
+            return update;
+        }
         self.handle_picker_key(key)
     }
 
@@ -1568,13 +1568,32 @@ impl ShellApp {
             return InputUpdate::handled_with_effects(vec![ShellEffect::Quit]);
         }
         if quit_choice_matches(key, 'n', 'N') || HotkeyTrigger::Esc.matches(key) {
+            self.router.set_quit_confirm_scroll(0);
             self.go_back();
             return InputUpdate::handled();
         }
         if key.modifiers.is_empty() {
+            self.scroll_quit_disclosures(key.code);
             return InputUpdate::handled();
         }
         InputUpdate::ignored()
+    }
+
+    fn scroll_quit_disclosures(&mut self, code: KeyCode) {
+        let viewport = crate::renderer::quit_disclosure_viewport(self);
+        let offset = viewport.offset;
+        let page = viewport.page_size.max(1);
+        let next = match code {
+            KeyCode::Up => offset.saturating_sub(1),
+            KeyCode::Down => offset.saturating_add(1),
+            KeyCode::PageUp => offset.saturating_sub(page),
+            KeyCode::PageDown => offset.saturating_add(page),
+            KeyCode::Home => 0,
+            KeyCode::End => viewport.max_offset,
+            _ => return,
+        };
+        self.router
+            .set_quit_confirm_scroll(next.min(viewport.max_offset));
     }
 
     /// The end-of-engagement retry gate: `y`/Enter retries the failed tasks
@@ -1595,18 +1614,27 @@ impl ShellApp {
         }
     }
 
-    /// Esc dismisses a visible notice banner. Returns false when no notice is
-    /// present so Esc falls through to view-back / draft-restore as usual.
+    /// Completion notices clear without taking Escape away from the active
+    /// reader or editor. Alerts retain their explicit dismissal action.
     fn handle_notice_dismiss_key(&mut self, key: KeyEvent) -> bool {
-        if self.phase_result_is_open()
-            || self.advisory().notice.is_none()
-            || key.code != KeyCode::Esc
-            || !key.modifiers.is_empty()
-        {
+        if key.code != KeyCode::Esc || !key.modifiers.is_empty() {
             return false;
         }
+        let captures_escape = self.notice_captures_escape();
         self.clear_notice();
-        true
+        captures_escape
+    }
+
+    pub(crate) fn notice_captures_escape(&self) -> bool {
+        if self.phase_result_is_open() {
+            return false;
+        }
+        self.advisory().notice.as_ref().is_some_and(|notice| {
+            matches!(
+                notice.severity,
+                crate::NoticeSeverity::Error | crate::NoticeSeverity::Warn
+            )
+        })
     }
 
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -1745,10 +1773,34 @@ impl ShellApp {
         action.apply(self)
     }
 
+    pub(crate) fn prove_detail_owns_controls(&self) -> bool {
+        self.shell_view() == ShellView::Workbench
+            && crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Prove
+            && self.router.workbench().prove_detail_is_open()
+    }
+
+    fn dismiss_prove_detail(&mut self) -> bool {
+        if !self.prove_detail_owns_controls() {
+            return false;
+        }
+        if self.input_mode() == InputMode::Prompt && self.esc_clear_input_or_completion() {
+            return true;
+        }
+        self.router.workbench_mut().close_prove_detail();
+        true
+    }
+
     fn handle_input_mode_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
         if !modifiers.no_modifiers || key.code != KeyCode::Esc {
             return false;
         }
+        if self.dismiss_prove_detail() {
+            return true;
+        }
+        self.toggle_composer_input_mode()
+    }
+
+    fn toggle_composer_input_mode(&mut self) -> bool {
         // Esc toggles the composer mode: with a draft or completion popup the
         // line editor consumes Esc first (clear/restore), so Navigate entry
         // only fires on an empty prompt.
@@ -2121,6 +2173,9 @@ fn quit_choice_matches(key: KeyEvent, lowercase: char, uppercase: char) -> bool 
 }
 
 #[cfg(test)]
+mod notice_keys_tests;
+
+#[cfg(test)]
 mod phase_result_tests;
 
 #[cfg(test)]
@@ -2249,6 +2304,7 @@ mod tests {
         lifecycle_run_id: &str,
     ) -> FixResultFixture {
         let target = tempfile::tempdir().unwrap();
+        seed_fix_source_identity(target.path());
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
         let finding = seed_fix_result_findings(&store, workspace.root());
@@ -2256,6 +2312,44 @@ mod tests {
         write_completed_fix_run_summary(&workspace, attempt_run_id, attempt_tool);
         let attempt_id = append_fix_result_attempt(&workspace, attempt_run_id);
         FixResultFixture { target, attempt_id }
+    }
+
+    fn seed_fix_source_identity(target: &std::path::Path) {
+        std::fs::write(target.join("input.rs"), "fn fixture() {}\n").unwrap();
+        run_fix_fixture_git(target, &["init", "--quiet"]);
+        kuzushi_core::WorkspaceTarget::new(target).unwrap();
+        for args in [
+            vec!["add", "."],
+            vec![
+                "-c",
+                "user.name=Kuzushi Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture",
+            ],
+        ] {
+            run_fix_fixture_git(target, &args);
+        }
+    }
+
+    fn run_fix_fixture_git(target: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(target)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     fn seed_fix_result_findings(
@@ -2776,7 +2870,9 @@ mod tests {
                 PhaseResultAction::Select,
                 PhaseResultAction::Open,
                 PhaseResultAction::RunAgain,
-            ]
+            ],
+            "{}",
+            card.recommended
         );
         assert!(card.control_hint.contains("u Acknowledge verified"));
         assert!(!card.control_hint.contains("Select patch"));
@@ -3410,8 +3506,17 @@ mod tests {
             .expect("visible error");
         assert_eq!(notice.severity, crate::NoticeSeverity::Error);
         assert_eq!(notice.source, "workbench");
-        assert!(notice.message.contains("Prove selection blocked:"));
-        assert!(notice.message.contains("result digest does not match"));
+        assert!(
+            notice.message.contains("phase result ledger is degraded"),
+            "{}",
+            notice.message
+        );
+        assert!(fixture.app.log_lines().iter().any(|line| {
+            line.prefix == "workflow"
+                && line
+                    .body
+                    .contains("typed phase receipt validation is degraded:")
+        }));
         assert!(fixture
             .app
             .engagement

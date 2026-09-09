@@ -131,16 +131,41 @@ From a source checkout:
 ```bash
 pnpm setup
 pnpm dev -- --help
-pnpm build:native
 node bin/kuzushi-rs.mjs --help
 ```
 
-The published `kuzushi` command resolves `native/<platform>-<arch>/kuzushi`.
+Both source entry points check the Cargo build before launching the CLI and
+its companion MCP servers. They use the executable paths reported by Cargo,
+including a configured target directory, and preserve the caller's working
+directory. A failed build stops the launch.
+
+To make your installed `kuzushi` and `kz` commands use this checkout:
+
+```bash
+pnpm link:local
+kuzushi --version
+pnpm link:local:restore  # restore the saved previous installation
+```
+
+Linking saves the complete previous global package beside it as
+`.kuzushi.before-local`. The linked commands check the source build on launch.
+Restore refuses to overwrite an installation that has since replaced that link.
+
+The published `kuzushi` command resolves the platform's optional native package,
+with `native/<platform>-<arch>/kuzushi` retained for staged distributions.
 The `kz` command is an argv0 alias over that same binary, so the package does
 not duplicate it. Each platform directory also contains the sibling
 `kuzushi-mcp-*` servers advertised by the CLI, and the wrapper places that
 private runtime directory first on the child `PATH`. Set `KUZUSHI_NATIVE_BIN`
 to point the wrapper at a specific CLI binary.
+
+When deliberately testing a staged release from a source checkout, select it
+explicitly so the source build does not replace the artifact under test:
+
+```bash
+pnpm build:native
+KUZUSHI_NATIVE_BIN="$PWD/native/$(node -p 'process.platform + "-" + process.arch')/kuzushi" node bin/kuzushi-rs.mjs --version
+```
 
 The npm installation is the complete product distribution: it installs the
 Node bridge dependencies and ships the LangGraph and trusted dynamic-module

@@ -1,11 +1,12 @@
 use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
+use super::geometry::{activity_geometry, ActivityGeometry};
 use super::*;
 use crate::ui_view_models::{
-    activity_view_model, ActivityFooterHint, ActivityHeartbeatTone, ActivityPaneLayout,
-    ActivityPaneTitle, ActivityViewModel, RunFocusModel,
+    activity_view_model, ActivityFooterHint, ActivityHeartbeatTone, ActivityPaneTitle,
+    ActivityViewModel, RunFocusModel,
 };
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::Modifier;
 use ratatui::widgets::{Paragraph, Wrap};
@@ -52,96 +53,50 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
 
 fn render_active_activity_view(frame: &mut Frame<'_>, area: Rect, activity: &RunFocusModel<'_>) {
     let now = Instant::now();
-    let (heartbeat, heartbeat_rows) = activity.heartbeat_rows(area.width, now);
-    let heartbeat_row_count = heartbeat_rows.len();
-    let header_lines = activity_header_lines(activity, area.width, heartbeat, heartbeat_rows);
-    let footer_lines = focus_footer_lines(area.width, activity);
-    let geometry = activity.frame_layout(area.width, heartbeat_row_count);
-    debug_assert_eq!(header_lines.len(), usize::from(geometry.header_rows));
-    debug_assert_eq!(footer_lines.len(), usize::from(geometry.footer_rows));
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(geometry.header_rows),
-            Constraint::Min(0),
-            Constraint::Length(geometry.footer_rows),
-        ])
-        .split(area);
+    let (header_lines, footer_lines) = activity_chrome_lines(activity, area, now);
+    let geometry = activity_geometry(activity, area, now);
+    render_header(frame, geometry.header, header_lines);
+    render_activity_panes(frame, &geometry, activity, now);
+    render_focus_footer(frame, geometry.footer, footer_lines);
+}
 
-    render_header(frame, outer[0], header_lines);
-    render_activity_panes(frame, outer[1], activity, now);
-    render_focus_footer(frame, outer[2], footer_lines);
+fn activity_chrome_lines(
+    activity: &RunFocusModel<'_>,
+    area: Rect,
+    now: Instant,
+) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    if let Some(chrome) = activity.compact_chrome(area.width, area.height) {
+        let header = chrome
+            .header
+            .into_iter()
+            .map(|row| Line::from(Span::styled(row, theme::heading())))
+            .collect();
+        let footer = chrome
+            .footer
+            .into_iter()
+            .map(|row| Line::from(Span::styled(row, theme::muted())))
+            .collect();
+        return (header, footer);
+    }
+    let (heartbeat, heartbeat_rows) = activity.heartbeat_rows(area.width, now);
+    (
+        activity_header_lines(activity, area.width, heartbeat, heartbeat_rows),
+        focus_footer_lines(area.width, activity),
+    )
 }
 
 fn render_activity_panes(
     frame: &mut Frame<'_>,
-    area: Rect,
+    geometry: &ActivityGeometry,
     activity: &RunFocusModel<'_>,
     now: Instant,
 ) {
-    let pane_chrome = activity.pane_chrome();
-    if activity.collapse_dag_pane() {
-        render_feed_pane_widget(frame, area, activity, &pane_chrome.feed);
-        return;
+    let chrome = activity.pane_chrome();
+    if let Some(area) = geometry.tasks {
+        let lines = dag_pane_lines(activity, inner_width(area), now);
+        render_dag_pane_widget(frame, area, activity, &chrome.dag, lines);
     }
-    match activity.pane_layout(area.width, area.height, now) {
-        ActivityPaneLayout::Focused => {
-            render_focused_activity_pane(frame, area, activity, &pane_chrome, now)
-        }
-        ActivityPaneLayout::Stacked { task_height } => {
-            render_stacked_activity_panes(frame, area, activity, &pane_chrome, task_height, now)
-        }
-        ActivityPaneLayout::SideBySide { task_width } => {
-            render_side_by_side_activity_panes(frame, area, activity, &pane_chrome, task_width, now)
-        }
-    }
-}
-
-fn render_stacked_activity_panes(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    activity: &RunFocusModel<'_>,
-    pane_chrome: &crate::ui_view_models::ActivityPaneChromeModel,
-    task_height: u16,
-    now: Instant,
-) {
-    let panes = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(task_height), Constraint::Min(3)])
-        .split(area);
-    let task_lines = dag_pane_lines(activity, inner_width(panes[0]), now);
-    render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag, task_lines);
-    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
-}
-
-fn render_side_by_side_activity_panes(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    activity: &RunFocusModel<'_>,
-    pane_chrome: &crate::ui_view_models::ActivityPaneChromeModel,
-    task_width: u16,
-    now: Instant,
-) {
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(task_width), Constraint::Min(48)])
-        .split(area);
-    let task_lines = dag_pane_lines(activity, inner_width(panes[0]), now);
-    render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag, task_lines);
-    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
-}
-
-fn render_focused_activity_pane(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    activity: &RunFocusModel<'_>,
-    chrome: &crate::ui_view_models::ActivityPaneChromeModel,
-    now: Instant,
-) {
-    if chrome.dag.focused {
-        let task_lines = dag_pane_lines(activity, inner_width(area), now);
-        render_dag_pane_widget(frame, area, activity, &chrome.dag, task_lines);
-    } else {
+    if let Some(area) = geometry.output {
         render_feed_pane_widget(frame, area, activity, &chrome.feed);
     }
 }

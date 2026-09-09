@@ -20,8 +20,9 @@ pub(crate) fn run_gap_fill(
     verb: &str,
     gaps: &[CoverageGap],
     document: &mut Value,
+    code_evidence: &CodeEvidence,
 ) -> Result<GapFillOutcome> {
-    let prompt = gap_fill_prompt(input, gaps, document);
+    let prompt = code_evidence.append_to(gap_fill_prompt(input, gaps, document));
     let costed = query_gap_fill(runtime, ctx, input, verb, gaps.len(), prompt)?;
     let outcome = merge_gap_fill(
         document,

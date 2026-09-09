@@ -3,6 +3,7 @@ pub(in crate::renderer) use super::*;
 
 pub(in crate::renderer) use catalog::*;
 pub(in crate::renderer) use cinematic::*;
+pub(in crate::renderer) use field_editor::*;
 pub(in crate::renderer) use findings::*;
 pub(in crate::renderer) use lines::*;
 pub(in crate::renderer) use options::*;
@@ -16,8 +17,10 @@ pub(in crate::renderer) use text::*;
 pub(in crate::renderer) use threat_model::*;
 mod catalog;
 mod cinematic;
+mod field_editor;
 mod findings;
 mod lines;
+pub(crate) mod markdown;
 mod options;
 mod pane_chrome;
 mod progress;

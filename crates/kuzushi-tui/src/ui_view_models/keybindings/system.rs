@@ -16,6 +16,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::UpdateAvailable => Some(update_available_keybindings()),
         ShellView::Interruption => Some(interruption_keybindings(app)),
         ShellView::Tools => Some(tools_keybindings(app)),
+        ShellView::Config => Some(config_keybindings(app)),
         ShellView::Scene => Some(scene_keybindings(app)),
         ShellView::SastTasks => Some(sast_tasks_keybindings(app)),
         // First-run pickers own input — surface their controls in the footer
@@ -23,28 +24,35 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::PlanningPicker => Some(planning_picker_keybindings(app)),
         ShellView::Setup => Some(setup_keybindings(app)),
         ShellView::Report => Some(report_keybindings(app)),
-        ShellView::FilePicker => Some(file_picker_keybindings()),
+        ShellView::FilePicker => Some(file_picker_keybindings(app)),
         ShellView::TargetPicker => Some(choice_picker_keybindings(app)),
         _ => None,
     }
 }
 
+fn config_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = vec![bind("Enter", "choose model")];
+    push_view_keybindings(&mut bindings, app);
+    bindings
+}
+
 fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if app.router.report().editing_path() {
         return vec![
-            bind("type", "destination"),
-            bind("Backspace", "delete"),
-            bind("Enter", "save"),
             bind("Esc", "cancel"),
+            bind("Enter/Ctrl+S", "save path"),
+            bind("←/→", "cursor"),
+            bind("Delete/⌫", "delete"),
         ];
     }
     vec![
+        bind("Esc/q", "return"),
+        bind("Enter", "export/retry"),
+        bind("PgUp/PgDn", "read"),
         bind("j/k", "format"),
         bind("c", "completeness"),
         bind("e", "edit path"),
-        bind("Enter", "export/retry"),
         bind("o", "reveal"),
-        bind("Esc/q", "return"),
     ]
 }
 
@@ -77,8 +85,10 @@ fn setup_value_editor_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding
     (app.router.setup().editor() == Some(crate::app::SetupEditor::Budget)).then(|| {
         vec![
             bind("type", "budget USD"),
-            bind("Backspace", "delete"),
-            bind("Delete", "unset"),
+            bind("←/→", "cursor"),
+            bind("Home/End", "ends"),
+            bind("Delete", "delete ahead"),
+            bind("Ctrl+U", "clear to start"),
             bind("Enter", "save"),
             bind("Esc", "cancel"),
         ]
@@ -86,11 +96,29 @@ fn setup_value_editor_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding
 }
 
 fn map_run_config_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if app.router.setup().map_run_config().edit().is_some() {
+    if app.map_scope_picker_open() {
         return vec![
-            bind("type", "comma-separated values"),
-            bind("Backspace", "delete"),
-            bind("Enter", "save"),
+            bind("type", "filter scopes"),
+            bind("↑/↓", "scope"),
+            bind("Enter", "select"),
+            bind("Esc", "cancel"),
+        ];
+    }
+    if let Some(list) = app.router.setup().map_run_config().text() {
+        if list.field.is_none() {
+            return vec![
+                bind("↑/↓", "entry"),
+                bind("Enter", "edit"),
+                bind("a", "add"),
+                bind("Delete", "remove"),
+                bind("Esc", "back"),
+            ];
+        }
+        let document = list.row == crate::app::MapRunConfigRowId::DesignDocs;
+        return vec![
+            bind("←/→/Home/End", "cursor"),
+            bind("Enter", if document { "save" } else { "new line" }),
+            bind("Ctrl+S", "save"),
             bind("Esc", "cancel"),
         ];
     }
@@ -113,9 +141,12 @@ fn permission_policy_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if app.engagement.planning_picker().option_edit().is_some() {
         return vec![
-            bind("type", "edit value"),
-            bind("Backspace", "delete"),
-            bind("Enter", "save"),
+            bind("←/→ ↑/↓", "cursor"),
+            bind("Delete", "delete ahead"),
+            bind("Ctrl+U", "clear to start"),
+            bind("Shift+Enter", "new line"),
+            bind("Enter/Ctrl+S", "save"),
+            bind("PgUp/PgDn", "error details"),
             bind("Esc", "cancel"),
         ];
     }
@@ -218,8 +249,16 @@ fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("demo", "offline"),
         bind("type", "command"),
         bind("Enter", "select"),
-        bind("Esc", "skip"),
+        bind("Esc", choice_picker_escape_hint(app)),
     ]
+}
+
+fn choice_picker_escape_hint(app: &ShellApp) -> &'static str {
+    if app.router.setup().editor() == Some(crate::app::SetupEditor::Model) {
+        "keep current"
+    } else {
+        "skip"
+    }
 }
 
 fn choice_picker_prompt_focused(app: &ShellApp) -> bool {
@@ -246,11 +285,12 @@ fn picker_prompt_keybindings() -> Vec<FooterKeybinding> {
     ]
 }
 
-fn file_picker_keybindings() -> Vec<FooterKeybinding> {
+fn file_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let document = app.router.file_picker().purpose() == crate::app::FilePickerPurpose::MapDocument;
     vec![
         bind("type", "filter"),
-        bind("j/k", "move"),
-        bind("Enter", "attach"),
+        bind("↑/↓", "move"),
+        bind("Enter", if document { "choose" } else { "attach" }),
         bind("Esc", "close"),
     ]
 }

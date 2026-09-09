@@ -9,18 +9,15 @@ pub fn confirm_gate_for_tool(
     allowlist: &std::collections::BTreeSet<String>,
 ) -> Option<PendingConfirm> {
     destructive_verb_confirm(tool, input)
-        .or_else(|| delegated_sast_effect_confirm(tool, input))
+        .or_else(|| delegated_execution_confirm(tool, input))
         .or_else(|| network_egress_confirm(tool, input, allowlist))
         .or_else(|| pwn_candidate_confirm(tool, input, allowlist))
         .or_else(|| fs_write_confirm(tool, input, allowlist))
 }
 
-fn delegated_sast_effect_confirm(tool: &str, input: &serde_json::Value) -> Option<PendingConfirm> {
-    if tool != "sast:scan" {
-        return None;
-    }
-    let delegated_tools = kuzushi_core::modules::sast_scan_delegated_tools(input);
-    let rationale = delegated_sast_effect_rationale(&delegated_tools)?;
+fn delegated_execution_confirm(tool: &str, input: &serde_json::Value) -> Option<PendingConfirm> {
+    let delegated_tools = kuzushi_core::modules::delegated_execution_tools(tool, input);
+    let rationale = delegated_execution_rationale(&delegated_tools)?;
     Some(PendingConfirm {
         kind: ConfirmKind::DescriptorEffect,
         tool: tool.to_string(),
@@ -32,13 +29,13 @@ fn delegated_sast_effect_confirm(tool: &str, input: &serde_json::Value) -> Optio
     })
 }
 
-fn delegated_sast_effect_rationale(delegated_tools: &[&str]) -> Option<&'static str> {
+fn delegated_execution_rationale(delegated_tools: &[&str]) -> Option<&'static str> {
     match delegated_tools {
         ["verify:exploit", "patch:finding"] => Some(
             "pocExecution runs generated proof harnesses in an isolated sandbox; autoPatch delegates patch generation and build/test validation in an isolated copy",
         ),
         ["verify:exploit"] => {
-            Some("pocExecution runs generated proof harnesses in an isolated sandbox")
+            Some("runs generated proof harnesses in an isolated sandbox")
         }
         ["patch:finding"] => Some(
             "autoPatch delegates patch generation and build/test validation in an isolated copy",
@@ -223,4 +220,31 @@ pub(crate) fn is_destructive_verb(cmd: &str) -> bool {
     ]
     .into_iter()
     .any(|matched| matched)
+}
+
+#[cfg(test)]
+mod empirical_confirmation_tests {
+    use super::*;
+    #[test]
+    fn empirical_mode_requires_fresh_execution_confirmation() {
+        let allowlist = std::collections::BTreeSet::from([confirm_allowlist_key(
+            "verify:finding",
+            "verify:exploit",
+        )]);
+        let gate = confirm_gate_for_tool(
+            "verify:finding",
+            &serde_json::json!({"mode":"empirical"}),
+            &allowlist,
+        )
+        .unwrap();
+        assert_eq!(gate.kind, ConfirmKind::DescriptorEffect);
+        assert_eq!(gate.target, "verify:exploit");
+        assert!(gate.allowlist.is_none());
+        assert!(confirm_gate_for_tool(
+            "verify:finding",
+            &serde_json::json!({"mode":"model"}),
+            &allowlist
+        )
+        .is_none());
+    }
 }

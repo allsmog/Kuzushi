@@ -1,8 +1,11 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 const EMITTED_FINDING_GENERATIONS_SQL: &str = r#"
 with ranked as (
-    select finding_json,
+    select finding_json, created_seq,
            row_number() over (
                partition by cast(json_extract(finding_json, '$.id') as integer)
                order by created_seq desc
@@ -14,7 +17,7 @@ with ranked as (
 select finding_json
   from ranked
  where observation_rank = 1
- order by cast(json_extract(finding_json, '$.id') as integer)
+ order by created_seq asc
 "#;
 
 impl FindingStore {
@@ -24,14 +27,19 @@ impl FindingStore {
     /// through a durable identity. Safety audits need the unfurled rows so a
     /// broad identity cannot erase conflicting locations, rules, or symbols.
     pub fn list_emitted_finding_generations(&self) -> Result<Vec<Finding>> {
+        let mut findings = self.finding_generations_in_observation_order()?;
+        findings.sort_by(super::v3_finding_reads::finding_list_order);
+        Ok(findings)
+    }
+
+    pub(super) fn finding_generations_in_observation_order(&self) -> Result<Vec<Finding>> {
         let mut statement = self.conn.prepare(EMITTED_FINDING_GENERATIONS_SQL)?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-        let mut findings = rows
+        let findings = rows
             .collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter()
             .map(parse_finding_generation)
             .collect::<Result<Vec<_>>>()?;
-        findings.sort_by(super::v3_finding_reads::finding_list_order);
         self.hydrate_v3_findings(findings)
     }
 }

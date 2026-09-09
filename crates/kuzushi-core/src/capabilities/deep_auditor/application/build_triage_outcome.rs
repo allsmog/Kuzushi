@@ -4,24 +4,15 @@ pub(crate) fn build_triage_outcome(
     analysis: &VulnAnalysis,
     outcome: &AgentLoopOutcome,
 ) -> TriageOutcome {
-    // Symmetric thresholds: a confident "false positive" verdict (the model
-    // found an upstream guard) is just as valuable as a confident "true
-    // positive" verdict. The previous 0.7 false-positive threshold was an
-    // anti-bias hedge that systematically pushed evidence-backed
-    // false-positive calls to needs_review — particularly bad in the
-    // synthesis-fallback path, where confidence is intentionally capped.
-    let verdict = match (analysis.triggerable, analysis.confidence) {
-        (true, c) if c >= 0.5 => TriageVerdict::TruePositive,
-        (false, c) if c >= 0.5 => TriageVerdict::FalsePositive,
-        _ => TriageVerdict::NeedsReview,
-    };
+    let verdict = supported_verdict(analysis);
+    let rationale = assessment_rationale(analysis);
     let rationale = if outcome.truncated {
         format!(
             "[deep-auditor truncated at {} steps] {}",
-            outcome.steps_used, analysis.rationale
+            outcome.steps_used, rationale
         )
     } else {
-        analysis.rationale.clone()
+        rationale
     };
     TriageOutcome {
         verdict,
@@ -42,3 +33,40 @@ pub(crate) fn build_triage_outcome(
         cost_usd_exact: outcome.cost_usd_exact,
     }
 }
+
+fn supported_verdict(analysis: &VulnAnalysis) -> TriageVerdict {
+    if missing_refutation_call_path(analysis) {
+        return TriageVerdict::NeedsReview;
+    }
+    match (analysis.triggerable, analysis.confidence) {
+        (Some(true), c) if c >= 0.5 => TriageVerdict::TruePositive,
+        (Some(false), c) if c >= 0.5 => TriageVerdict::FalsePositive,
+        _ => TriageVerdict::NeedsReview,
+    }
+}
+
+fn missing_refutation_call_path(analysis: &VulnAnalysis) -> bool {
+    if analysis.triggerable != Some(false) {
+        return false;
+    }
+    if analysis.refute_reason != Some(crate::findings::RefuteReason::ImplausibleTrigger) {
+        return false;
+    }
+    analysis
+        .first_link
+        .as_deref()
+        .is_none_or(|link| link.trim().is_empty())
+}
+
+fn assessment_rationale(analysis: &VulnAnalysis) -> String {
+    if missing_refutation_call_path(analysis) {
+        return format!(
+            "[needs review: no inspected call path supports the implausible-trigger refutation] {}",
+            analysis.rationale
+        );
+    }
+    analysis.rationale.clone()
+}
+
+#[cfg(test)]
+mod tests;

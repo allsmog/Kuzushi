@@ -70,8 +70,8 @@ pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
             rows: config_model_rows(app),
         },
         commands: [
-            "Up/Down select",
-            "Enter choose",
+            "Up/Down scroll",
+            "Enter model picker",
             "model <n> [xhigh]",
             "auth login openai|anthropic",
         ],
@@ -512,8 +512,7 @@ fn cost_detail(app: &ShellApp) -> String {
 
 fn onboarding_detail(app: &ShellApp) -> Option<String> {
     app.config().model.is_none().then(|| {
-        "Up/Down selects a model; Enter activates it. OAuth availability is shown below."
-            .to_string()
+        "Open /model to choose a model. Enter in navigation mode opens the picker.".to_string()
     })
 }
 
@@ -522,7 +521,8 @@ fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
     let visible_indexes = crate::app::visible_model_choice_indexes(app.config());
     let configured_index = configured
         .as_deref()
-        .and_then(crate::app::model_choice_index_by_id);
+        .and_then(crate::app::model_choice_index_by_id)
+        .filter(|index| visible_indexes.contains(index));
     let mut rows = explicit_configured_model_row(app, configured.as_deref(), configured_index);
     rows.extend(visible_indexes.into_iter().filter_map(|index| {
         let choice = crate::app::model_choices().get(index)?;

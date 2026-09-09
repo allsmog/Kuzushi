@@ -20,6 +20,7 @@ pub(in crate::renderer) use config_lines::*;
 pub(in crate::renderer) use cost_lines::*;
 pub(in crate::renderer) use health_lines::*;
 pub(in crate::renderer) use interruption_lines::*;
+pub(crate) use overlay_lines::keymap_reader_scroll;
 pub(in crate::renderer) use overlay_lines::*;
 pub(in crate::renderer) use permission_policy_lines::*;
 pub(in crate::renderer) use tools_lines::*;
@@ -44,7 +45,8 @@ pub(crate) use health_lines::health_lines;
 pub(crate) use interruption_lines::interruption_lines;
 pub(crate) use overlay_lines::{
     boot_splash_lines, confirm_dialog_lines, keymap_lines, quit_confirm_lines,
-    render_system_overlay, theme_picker_lines, update_available_lines,
+    quit_disclosure_viewport, render_compact_quit, render_system_overlay, theme_picker_lines,
+    update_available_lines,
 };
 pub(crate) use permission_policy_lines::permission_policy_lines;
 pub(crate) use tools_lines::tools_lines;

@@ -11,6 +11,14 @@ pub(in crate::renderer::views) fn phase_header_lines(
 ) -> Vec<Line<'static>> {
     let mut lines = vec![identity_line(header, width)];
     lines.extend(context_header_lines(header, width));
+    if header.phase == kuzushi_core::WorkflowPhase::Prove
+        && header
+            .result_card
+            .as_ref()
+            .is_some_and(|card| card.has_result_actions())
+    {
+        return lines;
+    }
     let trailing = command_hint_lines(header, hints, width);
     let card_rows = height.saturating_sub(lines.len() + trailing.len() + 3);
     lines.extend(result_card_lines(

@@ -1,58 +1,17 @@
 pub(crate) use super::*;
-use kuzushi_core::capabilities::ThreatModelRef;
 use kuzushi_core::run_artifacts::FailureToLlmContext;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ThreadContextKey {
-    pub canonical_target: PathBuf,
-    pub target_revision: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub threat_model_ref: Option<ThreatModelRef>,
-    /// Exact digest named by the threat-model attachment captured for this
-    /// thread. Legacy mirrors have no truthful lineage ref, so this remains
-    /// populated even when `threat_model_ref` is absent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attached_model_sha256: Option<String>,
-    pub policy_version: String,
-}
-
-impl ThreadContextKey {
-    pub(crate) fn changed_dimensions(&self, next: &Self) -> Vec<&'static str> {
-        [
-            (
-                self.canonical_target != next.canonical_target,
-                "target changed",
-            ),
-            (
-                self.target_revision != next.target_revision,
-                "target revision changed",
-            ),
-            (
-                self.threat_model_ref != next.threat_model_ref
-                    || self.attached_model_sha256 != next.attached_model_sha256,
-                "threat model changed",
-            ),
-            (
-                self.policy_version != next.policy_version,
-                "Ask tool policy changed",
-            ),
-        ]
-        .into_iter()
-        .filter_map(|(changed, label)| changed.then_some(label))
-        .collect()
-    }
-}
+pub use kuzushi_core::session_transcript::{ChatTurn, ThreadContextKey};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentChatView {
     pub question: String,
     pub answer: Option<String>,
+    /// Unfinished public response text, excluded from model history.
+    pub partial_answer: String,
     pub running: bool,
     pub abort_requested: bool,
     pub error: Option<String>,
+    pub(crate) recovery_note: Option<String>,
     pub history: Vec<ChatTurn>,
     /// Run id used for `<target>/.kuzushi/v3/runs/<run_id>/items.jsonl`.
     pub run_id: Option<String>,
@@ -72,9 +31,11 @@ impl Default for AgentChatView {
         Self {
             question: String::new(),
             answer: None,
+            partial_answer: String::new(),
             running: false,
             abort_requested: false,
             error: None,
+            recovery_note: None,
             history: Vec::new(),
             run_id: None,
             started_secs: 0,
@@ -97,6 +58,7 @@ impl AgentChatView {
             history.push(ChatTurn {
                 question: self.question.clone(),
                 answer: self.answer.clone(),
+                partial_answer: self.partial_answer.clone(),
                 error: self.error.clone(),
             });
         }
@@ -107,9 +69,11 @@ impl AgentChatView {
         Self {
             question,
             answer: None,
+            partial_answer: String::new(),
             running: false,
             abort_requested: false,
             error: None,
+            recovery_note: None,
             history,
             run_id: None,
             started_secs: 0,
@@ -128,6 +92,7 @@ impl AgentChatView {
             turns.push(ChatTurn {
                 question: self.question.clone(),
                 answer: self.answer.clone(),
+                partial_answer: self.partial_answer.clone(),
                 error: self.error.clone(),
             });
         }
@@ -173,11 +138,4 @@ impl AgentChatView {
             || self.failure_context.is_some()
             || self.pending_failure_context.is_some()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChatTurn {
-    pub question: String,
-    pub answer: Option<String>,
-    pub error: Option<String>,
 }

@@ -1,4 +1,5 @@
 use super::*;
+mod prove_result_reading;
 use crate::ui_view_models::PhaseSurfaceId;
 
 fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
@@ -1572,28 +1573,34 @@ fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
     // otherwise the transcript would visually stay pinned while the generic
     // offset advances.
     let mut app = ShellApp::new(V2Config::default(), None);
+    for index in 0..50 {
+        app.log("error", format!("recorded row {index}"));
+    }
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
     app.set_shell_view(ShellView::Logs);
     app.set_input_mode(crate::InputMode::Navigate);
     app.router.default_scroll_mut().reset();
     app.router.logs_mut().open();
 
+    let page = crate::renderer::logs_reader_scroll(&app).unwrap().page_rows;
+
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
     );
-    assert_eq!(app.router.logs().scroll(), 10);
+    assert_eq!(app.router.logs().scroll(), page);
     assert_eq!(app.router.default_scroll().offset(), 0);
 
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
     );
-    assert_eq!(app.router.logs().scroll(), 11);
+    assert_eq!(app.router.logs().scroll(), page + 1);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
     );
-    assert_eq!(app.router.logs().scroll(), 12);
+    assert_eq!(app.router.logs().scroll(), page + 2);
 
     press_key(
         &mut app,
@@ -2494,6 +2501,10 @@ fn threat_regen_and_inline_ask_return_effects_without_spawning_workers() {
     config.model = Some("openai:gpt-5.5".to_string());
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(target.path().to_path_buf()));
+
+    // The reducer requires a session credential before it emits a dispatch.
+    // No effect is executed, so this fixture performs no provider request.
+    app.session_mut().mark_session_api_key_ready("openai");
 
     let regen_effects = app.reduce_threat_regen();
     let ask_effects = app.reduce_ask_agent(&AskRequest::threat_model(
@@ -7453,7 +7464,7 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
         false,
     );
     assert_eq!(prefix, "auth");
-    assert!(openai_success.contains("Next: model 3 (openai-oauth:gpt-5.4)"));
+    assert!(openai_success.contains("Next: model 7 (openai-oauth:gpt-5.6-terra)"));
     assert!(!openai_success.contains("openai-codex"));
     assert!(!openai_success.contains("codex"));
 
@@ -7854,41 +7865,22 @@ fn model_choice_with_focused_module_and_no_global_sets_global_first() {
 }
 
 #[test]
-fn config_view_onboards_with_keyboard_model_selection() {
+fn config_view_onboards_through_the_visible_model_picker() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.config_mut().model = None;
     app.set_shell_view(ShellView::Config);
     app.set_input_mode(crate::InputMode::Navigate);
-    // The Config view hides the non-primary OpenAI row (which varies with auth
-    // state), so navigation steps the *visible* set — derive expectations from
-    // it rather than hardcoding an index, and assert the Enter target is exactly
-    // the highlighted (visible) row, not a hidden one.
-    let visible = super::settings::visible_model_choice_indexes(app.config());
-    let choices = super::settings::model_choices();
-    app.router
-        .model_catalog_mut()
-        .set_selected_index(visible[0]);
-
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+    let opening = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(opening.effects.is_empty());
+    assert_eq!(app.config().model, None);
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Model));
+    let expected = app.router.model_picker().selected_id().unwrap().to_string();
+    let choosing = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.config().model.as_deref(), Some(expected.as_str()));
+    assert_eq!(app.shell_view(), ShellView::Config);
+    assert!(
+        matches!(choosing.effects.as_slice(), [ShellEffect::PersistGlobalModelSelection(selection)] if selection.model == expected)
     );
-    assert_eq!(
-        app.router.model_catalog().selected_index(),
-        visible[1 % visible.len()]
-    );
-
-    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
-    assert_eq!(app.router.model_catalog().selected_index(), visible[0]);
-
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
-    );
-    let expected = choices[visible[0]];
-    assert_eq!(app.config().model.as_deref(), Some(expected.id));
-    assert_eq!(app.session_thinking_level(), Some(expected.thinking_level));
-    assert!(app.log_lines().iter().any(|line| line.prefix == "model"
-        && line.body.contains("showing config; type `back` to return")));
 }
 
 #[test]
@@ -8470,14 +8462,17 @@ fn stored_openai_oauth_explicitly_switches_the_configured_api_model_without_logi
 
     assert!(auth_login_effect(&result.effects).is_none());
     let persist = global_model_persist_effect(&result.effects).expect("model persist effect");
-    assert_eq!(persist.model, "openai-codex:gpt-5.4");
-    assert_eq!(persist.thinking_level.as_deref(), Some("xhigh"));
-    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
-    assert_eq!(app.session_thinking_level(), Some("xhigh"));
+    assert_eq!(persist.model, "openai-codex:gpt-5.6-terra");
+    assert_eq!(persist.thinking_level.as_deref(), Some("medium"));
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("openai-codex:gpt-5.6-terra")
+    );
+    assert_eq!(app.session_thinking_level(), Some("medium"));
     assert_eq!(app.router.setup().editor(), None);
     let notice = app.advisory().notice.as_ref().expect("OAuth reuse notice");
     assert!(notice.message.contains("OAuth connection reused"));
-    assert!(notice.message.contains("openai-oauth:gpt-5.4"));
+    assert!(notice.message.contains("openai-oauth:gpt-5.6-terra"));
     assert!(!notice.message.contains("oauth-access-secret"));
     assert!(!notice.message.contains("oauth-refresh-secret"));
 }
@@ -8544,7 +8539,7 @@ fn missing_openai_oauth_carries_the_explicit_switch_through_the_existing_login_e
             .model_switch
             .as_ref()
             .map(|switch| switch.model.as_str()),
-        Some("openai-codex:gpt-5.4")
+        Some("openai-codex:gpt-5.6-terra")
     );
     assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
     assert_eq!(app.session_thinking_level(), Some("high"));
@@ -8601,7 +8596,10 @@ fn successful_picker_login_writes_and_reprobes_the_configured_oauth_store() {
         oauth_provider_status(app.config(), "openai-codex"),
         OauthCredentialStatus::Ready
     );
-    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("openai-codex:gpt-5.6-terra")
+    );
     assert!(global_model_persist_effect(&followup).is_some());
     assert_eq!(app.shell_view(), ShellView::Setup);
     assert!(std::env::var_os("KUZUSHI_OAUTH_CREDENTIALS").is_none());
@@ -8891,7 +8889,7 @@ fn model_picker_shows_openai_oauth_before_login() {
     assert!(
         choices
             .iter()
-            .any(|choice| choice.id == "openai-codex:gpt-5.4"),
+            .any(|choice| choice.id == "openai-codex:gpt-5.6-terra"),
         "OpenAI OAuth must be visible before credentials exist"
     );
 }
@@ -12554,7 +12552,7 @@ fn model_picker_enter_with_keyless_provider_returns_to_setup() {
         .iter()
         .position(|choice| choice.provider == "anthropic")
         .expect("an anthropic model is offered");
-    app.router.model_picker_mut().open(idx, choices.len());
+    app.router.model_picker_mut().open(Some(choices[idx].id));
 
     press_key(
         &mut app,
@@ -14655,7 +14653,13 @@ fn mouse_click_focuses_activity_panes() {
 fn run_focus_output_jkgg_drive_the_authoritative_feed_scroll() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Activity);
-    app.set_activity(Some(ActivitySession::new("run-scroll")));
+    let mut session = ActivitySession::new("run-scroll");
+    for index in 0..40 {
+        apply_activity_notice(&mut session, &format!("recorded output {index}"));
+    }
+    app.set_activity(Some(session));
+    app.router.activity_mut().verbose_subsystems = true;
+    app.set_viewport(TerminalViewport::new(40, 12));
     app.set_input_mode(crate::InputMode::Navigate);
 
     press_key(
@@ -14681,6 +14685,15 @@ fn run_focus_output_jkgg_drive_the_authoritative_feed_scroll() {
     );
     assert_eq!(app.router.activity().feed_scroll, usize::MAX);
     assert!(!app.router.activity().feed_auto_tail);
+
+    let top = crate::renderer::activity_output_scroll(&app)
+        .expect("output scroll bounds")
+        .max_offset;
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.activity().feed_scroll, top.saturating_sub(1));
 
     press_key(
         &mut app,
@@ -16731,15 +16744,19 @@ fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
     let target = temp.path().to_path_buf();
     let tree_hash = kuzushi_core::incremental_index::current_workspace_tree_hash(&target).unwrap();
     let original = serde_json::json!({
+        "version": "2.0",
         "methodology": "stride",
-        "threats": [{"id": "T-1", "title": "original"}],
+        "dfd": {
+            "nodes": [{"id": "app", "name": "Application"}],
+            "flows": [],
+            "trustBoundaries": []
+        },
+        "threats": [{"id": "T-1", "title": "original", "targetElementIds": ["app"]}],
+        "summary": {},
         "provenance": {"treeHash": tree_hash.clone()},
     });
-    let newer = serde_json::json!({
-        "methodology": "stride",
-        "threats": [{"id": "T-1", "title": "newer"}],
-        "provenance": {"treeHash": tree_hash},
-    });
+    let mut newer = original.clone();
+    newer["threats"][0]["title"] = serde_json::json!("newer");
     let original_id = kuzushi_core::record_threat_model_version(&target, &original, "build", None)
         .unwrap()
         .unwrap();
@@ -16766,8 +16783,11 @@ fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
             .is_some(),
         "threats use <n> re-verifies the restored document"
     );
-    assert_eq!(live, original);
-    let original_sha = kuzushi_core::findings::threat_model_document_sha256(&original);
+    // Legacy import normalizes the document before restoring it. The selected
+    // content and its new live receipt must agree after that migration.
+    assert_eq!(live["threats"][0]["title"], original["threats"][0]["title"]);
+    assert_eq!(live["methodology"], original["methodology"]);
+    let original_sha = kuzushi_core::findings::threat_model_document_sha256(&live);
     assert_eq!(
         app.router.threat().live_sha256(),
         Some(original_sha.as_str())
@@ -17258,6 +17278,8 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     let cancel = ticket.cancel.clone();
     app.set_agent_cancel(Some(cancel.clone()));
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -17294,6 +17316,8 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
 fn agent_response_after_abort_request_is_ignored() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -17335,6 +17359,8 @@ fn agent_answer_event_does_not_duplicate_the_runtime_model_call() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -17439,6 +17465,8 @@ fn agent_failure_event_records_bounded_failure_handoff() {
     );
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -17482,7 +17510,7 @@ fn agent_failure_event_records_bounded_failure_handoff() {
     ));
     assert_eq!(
         app.agent_chat().and_then(|agent| agent.error.as_deref()),
-        Some("model request failed (runtime_error)")
+        Some("model request failed (runtime_error)\nNext: Open /doctor to check the runtime before retrying. Inspect the run if the failure persists.\nCommands: Ctrl+G opens the command palette.\nDetails: /trace agent-failed")
     );
     assert!(app
         .log_lines()
@@ -17594,6 +17622,8 @@ fn aborted_agent_run_terminalizes_the_running_seed_as_canceled() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -18894,32 +18924,19 @@ fn confirm_gate_detects_fs_write_outside_kuzushi() {
 }
 
 #[test]
-fn move_model_selection_only_visits_visible_rows() {
+fn model_picker_navigation_only_visits_visible_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    // The Config view hides the non-primary OpenAI row, so navigation must never
-    // park the selection on a hidden index (which the renderer would collapse to
-    // the first visible row, desyncing the highlight from the Enter target).
-    let visible = super::settings::visible_model_choice_indexes(app.config());
-    app.router
-        .model_catalog_mut()
-        .set_selected_index(visible[0]);
-    for _ in 0..(visible.len() * 2 + 1) {
-        app.move_model_selection(1);
-        let selected_index = app.router.model_catalog().selected_index();
-        assert!(
-            visible.contains(&selected_index),
-            "forward step escaped visible set {visible:?}: {}",
-            selected_index
-        );
-    }
-    for _ in 0..(visible.len() * 2 + 1) {
-        app.move_model_selection(-1);
-        let selected_index = app.router.model_catalog().selected_index();
-        assert!(
-            visible.contains(&selected_index),
-            "back step escaped visible set {visible:?}: {}",
-            selected_index
-        );
+    app.open_model_picker();
+    let ids = super::settings::visible_model_choices(app.config())
+        .iter()
+        .map(|choice| choice.id)
+        .collect::<Vec<_>>();
+    for code in [KeyCode::Down, KeyCode::Up] {
+        for _ in 0..(ids.len() * 2 + 1) {
+            let result = app.reduce_key(KeyEvent::new(code, KeyModifiers::NONE));
+            assert!(result.effects.is_empty());
+            assert!(ids.contains(&app.router.model_picker().selected_id().unwrap()));
+        }
     }
 }
 
@@ -21108,9 +21125,12 @@ fn stored_openai_oauth_retargets_and_resumes_the_preserved_scan_plan() {
         .engagement
         .pending_credential_continuation()
         .expect("preserved continuation");
-    assert_eq!(pending.model, "openai-codex:gpt-5.4");
+    assert_eq!(pending.model, "openai-codex:gpt-5.6-terra");
     assert_eq!(pending.model_binding, PendingCredentialModelBinding::Config);
-    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("openai-codex:gpt-5.6-terra")
+    );
 
     let resume = app.resume_credential_continuation_effect();
 
@@ -21193,8 +21213,8 @@ fn new_openai_oauth_login_resumes_the_exact_committed_scan_plan() {
         [
             ShellEffect::PersistGlobalModelSelection(selection),
             ShellEffect::ResumeCredentialContinuation
-        ] if selection.model == "openai-codex:gpt-5.4"
-            && selection.thinking_level.as_deref() == Some("xhigh")
+        ] if selection.model == "openai-codex:gpt-5.6-terra"
+            && selection.thinking_level.as_deref() == Some("medium")
     ));
     let retargeted = app
         .engagement
@@ -21203,7 +21223,7 @@ fn new_openai_oauth_login_resumes_the_exact_committed_scan_plan() {
     assert_eq!(retargeted.target, preserved.target);
     assert_eq!(retargeted.phase, preserved.phase);
     assert_eq!(retargeted.work, preserved.work);
-    assert_eq!(retargeted.model, "openai-codex:gpt-5.4");
+    assert_eq!(retargeted.model, "openai-codex:gpt-5.6-terra");
 
     let dispatch = app.resume_credential_continuation_effect();
 
@@ -21271,13 +21291,13 @@ fn stored_openai_oauth_switches_only_an_explicitly_bound_deferred_step() {
         .engagement
         .pending_credential_continuation()
         .expect("retargeted continuation");
-    assert_eq!(pending.model, "openai-codex:gpt-5.4");
+    assert_eq!(pending.model, "openai-codex:gpt-5.6-terra");
     let PendingCredentialWork::DeferredStep(step) = &pending.work else {
         panic!("expected deferred step")
     };
     assert_eq!(
         step.input.get("model").and_then(serde_json::Value::as_str),
-        Some("openai-codex:gpt-5.4")
+        Some("openai-codex:gpt-5.6-terra")
     );
     assert_eq!(app.target_owned().as_ref(), Some(&active_target));
     assert!(app.provider_auth_ready_for("openai-codex"));
@@ -21300,7 +21320,7 @@ fn stored_openai_oauth_switches_only_an_explicitly_bound_deferred_step() {
             .input
             .get("model")
             .and_then(serde_json::Value::as_str),
-        Some("openai-codex:gpt-5.4")
+        Some("openai-codex:gpt-5.6-terra")
     );
     assert!(app.log_lines().iter().any(|line| {
         line.body.contains("paused step explicitly switched")
@@ -22893,6 +22913,7 @@ fn investigation_card_boundary_toggles_and_enter_drafts_the_bounded_command() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_viewport(TerminalViewport::new(40, 12));
     *app.findings_mut() = vec![Finding::new_semgrep(
         "demo.investigate",
         "src/lib.rs",
@@ -22919,6 +22940,62 @@ fn investigation_card_boundary_toggles_and_enter_drafts_the_bounded_command() {
         )
     ));
 
+    app.router.workbench_mut().open_investigation_draft(
+        kuzushi_core::verification::application::LocalVerificationReadiness::NoSupportedBackend,
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty()),
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert!(app.input().is_empty());
+    assert!(app.router.workbench().investigation_draft().is_some());
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(app.router.workbench().investigation_draft().is_none());
+    assert!(app.input().is_empty());
+
+    // Reopen and page the card itself, without moving the selected finding.
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty()),
+    );
+    let bindings = crate::ui_view_models::footer_keybindings(&app);
+    assert!(bindings
+        .iter()
+        .any(|binding| binding.key == "Esc" && binding.label == "back"));
+    assert!(!bindings.iter().any(|binding| binding.label == "prompt"));
+    assert!(crate::ui_view_models::navigation_prompt_label(&app).contains("Esc back"));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
+    );
+    assert!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(crate::ui_view_models::PhaseSurfaceId::ProveInvestigation)
+            > 0
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty()),
+    );
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(crate::ui_view_models::PhaseSurfaceId::ProveInvestigation),
+        0
+    );
+
+    // A declared supported discovery result tests drafting independently of
+    // whichever binaries are installed on the test host. No execution occurs.
+    app.router.workbench_mut().open_investigation_draft(
+        kuzushi_core::verification::application::LocalVerificationReadiness::BubblewrapDetected,
+    );
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty()),
@@ -23016,6 +23093,21 @@ fn investigation_card_folds_stored_gate_model_and_drafts_the_previewed_command()
             .any(|rung| rung == "gate: openai:gpt-cheap (rejection only)"),
         "{:?}",
         plan.model_ladder
+    );
+    let empirical_command = crate::ui_view_models::investigation_verify_command(
+        &app,
+        "abc",
+        crate::app::InvestigationBoundary::LocalReproduction,
+    );
+    let empirical_input: serde_json::Value = serde_json::from_str(
+        empirical_command
+            .strip_prefix("run verify:finding ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        empirical_input,
+        serde_json::json!({"fingerprint":"abc", "mode":"empirical"})
     );
     let previewed = plan.command.clone();
 
@@ -23167,6 +23259,8 @@ fn clear_conversation_retains_agent_slot_until_terminal_event_then_drains_steer(
     let mut app = ShellApp::new(V2Config::default(), None);
     let _agent_ticket = app.jobs_mut().start(JobKind::Agent, "agent");
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -23217,6 +23311,8 @@ fn ctrl_l_clear_conversation_retains_live_agent_slot_and_queued_work() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let _agent_ticket = app.jobs_mut().start(JobKind::Agent, "agent");
     app.set_agent_chat(Some(AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "what changed?".to_string(),
         answer: None,
         running: true,
@@ -23989,9 +24085,6 @@ fn perf_baseline_backlog_and_deck_folds() {
         "PERF refresh_campaign_deck (incl trend + history IO): {:?}",
         timer.elapsed()
     );
-    let timer = Instant::now();
-    app.refresh_workspace_trend();
-    eprintln!("PERF refresh_workspace_trend: {:?}", timer.elapsed());
 }
 
 #[test]

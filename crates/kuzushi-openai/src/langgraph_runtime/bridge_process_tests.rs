@@ -6,10 +6,10 @@ use super::bridge_process::{
     bridge_failure_metadata, bridge_near_executable, bridge_runtime_failure,
     bridge_timeout_from_env_value, configure_bridge_process_group,
     default_langgraph_bridge_command, mcp_binary_env_defaults, public_bridge_error,
-    public_bridge_failure_with_detail, read_bounded_pipe, run_next_step_bridge,
+    public_bridge_failure_with_detail, read_bounded_pipe, run_next_step_bridge_observed,
     wait_with_output_deadline_limits, write_bridge_diagnostics,
 };
-use super::runtime_impl::estimated_bridge_cost;
+use super::runtime_impl::{bridge_prompt_cache, estimated_bridge_cost};
 use kuzushi_core::{
     AgentToolPolicy, AgentToolPolicyAuthorization, READ_ONLY_ASK_POLICY_ID,
     READ_ONLY_ASK_POLICY_PROTOCOL_VERSION,
@@ -20,6 +20,7 @@ use std::io::Cursor;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+mod streaming;
 
 #[test]
 fn bridge_pipe_reader_rejects_output_above_limit() {
@@ -162,6 +163,45 @@ fn known_claude_usage_gets_an_observed_cost_when_provider_omits_cost() {
 
     let estimate = estimated_bridge_cost(&response, "vertex:claude-sonnet-4-6").unwrap();
     assert!((estimate - 0.0105).abs() < 1e-12, "{estimate}");
+    assert_eq!(bridge_prompt_cache(&response), None);
+}
+
+#[test]
+fn bridge_cache_counters_reach_the_response_and_discount_the_estimate() {
+    let response: BridgeResponse = serde_json::from_value(json!({
+        "ok": true,
+        "input_tokens": 1_000,
+        "output_tokens": 500,
+        "cache_read_input_tokens": 10_000,
+        "cache_creation_input_tokens": 2_000,
+    }))
+    .unwrap();
+
+    let cache = bridge_prompt_cache(&response).unwrap();
+    assert_eq!(cache.read_input_tokens, 10_000);
+    assert_eq!(cache.creation_input_tokens, 2_000);
+
+    // Sonnet: 1k uncached in ($0.003) + 10k reads at 0.1x ($0.003)
+    //       + 2k writes at 1.25x ($0.0075) + 500 out ($0.0075).
+    let estimate = estimated_bridge_cost(&response, "vertex:claude-sonnet-4-6").unwrap();
+    assert!((estimate - 0.021).abs() < 1e-12, "{estimate}");
+}
+
+#[test]
+fn a_lone_cache_counter_is_still_reported_rather_than_dropped() {
+    let response: BridgeResponse = serde_json::from_value(json!({
+        "ok": true,
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_creation_input_tokens": 700,
+    }))
+    .unwrap();
+
+    let cache = bridge_prompt_cache(&response).unwrap();
+    assert_eq!(
+        (cache.read_input_tokens, cache.creation_input_tokens),
+        (0, 700)
+    );
 }
 
 #[test]
@@ -283,7 +323,7 @@ fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
         format!("cat >/dev/null; printf '%s' '{sentinel}' >&2; exit 1"),
     ];
 
-    let error = run_next_step_bridge(&command, &request, None)
+    let error = run_next_step_bridge_observed(&command, &request, None, None)
         .unwrap_err()
         .to_string();
 
@@ -303,7 +343,7 @@ fn bridge_parse_failure_rewrites_internal_provider_tokens() {
         "cat >/dev/null; printf '%s' 'malformed openai-codex response'".to_string(),
     ];
 
-    let error = run_next_step_bridge(&command, &request, None)
+    let error = run_next_step_bridge_observed(&command, &request, None, None)
         .unwrap_err()
         .to_string();
 
@@ -417,6 +457,7 @@ fn bridge_requests_serialize_protocol_version() {
         authorization: None,
         runtime_options: None,
         temperature: None,
+        cacheable_prompt_prefix: None,
     };
 
     let value = serde_json::to_value(request).unwrap();
@@ -482,6 +523,7 @@ fn test_next_step_request() -> NextStepBridgeRequest {
         messages: vec![json!({"role": "user", "content": "prompt"})],
         tools: Vec::new(),
         max_tokens: 128,
+        thinking_level: None,
         api_key_env: "OPENAI_API_KEY".to_string(),
         api_key: None,
         oauth_credentials_path: "/operator/oauth.json".to_string(),

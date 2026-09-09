@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+mod conversations;
 mod discovery;
 mod reader;
 mod secure_directory;

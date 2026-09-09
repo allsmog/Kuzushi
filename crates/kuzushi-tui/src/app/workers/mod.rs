@@ -23,6 +23,8 @@ pub(crate) use tool_run_status::*;
 pub(crate) use worker_lifecycle::*;
 mod background_tool_worker;
 mod live_trace;
+mod model_failure;
+use model_failure::failed_agent_event;
 mod parse_plan_json;
 mod parse_threat_patch_json;
 mod proposal_run_artifacts;

@@ -561,7 +561,7 @@ mod tests {
 
         assert!(text.contains("SCAN BATCH"), "{text}");
         assert!(text.contains("cost not estimated"), "{text}");
-        assert!(text.contains("requested 1 → effective 1"), "{text}");
+        assert!(text.contains("requested 1 · using 1"), "{text}");
     }
 
     #[test]
@@ -578,7 +578,7 @@ mod tests {
         assert!(text.contains("BATCH batch-1"), "{text}");
         assert!(text.contains("BATCH OCCURRENCE"), "{text}");
         assert!(text.contains("seen 2 / completed 3"), "{text}");
-        assert!(text.contains("runs run-1,run-2"), "{text}");
+        assert!(text.contains("runs run-1, run-2"), "{text}");
         assert!(
             text.contains("gate failed · operational complete · security failed · blocking 1"),
             "{text}"

@@ -4,11 +4,26 @@ const FILE_PICKER_HEADER_LINES: u16 = 8;
 
 pub(crate) fn file_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(divider("ATTACH A FILE", area.width));
-    lines.push(blank());
-    lines.push(muted(
-        "Files are rooted at the active target and attach to the focused KB module.",
+    let document = app.router.file_picker().purpose() == crate::app::FilePickerPurpose::MapDocument;
+    lines.push(divider(
+        if document {
+            "CHOOSE A DESIGN DOCUMENT"
+        } else {
+            "ATTACH A FILE"
+        },
+        area.width,
     ));
+    lines.push(blank());
+    let hint = if document {
+        "Choose a target file to add to the Map plan."
+    } else {
+        "Choose a target file to attach as context."
+    };
+    lines.extend(
+        wrap_text(hint, area.width as usize)
+            .into_iter()
+            .map(|line| muted(&line)),
+    );
     lines.push(file_picker_query_line(app, area.width));
     lines.push(file_picker_count_line(app, area.width));
     lines.push(blank());
@@ -16,24 +31,24 @@ pub(crate) fn file_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("type", "filter"),
-        ("↑/↓/j/k", "move"),
-        ("Enter", "attach"),
-        ("Esc/q", "close"),
+        ("↑/↓", "move"),
+        ("Enter", if document { "choose" } else { "attach" }),
+        ("Esc", "back"),
     ]));
     lines
 }
 
 fn file_picker_query_line(app: &ShellApp, width: u16) -> Line<'static> {
     let route = app.router.file_picker();
-    let query = if route.query().is_empty() {
-        "(all files)"
-    } else {
-        route.query()
-    };
-    Line::styled(
-        fit(&format!("filter: {query}"), width as usize),
-        theme::label(),
-    )
+    let mut line = Line::from(Span::styled("filter: ", theme::label()));
+    if let Some(field) =
+        field_editor_lines(route.query_field(), width.saturating_sub(8) as usize, 1)
+            .into_iter()
+            .next()
+    {
+        line.spans.extend(field.spans);
+    }
+    line
 }
 
 fn file_picker_count_line(app: &ShellApp, width: u16) -> Line<'static> {

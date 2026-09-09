@@ -189,6 +189,42 @@ fn prompt_result_card_resolves_remapped_and_unbound_navigate_controls() {
     );
 }
 
+#[test]
+fn result_footer_respects_remapped_unbound_and_prompt_owned_controls() {
+    for configured in [vec!["ctrl+x".to_string()], Vec::new()] {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "phase_result".to_string(),
+            action: "continue".to_string(),
+            bindings: configured.clone(),
+        }];
+        let (_target, mut app) = unresolved_map_result_app(config);
+        app.set_shell_view(ShellView::Workbench);
+        app.set_input_mode(InputMode::Navigate);
+        let bindings = crate::ui_view_models::footer_keybindings(&app);
+        assert!(
+            !bindings
+                .iter()
+                .any(|binding| binding.key == "n" || binding.key == "n/N"),
+            "{bindings:?}"
+        );
+        for key in &configured {
+            assert!(
+                bindings
+                    .iter()
+                    .any(|binding| &binding.key == key && binding.label == "Use & Scan"),
+                "{bindings:?}"
+            );
+        }
+        app.set_input_mode(InputMode::Prompt);
+        let prompt = crate::ui_view_models::footer_keybindings(&app);
+        assert!(
+            !prompt.iter().any(|binding| binding.label == "Use & Scan"),
+            "{prompt:?}"
+        );
+    }
+}
+
 fn finding() -> Finding {
     Finding::new_tool(
         "semgrep",

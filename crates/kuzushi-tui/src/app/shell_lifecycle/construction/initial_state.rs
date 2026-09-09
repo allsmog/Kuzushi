@@ -1,10 +1,7 @@
 macro_rules! shell_app_initial_state {
-    ($config:expr, $target:expr, $option_store:expr, $registry:expr, $selected_model_index:expr, $session_budget_usd:expr, $trusted_workflow_auto_accept:expr) => {{
-        let mut router = RouterState::default();
+    ($config:expr, $target:expr, $option_store:expr, $registry:expr, $session_budget_usd:expr, $trusted_workflow_auto_accept:expr) => {{
+        let router = RouterState::default();
         let runtime_keymap = RuntimeKeymap::from_config(&$config.operator.keybindings);
-        router
-            .model_catalog_mut()
-            .set_selected_index($selected_model_index);
         Self {
             editor: EditorState::default(),
             session: SessionState::new(

@@ -48,10 +48,6 @@ impl ShellApp {
     ) -> Option<InputUpdate> {
         // First view-specific handler that claims the key wins; the hotkey
         // fallback is last so per-view keys take precedence.
-        let report_update = self.handle_report_view_key(key, modifiers);
-        if report_update.handled {
-            return Some(report_update);
-        }
         let config_update = self.handle_config_view_key(key, modifiers);
         if config_update.handled {
             return Some(config_update);
@@ -61,46 +57,6 @@ impl ShellApp {
             return Some(scene_update);
         }
         None
-    }
-
-    fn handle_report_view_key(
-        &mut self,
-        key: KeyEvent,
-        modifiers: KeyModifierState,
-    ) -> InputUpdate {
-        if !modifiers.plain || !matches!(self.shell_view(), ShellView::Report) {
-            return InputUpdate::ignored();
-        }
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.router.report_mut().move_format(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.router.report_mut().move_format(1),
-            KeyCode::Char('c') => self.router.report_mut().cycle_completeness(),
-            KeyCode::Char('e') => self.router.report_mut().set_editing_path(true),
-            KeyCode::Char('q') => self.close_report_to_origin(),
-            KeyCode::Enter => {
-                let route = self.router.report();
-                let output = route.path_draft().trim();
-                if output.is_empty() {
-                    self.log("report", "destination must not be empty");
-                    return InputUpdate::handled();
-                }
-                return InputUpdate::handled_with_effects(vec![ShellEffect::ExportReport(
-                    ReportExport {
-                        format: route.format(),
-                        completeness: route.completeness(),
-                        output: PathBuf::from(output),
-                        target: self.target_owned(),
-                    },
-                )]);
-            }
-            KeyCode::Char('o') => {
-                return InputUpdate::handled_with_effects(vec![
-                    ShellEffect::RevealReportDestination,
-                ]);
-            }
-            _ => return InputUpdate::ignored(),
-        }
-        InputUpdate::handled()
     }
 
     /// Arrow-key / single-key view hotkeys, tried after the per-view handlers.
@@ -129,18 +85,11 @@ impl ShellApp {
         if !modifiers.plain || !matches!(self.shell_view(), ShellView::Config) {
             return InputUpdate::ignored();
         }
-        match key.code {
-            KeyCode::Up => {
-                self.move_model_selection(-1);
-                InputUpdate::handled()
-            }
-            KeyCode::Down => {
-                self.move_model_selection(1);
-                InputUpdate::handled()
-            }
-            KeyCode::Enter => InputUpdate::handled_with_effects(self.select_current_model_choice()),
-            _ => InputUpdate::ignored(),
+        if key.code != KeyCode::Enter {
+            return InputUpdate::ignored();
         }
+        self.open_model_picker();
+        InputUpdate::handled()
     }
 
     /// 3D playground controls (active only while `ShellView::Scene` is open and
@@ -571,9 +520,11 @@ impl ShellApp {
     }
 
     fn scroll_entry_point_detail(&mut self, direction: i32) {
-        self.router
-            .scene_mut()
-            .scroll_entry_point_detail(direction, VIEWPORT_PAGE_LINES);
+        if let Some(scroll) = crate::renderer::entry_point_page_scroll(self, direction) {
+            self.router
+                .scene_mut()
+                .set_entry_point_detail_scroll(scroll);
+        }
     }
 
     fn activate_entry_point_selection(&mut self) -> InputUpdate {

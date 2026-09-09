@@ -1,11 +1,12 @@
+use super::bridge_process::run_bridge_observed;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl, AgentQueryRequest,
-    AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentToolLoopRequest,
-    AgentToolPolicyAuthorization, AgentToolPolicyReceipt, LoopHistoryEntry, ModelTokenUsage,
-    Observed, RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata, ScanCancellation,
-    TriageOutcome, TriageRequest,
+    runtime::PromptCacheUsage, runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput,
+    AgentToolLoopRequest, AgentToolPolicyAuthorization, AgentToolPolicyReceipt, LoopHistoryEntry,
+    ModelTokenUsage, Observed, RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata,
+    ScanCancellation, TriageOutcome, TriageRequest,
 };
 
 use super::bridge_payloads::{
@@ -14,7 +15,7 @@ use super::bridge_payloads::{
     LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
-    bridge_runtime_failure, run_bridge, run_strict_json_bridge, run_tool_policy_handshake_bridge,
+    bridge_runtime_failure, run_strict_json_bridge, run_tool_policy_handshake_bridge,
 };
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
@@ -286,6 +287,9 @@ fn bridge_request_from(
     credential: ModelCredential,
     authorization: Option<AgentToolPolicyAuthorization>,
 ) -> BridgeRequest {
+    let cacheable_prompt_prefix = request
+        .prompt_cache_split()
+        .map(|(prefix, _)| prefix.to_string());
     let thinking_level = request
         .thinking_level
         .or_else(|| runtime.thinking_level.clone());
@@ -307,6 +311,7 @@ fn bridge_request_from(
         authorization,
         runtime_options: request.runtime_options,
         temperature: request.temperature,
+        cacheable_prompt_prefix,
     }
 }
 
@@ -317,6 +322,7 @@ fn observed_agent_response_from_bridge(
     let usage = bridge_model_usage(&response)?;
     let (cost_usd, cost_usd_reported) = bridge_cost(&response)?;
     let estimated_cost_usd = estimated_bridge_cost(&response, model);
+    let prompt_cache = bridge_prompt_cache(&response);
     Ok(Observed::new(
         AgentQueryResponse {
             text: response.text.unwrap_or_default(),
@@ -326,6 +332,7 @@ fn observed_agent_response_from_bridge(
             estimated_cost_usd,
             input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
             output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
+            prompt_cache,
             truncated: response.truncated,
             stop_reason: response.stop_reason,
         },
@@ -333,14 +340,30 @@ fn observed_agent_response_from_bridge(
     ))
 }
 
+/// Cache accounting only when the bridge reported at least one of the two
+/// counters; a missing pair stays `None` rather than becoming a zero claim.
+pub(super) fn bridge_prompt_cache(response: &BridgeResponse) -> Option<PromptCacheUsage> {
+    if response.cache_read_input_tokens.is_none() && response.cache_creation_input_tokens.is_none()
+    {
+        return None;
+    }
+    Some(PromptCacheUsage {
+        read_input_tokens: clamp_token_count_u32(response.cache_read_input_tokens.unwrap_or(0)),
+        creation_input_tokens: clamp_token_count_u32(
+            response.cache_creation_input_tokens.unwrap_or(0),
+        ),
+    })
+}
+
 pub(super) fn estimated_bridge_cost(response: &BridgeResponse, model: &str) -> Option<f64> {
     if response.cost_usd.is_some() {
         return None;
     }
-    crate::anthropic_oauth::estimate_cost_usd(
+    crate::anthropic_oauth::estimate_cost_usd_with_cache(
         model,
         clamp_token_count_u32(response.input_tokens?),
         clamp_token_count_u32(response.output_tokens?),
+        bridge_prompt_cache(response),
     )
 }
 
@@ -445,6 +468,7 @@ impl LangGraphRuntime {
             request,
             self.cancellation.as_ref(),
             &self.retry,
+            self.response_text.as_ref(),
         )?;
         Ok((response, model))
     }
@@ -549,16 +573,21 @@ fn run_bridge_with_transport_retries(
     request: BridgeRequest,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     retry_policy: &super::runtime_config::BridgeRetryPolicy,
+    observer: Option<&super::ResponseTextObserver>,
 ) -> Result<BridgeResponse> {
     let mut attempt = 0;
     loop {
         attempt += 1;
         ensure_not_cancelled(cancellation)?;
-        let (error, failure) =
-            match bridge_attempt_outcome(run_bridge(command, &request, cancellation))? {
-                BridgeAttempt::Success(response) => return Ok(response),
-                BridgeAttempt::Retry { error, failure } => (error, failure),
-            };
+        let (error, failure) = match bridge_attempt_outcome(run_bridge_observed(
+            command,
+            &request,
+            cancellation,
+            observer,
+        ))? {
+            BridgeAttempt::Success(response) => return Ok(response),
+            BridgeAttempt::Retry { error, failure } => (error, failure),
+        };
         if attempt >= transport_retry::max_attempts(&failure, retry_policy) {
             return Err(error);
         }

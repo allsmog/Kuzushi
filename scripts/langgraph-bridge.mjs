@@ -14,6 +14,7 @@ import {
 import {
   appendStructuredOutputContract,
   bridgeQueryResult,
+  humanMessageForRequest,
   interruptedQueryResult,
   isAiMessage,
   maybeParseJson,
@@ -27,7 +28,8 @@ import {
 } from "./langgraph-bridge/model.mjs";
 import { messagesForNextStep } from "./langgraph-bridge/next-step-messages.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
-import { writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
+import { writeBridgePayload, writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
+import { invokeWithResponseText, responseStreamFor } from "./langgraph-bridge/response-stream.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
 import {
   acknowledgeToolPolicy,
@@ -81,7 +83,7 @@ const FORCED_CONCLUSION_PROMPT =
   "you could not confirm.";
 
 async function runQueryGraphToConclusion(graph, request, system, progress) {
-  const state = { messages: [new HumanMessage(request.prompt ?? "")] };
+  const state = { messages: [humanMessageForRequest(request)] };
   try {
     const result = await graph.invoke(state, {
       recursionLimit: QUERY_GRAPH_RECURSION_LIMIT,
@@ -101,10 +103,10 @@ async function forcedConclusion(request, system, progress) {
   const model = modelForRequest(request);
   return invokeThroughQuotaWindows(model, [
     systemMessageForRequest(request, system),
-    new HumanMessage(request.prompt ?? ""),
+    humanMessageForRequest(request),
     ...concludedEvidenceMessages(progress),
     new HumanMessage(FORCED_CONCLUSION_PROMPT),
-  ]);
+  ], request);
 }
 
 // The evidence transcript minus the leading prompt, trimmed of a trailing
@@ -149,16 +151,16 @@ function callModelNode(model, request, system, progress) {
     const response = await invokeThroughQuotaWindows(model, [
       systemMessageForRequest(request, system),
       ...state.messages,
-    ]);
+    ], request);
     progress.messages = [...state.messages, response];
     return { messages: [response] };
   };
 }
 
-async function invokeThroughQuotaWindows(model, messages) {
+async function invokeThroughQuotaWindows(model, messages, request) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await model.invoke(messages);
+      return await invokeWithResponseText(model, messages, request);
     } catch (error) {
       if (attempt >= QUOTA_WINDOW_RETRIES || !isRateLimitError(error)) throw error;
       await sleep(quotaWaitMs(error));
@@ -251,10 +253,10 @@ async function handleNextStep(request) {
   const baseModel = modelForRequest(request);
   const model = tools.length ? baseModel.bindTools(tools) : baseModel;
   const system = request.systemPrompt ?? request.system_prompt ?? "";
-  const response = await model.invoke([
+  const response = await invokeWithResponseText(model, [
     systemMessageForRequest(request, system),
     ...messagesForNextStep(request.messages),
-  ]);
+  ], request);
   debugDumpBridgeCall("next-step", request, tools, system, response);
   return nextStepResultFromResponse(response);
 }
@@ -324,6 +326,14 @@ async function dispatchModelRequest(request) {
   return runQueryGraph(request);
 }
 
+let responseStream;
+
+async function finishResponse(response, exitCode) {
+  if (!responseStream) return writeBridgeResponseAndExit(response, exitCode);
+  await responseStream.finish(response);
+  process.exit(exitCode);
+}
+
 async function main() {
   // `--oauth-login <provider> [method]` runs an interactive auth flow over the
   // inherited terminal and never reads the JSON request envelope from stdin.
@@ -333,7 +343,8 @@ async function main() {
     return;
   }
   const request = validateBridgeRequest(JSON.parse(await readStdin()));
-  await writeBridgeResponseAndExit(await dispatch(request), 0);
+  responseStream = responseStreamFor(request, writeBridgePayload);
+  await finishResponse(await dispatch(request), 0);
 }
 
 main().catch(async (error) => {
@@ -344,7 +355,7 @@ main().catch(async (error) => {
     process.stderr.write(`[bridge-error] ${response.errorClass}: ${response.detail}\n`);
   }
   try {
-    await writeBridgeResponseAndExit(response, 1);
+    await finishResponse(response, 1);
   } catch {
     process.exit(1);
   }

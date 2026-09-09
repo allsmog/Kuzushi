@@ -23,6 +23,10 @@ use crate::ui_view_models::{
 
 use super::*;
 
+mod activity_reader;
+mod keymap_reader;
+mod prove_detail_controls;
+
 fn apply_renderer_notice(session: &mut ActivitySession, message: &str) {
     use kuzushi_core::run_lifecycle::{
         DiagnosticLevel, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemV1, SafeText,
@@ -456,13 +460,13 @@ fn planning_picker_options_focus_marks_the_options_pane() {
         "inactive task pane should not claim focus: {rendered}"
     );
 
-    app.engagement
-        .planning_picker_mut()
-        .set_option_edit(Some(crate::app::PlanningOptionEdit {
-            task: PlanningTaskId::BuildStrideThreatModel,
-            option_name: "model".to_string(),
-            draft: "openai:gpt-5.5".to_string(),
-        }));
+    app.engagement.planning_picker_mut().set_option_edit(Some(
+        crate::app::PlanningOptionEdit::new(
+            PlanningTaskId::BuildStrideThreatModel,
+            "model",
+            "openai:gpt-5.5",
+        ),
+    ));
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let editing = format!("{:?}", terminal.backend().buffer());
     assert!(editing.contains("EDITING OPTION"), "{editing}");
@@ -1436,11 +1440,11 @@ fn scan_batch_config_has_tty_and_plain_content_parity() {
 
     for text in [
         "SCAN BATCH",
-        "Logical trials",
+        "Scan trials",
         "requested 1",
-        "effective 1",
+        "using 1",
         "cost not estimated",
-        "detached campaign dispatcher",
+        "start this batch in the background",
     ] {
         assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
         assert!(plain.contains(text), "plain missing {text:?}: {plain}");
@@ -2486,6 +2490,7 @@ fn narrow_sast_tasks_and_config_use_the_default_viewport() {
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_viewport(crate::TerminalViewport::new(60, 20));
     let last_task = crate::ui_view_models::sast_tasks_model(&app)
         .rows
         .last()
@@ -2511,8 +2516,8 @@ fn narrow_sast_tasks_and_config_use_the_default_viewport() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let config = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
     assert!(
-        config.contains("MODELS"),
-        "models section missing: {config}"
+        config.contains("Enter model picker"),
+        "Config's final action must remain reachable after the model list grows: {config}"
     );
 
     press_key(
@@ -2522,14 +2527,14 @@ fn narrow_sast_tasks_and_config_use_the_default_viewport() {
     press_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     assert_eq!(
         app.router.default_scroll().offset(),
-        0,
-        "Up/Down remain model-selection keys"
+        1,
+        "Config arrows scroll the document"
     );
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
     );
-    assert_eq!(app.router.default_scroll().offset(), 1);
+    assert_eq!(app.router.default_scroll().offset(), 2);
 }
 
 #[test]
@@ -2916,14 +2921,13 @@ fn plain_help_guidance_wraps_without_truncating_command_shapes() {
 #[test]
 fn renders_config_onboarding_without_silent_model_selection() {
     // Config now includes the complete effective-source inventory before the
-    // model catalog. Give this content test enough height to assert both
-    // sections; compact viewport behavior is covered separately.
-    let backend = TestBackend::new(100, 40);
+    // expanded model catalog. Give this content test enough height to assert
+    // both sections; compact viewport behavior is covered separately.
+    let backend = TestBackend::new(100, 50);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config_mut().model = None;
     app.set_session_thinking_level(None);
-    app.router.model_catalog_mut().set_selected_index(2);
     app.set_shell_view(ShellView::Config);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2936,9 +2940,8 @@ fn renders_config_onboarding_without_silent_model_selection() {
     assert!(rendered.contains("onboarding"));
     assert!(rendered.contains("Up/Down"));
     assert!(rendered.contains(">"));
-    // The primary OpenAI slot is auth-aware (API-key model without stored
-    // OAuth credentials, OAuth model with them); both are explicit selectors.
-    assert!(rendered.contains("openai:gpt-5.5") || rendered.contains("openai-oauth:gpt-5.4"));
+    assert!(rendered.contains("openai:gpt-5.5"));
+    assert!(rendered.contains("openai-oauth:gpt-5.6-terra"));
     assert!(rendered.contains("anthropic:claude-sonnet-4-6"));
     assert!(!rendered.contains("┌"));
 }
@@ -2955,10 +2958,66 @@ fn plain_config_onboarding_uses_explicit_model_selection() {
     assert!(rendered.contains("CONFIG"));
     assert!(rendered.contains("model: unconfigured"));
     assert!(rendered.contains("onboarding: model <n> selects an explicit provider:model"));
-    // The primary OpenAI slot is auth-aware; either form is an explicit selector.
-    assert!(rendered.contains("openai:gpt-5.5") || rendered.contains("openai-oauth:gpt-5.4"));
+    assert!(rendered.contains("openai:gpt-5.5"));
+    assert!(rendered.contains("openai-oauth:gpt-5.6-terra"));
     assert!(rendered.contains("anthropic:claude-sonnet-4-6"));
     assert_strict_plain_80(&rendered);
+}
+
+#[test]
+fn config_picker_renders_the_visible_candidate_and_returns_at_constrained_sizes() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for (width, height) in [(40, 12), (80, 24), (120, 36)] {
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-5.5".into());
+        let mut app = ShellApp::new(config, None);
+        app.set_shell_view(ShellView::Config);
+        app.set_input_mode(crate::InputMode::Navigate);
+        app.sync_view_change();
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let before = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(
+            before.contains("Enter choose model") || before.contains("Enter model picker"),
+            "{width}x{height}: {before}"
+        );
+
+        let opening = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.sync_view_change();
+        assert!(opening.effects.is_empty());
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let picker = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(picker.contains("CHOOSE A MODEL"), "{picker}");
+        assert!(!picker.contains("NAVIGATION MODE"), "{picker}");
+        assert!(picker.contains("▸ GPT-5.5"), "{picker}");
+        assert!(picker.contains("Current: openai:gpt-5.5"), "{picker}");
+        app.reduce_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let moved = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(moved.contains("▸ GPT-5.4 mini"), "{moved}");
+        app.reduce_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let command = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(
+            command.contains("Enter command") || command.contains("Enter run command"),
+            "{command}"
+        );
+        assert!(!command.contains("Enter select"), "{command}");
+        assert!(!command.contains("Enter: API key"), "{command}");
+        app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(
+            app.router.setup().editor(),
+            Some(crate::app::SetupEditor::Model)
+        );
+        app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        app.sync_view_change();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let restored = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(restored.contains("CONFIG"), "{restored}");
+        assert!(!restored.contains("CHOOSE A MODEL"), "{restored}");
+        assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    }
 }
 
 #[test]
@@ -3027,7 +3086,7 @@ fn renders_help_grouped_by_operator_workflow() {
 fn renders_help_aliases_and_examples_from_command_specs() {
     // Keep the complete command catalog in the viewport. Adding a public
     // command must not turn this contract into a scroll-position test.
-    let backend = TestBackend::new(120, 160);
+    let backend = TestBackend::new(120, 320);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Help);
@@ -3275,7 +3334,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("Enter review"), "{rendered}");
+    assert!(rendered.contains("Enter open Prove"), "{rendered}");
     assert!(rendered.contains("j/k/↑/↓ move"), "{rendered}");
     assert!(rendered.contains("Shift+Tab phase→"), "{rendered}");
     assert!(rendered.contains("] pane"), "{rendered}");
@@ -3356,6 +3415,8 @@ fn failure_handoff_view_renders_current_context() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_agent_chat(Some(crate::app::AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: String::new(),
         answer: None,
         running: false,
@@ -5129,15 +5190,62 @@ fn compact_model_picker_keeps_the_selected_model_visible() {
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(std::path::PathBuf::from("/work/acme")));
     app.open_model_picker();
-    app.router.model_picker_mut().open(5, 6);
+    app.router
+        .model_picker_mut()
+        .open(Some("anthropic:claude-opus-4-7"));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("models 6-6 of 6"), "{rendered}");
+    assert!(rendered.contains("of 10"), "{rendered}");
     assert!(rendered.contains("▸ Claude Opus"), "{rendered}");
     assert!(!rendered.contains("d demo"), "{rendered}");
     assert!(rendered.contains("Enter select"), "{rendered}");
+}
+
+#[test]
+fn model_picker_discloses_retired_current_model_without_hiding_selection_or_keys() {
+    for (width, height) in [(40, 12), (80, 24), (120, 36)] {
+        let mut config = V2Config::default();
+        config.model = Some("openai-codex:gpt-5.4".into());
+        let mut app = ShellApp::new(config, None);
+        app.open_model_picker();
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(
+            rendered.contains("Current: openai-oauth:gpt-5.4"),
+            "{width}x{height}: {rendered}"
+        );
+        assert!(rendered.contains("Retired for ChatGPT"), "{rendered}");
+        let selected = rendered
+            .lines()
+            .find(|line| line.contains("▸ ") && line.contains("Terra"));
+        assert!(selected.is_some(), "{rendered}");
+        assert!(rendered.contains("Enter"), "{rendered}");
+        assert!(rendered.contains("Esc keep"), "{rendered}");
+        assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+    }
+}
+
+#[test]
+fn model_picker_discloses_unknown_current_model_as_unverified() {
+    let mut config = V2Config::default();
+    config.model = Some("openai:operator-custom-model".into());
+    let mut app = ShellApp::new(config, None);
+    app.open_model_picker();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+    assert!(
+        rendered.contains("Current: openai:operator-custom-model"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("availability is unverified"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("Esc keep"), "{rendered}");
 }
 
 #[test]
@@ -5208,9 +5316,7 @@ fn file_picker_renders_filter_count_and_selected_file() {
         ],
         false,
     );
-    for ch in "des".chars() {
-        app.router.file_picker_mut().push_query(ch);
-    }
+    app.router.file_picker_mut().paste_query("des");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -5609,6 +5715,7 @@ fn compact_replay_page_down_reaches_aliases() {
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_viewport(crate::TerminalViewport::new(60, 20));
     app.set_target(Some(tmp.path().to_path_buf()));
     seed_compact_scroll_findings(&mut app);
     app.router.replay_mut().open(run_id);
@@ -5919,6 +6026,8 @@ fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
     assert_eq!(next.question, "first question");
 
     let prev = AgentChatView {
+        recovery_note: None,
+        partial_answer: String::new(),
         question: "first question".to_string(),
         answer: Some("first answer".to_string()),
         running: false,
@@ -6511,8 +6620,7 @@ fn ultra_compact_zoomed_prove_keeps_status_and_next_visible() {
     assert!(rendered.contains("ZOOM · PROVE"), "{rendered}");
 }
 
-#[test]
-fn ultra_compact_result_ready_prove_keeps_status_and_next_visible() {
+fn pending_prove_result_fixture() -> (tempfile::TempDir, ShellApp) {
     let (target, mut app) = phase_native_workbench_fixture(WorkbenchPage::Prove);
     let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(target.path());
     let completed = kuzushi_core::workflow_attempts::PhaseAttemptCompleted::new(
@@ -6528,9 +6636,58 @@ fn ultra_compact_result_ready_prove_keeps_status_and_next_visible() {
     app.engagement
         .set_phase_attempt_projection(Some(snapshot), ledger);
 
+    (target, app)
+}
+
+#[test]
+fn pending_prove_result_yields_to_investigation_and_trace_then_returns() {
+    use crate::TerminalViewport;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    for key in ['v', 't'] {
+        for width in [40, 80] {
+            let (_target, mut app) = pending_prove_result_fixture();
+            app.set_input_mode(InputMode::Navigate);
+            app.set_viewport(TerminalViewport::new(width, 24));
+            assert!(press_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)
+            ));
+            let rendered = render_phase_app(&app, width, 24);
+            assert!(!rendered.contains("RESULT · selected"), "{key}: {rendered}");
+            let label = if key == 'v' { "INVESTIGATE" } else { "TRACE" };
+            assert!(rendered.contains(label), "{key}: {rendered}");
+            assert!(press_key(
+                &mut app,
+                KeyEvent::new(
+                    if key == 't' {
+                        KeyCode::Char('t')
+                    } else {
+                        KeyCode::Esc
+                    },
+                    KeyModifiers::NONE
+                )
+            ));
+            assert!(render_phase_app(&app, width, 24).contains("RESULT · selected"));
+            assert!(app.input().is_empty());
+        }
+    }
+}
+
+#[test]
+fn ultra_compact_legacy_prove_result_keeps_status_and_honest_next_visible() {
+    let (_target, app) = pending_prove_result_fixture();
+
     let rendered = render_phase_app(&app, 40, 12);
 
-    assert_compact_prove_status(&rendered);
+    assert!(rendered.contains("Selected F-0001"), "{rendered}");
+    assert!(
+        rendered.contains("[●○○]") && rendered.contains("1src"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("STATUS candidate"), "{rendered}");
+    assert!(rendered.contains("NEXT inspect result"), "{rendered}");
+    assert!(rendered.find("F-0001") < rendered.find("STATUS candidate"));
+    assert!(rendered.find("STATUS candidate") < rendered.find("NEXT inspect result"));
     assert!(rendered.contains("RESULT"), "{rendered}");
 }
 
@@ -7070,6 +7227,7 @@ fn keymap_overlay_scrolls_without_dangling_section_headings() {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_viewport(crate::TerminalViewport::new(width, height));
         app.set_shell_view(ShellView::Workbench);
         app.set_shell_view(ShellView::Keymap);
         app.set_input_mode(crate::InputMode::Prompt);
@@ -7093,7 +7251,17 @@ fn keymap_overlay_scrolls_without_dangling_section_headings() {
         );
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let bottom = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
-        assert!(bottom.contains("/keys"), "{width}x{height}: {bottom}");
+        let bottom_document = bottom
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with('│'))
+            .map(|line| line.trim_matches('│').trim())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            bottom_document.contains("effective action keymap"),
+            "{width}x{height} did not reach the final control-map text: {bottom}"
+        );
         assert!(bottom.contains("PgUp/PgDn scroll"), "{bottom}");
         assert_keymap_sections_have_a_body(&bottom, width, height);
 
@@ -7113,7 +7281,7 @@ fn keymap_overlay_scrolls_without_dangling_section_headings() {
 
 fn assert_keymap_sections_have_a_body(rendered: &str, width: u16, height: u16) {
     for (heading, first_row) in [
-        ("── GLOBAL", "help               open help"),
+        ("── GLOBAL", "open help"),
         ("── NAVIGATION", "j  ·  k"),
         ("── DISPATCH", "/scan"),
         ("── LIFECYCLE", "/history"),

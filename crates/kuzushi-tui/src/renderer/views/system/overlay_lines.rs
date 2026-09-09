@@ -8,6 +8,10 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 mod confirm_dialog;
 mod keymap;
+mod keymap_reader;
+pub(crate) use keymap_reader::keymap_reader_scroll;
+mod quit_confirmation;
+pub(crate) use quit_confirmation::{quit_disclosure_viewport, render_compact_quit};
 mod theme_picker;
 mod update_available;
 
@@ -16,7 +20,10 @@ pub(crate) fn boot_splash_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>
 }
 
 pub(crate) fn quit_confirm_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    quit_confirm_model_lines(quit_confirm_model(app), area.width as usize)
+    if area.height == u16::MAX {
+        return quit_confirm_model_lines(quit_confirm_model(app), area.width as usize);
+    }
+    quit_confirmation::quit_page_lines(app, area)
 }
 
 pub(crate) fn confirm_dialog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -36,6 +43,14 @@ pub(crate) fn update_available_lines(app: &ShellApp, area: Rect) -> Vec<Line<'st
 }
 
 pub(crate) fn render_system_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if app.shell_view() == ShellView::Keymap {
+        keymap_reader::render_keymap_reader(frame, area, app);
+        return;
+    }
+    render_generic_system_overlay(frame, area, app);
+}
+
+fn render_generic_system_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let overlay_area = system_overlay_area(area, app.shell_view());
     let lines = contextual_overlay_lines(app, overlay_area);
     if lines.is_empty() || overlay_area.width < 8 || overlay_area.height < 3 {
@@ -70,12 +85,11 @@ fn render_system_overlay_backdrop(frame: &mut Frame<'_>, area: Rect, view: Shell
 }
 
 fn contextual_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let width = area.width.saturating_sub(6).min(92);
-    let body_area = Rect { width, ..area };
+    let body_area = contextual_overlay_body_area(area);
     let lines = match app.shell_view() {
         ShellView::Catalog => return catalog_overlay_lines(app, body_area),
         ShellView::ConfirmDialog => confirm_dialog_lines(app, body_area),
-        ShellView::QuitConfirm => quit_confirm_lines(app, body_area),
+        ShellView::QuitConfirm => return quit_confirmation::quit_overlay_lines(app, body_area),
         ShellView::ThemePicker => theme_picker_lines(app, body_area),
         ShellView::Keymap => keymap_lines(app, body_area),
         ShellView::Help => help_lines(app, body_area),
@@ -87,6 +101,13 @@ fn contextual_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return keymap_overlay_viewport(lines, area, app.router.default_scroll().offset() as usize);
     }
     lines
+}
+
+fn contextual_overlay_body_area(area: Rect) -> Rect {
+    Rect {
+        width: area.width.saturating_sub(6).min(92),
+        ..area
+    }
 }
 
 /// The Catalog is a contextual action picker, not a document. Keep its fixed
@@ -261,6 +282,14 @@ fn keymap_overlay_viewport(
     }
     let max_start = lines.len().saturating_sub(visible);
     let start = keymap_scroll_start(scroll, max_start);
+    overlay_document_window(&lines, visible, start)
+}
+
+fn overlay_document_window(
+    lines: &[Line<'static>],
+    visible: usize,
+    start: usize,
+) -> Vec<Line<'static>> {
     let mut window = lines
         .iter()
         .skip(start)
@@ -530,12 +559,18 @@ fn quit_warning_box(width: usize, title: &str, body: &str) -> Vec<Line<'static>>
     let top_title = format!("{title} ");
     let top_fill = width.saturating_sub(display_width(top_prefix) + display_width(&top_title) + 2);
     let body_width = width.saturating_sub(8);
-    let body = format!(" {body}");
-    vec![
-        raw(format!("{top_prefix}{top_title}{}╗", "═".repeat(top_fill))),
-        raw(format!("   ║ {} ║", fixed_width(&body, body_width))),
-        raw(format!("   ╚{}╝", "═".repeat(width.saturating_sub(6)))),
-    ]
+    let mut lines = vec![raw(format!(
+        "{top_prefix}{top_title}{}╗",
+        "═".repeat(top_fill)
+    ))];
+    for chunk in wrap_text(body, body_width.saturating_sub(1).max(1)) {
+        lines.push(raw(format!(
+            "   ║ {} ║",
+            fixed_width(&format!(" {chunk}"), body_width)
+        )));
+    }
+    lines.push(raw(format!("   ╚{}╝", "═".repeat(width.saturating_sub(6)))));
+    lines
 }
 
 fn quit_footer_stage_line(width: usize, footer: &QuitConfirmFooter) -> String {

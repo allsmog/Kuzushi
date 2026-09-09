@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use super::super::response::{anthropic_model_for_tier, estimate_cost_usd};
+    use super::super::response::{
+        anthropic_model_for_tier, estimate_cost_usd, estimate_cost_usd_with_cache,
+    };
     use super::super::*;
+    use kuzushi_core::runtime::PromptCacheUsage;
     use kuzushi_core::{
         AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome,
         TriageRequest, TriageVerdict,
@@ -96,6 +99,40 @@ mod tests {
         assert_eq!(body["system"], "system");
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "user prompt");
+    }
+
+    #[test]
+    fn anthropic_messages_body_marks_a_verified_prompt_prefix_as_a_cache_block() {
+        let request = AgentQueryRequest::new(
+            "anthropic:claude-sonnet-4-6".to_string(),
+            ".",
+            "system".to_string(),
+            "shared inventory\nactor tail".to_string(),
+        )
+        .with_cacheable_prompt_prefix("shared inventory\n");
+
+        let body = anthropic_messages_body("claude-sonnet-4-6", 2048, &request);
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "shared inventory\n");
+        assert_eq!(content[0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(content[1]["text"], "actor tail");
+        assert!(content[1].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn anthropic_messages_body_sends_the_whole_prompt_when_the_prefix_does_not_match() {
+        let request = AgentQueryRequest::new(
+            "anthropic:claude-sonnet-4-6".to_string(),
+            ".",
+            "system".to_string(),
+            "actor tail".to_string(),
+        )
+        .with_cacheable_prompt_prefix("stale prefix");
+
+        let body = anthropic_messages_body("claude-sonnet-4-6", 2048, &request);
+        assert_eq!(body["messages"][0]["content"], "actor tail");
     }
 
     #[test]
@@ -301,6 +338,52 @@ mod tests {
     #[test]
     fn cost_estimate_zero_when_no_tokens() {
         assert_eq!(estimate_cost_usd("claude-haiku-4-5", 0, 0), Some(0.0));
+    }
+
+    #[test]
+    fn cost_estimate_prices_cache_reads_at_a_tenth_and_writes_at_a_premium() {
+        let cache = PromptCacheUsage {
+            read_input_tokens: 10_000,
+            creation_input_tokens: 1_000,
+        };
+        let cost = estimate_cost_usd_with_cache("claude-sonnet-4-6", 1000, 0, Some(cache)).unwrap();
+        // 1k uncached ($0.003) + 10k reads at 0.1x ($0.003) + 1k writes at 1.25x ($0.00375).
+        assert!((cost - 0.00975).abs() < 1e-12, "{cost}");
+
+        let uncached_equivalent = estimate_cost_usd("claude-sonnet-4-6", 12_000, 0).unwrap();
+        assert!(cost < uncached_equivalent);
+        assert_eq!(
+            estimate_cost_usd_with_cache("claude-sonnet-4-6", 1000, 0, None),
+            estimate_cost_usd("claude-sonnet-4-6", 1000, 0)
+        );
+    }
+
+    #[test]
+    fn parse_anthropic_messages_response_carries_prompt_cache_usage() {
+        let response = parse_anthropic_messages_response(
+            "claude-sonnet-4-6",
+            r#"{
+              "content": [{"type":"text","text":"ok"}],
+              "usage": {"input_tokens": 100, "output_tokens": 10,
+                        "cache_read_input_tokens": 5000, "cache_creation_input_tokens": 0}
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.prompt_cache,
+            Some(PromptCacheUsage {
+                read_input_tokens: 5000,
+                creation_input_tokens: 0,
+            })
+        );
+        let uncached = parse_anthropic_messages_response(
+            "claude-sonnet-4-6",
+            r#"{"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":5100,"output_tokens":10}}"#,
+        )
+        .unwrap();
+        assert_eq!(uncached.prompt_cache, None);
+        assert!(response.estimated_cost_usd.unwrap() < uncached.estimated_cost_usd.unwrap());
     }
 
     // ----- model_for_tier ------------------------------------------

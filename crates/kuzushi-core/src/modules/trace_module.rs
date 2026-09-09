@@ -8,14 +8,15 @@ pub(crate) fn trace_module() -> BuiltinModule {
         "Operator-requested data-flow trace expansion that appends static evidence around a finding.",
         vec![tool_with_options(
             "trace:expand",
-            "Expand a finding's data-flow trace (LLM-driven, read-only; appends operator-requested static evidence steps).",
+            "Read source to expand a finding's recorded data flow and save supporting evidence.",
             trace_expand_options(),
         )
         .with_policy(workspace_policy(
             ToolPhase::Prove,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
-        ))],
+        ))
+        .without_phase_result()],
         vec![],
     )
 }

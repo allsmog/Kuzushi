@@ -20,7 +20,9 @@ pub const DEFAULT_PASSES: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VulnAnalysis {
-    pub triggerable: bool,
+    /// None means reachability or impact remains unresolved, not refuted.
+    /// Existing JSON boolean assessments remain readable as Some(bool).
+    pub triggerable: Option<bool>,
     /// Human-readable rationale, present whether triggerable or not.
     pub rationale: String,
     /// 0.0..=1.0 confidence the verdict is correct.
@@ -143,11 +145,15 @@ const DEEP_AUDITOR_METHOD: &str = "Method, with a target budget of 3-8 tool call
    validator, router, parser, schema, middleware, or privilege gate enforces the missing invariant \
    upstream.
 5. Stop as soon as the verdict is supported by cited evidence. Reading more than 10 regions is \
-   usually wasted budget; emit the current best verdict and mark uncertainty when needed.";
+   usually wasted budget; emit the current best verdict and mark uncertainty when needed.
+6. Return triggerable=null when reachability or impact remains unresolved. An empty reference \
+   search, an external/library caller, or a missing entry point is not evidence of safety. \
+   A triggerable=false verdict requires cited evidence that defeats the claimed vulnerability. \
+   For implausible_trigger, cite the inspected call path in first_link; without it, use null.";
 
 const DEEP_AUDITOR_OUTPUT: &str = "Return ONLY a JSON object matching this schema as your final message (no tool call, just JSON):
 {
-  \"triggerable\": bool,
+  \"triggerable\": true|false|null (null means needs_review),
   \"rationale\": \"one or two sentences naming the guard or missing guard and citing file:line\",
   \"confidence\": 0.0..=1.0,
   \"first_link\": \"file:line of the first call site you actually read, or null\",

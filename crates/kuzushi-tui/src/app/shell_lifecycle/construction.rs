@@ -126,7 +126,6 @@ impl ShellApp {
         registry: ModuleRegistry,
         transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
     ) -> Self {
-        let selected_model_index = preferred_model_choice_index(&config);
         let (option_store, option_store_error) = persistent_option_store(target);
         let session_budget_usd = config.operator.session_budget_usd;
         let trusted_workflow_auto_accept = config.operator.trusted_workflow_auto_accept;
@@ -135,7 +134,6 @@ impl ShellApp {
             target,
             option_store,
             registry,
-            selected_model_index,
             session_budget_usd,
             trusted_workflow_auto_accept
         );
@@ -143,7 +141,8 @@ impl ShellApp {
             app.attach_session_transcript(transcript);
         }
         Self::hydrate_initial_workspace(&mut app, target);
-        app.announce_startup(selected_model_index, option_store_error, target.is_some());
+        app.start_answer_recovery();
+        app.announce_startup(option_store_error, target.is_some());
         app
     }
 
@@ -168,13 +167,8 @@ impl ShellApp {
 
     /// Post-construction setup: session model/thinking-level, the startup
     /// banner logs, persisted history load, and the first-run onboarding phase.
-    fn announce_startup(
-        &mut self,
-        selected_model_index: usize,
-        option_store_error: Option<String>,
-        has_target: bool,
-    ) {
-        self.apply_session_model(selected_model_index);
+    fn announce_startup(&mut self, option_store_error: Option<String>, has_target: bool) {
+        self.apply_configured_model_reasoning();
         self.log("system", "kuzushi shell");
         self.log("startup", self.startup_summary_line());
         if let Some(error) = option_store_error {
@@ -194,11 +188,14 @@ impl ShellApp {
         self.apply_initial_onboarding_phase();
     }
 
-    fn apply_session_model(&mut self, selected_model_index: usize) {
-        if self.config().model.is_none() {
-            return;
-        }
-        if let Some(choice) = model_choices().get(selected_model_index) {
+    fn apply_configured_model_reasoning(&mut self) {
+        let choice = self
+            .config()
+            .model
+            .as_deref()
+            .and_then(model_choice_index_by_id)
+            .and_then(|index| model_choices().get(index));
+        if let Some(choice) = choice {
             self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
         }
     }
@@ -207,6 +204,20 @@ impl ShellApp {
 #[cfg(test)]
 mod initial_context_tests {
     use super::*;
+
+    #[test]
+    fn model_catalog_suggestions_do_not_change_configured_reasoning_at_startup() {
+        for (model, expected_effort) in [
+            ("openai-codex:gpt-5.4", Some("xhigh")),
+            ("openai:operator-custom-model", None),
+        ] {
+            let mut config = V2Config::default();
+            config.model = Some(model.into());
+            let app = ShellApp::new(config, None);
+            assert_eq!(app.config().model.as_deref(), Some(model));
+            assert_eq!(app.session_thinking_level(), expected_effort);
+        }
+    }
 
     #[test]
     fn shell_startup_projects_an_existing_context_snapshot() {

@@ -58,7 +58,13 @@ fn apply_target_build_input(
     build.seeds = read_string_list(input, &["seed"]);
     build.design_docs = read_string_list(
         input,
-        &["designDocs", "designDoc", "design_docs", "design_doc", "design"],
+        &[
+            "designDocs",
+            "designDoc",
+            "design_docs",
+            "design_doc",
+            "design",
+        ],
     );
     build.stages = read_stages(input, flavor.tool_name(), &build.methodology)?;
     build.prompt_override = Some(
@@ -75,7 +81,10 @@ fn apply_target_build_input(
     Ok(())
 }
 
-pub(crate) fn read_build_roots(input: &Value, workspace_root: &Path) -> Result<ThreatModelBuildRoots> {
+pub(crate) fn read_build_roots(
+    input: &Value,
+    workspace_root: &Path,
+) -> Result<ThreatModelBuildRoots> {
     let Some(scope_input) = read_string(input, &["scope"]) else {
         return Ok(ThreatModelBuildRoots {
             workspace_root: workspace_root.to_path_buf(),
@@ -111,7 +120,10 @@ pub(crate) fn load_requested_threat_model(
     Ok(try_load_persistent_threat_model(workspace_root)?.map(|document| (document, None)))
 }
 
-fn resolve_scoped_build_roots(workspace_root: &Path, scope_input: &str) -> Result<ThreatModelBuildRoots> {
+fn resolve_scoped_build_roots(
+    workspace_root: &Path,
+    scope_input: &str,
+) -> Result<ThreatModelBuildRoots> {
     let tree = crate::workspace::load_nested_project_scopes(workspace_root)?;
     let scope = resolve_scope_selection(tree.as_ref(), scope_input)?;
     let analysis_root = canonical_analysis_root(workspace_root, Path::new(&scope.rel_path))?;
@@ -175,19 +187,33 @@ fn normalized_scope_path(value: &str) -> Result<String> {
     let path = Path::new(&normalized);
     anyhow::ensure!(
         !normalized.is_empty()
-            && path.components().all(|component| matches!(component, std::path::Component::Normal(_))),
+            && path
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_))),
         "scope path must be a non-escaping workspace-relative path"
     );
     Ok(path.to_string_lossy().replace('\\', "/"))
 }
 
 fn canonical_analysis_root(workspace_root: &Path, rel_path: &Path) -> Result<PathBuf> {
-    let workspace = std::fs::canonicalize(workspace_root)
-        .with_context(|| format!("could not resolve workspace root {}", workspace_root.display()))?;
+    let workspace = std::fs::canonicalize(workspace_root).with_context(|| {
+        format!(
+            "could not resolve workspace root {}",
+            workspace_root.display()
+        )
+    })?;
     let analysis = std::fs::canonicalize(workspace_root.join(rel_path))
         .with_context(|| format!("scope directory {} is missing", rel_path.display()))?;
-    anyhow::ensure!(analysis.is_dir(), "scope path {} is not a directory", rel_path.display());
-    anyhow::ensure!(analysis.starts_with(&workspace), "scope path {} escapes the workspace", rel_path.display());
+    anyhow::ensure!(
+        analysis.is_dir(),
+        "scope path {} is not a directory",
+        rel_path.display()
+    );
+    anyhow::ensure!(
+        analysis.starts_with(&workspace),
+        "scope path {} escapes the workspace",
+        rel_path.display()
+    );
     Ok(analysis)
 }
 
@@ -447,8 +473,11 @@ fn source_artifact_values(input: &Value, flavor: BuildFlavor) -> Vec<String> {
 
 fn default_source_artifacts(flavor: BuildFlavor) -> Vec<String> {
     match flavor {
-        BuildFlavor::ThreatModel => vec!["context".to_string(), "threat-model".to_string()],
-        BuildFlavor::RandoriPasta => vec!["none".to_string()],
+        BuildFlavor::ThreatModel => DEFAULT_THREAT_MODEL_SOURCES
+            .iter()
+            .map(|source| (*source).to_string())
+            .collect(),
+        BuildFlavor::RandoriPasta => vec!["source-code".to_string()],
     }
 }
 
@@ -488,10 +517,15 @@ fn reject_invalid_source_artifact_combo(sources: &[String]) -> Result<()> {
 }
 
 fn source_artifacts_for_context_mode(sources: Vec<String>, context_mode: &str) -> Vec<String> {
-    if context_mode == "off" && source_lists_match(&sources, &["context", "threat-model"]) {
+    if context_mode == "off" && default_context_sources(&sources) {
         return vec!["none".to_string()];
     }
     sources
+}
+
+fn default_context_sources(sources: &[String]) -> bool {
+    source_lists_match(sources, DEFAULT_THREAT_MODEL_SOURCES)
+        || source_lists_match(sources, &["context", "threat-model"])
 }
 
 fn source_lists_match(actual: &[String], expected: &[&str]) -> bool {
@@ -658,16 +692,20 @@ mod scope_resolution_tests {
         std::fs::create_dir_all(root.path().join("apps/api")).unwrap();
         save_scope_tree(root.path());
 
-        let by_id = read_build_roots(
-            &json!({"scope":"id:package-api-a1b2c3d4"}),
-            root.path(),
-        )
-        .unwrap();
+        let by_id =
+            read_build_roots(&json!({"scope":"id:package-api-a1b2c3d4"}), root.path()).unwrap();
         let by_path = read_build_roots(&json!({"scope":"path:apps/api"}), root.path()).unwrap();
 
         assert_eq!(by_id.scope, by_path.scope);
-        assert_eq!(by_id.analysis_root, root.path().join("apps/api").canonicalize().unwrap());
-        assert!(by_id.scope.unwrap().project_model_sha256.starts_with("sha256:"));
+        assert_eq!(
+            by_id.analysis_root,
+            root.path().join("apps/api").canonicalize().unwrap()
+        );
+        assert!(by_id
+            .scope
+            .unwrap()
+            .project_model_sha256
+            .starts_with("sha256:"));
     }
 
     #[test]
@@ -694,6 +732,9 @@ mod scope_resolution_tests {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("scope directory apps/api is missing"), "{error}");
+        assert!(
+            error.contains("scope directory apps/api is missing"),
+            "{error}"
+        );
     }
 }

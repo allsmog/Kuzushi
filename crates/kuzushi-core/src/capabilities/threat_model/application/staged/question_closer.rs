@@ -37,12 +37,18 @@ pub(crate) fn run_question_closer(
     input: &BuildInput,
     evidence_index: &BTreeSet<String>,
     document: &mut Value,
+    code_evidence: &CodeEvidence,
 ) -> Result<QuestionCloserOutcome> {
     let questions = open_question_texts(document);
     if questions.is_empty() {
         return Ok(QuestionCloserOutcome::skipped("none-needed", 0));
     }
-    let prompt = question_closer_prompt(input, &questions, evidence_index, document);
+    let prompt = code_evidence.append_to(question_closer_prompt(
+        input,
+        &questions,
+        evidence_index,
+        document,
+    ));
     let costed = query_question_closer(runtime, ctx, input, verb, questions.len(), prompt)?;
     let questions_closed = fold_answered_questions(document, &costed.value, evidence_index);
     Ok(QuestionCloserOutcome {
@@ -146,7 +152,7 @@ fn question_closer_prompt(
 Open questions:
 {question_lines}
 
-Citable evidence anchors — every evidenceRefs entry MUST be copied verbatim from this list:
+Citable evidence anchors — copy evidenceRefs verbatim from this list or a `ref` in the attached source-code section:
 {anchor_lines}
 
 Threats in the model (for foldInto="controls", threatStableId MUST be one of these stable ids):
@@ -287,7 +293,10 @@ fn remove_open_question(document: &mut Value, question: &str) -> bool {
 }
 
 fn apply_answer(document: &mut Value, row: &Value, question: &str, answer: &str, refs: &[String]) {
-    let fold_into = row.get("foldInto").and_then(Value::as_str).unwrap_or("context");
+    let fold_into = row
+        .get("foldInto")
+        .and_then(Value::as_str)
+        .unwrap_or("context");
     if fold_into == "controls" {
         if let Some(threat) = matched_threat_mut(document, row) {
             push_control(threat, question, answer, refs);
@@ -304,9 +313,9 @@ fn matched_threat_mut<'a>(document: &'a mut Value, row: &Value) -> Option<&'a mu
         .as_array_mut()?
         .iter_mut()
         .find(|threat| {
-            ["stableId", "id"].iter().any(|key| {
-                threat.get(*key).and_then(Value::as_str) == Some(target)
-            })
+            ["stableId", "id"]
+                .iter()
+                .any(|key| threat.get(*key).and_then(Value::as_str) == Some(target))
         })
 }
 
@@ -331,7 +340,10 @@ fn push_control(threat: &mut Value, question: &str, answer: &str, refs: &[String
 
 fn push_context_note(document: &mut Value, question: &str, answer: &str, refs: &[String]) {
     ensure_array(document, "contextNotes");
-    if let Some(notes) = document.get_mut("contextNotes").and_then(Value::as_array_mut) {
+    if let Some(notes) = document
+        .get_mut("contextNotes")
+        .and_then(Value::as_array_mut)
+    {
         notes.push(json!({
             "note": answer,
             "question": question,
@@ -398,7 +410,11 @@ mod tests {
         });
         let closed = fold_answered_questions(&mut document, &response, &index());
         assert_eq!(closed, 1);
-        assert_eq!(open_question_texts(&document).len(), 1, "the CI question stays open");
+        assert_eq!(
+            open_question_texts(&document).len(),
+            1,
+            "the CI question stays open"
+        );
         let threat = &document["threats"][0];
         assert_eq!(
             threat["existingMitigations"][0],

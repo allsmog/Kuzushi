@@ -56,7 +56,7 @@ fn lifecycle_and_evidence_labels_use_recorded_finding_state() {
     finding.corroboration_count = 2;
 
     assert_eq!(lifecycle_status_label(&finding), "statically_supported");
-    assert_eq!(evidence_state_label(&finding), "corroborated");
+    assert_eq!(evidence_state_label(&finding), "multiple observations");
 }
 
 #[test]
@@ -349,4 +349,13 @@ fn finding(rule: &str, line: u32, message: &str) -> Finding {
         Severity::High,
         message,
     )
+}
+
+#[test]
+fn repeated_observations_do_not_claim_corroborated_proof() {
+    let mut candidate = finding("repeat", 12, "unverified candidate");
+    candidate.corroboration_count = 2;
+    assert_eq!(evidence_state_label(&candidate), "multiple observations");
+    assert_eq!(lifecycle_status_label(&candidate), "candidate");
+    assert!(candidate.static_proof_state.is_none());
 }

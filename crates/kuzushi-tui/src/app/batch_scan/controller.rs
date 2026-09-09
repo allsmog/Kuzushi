@@ -1,6 +1,6 @@
 use super::launch::{prepare_batch_launch, resolve_config_workers, PreparedBatchLaunch};
 use super::worker_resolution::BatchWorkerResolution;
-use super::BatchScanConfig;
+use super::{BatchScanConfig, BatchScanConfigRow};
 use crate::app::state_transitions::{InputUpdate, ViewHotkeyAction};
 use crate::app::{ShellApp, ShellView};
 use kuzushi_core::findings::derive_batch_occurrence_report;
@@ -16,6 +16,7 @@ impl ShellApp {
             Some(BatchScanConfig::load(&target, prior_run_id));
         self.refresh_batch_worker_resolution();
         self.set_shell_view(ShellView::Campaign);
+        self.set_input_mode(crate::app::InputMode::Navigate);
         self.log("batch", "scan-batch configurator");
     }
 
@@ -46,9 +47,9 @@ impl ShellApp {
 
     fn apply_batch_edit_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
         match action {
-            ViewHotkeyAction::CampaignCycleWorkers => {
-                Some(self.edit_batch_config_and_resolve(BatchScanConfig::cycle_workers))
-            }
+            ViewHotkeyAction::CampaignCycleWorkers => Some(self.edit_batch_config(|config| {
+                config.begin_number_edit(BatchScanConfigRow::Workers);
+            })),
             ViewHotkeyAction::CampaignOpenDetail => Some(self.activate_batch_config_row()),
             _ => None,
         }
@@ -67,15 +68,6 @@ impl ShellApp {
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
             edit(config);
         }
-        InputUpdate::handled()
-    }
-
-    fn edit_batch_config_and_resolve(
-        &mut self,
-        edit: impl FnOnce(&mut BatchScanConfig),
-    ) -> InputUpdate {
-        self.edit_batch_config(edit);
-        self.refresh_batch_worker_resolution();
         InputUpdate::handled()
     }
 
@@ -110,6 +102,9 @@ impl ShellApp {
 
     fn confirmed_batch_config(&mut self) -> Option<BatchScanConfig> {
         let config = self.router.campaign_mut().batch_scan_config.as_mut()?;
+        if config.number_edit.is_some() {
+            return None;
+        }
         if config.needs_large_batch_review() && !config.review_armed {
             config.arm_review();
             return None;
@@ -136,7 +131,7 @@ impl ShellApp {
         }
     }
 
-    fn close_batch_config(&mut self) -> InputUpdate {
+    pub(super) fn close_batch_config(&mut self) -> InputUpdate {
         self.router.campaign_mut().batch_scan_config = None;
         self.open_campaign_view(None);
         InputUpdate::handled()
@@ -156,7 +151,7 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn refresh_batch_worker_resolution(&mut self) {
+    pub(super) fn refresh_batch_worker_resolution(&mut self) {
         let Some((target, config)) = self
             .target_owned()
             .zip(self.router.campaign().batch_scan_config.clone())

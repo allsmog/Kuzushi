@@ -398,7 +398,7 @@ fn risk_order(left: &AttackSurface, right: &AttackSurface) -> std::cmp::Ordering
 }
 
 pub(crate) fn attack_surface_id(surface: &AttackSurface) -> String {
-    let metadata = serde_json::to_string(&surface.metadata).unwrap_or_else(|_| "{}".to_string());
+    let metadata = surface_identity_metadata(&surface.metadata);
     let segments = [
         surface.kind.as_str(),
         &surface.path,
@@ -417,6 +417,14 @@ pub(crate) fn attack_surface_id(surface: &AttackSurface) -> String {
     ];
     let body = segments.join("\0");
     format!("AS-{}", &static_content_hash(&body)[..16])
+}
+
+fn surface_identity_metadata(metadata: &Value) -> String {
+    let mut identity = metadata.clone();
+    if let Some(fields) = identity.as_object_mut() {
+        fields.remove("sourcePolicy");
+    }
+    serde_json::to_string(&identity).unwrap_or_else(|_| "{}".to_string())
 }
 
 pub(crate) fn language_from_path(path: &str) -> Option<&'static str> {

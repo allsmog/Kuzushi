@@ -244,4 +244,6 @@ wait_for_file() { # <path>
 
 test_tmux_session_keeps_exact_operator_binary_identity
 
+bash "$SCRIPT_DIR/test-required-snap.sh"
+
 printf 'PASS: DevEx harness contracts\n'

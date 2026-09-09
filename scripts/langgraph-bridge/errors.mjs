@@ -39,6 +39,17 @@ export function providerHttpError(status) {
   return new BridgePublicError(errorClassForStatus(status), status);
 }
 
+export async function providerResponseError(response) {
+  const error = providerHttpError(response.status);
+  try {
+    const payload = JSON.parse((await response.text()).slice(0, 16_384));
+    error.detail = unavailableModelDetail(error.errorClass, payload);
+  } catch {
+    // A missing or malformed error body must not hide the known HTTP status.
+  }
+  return error;
+}
+
 export function invalidProviderResponseError() {
   return new BridgePublicError("provider_response_invalid");
 }
@@ -59,10 +70,25 @@ export function bridgeErrorResponse(error) {
 
 const ADAPTIVE_THINKING_DETAIL =
   "temperature is incompatible with adaptive thinking; omit the pinned temperature";
+const MODEL_UNAVAILABLE_DETAIL =
+  "The selected model is unavailable for this provider or account. Choose an available model explicitly.";
+
+function unavailableModelDetail(errorClass, payload) {
+  if (errorClass !== "provider_rejected") return undefined;
+  const message = payload?.error?.message ?? payload?.detail;
+  const text = typeof message === "string" ? message.toLowerCase() : "";
+  const unavailable = /\bmodel(?: ['"][^'"]{1,128}['"])? is not supported\b/.test(text);
+  return payload?.error?.code === "model_not_found" || unavailable
+    ? MODEL_UNAVAILABLE_DETAIL
+    : undefined;
+}
 
 /** Only canonical operator guidance crosses the durable protocol. Raw SDK and
  * provider messages may contain proprietary source even after secret redaction. */
 export function bridgeErrorDetail(error, errorClass) {
+  if (error instanceof BridgePublicError && errorClass === "provider_rejected") {
+    return error.detail === MODEL_UNAVAILABLE_DETAIL ? MODEL_UNAVAILABLE_DETAIL : undefined;
+  }
   if (errorClass !== "sdk_client_validation") return undefined;
   const message = boundedLower(error?.message);
   return message.includes("temperature") && message.includes("thinking")

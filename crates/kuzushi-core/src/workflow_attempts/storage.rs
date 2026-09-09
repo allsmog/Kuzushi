@@ -211,6 +211,7 @@ fn append_validated_event(target: &Path, event: PhaseAttemptEvent) -> Result<Pat
 
 fn validate_appended_event(target: &Path, event: &PhaseAttemptEvent) -> Result<()> {
     let mut events = load_phase_attempt_events(target)?;
+    super::phase_result_policy::ensure_event_is_phase_result(target, event, &events)?;
     events.push(event.clone());
     PhaseAttemptLedger::from_events(events).map(|_| ())
 }

@@ -128,7 +128,17 @@ impl ShellApp {
         self.is_picker_view()
             && (!picker_shell_chord(key.modifiers)
                 || self.credential_picker_owns_shell_chord(key)
-                || self.planning_picker_owns_shell_chord(key))
+                || self.planning_picker_owns_shell_chord(key)
+                || self.planning_option_editor_owns_key(key)
+                || self.budget_editor_owns_key(key)
+                || self.map_text_editor_owns_key(key)
+                || self.file_picker_owns_edit_key(key))
+    }
+
+    fn file_picker_owns_edit_key(&self, key: KeyEvent) -> bool {
+        self.shell_view() == ShellView::FilePicker
+            && !(key.modifiers == KeyModifiers::CONTROL
+                && matches!(key.code, KeyCode::Char('c' | 'd')))
     }
 
     fn planning_picker_owns_shell_chord(&self, key: KeyEvent) -> bool {
@@ -256,7 +266,7 @@ impl ShellApp {
         }
         let code = key.code;
         if self.router.setup().editor() == Some(SetupEditor::Budget) {
-            return self.handle_setup_budget_key(code);
+            return self.handle_setup_budget_key(key);
         }
         match code {
             KeyCode::Up => {
@@ -277,8 +287,11 @@ impl ShellApp {
     }
 
     fn handle_map_run_config_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if self.router.setup().map_run_config().edit().is_some() {
-            return self.handle_map_run_text_key(key);
+        if self.map_scope_picker_open() {
+            return self.handle_map_scope_key(key);
+        }
+        if self.router.setup().map_run_config().text().is_some() {
+            return self.handle_map_text_key(key);
         }
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
@@ -294,24 +307,11 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn handle_map_run_text_key(&mut self, key: KeyEvent) -> InputUpdate {
-        match key.code {
-            KeyCode::Enter => return self.commit_map_run_text_input(),
-            KeyCode::Esc => self.router.setup_mut().map_run_config_mut().finish_edit(),
-            KeyCode::Backspace => self.router.setup_mut().map_run_config_mut().pop_char(),
-            KeyCode::Char(ch) if key.modifiers.is_empty() => {
-                self.router.setup_mut().map_run_config_mut().push_char(ch)
-            }
-            _ => return InputUpdate::handled(),
-        }
-        InputUpdate::handled()
-    }
-
     fn activate_map_run_config_row(&mut self) -> InputUpdate {
         let row = self.router.setup().map_run_config().row();
         let result = match row {
             crate::app::MapRunConfigRowId::Methodology => self.cycle_map_methodology(),
-            crate::app::MapRunConfigRowId::Scope => self.cycle_map_scope(),
+            crate::app::MapRunConfigRowId::Scope => self.open_map_scope_picker(),
             crate::app::MapRunConfigRowId::DesignDocs | crate::app::MapRunConfigRowId::Context => {
                 self.begin_map_text_edit(row);
                 return InputUpdate::handled();
@@ -321,13 +321,13 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn commit_map_run_text_input(&mut self) -> InputUpdate {
+    pub(super) fn commit_map_run_text_input(&mut self) -> InputUpdate {
         let result = self.commit_map_text_edit();
         self.set_map_run_config_result(result);
         InputUpdate::handled()
     }
 
-    fn set_map_run_config_result(&mut self, result: anyhow::Result<()>) {
+    pub(super) fn set_map_run_config_result(&mut self, result: anyhow::Result<()>) {
         match result {
             Ok(()) => self.router.setup_mut().map_run_config_mut().clear_error(),
             Err(error) => self
@@ -336,67 +336,6 @@ impl ShellApp {
                 .map_run_config_mut()
                 .set_error(format!("{error:#}")),
         }
-    }
-
-    fn handle_setup_budget_key(&mut self, code: KeyCode) -> InputUpdate {
-        match code {
-            KeyCode::Enter => self.commit_setup_budget(),
-            KeyCode::Esc => {
-                self.router.setup_mut().finish_editor();
-                InputUpdate::handled()
-            }
-            KeyCode::Backspace => {
-                self.router.setup_mut().pop_budget_char();
-                InputUpdate::handled()
-            }
-            KeyCode::Delete => {
-                self.router.setup_mut().clear_budget_draft();
-                InputUpdate::handled()
-            }
-            KeyCode::Char(ch) if ch.is_ascii_digit() || ch == '.' => {
-                self.router.setup_mut().push_budget_char(ch);
-                InputUpdate::handled()
-            }
-            _ => InputUpdate::handled(),
-        }
-    }
-
-    fn commit_setup_budget(&mut self) -> InputUpdate {
-        let draft = self.router.setup().budget_draft().trim().to_string();
-        if draft.is_empty() {
-            self.session_mut().set_session_budget_usd(None);
-            self.router.setup_mut().finish_editor();
-            self.log("setup", "session budget unset; spending is not capped");
-            return InputUpdate::handled();
-        }
-        let Ok(value) = draft.parse::<f64>() else {
-            self.router
-                .setup_mut()
-                .set_budget_error("enter a positive USD amount, or clear to leave unset");
-            return InputUpdate::handled();
-        };
-        if !value.is_finite() || value <= 0.0 {
-            self.router
-                .setup_mut()
-                .set_budget_error("budget must be a finite positive amount");
-            return InputUpdate::handled();
-        }
-        if self
-            .config()
-            .operator
-            .spend_hard_ceiling_usd
-            .is_some_and(|ceiling| value > ceiling)
-        {
-            let ceiling = self.config().operator.spend_hard_ceiling_usd.unwrap_or(0.0);
-            self.router
-                .setup_mut()
-                .set_budget_error(format!("budget exceeds the hard ceiling ${ceiling:.2}"));
-            return InputUpdate::handled();
-        }
-        self.session_mut().set_session_budget_usd(Some(value));
-        self.router.setup_mut().finish_editor();
-        self.log("setup", format!("session budget set to ${value:.2}"));
-        InputUpdate::handled()
     }
 
     fn activate_setup_row(&mut self) -> InputUpdate {
@@ -516,14 +455,24 @@ impl ShellApp {
     }
 
     fn move_model_picker_cursor(&mut self, delta: isize) {
-        let len = visible_model_choices(self.config()).len();
-        self.router.model_picker_mut().move_cursor(delta, len);
+        let choices = visible_model_choices(self.config());
+        let ids = choices.iter().map(|choice| choice.id).collect::<Vec<_>>();
+        self.router.model_picker_mut().move_selection(delta, &ids);
     }
 
     fn accept_model_picker_choice(&mut self) -> Vec<ShellEffect> {
-        let choices = visible_model_choices(self.config());
-        let Some(choice) = choices.get(self.router.model_picker().cursor()).copied() else {
-            self.log("error", "no model choices available");
+        let choice = self
+            .router
+            .model_picker()
+            .selected_id()
+            .and_then(crate::app::model_choice_index_by_id)
+            .and_then(|index| crate::app::model_choices().get(index))
+            .filter(|choice| choice.catalog_note.is_none());
+        let Some(choice) = choice else {
+            self.log(
+                "error",
+                "selected model is not offered; reopen /model and choose a current model",
+            );
             return Vec::new();
         };
         self.config_mut().model = Some(choice.id.to_string());
@@ -531,7 +480,7 @@ impl ShellApp {
         self.log(
             "model",
             format!(
-                "{} selected via onboarding (saved as the global model)",
+                "{} selected; saving as the global model",
                 display_model_selector(choice.id),
             ),
         );
@@ -543,6 +492,9 @@ impl ShellApp {
     }
 
     fn transition_after_model_choice(&mut self, provider: &'static str) {
+        if self.restore_model_picker_config_origin() {
+            return;
+        }
         if self.router.setup().editor() == Some(SetupEditor::Model) {
             self.return_to_setup_from_editor();
             return;
@@ -628,15 +580,25 @@ impl ShellApp {
     }
 
     fn defer_model_picker(&mut self) {
-        self.log(
-            "onboarding",
-            "model selection deferred — set one with `model <id>`, or run `demo` for the offline fixture",
-        );
+        self.log("onboarding", "model selection unchanged");
+        if self.restore_model_picker_config_origin() {
+            return;
+        }
         if self.router.setup().editor() == Some(SetupEditor::Model) {
             self.return_to_setup_from_editor();
         } else {
             self.open_workbench();
         }
+    }
+
+    pub(super) fn close_model_picker_if_open(&mut self) -> bool {
+        if self.shell_view() != ShellView::Setup
+            || self.router.setup().editor() != Some(SetupEditor::Model)
+        {
+            return false;
+        }
+        self.defer_model_picker();
+        true
     }
 
     fn handle_auth_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -903,44 +865,13 @@ impl ShellApp {
     }
 
     fn handle_planning_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if self.handle_planning_option_edit_key(key.code) {
+        if self.handle_planning_option_edit_key(key) {
             return InputUpdate::handled();
         }
         match self.engagement.planning_picker().focus() {
             PickerFocus::List => self.handle_planning_step_key(key.code),
             PickerFocus::OptionsPane => self.handle_planning_options_key(key),
             PickerFocus::Prompt => InputUpdate::ignored(),
-        }
-    }
-
-    fn handle_planning_option_edit_key(&mut self, code: KeyCode) -> bool {
-        if self.engagement.planning_picker().option_edit().is_none() {
-            return false;
-        }
-        match code {
-            KeyCode::Enter => {
-                self.commit_planning_option_edit();
-                true
-            }
-            KeyCode::Esc => {
-                self.cancel_planning_option_edit();
-                true
-            }
-            KeyCode::Backspace => {
-                self.backspace_planning_option_draft();
-                true
-            }
-            KeyCode::Delete => {
-                if let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() {
-                    edit.draft.clear();
-                }
-                true
-            }
-            KeyCode::Char(ch) if !ch.is_control() => {
-                self.edit_planning_option_draft(ch);
-                true
-            }
-            _ => true,
         }
     }
 
@@ -1642,22 +1573,22 @@ mod tests {
 
         assert!(app.reduce_key(plain_key(KeyCode::Char('q'))).handled);
         assert!(app.input().is_empty());
-        assert!(app.router.setup().budget_draft().is_empty());
+        assert_eq!(app.router.setup().budget_draft(), "q");
 
         app.set_shell_view(ShellView::PlanningPicker);
         app.engagement
             .planning_picker_mut()
-            .set_option_edit(Some(PlanningOptionEdit {
-                task: PlanningTaskId::GatherRepoContext,
-                option_name: "scope".to_string(),
-                draft: String::new(),
-            }));
+            .set_option_edit(Some(PlanningOptionEdit::new(
+                PlanningTaskId::GatherRepoContext,
+                "scope",
+                "",
+            )));
         assert!(app.reduce_key(plain_key(KeyCode::Char(':'))).handled);
         assert_eq!(
             app.engagement
                 .planning_picker()
                 .option_edit()
-                .map(|edit| edit.draft.as_str()),
+                .map(|edit| edit.field.text()),
             Some(":")
         );
         assert!(app.input().is_empty());

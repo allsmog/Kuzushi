@@ -49,6 +49,8 @@ fn model_auth_status_reports_choice_auth_for_unknown_provider() {
         label: "local demo",
         thinking_level: "default",
         auth: "manual",
+        aliases: &[],
+        catalog_note: None,
     };
 
     let app = ShellApp::new(V2Config::default(), None);

@@ -137,6 +137,9 @@ fn review_specs(model: &ReviewPhaseModel) -> Vec<PhaseSurfaceSpec> {
 }
 
 fn prove_specs(model: &ProvePhaseModel) -> Vec<PhaseSurfaceSpec> {
+    if model.pending_result.is_some() {
+        return vec![scrollable(PhaseSurfaceId::ProveResult)];
+    }
     let mut specs = vec![scrollable_with_state(
         PhaseSurfaceId::ProveStatus,
         presence_state(model.finding.is_some()),
@@ -161,12 +164,12 @@ fn prove_specs(model: &ProvePhaseModel) -> Vec<PhaseSurfaceSpec> {
     push_if(
         &mut specs,
         model.investigation.is_some(),
-        selectable(PhaseSurfaceId::ProveInvestigation),
+        scrollable(PhaseSurfaceId::ProveInvestigation),
     );
     push_if(
         &mut specs,
         model.trace.is_some(),
-        selectable(PhaseSurfaceId::ProveTrace),
+        scrollable(PhaseSurfaceId::ProveTrace),
     );
     specs
 }

@@ -80,22 +80,6 @@ impl ShellApp {
         }
     }
 
-    /// Recompute only the workspace trend (the Report route renders the same
-    /// strip as the deck) without disturbing deck cursor or campaign state.
-    pub(crate) fn refresh_workspace_trend(&mut self) {
-        let Some(target) = self.target_path_buf().cloned() else {
-            return;
-        };
-        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
-            self.review_decisions(),
-            kuzushi_core::capabilities::campaign::trend::workspace_campaign_spend_report(&target),
-        );
-        let history = refresh_trend_history(&target, &trend);
-        let deck = self.router.campaign_mut();
-        deck.trend = Some(trend);
-        deck.trend_history = history;
-    }
-
     pub(crate) fn apply_campaign_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
         if self.router.campaign().batch_scan_config.is_some() {
             return self.apply_batch_scan_hotkey(action);
@@ -613,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn deck_refresh_and_report_entry_both_fold_the_workspace_trend() {
+    fn deck_refresh_folds_campaign_spend_and_report_entry_keeps_it_separate() {
         let (_temp, mut app) = deck_app();
 
         app.open_campaign_view(None);
@@ -621,11 +605,14 @@ mod tests {
         assert_eq!(trend.campaign_spend_usd, 0.25);
         assert_eq!(trend.decided_findings, 0);
 
-        // Report entry recomputes from disk without needing the deck open.
+        // Report uses asynchronously hydrated run records. Opening it must
+        // not promote campaign-only spend to a workspace total or write trend history.
         app.router.campaign_mut().trend = None;
+        let history = app.router.campaign().trend_history.clone();
         app.open_report_from_current_origin();
-        let trend = app.router.campaign().trend.expect("report trend");
-        assert_eq!(trend.campaign_spend_usd, 0.25);
+        assert!(app.router.campaign().trend.is_none());
+        assert_eq!(app.router.campaign().trend_history, history);
+        assert_eq!(app.shell_view(), ShellView::Report);
     }
 
     #[cfg(unix)]

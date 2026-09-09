@@ -13,7 +13,7 @@ use crate::scene3d::{
     SceneLabel, VizPage, BACKGROUND,
 };
 use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model, entry_point_breakdown};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Paragraph, Wrap};
@@ -24,10 +24,7 @@ const CAM_DISTANCE: f32 = 4.2;
 /// (half-block framebuffer) and the two Canvas diagrams (DFD graph, attack
 /// tree). The line-based pages never reach here.
 pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0)])
-        .split(area);
+    let outer = super::gallery_layout::gallery_sections(area, false);
     frame.render_widget(
         Paragraph::new(gallery_header_lines(app, area.width as usize)),
         outer[0],
@@ -43,10 +40,7 @@ pub(crate) fn render_embedded_map_gallery(
     app: &ShellApp,
     line_scroll: u16,
 ) {
-    let outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(0)])
-        .split(area);
+    let outer = super::gallery_layout::gallery_sections(area, true);
     frame.render_widget(
         Paragraph::new(map_gallery_header_lines(app, area.width as usize)),
         outer[0],

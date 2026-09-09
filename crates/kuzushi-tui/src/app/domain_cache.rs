@@ -360,6 +360,18 @@ impl DomainCache {
         self.agent_chat.current()
     }
 
+    pub(super) fn agent_chat_state_mut(&mut self) -> &mut AgentChatState {
+        &mut self.agent_chat
+    }
+
+    pub(crate) fn agent_chat_history(&self) -> &[AgentChatView] {
+        self.agent_chat.history()
+    }
+
+    pub(crate) fn agent_chat_generation(&self) -> u64 {
+        self.agent_chat.generation()
+    }
+
     pub(crate) fn agent_chat_mut(&mut self) -> Option<&mut AgentChatView> {
         self.agent_chat.current_mut()
     }
@@ -579,25 +591,9 @@ impl DomainCache {
             .filter(|snapshot| snapshot.finding_fingerprint == fingerprint)
     }
 
-    /// Replace the cached expansion. Steps come from the durable
-    /// static-evidence store; when the store has steps but this session has
-    /// no advisory copy yet, the previous snapshot's open questions and
-    /// evidence deltas are retained if it described the same finding.
+    /// Replace the complete outcome, including newly resolved empty note lists.
     pub(crate) fn set_trace_expansion(&mut self, snapshot: Option<TraceExpansionSnapshot>) {
-        self.trace_expansion = match (snapshot, self.trace_expansion.take()) {
-            (Some(mut next), Some(previous))
-                if next.finding_fingerprint == previous.finding_fingerprint =>
-            {
-                if next.open_questions.is_empty() {
-                    next.open_questions = previous.open_questions;
-                }
-                if next.evidence_deltas.is_empty() {
-                    next.evidence_deltas = previous.evidence_deltas;
-                }
-                Some(next)
-            }
-            (next, _) => next,
-        };
+        self.trace_expansion = snapshot;
     }
 
     pub(crate) fn taint_flow_for_finding(&self, finding: &Finding) -> Option<&TaintFlowSnapshot> {

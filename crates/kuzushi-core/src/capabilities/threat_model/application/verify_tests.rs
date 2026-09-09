@@ -69,7 +69,7 @@ fn catalog_surface(index: usize) -> crate::attack_surface::AttackSurface {
             tier: "high".to_string(),
             reasons: vec!["test ingress".to_string()],
         },
-        metadata: Value::Null,
+        metadata: json!({"sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY}),
     };
     surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
     surface

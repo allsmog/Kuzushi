@@ -8,6 +8,9 @@ pub(crate) struct ModelChoice {
     pub provider: &'static str,
     pub auth: &'static str,
     pub thinking_level: &'static str,
+    pub aliases: &'static [&'static str],
+    /// Legacy selectors stay resolvable without being offered as suggestions.
+    pub catalog_note: Option<&'static str>,
 }
 
 pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
@@ -18,22 +21,88 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
         provider: "openai",
         auth: "OPENAI_API_KEY",
         thinking_level: "xhigh",
+        aliases: &["gpt-5.5", "5.5"],
+        catalog_note: None,
     },
     ModelChoice {
-        index: 2,
-        id: "openai:gpt-5.5-mini",
-        label: "GPT-5.5 mini",
+        index: 11,
+        id: "openai:gpt-5.4-mini",
+        label: "GPT-5.4 mini",
         provider: "openai",
         auth: "OPENAI_API_KEY",
         thinking_level: "high",
+        aliases: &["gpt-5.4-mini", "5.4-mini"],
+        catalog_note: None,
     },
     ModelChoice {
-        index: 3,
-        id: "openai-codex:gpt-5.4",
-        label: "OpenAI OAuth GPT-5.4",
+        index: 7,
+        id: "openai-codex:gpt-5.6-terra",
+        label: "OpenAI OAuth GPT-5.6 Terra",
         provider: "openai-codex",
         auth: "OAuth",
-        thinking_level: "xhigh",
+        thinking_level: "medium",
+        aliases: &[
+            "terra",
+            "gpt-5.6-terra",
+            "openai-oauth:gpt-5.6-terra",
+            "oauth:gpt-5.6-terra",
+        ],
+        catalog_note: None,
+    },
+    ModelChoice {
+        index: 8,
+        id: "openai-codex:gpt-5.6-sol",
+        label: "OpenAI OAuth GPT-5.6 Sol",
+        provider: "openai-codex",
+        auth: "OAuth",
+        thinking_level: "medium",
+        aliases: &[
+            "sol",
+            "gpt-5.6-sol",
+            "openai-oauth:gpt-5.6-sol",
+            "oauth:gpt-5.6-sol",
+        ],
+        catalog_note: None,
+    },
+    ModelChoice {
+        index: 9,
+        id: "openai-codex:gpt-5.6-luna",
+        label: "OpenAI OAuth GPT-5.6 Luna",
+        provider: "openai-codex",
+        auth: "OAuth",
+        thinking_level: "medium",
+        aliases: &[
+            "luna",
+            "gpt-5.6-luna",
+            "openai-oauth:gpt-5.6-luna",
+            "oauth:gpt-5.6-luna",
+        ],
+        catalog_note: None,
+    },
+    ModelChoice {
+        index: 10,
+        id: "openai-codex:gpt-6-astra",
+        label: "OpenAI OAuth GPT-6 Astra",
+        provider: "openai-codex",
+        auth: "OAuth",
+        thinking_level: "medium",
+        aliases: &[
+            "astra",
+            "gpt-6-astra",
+            "openai-oauth:gpt-6-astra",
+            "oauth:gpt-6-astra",
+        ],
+        catalog_note: None,
+    },
+    ModelChoice {
+        index: 12,
+        id: "openai-codex:gpt-5.5",
+        label: "OpenAI OAuth GPT-5.5",
+        provider: "openai-codex",
+        auth: "OAuth",
+        thinking_level: "medium",
+        aliases: &["openai-oauth:gpt-5.5", "oauth:gpt-5.5"],
+        catalog_note: None,
     },
     ModelChoice {
         index: 4,
@@ -42,6 +111,13 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
         provider: "openai-codex",
         auth: "OAuth (ChatGPT Pro preview access)",
         thinking_level: "high",
+        aliases: &[
+            "spark",
+            "gpt-5.3-codex-spark",
+            "openai-oauth:gpt-5.3-codex-spark",
+            "oauth:gpt-5.3-codex-spark",
+        ],
+        catalog_note: None,
     },
     ModelChoice {
         index: 5,
@@ -50,6 +126,8 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
         provider: "anthropic",
         auth: "ANTHROPIC_API_KEY or OAuth",
         thinking_level: "high",
+        aliases: &["sonnet", "claude-sonnet", "claude-sonnet-4-6"],
+        catalog_note: None,
     },
     ModelChoice {
         index: 6,
@@ -58,6 +136,30 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
         provider: "anthropic",
         auth: "ANTHROPIC_API_KEY or OAuth",
         thinking_level: "xhigh",
+        aliases: &["opus", "claude-opus", "claude-opus-4-7"],
+        catalog_note: None,
+    },
+    ModelChoice {
+        index: 2,
+        id: "openai:gpt-5.5-mini",
+        label: "GPT-5.5 mini",
+        provider: "openai",
+        auth: "OPENAI_API_KEY",
+        thinking_level: "high",
+        aliases: &["gpt-5.5-mini", "5.5-mini", "mini"],
+        catalog_note: Some("Not in the current reference catalog; availability is unverified."),
+    },
+    ModelChoice {
+        index: 3,
+        id: "openai-codex:gpt-5.4",
+        label: "OpenAI OAuth GPT-5.4",
+        provider: "openai-codex",
+        auth: "OAuth",
+        thinking_level: "xhigh",
+        aliases: &["openai-oauth:gpt-5.4", "oauth:gpt-5.4"],
+        catalog_note: Some(
+            "Retired for ChatGPT sign-in on August 31, 2026. Choose a current model.",
+        ),
     },
 ];
 
@@ -75,7 +177,7 @@ pub(crate) fn oauth_model_switch_for_provider(provider: &str) -> Option<AuthMode
     }
     MODEL_CHOICES
         .iter()
-        .find(|choice| choice.provider == oauth_provider)
+        .find(|choice| choice.provider == oauth_provider && choice.catalog_note.is_none())
         .map(|choice| AuthModelSwitch {
             model: choice.id.to_string(),
             thinking_level: choice.thinking_level.to_string(),
@@ -83,15 +185,10 @@ pub(crate) fn oauth_model_switch_for_provider(provider: &str) -> Option<AuthMode
 }
 
 pub(crate) fn visible_model_choice_indexes(config: &V2Config) -> Vec<usize> {
-    let configured = config.model.as_deref();
-    let canonical =
-        configured.and_then(|model| kuzushi_core::runtime::canonical_model_spec(model).ok());
-    let configured_model = canonical.as_deref().or(configured);
-    let preferred = configured_model
-        .and_then(model_choice_index_by_id)
-        .unwrap_or_else(|| visible_primary_openai_choice(config, configured_model));
+    let preferred = preferred_model_choice_index(config);
     std::iter::once(preferred)
         .chain((0..MODEL_CHOICES.len()).filter(|index| *index != preferred))
+        .filter(|index| MODEL_CHOICES[*index].catalog_note.is_none())
         .collect()
 }
 
@@ -102,17 +199,15 @@ pub(crate) fn visible_model_choices(config: &V2Config) -> Vec<&'static ModelChoi
         .collect()
 }
 
-fn visible_primary_openai_choice(config: &V2Config, configured_model: Option<&str>) -> usize {
-    match configured_model {
-        Some("openai-codex:gpt-5.3-codex-spark") => 3,
-        Some("openai-codex:gpt-5.4") => 2,
-        Some("openai:gpt-5.5") => 0,
-        _ if auth_ready_for_provider(config, "openai-codex") => 2,
-        _ => 0,
+pub(crate) fn model_catalog_note(model: &str) -> Option<&'static str> {
+    match model_choice_index_by_id(model) {
+        Some(index) => MODEL_CHOICES[index].catalog_note,
+        None => Some("Not in the current reference catalog; availability is unverified."),
     }
 }
 
 pub(crate) fn display_model_selector(model: &str) -> String {
+    let model = model.trim();
     model
         .strip_prefix("openai-codex:")
         .map(|name| format!("openai-oauth:{name}"))
@@ -136,15 +231,13 @@ pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {
     )
 }
 
-/// Cursor position inside the *visible* onboarding list for the preferred
-/// model. The preferred selector above intentionally returns an index into
-/// `MODEL_CHOICES`; the picker renders a reordered subset, so feeding that
-/// absolute index directly to its cursor can highlight one row while Enter
-/// selects another.
-pub(crate) fn preferred_visible_model_choice_cursor(config: &V2Config) -> usize {
-    let preferred = preferred_model_choice_index(config);
-    visible_model_choice_indexes(config)
+pub(crate) fn model_picker_cursor(app: &ShellApp) -> usize {
+    let selected = app.router.model_picker().selected_id();
+    visible_model_choices(app.config())
         .iter()
-        .position(|index| *index == preferred)
+        .position(|choice| Some(choice.id) == selected)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests;

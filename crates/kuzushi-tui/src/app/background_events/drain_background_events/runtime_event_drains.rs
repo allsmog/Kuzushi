@@ -1,6 +1,17 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+mod phase_result_destination;
+#[cfg(test)]
+mod planner_result_tests;
+mod receipt_notice;
+#[cfg(test)]
+mod setup_map_result_tests;
+#[cfg(test)]
+mod trace_phase_result_tests;
+#[cfg(test)]
+mod trace_return_tests;
+
 const EVENT_DRAIN_LIMIT: usize = 256;
 pub(super) const TRACE_DRAIN_LIMIT: usize = 512;
 pub(super) const JOB_DRAIN_LIMIT: usize = EVENT_DRAIN_LIMIT + TRACE_DRAIN_LIMIT;
@@ -37,6 +48,7 @@ impl ShellApp {
         self.reap_worker_handles()
             | self.cancel_timed_out_workers()
             | self.apply_view_hydration_results()
+            | self.apply_answer_recovery()
             | self.apply_project_scope_discovery_results()
             | self.apply_target_candidate_discovery_results()
             | self.drain_idle_steer_queue()
@@ -226,9 +238,7 @@ impl ShellApp {
         // invalidates the view caches the deck renders from, so opening
         // earlier lands on an empty frame until manually reopened.
         if restored {
-            if let Some(page) = completion.pending_viz {
-                self.open_deferred_viz_page(page);
-            }
+            self.open_completed_run_destination(completion.origin, completion.pending_viz);
         }
         true
     }
@@ -263,27 +273,19 @@ impl ShellApp {
         }
         let origin = completion.origin.expect("restore decision requires origin");
         self.set_shell_view(origin.view);
-        self.set_input_mode(origin.input_mode);
+        self.set_input_mode(self.completed_reader_input_mode(origin.input_mode));
         true
     }
 
-    fn publish_run_focus_receipt(
-        &mut self,
-        receipt: Option<RunFocusReceipt>,
-        answer_acknowledgement: Option<&str>,
-    ) {
-        let Some(mut receipt) = receipt else {
-            return;
-        };
-        self.enrich_run_focus_receipt(&mut receipt);
-        let map_blocker = self.reconcile_durable_phase_outcome(&mut receipt);
-        self.tailor_phase_result_destination(&mut receipt);
-        apply_map_evidence_blocker(&mut receipt, map_blocker);
-        self.persist_phase_attempt(&mut receipt);
-        if let Some(session) = self.activity_mut() {
-            session.run_focus_receipt = Some(receipt.clone());
+    fn completed_reader_input_mode(&self, origin: InputMode) -> InputMode {
+        if !self.prove_detail_owns_controls() {
+            return origin;
         }
-        self.set_info_notice("run", run_receipt_notice(&receipt, answer_acknowledgement));
+        if self.input().is_empty() {
+            InputMode::Navigate
+        } else {
+            InputMode::Prompt
+        }
     }
 
     fn enrich_run_focus_receipt(&mut self, receipt: &mut RunFocusReceipt) {
@@ -324,7 +326,16 @@ impl ShellApp {
     /// The operator still selects the attempt before reality is re-derived;
     /// this only decides whether the card names the next phase or Report.
     fn tailor_phase_result_destination(&self, receipt: &mut RunFocusReceipt) {
+        receipt.origin_phase = self.receipt_phase_result_owner(receipt);
         let Some(phase) = receipt.origin_phase else {
+            receipt.attempt_id = None;
+            let policy = phase_result_policy(
+                None,
+                phase_attempt_outcome_from_label(&receipt.outcome),
+                false,
+            );
+            receipt.actions = policy.actions;
+            receipt.recommended_next = policy.recommended_next;
             return;
         };
         let report = phase_result_routes_to_report(self, receipt, phase);
@@ -336,6 +347,17 @@ impl ShellApp {
         );
         receipt.actions = policy.actions;
         receipt.recommended_next = policy.recommended_next;
+    }
+
+    fn receipt_phase_result_owner(&self, receipt: &RunFocusReceipt) -> Option<WorkflowPhase> {
+        let phase = receipt.origin_phase?;
+        let Some(target) = self.target() else {
+            return Some(phase);
+        };
+        (!self
+            .canonical_descriptor_run_refs(target, phase, &receipt.run_refs)
+            .is_empty())
+        .then_some(phase)
     }
 
     fn persist_phase_attempt(&mut self, receipt: &mut RunFocusReceipt) {
@@ -453,12 +475,8 @@ impl ShellApp {
         let summary = kuzushi_core::load_run_summary(target, run_id).ok()?;
         let tool = terminal_descriptor_run_tool(&summary)?;
         let descriptor = self.registry().resolve_tool(tool)?;
-        let classification = kuzushi_core::modules::autonomy::classify_descriptor(descriptor);
-        (classification
-            == Some(kuzushi_core::modules::autonomy::ToolClassification::Phase(
-                phase,
-            )))
-        .then_some(summary.run_id)
+        (kuzushi_core::modules::phase_result_phase(descriptor) == Some(phase))
+            .then_some(summary.run_id)
     }
 
     fn run_focus_sequence_is_settled(&self) -> bool {
@@ -896,6 +914,9 @@ fn run_receipt_notice(receipt: &RunFocusReceipt, answer_acknowledgement: Option<
         format!("{summary} · {acknowledgement}")
     })
 }
+
+#[cfg(test)]
+mod receipt_notice_tests;
 
 #[cfg(test)]
 mod operator_answer_notice_tests {
@@ -1430,7 +1451,8 @@ fn run_focus_event_outcome(event: &ShellEvent) -> String {
         | ShellEvent::Threat(ThreatPatchEvent::Proposed { .. } | ThreatPatchEvent::Answer { .. }) => {
             "completed"
         }
-        ShellEvent::RunItem(_)
+        ShellEvent::Agent(AgentEvent::ResponseText(_))
+        | ShellEvent::RunItem(_)
         | ShellEvent::RunItemsDurable { .. }
         | ShellEvent::RunItemsDerivativesApplied { .. }
         | ShellEvent::RunItemsFault { .. }

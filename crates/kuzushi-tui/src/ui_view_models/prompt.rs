@@ -43,6 +43,14 @@ fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
 }
 
 fn prompt_placeholder(app: &ShellApp, mode: Option<WorkbenchPage>) -> Option<String> {
+    if app.prove_detail_owns_controls() {
+        return app.input().is_empty().then(|| {
+            format!(
+                "type a command · Esc {}",
+                super::keybindings::reader_escape_label(app)
+            )
+        });
+    }
     app.input().is_empty().then(|| match mode {
         // The nav hint lives in the placeholder because that is where a
         // first-session operator is already looking when they wonder why
@@ -65,6 +73,9 @@ pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
 }
 
 pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
+    if app.prove_detail_owns_controls() {
+        return prove_detail_prompt_label(app);
+    }
     let controls = if workbench_prompt_mode(app) == Some(WorkbenchPage::Map)
         && super::map_gallery_is_primary(app)
     {
@@ -82,6 +93,15 @@ pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
         text.push_str(" prompt");
     }
     text
+}
+
+fn prove_detail_prompt_label(app: &ShellApp) -> String {
+    let escape = super::keybindings::reader_escape_label(app);
+    if app.router.workbench().trace_view_open() {
+        format!("TRACE · Esc {escape}")
+    } else {
+        format!("INVESTIGATE · Esc {escape} · m mode")
+    }
 }
 
 fn map_navigation_controls(app: &ShellApp) -> &'static str {

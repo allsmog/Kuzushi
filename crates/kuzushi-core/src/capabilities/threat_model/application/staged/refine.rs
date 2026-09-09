@@ -21,9 +21,8 @@ pub(crate) fn refine_threat_model(
     verb: &str,
     input: BuildInput,
 ) -> Result<Value> {
-    let (mut generated, source_bundle) = load_refine_state(ctx, verb, &input)?;
-    let delta = collect_refine_delta(&input, ctx, &generated.document)?;
-    source_bundle.authenticate_entry_point_sources(&delta.entry_point_catalog.receipt)?;
+    let (mut generated, source_bundle, delta) = load_refine_evidence(ctx, &input)?;
+    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     emit_refine_delta(ctx, verb, &delta);
     let attach = attach_new_evidence(&mut generated.document, &delta.new_findings);
     let (coverage, gap_method) =
@@ -55,7 +54,6 @@ pub(crate) fn refine_threat_model(
 
 fn load_refine_state(
     ctx: &ToolExecutionContext<'_>,
-    verb: &str,
     input: &BuildInput,
 ) -> Result<(GeneratedThreatModel, ThreatModelSourceBundle)> {
     let Some(selected) = load_selected_build_threat_model(input)? else {
@@ -64,7 +62,6 @@ fn load_refine_state(
         );
     };
     let source_bundle = load_threat_model_source_bundle(ctx, input)?;
-    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     let generated = GeneratedThreatModel {
         document: normalize_document(selected.document, &input.methodology)?,
         bridge_findings: None,
@@ -72,6 +69,25 @@ fn load_refine_state(
         cost_usd_exact: true,
     };
     Ok((generated, source_bundle))
+}
+
+fn load_refine_evidence(
+    ctx: &ToolExecutionContext<'_>,
+    input: &BuildInput,
+) -> Result<(GeneratedThreatModel, ThreatModelSourceBundle, RefineDelta)> {
+    let (generated, mut source_bundle) = load_refine_state(ctx, input)?;
+    let mut delta = collect_refine_delta(input, ctx, &generated.document)?;
+    source_bundle.authenticate_entry_point_sources(&delta.entry_point_catalog.receipt)?;
+    delta.code_evidence = source_bundle.attach_source_code(
+        input,
+        &delta.grounding_surfaces,
+        delta.entry_point_catalog.receipt.tree_hash.as_deref(),
+        ctx,
+    )?;
+    delta
+        .evidence_index
+        .extend(delta.code_evidence.references.iter().cloned());
+    Ok((generated, source_bundle, delta))
 }
 
 fn complete_refined_build(
@@ -98,6 +114,7 @@ fn complete_refined_build(
 }
 
 pub(crate) struct RefineDelta {
+    pub(crate) code_evidence: CodeEvidence,
     /// `None` = delta unknown (no recorded revision / not a git repo).
     pub(crate) changed_files: Option<Vec<String>>,
     pub(crate) new_findings: Vec<ConfirmedFindingRow>,
@@ -134,6 +151,7 @@ fn collect_refine_delta(
         &grounding.entry_point_catalog.catalog_ids,
     );
     Ok(RefineDelta {
+        code_evidence: CodeEvidence::default(),
         changed_files,
         new_findings,
         changed_surfaces,
@@ -327,7 +345,15 @@ fn cover_changed_surfaces(
     {
         return Ok((report, "budget-exhausted"));
     }
-    run_refine_gap_fill(runtime, ctx, verb, input, &report, generated)?;
+    run_refine_gap_fill(
+        runtime,
+        ctx,
+        verb,
+        input,
+        &report,
+        generated,
+        &delta.code_evidence,
+    )?;
     // Re-measure after remediation: the pre-gap-fill report describes the
     // document the model was asked to repair, not the one being persisted.
     let report = check_coverage(&generated.document, &delta.changed_surfaces);
@@ -341,6 +367,7 @@ fn run_refine_gap_fill(
     input: &BuildInput,
     report: &CoverageReport,
     generated: &mut GeneratedThreatModel,
+    code_evidence: &CodeEvidence,
 ) -> Result<()> {
     let outcome = run_gap_fill(
         runtime,
@@ -349,6 +376,7 @@ fn run_refine_gap_fill(
         verb,
         &report.gaps,
         &mut generated.document,
+        code_evidence,
     )?;
     generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
         [generated.cost_usd, outcome.cost_usd],
@@ -393,6 +421,7 @@ fn close_open_questions(
         input,
         &delta.evidence_index,
         &mut generated.document,
+        &delta.code_evidence,
     )?;
     generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
         [generated.cost_usd, outcome.cost_usd],
@@ -666,6 +695,7 @@ mod tests {
             catalog_surfaces: Vec::new(),
         };
         let delta = RefineDelta {
+            code_evidence: CodeEvidence::default(),
             changed_files: Some(Vec::new()),
             new_findings: Vec::new(),
             changed_surfaces: Vec::new(),

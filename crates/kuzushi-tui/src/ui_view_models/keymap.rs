@@ -75,11 +75,11 @@ fn default_cost(app: &ShellApp) -> String {
 
 pub(crate) fn default_keymap_sections(app: &ShellApp) -> Vec<KeymapSection> {
     let mut sections = vec![
+        active_view_keymap_section(app),
         global_keymap_section(),
         navigation_keymap_section(),
         dispatch_keymap_section(),
         lifecycle_keymap_section(),
-        active_view_keymap_section(app),
     ];
     if let Some(section) = operator_override_section(app) {
         sections.push(section);
@@ -117,7 +117,7 @@ fn operator_override_section(app: &ShellApp) -> Option<KeymapSection> {
 fn global_keymap_section() -> KeymapSection {
     section(
         "GLOBAL",
-        "work everywhere",
+        "shell and input controls",
         &[
             ("help", "open help"),
             ("Tab", "complete prompt input"),
@@ -133,7 +133,7 @@ fn global_keymap_section() -> KeymapSection {
                 "Ctrl-↑  ·  Ctrl-↓",
                 "autonomy dial: raise · lower the tool-dispatch ceiling",
             ),
-            ("Esc", "cancel field / close overlay / interrupt streaming"),
+            ("Esc", "contextual back / dismiss / clear field"),
         ],
     )
 }
@@ -200,27 +200,18 @@ fn active_view_keymap_section(app: &ShellApp) -> KeymapSection {
         .overlay_origin()
         .unwrap_or(crate::ShellView::Keymap);
     let mut seen = BTreeSet::new();
-    let mut rows = vec![KeymapBindingRow::new(
-        "Esc",
-        "enter navigation mode (empty prompt)",
-    )];
+    let mut rows = Vec::new();
     rows.extend(
         app.view_keybindings_for_view(origin)
             .into_iter()
-            .filter(|binding| !(binding.hint == "Esc" && binding.label == "back"))
             .filter(|binding| seen.insert((binding.hint.clone(), binding.label.clone())))
             .map(|binding| KeymapBindingRow::new(binding.hint, binding.label)),
     );
     rows.extend([
-        KeymapBindingRow::new("Esc", "return to prompt mode"),
         KeymapBindingRow::new("back", "leave the originating screen"),
         KeymapBindingRow::new("/keys", "open this complete control map"),
     ]);
-    KeymapSection::new(
-        format!("VIEW · {origin:?}"),
-        "complete navigation controls for the screen behind this keymap",
-        rows,
-    )
+    KeymapSection::new(format!("VIEW · {origin:?}"), "navigation controls", rows)
 }
 
 fn section(name: &str, blurb: &str, rows: &[(&str, &str)]) -> KeymapSection {
@@ -306,7 +297,7 @@ mod tests {
         app.set_shell_view(crate::ShellView::Keymap);
 
         let model = keymap_model(&app);
-        let section = model.sections.last().expect("originating view section");
+        let section = model.sections.first().expect("originating view section");
         let keys = section
             .rows
             .iter()

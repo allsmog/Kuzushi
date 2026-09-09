@@ -719,8 +719,9 @@ fn verdict_synthesis_prompt(
          - If you saw a clear unguarded path from attacker-controlled input to \
            the sink, report triggerable=true with confidence >= 0.5 and cite \
            the source and sink.\n\
-         - Only use confidence < 0.5 if your evidence is genuinely mixed or you \
-           never reached the relevant code.\n\n\
+         - If reachability or impact remains unresolved, report triggerable=null. \
+           Missing callers and empty reference searches do not establish safety; \
+           confidence that more evidence is needed is not a false-positive verdict.\n\n\
          Regions read in this audit:\n{summary}\n\n\
          Emit the JSON verdict now.",
         original = original.prompt,

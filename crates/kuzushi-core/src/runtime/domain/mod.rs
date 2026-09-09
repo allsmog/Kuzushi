@@ -18,7 +18,7 @@ pub use failure::{
     runtime_failure_metadata, RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata,
 };
 pub use model_usage::{ModelTokenUsage, Observed};
-pub use response_and_roles::{AgentQueryResponse, ModelTier, SubagentRole};
+pub use response_and_roles::{AgentQueryResponse, ModelTier, PromptCacheUsage, SubagentRole};
 pub use runtime_cost::{triage_cost_report, RuntimeCost, RuntimeCostReport};
 pub use tool_loop::{
     AgentLoopStep, AgentTool, AgentToolLoopRequest, ToolBox, ToolCall, ToolCallHandler, ToolResult,

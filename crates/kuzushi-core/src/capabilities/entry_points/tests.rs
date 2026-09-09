@@ -19,7 +19,7 @@ fn snapshot(target: &std::path::Path) -> serde_json::Value {
                 "route": "/oauth/callback",
                 "boundary": "public_http",
                 "risk": {"rank": 1, "score": 80, "tier": "high", "reasons": []},
-                "metadata": {"handler": "oauth_callback"}
+                "metadata": {"handler": "oauth_callback", "sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY}
             }]
         }
     })
@@ -29,6 +29,33 @@ fn write_snapshot(target: &std::path::Path, value: &serde_json::Value) {
     let path = crate::context::context_snapshot_path(target);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
+}
+
+#[test]
+fn legacy_rust_snapshot_cannot_recreate_the_same_test_surface_catalog() {
+    let target = tempfile::tempdir().unwrap();
+    let mut old = snapshot(target.path());
+    old["attackSurfaceMap"]["surfaces"][0]["metadata"] = json!({});
+    write_snapshot(target.path(), &old);
+    let freshness = crate::context::context_snapshot_freshness(target.path(), &old);
+    assert!(freshness.disclosure().unwrap().contains("test-scope filtering"));
+    let error = ensure_current_entry_point_catalog(target.path()).unwrap_err();
+    assert!(error.to_string().contains("context:build"), "{error:#}");
+    assert!(!target.path().join(".kuzushi/entry-points.json").exists());
+}
+
+#[test]
+fn explicit_legacy_rust_catalog_refuses_new_grounding_without_rewriting_history() {
+    let target = tempfile::tempdir().unwrap();
+    write_snapshot(target.path(), &snapshot(target.path()));
+    let (mut catalog, path) = refresh_entry_point_catalog(target.path()).unwrap();
+    catalog.entry_points[0].surface.metadata.as_object_mut().unwrap().remove("sourcePolicy");
+    catalog.provenance.sha256 = entry_points_sha256(&catalog.entry_points).unwrap();
+    super::persistence::write_entry_point_catalog(target.path(), &catalog).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let error = load_explicit_entry_point_catalog(target.path()).unwrap_err();
+    assert!(error.to_string().contains("test-scope filtering"), "{error:#}");
+    assert_eq!(std::fs::read(path).unwrap(), before);
 }
 
 #[test]

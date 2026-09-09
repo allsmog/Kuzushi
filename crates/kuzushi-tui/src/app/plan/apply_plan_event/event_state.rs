@@ -36,12 +36,14 @@ impl ShellApp {
                 self.engagement.set_pending_plan(plan);
                 self.set_completed_activity("plan", "proposal ready for review");
             }
-            PlanEvent::Failed { error, .. } => {
-                let safe_error = kuzushi_core::runtime::safe_model_failure_message(&error);
-                self.log("error", format!("planner failed: {safe_error}"));
-                self.set_refused_activity("plan", "planner failed");
-            }
+            PlanEvent::Failed { error, audit } => self.apply_failed_plan_event(error, audit),
         }
+    }
+
+    fn apply_failed_plan_event(&mut self, error: String, audit: AgentCallAudit) {
+        let message = crate::ui_view_models::model_failure_text(&audit, &error, None);
+        self.set_refused_activity_state("plan", &audit.failure_summary(&error));
+        self.set_error_notice("plan", format!("planner failed: {message}"));
     }
 
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {

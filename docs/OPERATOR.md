@@ -54,6 +54,60 @@ keys `1..5`, `n`/`N` to cycle). The decks below are the operator surfaces
 added around that spine. Global navigation: `j/k/↑/↓` move, `g/G` ends,
 `Tab`/`[`/`]` cycle panes, `Z` zoom pane, `Esc` back.
 
+After a foreground Map run started from Setup completes, Kuzushi opens its
+recorded Map result. Press `Esc` to enter Navigate mode, then `u` (**Use map**)
+to accept it, or inspect the result before deciding. Showing the result does
+not accept it or start Scan. A result whose recorded source identity is missing
+or no longer current stays available for inspection and asks you to run Map
+again; it cannot advance the workflow.
+Backgrounding with `b` returns to the launch view; background completion leaves
+your current view in place. `/setup` reopens the Map configuration explicitly.
+
+When exit confirmation is shown, `↑/↓` scroll one disclosure row, `PgUp/PgDn`
+scroll one visible page, and `Home/End` reach the beginning/end. Exit and Stay
+remain visible. The confirmation uses the full frame when ordinary shell chrome
+would leave too little reading space. `n` or `Esc` restores the prior editor and
+its unsaved draft; choosing `y` follows the disclosed exit/cancellation policy.
+
+In Setup's Map plan or a phase planner, `Tab` focuses the selected tool's
+options and `Enter` edits an option. The editor keeps the cursor visible while
+you move with arrows, `Home/End` or word/line editing chords. `Delete` removes
+the next character; `Ctrl+U` clears to the line start. Paste preserves Unicode
+and line breaks, and `Shift+Enter` adds a line break. `Enter` or `Ctrl+S` validates
+and saves the session option; `Esc` cancels. Saving does not launch the plan.
+Invalid values remain editable; `PgUp/PgDn` reads a long validation message.
+Outside the editor, `Ctrl+S` retains its separate persist-option action.
+
+`Ctrl+T` opens Answers beside the workspace when there is room, or switches
+between them in a compact terminal. While reading, `PgUp/PgDn` pages and
+`Home/End` reaches either end. `Enter` opens a reply; within the reply, Enter
+sends and `Shift+Enter` inserts a newline. `Esc` keeps an unsent draft.
+OpenAI OAuth Ask replies appear as the model responds. The pane follows new text
+until you scroll and labels the response as in progress. `Ctrl+C` cancels Ask;
+unfinished text stays visible as incomplete and is not reused as a completed
+answer. Other provider paths may still return their answer all at once.
+
+Ask history now reopens after restarting on the same target. Restored answers
+show their captured context; the next question rechecks the target revision,
+Map and tool policy before reusing earlier questions and completed answers. A changed context starts
+a fresh conversation. An interrupted or canceled turn stays incomplete. Recovery
+restores its submitted question for editing when there is no newer reply draft. It
+keeps your current model selection and never sends a request on its own.
+`clear` prevents that target's cleared conversation from returning on restart.
+
+Recovery uses the existing redacted session transcripts and retention setting.
+It checks the 64 most recently started sessions, within 32 MiB of total reads and
+8 MiB per file, and saves at most 12 earlier turns plus the current turn in a
+512 KiB checkpoint. A limit or unreadable record is disclosed; older transcripts
+without a context-bound checkpoint remain available through `kuzushi sessions`.
+`--no-session-persistence` disables saving and recovery. Unsent drafts remain
+session-local.
+
+Completed answers show Markdown headings, lists, quotes and code. Code retains
+indentation; `↪` marks a wrapped continuation. Links show their destinations,
+and narrow tables become labeled records. In short terminals, duplicate footer
+hints give way to answer text while reply and workspace controls stay visible.
+
 ### Campaign deck — `campaign [id]`
 
 Shell presentation over the shared campaign artifacts (`plan.json` +
@@ -107,9 +161,25 @@ reversal is one more decision, never an edit (§5).
 
 ### Report deck — `report`
 
-The exit surface. Exports the findings ledger in five formats (SARIF,
-Markdown bundle, JSONL, JSON, CSV — presented in that order) via
-`workspace:export-findings`, defaulting completeness to All. For a
+The exit surface exports the findings ledger as SARIF, Markdown bundle, JSONL,
+JSON, CSV, or VULN-FINDINGS, defaulting completeness to All. `j/k` selects a
+format, `c` changes completeness, and `Enter` exports. New destinations start
+under `.kuzushi/reports/`, outside the indexed source set. Each format retains
+its own destination during the session. `e` opens the destination editor;
+arrows, Home/End, Delete, Unicode and paste work inside that field. Enter or
+Ctrl+S saves the path without exporting; Escape cancels the edit. Relative
+paths resolve against the explicit target and use the shared output-path rules.
+
+Success and failure show the attempted format, completeness, time and full
+destination. Correct the path and retry after a failure. `PgUp/PgDn` reads
+long reports and receipts; `Esc/q` returns to the originating view. Review
+counts use the unfiltered finding ledger. Cost coverage describes up to 100
+recent run records, distinguishing complete, incomplete, unavailable and
+invalid records. A workspace spend total is unavailable: campaign and parent
+scan records may include costs represented again by child runs. Report does
+not add those overlapping amounts or present campaign-only spend as a total.
+
+For a
 CI-consumable **confirmed-only** SARIF (latest-decision-wins filter
 applied), use `report:sarif` — default output
 `.kuzushi/v3/reports/confirmed-findings.sarif`.
@@ -489,7 +559,13 @@ overwritten without `force=true` — then recorded in the versions
 ledger with source `import`; the agentic-sast digest and carlini hunts
 prepend a staleness warning when the live document's revision no
 longer matches HEAD, and `threats use <n>` re-verifies after every
-restore), `threat-model:methodologies`; PASTA-style `randori:pasta` +
+restore), `threat-model:methodologies`; the immutable-lineage verbs
+`threat-model:models` (list lineages and their head revisions),
+`threat-model:revisions` (list one lineage's immutable revisions),
+`threat-model:activate` (point the active head at an existing revision
+without minting content), `threat-model:restore` (re-commit historical
+content as a new revision and activate it), and `threat-model:adopt`
+(commit a hand-edited compatibility mirror as a new revision); PASTA-style `randori:pasta` +
 `randori:threat-model`; `threat-intel:discover` (target-local package inventory
 only), `threat-intel:research` (explicit external action: bounded OSV package
 queries followed directly by catalog harvest, with no hand-authored CVE JSON),
@@ -497,6 +573,14 @@ queries followed directly by catalog harvest, with no hand-authored CVE JSON),
 `threat-leads:build` + `threat-leads:read`; system X-ray `x-ray:run`,
 `x-ray:read` (and the `x-ray:x-ray` alias verb); attack-surface
 extraction `entry-points:extract`.
+
+In a ready Map, use Tab with an empty composer to reach Entry points.
+Arrows select an entry; Page Up/Page Down move through its evidence by the
+visible detail height. In Navigate mode, `z` opens the same view full frame
+and Enter follows a resolved DFD link. Counts, freshness and warning presence
+stay above the browser; the complete source receipt and warnings are also
+readable at the end of the selected entry's detail. Selecting another entry
+starts its detail at the top.
 
 **Findings lifecycle** — `triage:run` (prefilter → structured dedupe —
 same tool+rule within 15 lines inherits the representative verdict with

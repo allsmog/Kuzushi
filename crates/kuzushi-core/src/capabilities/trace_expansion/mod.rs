@@ -11,6 +11,7 @@
 
 mod contract;
 mod expand;
+mod history;
 mod persist;
 #[cfg(test)]
 mod tests;
@@ -20,6 +21,7 @@ pub use contract::{
     TRACE_EXPANSION_CONTRACT_VERSION,
 };
 pub use expand::{run_trace_expansion, TraceExpansionOutcome};
+pub use history::{load_latest_trace_expansion, RecordedTraceExpansion, TraceExpansionSource};
 pub use persist::{
     append_trace_expansion_evidence, list_operator_trace_steps, TraceEvidenceReceipt,
     OPERATOR_TRACE_PROVENANCE,

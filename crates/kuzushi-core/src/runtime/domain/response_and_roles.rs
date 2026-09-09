@@ -254,6 +254,21 @@ mod policy_tests {
     }
 }
 
+/// Provider-reported prompt-cache accounting for one call. Present only when
+/// the provider reported it, so an absent value means "not reported", never
+/// "zero cache traffic". Cache reads bill at roughly a tenth of the input
+/// rate and cache writes at roughly 1.25x; a run that keeps reporting zero
+/// reads across identical-prefix calls has a caching setup problem worth
+/// diagnosing, which is why these counts ride the response.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PromptCacheUsage {
+    #[serde(default)]
+    pub read_input_tokens: u32,
+    #[serde(default)]
+    pub creation_input_tokens: u32,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AgentQueryResponse {
     #[serde(default)]
@@ -283,6 +298,10 @@ pub struct AgentQueryResponse {
     pub input_tokens: u32,
     #[serde(default)]
     pub output_tokens: u32,
+    /// Prompt-cache read/write counts when the provider reported them. Cached
+    /// tokens are not part of `input_tokens`, so the two can be summed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache: Option<PromptCacheUsage>,
     #[serde(default)]
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -299,6 +318,7 @@ struct AgentQueryResponseWire {
     estimated_cost_usd: Option<f64>,
     input_tokens: u32,
     output_tokens: u32,
+    prompt_cache: Option<PromptCacheUsage>,
     truncated: bool,
     stop_reason: Option<String>,
 }
@@ -317,6 +337,7 @@ impl<'de> Deserialize<'de> for AgentQueryResponse {
             estimated_cost_usd: wire.estimated_cost_usd,
             input_tokens: wire.input_tokens,
             output_tokens: wire.output_tokens,
+            prompt_cache: wire.prompt_cache,
             truncated: wire.truncated,
             stop_reason: wire.stop_reason,
         })
@@ -374,6 +395,32 @@ mod agent_query_response_cost_tests {
             response.checked_cost_report().unwrap().exact_usd(),
             Some(0.25)
         );
+    }
+
+    #[test]
+    fn prompt_cache_usage_is_absent_unless_reported_and_round_trips_when_it_is() {
+        let unreported: AgentQueryResponse =
+            serde_json::from_value(serde_json::json!({"input_tokens": 10})).unwrap();
+        assert_eq!(unreported.prompt_cache, None);
+        assert!(serde_json::to_value(&unreported)
+            .unwrap()
+            .get("prompt_cache")
+            .is_none());
+
+        let reported: AgentQueryResponse = serde_json::from_value(
+            serde_json::json!({"prompt_cache": {"read_input_tokens": 4000}}),
+        )
+        .unwrap();
+        assert_eq!(
+            reported.prompt_cache,
+            Some(PromptCacheUsage {
+                read_input_tokens: 4000,
+                creation_input_tokens: 0,
+            })
+        );
+        let wire = serde_json::to_value(&reported).unwrap();
+        assert_eq!(wire["prompt_cache"]["read_input_tokens"], 4000);
+        assert_eq!(wire["prompt_cache"]["creation_input_tokens"], 0);
     }
 }
 

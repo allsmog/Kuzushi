@@ -32,6 +32,19 @@ impl PhaseAttemptLedger {
         Ok(ledger)
     }
 
+    /// Remove non-phase results only from this in-memory projection. Raw
+    /// events and canonical run history remain available for inspection.
+    pub(super) fn exclude_from_phase_projection(&mut self, excluded: &BTreeSet<String>) {
+        self.attempts.retain(|id, _| !excluded.contains(id));
+        self.attempt_order.retain(|id, _| !excluded.contains(id));
+        self.disposition_order
+            .retain(|id, _| !excluded.contains(id));
+        self.content_reuse_blocked_attempts
+            .retain(|id| !excluded.contains(id));
+        self.content_drift_blocked_attempts
+            .retain(|id| !excluded.contains(id));
+    }
+
     pub fn attempts(&self) -> impl DoubleEndedIterator<Item = &PhaseAttemptRecord> {
         self.attempts.values()
     }

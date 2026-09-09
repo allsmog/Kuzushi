@@ -2,30 +2,68 @@ use super::*;
 use rusqlite::types::Type;
 use std::collections::BTreeMap;
 
-const LATEST_FINDING_PROJECTION_SQL: &str = r#"
-with observations as (
-    select finding_json,
-           case
-             when lower(trim(json_extract(finding_json, '$.tool'))) = 'chains'
-               or lower(trim(json_extract(finding_json, '$.rule_id'))) like 'exploit-chain/%'
-               then 'fingerprint:' || json_extract(finding_json, '$.fingerprint')
-             when nullif(trim(json_extract(finding_json, '$.identityId')), '') is null
-               then 'fingerprint:' || json_extract(finding_json, '$.fingerprint')
-             when json_extract(finding_json, '$.identityBasis') in (
-                    'exact_producer_fingerprint', 'cross_run_dedup_key', 'source_locator'
-                  )
-               then 'identity:' || json_extract(finding_json, '$.identityId')
-             when nullif(trim(json_extract(finding_json, '$.source_signature')), '') is not null
-               then 'identity:' || json_extract(finding_json, '$.identityId')
-                    || ':source:' || trim(json_extract(finding_json, '$.source_signature'))
-             when nullif(trim(json_extract(finding_json, '$.dedup_key')), '') is not null
-               then 'identity:' || json_extract(finding_json, '$.identityId')
-                    || ':dedup:' || trim(json_extract(finding_json, '$.dedup_key'))
-             else 'fingerprint:' || json_extract(finding_json, '$.fingerprint')
-           end as stable_key,
-           created_seq
+/// The latest observation per stable identity — the ledger's current
+/// finding set. Shared by the full projection below and the narrow
+/// review-decision-subject projection, so both agree on what "current" means.
+///
+/// Stable-key policy mirrors the Rust safe fold in
+/// `identity_fold_projection.rs`: strong-basis observations key on their
+/// identity; a weak (file-fallback) observation joins that identity only when
+/// some strong observation of the same identity shares its source signature or
+/// dedup key — the cross-run case where a later hunt rediscovers a finding
+/// first minted without corroboration — and otherwise keeps its own
+/// signature- or dedup-scoped key so distinct fallbacks never collapse.
+macro_rules! latest_observation_ranking_cte {
+    () => {
+        r#"
+with observation_rows as (
+    select rowid as observation_rowid,
+           finding_json,
+           created_seq,
+           lower(trim(json_extract(finding_json, '$.tool'))) as tool,
+           lower(trim(json_extract(finding_json, '$.rule_id'))) as rule_id,
+           json_extract(finding_json, '$.fingerprint') as fingerprint,
+           nullif(trim(json_extract(finding_json, '$.identityId')), '') as identity_id,
+           (json_extract(finding_json, '$.identityBasis') in (
+              'exact_producer_fingerprint', 'cross_run_dedup_key', 'source_locator'
+            ) or (json_extract(finding_json, '$.identityBasis') is null
+                  and json_extract(finding_json, '$.identityMatchTier') = 'dedup_key_cross_run')
+           ) as strong_basis,
+           nullif(trim(json_extract(finding_json, '$.source_signature')), '') as source_signature,
+           nullif(trim(json_extract(finding_json, '$.dedup_key')), '') as dedup_key
       from finding_observations
      where finding_json is not null
+), strong_identity_evidence as materialized (
+    select distinct identity_id, source_signature, dedup_key
+      from observation_rows
+     where identity_id is not null and strong_basis
+), folded_weak_observations as materialized (
+    select distinct weak.observation_rowid
+      from observation_rows as weak
+      join strong_identity_evidence as strong
+        on strong.identity_id = weak.identity_id
+       and (strong.source_signature = weak.source_signature
+            or strong.dedup_key = weak.dedup_key)
+     where weak.identity_id is not null and not weak.strong_basis
+), observations as (
+    select finding_json,
+           case
+             when tool = 'chains' or rule_id like 'exploit-chain/%'
+               then 'fingerprint:' || fingerprint
+             when identity_id is null
+               then 'fingerprint:' || fingerprint
+             when strong_basis
+               then 'identity:' || identity_id
+             when observation_rowid in (select observation_rowid from folded_weak_observations)
+               then 'identity:' || identity_id
+             when source_signature is not null
+               then 'identity:' || identity_id || ':source:' || source_signature
+             when dedup_key is not null
+               then 'identity:' || identity_id || ':dedup:' || dedup_key
+             else 'fingerprint:' || fingerprint
+           end as stable_key,
+           created_seq
+      from observation_rows
 ), ranked_observations as (
     select finding_json, stable_key,
            row_number() over (
@@ -33,7 +71,13 @@ with observations as (
                order by created_seq desc
            ) as observation_rank
       from observations
-), merged_sources as (
+)"#
+    };
+}
+
+const LATEST_FINDING_PROJECTION_SQL: &str = concat!(
+    latest_observation_ranking_cte!(),
+    r#", merged_sources as (
     select observations.stable_key,
            json_group_array(json(source.value)) as sources_json
       from observations
@@ -45,7 +89,20 @@ select latest.finding_json,
   from ranked_observations as latest
   left join merged_sources on merged_sources.stable_key = latest.stable_key
  where latest.observation_rank = 1
-"#;
+"#
+);
+
+/// Only the two columns a review-decision lookup needs, straight from the
+/// stored JSON: no `Finding` deserialization, no source merge, no hydration.
+const LATEST_REVIEW_DECISION_SUBJECTS_SQL: &str = concat!(
+    latest_observation_ranking_cte!(),
+    r#"
+select cast(json_extract(latest.finding_json, '$.id') as integer) as finding_id,
+       nullif(trim(json_extract(latest.finding_json, '$.identityId')), '') as identity_id
+  from ranked_observations as latest
+ where latest.observation_rank = 1
+"#
+);
 
 impl FindingStore {
     pub(crate) fn v3_findings_for_scan_id(&self, scan_id: &str) -> Result<Vec<Finding>> {
@@ -73,6 +130,21 @@ impl FindingStore {
             .context("Could not list v3 findings")?;
         findings.sort_by(finding_list_order);
         self.hydrate_v3_findings(findings)
+    }
+
+    /// Review-decision subjects for every current finding, read without
+    /// materializing the findings themselves. Yields the same subject set as
+    /// mapping `v3_all_findings()` through `ReviewDecisionSubject::from`.
+    pub(crate) fn v3_review_decision_subjects(&self) -> Result<Vec<ReviewDecisionSubject>> {
+        let mut stmt = self.conn.prepare(LATEST_REVIEW_DECISION_SUBJECTS_SQL)?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ReviewDecisionSubject {
+                finding_id: row.get(0)?,
+                identity_id: row.get(1)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not list v3 review-decision subjects")
     }
 
     pub(crate) fn v3_finding_by_fingerprint(&self, fingerprint: &str) -> Result<Option<Finding>> {

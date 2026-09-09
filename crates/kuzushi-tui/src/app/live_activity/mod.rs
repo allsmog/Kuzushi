@@ -131,6 +131,21 @@ impl ShellApp {
         ));
     }
 
+    /// Keep the terminal activity detail when an error notice already records
+    /// the failure. This avoids duplicating the same cause in the transcript.
+    pub(crate) fn set_refused_activity_state(
+        &mut self,
+        subject: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
+        self.mark_activity_session_terminal();
+        self.set_live_activity_state(Some(LiveActivity::new(
+            LiveActivityPhase::Refused,
+            subject,
+            detail,
+        )));
+    }
+
     pub(crate) fn set_partial_activity(
         &mut self,
         subject: impl Into<String>,

@@ -46,6 +46,8 @@ mod node_route_from_line;
 mod summarize_surfaces;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod rust_test_scope_tests;
 
 pub use add::build_attack_surface_map;
 pub use load::load_attack_surface_map;

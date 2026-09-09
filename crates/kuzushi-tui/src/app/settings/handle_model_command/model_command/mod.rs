@@ -19,7 +19,7 @@ impl ShellApp {
             self.open_model_picker();
             return Vec::new();
         };
-        self.set_shell_view(ShellView::Config);
+        self.show_model_command_config();
         let (model, thinking_level) = match parsing::resolve_model_command_selection(&command) {
             Ok(selection) => selection,
             Err(message) => {

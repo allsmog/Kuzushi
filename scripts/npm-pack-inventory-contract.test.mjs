@@ -50,6 +50,8 @@ test("packaged LangGraph runtime closes over its relative module graph", () => {
   for (const omitted of [
     "scripts/langgraph-bridge/confined-file-read.mjs",
     "scripts/langgraph-bridge/next-step-messages.mjs",
+    "scripts/langgraph-bridge/response-stream.mjs",
+    "scripts/langgraph-bridge/oauth-response-stream.mjs",
     "scripts/langgraph-bridge/tool-policy-handshake.mjs",
     "scripts/langgraph-bridge/grep-regex-worker.mjs",
   ]) {

@@ -111,8 +111,8 @@ pub(super) fn render_lines_pane(
     );
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let visual_rows = wrapped_line_count(&lines, inner.width);
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let visual_rows = paragraph.line_count(inner.width);
     let scroll = clamped_scroll(state.scroll(surface), visual_rows, inner.height);
     frame.render_widget(paragraph.scroll((scroll, 0)), inner);
 }
@@ -180,17 +180,44 @@ fn clamped_scroll(scroll: u16, rows: usize, viewport: u16) -> u16 {
     )
 }
 
-fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
-    let width = width.max(1) as usize;
-    lines
-        .iter()
-        .map(|line| wrap_text(&line.to_string(), width).len())
-        .sum()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maximum_scroll_reaches_final_row_after_indented_wrapping() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut lines = vec![Line::from(format!("      {}", "x ".repeat(19))); 12];
+        lines.push(Line::from("FINAL LINEAGE"));
+        let mut terminal = Terminal::new(TestBackend::new(40, 7)).unwrap();
+        let mut scroll = WorkbenchSurfaceScroll::default();
+        scroll.set(PhaseSurfaceId::ProveResult, u16::MAX);
+        let state = PhaseRenderState {
+            focus: Some(PhaseSurfaceId::ProveResult),
+            surface: Some(PhaseSurfaceId::ProveResult),
+            role: SurfaceRole::Standard,
+            scroll: &scroll,
+            density: LayoutDensity::Guided,
+        };
+        terminal
+            .draw(|frame| {
+                render_lines_pane(
+                    frame,
+                    frame.area(),
+                    "RESULT",
+                    lines.clone(),
+                    PhaseSurfaceId::ProveResult,
+                    state,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text = (0..7)
+            .map(|y| (0..40).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("FINAL LINEAGE"), "{text}");
+    }
 
     #[test]
     fn wrapped_unicode_rows_expand_the_scroll_extent() {
@@ -198,7 +225,9 @@ mod tests {
             "touched: src/認証/very-long-remediation-target-with-emoji-🔐.rs",
         )];
 
-        let rows = wrapped_line_count(&lines, 18);
+        let rows = Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .line_count(18);
 
         assert!(rows >= 4, "expected visual wrapping, got {rows} row(s)");
         assert!(clamped_scroll(u16::MAX, rows, 2) >= 2);

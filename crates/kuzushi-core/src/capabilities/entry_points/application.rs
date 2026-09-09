@@ -71,11 +71,24 @@ pub(crate) fn load_explicit_entry_point_catalog(
     })?;
     validate_catalog_source_identity(target, &catalog)
         .context("explicit entry-points source is stale against the current target")?;
+    validate_catalog_extraction_policy(&catalog)?;
     Ok(EntryPointCatalogResolution {
         catalog: Some(catalog),
         status: "explicit".to_string(),
         path,
     })
+}
+
+fn validate_catalog_extraction_policy(catalog: &EntryPointCatalog) -> Result<()> {
+    use crate::workspace::rust_surface_policy::{has_legacy_rust_surface, REBUILD_RUST_SURFACES};
+    anyhow::ensure!(
+        !catalog.entry_points.iter().any(|entry| {
+            let surface = &entry.surface;
+            has_legacy_rust_surface(&surface.language, &surface.path, &surface.metadata)
+        }),
+        REBUILD_RUST_SURFACES
+    );
+    Ok(())
 }
 
 pub(super) fn authenticate_catalog_document(

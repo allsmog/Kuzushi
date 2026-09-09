@@ -34,15 +34,21 @@ pub(in crate::modules) fn run_entry_points_extract(
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
     emit_step(ctx, "tool", "extract", "entry-points start");
+    let snapshot = crate::workspace::source_snapshot::SourceSnapshot::capture(
+        ctx,
+        "entry-points:extract",
+        &target,
+    )?;
     let (catalog, output_path) =
         crate::capabilities::entry_points::refresh_entry_point_catalog(&target)?;
+    snapshot.ensure_current(ctx, "entry-points:extract", &target)?;
     emit_step(
         ctx,
         "done",
         "extract",
         format!("entry-points wrote {} routes", catalog.total),
     );
-    Ok(entry_points_response(&target, &output_path, &catalog))
+    Ok(snapshot.attach(entry_points_response(&target, &output_path, &catalog)))
 }
 
 fn entry_points_response(

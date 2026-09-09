@@ -143,7 +143,8 @@ impl JobEventSink {
         let reliable = terminal
             || matches!(
                 &stamped.event,
-                ShellEvent::RunItem(_)
+                ShellEvent::Agent(AgentEvent::ResponseText(_))
+                    | ShellEvent::RunItem(_)
                     | ShellEvent::RunItemsDurable { .. }
                     | ShellEvent::RunItemsDerivativesApplied { .. }
                     | ShellEvent::RunItemsFault { .. }

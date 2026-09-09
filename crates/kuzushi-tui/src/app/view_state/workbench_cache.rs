@@ -60,6 +60,7 @@ pub(crate) use view_model_fragments::{
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkbenchCache {
+    pub(crate) answer_document: Option<crate::ui_view_models::AnswerDocumentCache>,
     target_base: Option<TargetBaseCache>,
     target_profile: Option<TargetProfileCache>,
     #[cfg(test)]
@@ -513,6 +514,13 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_json_file(&mut self, path: &Path) {
         self.json_files.remove(path);
+    }
+
+    pub(crate) fn invalidate_threat_model(&mut self, target: &Path) {
+        self.threat_model_store = None;
+        self.invalidate_json_file(&kuzushi_core::capabilities::persistent_threat_model_path(
+            target,
+        ));
     }
 
     pub(crate) fn invalidate_state_artifact_paths(

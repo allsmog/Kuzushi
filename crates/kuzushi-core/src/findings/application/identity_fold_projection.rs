@@ -1,11 +1,11 @@
 //! Policy-aware projection of emitted finding generations for operator views.
 
 use super::{finding_projection_key, IdentityFoldPolicy};
-use crate::findings::{
-    is_attack_chain_finding, Finding, FindingEvidence, FindingSource, ProofConfidence, Severity,
-};
+use crate::findings::{is_attack_chain_finding, Finding, FindingEvidence, FindingSource};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Input follows authoritative observation order, oldest first. Each group
+/// presents its current observation while retaining source and evidence history.
 pub(crate) fn project_finding_generations(
     findings: Vec<Finding>,
     policy: IdentityFoldPolicy,
@@ -119,7 +119,7 @@ fn merge_findings(previous: &Finding, next: Finding) -> Finding {
     let next_sources = next.sources.clone();
     let next_evidence = next.evidence.clone();
     let next_count = next.corroboration_count;
-    let mut representative = strongest_representative(previous, next);
+    let mut representative = next;
     representative.sources = merged_sources(&previous.sources, &next_sources);
     representative.evidence = merged_evidence(&previous.evidence, &next_evidence);
     representative.corroboration_count = merged_corroboration_count(
@@ -128,32 +128,6 @@ fn merge_findings(previous: &Finding, next: Finding) -> Finding {
         representative.sources.len(),
     );
     representative
-}
-
-fn strongest_representative(previous: &Finding, next: Finding) -> Finding {
-    if finding_rank(&next) > finding_rank(previous) {
-        next
-    } else {
-        previous.clone()
-    }
-}
-
-fn finding_rank(finding: &Finding) -> (u8, u8) {
-    (
-        severity_rank(finding.severity),
-        3u8.saturating_sub(ProofConfidence::classify(finding).rank()),
-    )
-}
-
-fn severity_rank(severity: Severity) -> u8 {
-    match severity {
-        Severity::Critical => 5,
-        Severity::High => 4,
-        Severity::Medium => 3,
-        Severity::Low => 2,
-        Severity::Info => 1,
-        Severity::Unknown => 0,
-    }
 }
 
 fn merged_sources(left: &[FindingSource], right: &[FindingSource]) -> Vec<FindingSource> {

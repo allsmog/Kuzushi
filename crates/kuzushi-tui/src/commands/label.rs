@@ -192,6 +192,7 @@ pub enum ShellCommand {
     AskWholeModel(String),
     /// Cancel only the active Ask, preserving a concurrently running scan.
     CancelAsk,
+    Answers,
     Options {
         tool: Option<String>,
         filter: OptionsFilter,

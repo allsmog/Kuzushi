@@ -5,7 +5,13 @@ pub fn run_carlini_threat_hunt(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    Ok(run_carlini_threat_hunt_report(&input, ctx, runtime)?.to_tool_json())
+    let target = resolve_target(&input, ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "carlini-threat-hunt:run",
+        &target,
+        || Ok(run_carlini_threat_hunt_report(&input, ctx, runtime)?.to_tool_json()),
+    )
 }
 
 pub fn run_carlini_threat_hunt_report(

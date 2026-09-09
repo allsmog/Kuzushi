@@ -276,7 +276,6 @@ impl ShellApp {
             || self.session_thinking_level() != Some(selection.thinking_level.as_str());
         self.config_mut().model = Some(selection.model.clone());
         self.set_session_thinking_level(Some(selection.thinking_level.clone()));
-        self.sync_selected_model_index();
         self.log(
             "model",
             format!(

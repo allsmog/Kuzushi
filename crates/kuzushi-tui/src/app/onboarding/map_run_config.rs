@@ -5,16 +5,17 @@ use crate::ShellApp;
 use anyhow::{Context, Result};
 use kuzushi_core::NestedProjectScope;
 use serde_json::{json, Value};
+use std::path::Path;
 
 mod expansion;
 mod regeneration;
 mod scope_policy;
+mod scope_selection;
 
 pub(crate) use regeneration::scoped_regeneration_input;
 pub(crate) use scope_policy::{eligible_leaf_scopes, owning_leaf_scope};
 use scope_policy::{
-    next_scope_value, scope_label, scope_selection_error, selected_scope_count,
-    validate_all_scope_count,
+    scope_label, scope_selection_error, selected_scope_count, validate_all_scope_count,
 };
 
 pub(crate) const ALL_LEAF_SCOPES: &str = "all:leaf";
@@ -86,36 +87,51 @@ impl ShellApp {
             .unwrap_or_else(|| "stride".to_string())
     }
 
-    pub(crate) fn cycle_map_scope(&mut self) -> Result<()> {
-        let tree = self.cached_map_scope_tree();
-        let leaves: Vec<NestedProjectScope> = tree
-            .as_ref()
-            .map(|tree| eligible_leaf_scopes(tree).into_iter().cloned().collect())
-            .unwrap_or_default();
-        let current = self.map_option_string("scope");
-        if self.confirm_pending_all_scope_review(current.as_deref(), tree.as_ref()) {
-            return Ok(());
-        }
-        let next = next_scope_value(current.as_deref(), &leaves);
-        self.apply_map_scope_choice(next, tree.as_ref(), leaves.len())
-    }
-
     pub(crate) fn begin_map_text_edit(&mut self, row: MapRunConfigRowId) {
         let option = map_text_option(row).unwrap_or_default();
-        let draft = self.map_string_list(option).join(", ");
+        let values = self.map_string_list(option);
         self.router
             .setup_mut()
             .map_run_config_mut()
-            .begin_edit(row, draft);
+            .begin_edit(row, values);
     }
 
     pub(crate) fn commit_map_text_edit(&mut self) -> Result<()> {
-        let state = self.router.setup().map_run_config();
-        let row = state.edit().context("Map text editor is not open")?;
-        let values = parse_string_list(state.draft());
+        let list = self
+            .router
+            .setup()
+            .map_run_config()
+            .text()
+            .context("Map text editor is not open")?;
+        let field = list.field.as_ref().context("select an entry to edit")?;
+        anyhow::ensure!(
+            !field.text().trim().is_empty(),
+            "enter a value, or Esc to cancel"
+        );
+        if list.row == MapRunConfigRowId::DesignDocs {
+            validate_map_document(self.target(), field.text())?;
+        }
+        let row = list.row;
+        let values = list.candidate_values(field.text().to_string());
+        self.save_map_text_values(row, values)
+    }
+
+    pub(crate) fn remove_map_text_entry(&mut self) -> Result<()> {
+        let list = self
+            .router
+            .setup()
+            .map_run_config()
+            .text()
+            .context("Map text editor is not open")?;
+        self.save_map_text_values(list.row, list.without_selected())
+    }
+
+    fn save_map_text_values(&mut self, row: MapRunConfigRowId, values: Vec<String>) -> Result<()> {
         let option = map_text_option(row).context("selected Map row is not text")?;
-        self.set_map_option(option, json!(values))?;
-        self.router.setup_mut().map_run_config_mut().finish_edit();
+        self.set_map_option(option, json!(&values))?;
+        if let Some(list) = self.router.setup_mut().map_run_config_mut().text_mut() {
+            list.saved(values);
+        }
         Ok(())
     }
 
@@ -171,31 +187,6 @@ impl ShellApp {
             (None, Some(cap)) => format!("session upper bound ${cap:.2}"),
             (None, None) => "upper bound not capped".to_string(),
         }
-    }
-
-    fn confirm_pending_all_scope_review(
-        &mut self,
-        current: Option<&str>,
-        tree: Option<&kuzushi_core::NestedProjectScopeTree>,
-    ) -> bool {
-        let count = tree.map_or(0, |tree| eligible_leaf_scopes(tree).len());
-        let review_key = tree.and_then(|tree| self.all_scope_review_key(tree).ok());
-        let pending = current == Some(ALL_LEAF_SCOPES)
-            && count > ALL_SCOPES_REVIEW_THRESHOLD
-            && !review_key.as_deref().is_some_and(|key| {
-                self.router
-                    .setup()
-                    .map_run_config()
-                    .all_scopes_reviewed(key)
-            });
-        if pending {
-            self.router
-                .setup_mut()
-                .map_run_config_mut()
-                .set_all_scopes_reviewed(review_key);
-            self.router.setup_mut().map_run_config_mut().clear_error();
-        }
-        pending
     }
 
     fn apply_map_scope_choice(
@@ -254,13 +245,14 @@ fn map_text_option(row: MapRunConfigRowId) -> Option<&'static str> {
     }
 }
 
-fn parse_string_list(draft: &str) -> Vec<String> {
-    draft
-        .split([',', '\n'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
+fn validate_map_document(target: Option<&Path>, value: &str) -> Result<()> {
+    let target = target.context("choose a target before adding a document")?;
+    let path = target.join(value);
+    let metadata = path
+        .metadata()
+        .with_context(|| format!("cannot read document {value:?}"))?;
+    anyhow::ensure!(metadata.is_file(), "document {value:?} must be a file");
+    Ok(())
 }
 
 fn next_map_methodology(current: Option<&str>) -> &'static str {
@@ -273,7 +265,7 @@ fn next_map_methodology(current: Option<&str>) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_map_methodology, parse_string_list};
+    use super::{next_map_methodology, validate_map_document};
 
     #[test]
     fn first_class_methodology_toggles_stride_and_pasta_only() {
@@ -283,10 +275,13 @@ mod tests {
     }
 
     #[test]
-    fn string_lists_accept_comma_and_line_delimiters() {
-        assert_eq!(
-            parse_string_list("docs/a.md, docs/b.md\nnotes/c.md"),
-            vec!["docs/a.md", "docs/b.md", "notes/c.md"]
-        );
+    fn document_validation_preserves_commas_and_spaces_and_names_invalid_files() {
+        let target = tempfile::tempdir().unwrap();
+        let name = "Architecture, v2.md";
+        std::fs::write(target.path().join(name), "context").unwrap();
+        validate_map_document(Some(target.path()), name).unwrap();
+        let error = validate_map_document(Some(target.path()), "missing.md").unwrap_err();
+        assert!(error.to_string().contains("missing.md"));
+        assert!(validate_map_document(Some(target.path()), ".").is_err());
     }
 }

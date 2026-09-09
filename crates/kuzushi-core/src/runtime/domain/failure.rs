@@ -7,6 +7,7 @@ const ADAPTIVE_THINKING_DETAIL: &str =
     "temperature is incompatible with adaptive thinking; omit the pinned temperature";
 const OPENAI_OAUTH_DETAIL: &str =
     "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.";
+const MODEL_UNAVAILABLE_DETAIL: &str = "The selected model is unavailable for this provider or account. Choose an available model explicitly.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -243,20 +244,31 @@ fn allowlisted_failure_detail(
     detail: Option<&str>,
 ) -> Option<String> {
     let detail = detail?.to_ascii_lowercase();
-    match error_class {
-        RuntimeFailureClass::SdkClientValidation
-            if detail.contains("temperature") && detail.contains("thinking") =>
-        {
-            Some(ADAPTIVE_THINKING_DETAIL.to_string())
-        }
-        RuntimeFailureClass::Authentication
-            if detail.contains("openai oauth authentication failed") =>
-        {
-            Some(OPENAI_OAUTH_DETAIL.to_string())
-        }
-        _ => None,
-    }
+    SAFE_DETAILS
+        .iter()
+        .find(|(class, required, _)| {
+            *class == error_class && required.iter().all(|text| detail.contains(text))
+        })
+        .map(|(_, _, canonical)| canonical.to_string())
 }
+
+const SAFE_DETAILS: &[(RuntimeFailureClass, &[&str], &str)] = &[
+    (
+        RuntimeFailureClass::SdkClientValidation,
+        &["temperature", "thinking"],
+        ADAPTIVE_THINKING_DETAIL,
+    ),
+    (
+        RuntimeFailureClass::Authentication,
+        &["openai oauth authentication failed"],
+        OPENAI_OAUTH_DETAIL,
+    ),
+    (
+        RuntimeFailureClass::ProviderRejected,
+        &["the selected model is unavailable for this provider or account. choose an available model explicitly."],
+        MODEL_UNAVAILABLE_DETAIL,
+    ),
+];
 
 #[cfg(test)]
 mod tests {
@@ -289,5 +301,29 @@ mod tests {
             "detail": "token=secret-value"
         });
         assert!(serde_json::from_value::<RuntimeFailureMetadata>(value).is_err());
+    }
+
+    #[test]
+    fn unavailable_model_detail_roundtrips_without_accepting_raw_provider_content() {
+        let metadata = RuntimeFailureMetadata::new(
+            RuntimeFailureClass::ProviderRejected,
+            Some(400),
+            Some(MODEL_UNAVAILABLE_DETAIL),
+        );
+        let value = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(value["detail"], MODEL_UNAVAILABLE_DETAIL);
+        assert_eq!(
+            serde_json::from_value::<RuntimeFailureMetadata>(value.clone()).unwrap(),
+            metadata
+        );
+        let mut unsafe_value = value;
+        unsafe_value["detail"] = format!("{MODEL_UNAVAILABLE_DETAIL} PRIVATE_SOURCE").into();
+        assert!(serde_json::from_value::<RuntimeFailureMetadata>(unsafe_value).is_err());
+        let wrong_class = RuntimeFailureMetadata::new(
+            RuntimeFailureClass::Authentication,
+            Some(401),
+            Some(MODEL_UNAVAILABLE_DETAIL),
+        );
+        assert_eq!(wrong_class.detail, None);
     }
 }

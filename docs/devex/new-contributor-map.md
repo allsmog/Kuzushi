@@ -58,6 +58,10 @@ For vocabulary and dependency rules, see
   by tool. Missing binaries should fail actionably.
 - `pnpm build:native` assembles the native npm runtime; source Rust builds use
   Cargo. There are no retained TypeScript library exports to compile.
+- The source wrapper and `pnpm dev` check the Cargo build and use its reported
+  executable paths. Set `KUZUSHI_NATIVE_BIN` when intentionally testing a staged
+  artifact. `pnpm link:local` makes both global aliases use the checkout while
+  preserving the previous installation for `pnpm link:local:restore`.
 - `.kuzushi`, `.kuzushi-active`, native binaries, temp prompts, and
   SQLite files are local state, not product assets.
 - The pre-commit hook expects `lint-staged`. If local dependencies are missing,

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,9 +39,11 @@ if (nativeOverride) {
 // from argv0. Cargo checkouts also use the single `kuzushi` CLI build output.
 const fallbackExe = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
 const platformPackage = nativePlatformPackage();
-const installedRuntimeDir = resolveInstalledRuntimeDir(platformPackage);
+const sourceBinary = nativeOverride ? undefined : await buildSourceCheckout();
+const installedRuntimeDir = nativeOverride || sourceBinary ? undefined : resolveInstalledRuntimeDir(platformPackage);
 const candidates = [
   nativeOverride,
+  sourceBinary,
   installedRuntimeDir && join(installedRuntimeDir, exe),
   installedRuntimeDir && join(installedRuntimeDir, fallbackExe),
   join(root, "native", `${process.platform}-${process.arch}`, exe),
@@ -86,8 +88,21 @@ function isNativeBinaryFile(candidate) {
 }
 
 function nativeRuntimePath(binaryPath, inheritedPath) {
-  const runtimeDir = dirname(binaryPath);
+  const runtimeDir = dirname(realpathSync(binaryPath));
   return inheritedPath ? `${runtimeDir}${delimiter}${inheritedPath}` : runtimeDir;
+}
+
+async function buildSourceCheckout() {
+  if (!existsSync(join(root, "Cargo.toml")) || !existsSync(join(root, "crates", "kuzushi-cli", "Cargo.toml"))) {
+    return undefined;
+  }
+  try {
+    const { buildSourceRuntime } = await import("../scripts/source-native-runtime.mjs");
+    return buildSourceRuntime(root);
+  } catch (error) {
+    process.stderr.write(`kuzushi: ${error.message}\n`);
+    process.exit(error.exitCode ?? 1);
+  }
 }
 
 function resolveInstalledRuntimeDir(selectedPackage) {

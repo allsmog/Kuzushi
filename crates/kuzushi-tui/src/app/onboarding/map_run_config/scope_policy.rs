@@ -28,21 +28,6 @@ pub(crate) fn owning_leaf_scope<'a>(
         .map(|(_, scope)| scope)
 }
 
-pub(super) fn next_scope_value(
-    current: Option<&str>,
-    leaves: &[NestedProjectScope],
-) -> Option<String> {
-    let mut values = Vec::with_capacity(leaves.len() + 2);
-    values.push(None);
-    values.extend(leaves.iter().map(|scope| Some(format!("id:{}", scope.id))));
-    values.push(Some(ALL_LEAF_SCOPES.to_string()));
-    let current_index = values
-        .iter()
-        .position(|value| value.as_deref() == current)
-        .unwrap_or(0);
-    values[(current_index + 1) % values.len()].clone()
-}
-
 pub(super) fn selected_scope_count(scope: Option<&str>, leaf_count: usize) -> usize {
     if scope == Some(ALL_LEAF_SCOPES) {
         leaf_count

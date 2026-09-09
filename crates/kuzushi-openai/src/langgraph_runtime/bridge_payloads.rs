@@ -44,6 +44,8 @@ pub(crate) struct NextStepBridgeRequest {
     pub(crate) messages: Vec<Value>,
     pub(crate) tools: Vec<BridgeTool>,
     pub(crate) max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) thinking_level: Option<String>,
     pub(crate) api_key_env: String,
     pub(crate) api_key: Option<String>,
     pub(crate) oauth_credentials_path: String,
@@ -132,6 +134,11 @@ pub(crate) struct BridgeRequest {
     pub(crate) runtime_options: Option<AgentRuntimeOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) temperature: Option<f32>,
+    /// Verified stable prefix of `prompt` (see
+    /// `AgentQueryRequest::prompt_cache_split`); the bridge sends it as a
+    /// cache-marked user content block ahead of the remainder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cacheable_prompt_prefix: Option<String>,
 }
 
 /// `type: "ping"` envelope consumed by the bridge's `handlePing`. The wire
@@ -206,6 +213,12 @@ pub(crate) struct BridgeResponse {
     pub(crate) input_tokens: Option<u64>,
     #[serde(default, alias = "output_tokens")]
     pub(crate) output_tokens: Option<u64>,
+    /// Prompt-cache accounting summed over the bridge's model calls. Absent
+    /// when no call reported it; never synthesized as zero.
+    #[serde(default, alias = "cache_read_input_tokens")]
+    pub(crate) cache_read_input_tokens: Option<u64>,
+    #[serde(default, alias = "cache_creation_input_tokens")]
+    pub(crate) cache_creation_input_tokens: Option<u64>,
     #[serde(default, alias = "input_reported_calls")]
     pub(crate) input_reported_calls: Option<u64>,
     #[serde(default, alias = "output_reported_calls")]

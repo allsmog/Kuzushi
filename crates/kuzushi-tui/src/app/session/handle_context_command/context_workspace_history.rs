@@ -89,6 +89,7 @@ impl ShellApp {
         }
         self.clear_log();
         *self.selected_finding_mut() = None;
+        self.record_cleared_answer_conversation();
         self.clear_agent_chat();
         self.set_shell_view(ShellView::Catalog);
         self.log(

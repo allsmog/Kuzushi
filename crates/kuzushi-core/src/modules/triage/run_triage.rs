@@ -1,6 +1,23 @@
 use super::*;
 
+#[cfg(test)]
+mod tests;
+
 pub(in crate::modules) fn run_triage(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let workspace = require_triage_workspace(ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "triage:run",
+        workspace.root(),
+        || run_triage_against_source(input, ctx, runtime),
+    )
+}
+
+fn run_triage_against_source(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,

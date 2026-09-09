@@ -1,11 +1,12 @@
+use super::number_edit::BatchNumberEdit;
 use kuzushi_core::RunSummary;
 use std::path::Path;
 
 pub(crate) const DEFAULT_BATCH_TRIALS: usize = 3;
 pub(crate) const BATCH_REVIEW_THRESHOLD: usize = 10;
 pub(crate) const BATCH_HARD_CAP: usize = 50;
-const MIN_BATCH_TRIALS: usize = 2;
-const MAX_BATCH_WORKERS: usize = 8;
+pub(super) const MIN_BATCH_TRIALS: usize = 2;
+pub(super) const MAX_BATCH_WORKERS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BatchScanConfigRow {
@@ -20,7 +21,7 @@ impl BatchScanConfigRow {
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Trials => "Logical trials",
+            Self::Trials => "Scan trials",
             Self::Workers => "Parallel workers",
             Self::PriorRun => "Cost evidence",
             Self::Launch => "Review and launch",
@@ -46,6 +47,7 @@ pub(crate) struct BatchScanConfig {
     pub(crate) cursor: usize,
     pub(crate) review_armed: bool,
     pub(crate) notice: Option<String>,
+    pub(crate) number_edit: Option<BatchNumberEdit>,
 }
 
 impl BatchScanConfig {
@@ -66,6 +68,7 @@ impl BatchScanConfig {
             cursor: 0,
             review_armed: false,
             notice,
+            number_edit: None,
         }
     }
 
@@ -80,22 +83,13 @@ impl BatchScanConfig {
 
     pub(crate) fn activate_selected(&mut self) -> bool {
         match self.selected_row() {
-            BatchScanConfigRow::Trials => self.cycle_trials(),
-            BatchScanConfigRow::Workers => self.cycle_workers(),
+            row @ (BatchScanConfigRow::Trials | BatchScanConfigRow::Workers) => {
+                self.begin_number_edit(row);
+            }
             BatchScanConfigRow::PriorRun => self.cycle_prior_run(),
             BatchScanConfigRow::Launch => return true,
         }
         false
-    }
-
-    pub(crate) fn cycle_trials(&mut self) {
-        self.trials = cycle(self.trials, MIN_BATCH_TRIALS, BATCH_HARD_CAP);
-        self.disarm_review();
-    }
-
-    pub(crate) fn cycle_workers(&mut self) {
-        self.requested_workers = cycle(self.requested_workers, 1, MAX_BATCH_WORKERS);
-        self.disarm_review();
     }
 
     pub(crate) fn cycle_prior_run(&mut self) {
@@ -134,14 +128,6 @@ impl BatchScanConfig {
     ) {
         self.effective_workers = effective_workers.max(1);
         self.worker_clamp_reason = reason;
-    }
-}
-
-fn cycle(current: usize, minimum: usize, maximum: usize) -> usize {
-    if current >= maximum {
-        minimum
-    } else {
-        current + 1
     }
 }
 
@@ -207,17 +193,6 @@ mod tests {
         assert!(!config.review_armed);
         config.arm_review();
         assert!(config.review_armed);
-    }
-
-    #[test]
-    fn trial_control_wraps_at_the_tui_hard_cap() {
-        let target = tempfile::tempdir().unwrap();
-        let mut config = BatchScanConfig::load(target.path(), None);
-        config.trials = BATCH_HARD_CAP;
-
-        config.cycle_trials();
-
-        assert_eq!(config.trials, MIN_BATCH_TRIALS);
     }
 
     #[test]

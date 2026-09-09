@@ -7,7 +7,10 @@ use crate::ui_view_models::{
 use crate::{ShellApp, ViewDataState};
 use kuzushi_core::{PersistedVerification, RunArtifactRead};
 
-pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
+pub(super) fn prove_phase_model(
+    app: &ShellApp,
+    pending_result: Option<super::PhaseResultCardModel>,
+) -> ProvePhaseModel {
     let findings = findings_model(app);
     let selected = current_finding_for_detail(app);
     let finding = selected
@@ -24,6 +27,7 @@ pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
         taint_flow_path_for_finding(app, selected.as_ref().map(|(_, finding)| finding));
     let trace = trace_evidence_model(app, selected.as_ref(), finding.as_ref(), &attack_path);
     ProvePhaseModel {
+        pending_result: pending_result.filter(|_| investigation.is_none() && trace.is_none()),
         selection_disclosure: super::phase_bodies::actionable_selection_disclosure(
             app,
             &findings,
@@ -83,9 +87,10 @@ fn investigation_plan_model(
             "evidence {} · proof {} — the claims below stay unproven until an investigation records them",
             detail.evidence_state, detail.proof_confidence_label
         ),
-        evidence_goals: investigation_evidence_goals(raw, proof),
+        evidence_goals: investigation_mode_goals(raw, proof, boundary),
+        local_readiness: app.router.workbench().investigation_readiness(),
         empirical: boundary == crate::app::InvestigationBoundary::LocalReproduction,
-        model_ladder: investigation_model_ladder(app),
+        model_ladder: if boundary == crate::app::InvestigationBoundary::StaticOnly { investigation_model_ladder(app) } else { Vec::new() },
         command: investigation_verify_command(app, &raw.fingerprint, boundary),
     })
 }
@@ -104,8 +109,8 @@ pub(crate) fn investigation_verify_command(
     let mut input = serde_json::Map::new();
     input.insert("fingerprint".to_string(), serde_json::json!(fingerprint));
     input.insert("mode".to_string(), serde_json::json!(boundary.mode_value()));
-    for (key, value) in stored_verify_model_knobs(app) {
-        input.insert(key, value);
+    if boundary == crate::app::InvestigationBoundary::StaticOnly {
+        input.extend(stored_verify_model_knobs(app));
     }
     format!("run verify:finding {}", serde_json::Value::Object(input))
 }
@@ -132,10 +137,9 @@ fn stored_verify_model_knobs(app: &ShellApp) -> serde_json::Map<String, serde_js
     knobs
 }
 
-/// A human-readable summary of which models the drafted verification will use,
-/// in execution order: the cheap plausibility gate (rejection only), then the
-/// full-strength panel. Both rows report exactly the models
-/// `investigation_verify_command` folds into the drafted command.
+/// Configured verification models, with the panel first for compact preflight.
+/// Inline/stored values and the selected configuration use the same precedence
+/// as execution; unset optional stages stay explicit.
 fn investigation_model_ladder(app: &ShellApp) -> Vec<String> {
     let knobs = stored_verify_model_knobs(app);
     let gate = knobs
@@ -145,7 +149,8 @@ fn investigation_model_ladder(app: &ShellApp) -> Vec<String> {
     let panel = knobs
         .get("model")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("workspace model");
+        .or(app.config().model.as_deref())
+        .unwrap_or("not selected");
     let passes = knobs
         .get("VERIFY_PASSES")
         .and_then(serde_json::Value::as_u64)
@@ -155,14 +160,37 @@ fn investigation_model_ladder(app: &ShellApp) -> Vec<String> {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("not set");
     vec![
-        format!("gate: {gate} (rejection only)"),
-        format!("panel: {panel} x {passes} pass(es)"),
-        format!("escalate on tie: {escalation}"),
+        format!(
+            "panel: {} x {passes} pass(es)",
+            crate::app::display_model_selector(panel)
+        ),
+        format!(
+            "escalate on tie: {}",
+            crate::app::display_model_selector(escalation)
+        ),
+        format!(
+            "gate: {} (rejection only)",
+            crate::app::display_model_selector(gate)
+        ),
     ]
 }
 
 /// Evidence goals derive from the finding's recorded gaps, so the card only
 /// promises work this finding actually needs.
+fn investigation_mode_goals(
+    finding: &kuzushi_core::Finding,
+    proof: Option<&ProofReplayModel>,
+    boundary: crate::app::InvestigationBoundary,
+) -> Vec<String> {
+    if boundary == crate::app::InvestigationBoundary::LocalReproduction {
+        return vec![
+            "Build and attempt an isolated harness for this finding when the language and trigger are supported".to_string(),
+            "Record execution evidence or the reason reproduction could not be attempted".to_string(),
+        ];
+    }
+    investigation_evidence_goals(finding, proof)
+}
+
 fn investigation_evidence_goals(
     finding: &kuzushi_core::Finding,
     proof: Option<&ProofReplayModel>,
@@ -172,7 +200,7 @@ fn investigation_evidence_goals(
         goals.push("Recover structured evidence anchors (source and sink lines)".to_string());
     }
     if finding.corroboration_count <= 1 && finding.sources.len() <= 1 {
-        goals.push("Corroborate the signal through an independent source".to_string());
+        goals.push("Seek independent source evidence for the claim".to_string());
     }
     let has_runtime_attempt = finding
         .verification
@@ -180,10 +208,13 @@ fn investigation_evidence_goals(
         .is_some_and(PersistedVerification::has_terminal_runtime_verification);
     match (has_runtime_attempt, proof) {
         (false, _) => {
-            goals.push("Attempt safe reproduction and record a runtime witness".to_string());
+            goals.push(
+                "Assess reachability and guards from source; runtime behavior remains untested"
+                    .to_string(),
+            );
         }
         (true, Some(replay)) if replay.requires_revalidation => {
-            goals.push("Re-validate the stale proof against the current observation".to_string());
+            goals.push("Reassess source evidence for the current observation; prior runtime proof remains stale".to_string());
         }
         _ => {}
     }
@@ -283,7 +314,9 @@ mod investigation_goal_tests {
         let goals = investigation_evidence_goals(&bare_finding(), None);
         assert!(goals.iter().any(|goal| goal.contains("evidence anchors")));
         assert!(goals.iter().any(|goal| goal.contains("independent source")));
-        assert!(goals.iter().any(|goal| goal.contains("runtime witness")));
+        assert!(goals
+            .iter()
+            .any(|goal| goal.contains("runtime behavior remains untested")));
         assert!(
             goals.last().unwrap().contains("durable evidence"),
             "{goals:?}"
@@ -302,11 +335,13 @@ mod investigation_goal_tests {
         assert!(!fresh.iter().any(|goal| goal.contains("stale proof")));
 
         let stale = investigation_evidence_goals(&finding, Some(&replay(true)));
-        assert!(stale.iter().any(|goal| goal.contains("stale proof")));
+        assert!(stale
+            .iter()
+            .any(|goal| goal.contains("prior runtime proof remains stale")));
     }
 
     #[test]
-    fn model_assessment_keeps_runtime_witness_as_an_open_goal() {
+    fn model_assessment_discloses_runtime_behavior_remains_untested() {
         let mut finding = bare_finding();
         finding.verification = Some(PersistedVerification {
             proof_level: 3,
@@ -325,6 +360,8 @@ mod investigation_goal_tests {
         });
 
         let goals = investigation_evidence_goals(&finding, Some(&replay(false)));
-        assert!(goals.iter().any(|goal| goal.contains("runtime witness")));
+        assert!(goals
+            .iter()
+            .any(|goal| goal.contains("runtime behavior remains untested")));
     }
 }

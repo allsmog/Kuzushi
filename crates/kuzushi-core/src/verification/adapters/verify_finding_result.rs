@@ -7,7 +7,7 @@ use crate::findings::Finding;
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
-pub(crate) const DEFAULT_VERIFY_PROMPT: &str = "Treat this finding as a false positive until proven otherwise. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between; return exploitable=false when the evidence is incomplete.";
+pub(crate) const DEFAULT_VERIFY_PROMPT: &str = "Test this finding as a possible false positive. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between. Return exploitable=false only when cited evidence defeats the claim. Return exploitable=null and proofVerdict=insufficient_finding_detail when evidence, caller context, or attacker control is incomplete; lack of evidence is not a negative assessment.";
 
 /// Build the prompt for the independent exploitability verifier.
 ///
@@ -58,7 +58,7 @@ pub(in crate::verification::adapters) fn normalize_verification_result(
 
 struct RequiredVerificationFields {
     fingerprint: String,
-    exploitable: bool,
+    exploitable: Option<bool>,
     poc_payload: Option<String>,
     poc_description: String,
     attack_vector: Option<String>,
@@ -71,7 +71,7 @@ fn required_verification_fields(
     fallback_fingerprint: &str,
 ) -> Result<RequiredVerificationFields> {
     let fingerprint = canonical_verification_fingerprint(object, fallback_fingerprint)?;
-    let exploitable = required_object_bool(object, &["exploitable"])?;
+    let exploitable = super::verify_assessment::normalize_exploitability(object)?;
     let poc_payload = read_object_nullable_string(object, &["pocPayload", "poc_payload"]);
     let poc_description =
         read_object_string(object, &["pocDescription", "poc_description"]).unwrap_or_default();
@@ -173,18 +173,6 @@ fn insert_optional_context_fields(result: &mut Map<String, Value>, object: &Map<
     if let Some(value) = normalize_object_array(object, &["blindspots"]) {
         result.insert("blindspots".to_string(), value);
     }
-}
-
-fn required_object_bool(object: &Map<String, Value>, keys: &[&str]) -> Result<bool> {
-    let value = read_object_value(object, keys).ok_or_else(|| {
-        anyhow::anyhow!("verification output missing required boolean `exploitable`")
-    })?;
-    value.as_bool().ok_or_else(|| {
-        anyhow::anyhow!(
-            "verification output field `exploitable` must be boolean, got {}",
-            value_type_name(value)
-        )
-    })
 }
 
 fn required_object_f64(object: &Map<String, Value>, keys: &[&str]) -> Result<f64> {
@@ -348,14 +336,14 @@ mod tests {
         let missing = normalize_verification_result(json!({"confidence": 0.4}), "fp")
             .unwrap_err()
             .to_string();
-        assert!(missing.contains("missing required boolean"));
+        assert!(missing.contains("missing boolean or null"));
 
         let string_value =
             normalize_verification_result(json!({"exploitable": "yes", "confidence": 0.9}), "fp")
                 .unwrap_err()
                 .to_string();
         assert!(string_value.contains("must be boolean"));
-        assert!(string_value.contains("string"));
+        assert!(!string_value.contains("yes"));
     }
 
     #[test]

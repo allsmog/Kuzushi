@@ -74,7 +74,14 @@ impl ShellApp {
             return self.reduce_submitted_line(&entry.insert_text).effects;
         }
         self.set_input(entry.insert_text);
+        self.focus_palette_command_input();
         Vec::new()
+    }
+
+    fn focus_palette_command_input(&mut self) {
+        if crate::ui_view_models::answers_own_input(self) {
+            self.router.answers_mut().focus = crate::app::AnswerFocus::Workspace;
+        }
     }
 
     pub(crate) fn close_palette(&mut self) {

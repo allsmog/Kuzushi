@@ -235,6 +235,7 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
 }
 
 pub(in crate::modules) fn dispatch_finding_action_tool(
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -260,8 +261,8 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
             ctx,
             runtime,
         )),
-        "verify:finding" if verify_empirical_mode(input) => {
-            Some(run_verify_exploit(input.clone(), ctx))
+        "verify:finding" if crate::modules::verification_is_empirical(input) => {
+            Some(dispatch_empirical_verification(registry, input, ctx))
         }
         "verify:finding" => Some(run_verify_finding(input.clone(), ctx, runtime)),
         "verify:exploit" => Some(run_verify_exploit(input.clone(), ctx)),
@@ -269,6 +270,19 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
         "patch:finding" => Some(run_patch_finding(input.clone(), ctx, runtime)),
         _ => None,
     }
+}
+
+fn dispatch_empirical_verification(
+    registry: &ModuleRegistry,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    registry.dispatch_delegated_tool_with_runtime(
+        "verify:exploit",
+        json!({"fingerprint": input.get("fingerprint")}),
+        ctx,
+        None,
+    )
 }
 
 /// Opt-in `dedupe=true` runs the model-driven corpus dedupe BEFORE bulk
@@ -284,8 +298,8 @@ fn run_triage_with_optional_dedupe(
         .get("dedupe")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let dedupe_enabled = legacy_dedupe
-        || input.get("modelDedupe").and_then(Value::as_str) == Some("auto");
+    let dedupe_enabled =
+        legacy_dedupe || input.get("modelDedupe").and_then(Value::as_str) == Some("auto");
     let effective_input = effective_model_dedupe_input(input, legacy_dedupe);
     if !dedupe_enabled {
         return run_triage(effective_input, ctx, runtime);
@@ -380,13 +394,6 @@ fn deep_triage_input(input: &Value) -> Value {
         object.insert("findingFingerprint".to_string(), fingerprint);
     }
     normalized
-}
-
-fn verify_empirical_mode(input: &Value) -> bool {
-    input
-        .get("mode")
-        .and_then(Value::as_str)
-        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("empirical"))
 }
 
 pub(in crate::modules) fn dispatch_recon_assessment_tool(

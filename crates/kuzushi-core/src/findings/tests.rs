@@ -661,15 +661,21 @@ mod tests {
             Severity::Medium,
             "user input reaches the HTML sink, CWE-79",
         );
+        // Same 8-line dedup bucket as `first`, so the later run rediscovers the
+        // finding through the shared dedup key and joins its identity with a
+        // strong (cross-run) basis. Two uncorroborated file-fallback
+        // observations would stay separate rows under the safe fold, however
+        // close their lines are.
         let second = Finding::new_tool(
             "codeql",
             "codeql/cwe-79",
             "src/render.ts",
-            24,
-            Some(24),
+            22,
+            Some(22),
             Severity::High,
             "user input reaches the HTML sink, CWE-79",
         );
+        assert_eq!(first.dedup_key, second.dedup_key);
         let first_id = store.insert_finding("run-global-a", &first).unwrap();
         let second_id = store.insert_finding("run-global-b", &second).unwrap();
 
@@ -681,6 +687,8 @@ mod tests {
         assert_eq!(second_run[0].id, Some(second_id));
         assert_eq!(first_run[0].identity_id, second_run[0].identity_id);
         assert_ne!(first_run[0].fingerprint, second_run[0].fingerprint);
+        assert!(!first_run[0].effective_identity_basis().is_strong());
+        assert!(second_run[0].effective_identity_basis().is_strong());
         assert_eq!(first_run[0].corroboration_count, 1);
         assert_eq!(second_run[0].corroboration_count, 1);
         assert_eq!(first_run[0].sources.len(), 1);

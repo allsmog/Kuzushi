@@ -4,11 +4,18 @@ use crate::ui_view_models::active_workbench_page;
 use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ShellApp, ShellView};
 
+mod prove_details;
+pub(super) use prove_details::prove_detail_bindings;
+
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     matches!(app.shell_view(), ShellView::Workbench).then(|| workbench_keybindings(app))
 }
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if let Some(mut bindings) = crate::ui_view_models::phase_cockpit::result_keybindings(app) {
+        bindings.push(bind("Ctrl+C", "exit"));
+        return bindings;
+    }
     let plan = workbench_plan(app);
     if let Some(bindings) = guided_workbench_keybindings(app, plan.as_ref()) {
         return bindings;
@@ -37,7 +44,7 @@ fn regular_workbench_keybindings(
     bindings
 }
 
-fn ready_map_gallery_is_visible(app: &ShellApp) -> bool {
+pub(super) fn ready_map_gallery_is_visible(app: &ShellApp) -> bool {
     active_workbench_page(app) == WorkbenchPage::Map
         && crate::ui_view_models::map_gallery_is_primary(app)
 }
@@ -114,33 +121,39 @@ fn guided_workbench_keybindings(
     })
 }
 
+const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..5", "Tab", "[", "]", "Z", "z", "Enter"];
+const REVIEW_KEYS: [&str; 17] = [
+    "Enter",
+    "j/k/↑/↓",
+    "PgUp/PgDn",
+    "q",
+    "Shift+Tab",
+    "v",
+    "x",
+    "c",
+    "i",
+    "n/N",
+    "Tab",
+    "1..5",
+    "[",
+    "]",
+    "Z",
+    "z",
+    "g/G",
+];
+
 fn prioritize_phase_controls(
     bindings: &mut [FooterKeybinding],
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
 ) {
     // Preserve the phase-native controls before secondary cursor shortcuts at
     // compact widths. This changes presentation order only.
-    const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..5", "Tab", "[", "]", "Z", "z", "Enter"];
-    const REVIEW_KEYS: [&str; 16] = [
-        "Shift+Tab",
-        "q",
-        "Enter",
-        "j/k/↑/↓",
-        "v",
-        "x",
-        "c",
-        "i",
-        "n/N",
-        "Tab",
-        "1..5",
-        "[",
-        "]",
-        "Z",
-        "z",
-        "g/G",
-    ];
     let keys = if focused_surface(plan).is_some_and(|surface| {
-        surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable
+        matches!(
+            surface.interaction,
+            crate::ui_view_models::SurfaceInteraction::Selectable
+                | crate::ui_view_models::SurfaceInteraction::Scrollable
+        )
     }) {
         REVIEW_KEYS.as_slice()
     } else {
@@ -172,7 +185,7 @@ fn focused_enter_binding(
     }
     (surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable).then(|| {
         if page == WorkbenchPage::Review {
-            bind("Enter", "review")
+            bind("Enter", "open Prove")
         } else {
             bind("Enter", "open")
         }

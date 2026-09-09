@@ -2,14 +2,37 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) -> Vec<ShellEffect> {
+        if let AgentEvent::ResponseText(event) = event {
+            self.apply_agent_response_text(event);
+            return Vec::new();
+        }
         if let Some(session) = self.activity_mut() {
             session.operator_question = None;
         }
         let state = AgentEventState::from_app(self);
         match event {
+            AgentEvent::ResponseText(_) => Vec::new(),
             AgentEvent::Answered { text, audit } => self.apply_agent_answer(text, audit, state),
             AgentEvent::Failed { error, audit } => self.apply_agent_failure(error, audit, state),
         }
+    }
+
+    fn apply_agent_response_text(
+        &mut self,
+        event: kuzushi_openai::langgraph_runtime::ResponseTextEvent,
+    ) {
+        use kuzushi_openai::langgraph_runtime::ResponseTextEvent;
+        let Some(agent) = self
+            .agent_chat_mut()
+            .filter(|chat| chat.running && !chat.abort_requested)
+        else {
+            return;
+        };
+        match event {
+            ResponseTextEvent::Reset => agent.partial_answer.clear(),
+            ResponseTextEvent::Delta(text) => agent.partial_answer.push_str(&text),
+        }
+        self.router.answers_mut().follow_response = true;
     }
 
     fn apply_agent_answer(
@@ -35,6 +58,7 @@ impl ShellApp {
                 agent.error = Some("response arrived after abort request; ignored".to_string());
             } else {
                 agent.answer = Some(text.to_string());
+                agent.partial_answer.clear();
                 agent.error = None;
             }
         }
@@ -73,12 +97,11 @@ impl ShellApp {
             },
         );
         self.log("answer", text.clone());
-        // Ask is a fallthrough: the operator kept their view, and the full
-        // answer text lands in the transcript.
+        // Refresh the answer document in place; completion never changes focus.
         self.set_agent_terminal_activity(
             state.auxiliary_read_only,
             LiveActivityPhase::Completed,
-            "answer received. Next: logs",
+            "answer received · workbench → answers",
         );
         self.agent_success_record(&text, audit, state)
     }
@@ -89,38 +112,60 @@ impl ShellApp {
         audit: AgentCallAudit,
         state: AgentEventState,
     ) -> Vec<ShellEffect> {
-        let safe_error = kuzushi_core::runtime::safe_model_failure_message(&error);
+        let safe_error = audit.failure_summary(&error);
+        let message =
+            crate::ui_view_models::model_failure_text(&audit, &error, state.run_id.as_deref());
+        self.restore_failed_answer_draft(state.artifact_target.clone());
+        self.settle_agent_failure_state(&message, state.abort_requested);
+        self.record_agent_cost(&audit, state.run_id.as_deref());
+        if state.abort_requested {
+            return self.apply_aborted_agent_failure(error, audit, state);
+        }
+        self.set_error_notice("ask", message);
+        self.set_agent_terminal_activity(
+            state.auxiliary_read_only,
+            LiveActivityPhase::Refused,
+            &safe_error,
+        );
+        self.agent_failure_record(safe_error, audit, state)
+    }
+
+    fn settle_agent_failure_state(&mut self, message: &str, abort_requested: bool) {
         if let Some(agent) = self.agent_chat_mut() {
             agent.running = false;
             agent.abort_requested = false;
             agent.answer = None;
-            agent.error = Some(agent_failure_message(&safe_error, state.abort_requested));
+            agent.error = Some(agent_failure_message(message, abort_requested));
         }
-        self.record_agent_cost(&audit, state.run_id.as_deref());
-        if state.abort_requested {
-            let safe_error = persisted_agent_cancellation(&error);
-            self.log(
-                "agent",
-                format!("LangGraph ended after abort request: {safe_error}"),
-            );
-            self.set_agent_terminal_activity(
-                state.auxiliary_read_only,
-                LiveActivityPhase::Refused,
-                "worker ended after abort request",
-            );
-            return self.agent_canceled_record(
-                format!("worker ended after abort request: {error}"),
-                audit,
-                state,
-            );
-        }
-        self.set_error_notice("ask", safe_error.clone());
+    }
+
+    fn apply_aborted_agent_failure(
+        &mut self,
+        error: String,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
+        let safe_error = persisted_agent_cancellation(&error);
+        self.log(
+            "agent",
+            format!("LangGraph ended after abort request: {safe_error}"),
+        );
         self.set_agent_terminal_activity(
             state.auxiliary_read_only,
             LiveActivityPhase::Refused,
-            "model request failed",
+            "worker ended after abort request",
         );
-        self.agent_failure_record(safe_error, audit, state)
+        self.agent_canceled_record(safe_error, audit, state)
+    }
+
+    fn restore_failed_answer_draft(&mut self, target: Option<std::path::PathBuf>) {
+        let Some(question) = self.agent_chat().map(|chat| chat.question.clone()) else {
+            return;
+        };
+        let current_target = self.target_owned();
+        self.router
+            .answers_mut()
+            .restore_failed_question(target, current_target, &question);
     }
 
     fn set_agent_terminal_activity(
@@ -134,7 +179,7 @@ impl ShellApp {
         }
         match phase {
             LiveActivityPhase::Completed => self.set_completed_activity("agent", detail),
-            LiveActivityPhase::Refused => self.set_refused_activity("agent", detail),
+            LiveActivityPhase::Refused => self.set_refused_activity_state("agent", detail),
             _ => {}
         }
     }
@@ -209,6 +254,7 @@ impl ShellApp {
     }
 
     pub(crate) fn record_agent_run_effect(&mut self, record: AgentRunRecord) {
+        self.persist_answer_conversation();
         let usable_result = matches!(record.outcome, AgentRunOutcome::Complete { .. });
         let persistence = match &record.outcome {
             AgentRunOutcome::Complete { answer_chars } => {
@@ -263,7 +309,7 @@ fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) -> a
 }
 
 fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) -> anyhow::Result<()> {
-    let safe_error = kuzushi_core::runtime::safe_model_failure_message(error);
+    let safe_error = record.audit.failure_summary(error);
     record_agent_run_failed(
         record.target.as_deref(),
         &record.run_id,
@@ -336,7 +382,7 @@ fn agent_latency_ms(started_secs: u64) -> Option<u64> {
 
 fn agent_failure_message(error: &str, abort_requested: bool) -> String {
     if abort_requested {
-        format!("request ended after abort request; last error: {error}")
+        "Ask canceled. Review the question before sending it again.".to_string()
     } else {
         error.to_string()
     }

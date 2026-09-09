@@ -18,6 +18,7 @@ pub(crate) use domain_cache::*;
 pub(crate) use editor_state::*;
 pub(crate) use effect_runtime::*;
 pub(crate) use effects::*;
+pub(crate) use field_editor::FieldEditor;
 pub(crate) use file_picker::*;
 pub(crate) use findings::*;
 pub(crate) use guided_scan::*;
@@ -67,6 +68,7 @@ mod abort_reason;
 mod agent_chat;
 mod agent_chat_state;
 mod agent_session;
+mod answer_recovery;
 mod approval;
 mod artifacts;
 mod attention;
@@ -82,6 +84,7 @@ mod coverage;
 mod editor_state;
 mod effect_runtime;
 mod effects;
+mod field_editor;
 mod file_picker;
 mod findings;
 mod guided_scan;
@@ -194,8 +197,8 @@ pub use runtime::{
 };
 pub(crate) use settings::{
     auth_provider_label, bridge_command_status, display_model_selector, env_credential_is_ready,
-    model_choice_index_by_id, model_choices, oauth_credential_is_ready,
-    oauth_model_switch_for_provider, oauth_provider_status, preferred_visible_model_choice_cursor,
+    model_catalog_note, model_choice_index_by_id, model_choices, model_picker_cursor,
+    oauth_credential_is_ready, oauth_model_switch_for_provider, oauth_provider_status,
     runtime_backend_label, validate_shell_model_id, AuthProvider, ModelChoice,
 };
 pub use shellapp::ShellApp;

@@ -1,6 +1,8 @@
 import { AIMessage } from "@langchain/core/messages";
-import { invalidProviderResponseError, providerHttpError } from "./errors.mjs";
+import { toJsonSchema } from "@langchain/core/utils/json_schema";
+import { invalidProviderResponseError, providerResponseError } from "./errors.mjs";
 import { appendStructuredOutputContract, cacheableTextBlock, messageText } from "./model.mjs";
+import { openAiResponseEvents } from "./oauth-response-stream.mjs";
 
 const CLAUDE_CODE_IDENTITY_LINE = "You are Claude Code, Anthropic's official CLI for Claude.";
 
@@ -34,7 +36,7 @@ class AnthropicOAuthChatModel {
       },
       body: JSON.stringify(this.body(messages)),
     });
-    if (!response.ok) throw providerHttpError(response.status);
+    if (!response.ok) throw await providerResponseError(response);
     return anthropicMessageFromResponse(await providerJson(response));
   }
 
@@ -73,13 +75,17 @@ class OpenAiCodexOAuthChatModel {
     );
   }
 
-  async invoke(messages) {
+  async invoke(messages, options = {}) {
     const response = await fetch("https://chatgpt.com/backend-api/codex/responses", {
       method: "POST",
       headers: openAiOauthHeaders(this.token, this.request.oauthAccountId),
       body: JSON.stringify(this.body(messages)),
     });
-    if (!response.ok) throw providerHttpError(response.status);
+    if (!response.ok) throw await providerResponseError(response);
+    if (options.onText) {
+      const events = await openAiResponseEvents(response, options.onText);
+      return openAiMessageFromEvents(events, this.openAiToolNameMap());
+    }
     const text = await response.text();
     return openAiMessageFromSse(text, this.openAiToolNameMap());
   }
@@ -93,6 +99,8 @@ class OpenAiCodexOAuthChatModel {
       store: false,
       stream: true,
     };
+    const effort = this.request.thinkingLevel ?? this.request.thinking_level;
+    if (effort != null) body.reasoning = { effort };
     if (this.tools.length) body.tools = this.openAiToolDefinitions();
     return body;
   }
@@ -141,7 +149,10 @@ function anthropicMessageFromResponse(parsed) {
 }
 
 function openAiMessageFromSse(text, safeToOriginal = new Map()) {
-  const events = sseJsonEvents(text);
+  return openAiMessageFromEvents(sseJsonEvents(text), safeToOriginal);
+}
+
+function openAiMessageFromEvents(events, safeToOriginal) {
   const toolCalls = events.flatMap((event) => openAiToolCallsFromEvent(event, safeToOriginal));
   const finalText = outputTextFromEvents(events);
   const usage = events.findLast?.((event) => event?.response?.usage)?.response?.usage;
@@ -268,7 +279,24 @@ function contentWithCacheBreakpoint(content) {
 function anthropicMessage(message) {
   if (message?._getType?.() === "ai") return anthropicAssistantMessage(message);
   if (message?._getType?.() === "tool") return anthropicToolResultMessage(message);
-  return { role: "user", content: messageText(message) };
+  return anthropicUserMessage(message);
+}
+
+// A user turn built from content blocks keeps its block boundaries — and the
+// cache marker on a declared prompt prefix — instead of being flattened to one
+// string, which would silently discard the caching the Rust runtime asked for.
+function anthropicUserMessage(message) {
+  const content = message?.content;
+  if (!Array.isArray(content) || !content.length) {
+    return { role: "user", content: messageText(message) };
+  }
+  return { role: "user", content: content.map(anthropicUserTextBlock) };
+}
+
+function anthropicUserTextBlock(part) {
+  if (typeof part === "string") return { type: "text", text: part };
+  const block = { type: "text", text: part?.text ?? part?.content ?? "" };
+  return part?.cache_control ? { ...block, cache_control: part.cache_control } : block;
 }
 
 function anthropicAssistantMessage(message) {
@@ -391,7 +419,7 @@ function anthropicToolDefinition(tool) {
   return {
     name: tool.name,
     description: tool.description ?? "",
-    input_schema: tool.schema ?? tool.input_schema ?? tool.inputSchema ?? { type: "object" },
+    input_schema: toolInputSchema(tool),
   };
 }
 
@@ -400,8 +428,15 @@ function openAiToolDefinition(tool) {
     type: "function",
     name: tool.name,
     description: tool.description ?? "",
-    parameters: tool.schema ?? tool.input_schema ?? tool.inputSchema ?? { type: "object" },
+    parameters: toolInputSchema(tool),
+    // Optional arguments and validation belong to the declared tool contract.
+    strict: false,
   };
+}
+
+function toolInputSchema(tool) {
+  const schema = tool.schema ?? tool.input_schema ?? tool.inputSchema ?? { type: "object", properties: {} };
+  return toJsonSchema(schema);
 }
 
 function openAiToolBindings(tools) {
@@ -464,10 +499,14 @@ function providerUsage(usage) {
   requiredProviderObject(usage);
   const inputTokens = optionalProviderTokenCount(usage.input_tokens);
   const outputTokens = optionalProviderTokenCount(usage.output_tokens);
+  const cacheRead = optionalProviderTokenCount(usage.cache_read_input_tokens);
+  const cacheCreation = optionalProviderTokenCount(usage.cache_creation_input_tokens);
   if (inputTokens === undefined && outputTokens === undefined) return undefined;
   return {
     ...(inputTokens === undefined ? {} : { input_tokens: inputTokens }),
     ...(outputTokens === undefined ? {} : { output_tokens: outputTokens }),
+    ...(cacheRead === undefined ? {} : { cache_read_input_tokens: cacheRead }),
+    ...(cacheCreation === undefined ? {} : { cache_creation_input_tokens: cacheCreation }),
   };
 }
 

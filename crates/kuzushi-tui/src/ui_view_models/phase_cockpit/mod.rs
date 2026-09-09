@@ -12,7 +12,7 @@ use super::{
 };
 #[cfg(test)]
 use crate::{phase_attempt_outcome_from_label, phase_result_policy};
-use crate::{InputMode, PhaseResultCommand, ShellApp, ShellView};
+use crate::{InputMode, ShellApp, ShellView};
 use kuzushi_core::WorkflowPhase;
 
 mod composition;
@@ -22,7 +22,12 @@ mod layout;
 mod layout_matrix_tests;
 mod map;
 mod phase_bodies;
+mod result_controls;
 mod scan;
+#[cfg(test)]
+use result_controls::result_action_label;
+use result_controls::result_action_labels_for;
+pub(crate) use result_controls::result_keybindings;
 
 pub(crate) use composition::{Composition, DrawerSize, DrawerSpec, SurfaceRole};
 mod chain_artifacts;
@@ -58,6 +63,12 @@ pub(crate) struct PhaseResultCardModel {
     pub(crate) actions: Vec<kuzushi_core::workflow_attempts::PhaseResultAction>,
     pub(crate) control_hint: String,
     pub(crate) recommended: String,
+}
+
+impl PhaseResultCardModel {
+    pub(crate) fn has_result_actions(&self) -> bool {
+        !self.actions.is_empty()
+    }
 }
 
 impl PhaseCockpitModel {
@@ -245,6 +256,7 @@ pub(crate) struct ChainLinkModel {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ProvePhaseModel {
+    pub(crate) pending_result: Option<PhaseResultCardModel>,
     pub(crate) finding: Option<FindingDetailModel>,
     pub(crate) attack_path: TaintFlowPath,
     pub(crate) proof: Option<ProofReplayModel>,
@@ -271,6 +283,7 @@ pub(crate) struct ProvePhaseModel {
 /// are the last expansion's advisory copy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TraceEvidenceModel {
+    pub(crate) last_outcome: Option<String>,
     pub(crate) reference: String,
     pub(crate) severity: String,
     /// `target …@rev · threat model @rev` when the cached metadata and the
@@ -303,8 +316,10 @@ pub(crate) struct InvestigationPlanModel {
     pub(crate) why: String,
     pub(crate) evidence_goals: Vec<String>,
     pub(crate) empirical: bool,
-    /// Which models the drafted verification will use, in execution order
-    /// (gate → panel). Kept consistent with `command` by construction.
+    pub(crate) local_readiness:
+        Option<kuzushi_core::verification::application::LocalVerificationReadiness>,
+    /// Configured verification models, with the panel first for preflight.
+    /// Kept consistent with `command` and the selected config by construction.
     pub(crate) model_ladder: Vec<String>,
     pub(crate) command: String,
 }
@@ -452,10 +467,16 @@ pub(super) fn phase_cockpit_model_for_phase_with_journey(
     phase: WorkflowPhase,
     journey: Option<&JourneyModel>,
 ) -> PhaseCockpitModel {
+    let header = engagement_header_model(app, phase, journey);
+    let result = header
+        .result_card
+        .as_ref()
+        .filter(|card| card.has_result_actions());
+    let body = phase_body(app, phase, result);
     PhaseCockpitModel {
         phase,
-        header: engagement_header_model(app, phase, journey),
-        body: phase_body(app, phase),
+        header,
+        body,
     }
 }
 
@@ -485,6 +506,7 @@ fn engagement_header_model(
     let result_next = app
         .engagement
         .unresolved_phase_attempt(phase)
+        .filter(|_| !app.prove_detail_owns_controls())
         .map(|record| super::journey::unresolved_attempt_action(app, record));
     EngagementHeaderModel {
         phase,
@@ -513,6 +535,9 @@ fn engagement_header_model(
 }
 
 fn phase_result_card(app: &ShellApp, phase: WorkflowPhase) -> Option<PhaseResultCardModel> {
+    if app.prove_detail_owns_controls() {
+        return None;
+    }
     let presentation = app.phase_result_presentation(phase)?;
     Some(phase_result_card_model(app, phase, presentation))
 }
@@ -782,77 +807,6 @@ fn fallback_result_policy(phase: WorkflowPhase, outcome: &str) -> crate::app::Ph
     )
 }
 
-fn result_action_labels_for(
-    app: &ShellApp,
-    actions: &[kuzushi_core::workflow_attempts::PhaseResultAction],
-    phase: WorkflowPhase,
-    outcome: &str,
-    verified_remediation: bool,
-) -> String {
-    actions
-        .iter()
-        .map(|action| result_action_label(app, *action, phase, outcome, verified_remediation))
-        .collect::<Vec<_>>()
-        .join(" · ")
-}
-
-fn result_action_label(
-    app: &ShellApp,
-    action: kuzushi_core::workflow_attempts::PhaseResultAction,
-    phase: WorkflowPhase,
-    outcome: &str,
-    verified_remediation: bool,
-) -> String {
-    use kuzushi_core::workflow_attempts::PhaseResultAction::*;
-    let verb = match action {
-        Select if outcome == "partial" => "Acknowledge & use partial".to_string(),
-        Select if verified_remediation => "Acknowledge verified".to_string(),
-        Select => select_action_label(phase).to_string(),
-        SelectAndContinue => continue_action_label(phase).to_string(),
-        SelectAndReport => "Use & Report".to_string(),
-        ContinueRun => "Continue".to_string(),
-        Open => "Open".to_string(),
-        Refine => "Refine".to_string(),
-        RunAgain => "Run again".to_string(),
-        Regenerate => "Regenerate".to_string(),
-        // One verb per action everywhere: the guided card, the disposition
-        // event, and this strip all say Discard. "Dismiss" belongs to
-        // findings decisions, not attempt dispositions.
-        Discard => "Discard".to_string(),
-    };
-    let command = PhaseResultCommand::from_action(action);
-    let labels = app.ui().keymap_binding_labels(
-        "phase_result",
-        command.action_id(),
-        &[command.default_hint()],
-    );
-    if labels.is_empty() {
-        format!("unbound {verb}")
-    } else {
-        format!("{} {verb}", labels.join("/"))
-    }
-}
-
-fn select_action_label(phase: WorkflowPhase) -> &'static str {
-    match phase {
-        WorkflowPhase::Map => "Use map",
-        WorkflowPhase::Scan => "Use scan",
-        WorkflowPhase::Review => "Commit decisions",
-        WorkflowPhase::Prove => "Use proof set",
-        WorkflowPhase::Fix => "Select patch",
-    }
-}
-
-fn continue_action_label(phase: WorkflowPhase) -> &'static str {
-    match phase {
-        WorkflowPhase::Map => "Use & Scan",
-        WorkflowPhase::Scan => "Use & Review",
-        WorkflowPhase::Review => "Commit & Prove",
-        WorkflowPhase::Prove => "Use & Fix",
-        WorkflowPhase::Fix => "Continue",
-    }
-}
-
 fn configured_model_label(model: &str) -> String {
     if model == "unconfigured" {
         model.to_string()
@@ -896,12 +850,18 @@ fn active_module_label(app: &ShellApp) -> String {
         .to_string()
 }
 
-fn phase_body(app: &ShellApp, phase: WorkflowPhase) -> PhaseCockpitBody {
+fn phase_body(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+    pending_result: Option<&PhaseResultCardModel>,
+) -> PhaseCockpitBody {
     match phase {
         WorkflowPhase::Map => PhaseCockpitBody::Map(map_phase_model(app)),
         WorkflowPhase::Scan => PhaseCockpitBody::Scan(scan_phase_model(app)),
         WorkflowPhase::Review => PhaseCockpitBody::Review(review_phase_model(app)),
-        WorkflowPhase::Prove => PhaseCockpitBody::Prove(prove_phase_model(app)),
+        WorkflowPhase::Prove => {
+            PhaseCockpitBody::Prove(prove_phase_model(app, pending_result.cloned()))
+        }
         WorkflowPhase::Fix => PhaseCockpitBody::Fix(fix_phase_model(app)),
     }
 }

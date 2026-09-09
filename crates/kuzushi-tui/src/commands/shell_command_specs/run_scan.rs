@@ -2,6 +2,12 @@ use super::*;
 
 pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "answers",
+        aliases: &["/answers", "chat"],
+        category: ShellCommandCategory::RunScan,
+        description: "read complete Ask answers and reply beside the workspace (Ctrl+T)",
+    },
+    ShellCommandSpec {
         command: "demo",
         aliases: &["demo", "/demo"],
         category: ShellCommandCategory::RunScan,

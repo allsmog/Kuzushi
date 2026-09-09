@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+mod empirical_candidate;
 #[path = "selected_proof/model_candidate.rs"]
 mod model_candidate;
 
@@ -44,14 +45,35 @@ fn stage_proof(
 ) -> Result<StagedProof> {
     let summary = &run.summary;
     match summary.tool.as_deref() {
-        Some("verify:finding") => stage_model_proof(workspace, store, run),
-        Some("verify:exploit") => validate_empirical_proof(workspace, store, summary),
+        Some("verify:finding") => stage_finding_proof(workspace, store, run),
+        Some("verify:exploit") => validate_empirical_proof(workspace, store, run),
         Some(tool) => anyhow::bail!("Prove attempt references unsupported proof tool {tool:?}"),
         None => anyhow::bail!(
             "Prove run {:?} has no canonical tool identity",
             summary.run_id
         ),
     }
+}
+
+fn stage_finding_proof(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    run: &VerifiedRun,
+) -> Result<StagedProof> {
+    let input = read_json_artifact(
+        workspace.root(),
+        &run.summary.run_id,
+        "input.json",
+        "proof input",
+    )?;
+    if crate::modules::verification_is_empirical(&input) {
+        return validate_empirical_proof(workspace, store, run);
+    }
+    anyhow::ensure!(
+        run.result.pointer("/proof/kind").and_then(Value::as_str) != Some("empirical-verification"),
+        "model verification cannot claim an empirical result"
+    );
+    stage_model_proof(workspace, store, run)
 }
 
 enum StagedProof {
@@ -178,32 +200,19 @@ fn stage_model_proof(
 fn validate_empirical_proof(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
-    summary: &RunSummary,
+    run: &VerifiedRun,
 ) -> Result<StagedProof> {
     let input = read_json_artifact(
         workspace.root(),
-        &summary.run_id,
+        &run.summary.run_id,
         "input.json",
         "proof input",
     )?;
     let reference = required_string(&input, "fingerprint", "proof input fingerprint")?;
-    // Operator-reference resolution: verify:finding accepts aliases (F-0001),
-    // so the recorded proof input may carry one instead of a fingerprint.
     let finding = store
         .get_finding_by_operator_reference(reference)?
         .context("proof finding no longer exists")?;
-    let proof = finding
-        .verification
-        .as_ref()
-        .context("empirical proof was not persisted")?;
-    anyhow::ensure!(
-        proof.verification_run_id.as_deref() == Some(summary.run_id.as_str()),
-        "empirical proof does not belong to the selected run"
-    );
-    anyhow::ensure!(
-        proof.is_current_for_scan(finding.scan_id.as_deref()),
-        "empirical proof belongs to a stale finding generation"
-    );
+    empirical_candidate::validate(workspace.root(), &finding, &run.summary.run_id, &run.result)?;
     Ok(StagedProof::AlreadyDurable)
 }
 

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   CANONICAL_WORKSPACE_IGNORE_POLICY,
@@ -31,6 +33,16 @@ test("approved OpenAI and Spark Java contexts remain public", () => {
   for (const [file, source] of fixtures) {
     assert.deepEqual(textContextFailures(file, source), []);
   }
+});
+
+test("model alias arrays require an approved catalog file and canonical model context", () => {
+  const file = "crates/kuzushi-tui/src/app/settings/model_choices.rs";
+  const model = 'id: "openai-codex:gpt-5.3-codex-spark",';
+  const alias = '    "spark",';
+  assert.deepEqual(textContextFailures(file, `${model}\naliases: &[\n${alias}\n],`), []);
+  assert.notDeepEqual(textContextFailures(file, alias), []);
+  assert.notDeepEqual(textContextFailures("unknown.rs", `${model}\n${alias}`), []);
+  assert.notDeepEqual(textContextFailures(file, `${model}\n${alias} // SPARK control plane`), []);
 });
 
 test("private names, attribution, unknown Spark context, and developer homes fail", () => {
@@ -116,6 +128,38 @@ test("canonical child ignore policy preserves the three trackable surfaces", () 
 test("the tracked current tree passes the private-context contract", () => {
   assert.deepEqual(scanRepository(), []);
 });
+
+test("working-tree source deletions do not crash the context scan", (t) => {
+  const root = contextScanFixture(t);
+  unlinkSync(path.join(root, "obsolete.rs"));
+  assert.deepEqual(scanRepository(root), []);
+});
+
+test("deleting the required policy still fails the context scan", (t) => {
+  const root = contextScanFixture(t);
+  unlinkSync(path.join(root, "crates/kuzushi-cli/.kuzushi/.gitignore"));
+  assert.match(scanRepository(root).join("\n"), /canonical child ignore policy must be tracked/);
+});
+
+test("source deletions do not exempt other tracked private content", (t) => {
+  const root = contextScanFixture(t);
+  unlinkSync(path.join(root, "obsolete.rs"));
+  writeFileSync(path.join(root, "current.rs"), `${PRIVATE_CONTEXT_TERMS[0]} internal context\n`);
+  assert.match(scanRepository(root).join("\n"), /current\.rs:1:/);
+});
+
+function contextScanFixture(t) {
+  const root = mkdtempSync(path.join(tmpdir(), "kuzushi-context-scan-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const policy = "crates/kuzushi-cli/.kuzushi/.gitignore";
+  mkdirSync(path.dirname(path.join(root, policy)), { recursive: true });
+  writeFileSync(path.join(root, policy), CANONICAL_WORKSPACE_IGNORE_POLICY);
+  writeFileSync(path.join(root, "obsolete.rs"), "// retired source\n");
+  writeFileSync(path.join(root, "current.rs"), "// current source\n");
+  execFileSync("git", ["-C", root, "init", "--quiet"]);
+  execFileSync("git", ["-C", root, "add", "--force", "--", policy, "obsolete.rs", "current.rs"]);
+  return root;
+}
 
 function gitCheckIgnore(file) {
   return spawnSync("git", ["check-ignore", "--no-index", "-q", file], {

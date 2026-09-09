@@ -37,7 +37,12 @@ fn push_keymap_sections(
             lines.push(blank());
         }
         lines.push(keymap_section_divider(width, &section.name, &section.blurb));
-        lines.extend(section.rows.into_iter().map(keymap_binding_line));
+        lines.extend(
+            section
+                .rows
+                .into_iter()
+                .flat_map(|row| keymap_binding_lines(row, width)),
+        );
     }
 }
 
@@ -56,12 +61,16 @@ fn keymap_section_divider(width: usize, name: &str, blurb: &str) -> Line<'static
     raw(format!("{prefix}{}", "─".repeat(fill.max(1))))
 }
 
-fn keymap_binding_line(row: KeymapBindingRow) -> Line<'static> {
-    raw(format!(" {:<18} {}", fixed_key_cell(&row.keys), row.action))
-}
-
-fn fixed_key_cell(keys: &str) -> String {
-    keys.chars().take(18).collect()
+fn keymap_binding_lines(row: KeymapBindingRow, width: usize) -> Vec<Line<'static>> {
+    let text = if width < 60 {
+        format!(" {} · {}", row.keys, row.action)
+    } else {
+        format!(" {:<18} {}", row.keys, row.action)
+    };
+    crate::renderer::shared::text::wrap_document_lines(
+        vec![raw(text)],
+        width.min(u16::MAX as usize) as u16,
+    )
 }
 
 fn keymap_footer_stage_line(width: usize, footer: &KeymapFooter) -> String {

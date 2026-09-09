@@ -295,6 +295,25 @@ fn earliest_unresolved_phase(app: &ShellApp) -> Option<WorkflowPhase> {
         .find(|phase| app.engagement.unresolved_phase_attempt(*phase).is_some())
 }
 
+/// Review and Prove selection accepts existing evidence; it does not create
+/// Map/Scan checkpoints. Predict the same destination routing will derive
+/// after this pending result is selected, retaining other pending results.
+pub(crate) fn journey_destination_after_selection(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+) -> Option<JourneyDestination> {
+    if !matches!(phase, WorkflowPhase::Review | WorkflowPhase::Prove) {
+        return None;
+    }
+    let progress = journey_reality_projection(app)?.progress;
+    let unresolved = WorkflowPhase::ORDER
+        .iter()
+        .copied()
+        .filter(|other| *other != phase)
+        .find(|other| app.engagement.unresolved_phase_attempt(*other).is_some());
+    Some(journey_destination(progress, unresolved))
+}
+
 fn checkpoint_drift(app: &ShellApp, phase: WorkflowPhase) -> Option<CheckpointDrift> {
     if app.engagement.phase_attempt_projection_is_degraded() {
         return None;

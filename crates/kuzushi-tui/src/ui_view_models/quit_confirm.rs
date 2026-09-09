@@ -108,6 +108,10 @@ fn volatile_session_rows(app: &ShellApp) -> Vec<String> {
         session_budget_row(app),
         budget_draft_row(app),
         planning_option_draft_row(app),
+        report_path_draft_row(app),
+        map_text_draft_row(app),
+        batch_number_draft_row(app),
+        answer_draft_row(app),
         setup_plan_row(app),
         prompt_draft_row(app),
         credential_draft_row(app),
@@ -116,6 +120,19 @@ fn volatile_session_rows(app: &ShellApp) -> Vec<String> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+fn answer_draft_row(app: &ShellApp) -> Option<String> {
+    app.router.answers().has_drafts().then(|| {
+        "    !   Ask drafts   unsent questions will be discarded; content hidden".to_string()
+    })
+}
+
+fn report_path_draft_row(app: &ShellApp) -> Option<String> {
+    app.router.report().editing_path().then(|| {
+        "    !   report destination draft   active edit will be discarded; content hidden"
+            .to_string()
+    })
 }
 
 fn queued_commands_row(app: &ShellApp) -> Option<String> {
@@ -148,6 +165,23 @@ fn setup_plan_row(app: &ShellApp) -> Option<String> {
     let picker = app.engagement.planning_picker();
     (!picker.selected().is_empty())
         .then(|| "    !   planning selection   session choices will be discarded".to_string())
+}
+
+fn map_text_draft_row(app: &ShellApp) -> Option<String> {
+    app.router.setup().map_run_config().has_unsaved_text().then(|| {
+        "    !   Map draft   unsaved document or context edits will be discarded; content hidden".to_string()
+    })
+}
+
+fn batch_number_draft_row(app: &ShellApp) -> Option<String> {
+    app.router
+        .campaign()
+        .batch_scan_config
+        .as_ref()?
+        .number_edit
+        .as_ref()
+        .filter(|edit| !edit.field.text().is_empty())
+        .map(|_| "    !   batch number draft   unsaved value will be discarded".to_string())
 }
 
 fn prompt_draft_row(app: &ShellApp) -> Option<String> {
@@ -332,13 +366,13 @@ mod tests {
     fn quit_confirm_discloses_active_setup_drafts_without_echoing_content() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.router.setup_mut().begin_budget_edit(None);
-        app.router.setup_mut().push_budget_char('9');
+        app.router.setup_mut().insert_budget_text("9");
         app.engagement.planning_picker_mut().set_option_edit(Some(
-            crate::app::PlanningOptionEdit {
-                task: crate::app::PlanningTaskId::GatherRepoContext,
-                option_name: "scope".to_string(),
-                draft: "secret scope".to_string(),
-            },
+            crate::app::PlanningOptionEdit::new(
+                crate::app::PlanningTaskId::GatherRepoContext,
+                "scope",
+                "secret scope",
+            ),
         ));
 
         let model = quit_confirm_model(&app);

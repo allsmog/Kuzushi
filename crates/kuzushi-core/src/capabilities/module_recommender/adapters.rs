@@ -18,6 +18,11 @@ pub(crate) fn execute_module_recommender_tool(
     available_tools: Vec<String>,
 ) -> Result<Value> {
     let workspace = workspace_for_input(&input, ctx)?;
+    let snapshot = crate::workspace::source_snapshot::SourceSnapshot::capture(
+        ctx,
+        "module-recommender:recommend",
+        workspace.root(),
+    )?;
     let inventory = build_repository_inventory(workspace.root())?;
     let attack_surface = build_attack_surface_map_from_inventory(workspace.root(), &inventory)?;
     let (findings_available, findings) = list_findings(ctx, &workspace)?;
@@ -34,15 +39,18 @@ pub(crate) fn execute_module_recommender_tool(
     // available; otherwise fall back to the deterministic rule catalog.
     let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root());
     let report = build_recommendation_report_ranked(request, ranking);
+    snapshot.ensure_current(ctx, "module-recommender:recommend", workspace.root())?;
     let strategy_proposals = persist_strategy_proposals(&workspace, &report, ctx.run_id())?;
     write_strategy_run_artifact(ctx, &strategy_proposals)?;
     let summary = report.summary.clone();
     let output = recommendation_report_output(&report);
     let data =
         serde_json::to_value(report).context("Could not serialize module recommendations")?;
-    Ok(crate::module_result::completed_output_result(
-        summary, output, data,
-    ))
+    Ok(
+        snapshot.attach(crate::module_result::completed_output_result(
+            summary, output, data,
+        )),
+    )
 }
 
 fn recommender_request(

@@ -933,6 +933,15 @@ fn perf_baseline_folds_over_10k_findings_30k_decisions() {
     );
 
     let timer = Instant::now();
+    let narrow_records = store.list_all_review_decisions().unwrap();
+    eprintln!(
+        "PERF list_all_review_decisions (subject projection, no finding load): {:?} ({} rows)",
+        timer.elapsed(),
+        narrow_records.len()
+    );
+    assert_eq!(narrow_records.len(), records.len());
+
+    let timer = Instant::now();
     let metrics = super::trend::trend_metrics(&records, 123.0);
     eprintln!(
         "PERF trend_metrics fold: {:?} (decided {})",

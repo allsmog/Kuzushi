@@ -145,6 +145,11 @@ impl EngagementState {
         self.phase_attempt_projection_degraded
     }
 
+    pub(crate) fn phase_attempt_content_is_blocked(&self, attempt_id: &str) -> bool {
+        self.phase_attempt_ledger
+            .content_reuse_is_blocked(attempt_id)
+    }
+
     pub(crate) fn selected_phase_attempt(
         &self,
         phase: WorkflowPhase,

@@ -11,6 +11,131 @@ mod tests {
     use crate::structured_output::parse_json_value_from_agent_text;
     use crate::workspace::WorkspaceTarget;
 
+    fn run_source_code_prompt_case(input: Value) -> (Value, Vec<AgentQueryRequest>) {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("lib.rs"),
+            r#"
+pub fn accepts_scope(scope: &str) -> bool {
+    scope.starts_with("workspace:") && !scope.contains("..")
+}
+#[cfg(test)] mod tests {
+    #[test] fn fake_ingress() { serde_json::from_str::<String>("UNIT_TEST_BODY_MARKER"); }
+}
+"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let mut document = sample_document();
+        document["threats"][0]["evidence"] =
+            json!([{"kind":"source", "ref":"lib.rs:3", "summary":"Scope predicate"}]);
+        let runtime = MockThreatRuntime::new(json!({"document": document}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let result = registry
+            .execute_tool_with_runtime("threat-model:build", input, &ctx, Some(&runtime))
+            .unwrap();
+        (result, runtime.requests())
+    }
+
+    #[test]
+    fn default_source_code_reaches_the_real_registry_model_prompt() {
+        let (result, requests) = run_source_code_prompt_case(json!({"seedMode":"fresh"}));
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].prompt.contains("pub fn accepts_scope"));
+        assert!(requests[0].prompt.contains("starts_with"));
+        assert!(requests[0].prompt.contains("lib.rs:2"));
+        assert!(!requests[0].prompt.contains("UNIT_TEST_BODY_MARKER"));
+        assert!(result["data"]["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["label"] == "source-code" && source["status"] == "loaded"));
+    }
+
+    #[test]
+    fn explicit_sources_none_keeps_source_code_out_of_the_model_prompt() {
+        let (_, requests) = run_source_code_prompt_case(json!({"sources":["none"]}));
+        assert_eq!(requests.len(), 1);
+        assert!(!requests[0].prompt.contains("pub fn accepts_scope"));
+    }
+
+    #[test]
+    fn source_code_respects_context_off_and_explicit_legacy_sources() {
+        for input in [
+            json!({"contextMode":"off"}),
+            json!({"sources":["context","threat-model"]}),
+        ] {
+            let (_, requests) = run_source_code_prompt_case(input);
+            assert!(!requests[0].prompt.contains("pub fn accepts_scope"));
+        }
+        let (_, requests) =
+            run_source_code_prompt_case(json!({"contextMode":"off", "sources":["source-code"]}));
+        assert!(requests[0].prompt.contains("pub fn accepts_scope"));
+    }
+
+    #[test]
+    fn source_code_staged_synthesis_accepts_only_supplied_line_evidence() {
+        let (result, requests) = run_source_code_prompt_case(json!({"pipeline":"staged"}));
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].prompt.contains("pub fn accepts_scope"));
+        assert_eq!(
+            result["data"]["document"]["threats"][0]["evidence"][0]["ref"],
+            "lib.rs:3"
+        );
+    }
+
+    #[test]
+    fn source_code_refine_question_closer_receives_body_and_validates_its_citation() {
+        let temp = tempfile::tempdir().unwrap();
+        let code = format!(
+            "{}pub fn accepts_scope(scope: &str) -> bool {{ !scope.contains(\"..\") }}\n",
+            "// context line\n".repeat(98)
+        );
+        fs::write(temp.path().join("lib.rs"), code).unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut document = sample_document();
+        document["openQuestions"] = json!(["Does scope reject parent traversal?"]);
+        save_persistent_threat_model(workspace.root(), &document, true).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"answered":[{
+            "question":"Does scope reject parent traversal?", "answer":"The predicate rejects two consecutive dots.",
+            "evidenceRefs":["lib.rs:99"], "foldInto":"context"
+        }],"unanswered":[]}));
+        let ctx = staged_ctx(&config, &workspace);
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"mode":"refine", "preserveUserEdits":false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].prompt.contains("pub fn accepts_scope"));
+        assert!(requests[0].prompt.contains("lib.rs:99"));
+        assert!(requests[0]
+            .prompt
+            .contains("or a `ref` in the attached source-code section"));
+        assert_eq!(result["data"]["document"]["openQuestions"], json!([]));
+        assert_eq!(
+            result["data"]["document"]["contextNotes"][0]["evidenceRefs"],
+            json!(["lib.rs:99"])
+        );
+    }
+
     #[test]
     fn parses_text_json_with_markdown_fence() {
         let parsed =
@@ -12647,9 +12772,7 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let persistent = load_persistent_threat_model(temp.path())
-            .unwrap()
-            .unwrap();
+        let persistent = load_persistent_threat_model(temp.path()).unwrap().unwrap();
 
         for value in [&built, &read, &artifact_read] {
             assert_eq!(
@@ -13034,6 +13157,11 @@ mod tests {
 
         let requests = runtime.requests();
         assert_eq!(requests.len(), 2, "synthesis + gap-fill");
+        for request in &requests {
+            assert!(request.prompt.contains("source-code"));
+            assert!(request.prompt.contains("res.send('ok')"));
+            assert!(request.prompt.contains("src/admin.js:3"));
+        }
         assert!(requests[0].prompt.contains("Staged synthesis contract"));
         assert!(requests[1].prompt.contains("Uncovered entry points"));
         assert!(requests[1].prompt.contains("src/admin.js"));

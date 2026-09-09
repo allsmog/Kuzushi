@@ -54,9 +54,9 @@ impl ModuleRegistry {
     }
 
     pub fn register(&mut self, builtin: BuiltinModule) {
-        builtin.validate_declared_policy().unwrap_or_else(|error| {
-            panic!("invalid built-in descriptor policy: {error:#}")
-        });
+        builtin
+            .validate_declared_policy()
+            .unwrap_or_else(|error| panic!("invalid built-in descriptor policy: {error:#}"));
         self.register_builtin_tools(&builtin);
         self.register_builtin_dag_executors(&builtin);
         self.modules.insert(builtin.metadata().id.clone(), builtin);
@@ -244,7 +244,7 @@ fn execute_finding_action_tool(
         );
     }
     dispatch_result(
-        dispatch_finding_action_tool(name, input, ctx, runtime),
+        dispatch_finding_action_tool(registry, name, input, ctx, runtime),
         name,
     )
 }
@@ -522,7 +522,9 @@ mod tests {
         assert!(module("taint-iris").is_hidden());
         assert!(registry.resolve_tool("taint-iris:hunt").unwrap().hidden);
 
-        assert!(registry.modules().any(|module| module.metadata().id == "fuzz"));
+        assert!(registry
+            .modules()
+            .any(|module| module.metadata().id == "fuzz"));
         assert!(registry.tools().any(|tool| tool.name == "fuzz:run"));
         assert!(registry
             .discoverable_modules()

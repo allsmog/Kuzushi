@@ -79,13 +79,8 @@ fn collect_agentic_sast_findings(
     parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let checkpoints = ctx.stage_checkpoints();
-    let mut result = checkpointed_agentic_hunt(
-        checkpoints.as_deref(),
-        runtime,
-        run,
-        ctx,
-        parent_step,
-    )?;
+    let mut result =
+        checkpointed_agentic_hunt(checkpoints.as_deref(), runtime, run, ctx, parent_step)?;
     emit_agentic_sast_validation_count(ctx, parent_step, result.value.len());
     let initial_cost = result.cost_report()?;
     let review = checkpointed_agentic_review(
@@ -166,11 +161,15 @@ fn write_agentic_stage_checkpoint(
     stage_id: &str,
     result: &CostedStructuredJson<Vec<Finding>>,
 ) {
-    let (Some(handle), Some(stage)) = (handle, stage) else { return };
+    let (Some(handle), Some(stage)) = (handle, stage) else {
+        return;
+    };
     let Ok(payload) = serde_json::to_value(AgenticSastStageCheckpoint::from_result(result)) else {
         return;
     };
-    let Some(artifact) = handle.write_stage_payload(stage_id, &payload) else { return };
+    let Some(artifact) = handle.write_stage_payload(stage_id, &payload) else {
+        return;
+    };
     stage.complete(vec![artifact]);
 }
 
@@ -262,7 +261,10 @@ fn agentic_sast_report(
     }
 }
 
-fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_agentic_sast_start(
+    ctx: &ToolExecutionContext<'_>,
+    run: &AgenticSastRun,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -342,32 +344,14 @@ fn emit_agentic_sast_finding_delta(
     persisted: Option<&AgenticSastPersistedRun>,
     findings: &[Finding],
 ) -> Result<()> {
-    let (Some(observation), Some(persisted), Some(store)) =
-        (ctx.run_observation(), persisted, ctx.findings_store)
-    else {
+    let Some(persisted) = persisted else {
         return Ok(());
     };
-    let store_watermark = store.projection_meta()?.applied_seq;
-    let finding_id_samples = findings
-        .iter()
-        .take(crate::run_lifecycle::MAX_FINDING_ID_SAMPLES)
-        .map(|finding| crate::run_lifecycle::SafeText::operator_visible(&finding.fingerprint))
-        .collect();
-    observation.emit(crate::run_lifecycle::RunItemRecord::new(
-        crate::run_lifecycle::RunItemId::new(),
-        crate::run_lifecycle::RunItemSource::Persistence,
-        crate::run_lifecycle::RunItemV1::FindingDelta {
-            delta: crate::run_lifecycle::FindingDeltaSummary {
-                added: persisted.findings_added,
-                updated: persisted.findings_updated,
-                removed: 0,
-                store_watermark: crate::run_lifecycle::SafeText::operator_visible(
-                    store_watermark.to_string(),
-                ),
-                finding_id_samples,
-            },
-        },
-    ))
+    crate::findings::emit_persisted_finding_delta(
+        ctx,
+        findings,
+        (persisted.findings_added, persisted.findings_updated),
+    )
 }
 
 fn begin_agentic_sast_child_scope(

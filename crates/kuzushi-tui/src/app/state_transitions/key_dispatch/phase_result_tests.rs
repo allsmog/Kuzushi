@@ -10,6 +10,149 @@ use super::*;
 use kuzushi_core::workflow_attempts::{PhaseAttemptOutcome, PhaseResultAction};
 use kuzushi_core::{V2Config, WorkflowPhase, WorkspaceTarget};
 
+#[test]
+fn review_result_controls_name_report_and_own_their_footer_keys() {
+    let mut fixture = review_continuation_fixture(false);
+    let hint = review_result_hint(&fixture.app);
+    assert!(hint.contains("Report"), "{hint}");
+    assert!(!hint.contains("Prove"), "{hint}");
+    let bindings = crate::ui_view_models::footer_keybindings(&fixture.app);
+    assert!(
+        bindings
+            .iter()
+            .any(|binding| binding.key == "n" && binding.label.contains("Report")),
+        "{bindings:?}"
+    );
+    assert!(
+        !bindings.iter().any(|binding| binding.key == "n/N"),
+        "{bindings:?}"
+    );
+    fixture.press('n');
+    assert_eq!(fixture.app.shell_view(), ShellView::Report);
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Review));
+}
+
+#[test]
+fn actionable_review_controls_and_key_reducer_agree_on_prove() {
+    let mut fixture = review_continuation_fixture(true);
+    assert!(review_result_hint(&fixture.app).contains("Prove"));
+    fixture.press('n');
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&fixture.app),
+        WorkbenchPage::Prove
+    );
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Review));
+}
+
+#[test]
+fn review_continuation_respects_an_earlier_unresolved_phase() {
+    let mut fixture = review_continuation_fixture(false);
+    crate::test_support::record_indexed_run(
+        fixture._temp.path(),
+        "new-map",
+        "context:build",
+        serde_json::json!({"ok": true, "data": {"snapshot": {"filesIndexed": 1}}}),
+    );
+    crate::test_support::append_typed_attempt(
+        fixture._temp.path(),
+        WorkflowPhase::Map,
+        "new-map",
+        PhaseAttemptOutcome::Completed,
+    );
+    fixture.app.refresh_phase_attempt_projection();
+    let hint = review_result_hint(&fixture.app);
+    assert!(hint.contains("Use & Map"), "{hint}");
+    assert!(!hint.contains("Use & Report"), "{hint}");
+    fixture.press('n');
+    assert_eq!(fixture.app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&fixture.app),
+        WorkbenchPage::Map
+    );
+    assert!(fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Review));
+}
+
+fn review_continuation_fixture(actionable: bool) -> ResultCardFixture {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Review, "context:build");
+    for phase in [WorkflowPhase::Map, WorkflowPhase::Scan] {
+        seed_selected_phase(fixture._temp.path(), phase);
+    }
+    seed_reviewed_finding(fixture._temp.path(), actionable);
+    fixture.app.refresh_phase_attempt_projection();
+    fixture.app.refresh_findings(false);
+    fixture
+}
+
+fn seed_selected_phase(target: &std::path::Path, phase: WorkflowPhase) {
+    use kuzushi_core::workflow_attempts::{
+        append_phase_attempt_disposition, PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
+    };
+    let run_id = format!("accepted-{phase:?}").to_lowercase();
+    crate::test_support::record_indexed_run(
+        target,
+        &run_id,
+        "context:build",
+        serde_json::json!({"ok":true,"data":{"snapshot":{"filesIndexed":1}}}),
+    );
+    let completed = crate::test_support::append_typed_attempt(
+        target,
+        phase,
+        &run_id,
+        PhaseAttemptOutcome::Completed,
+    );
+    append_phase_attempt_disposition(
+        target,
+        PhaseAttemptDispositionRecorded::new(
+            completed.attempt_id,
+            PhaseAttemptDisposition::Selected {
+                acknowledged_partial: false,
+            },
+        ),
+    )
+    .unwrap();
+}
+
+fn seed_reviewed_finding(target: &std::path::Path, actionable: bool) {
+    let workspace = WorkspaceTarget::new(target).unwrap();
+    let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+    let finding = kuzushi_core::Finding::new_tool(
+        "audit",
+        "rule",
+        "lib.rs",
+        1,
+        None,
+        kuzushi_core::Severity::Medium,
+        "reviewed candidate",
+    );
+    let id = store.insert_finding("accepted-scan", &finding).unwrap();
+    let outcome = kuzushi_core::TriageOutcome {
+        verdict: if actionable {
+            kuzushi_core::TriageVerdict::TruePositive
+        } else {
+            kuzushi_core::TriageVerdict::FalsePositive
+        },
+        confidence: 0.9,
+        rationale: "recorded review decision".to_string(),
+        ..Default::default()
+    };
+    if actionable {
+        store
+            .record_triage_with_author(id, &outcome, kuzushi_core::findings::TriageAuthor::Human)
+            .unwrap();
+    } else {
+        store.record_auto_triage_locally(id, &outcome).unwrap();
+    }
+}
+
+fn review_result_hint(app: &ShellApp) -> String {
+    crate::ui_view_models::phase_cockpit_model_for_phase(app, WorkflowPhase::Review)
+        .header
+        .result_card
+        .expect("pending Review result")
+        .control_hint
+}
+
 struct ResultCardFixture {
     _temp: tempfile::TempDir,
     app: ShellApp,

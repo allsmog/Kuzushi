@@ -176,19 +176,7 @@ pub(super) fn workbench_keybindings_for_plan(
     // discoverability contract: pane cycling, opening, and moving must survive
     // before page/visualization shortcuts and secondary actions.
     let page = crate::ui_view_models::active_workbench_page(app);
-    if plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
-        // A guided QUESTION card owns every key. A RESULT checkpoint only
-        // owns the keys its strip binds (dispatched before these): page
-        // navigation and page-level actions must keep working under an
-        // unresolved result, or the operator is stranded on the phase page.
-        if app.guided_scan_question_is_open() {
-            return Vec::new();
-        }
-        let mut bindings = workbench_page_keybindings();
-        bindings.extend(workbench_secondary_action_keybindings(
-            page,
-            crate::ui_view_models::review_backlog_active(app),
-        ));
+    if let Some(bindings) = guided_workbench_bindings(app, plan, page) {
         return bindings;
     }
     let available_count = plan.map_or(0, |plan| plan.available_surfaces.len());
@@ -205,7 +193,7 @@ pub(super) fn workbench_keybindings_for_plan(
                 | crate::ui_view_models::SurfaceInteraction::Scrollable
         )
     ) {
-        bindings.extend(workbench_movement_keybindings());
+        bindings.extend(workbench_movement_keybindings(interaction));
     }
     bindings.extend(workbench_page_keybindings());
     if !plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
@@ -217,6 +205,34 @@ pub(super) fn workbench_keybindings_for_plan(
     ));
     bindings.extend(workbench_return_keybindings(plan));
     bindings
+}
+
+fn guided_workbench_bindings(
+    app: &ShellApp,
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+    page: WorkbenchPage,
+) -> Option<Vec<ViewKeybinding>> {
+    if !plan.is_some_and(|plan| {
+        plan.density == crate::ui_view_models::LayoutDensity::Guided
+            && !matches!(
+                plan.effective_focus,
+                crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
+                    | crate::ui_view_models::PhaseSurfaceId::ProveResult
+                    | crate::ui_view_models::PhaseSurfaceId::ProveTrace
+            )
+    }) {
+        return None;
+    }
+    // Questions own their keys; pending results retain page navigation.
+    if app.guided_scan_question_is_open() {
+        return Some(Vec::new());
+    }
+    let mut bindings = workbench_page_keybindings();
+    bindings.extend(workbench_secondary_action_keybindings(
+        page,
+        crate::ui_view_models::review_backlog_active(app),
+    ));
+    Some(bindings)
 }
 
 fn workbench_pane_cycle_keybindings(available_count: usize) -> Vec<ViewKeybinding> {
@@ -236,7 +252,12 @@ fn workbench_open_keybindings(
 ) -> Vec<ViewKeybinding> {
     let can_open = surface.is_some_and(|surface| {
         surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable
-            || surface.id == crate::ui_view_models::PhaseSurfaceId::ReviewQueue
+            || matches!(
+                surface.id,
+                crate::ui_view_models::PhaseSurfaceId::ReviewQueue
+                    | crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
+                    | crate::ui_view_models::PhaseSurfaceId::ProveTrace
+            )
     });
     if !can_open {
         return Vec::new();
@@ -291,8 +312,10 @@ fn workbench_next_pane_keybindings() -> [ViewKeybinding; 1] {
     )]
 }
 
-fn workbench_movement_keybindings() -> Vec<ViewKeybinding> {
-    vec![
+fn workbench_movement_keybindings(
+    interaction: Option<crate::ui_view_models::SurfaceInteraction>,
+) -> Vec<ViewKeybinding> {
+    let mut bindings = vec![
         bind_char(
             'j',
             "j/k/↑/↓",
@@ -319,6 +342,27 @@ fn workbench_movement_keybindings() -> Vec<ViewKeybinding> {
         ),
         bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
         bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
+    ];
+    if interaction == Some(crate::ui_view_models::SurfaceInteraction::Scrollable) {
+        bindings.extend(workbench_detail_paging());
+    }
+    bindings
+}
+
+fn workbench_detail_paging() -> [ViewKeybinding; 2] {
+    [
+        bind(
+            HotkeyTrigger::PageDown,
+            "PgUp/PgDn",
+            "scroll",
+            ViewHotkeyAction::ViewPageDown,
+        ),
+        bind(
+            HotkeyTrigger::PageUp,
+            "PgUp/PgDn",
+            "scroll",
+            ViewHotkeyAction::ViewPageUp,
+        ),
     ]
 }
 

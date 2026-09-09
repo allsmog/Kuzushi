@@ -771,7 +771,7 @@ mod tests {
                 tier: "high".to_string(),
                 reasons: vec!["public route".to_string()],
             },
-            metadata: json!({"handler": "oauth_callback"}),
+            metadata: json!({"handler": "oauth_callback", "sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY}),
         };
         surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
         surface

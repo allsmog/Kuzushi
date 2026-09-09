@@ -122,7 +122,6 @@ impl ShellApp {
                 self.router.report_mut().set_origin(origin);
             }
         }
-        self.refresh_workspace_trend();
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
     }
@@ -520,6 +519,10 @@ impl ShellApp {
     pub fn set_target(&mut self, target: Option<PathBuf>) {
         let changed = self.target() != target.as_deref();
         if changed {
+            let prior = self.target_owned();
+            self.router
+                .answers_mut()
+                .switch_target(prior, target.clone());
             self.invalidate_view_hydration();
             let campaign = self.router.campaign_mut();
             campaign.batch_scan_config = None;
@@ -537,10 +540,28 @@ impl ShellApp {
                 },
             });
             self.refresh_phase_attempt_projection();
+            self.start_answer_recovery();
         }
     }
 
     pub(crate) fn refresh_phase_attempt_projection(&mut self) {
+        let previous = self.pending_prove_result_id().map(str::to_string);
+        self.read_phase_attempt_projection();
+        if self.pending_prove_result_id() != previous.as_deref() {
+            self.router
+                .workbench_mut()
+                .scroll_mut()
+                .set(crate::ui_view_models::PhaseSurfaceId::ProveResult, 0);
+        }
+    }
+
+    fn pending_prove_result_id(&self) -> Option<&str> {
+        self.engagement
+            .unresolved_phase_attempt(WorkflowPhase::Prove)
+            .map(|record| record.completed.attempt_id.as_str())
+    }
+
+    fn read_phase_attempt_projection(&mut self) {
         let Some(target) = self.target_owned() else {
             self.engagement.set_phase_attempt_projection(
                 None,
@@ -940,16 +961,6 @@ impl ShellApp {
         self.ui.viewport()
     }
 
-    /// The terminal viewport minus the context rail's columns when it is
-    /// visible. Layout decisions about body content (wrap widths, breakpoint
-    /// checks) must use this, not `viewport()`, or they measure against
-    /// columns the rail occupies.
-    pub(crate) fn content_viewport(&self) -> TerminalViewport {
-        let viewport = self.ui.viewport();
-        let rail = crate::ui_view_models::rail_width(self, viewport.columns);
-        TerminalViewport::new(viewport.columns.saturating_sub(rail), viewport.rows)
-    }
-
     pub(crate) fn set_viewport(&mut self, viewport: TerminalViewport) {
         self.ui.set_viewport(viewport);
     }
@@ -1244,6 +1255,14 @@ impl ShellApp {
         self.domain.agent_chat()
     }
 
+    pub(crate) fn agent_chat_history(&self) -> &[AgentChatView] {
+        self.domain.agent_chat_history()
+    }
+
+    pub(crate) fn agent_chat_generation(&self) -> u64 {
+        self.domain.agent_chat_generation()
+    }
+
     pub(crate) fn agent_chat_mut(&mut self) -> Option<&mut AgentChatView> {
         self.domain.agent_chat_mut()
     }
@@ -1264,6 +1283,7 @@ impl ShellApp {
 
     pub(crate) fn clear_agent_chat(&mut self) {
         self.domain.clear_agent_chat();
+        *self.router.answers_mut() = Default::default();
     }
 
     pub(crate) fn agent_chat_or_default_mut(&mut self) -> &mut AgentChatView {

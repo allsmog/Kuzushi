@@ -13,7 +13,13 @@ use kuzushi_core::OptionScope;
 use serde_json::Value;
 use std::time::SystemTime;
 
+mod option_editor;
+pub(crate) use option_editor::planning_option_error_scroll;
+
 pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if let Some(edit) = app.engagement.planning_picker().option_edit() {
+        return option_editor::option_editor_lines(app, edit, area);
+    }
     match planning_layout_mode(area) {
         PlanningLayoutMode::Compact => compact_planning_picker_lines(app, area),
         mode => expanded_planning_picker_lines(app, area, mode),
@@ -295,15 +301,7 @@ fn compact_option_detail(app: &ShellApp) -> String {
         return "This step has no declared options".to_string();
     };
     let resolved = app.resolved_input_for_planning_task(row.id).ok();
-    let editing = app.engagement.planning_picker().option_edit().is_some();
-    let value = option_display_value(app, spec, resolved.as_ref(), editing);
-    if editing {
-        return format!(
-            "Editing {} ({}) = {value} · Enter save · Esc cancel",
-            option_display_name(&spec.name),
-            spec.name
-        );
-    }
+    let value = option_display_value(spec, resolved.as_ref());
     let source = option_provenance(app, row, spec, resolved.as_ref());
     format!(
         "Option · {} = {value} · {source} · {} · {}",
@@ -314,14 +312,6 @@ fn compact_option_detail(app: &ShellApp) -> String {
 }
 
 fn planning_controls_line(app: &ShellApp, width: usize) -> Line<'static> {
-    if app.engagement.planning_picker().option_edit().is_some() {
-        let text = if width < 48 {
-            " EDITING · type · Enter save · Esc cancel"
-        } else {
-            " EDITING OPTION  Type value  Enter save  Esc cancel  Backspace edit"
-        };
-        return styled(&fit(text, width), theme::warn());
-    }
     if width < 48 {
         return styled(
             &fit(ultra_compact_planning_controls(app), width),
@@ -1248,13 +1238,8 @@ fn option_pane_row(
 ) -> Line<'static> {
     let selected = app.engagement.planning_picker().focus() == PickerFocus::OptionsPane
         && idx == app.engagement.planning_picker().option_cursor();
-    let editing = app
-        .engagement
-        .planning_picker()
-        .option_edit()
-        .is_some_and(|edit| edit.task == row.id && edit.option_name == spec.name);
     let marker = if selected { ">" } else { " " };
-    let value = option_display_value(app, spec, resolved, editing);
+    let value = option_display_value(spec, resolved);
     let provenance = option_provenance(app, row, spec, resolved);
     let name = option_name_label(app, row, spec);
     let body_width = width.saturating_sub(4);
@@ -1318,7 +1303,7 @@ fn compact_selected_option_detail(
     spec: &OptionSpec,
     resolved: Option<&Value>,
 ) -> String {
-    let value = option_display_value(app, spec, resolved, false);
+    let value = option_display_value(spec, resolved);
     let source = option_provenance(app, row, spec, resolved);
     format!(
         "{} · {value} · {source} · {}",
@@ -1360,7 +1345,7 @@ fn selected_option_detail_lines(
     width: usize,
 ) -> Vec<String> {
     let mut lines = vec![option_name_label(app, row, spec), String::new()];
-    let value = option_display_value(app, spec, resolved, false);
+    let value = option_display_value(spec, resolved);
     push_wrapped_detail(&mut lines, &format!("Current: {value}"), width);
     let source = option_provenance(app, row, spec, resolved);
     push_wrapped_detail(&mut lines, &format!("From: {source}"), width);
@@ -1399,21 +1384,7 @@ fn option_detail_title(index: usize, total: usize, budget: usize, detail: usize)
     format!(" OPTION {}/{} ", index + 1, total)
 }
 
-fn option_display_value(
-    app: &ShellApp,
-    spec: &OptionSpec,
-    resolved: Option<&Value>,
-    editing: bool,
-) -> String {
-    if editing {
-        let draft = app
-            .engagement
-            .planning_picker()
-            .option_edit()
-            .map(|edit| edit.draft.as_str())
-            .unwrap_or_default();
-        return format!("EDIT:{draft}_");
-    }
+fn option_display_value(spec: &OptionSpec, resolved: Option<&Value>) -> String {
     resolved
         .and_then(|input| input.get(&spec.name))
         .map(format_option_value)

@@ -10,8 +10,8 @@ impl ShellApp {
                     .scroll_mut()
                     .shift(focus, -(amount as i32));
             }
-            ScrollTarget::Logs => self.router.logs_mut().scroll_up(amount as usize),
-            ScrollTarget::Default => self.router.default_scroll_mut().scroll_up(amount),
+            ScrollTarget::Logs => self.shift_logs_scroll(-(amount as isize)),
+            ScrollTarget::Default => self.shift_default_scroll(-(amount as isize)),
         }
     }
 
@@ -24,9 +24,33 @@ impl ShellApp {
                     .scroll_mut()
                     .shift(focus, amount as i32);
             }
-            ScrollTarget::Logs => self.router.logs_mut().scroll_down(amount as usize),
-            ScrollTarget::Default => self.router.default_scroll_mut().scroll_down(amount),
+            ScrollTarget::Logs => self.shift_logs_scroll(amount as isize),
+            ScrollTarget::Default => self.shift_default_scroll(amount as isize),
         }
+    }
+
+    fn shift_default_scroll(&mut self, amount: isize) {
+        let max = crate::renderer::run_artifact_max_scroll(self)
+            .map(usize::from)
+            .or_else(|| crate::renderer::keymap_reader_scroll(self).map(|reader| reader.max_offset))
+            .unwrap_or(usize::from(u16::MAX))
+            .min(usize::from(u16::MAX));
+        let scroll = self.router.default_scroll_mut();
+        let current = usize::from(scroll.offset()).min(max);
+        scroll.set(current.saturating_add_signed(amount).min(max) as u16);
+    }
+
+    fn shift_logs_scroll(&mut self, amount: isize) {
+        let limit = crate::renderer::logs_reader_scroll(self).map_or(0, |reader| reader.max_offset);
+        let route = self.router.logs_mut();
+        let current = route.scroll().min(limit);
+        route.set_scroll(current);
+        if amount < 0 {
+            route.scroll_up(amount.unsigned_abs());
+        } else {
+            route.scroll_down(amount as usize);
+        }
+        route.set_scroll(route.scroll().min(limit));
     }
 
     pub fn scroll_to_top(&mut self) {
@@ -63,6 +87,8 @@ impl ShellApp {
     /// by manually scrolling the feed pane: once the operator scrolls up
     /// from the bottom, auto-tail is paused for that session.
     fn scroll_active_activity_pane(&mut self, amount: isize) {
+        let limit =
+            crate::renderer::activity_output_scroll(self).map_or(0, |scroll| scroll.max_offset);
         let Some(session) = self.domain.activity() else {
             return;
         };
@@ -70,8 +96,9 @@ impl ShellApp {
         match route.effective_pane_focus(session) {
             PaneFocus::Left => route.shift_task_cursor(session, amount),
             PaneFocus::Right => {
+                let current = bounded_feed_scroll(route, limit);
                 route.feed_auto_tail = false;
-                route.feed_scroll = shift_feed_from_tail(route.feed_scroll, amount);
+                route.feed_scroll = shift_feed_from_tail(current, amount).min(limit);
             }
         }
     }
@@ -145,8 +172,16 @@ fn focused_pane_to_top(session: &ActivitySession, route: &mut ActivityRouteState
     }
 }
 
+fn bounded_feed_scroll(route: &ActivityRouteState, limit: usize) -> usize {
+    if route.feed_auto_tail {
+        0
+    } else {
+        route.feed_scroll.min(limit)
+    }
+}
+
 /// Run Focus stores output scroll as distance above the live tail. This keeps
-/// input handling independent of the renderer's current viewport height.
+/// the tail stable while the document grows; movement is bounded at the caller.
 fn shift_feed_from_tail(current: usize, amount: isize) -> usize {
     if amount.is_negative() {
         current.saturating_add(amount.unsigned_abs())

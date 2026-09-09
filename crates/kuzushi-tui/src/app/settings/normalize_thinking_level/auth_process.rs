@@ -145,7 +145,7 @@ pub(crate) fn normalize_auth_method(
 fn auth_login_next_step(provider: &str) -> String {
     crate::app::model_choices()
         .iter()
-        .find(|choice| choice.provider == provider)
+        .find(|choice| choice.provider == provider && choice.catalog_note.is_none())
         .map(|choice| {
             let selector = crate::app::display_model_selector(choice.id);
             format!("model {} ({selector})", choice.index)

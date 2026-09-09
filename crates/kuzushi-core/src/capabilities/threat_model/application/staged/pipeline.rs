@@ -80,14 +80,27 @@ fn run_staged_research_stage(
     input: &BuildInput,
     checkpoints: &Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>>,
 ) -> Result<(ThreatModelSourceBundle, ResearchDossier)> {
-    let source_bundle = load_threat_model_source_bundle(ctx, input)?;
-    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
+    let mut source_bundle = load_threat_model_source_bundle(ctx, input)?;
     emit_seed_disclosure(ctx, verb, input)?;
     let research_stage = stage_scope(checkpoints, "research");
-    let dossier = run_research(input, ctx)?;
-    source_bundle.authenticate_entry_point_sources(
-        &dossier.grounding.entry_point_catalog.receipt,
+    let mut dossier = run_research(input, ctx)?;
+    source_bundle
+        .authenticate_entry_point_sources(&dossier.grounding.entry_point_catalog.receipt)?;
+    dossier.code_evidence = source_bundle.attach_source_code(
+        input,
+        &dossier.grounding.surfaces,
+        dossier
+            .grounding
+            .entry_point_catalog
+            .receipt
+            .tree_hash
+            .as_deref(),
+        ctx,
     )?;
+    dossier
+        .evidence_index
+        .extend(dossier.code_evidence.references.iter().cloned());
+    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     emit_research(ctx, verb, &dossier);
     write_stage_artifact(
         input.workspace_root(),
@@ -274,6 +287,7 @@ fn gap_fill_resolution(
         verb,
         &report.gaps,
         &mut generated.document,
+        &dossier.code_evidence,
     )?;
     record_gap_fill_cost(spend, ticket, generated, &outcome)?;
     let after = check_coverage(&generated.document, &dossier.grounding.surfaces);
@@ -381,7 +395,11 @@ fn rebase_variant_scan_samples(input: &BuildInput, document: &mut Value) {
         let Some(path) = sample.as_str() else {
             continue;
         };
-        *sample = json!(scope.rel_path.join(path).to_string_lossy().replace('\\', "/"));
+        *sample = json!(scope
+            .rel_path
+            .join(path)
+            .to_string_lossy()
+            .replace('\\', "/"));
     }
 }
 
@@ -593,6 +611,7 @@ mod tests {
             ..BuildInput::default()
         };
         let dossier = ResearchDossier {
+            code_evidence: CodeEvidence::default(),
             grounding: PromptGrounding {
                 surfaces: Vec::new(),
                 confirmed_findings: Vec::new(),

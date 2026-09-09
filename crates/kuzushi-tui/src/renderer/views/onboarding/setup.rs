@@ -1,8 +1,10 @@
 use super::*;
-use crate::app::SetupEditor;
 use crate::ui_view_models::{setup_readiness_model, SetupReadinessRow, SetupReadinessTone};
 
 pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if app.budget_editor_open() {
+        return super::budget_editor::budget_editor_lines(app, area);
+    }
     let model = setup_readiness_model(app);
     let width = area.width as usize;
     let compact = area.width < 72;
@@ -15,7 +17,6 @@ pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         lines.push(blank());
     }
     lines.extend(setup_readiness_lines(app, &model.rows, width, compact));
-    lines.extend(setup_editor_lines(app, width));
     lines.push(blank());
     lines.extend(setup_summary_lines(&model, width));
     lines
@@ -81,17 +82,6 @@ fn setup_target_fact_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
         .into_iter()
         .map(|line| muted(&fit(&format!("    {line}"), width)))
         .collect()
-}
-
-fn setup_editor_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
-    if app.router.setup().editor() != Some(SetupEditor::Budget) {
-        return Vec::new();
-    }
-    let mut lines = vec![blank(), setup_budget_editor_line(app, width)];
-    if let Some(error) = app.router.setup().budget_error() {
-        lines.push(styled(&fit(&format!(" ! {error}"), width), theme::danger()));
-    }
-    lines
 }
 
 const START_MAP_CALL_TO_ACTION: &str = "move to Start Map and press Enter";
@@ -215,20 +205,6 @@ fn setup_row_line(
         format!("{glyph} {:<14} {:<16}", row.label, row.status)
     };
     selection_band(&body, selected, width)
-}
-
-fn setup_budget_editor_line(app: &ShellApp, width: usize) -> Line<'static> {
-    let draft = app.router.setup().budget_draft();
-    let value = if draft.is_empty() { "<unset>" } else { draft };
-    styled(
-        &fit(
-            &format!(
-                " Budget USD: {value}  · type amount · Enter save · Delete unset · Esc cancel"
-            ),
-            width,
-        ),
-        theme::accent(),
-    )
 }
 
 #[cfg(test)]

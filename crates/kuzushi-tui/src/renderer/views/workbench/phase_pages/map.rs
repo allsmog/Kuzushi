@@ -126,10 +126,7 @@ fn render_map_canvas(
     model: &MapPhaseModel,
     state: PhaseRenderState,
 ) {
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(area);
+    let sections = crate::renderer::views::scene::map_canvas_sections(area);
     crate::renderer::views::scene::render_embedded_map_gallery(
         frame,
         sections[0],

@@ -25,10 +25,10 @@ fn text_vuln_analysis(outcome: &AgentLoopOutcome) -> Option<VulnAnalysis> {
 }
 
 fn fallback_vuln_analysis(outcome: &AgentLoopOutcome) -> VulnAnalysis {
-    // Conservative fallback: not triggerable, low confidence, attach the
+    // Unresolved fallback: low confidence, attach the
     // raw text so an operator can review.
     VulnAnalysis {
-        triggerable: false,
+        triggerable: None,
         rationale: synthesized_fallback_rationale(&outcome.text),
         confidence: 0.25,
         evidence: collect_implicit_evidence(&outcome.transcript),
@@ -41,7 +41,10 @@ fn synthesized_fallback_rationale(text: &str) -> String {
     if text.trim().is_empty() {
         return format!("{SYNTHESIZED_FALLBACK_PREFIX} no model text returned");
     }
-    format!("{SYNTHESIZED_FALLBACK_PREFIX} raw model text: {}", text.trim())
+    format!(
+        "{SYNTHESIZED_FALLBACK_PREFIX} raw model text: {}",
+        text.trim()
+    )
 }
 
 pub(crate) fn collect_implicit_evidence(transcript: &[LoopHistoryEntry]) -> Vec<EvidenceCitation> {
@@ -88,7 +91,10 @@ fn read_source_evidence(args: &Value, output: &Value) -> Vec<EvidenceCitation> {
     if file.is_empty() {
         return Vec::new();
     }
-    let start = output.get("start_line").and_then(Value::as_u64).unwrap_or(0) as u32;
+    let start = output
+        .get("start_line")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
     let end = output
         .get("end_line")
         .and_then(Value::as_u64)

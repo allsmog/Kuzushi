@@ -94,3 +94,18 @@ but it bounds bulk paths — `workspace:import-findings` on a
 multi-thousand-row external ledger will be slow. If bulk import becomes
 a real workflow, batch events per transaction/fsync instead of per
 record; do not weaken per-decision durability for the interactive path.
+
+## 2026-09-06 — trend fold reads decision subjects, not findings
+
+`campaign:status` used to load every finding through `list_all_findings`
+(full `finding_json` deserialization, source merge, verification and
+suppression hydration) only to hand `list_review_decisions_for_findings` the
+`(finding_id, identity_id)` pair per row. `FindingStore::list_all_review_decisions`
+now projects exactly those two columns from the shared latest-observation
+ranking CTE (`v3_finding_reads.rs`, `LATEST_REVIEW_DECISION_SUBJECTS_SQL`) and
+feeds them to the same decision query, so the status trend no longer scales
+with finding payload size. `review_decisions.rs` tests pin that the narrow
+read returns byte-identical records to the full walk. The ignored harness
+prints `PERF list_all_review_decisions` beside `PERF list_all_findings` for a
+direct comparison; rerun it with the command at the top of this page when
+either read changes.

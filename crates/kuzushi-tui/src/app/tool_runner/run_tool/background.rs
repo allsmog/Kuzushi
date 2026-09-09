@@ -7,6 +7,8 @@ use self::preflight::langgraph_bridge_preflight_error;
 use super::*;
 
 mod dispatch;
+#[cfg(test)]
+mod phase_result_tests;
 mod preflight;
 
 impl ShellApp {
@@ -195,6 +197,7 @@ impl ShellApp {
             }
         };
         seed.phase = background_tool_origin_phase(
+            self.registry(),
             tool_name,
             self.engagement.current_phase(),
             self.engagement.running_tool(),
@@ -499,11 +502,16 @@ impl ShellApp {
 }
 
 fn background_tool_origin_phase(
+    registry: &ModuleRegistry,
     tool_name: &str,
     current_phase: Option<crate::app::WorkflowPhase>,
     planning_tool: Option<&str>,
 ) -> Option<crate::app::WorkflowPhase> {
-    let declared_phase = kuzushi_core::modules::autonomy::tool_phase(tool_name);
+    let descriptor = registry.resolve_tool(tool_name)?;
+    if !descriptor.phase_result {
+        return None;
+    }
+    let declared_phase = kuzushi_core::modules::phase_result_phase(descriptor);
     declared_phase.or_else(|| {
         planning_tool
             .is_some_and(|planned| planned == tool_name)
@@ -576,6 +584,7 @@ mod tests {
     fn declared_tool_phase_wins_over_a_different_walker_phase() {
         assert_eq!(
             background_tool_origin_phase(
+                &ModuleRegistry::with_v2_builtins(),
                 "semgrep:scan",
                 Some(crate::app::WorkflowPhase::Fix),
                 Some("semgrep:scan"),
@@ -588,6 +597,7 @@ mod tests {
     fn manual_generic_tool_ignores_a_residual_walker_phase() {
         assert_eq!(
             background_tool_origin_phase(
+                &ModuleRegistry::with_v2_builtins(),
                 "findings:list",
                 Some(crate::app::WorkflowPhase::Scan),
                 None,
@@ -600,6 +610,7 @@ mod tests {
     fn planning_owned_generic_tool_captures_the_current_walker_phase() {
         assert_eq!(
             background_tool_origin_phase(
+                &ModuleRegistry::with_v2_builtins(),
                 "findings:list",
                 Some(crate::app::WorkflowPhase::Prove),
                 Some("findings:list"),

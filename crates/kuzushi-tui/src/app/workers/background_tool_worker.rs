@@ -41,6 +41,7 @@ pub(crate) enum ToolEvent {
 
 #[derive(Debug)]
 pub(crate) enum AgentEvent {
+    ResponseText(kuzushi_openai::langgraph_runtime::ResponseTextEvent),
     Answered {
         text: String,
         audit: AgentCallAudit,
@@ -56,6 +57,7 @@ pub(crate) struct AgentCallAudit {
     pub(crate) cost: kuzushi_core::runtime::RuntimeCostReport,
     pub(crate) call_attempted: bool,
     pub(crate) tool_policy_receipt: Option<kuzushi_core::runtime::AgentToolPolicyReceipt>,
+    pub(crate) failure: Option<kuzushi_core::runtime::RuntimeFailureMetadata>,
 }
 
 impl AgentCallAudit {
@@ -64,6 +66,7 @@ impl AgentCallAudit {
             cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
             call_attempted: false,
             tool_policy_receipt: None,
+            failure: None,
         }
     }
 

@@ -58,7 +58,15 @@ fn normalize_model_spec(model: &str) -> Result<String> {
     if provider.is_empty() || model_id.is_empty() {
         anyhow::bail!("model must include both provider and model id, got {model:?}");
     }
+    let provider = canonical_provider_name(provider);
     Ok(format!("{provider}:{model_id}"))
+}
+
+fn canonical_provider_name(provider: &str) -> &str {
+    match provider {
+        "openai-oauth" | "oauth" => "openai-codex",
+        _ => provider,
+    }
 }
 
 fn model_provider(model: &str) -> &str {

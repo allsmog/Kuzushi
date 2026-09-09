@@ -13,21 +13,21 @@ pub(in crate::modules) use engagement_module::*;
 pub(in crate::modules) use entry_points_module::*;
 pub(in crate::modules) use findings_module::*;
 pub(in crate::modules) use fleet_module::*;
-pub(in crate::modules) use fuzz_module::*;
 pub(in crate::modules) use full_mode_config_paths::*;
 pub(in crate::modules) use full_mode_dry_run::*;
 pub(in crate::modules) use full_mode_module::*;
 pub(in crate::modules) use full_mode_tool_input::*;
+pub(in crate::modules) use fuzz_module::*;
 pub(in crate::modules) use input::*;
 pub(in crate::modules) use offense_module::*;
 pub(in crate::modules) use offense_review_module::*;
 pub(in crate::modules) use options::*;
+pub(in crate::modules) use pack_module::*;
 pub(in crate::modules) use patch_module::*;
 pub(in crate::modules) use pipeline_module::*;
 pub(in crate::modules) use plugin_resolution::*;
 pub(in crate::modules) use pwn::*;
 pub(in crate::modules) use recon_module::*;
-pub(in crate::modules) use pack_module::*;
 pub(in crate::modules) use report_module::*;
 pub(in crate::modules) use resolve_tool_model::*;
 pub(in crate::modules) use router_module::*;
@@ -43,15 +43,15 @@ pub(in crate::modules) use taint_iris_next::*;
 pub(in crate::modules) use threat_intel_module::*;
 pub(in crate::modules) use threat_leads_module::*;
 pub(in crate::modules) use threat_model_module::*;
+pub(in crate::modules) use trace::*;
+pub(in crate::modules) use trace_module::*;
 pub(in crate::modules) use triage::*;
 pub(in crate::modules) use triage_module::*;
 pub(in crate::modules) use uaf_hunt_module::*;
-pub(in crate::modules) use trace::*;
-pub(in crate::modules) use trace_module::*;
 pub(in crate::modules) use verify::*;
 pub(in crate::modules) use verify_module::*;
-pub(in crate::modules) use workspace_module::*;
 pub(in crate::modules) use worklist_module::*;
+pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
 mod application;
 pub mod autonomy;
@@ -74,25 +74,28 @@ mod native_scanners;
 mod offense_module;
 mod offense_review_module;
 mod options;
+mod pack_module;
 mod patch_module;
+mod phase_results;
 mod pipeline;
+pub use phase_results::phase_result_phase;
 mod plugin_adapters;
 mod plugin_resolution;
 mod prompt_armor;
 mod pwn;
 mod registry;
-mod pack_module;
 mod report_module;
 mod runtime_requirements;
-mod sast_scan_delegation;
 mod sast_run;
+mod sast_scan_delegation;
 mod support;
 mod taint_iris;
 mod taint_iris_next;
-mod triage;
-mod vendor_assessment;
 mod trace;
 mod trace_module;
+mod triage;
+mod vendor_assessment;
+mod verification_mode;
 mod verify;
 mod workspace_tools;
 
@@ -123,8 +126,8 @@ mod threat_model_module;
 mod triage_module;
 mod uaf_hunt_module;
 mod verify_module;
-mod workspace_module;
 mod worklist_module;
+mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
 pub use autonomy::{
@@ -152,8 +155,8 @@ pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
     agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace, tool_execution_model,
-    tool_needs_finding_store, tool_needs_runtime,
-    tool_requires_agent_runtime, tool_uses_agent_runtime, tool_uses_finding_store,
-    tool_wants_runtime, wants_sast_runtime,
+    tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime,
+    tool_uses_agent_runtime, tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
 };
 pub use sast_scan_delegation::sast_scan_delegated_tools;
+pub use verification_mode::{delegated_execution_tools, verification_is_empirical};

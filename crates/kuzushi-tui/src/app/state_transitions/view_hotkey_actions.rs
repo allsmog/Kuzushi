@@ -6,6 +6,7 @@ use std::path::{Component, Path};
 enum FocusedWorkbenchVisualization {
     Scene(VizPage),
     ProofReplay,
+    PendingResult,
 }
 
 fn human_review_decision(
@@ -177,6 +178,9 @@ impl ShellApp {
         match focused_workbench_visualization(surface.id) {
             FocusedWorkbenchVisualization::Scene(scene) => self.open_scene_to_page(scene),
             FocusedWorkbenchVisualization::ProofReplay => self.open_confirm_proof_replay(),
+            FocusedWorkbenchVisualization::PendingResult => {
+                self.apply_phase_result_command(crate::app::PhaseResultCommand::Open);
+            }
         }
     }
 
@@ -426,14 +430,13 @@ impl ShellApp {
             );
             return InputUpdate::handled();
         }
-        self.router.workbench_mut().open_investigation_draft();
+        self.router.workbench_mut().open_investigation_draft(
+            kuzushi_core::verification::application::local_verification_readiness(),
+        );
         self.router
             .workbench_mut()
             .set_focus(crate::ui_view_models::PhaseSurfaceId::ProveInvestigation);
-        self.log(
-            "verify",
-            "investigation plan opened — m switches the safety boundary, Enter drafts the command",
-        );
+        self.log("verify", "investigation plan opened");
         InputUpdate::handled()
     }
 
@@ -444,9 +447,12 @@ impl ShellApp {
                     crate::app::InvestigationBoundary::StaticOnly => {
                         "static-only — adversarial analysis, no code executes"
                     }
-                    crate::app::InvestigationBoundary::LocalReproduction => {
-                        "local reproduction — sandboxed PoC execution against this checkout"
-                    }
+                    crate::app::InvestigationBoundary::LocalReproduction => self
+                        .router
+                        .workbench()
+                        .investigation_readiness()
+                        .map(|readiness| readiness.message())
+                        .unwrap_or("local reproduction availability has not been checked"),
                 };
                 self.log("verify", format!("safety boundary: {label}"));
             }
@@ -455,13 +461,18 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    /// Enter on the investigation card authorizes the plan: the previewed
+    /// Enter on the investigation card drafts the plan: the previewed
     /// verify command is drafted into the prompt and the card closes. The
     /// operator still submits the prompt — the card never launches anything.
     fn start_investigation_from_card(&mut self) {
         let Some(boundary) = self.router.workbench().investigation_draft() else {
             return;
         };
+        if boundary == crate::app::InvestigationBoundary::LocalReproduction
+            && !self.local_investigation_can_attempt()
+        {
+            return;
+        }
         let Some(finding) = self.current_workbench_finding() else {
             self.log("verify", "no finding selected — plan dismissed");
             self.router.workbench_mut().close_investigation_draft();
@@ -481,6 +492,21 @@ impl ShellApp {
             "verify",
             "investigation drafted — press Enter to start it under the chosen boundary",
         );
+    }
+
+    fn local_investigation_can_attempt(&mut self) -> bool {
+        let Some(readiness) = self.router.workbench().investigation_readiness() else {
+            self.log(
+                "verify",
+                "reopen the investigation card to check local reproduction availability",
+            );
+            return false;
+        };
+        if readiness.can_attempt() {
+            return true;
+        }
+        self.log("verify", readiness.message());
+        false
     }
 
     fn draft_workbench_proof_deferral(&mut self) -> InputUpdate {
@@ -627,15 +653,18 @@ impl ShellApp {
     /// recorded path renders beside the operator-requested expansion, which
     /// hydrates from the durable static-evidence store on open.
     fn toggle_workbench_trace_view(&mut self) -> InputUpdate {
+        if !self.router.workbench().trace_view_open()
+            && crate::ui_view_models::current_finding_for_detail(self).is_none()
+        {
+            self.log("trace", "no finding selected — open one from Review first");
+            return InputUpdate::handled();
+        }
         if self.router.workbench_mut().toggle_trace_view() {
             self.router
                 .workbench_mut()
                 .set_focus(crate::ui_view_models::PhaseSurfaceId::ProveTrace);
             self.hydrate_selected_trace_expansion();
-            self.log(
-                "trace",
-                "trace opened — Enter drafts trace:expand, t closes",
-            );
+            self.log("trace", "trace opened");
         } else {
             self.log("trace", "trace closed");
         }
@@ -1393,6 +1422,7 @@ fn focused_workbench_visualization(
         | PhaseSurfaceId::ProveInvestigation
         | PhaseSurfaceId::ProveTrace => FocusedWorkbenchVisualization::Scene(VizPage::AttackPath),
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,
+        PhaseSurfaceId::ProveResult => FocusedWorkbenchVisualization::PendingResult,
         PhaseSurfaceId::FixCandidate
         | PhaseSurfaceId::FixVerification
         | PhaseSurfaceId::FixAttackTree
@@ -1603,6 +1633,10 @@ mod phase_visualization_tests {
         assert_visualization(
             crate::ui_view_models::PhaseSurfaceId::ProveReceipt,
             FocusedWorkbenchVisualization::ProofReplay,
+        );
+        assert_visualization(
+            crate::ui_view_models::PhaseSurfaceId::ProveResult,
+            FocusedWorkbenchVisualization::PendingResult,
         );
     }
 

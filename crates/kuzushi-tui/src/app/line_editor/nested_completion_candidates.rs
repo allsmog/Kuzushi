@@ -59,9 +59,9 @@ pub(crate) fn config_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     CompletionValues::Static(config_completion_keys())
 }
 
-pub(crate) fn model_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+pub(crate) fn model_completion_values(app: &ShellApp) -> CompletionValues<'_> {
     CompletionValues::Owned(
-        model_choices()
+        visible_model_choices(app.config())
             .iter()
             .flat_map(|choice| {
                 [

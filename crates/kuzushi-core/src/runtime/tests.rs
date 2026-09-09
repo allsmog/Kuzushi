@@ -101,6 +101,25 @@ mod tests {
     }
 
     #[test]
+    fn governance_normalizes_public_oauth_aliases_without_changing_model_identity() {
+        for provider in ["openai-oauth", "oauth", "openai-codex"] {
+            let model = format!(" {provider} : operator-custom-model ");
+            assert_eq!(
+                canonical_model_spec(&model).unwrap(),
+                "openai-codex:operator-custom-model"
+            );
+            assert_eq!(
+                require_configured_model("agent:ask", Some(&model)).unwrap(),
+                "openai-codex:operator-custom-model"
+            );
+        }
+        assert_eq!(
+            canonical_model_spec("openai:gpt-5.5").unwrap(),
+            "openai:gpt-5.5"
+        );
+    }
+
+    #[test]
     fn governance_accepts_provider_models_with_default_credential_envs() {
         assert!(
             validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY").is_ok()
@@ -712,7 +731,10 @@ fn model_auth_binding_rejects_every_cross_provider_pair() {
         (PublicAuthProvider::Anthropic, "openai:gpt-5.5"),
         (PublicAuthProvider::Anthropic, "openai-codex:gpt-5.5"),
         (PublicAuthProvider::OpenAi, "anthropic:claude-haiku-4-5"),
-        (PublicAuthProvider::OpenAi, "vertex-anthropic:claude-haiku-4-5"),
+        (
+            PublicAuthProvider::OpenAi,
+            "vertex-anthropic:claude-haiku-4-5",
+        ),
     ];
 
     for (requested, model) in foreign_pairs {

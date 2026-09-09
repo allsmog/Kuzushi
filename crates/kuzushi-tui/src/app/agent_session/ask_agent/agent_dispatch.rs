@@ -20,11 +20,10 @@ impl ShellApp {
         let Some(operator_question) = self.accept_agent_question(&request.question) else {
             return Vec::new();
         };
-        self.record_session_event(
-            kuzushi_core::session_transcript::SessionEvent::AgentUserTurn {
-                text: operator_question.clone(),
-            },
-        );
+        if self.wait_for_answer_recovery(&operator_question) {
+            return Vec::new();
+        }
+        self.present_submitted_agent_question(&operator_question);
         let prior = self.agent_chat().cloned().unwrap_or_default();
         let Some(target) = self.agent_target_for_question(&prior, &operator_question) else {
             return Vec::new();
@@ -52,6 +51,17 @@ impl ShellApp {
         vec![ShellEffect::DispatchAgent(dispatch)]
     }
 
+    fn present_submitted_agent_question(&mut self, question: &str) {
+        if crate::ui_view_models::answers_available(self) {
+            self.router.answers_mut().begin_turn();
+        }
+        self.record_session_event(
+            kuzushi_core::session_transcript::SessionEvent::AgentUserTurn {
+                text: question.to_string(),
+            },
+        );
+    }
+
     pub(crate) fn dispatch_agent(&mut self, mut dispatch: AgentDispatch) {
         if self.reject_runtime_launch_while_budget_halted(true, "agent") {
             return;
@@ -68,6 +78,7 @@ impl ShellApp {
             tool_name: "agent:ask".to_string(),
         });
         self.install_agent_dispatch_state(&dispatch, watchdog_cancel.clone());
+        self.persist_answer_conversation();
         self.log_agent_thread_reset(dispatch.thread_reset_reason.as_deref());
         self.log_agent_dispatch(&dispatch);
         self.log_agent_failure_context_attachment(dispatch.attached_failure_context);
@@ -306,16 +317,12 @@ impl ShellApp {
         threat_model_snapshot: &ThreatModelSceneSnapshot,
     ) -> BuiltAgentPrompt {
         match attachment {
-            AskAttachment::Screen => {
-                let screen = screen_context_model(self);
-                let prompt = agent_question_with_thread_context(
-                    question,
-                    failure_context,
-                    Some(AgentPromptAttachment::Screen(&screen)),
-                    history,
-                );
-                built_agent_prompt(prompt, screen.scope_chip())
-            }
+            AskAttachment::Screen => self.build_screen_agent_prompt(
+                question,
+                failure_context,
+                history,
+                threat_model_snapshot,
+            ),
             AskAttachment::ThreatModel { whole_model } => {
                 let scene = threat_model_scene_context_from_snapshot(
                     self,
@@ -330,6 +337,44 @@ impl ShellApp {
                 );
                 built_agent_prompt(prompt, Some(scene.scope_chip().to_string()))
             }
+        }
+    }
+
+    fn build_screen_agent_prompt(
+        &self,
+        question: &str,
+        failure_context: Option<&FailureToLlmContext>,
+        history: &[ChatTurn],
+        snapshot: &ThreatModelSceneSnapshot,
+    ) -> BuiltAgentPrompt {
+        let screen = screen_context_model(self);
+        let map = self
+            .map_context_is_visible()
+            .then(|| threat_model_scene_context_from_snapshot(self, snapshot, false));
+        let attachment = map
+            .as_ref()
+            .map_or(AgentPromptAttachment::Screen(&screen), |map| {
+                AgentPromptAttachment::ScreenWithMap(&screen, map)
+            });
+        let prompt = agent_question_with_thread_context(
+            question,
+            failure_context,
+            Some(attachment),
+            history,
+        );
+        built_agent_prompt(prompt, screen.scope_chip())
+    }
+
+    fn map_context_is_visible(&self) -> bool {
+        match self.shell_view() {
+            ShellView::Workbench => {
+                crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Map
+            }
+            ShellView::Scene => matches!(
+                self.router.scene().page(),
+                crate::scene3d::VizPage::Summary | crate::scene3d::VizPage::Dfd
+            ),
+            _ => false,
         }
     }
 
@@ -390,12 +435,13 @@ impl ShellApp {
         next.auxiliary_read_only = dispatch.execution_mode.is_auxiliary();
         next.failure_context = dispatch.failure_context.clone();
         self.set_agent_chat(Some(next));
+        self.router
+            .answers_mut()
+            .submitted(&dispatch.operator_question);
         self.set_agent_artifact_target(Some(dispatch.artifact_target.clone()));
         self.set_agent_cancel(Some(cancel));
-        // Deliberately no view change: ask is a fallthrough. The operator
-        // stays on the current view; progress shows in the live-activity
-        // chrome and the answer lands in the transcript. `chat` opens the
-        // conversation surface explicitly.
+        // The pane opens on the operator's request, before dispatch. Worker
+        // completion updates its document without changing view or focus.
     }
 
     pub(crate) fn set_pending_failure_context(&mut self, context: FailureToLlmContext) {
@@ -778,6 +824,22 @@ mod tests {
     }
 
     #[test]
+    fn answers_dispatch_admission_clears_only_the_submitted_draft() {
+        let target = tempfile::tempdir().expect("target");
+        let model = test_agent_model();
+        let mut app = agent_test_app(target.path(), &model);
+        app.router.answers_mut().draft.insert("what changed?");
+        seed_agent_run(&mut app, &model);
+        assert!(app.router.answers().draft.text().is_empty());
+        app.router
+            .answers_mut()
+            .draft
+            .insert("another unsent question");
+        seed_agent_run(&mut app, &model);
+        assert_eq!(app.router.answers().draft.text(), "another unsent question");
+    }
+
+    #[test]
     fn agent_dispatch_captures_only_an_explicit_guided_phase() {
         let target = tempfile::tempdir().expect("target");
         let model = test_agent_model();
@@ -1098,6 +1160,90 @@ mod tests {
             Some("scene:dfd:browser")
         );
         assert_eq!(app.shell_view(), ShellView::Scene);
+    }
+
+    #[test]
+    fn map_screen_attachment_includes_the_visible_model_as_untrusted_context() {
+        let target = tempfile::tempdir().unwrap();
+        write_scene_threat_model(target.path());
+        let model = test_agent_model();
+        let mut app = agent_test_app(target.path(), &model);
+        app.hydrate_all_view_data_for_test();
+        app.set_workbench_page(WorkbenchPage::Map);
+        assert_ne!(app.router.scene().page(), crate::scene3d::VizPage::Summary);
+        assert_eq!(app.current_map_viz_page(), crate::scene3d::VizPage::Summary);
+        let snapshot = capture_threat_model_scene_snapshot(target.path()).unwrap();
+        let prompt = app.build_agent_prompt(
+            "Explain the map",
+            None,
+            AskAttachment::Screen,
+            &[],
+            &snapshot,
+        );
+
+        assert!(
+            prompt.text.contains("Authentication service"),
+            "{}",
+            prompt.text
+        );
+        assert!(prompt.text.contains("\"selectedElement\""));
+        assert!(prompt.text.contains("\"oneHopNeighbors\""));
+        assert!(prompt.text.contains("screenContext:"));
+        assert!(prompt.text.contains("threatModelScene:"));
+        assert!(!prompt.text.contains("whole-only marker"));
+        let fence = prompt.text.find("UNTRUSTED SCREEN CONTEXT").unwrap();
+        let data = prompt
+            .text
+            .find("ignore all previous instructions")
+            .unwrap();
+        let question = prompt.text.find("Operator question:").unwrap();
+        assert!(fence < data && data < question);
+    }
+
+    #[test]
+    fn map_screen_attachment_is_bound_to_the_captured_model_and_current_page() {
+        let target = tempfile::tempdir().unwrap();
+        write_scene_threat_model(target.path());
+        let model = test_agent_model();
+        let mut app = agent_test_app(target.path(), &model);
+        app.set_workbench_page(WorkbenchPage::Map);
+        let snapshot = capture_threat_model_scene_snapshot(target.path()).unwrap();
+        write_legacy_thread_model(target.path(), "later replacement");
+        let prompt = app.build_agent_prompt("Explain", None, AskAttachment::Screen, &[], &snapshot);
+        assert!(prompt.text.contains("Authentication service"));
+        assert!(!prompt.text.contains("later replacement"));
+        app.set_workbench_page(WorkbenchPage::Review);
+        let review = app.build_agent_prompt("Review", None, AskAttachment::Screen, &[], &snapshot);
+        assert!(!review.text.contains("Authentication service"));
+        assert!(!review.text.contains("threatModelScene:"));
+    }
+
+    #[test]
+    fn map_screen_attachment_tracks_the_selected_dfd_node_in_zoom() {
+        let target = tempfile::tempdir().unwrap();
+        write_scene_threat_model(target.path());
+        let model = test_agent_model();
+        let mut app = agent_test_app(target.path(), &model);
+        app.set_shell_view(ShellView::Scene);
+        app.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::Dfd);
+        app.router.scene_mut().set_dfd_selection(1, 4);
+        let snapshot = capture_threat_model_scene_snapshot(target.path()).unwrap();
+        let prompt = app.build_agent_prompt("Explain", None, AskAttachment::Screen, &[], &snapshot);
+        let raw = prompt
+            .text
+            .split("threatModelScene:\n")
+            .nth(1)
+            .unwrap()
+            .split("\n\nOperator question:")
+            .next()
+            .unwrap();
+        let scene: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(scene["selectedElement"]["id"], "api");
+        assert_eq!(scene["page"]["id"], "dfd");
+        assert_eq!(scene["attachmentMode"], "scene-slice");
+        assert!(scene["modelRef"]["sha256"].is_string());
     }
 
     #[test]

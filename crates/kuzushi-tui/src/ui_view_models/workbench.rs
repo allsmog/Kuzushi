@@ -109,7 +109,7 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("B", "review decision backlog"),
-    hint("Enter", "open in Prove"),
+    hint("Enter", "queue → Prove"),
     hint("findings", "show full queue"),
     hint("z", "open heatmap"),
 ];

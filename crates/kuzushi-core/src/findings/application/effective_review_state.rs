@@ -3,8 +3,8 @@
 //!
 //! Append-only review records outlive the finding row they were written
 //! against: a re-scan mints a new row for the same durable identity. Resolving
-//! "the decision in force" therefore has to prefer durable identity over row
-//! identity, and newest over oldest. Shell projections, headless review
+//! "the decision in force" therefore includes shared identity decisions and
+//! decisions local to the selected row. Shell projections, headless review
 //! listings, and the proof-deferral gate all read that one answer here so a
 //! finding can never be actionable in one mode and unreviewed in another.
 //!
@@ -17,7 +17,10 @@ use super::super::domain::{
     TriageVerdict,
 };
 use crate::workspace::WorkspaceFindingReviewContext;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[cfg(test)]
+mod tests;
 
 /// The review decision in force for one finding, plus whether it was carried
 /// from the durable identity rather than recorded against this exact row.
@@ -113,12 +116,13 @@ impl EffectiveReviewDecision {
     }
 }
 
-/// Newest-decision-wins index over a whole ledger, keyed by both durable
-/// identity and finding row id.
+/// Human-priority, then newest-decision index over a whole ledger. Local
+/// records apply only to their finding row; identity records may be carried.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EffectiveReviewStateIndex {
     by_identity: BTreeMap<String, IndexedReviewDecision>,
     by_finding_id: BTreeMap<i64, IndexedReviewDecision>,
+    by_local_finding_id: BTreeMap<i64, IndexedReviewDecision>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -134,8 +138,14 @@ impl EffectiveReviewStateIndex {
         decisions: &[ReviewDecisionRecord],
     ) -> Self {
         let mut index = Self::default();
+        let local_rows = decisions
+            .iter()
+            .filter(|record| normalized_record_identity_id(record).is_none())
+            .map(|record| record.finding_id)
+            .collect::<BTreeSet<_>>();
         for finding in findings {
-            index.insert_finding_decision(finding);
+            let local = finding.id.is_some_and(|id| local_rows.contains(&id));
+            index.insert_finding_decision(finding, local);
         }
         for decision in decisions {
             index.insert_record_decision(decision);
@@ -143,7 +153,7 @@ impl EffectiveReviewStateIndex {
         index
     }
 
-    fn insert_finding_decision(&mut self, finding: &Finding) {
+    fn insert_finding_decision(&mut self, finding: &Finding, local: bool) {
         let Some(decision) = EffectiveReviewDecision::from_finding(finding) else {
             return;
         };
@@ -152,11 +162,28 @@ impl EffectiveReviewStateIndex {
             finding_id: finding.id,
             decision: decision.decision,
         };
-        if let Some(identity_id) = normalized_identity_id(finding) {
-            insert_latest_decision(&mut self.by_identity, identity_id, indexed.clone());
-        }
+        self.insert_embedded_decision_scope(finding, &indexed, local);
         if let Some(finding_id) = finding.id {
             insert_latest_decision(&mut self.by_finding_id, finding_id, indexed);
+        }
+    }
+
+    fn insert_embedded_decision_scope(
+        &mut self,
+        finding: &Finding,
+        indexed: &IndexedReviewDecision,
+        local: bool,
+    ) {
+        // A cached triage value carries no scope metadata. An explicit local
+        // record prevents that cache from manufacturing identity propagation.
+        if local {
+            if let Some(id) = finding.id {
+                insert_latest_decision(&mut self.by_local_finding_id, id, indexed.clone());
+            }
+            return;
+        }
+        if let Some(identity) = normalized_identity_id(finding) {
+            insert_latest_decision(&mut self.by_identity, identity, indexed.clone());
         }
     }
 
@@ -168,6 +195,12 @@ impl EffectiveReviewStateIndex {
         };
         if let Some(identity_id) = normalized_record_identity_id(record) {
             insert_latest_decision(&mut self.by_identity, identity_id, indexed.clone());
+        } else {
+            insert_latest_decision(
+                &mut self.by_local_finding_id,
+                record.finding_id,
+                indexed.clone(),
+            );
         }
         insert_latest_decision(&mut self.by_finding_id, record.finding_id, indexed);
     }
@@ -180,9 +213,11 @@ impl EffectiveReviewStateIndex {
     }
 
     fn identity_decision_for(&self, finding: &Finding) -> Option<EffectiveReviewDecision> {
-        normalized_identity_id(finding)
+        let identity = normalized_identity_id(finding)
             .as_deref()
-            .and_then(|identity_id| self.by_identity.get(identity_id))
+            .and_then(|identity_id| self.by_identity.get(identity_id));
+        let local = finding.id.and_then(|id| self.by_local_finding_id.get(&id));
+        effective_indexed_decision(identity, local)
             .map(|indexed| EffectiveReviewDecision::from_indexed(indexed, finding))
     }
 
@@ -203,8 +238,7 @@ impl EffectiveReviewStateIndex {
     }
 }
 
-/// Every append-only decision recorded against this finding's durable
-/// identity, newest first.
+/// Every applicable identity or finding-local decision, newest first.
 pub fn review_decision_history_for<'a>(
     finding: &Finding,
     records: &'a [ReviewDecisionRecord],
@@ -225,9 +259,23 @@ fn record_addresses_finding(
     finding: &Finding,
     identity_id: Option<&str>,
 ) -> bool {
-    match identity_id {
-        Some(identity_id) => normalized_record_identity_id(record).as_deref() == Some(identity_id),
-        None => finding.id == Some(record.finding_id),
+    match (
+        identity_id,
+        normalized_record_identity_id(record).as_deref(),
+    ) {
+        (Some(identity), Some(record_identity)) => identity == record_identity,
+        _ => finding.id == Some(record.finding_id),
+    }
+}
+
+fn effective_indexed_decision<'a>(
+    identity: Option<&'a IndexedReviewDecision>,
+    local: Option<&'a IndexedReviewDecision>,
+) -> Option<&'a IndexedReviewDecision> {
+    match (identity, local) {
+        (Some(shared), Some(local)) if decision_remains_effective(shared, local) => Some(shared),
+        (_, Some(local)) => Some(local),
+        (shared, None) => shared,
     }
 }
 

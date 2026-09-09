@@ -1,5 +1,6 @@
 mod active;
 mod catalog;
+mod run_artifact;
 mod system;
 mod workbench;
 mod workflow;
@@ -13,9 +14,23 @@ pub(crate) struct FooterKeybinding {
     pub(crate) label: String,
 }
 
+pub(super) fn interrupt_binding(app: &ShellApp) -> FooterKeybinding {
+    active::active_keybindings(app)
+        .and_then(|bindings| bindings.into_iter().find(|binding| binding.key == "Ctrl+C"))
+        .unwrap_or_else(|| bind("Ctrl+C", "exit"))
+}
+
+pub(super) fn reader_escape_label(app: &ShellApp) -> &'static str {
+    if app.notice_captures_escape() {
+        "dismiss notice"
+    } else {
+        "back"
+    }
+}
+
 pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if app.advisory().pending_confirm.is_some() {
-        return system::pending_confirm_keybindings(app);
+    if let Some(bindings) = owned_input_bindings(app) {
+        return bindings;
     }
     let mut bindings = active::active_keybindings(app).unwrap_or_else(|| idle_keybindings(app));
     if view_owns_its_input_contract(app) {
@@ -23,17 +38,101 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     bindings = input_mode_bindings(bindings, app.input_mode());
     push_input_mode_binding(&mut bindings, app);
-    insert_prompt_completion_binding(&mut bindings, app.input_mode());
+    insert_prompt_completion_binding(&mut bindings, app);
+    if super::answers_available(app) && app.agent_chat().is_some() {
+        bindings.insert(0, bind("Ctrl+T", "answers"));
+    }
+    prioritize_entry_point_paging(&mut bindings, app);
     apply_operator_chrome_overrides(bindings, app)
 }
 
-fn insert_prompt_completion_binding(bindings: &mut Vec<FooterKeybinding>, mode: crate::InputMode) {
-    if mode != crate::InputMode::Prompt {
+fn prioritize_entry_point_paging(bindings: &mut [FooterKeybinding], app: &ShellApp) {
+    if app.shell_view() != crate::ShellView::Workbench {
         return;
     }
-    let tab = bind("Tab", "complete");
+    if app.current_map_viz_page() != crate::scene3d::VizPage::EntryPoints
+        || !workbench::ready_map_gallery_is_visible(app)
+    {
+        return;
+    }
+    bindings.sort_by_key(|binding| u8::from(binding.key != "PgUp/PgDn"));
+}
+
+fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if app.advisory().pending_confirm.is_some() {
+        return Some(system::pending_confirm_keybindings(app));
+    }
+    batch_config_bindings(app)
+        .or_else(|| super::answers_own_input(app).then(|| answer_bindings(app)))
+        .or_else(|| workbench::prove_detail_bindings(app))
+        .or_else(|| run_artifact::keybindings(app))
+}
+
+fn answer_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = answer_editing_bindings(app);
+    if let Some(chat) = app.agent_chat().filter(|chat| chat.running) {
+        let label = if chat.abort_requested {
+            "canceling Ask"
+        } else {
+            "cancel Ask"
+        };
+        bindings.insert(0, bind("Ctrl+C", label));
+    }
+    bindings
+}
+
+fn answer_editing_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if app.router.answers().focus == crate::app::AnswerFocus::Reply {
+        return vec![
+            bind("Enter", "ask"),
+            bind("Shift+Enter", "newline"),
+            bind("Esc", "keep draft"),
+            bind("Ctrl+T", "workspace"),
+        ];
+    }
+    vec![
+        bind("↑/↓", "scroll answer"),
+        bind("Enter", "reply"),
+        bind("Alt+←/→", "contexts"),
+        bind("Ctrl+T", "workspace"),
+    ]
+}
+
+fn batch_config_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if app.batch_number_editor_open() {
+        return Some(vec![
+            bind("Enter", "save value"),
+            bind("Esc", "cancel edit"),
+        ]);
+    }
+    app.batch_config_open().then(|| {
+        vec![
+            bind("↑/↓", "setting"),
+            bind("Enter", "edit"),
+            bind("L", "review/launch"),
+            bind("Esc", "campaigns"),
+        ]
+    })
+}
+
+fn insert_prompt_completion_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
+    if app.input_mode() != crate::InputMode::Prompt {
+        return;
+    }
+    let tab = bind("Tab", prompt_tab_action(app));
     if !bindings.contains(&tab) {
         bindings.insert(after_critical_binding(bindings), tab);
+    }
+}
+
+fn prompt_tab_action(app: &ShellApp) -> &'static str {
+    if app.shell_view() == crate::ShellView::Workbench
+        && app.input().is_empty()
+        && workbench::ready_map_gallery_is_visible(app)
+    {
+        "map view"
+    } else {
+        "complete"
     }
 }
 

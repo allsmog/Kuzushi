@@ -41,20 +41,27 @@ impl InputUpdate {
         }
     }
 }
+mod answer_keys;
+mod answer_mouse;
 mod back_navigation;
 mod budget_guard;
+mod budget_keys;
 mod confirmation_keys;
 mod control_keys;
 mod cursor_and_view_keys;
 mod exit_requests;
 mod key_dispatch;
 mod keybinding_types;
+mod map_scope_keys;
+mod map_text_keys;
 mod operator_question_keys;
 mod page_scroll;
 mod pending_plan_keys;
 mod picker_keys;
+mod planning_option_keys;
 mod prereq_prompt_keys;
 mod quit_chord;
+mod report_keys;
 mod scroll_navigation;
 mod text_input;
 mod ticking;
@@ -65,7 +72,7 @@ mod view_keybindings;
 
 pub(in crate::app) use keybinding_types::HotkeyTrigger;
 pub(in crate::app) use keybinding_types::KeyModifierState;
-pub(in crate::app) use keybinding_types::ViewHotkeyAction;
+pub(crate) use keybinding_types::ViewHotkeyAction;
 pub(in crate::app) use keybinding_types::ViewKeybinding;
 pub(crate) use quit_chord::is_quit_chord;
 use view_keybinding_groups::*;

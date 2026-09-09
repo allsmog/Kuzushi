@@ -25,6 +25,8 @@ use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp, ViewDat
 use kuzushi_core::RunSummary;
 use std::time::Instant;
 
+mod compact;
+
 pub(crate) enum ActivityViewModel<'a> {
     Active(RunFocusModel<'a>),
     Inactive(ActivityEmptyStateModel),
@@ -533,7 +535,7 @@ fn activity_abort_banner(app: &ShellApp) -> Option<String> {
     })
 }
 
-fn activity_abort_pending(app: &ShellApp) -> bool {
+pub(super) fn activity_abort_pending(app: &ShellApp) -> bool {
     !activity_abort_subjects(app).is_empty()
 }
 

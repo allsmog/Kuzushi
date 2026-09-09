@@ -496,8 +496,11 @@ is expected to behave identically and should be filed as a parity bug.
   native body and full-frame mode is only a zoom. A
   foreground completion first restores its exact origin, then opens the
   relevant non-empty deck; a background completion only emits a notice and
-  never steals focus. Threat-model completion is notification-only and never
-  force-opens the DFD; explicit `scene` access remains available. `scan` maps
+  never steals focus. Threat-model completion never force-opens the DFD;
+  explicit `scene` access remains available. A completed foreground Map plan
+  launched from Setup presents its durable Map result for explicit acceptance
+  after the receipt is published. Other threat-model completions remain
+  notification-only. `scan` maps
   to Heatmap when findings exist, and
   `viz_page_for_tool(tool_name)` maps artifact-emitting verbs exactly —
   `taint-iris:hunt`→AttackPath and `exploit-chain:scan`→ExploitChain. DFDs,
@@ -565,8 +568,11 @@ is expected to behave identically and should be filed as a parity bug.
   CLI `runs list/show/trace` is the headless analogue over the same shared
   artefacts. Run Focus captures the exact workflow origin before foreground
   launch. `b` restores that origin without cancellation; final chain/plan/steer
-  completion restores it with one accumulated receipt. Manual Run Focus
-  inspection and background-owned runs never auto-return or hijack focus.
+  completion restores it with one accumulated receipt. A completed Map attempt
+  launched from Setup then opens its durable Map result, provided the exact
+  current-target attempt is recorded and still unresolved; presenting it never
+  selects it. Other origins, unsuccessful outcomes, manual Run Focus inspection
+  and background-owned runs retain their existing return/focus policy.
 - **Campaign deck (`campaign [id]`, `ShellView::Campaign`) is shell-only
   presentation over shared campaign artifacts.** It renders the same
   `plan.json` + `queue.json` fold as `campaign:status` (one snapshot
@@ -769,8 +775,11 @@ backgrounds without cancellation and restores the captured origin.
 - **Completion**: intermediate prereq-chain, plan, and steer receipts accumulate
   in deterministic chain → plan → steer order. The final terminal outcome
   restores the exact origin and shows one receipt with outcome, run count,
-  duration, cost, changed findings/artifacts, and next action. Manual inspection
-  and background-owned work never auto-return.
+  duration, cost, changed findings/artifacts, and next action. A completed
+  foreground Setup Map attempt then presents its durable Map result for
+  explicit acceptance; its receipt and healthy current-target attempt projection
+  must agree on completion and identity. Manual inspection and background-owned
+  work never auto-return.
 
 When adding a new producer module, follow the pattern in
 `crates/kuzushi-core/src/modules/native_scanners/register_modules.rs::run_semgrep_scan`

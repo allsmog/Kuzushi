@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn model_failure_survives_an_additional_lifecycle_persistence_error() {
+    use kuzushi_core::runtime::{RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata};
+    let metadata =
+        RuntimeFailureMetadata::new(RuntimeFailureClass::ProviderRejected, Some(400), None);
+    let error = anyhow::Error::new(RuntimeFailure::new(metadata.clone()))
+        .context("agent loop step 0 failed");
+    let wrapped = error_with_lifecycle(error, Err(anyhow::anyhow!("private persistence path")));
+    let event = failed_agent_event(
+        CostedWorkerError::unresolved(wrapped),
+        AgentCallAudit::test(),
+    );
+    let AgentEvent::Failed { error, audit } = event else {
+        panic!("failed event expected");
+    };
+    assert_eq!(audit.failure, Some(metadata));
+    assert_eq!(error, "Provider rejected the request (HTTP 400).");
+    assert!(!error.contains("private persistence path"));
+}
+
+#[test]
 fn auxiliary_ask_request_has_only_bridge_acknowledged_read_tools() {
     let target = tempfile::tempdir().unwrap();
     let authorization =

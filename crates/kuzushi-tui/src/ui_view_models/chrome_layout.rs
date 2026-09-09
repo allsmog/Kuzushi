@@ -16,7 +16,14 @@ fn onboarding_supplies_own_guidance(app: &ShellApp) -> bool {
     )
 }
 
+fn compact_answers_supply_guidance(app: &ShellApp, terminal_height: u16) -> bool {
+    terminal_height <= 16 && super::answers_own_input(app)
+}
+
 pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
+    if compact_answers_supply_guidance(app, terminal_height) {
+        return 0;
+    }
     // ModuleRun, Quickstart, and Logs hide the embedded transcript strip
     // so they paint full-screen. ModuleRun keeps the prompt; Quickstart
     // (M1 §1.2) needs the room for the guided steps; Logs (M1 §1.1) is the
@@ -40,6 +47,9 @@ pub(crate) fn keybind_footer_chrome_height(
     terminal_height: u16,
     terminal_width: u16,
 ) -> u16 {
+    if compact_answers_supply_guidance(app, terminal_height) {
+        return 0;
+    }
     if activity_supplies_own_chrome(app)
         || onboarding_supplies_own_guidance(app)
         || terminal_height < 8
@@ -76,6 +86,9 @@ pub(crate) const RAIL_WIDTH: u16 = 36;
 /// honored down to `RAIL_FORCE_MIN_WIDTH`), then the automatic width test.
 /// Onboarding views own their whole frame and stay rail-free.
 pub(crate) fn rail_width(app: &ShellApp, terminal_width: u16) -> u16 {
+    if super::answers_visible(app) {
+        return 0;
+    }
     if !app.ui().rail_enabled() || onboarding_supplies_own_guidance(app) {
         return 0;
     }
@@ -91,7 +104,11 @@ pub(crate) fn rail_width(app: &ShellApp, terminal_width: u16) -> u16 {
 fn hides_transcript_chrome(view: &ShellView) -> bool {
     matches!(
         view,
-        ShellView::ModuleRun | ShellView::Quickstart | ShellView::Logs | ShellView::Workbench
+        ShellView::ModuleRun
+            | ShellView::Quickstart
+            | ShellView::Logs
+            | ShellView::Workbench
+            | ShellView::Keymap
     )
 }
 

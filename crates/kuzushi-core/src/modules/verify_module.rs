@@ -5,11 +5,11 @@ pub(crate) fn verify_module() -> BuiltinModule {
         "verify",
         "Verify",
         ModuleKind::Offense,
-        "Exploitability verification through proof-of-concept construction and sandboxed execution.",
+        "Finding verification through source analysis or isolated local reproduction.",
         vec![
             tool_with_options(
                 "verify:finding",
-                "Verify whether a finding is exploitable (LLM-driven; consults runtime for PoC reasoning).",
+                "Assess a finding from source, or attempt isolated local reproduction in empirical mode.",
                 verify_finding_options(),
             )
             .with_prompt(editable_prompt(
@@ -21,7 +21,7 @@ pub(crate) fn verify_module() -> BuiltinModule {
             ))
             .with_policy(workspace_policy(
                 ToolPhase::Prove,
-                RuntimeRequirement::Always,
+                RuntimeRequirement::InputAware,
                 FindingStoreRequirement::Required,
             )),
             hidden_tool_with_options(

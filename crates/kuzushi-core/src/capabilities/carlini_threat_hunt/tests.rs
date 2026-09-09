@@ -307,11 +307,12 @@ mod tests {
                 .unwrap();
         let runtime = StructuredCarliniRuntime { response };
         let (workspace, store, config) = carlini_alias_test_context(temp.path());
+        let trace = crate::run_artifacts::TraceHandle::jsonl(temp.path(), "carlini-source-delta");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
-            trace: None,
+            trace: Some(&trace),
             cancellation: None,
             authorization: Default::default(),
         };
@@ -326,6 +327,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.pointer("/data/count"), Some(&json!(2)));
+        assert!(result
+            .pointer("/data/snapshotHash")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.len() == 64));
+        let projection =
+            crate::run_lifecycle::load_run_projection(temp.path(), "carlini-source-delta")
+                .unwrap()
+                .projection;
+        let delta = projection
+            .finding_deltas
+            .last()
+            .expect("persisted findings have a typed delta");
+        assert_eq!((delta.added, delta.updated, delta.removed), (2, 0, 0));
         assert_eq!(result.pointer("/data/rejectedCount"), Some(&json!(0)));
         assert_eq!(
             result.pointer("/data/findings/0/start_line"),
@@ -342,6 +356,57 @@ mod tests {
             finding.actor_fingerprint.as_deref()
                 == Some("carlini-threat-hunt:Cluster_Gateway_User:0")
         }));
+        check_repeated_carlini_delta(
+            &workspace,
+            &store,
+            &config,
+            &runtime,
+            "carlini-repeated",
+            (0, 2, 0),
+        );
+        let empty = StructuredCarliniRuntime {
+            response: json!({"findings": []}),
+        };
+        check_repeated_carlini_delta(
+            &workspace,
+            &store,
+            &config,
+            &empty,
+            "carlini-empty",
+            (0, 0, 0),
+        );
+    }
+
+    fn check_repeated_carlini_delta(
+        workspace: &WorkspaceTarget,
+        store: &FindingStore,
+        config: &V2Config,
+        runtime: &dyn AgentRuntime,
+        run_id: &str,
+        expected: (u64, u64, u64),
+    ) {
+        let trace = crate::run_artifacts::TraceHandle::jsonl(workspace.root(), run_id);
+        let ctx = ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: Some(store),
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        ModuleRegistry::with_v2_builtins()
+            .execute_tool_with_runtime(
+                "offense-review:threat-hunt",
+                json!({"maxActors":1,"runsPerActor":1}),
+                &ctx,
+                Some(runtime),
+            )
+            .unwrap();
+        let projection = crate::run_lifecycle::load_run_projection(workspace.root(), run_id)
+            .unwrap()
+            .projection;
+        let delta = projection.finding_deltas.last().unwrap();
+        assert_eq!((delta.added, delta.updated, delta.removed), expected);
     }
 
     #[test]
@@ -566,6 +631,72 @@ mod tests {
         let inventory = prompt.find("Repository inventory and snippets").unwrap();
         let actor = prompt.find("Actor activity fingerprint").unwrap();
         assert!(inventory < actor);
+    }
+
+    fn actor_hunt_named(id: &str, name: &str) -> ActorHunt {
+        ActorHunt {
+            actor: DfdNode {
+                id: id.to_string(),
+                node_type: "external-entity".to_string(),
+                name: name.to_string(),
+                description: format!("{name} actor"),
+                trust_zone: "external".to_string(),
+            },
+            threats: Vec::new(),
+            flows: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn actor_prompt_cacheable_prefix_is_shared_across_actors_and_leads_each_prompt() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+        let inventory = render_carlini_inventory_block(&[(
+            "src/auth.rs".to_string(),
+            "fn login() {}".to_string(),
+        )]);
+
+        let user = build_actor_prompt_parts(
+            workspace.root(),
+            &actor_hunt_named("actor-user", "Authenticated User"),
+            &options,
+            &inventory,
+            "carlini-threat-hunt:Authenticated_User:0",
+        );
+        let admin = build_actor_prompt_parts(
+            workspace.root(),
+            &actor_hunt_named("actor-admin", "Operator"),
+            &options,
+            &inventory,
+            "carlini-threat-hunt:Operator:1",
+        );
+
+        assert_eq!(user.cacheable_prefix, admin.cacheable_prefix);
+        assert!(user.prompt.starts_with(&user.cacheable_prefix));
+        assert!(admin.prompt.starts_with(&admin.cacheable_prefix));
+        assert!(user.cacheable_prefix.contains("fn login() {}"));
+        assert!(!user.cacheable_prefix.contains("Actor activity fingerprint"));
+        assert_ne!(user.prompt, admin.prompt);
+        assert_eq!(
+            user.prompt,
+            build_actor_prompt(
+                workspace.root(),
+                &actor_hunt_named("actor-user", "Authenticated User"),
+                &options,
+                &inventory,
+                "carlini-threat-hunt:Authenticated_User:0",
+            )
+        );
     }
 
     #[test]

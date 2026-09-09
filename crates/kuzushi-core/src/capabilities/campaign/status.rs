@@ -30,10 +30,7 @@ pub fn execute_campaign_status(input: &Value, ctx: &ToolExecutionContext<'_>) ->
 fn workspace_trend_json(root: &Path, ctx: &ToolExecutionContext<'_>) -> (Value, Value) {
     let records = ctx
         .findings_store
-        .and_then(|store| {
-            let findings = store.list_all_findings().ok()?;
-            store.list_review_decisions_for_findings(&findings).ok()
-        })
+        .and_then(|store| store.list_all_review_decisions().ok())
         .unwrap_or_default();
     let metrics = super::trend::trend_metrics_with_spend(
         &records,

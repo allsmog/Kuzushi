@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use kuzushi_core::runtime::PromptCacheUsage;
 use kuzushi_core::ModelTier;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -28,10 +29,41 @@ pub(crate) fn anthropic_response_usage(parsed: &ApiResponse) -> (u32, u32) {
         .unwrap_or((0, 0))
 }
 
+pub(crate) fn anthropic_response_prompt_cache(parsed: &ApiResponse) -> Option<PromptCacheUsage> {
+    let usage = parsed.usage.as_ref()?;
+    if usage.cache_read_input_tokens.is_none() && usage.cache_creation_input_tokens.is_none() {
+        return None;
+    }
+    Some(PromptCacheUsage {
+        read_input_tokens: usage.cache_read_input_tokens.unwrap_or(0),
+        creation_input_tokens: usage.cache_creation_input_tokens.unwrap_or(0),
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn estimate_cost_usd(model: &str, input_tokens: u32, output_tokens: u32) -> Option<f64> {
+    estimate_cost_usd_with_cache(model, input_tokens, output_tokens, None)
+}
+
+/// Cache reads bill at a tenth of the input rate and cache writes at 1.25x
+/// (Anthropic list pricing). `input_tokens` excludes cached tokens, so the
+/// three input buckets add rather than overlap.
+const CACHE_READ_INPUT_RATE: f64 = 0.1;
+const CACHE_CREATION_INPUT_RATE: f64 = 1.25;
+
+pub(crate) fn estimate_cost_usd_with_cache(
+    model: &str,
+    input_tokens: u32,
+    output_tokens: u32,
+    prompt_cache: Option<PromptCacheUsage>,
+) -> Option<f64> {
     let model = model.to_ascii_lowercase();
     let (in_per_1k, out_per_1k) = token_prices_per_1k(&model)?;
-    Some((input_tokens as f64) / 1000.0 * in_per_1k + (output_tokens as f64) / 1000.0 * out_per_1k)
+    let cache = prompt_cache.unwrap_or_default();
+    let input_units = f64::from(input_tokens)
+        + f64::from(cache.read_input_tokens) * CACHE_READ_INPUT_RATE
+        + f64::from(cache.creation_input_tokens) * CACHE_CREATION_INPUT_RATE;
+    Some(input_units / 1000.0 * in_per_1k + f64::from(output_tokens) / 1000.0 * out_per_1k)
 }
 
 fn token_prices_per_1k(model: &str) -> Option<(f64, f64)> {
@@ -111,4 +143,8 @@ pub(crate) struct ApiUsage {
     pub(crate) input_tokens: Option<u32>,
     #[serde(default)]
     pub(crate) output_tokens: Option<u32>,
+    #[serde(default)]
+    pub(crate) cache_read_input_tokens: Option<u32>,
+    #[serde(default)]
+    pub(crate) cache_creation_input_tokens: Option<u32>,
 }

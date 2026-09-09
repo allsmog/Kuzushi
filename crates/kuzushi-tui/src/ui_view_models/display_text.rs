@@ -81,11 +81,37 @@ pub(crate) fn format_runtime_cost(
     }
     let formatted = format_session_cost(report.observed_usd());
     if report.is_complete() {
-        if report.observed_usd() == 0.0 {
-            return format!("{formatted} (no model calls)");
-        }
         formatted
     } else {
         format!(">={formatted} (metering incomplete)")
+    }
+}
+
+#[cfg(test)]
+mod runtime_cost_tests {
+    use super::*;
+    use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
+
+    #[test]
+    fn compact_cost_preserves_unknown_spend_without_inferring_call_counts() {
+        assert_eq!(
+            format_runtime_cost(RuntimeCostReport::known(RuntimeCost::ZERO), None),
+            "$0.00"
+        );
+        assert_eq!(
+            format_runtime_cost(RuntimeCostReport::INCOMPLETE_ZERO, None),
+            ">=$0.00 (metering incomplete)"
+        );
+        assert_eq!(
+            format_runtime_cost(RuntimeCostReport::UNAVAILABLE, None),
+            "cost not recorded"
+        );
+        assert_eq!(
+            format_runtime_cost(
+                RuntimeCostReport::known(RuntimeCost::ZERO),
+                Some("overflow")
+            ),
+            "cost accounting error"
+        );
     }
 }

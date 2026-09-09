@@ -23,6 +23,7 @@ fn record_phase_result_presentation_call() {
     PHASE_RESULT_PRESENTATION_CALLS.with(|calls| calls.set(calls.get() + 1));
 }
 
+mod continuation;
 #[path = "phase_results/typed_receipt.rs"]
 mod typed_receipt;
 use typed_receipt::TypedReceiptResolution;
@@ -222,6 +223,14 @@ pub(crate) fn phase_result_policy(
     use PhaseAttemptOutcome::{Blocked, Canceled, Failed};
     use PhaseResultAction::{Discard, Open, RunAgain};
 
+    if matches!(
+        (phase, outcome),
+        (Some(WorkflowPhase::Prove), PhaseAttemptOutcome::Partial)
+    ) {
+        return selection_blocked_result_policy(
+            "inspect the inconclusive assessment and missing evidence before retrying",
+        );
+    }
     if matches!(outcome, Blocked | Failed | Canceled) {
         return PhaseResultPolicy {
             actions: vec![Open, RunAgain, Discard],
@@ -300,7 +309,7 @@ impl ShellApp {
         let outcome = format!("{effective_outcome:?}").to_ascii_lowercase();
         let actions =
             ordered_phase_result_actions(completed.phase, effective_outcome, &policy.actions);
-        let emphasis = phase_result_emphasis(effective_outcome, &actions);
+        let emphasis = phase_result_emphasis(completed.phase, effective_outcome, &actions);
         let compact_summary = phase_result_compact_summary(completed, effective_outcome);
         let recommended_next = policy
             .recommended_next
@@ -395,6 +404,18 @@ impl ShellApp {
         Some(self.phase_result_policy_for(&record.completed))
     }
 
+    pub(crate) fn phase_result_control_state(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<(PhaseAttemptOutcome, PhaseResultPolicy)> {
+        let completed = &self.engagement.unresolved_phase_attempt(phase)?.completed;
+        let receipt = TypedReceiptResolution::resolve(completed);
+        Some((
+            receipt.outcome(),
+            self.phase_result_policy_with_receipt(completed, &receipt),
+        ))
+    }
+
     fn phase_result_policy_for(&self, completed: &PhaseAttemptCompleted) -> PhaseResultPolicy {
         let receipt = TypedReceiptResolution::resolve(completed);
         self.phase_result_policy_with_receipt(completed, &receipt)
@@ -415,6 +436,7 @@ impl ShellApp {
         }
         offer_threat_model_rerun_actions(completed, &mut policy);
         self.offer_continue_run(completed, &mut policy);
+        self.refine_phase_result_continuation(completed.phase, &mut policy);
         policy
     }
 
@@ -538,10 +560,16 @@ impl ShellApp {
                     .to_string(),
             );
         }
-        if let Some(reason) = completed.selection_blocked_reason.as_ref() {
-            return Some(reason.clone());
-        }
-        None
+        completed
+            .selection_blocked_reason
+            .clone()
+            .or_else(|| self.phase_attempt_identity_blocker(completed))
+    }
+
+    fn phase_attempt_identity_blocker(&self, completed: &PhaseAttemptCompleted) -> Option<String> {
+        self.engagement.phase_attempt_content_is_blocked(&completed.attempt_id).then(|| {
+            format!("Run {} again: its recorded source identity is unavailable or no longer current.", completed.phase.title())
+        })
     }
 
     pub(crate) fn verified_remediation_result_is_open(&self, phase: WorkflowPhase) -> bool {
@@ -635,9 +663,14 @@ fn phase_result_details(
 }
 
 fn phase_result_emphasis(
+    phase: WorkflowPhase,
     outcome: PhaseAttemptOutcome,
     actions: &[PhaseResultAction],
 ) -> PhaseResultEmphasis {
+    // Keep the pending Prove assessment prominent while its disposition is unresolved.
+    if phase == WorkflowPhase::Prove {
+        return PhaseResultEmphasis::DominantDecision;
+    }
     let selectable = actions.iter().any(|action| {
         matches!(
             action,
@@ -1195,6 +1228,23 @@ mod tests {
     }
 
     #[test]
+    fn partial_prove_never_offers_selection_or_continuation() {
+        let policy = phase_result_policy(
+            Some(WorkflowPhase::Prove),
+            PhaseAttemptOutcome::Partial,
+            false,
+        );
+        assert_eq!(
+            policy.actions,
+            vec![
+                PhaseResultAction::Open,
+                PhaseResultAction::RunAgain,
+                PhaseResultAction::Discard
+            ]
+        );
+    }
+
+    #[test]
     fn failed_attempt_with_stage_checkpoint_offers_continue_first() {
         let temp = tempfile::tempdir().unwrap();
         write_stage_checkpoint(temp.path(), "scan-run");
@@ -1242,7 +1292,11 @@ mod tests {
     fn only_selectable_completed_results_use_compact_disposition() {
         let target = tempfile::tempdir().unwrap();
         assert_eq!(
-            phase_result_emphasis(PhaseAttemptOutcome::Completed, &[PhaseResultAction::Select]),
+            phase_result_emphasis(
+                WorkflowPhase::Scan,
+                PhaseAttemptOutcome::Completed,
+                &[PhaseResultAction::Select]
+            ),
             PhaseResultEmphasis::CompactDisposition
         );
         let summary = phase_result_compact_summary(
@@ -1259,11 +1313,26 @@ mod tests {
             PhaseAttemptOutcome::Canceled,
         ] {
             assert_eq!(
-                phase_result_emphasis(outcome, &[PhaseResultAction::Select]),
+                phase_result_emphasis(WorkflowPhase::Scan, outcome, &[PhaseResultAction::Select]),
                 PhaseResultEmphasis::DominantDecision,
                 "outcome={outcome:?}"
             );
         }
+    }
+
+    #[test]
+    fn selectable_prove_result_keeps_the_new_assessment_expanded() {
+        assert_eq!(
+            phase_result_emphasis(
+                WorkflowPhase::Prove,
+                PhaseAttemptOutcome::Completed,
+                &[
+                    PhaseResultAction::Select,
+                    PhaseResultAction::SelectAndContinue
+                ],
+            ),
+            PhaseResultEmphasis::DominantDecision,
+        );
     }
 
     #[test]
@@ -1524,7 +1593,12 @@ mod tests {
         run_id: &str,
         phase: WorkflowPhase,
     ) -> TypedPhaseFixture {
-        write_typed_terminal_run(target, run_id);
+        crate::test_support::record_indexed_run(
+            target,
+            run_id,
+            "fixture:run",
+            serde_json::json!({"ok": true, "status": "completed", "data": {}}),
+        );
         let completed = typed_attempt_for_phase(target, run_id, phase);
         kuzushi_core::workflow_attempts::append_phase_attempt_completed_with_v2(
             target,
@@ -1808,7 +1882,7 @@ mod tests {
             "work-ledger rows leaked into the card: {detail}"
         );
         assert!(
-            detail.contains("Outcome · "),
+            detail.contains("Result · Fixture run (fixture:run) · completed · tool completed"),
             "terminal outcome missing from the card: {detail}"
         );
         assert!(

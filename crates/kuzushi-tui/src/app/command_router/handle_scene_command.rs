@@ -117,10 +117,13 @@ impl ShellApp {
         self.invalidate_view_hydration();
         self.workbench_cache()
             .borrow_mut()
-            .invalidate_json_file(&path);
+            .invalidate_threat_model(&target);
         self.hydrate_view_keys_blocking(
             &target,
-            vec![crate::app::ViewHydrationKey::JsonFile { path }],
+            vec![
+                crate::app::ViewHydrationKey::ThreatModelStore,
+                crate::app::ViewHydrationKey::JsonFile { path },
+            ],
         );
     }
 

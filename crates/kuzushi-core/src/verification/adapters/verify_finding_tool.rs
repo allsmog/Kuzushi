@@ -76,7 +76,7 @@ fn annotate_gate_stage(result: &mut Value, gate_model: &str, escalated: bool) {
 fn annotate_escalation_stage(
     result: &mut Value,
     escalation_model: &str,
-    resolved_exploitable: bool,
+    resolved_exploitable: Option<bool>,
     panel_passes: u64,
 ) {
     if let Some(object) = result.as_object_mut() {
@@ -139,10 +139,7 @@ fn annotate_escalation_failed(result: &mut Value, escalation_model: &str, error:
 /// the `consensus` block intact, then record the escalation stage.
 fn apply_escalation_verdict(result: &mut Value, pass: &Value, escalation_model: &str) {
     let panel_passes = panel_pass_count(result);
-    let resolved_exploitable = pass
-        .get("exploitable")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let resolved_exploitable = pass.get("exploitable").and_then(Value::as_bool);
     adopt_escalation_representative(result, pass);
     annotate_escalation_stage(result, escalation_model, resolved_exploitable, panel_passes);
 }
@@ -190,9 +187,7 @@ fn annotate_stage_note(result: &mut Value) {
     }
 }
 
-fn build_stage_disclosure(
-    result: &Value,
-) -> Option<crate::findings::VerificationStageDisclosure> {
+fn build_stage_disclosure(result: &Value) -> Option<crate::findings::VerificationStageDisclosure> {
     let gate = stage_block_model(result.get("gate"));
     let panel_passes = consensus_pass_count(result);
     let split = super::verify_consensus::panel_verdict_is_split(result);
@@ -361,12 +356,8 @@ fn require_verify_finding_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<
 }
 
 fn verify_finding_response(result: Value, cost: RuntimeCostReport) -> Result<Value> {
-    let exploitable = required_result_bool(&result, "exploitable")?;
-    let assessment = if exploitable {
-        "likely-exploitable (model assessment)"
-    } else {
-        "likely-not-exploitable (model assessment)"
-    };
+    let exploitable = super::verify_assessment::read_exploitability(&result)?;
+    let assessment = super::verify_assessment::assessment_label(exploitable);
     let mut lines = vec![
         "[+] verify:finding complete".to_string(),
         format!("      {assessment}"),
@@ -380,13 +371,29 @@ fn verify_finding_response(result: Value, cost: RuntimeCostReport) -> Result<Val
     let proof = verification_proof_snapshot(&result)?;
     let refusal_warning = escalation_refusal_warning(&result);
     let data = verification_response_data(result, &proof, &summary)?;
-    let mut response =
-        crate::module_result::completed_output_result(summary, lines.join("\n"), data);
+    let mut response = assessment_response(exploitable, summary, lines.join("\n"), data);
     add_verification_response_metadata(&mut response, proof, cost);
     if let Some(message) = refusal_warning {
         push_verification_warning(&mut response, message);
     }
     Ok(response)
+}
+
+fn assessment_response(
+    exploitable: Option<bool>,
+    summary: String,
+    output: String,
+    data: Value,
+) -> Value {
+    if exploitable.is_some() {
+        return crate::module_result::completed_output_result(summary, output, data);
+    }
+    crate::module_result::partial_output_result(
+        summary,
+        output,
+        vec![json!("Model assessment is inconclusive. Review missing evidence or panel disagreement before retrying; this result cannot replace selected proof.")],
+        data,
+    )
 }
 
 fn append_vector_line(lines: &mut Vec<String>, result: &Value) {
@@ -509,35 +516,58 @@ fn required_result_field(result: &Value, key: &str) -> Result<Value> {
         .with_context(|| format!("normalized verification result missing `{key}`"))
 }
 
-fn required_result_bool(result: &Value, key: &str) -> Result<bool> {
-    let value = result
-        .get(key)
-        .with_context(|| format!("normalized verification result missing boolean `{key}`"))?;
-    value.as_bool().with_context(|| {
-        format!(
-            "normalized verification result field `{key}` must be boolean, got {}",
-            value_type_name(value)
-        )
-    })
-}
-
-fn value_type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn known_cost(cost_usd: f64) -> RuntimeCostReport {
         RuntimeCostReport::known(RuntimeCost::from_usd(cost_usd, "test cost").unwrap())
+    }
+
+    #[test]
+    fn incomplete_response_preserves_uncertainty_cost_and_source() {
+        let mut result = normalize_verification_result(
+            json!({
+                "fingerprint":"fp-1", "exploitable":false, "confidence":0.61,
+                "proofLevel":2, "proofVerdict":"insufficient_finding_detail"
+            }),
+            "fp-1",
+        )
+        .unwrap();
+        result["verifiedScanId"] = json!("scan-1");
+        result["identityId"] = json!("identity-1");
+        result["sourceIdentity"] = source_identity_fixture();
+        let response = verify_finding_response(result, known_cost(0.25)).unwrap();
+        assert_eq!(response["status"], "partial");
+        assert_eq!(response["costUsd"], 0.25);
+        assert!(response["summary"]
+            .as_str()
+            .unwrap()
+            .contains("inconclusive"));
+        assert!(!response["output"]
+            .as_str()
+            .unwrap()
+            .contains("likely-not-exploitable"));
+        for path in ["/data", "/data/verification", "/data/proof", "/proof"] {
+            let proof = response.pointer(path).unwrap();
+            assert!(proof["exploitable"].is_null());
+            assert_eq!(proof["sourceIdentity"], source_identity_fixture());
+        }
+        assert!(response["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("cannot replace selected proof"));
+    }
+
+    #[test]
+    fn an_inconclusive_escalation_does_not_invent_a_negative() {
+        let mut result = json!({"consensus":{"passes":2,"exploitableVotes":1}});
+        let pass = json!({"exploitable":null,"proofVerdict":"insufficient_finding_detail"});
+        apply_escalation_verdict(&mut result, &pass, "test:explicit-model");
+        assert!(result["exploitable"].is_null());
+        assert!(result["escalation"]["resolvedExploitable"].is_null());
+        assert_eq!(result["escalation"]["attempted"], true);
+        assert_eq!(result["consensus"]["passes"], 2);
     }
 
     #[test]
@@ -603,7 +633,7 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(error.contains("missing boolean `exploitable`"));
+        assert!(error.contains("missing boolean or null `exploitable`"));
     }
 
     #[test]
@@ -742,7 +772,10 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(error.contains("must differ from the verifier model"), "{error}");
+        assert!(
+            error.contains("must differ from the verifier model"),
+            "{error}"
+        );
 
         // A genuinely distinct gate model is allowed.
         require_distinct_gate_model(Some("openai:gpt-cheap"), "anthropic:claude-haiku-4-5")
@@ -824,7 +857,10 @@ mod tests {
             })
         }
 
-        fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
+        fn triage_finding_blocking(
+            &self,
+            _: TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
             unreachable!("verify:finding does not use the triage path")
         }
     }
@@ -842,7 +878,9 @@ mod tests {
 
     fn triaged_store(target: &Path) -> (crate::findings::FindingStore, crate::findings::Finding) {
         let store = crate::findings::FindingStore::open_in_memory().unwrap();
-        store.record_run_started("scan-1", target, "running").unwrap();
+        store
+            .record_run_started("scan-1", target, "running")
+            .unwrap();
         let finding = crate::findings::Finding::new_tool(
             "verify-e2e",
             "verify-e2e/rule",
@@ -898,7 +936,10 @@ mod tests {
         // regression that escalated with the primary model would fail here.
         assert_eq!(models[2], "openai:escalation");
         assert_eq!(response["data"]["escalation"]["attempted"], json!(true));
-        assert_eq!(response["data"]["escalation"]["model"], json!("openai:escalation"));
+        assert_eq!(
+            response["data"]["escalation"]["model"],
+            json!("openai:escalation")
+        );
         // The ADOPTED verdict is the escalation pass's exploitable=true, not the
         // split panel's not-exploitable default: the tie was actually resolved.
         assert_eq!(
@@ -906,7 +947,10 @@ mod tests {
             json!(true),
             "the escalation pass's verdict must be adopted"
         );
-        assert_eq!(response["data"]["escalation"]["resolvedExploitable"], json!(true));
+        assert_eq!(
+            response["data"]["escalation"]["resolvedExploitable"],
+            json!(true)
+        );
         // The escalation resolves the tie but never forges panel unanimity.
         assert_ne!(
             response["data"]["verification"]["consensus"]["unanimous"],
@@ -946,12 +990,19 @@ mod tests {
         .unwrap();
 
         let models = runtime.models.lock().unwrap();
-        assert_eq!(models.len(), 2, "an invalid escalation never runs an extra pass");
-        assert_eq!(response["status"], json!("completed"));
+        assert_eq!(
+            models.len(),
+            2,
+            "an invalid escalation never runs an extra pass"
+        );
+        assert_eq!(response["status"], json!("partial"));
         assert_eq!(response["data"]["escalation"]["attempted"], json!(false));
-        assert_eq!(response["data"]["escalation"]["refusedToken"], json!("invalid-spec"));
-        // The split verdict stands unchanged (splits resolve to not-exploitable).
-        assert_eq!(response["data"]["exploitable"], json!(false));
+        assert_eq!(
+            response["data"]["escalation"]["refusedToken"],
+            json!("invalid-spec")
+        );
+        // The split verdict stands unchanged (splits remain inconclusive).
+        assert!(response["data"]["exploitable"].is_null());
         assert!(
             !response["warnings"].as_array().unwrap().is_empty(),
             "the invalid-spec refusal reads as completed-with-warning"
@@ -1027,14 +1078,18 @@ mod tests {
         .unwrap();
 
         let models = runtime.models.lock().unwrap();
-        assert_eq!(models.len(), 2, "a same-model escalation never runs an extra pass");
+        assert_eq!(
+            models.len(),
+            2,
+            "a same-model escalation never runs an extra pass"
+        );
         assert_eq!(response["data"]["escalation"]["attempted"], json!(false));
         assert!(
             !response["warnings"].as_array().unwrap().is_empty(),
             "a refusal reads as completed-with-warning"
         );
-        // The split verdict stands unchanged (splits resolve to not-exploitable).
-        assert_eq!(response["data"]["exploitable"], json!(false));
+        // The split verdict stands unchanged (splits remain inconclusive).
+        assert!(response["data"]["exploitable"].is_null());
     }
 
     /// Splits the primary panel (first exploitable, second not) and then FAILS
@@ -1060,7 +1115,10 @@ mod tests {
             })
         }
 
-        fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
+        fn triage_finding_blocking(
+            &self,
+            _: TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
             unreachable!("verify:finding does not use the triage path")
         }
     }
@@ -1095,14 +1153,20 @@ mod tests {
         .unwrap();
 
         // No top-level failure: the paid split verdict survives.
-        assert_eq!(response["status"], json!("completed"));
-        assert_eq!(response["data"]["exploitable"], json!(false));
+        assert_eq!(response["status"], json!("partial"));
+        assert!(response["data"]["exploitable"].is_null());
         assert_eq!(response["data"]["escalation"]["attempted"], json!(false));
         assert_eq!(
             response["data"]["escalation"]["refusedToken"],
             json!("attempt-failed")
         );
-        let warning = response["warnings"][0].as_str().unwrap();
+        let warning = response["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
             warning.contains("escalation attempt failed"),
             "the failure is disclosed as a warning: {warning}"

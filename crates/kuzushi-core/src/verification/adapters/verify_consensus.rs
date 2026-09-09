@@ -1,13 +1,4 @@
-//! Consensus over N independent adversarial verifier passes.
-//!
-//! Anthropic's defending-code harness reports that when a single
-//! verification pass still lets unexploitable findings through, running
-//! several independent verifiers and voting cuts the residual false
-//! positives further. This module combines the normalized results of N
-//! passes into one verdict, with a tie-breaking rule that matches the
-//! adversarial default: a finding is confirmed exploitable only when a
-//! *strict majority* of passes say so — ties and splits resolve to
-//! not-exploitable.
+//! Consensus retains incomplete evidence and disagreement as inconclusive.
 
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
@@ -27,43 +18,66 @@ pub(in crate::verification::adapters) fn combine_verify_passes(
         !passes.is_empty(),
         "verification consensus requires at least one pass"
     );
-    if passes.len() == 1 {
-        let pass = passes
-            .into_iter()
-            .next()
-            .context("verification consensus requires at least one pass")?;
-        validate_consensus_pass(&pass)?;
-        return Ok(pass);
-    }
-
-    let total = passes.len();
     for pass in &passes {
         validate_consensus_pass(pass)?;
     }
-    let exploitable_votes = passes.iter().filter(|pass| is_exploitable(pass)).count();
-    // Strict majority required to confirm exploitable — a tie is treated
-    // as not-exploitable, consistent with "assume false positive".
-    let exploitable = exploitable_votes * 2 > total;
+    if passes.len() == 1 {
+        return passes
+            .into_iter()
+            .next()
+            .context("verification pass is missing");
+    }
+    combine_panel(&passes)
+}
 
-    let winning: Vec<&Value> = passes
-        .iter()
-        .filter(|pass| is_exploitable(pass) == exploitable)
-        .collect();
+fn combine_panel(passes: &[Value]) -> Result<Value> {
+    let positive = vote_count(passes, Some(true));
+    let negative = vote_count(passes, Some(false));
+    let verdict = majority_verdict(passes.len(), positive, negative);
+    let winning = representative_pool(passes, verdict);
     let mut result = representative_pass(&winning).clone();
-    overwrite(&mut result, "exploitable", json!(exploitable));
+    overwrite(&mut result, "exploitable", json!(verdict));
     overwrite(&mut result, "confidence", json!(mean_confidence(&winning)));
     overwrite(
         &mut result,
         "consensus",
-        consensus_block(total, exploitable_votes, exploitable),
+        consensus_block(passes.len(), positive, negative, verdict),
     );
+    if verdict.is_none() {
+        overwrite(&mut result, "proofVerdict", json!("inconclusive"));
+        overwrite(&mut result, "pocPayload", Value::Null);
+    }
     Ok(result)
 }
 
+fn vote_count(passes: &[Value], verdict: Option<bool>) -> usize {
+    passes
+        .iter()
+        .filter(|pass| exploitability_of(pass) == verdict)
+        .count()
+}
+
+fn majority_verdict(total: usize, positive: usize, negative: usize) -> Option<bool> {
+    if positive * 2 > total {
+        return Some(true);
+    }
+    (negative * 2 > total).then_some(false)
+}
+
+fn representative_pool(passes: &[Value], verdict: Option<bool>) -> Vec<&Value> {
+    let matching: Vec<_> = passes
+        .iter()
+        .filter(|pass| exploitability_of(pass) == verdict)
+        .collect();
+    if matching.is_empty() {
+        return passes.iter().collect();
+    }
+    matching
+}
+
 /// True when the panel's vote was an even split (equal exploitable and
-/// not-exploitable votes over more than one pass). A split resolves to
-/// not-exploitable today; it is the one verdict a different-model tie-break
-/// can legitimately revisit. A single pass has no consensus block and is
+/// not-exploitable votes with no inconclusive votes). A split stays inconclusive
+/// unless an explicitly configured, different-model tie-break resolves it. A single pass has no consensus block and is
 /// never a split.
 pub(in crate::verification::adapters) fn panel_verdict_is_split(result: &Value) -> bool {
     let Some(consensus) = result.get("consensus") else {
@@ -71,26 +85,34 @@ pub(in crate::verification::adapters) fn panel_verdict_is_split(result: &Value) 
     };
     let passes = consensus.get("passes").and_then(Value::as_u64);
     let exploitable_votes = consensus.get("exploitableVotes").and_then(Value::as_u64);
+    let incomplete = consensus
+        .get("inconclusiveVotes")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     match (passes, exploitable_votes) {
-        (Some(passes), Some(votes)) => passes > 1 && votes * 2 == passes,
+        (Some(passes), Some(votes)) => passes > 1 && incomplete == 0 && votes * 2 == passes,
         _ => false,
     }
 }
 
-fn consensus_block(total: usize, exploitable_votes: usize, exploitable: bool) -> Value {
+fn consensus_block(total: usize, positive: usize, negative: usize, verdict: Option<bool>) -> Value {
     json!({
         "passes": total,
-        "exploitableVotes": exploitable_votes,
-        "notExploitableVotes": total - exploitable_votes,
-        "verdict": if exploitable { "exploitable" } else { "not-exploitable" },
-        "unanimous": exploitable_votes == 0 || exploitable_votes == total,
+        "exploitableVotes": positive,
+        "notExploitableVotes": negative,
+        "inconclusiveVotes": total - positive - negative,
+        "verdict": match verdict {
+            Some(true) => "exploitable",
+            Some(false) => "not-exploitable",
+            None => "inconclusive",
+        },
+        "unanimous": positive == total || negative == total,
     })
 }
 
-fn is_exploitable(pass: &Value) -> bool {
-    pass.get("exploitable")
-        .and_then(Value::as_bool)
-        .expect("validate_consensus_pass requires boolean exploitable")
+fn exploitability_of(pass: &Value) -> Option<bool> {
+    super::verify_assessment::read_exploitability(pass)
+        .expect("validate_consensus_pass requires boolean or null exploitable")
 }
 
 fn confidence_of(pass: &Value) -> f64 {
@@ -103,19 +125,8 @@ fn validate_consensus_pass(pass: &Value) -> Result<()> {
     let Some(object) = pass.as_object() else {
         anyhow::bail!("verification consensus pass must be an object");
     };
-    require_consensus_bool(object, "exploitable")?;
+    super::verify_assessment::read_exploitability(pass)?;
     require_consensus_number(object, "confidence")?;
-    Ok(())
-}
-
-fn require_consensus_bool(object: &Map<String, Value>, key: &str) -> Result<()> {
-    let value = object
-        .get(key)
-        .with_context(|| format!("verification consensus pass missing boolean `{key}`"))?;
-    anyhow::ensure!(
-        value.is_boolean(),
-        "verification consensus pass field `{key}` must be boolean"
-    );
     Ok(())
 }
 
@@ -176,6 +187,29 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_votes_do_not_count_as_negative_votes() {
+        let unknown = json!({"exploitable":null,"confidence":0.2,"proofVerdict":"insufficient_finding_detail"});
+        let result = combine_verify_passes(vec![pass(false, 0.8), unknown.clone()]).unwrap();
+        assert!(result["exploitable"].is_null());
+        assert_eq!(result["consensus"]["notExploitableVotes"], 1);
+        assert_eq!(result["consensus"]["inconclusiveVotes"], 1);
+        assert!(!panel_verdict_is_split(&result));
+        let majority =
+            combine_verify_passes(vec![pass(false, 0.8), pass(false, 0.7), unknown]).unwrap();
+        assert_eq!(majority["exploitable"], false);
+        assert_eq!(majority["consensus"]["unanimous"], false);
+    }
+
+    #[test]
+    fn an_entirely_incomplete_panel_stays_inconclusive() {
+        let unknown = json!({"exploitable":null,"confidence":0.2});
+        let result = combine_verify_passes(vec![unknown.clone(), unknown]).unwrap();
+        assert!(result["exploitable"].is_null());
+        assert_eq!(result["consensus"]["inconclusiveVotes"], 2);
+        assert_eq!(result["consensus"]["unanimous"], false);
+    }
+
+    #[test]
     fn single_pass_is_returned_unchanged() {
         let only = pass(true, 0.8);
         let combined = combine_verify_passes(vec![only.clone()]).unwrap();
@@ -199,12 +233,11 @@ mod tests {
     }
 
     #[test]
-    fn tie_resolves_to_not_exploitable() {
+    fn tie_stays_inconclusive() {
         let combined = combine_verify_passes(vec![pass(true, 0.95), pass(false, 0.4)]).unwrap();
-        assert_eq!(combined["exploitable"], json!(false));
-        // Confidence is from the winning (not-exploitable) side only.
-        assert_eq!(combined["confidence"], json!(0.4));
-        assert_eq!(combined["consensus"]["verdict"], json!("not-exploitable"));
+        assert!(combined["exploitable"].is_null());
+        assert_eq!(combined["proofVerdict"], "inconclusive");
+        assert_eq!(combined["consensus"]["verdict"], "inconclusive");
     }
 
     #[test]
@@ -221,7 +254,8 @@ mod tests {
         assert!(panel_verdict_is_split(&even));
 
         let majority =
-            combine_verify_passes(vec![pass(true, 0.9), pass(true, 0.6), pass(false, 0.5)]).unwrap();
+            combine_verify_passes(vec![pass(true, 0.9), pass(true, 0.6), pass(false, 0.5)])
+                .unwrap();
         assert!(!panel_verdict_is_split(&majority));
 
         let single = combine_verify_passes(vec![pass(true, 0.9)]).unwrap();
@@ -237,6 +271,6 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(error.contains("missing boolean `exploitable`"));
+        assert!(error.contains("missing boolean or null `exploitable`"));
     }
 }

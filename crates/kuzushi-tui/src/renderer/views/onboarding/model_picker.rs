@@ -2,10 +2,10 @@ use super::*;
 use crate::app::{visible_model_choices, ModelChoice};
 
 pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines = model_picker_intro(app, area.width);
+    let mut lines = model_picker_intro(app, area);
     let choices = visible_model_choices(app.config());
     let widths = picker_column_widths(&choices);
-    let footer = model_picker_footer(area);
+    let footer = model_picker_footer(app, area);
     let candidate_budget = (area.height as usize)
         .saturating_sub(lines.len() + footer.len())
         .max(1);
@@ -15,7 +15,7 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
         .max(1);
     let range = visible_model_range(
         choices.len(),
-        app.router.model_picker().cursor(),
+        crate::app::model_picker_cursor(app),
         row_budget,
     );
     if show_window_label {
@@ -28,19 +28,41 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     }
     for idx in range {
         let choice = choices[idx];
-        lines.push(model_picker_row(app, idx, choice, widths, area.width));
+        lines.push(model_picker_row(app, choice, widths, area.width));
     }
     lines.extend(footer);
     lines
 }
 
-fn model_picker_footer(area: Rect) -> Vec<Line<'static>> {
-    let mut lines = vec![offline_demo_action_line(area.width)];
+fn model_picker_footer(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
     if area.height > 12 {
-        lines.push(blank());
+        lines.push(offline_demo_action_line(area.width));
     }
-    lines.push(model_picker_controls(area.width as usize));
+    if app.picker_prompt_focused() {
+        lines.push(model_picker_controls(app, area.width as usize));
+        return lines;
+    }
+    if let Some(detail) = selected_model_detail(app) {
+        lines.push(muted(&fit(&detail, area.width as usize)));
+    }
+    lines.push(model_picker_controls(app, area.width as usize));
     lines
+}
+
+fn selected_model_detail(app: &ShellApp) -> Option<String> {
+    let selected = app.router.model_picker().selected_id()?;
+    let choice =
+        crate::app::model_choices().get(crate::app::model_choice_index_by_id(selected)?)?;
+    let credential = match choice.provider {
+        "openai-codex" => "ChatGPT",
+        "openai" => "API key",
+        _ => "Claude",
+    };
+    Some(format!(
+        "Enter: {credential} · effort {}",
+        choice.thinking_level
+    ))
 }
 
 fn visible_model_range(total: usize, cursor: usize, row_budget: usize) -> std::ops::Range<usize> {
@@ -57,23 +79,57 @@ fn model_window_label(start: usize, end: usize, total: usize, width: u16) -> Lin
     ))
 }
 
-fn model_picker_intro(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let mut lines = vec![divider("CHOOSE A MODEL", width)];
-    lines.extend(confirmed_target_line(app, width as usize));
-    lines.push(blank());
-    lines.extend(
-        wrap_text(
-            "Kuzushi does not silently pick a model for you. Select one to continue.",
-            width as usize,
-        )
-        .into_iter()
-        .map(|line| muted(&line)),
-    );
-    lines.push(blank());
+fn model_picker_intro(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = vec![divider("CHOOSE A MODEL", area.width)];
+    if area.height > 12 {
+        lines.extend(confirmed_target_line(app, area.width as usize));
+        lines.push(blank());
+    }
+    lines.extend(current_model_lines(app, area));
+    if area.height > 16 {
+        lines.extend(
+            wrap_text(
+                "Suggestions below. Credentials do not guarantee model access.",
+                area.width as usize,
+            )
+            .into_iter()
+            .map(|line| muted(&line)),
+        );
+        lines.push(blank());
+    }
     lines
 }
 
-fn model_picker_controls(width: usize) -> Line<'static> {
+fn current_model_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let current = app.config().model.as_deref();
+    let label = current
+        .map(crate::app::display_model_selector)
+        .unwrap_or_else(|| "not set".into());
+    let mut lines = model_notice_lines(&format!("Current: {label}"), area);
+    if let Some(note) = current.and_then(crate::app::model_catalog_note) {
+        lines.extend(model_notice_lines(note, area));
+    }
+    lines
+}
+
+fn model_notice_lines(text: &str, area: Rect) -> Vec<Line<'static>> {
+    if area.height <= 12 {
+        return vec![muted(&fit(text, area.width as usize))];
+    }
+    wrap_text(text, area.width as usize)
+        .into_iter()
+        .map(|line| muted(&line))
+        .collect()
+}
+
+fn model_picker_controls(app: &ShellApp, width: usize) -> Line<'static> {
+    if app.picker_prompt_focused() {
+        return responsive_keybind_hint_line(
+            width,
+            &[("Enter", "run command"), ("Esc", "return to picker")],
+            &[("Enter", "command"), ("Esc", "picker")],
+        );
+    }
     responsive_keybind_hint_line(
         width,
         &[
@@ -81,9 +137,9 @@ fn model_picker_controls(width: usize) -> Line<'static> {
             ("demo", "offline fixture"),
             ("type", "a command"),
             ("Enter", "confirm"),
-            ("Esc", "defer (you'll need to /model later)"),
+            ("Esc", "keep current"),
         ],
-        &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "defer")],
+        &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "keep")],
     )
 }
 
@@ -113,7 +169,6 @@ fn provider_effort_cell(choice: &ModelChoice) -> String {
 
 fn model_picker_row(
     app: &ShellApp,
-    idx: usize,
     choice: &ModelChoice,
     (label_width, provider_width): (usize, usize),
     width: u16,
@@ -127,7 +182,7 @@ fn model_picker_row(
     let body = responsive_model_row(app, choice, &full, label_width, width as usize);
     selection_band(
         &body,
-        idx == app.router.model_picker().cursor(),
+        Some(choice.id) == app.router.model_picker().selected_id(),
         width as usize,
     )
 }
@@ -146,7 +201,11 @@ fn responsive_model_row(
     let status = compact_auth_hint(app, choice);
     let status_width = display_width(status);
     let label_width = label_width.min(budget.saturating_sub(status_width + 2));
-    format!("{}  {status}", pad(choice.label, label_width))
+    let label = choice
+        .label
+        .strip_prefix("OpenAI OAuth ")
+        .unwrap_or(choice.label);
+    format!("{}  {status}", pad(label, label_width))
 }
 
 fn compact_auth_hint(app: &ShellApp, choice: &ModelChoice) -> &'static str {
@@ -154,7 +213,7 @@ fn compact_auth_hint(app: &ShellApp, choice: &ModelChoice) -> &'static str {
         choice.provider,
         app.provider_auth_ready_for(choice.provider),
     ) {
-        (_, true) => "ready",
+        (_, true) => "auth ready",
         ("openai-codex", false) => "OAuth login needed",
         (_, false) => "credentials needed",
     }

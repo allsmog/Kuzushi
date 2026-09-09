@@ -29,7 +29,23 @@ pub enum PickerFocus {
 pub struct PlanningOptionEdit {
     pub task: PlanningTaskId,
     pub option_name: String,
-    pub draft: String,
+    pub(crate) field: crate::app::FieldEditor,
+    pub(crate) error_scroll: usize,
+}
+
+impl PlanningOptionEdit {
+    pub(crate) fn new(
+        task: PlanningTaskId,
+        option_name: impl Into<String>,
+        draft: impl Into<String>,
+    ) -> Self {
+        Self {
+            task,
+            option_name: option_name.into(),
+            field: crate::app::FieldEditor::new(draft),
+            error_scroll: 0,
+        }
+    }
 }
 
 impl ShellApp {
@@ -98,24 +114,8 @@ impl ShellApp {
             .unwrap_or_default();
         self.engagement
             .planning_picker_mut()
-            .set_option_edit(Some(PlanningOptionEdit {
-                task,
-                option_name: spec.name,
-                draft,
-            }));
+            .set_option_edit(Some(PlanningOptionEdit::new(task, spec.name, draft)));
         self.engagement.planning_picker_mut().clear_option_error();
-    }
-
-    pub(crate) fn edit_planning_option_draft(&mut self, ch: char) {
-        if let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() {
-            edit.draft.push(ch);
-        }
-    }
-
-    pub(crate) fn backspace_planning_option_draft(&mut self) {
-        if let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() {
-            edit.draft.pop();
-        }
     }
 
     pub(crate) fn cancel_planning_option_edit(&mut self) {
@@ -131,10 +131,9 @@ impl ShellApp {
             self.engagement
                 .planning_picker_mut()
                 .set_option_error("selected option disappeared");
-            self.engagement.planning_picker_mut().set_option_edit(None);
             return;
         };
-        match coerce_raw_option_value(&spec, &edit.draft)
+        match coerce_raw_option_value(&spec, edit.field.text())
             .and_then(|value| self.set_planning_option_override(edit.task, &spec, value))
         {
             Ok(()) => {

@@ -137,7 +137,10 @@ fn failed_map_receipt_offers_one_retry_and_keeps_the_inspect_escape_hatch() {
         .iter()
         .filter(|action| matches!(action, WorkflowContinuation::Retry { .. }))
         .count();
-    assert_eq!(retries, 1, "rebuild ask must not duplicate the generic retry");
+    assert_eq!(
+        retries, 1,
+        "rebuild ask must not duplicate the generic retry"
+    );
     assert!(offered_actions
         .iter()
         .any(|action| matches!(action, WorkflowContinuation::InspectRun { .. })));
@@ -202,6 +205,35 @@ fn derives_interactions_and_clean_scan_destination_from_typed_projection() {
             interaction_count: 1,
             continuation: WorkflowContinuation::OpenReport { .. },
             ..
+        }
+    ));
+}
+
+#[test]
+fn zero_findings_from_one_engine_does_not_cover_an_unobserved_engine() {
+    let first = run_id();
+    let second = run_id();
+    let mut observed = projection(first.clone(), RunItemStatus::Completed);
+    observed.finding_deltas.push(FindingDeltaSummary {
+        added: 0,
+        updated: 0,
+        removed: 0,
+        store_watermark: SafeText::operator_visible("ledger:7"),
+        finding_id_samples: Vec::new(),
+    });
+    let unobserved = projection(second.clone(), RunItemStatus::Completed);
+    let item = PhaseReceiptBuilder::new(
+        WorkflowPhase::Scan,
+        RunItemStatus::Completed,
+        &[first, second],
+        &[observed, unobserved],
+    )
+    .build()
+    .unwrap();
+    assert!(matches!(
+        receipt_continuation(&item),
+        WorkflowContinuation::OpenPhase {
+            phase: WorkflowPhase::Review
         }
     ));
 }
@@ -412,5 +444,38 @@ fn blocked_partial_receipt_offers_no_select_or_continue() {
     assert!(!offered_actions.iter().any(|action| matches!(
         action,
         WorkflowContinuation::NoFurtherAction { .. } | WorkflowContinuation::OpenPhase { .. }
+    )));
+}
+
+#[test]
+fn partial_prove_offers_inspection_and_retry_without_selection_or_fix() {
+    let run_id = run_id();
+    let projection = projection(run_id.clone(), RunItemStatus::Partial);
+    let item = PhaseReceiptBuilder::new(
+        WorkflowPhase::Prove,
+        RunItemStatus::Partial,
+        std::slice::from_ref(&run_id),
+        std::slice::from_ref(&projection),
+    )
+    .build()
+    .unwrap();
+    let RunItemV1::PhaseReceipt {
+        offered_actions,
+        continuation,
+        ..
+    } = item
+    else {
+        panic!("phase receipt");
+    };
+    assert!(matches!(
+        continuation,
+        WorkflowContinuation::InspectRun { .. }
+    ));
+    assert!(offered_actions
+        .iter()
+        .any(|action| matches!(action, WorkflowContinuation::Retry { .. })));
+    assert!(offered_actions.iter().all(|action| matches!(
+        action,
+        WorkflowContinuation::InspectRun { .. } | WorkflowContinuation::Retry { .. }
     )));
 }

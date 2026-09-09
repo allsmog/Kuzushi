@@ -4,6 +4,10 @@ use serde_json::{json, Map, Value};
 
 pub(super) fn collect_entry_points(snapshot: &Value) -> Result<Vec<EntryPointRecord>> {
     let rows = attack_surface_rows(snapshot)?;
+    anyhow::ensure!(
+        !rows.iter().any(crate::workspace::rust_surface_policy::is_legacy_rust_row),
+        crate::workspace::rust_surface_policy::REBUILD_RUST_SURFACES
+    );
     rows.iter()
         .map(normalize_entry_point)
         .filter_map(Result::transpose)

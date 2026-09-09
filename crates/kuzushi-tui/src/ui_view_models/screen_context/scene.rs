@@ -113,11 +113,20 @@ fn scene_context_from_bound_model(
         bound.document.as_ref(),
         bound.model_ref.clone(),
         &bound.topology,
-        app.router.scene().page(),
+        visible_scene_page(app),
         app.router.scene().dfd_selection(),
         app.router.scene().summary_component_selection(),
         whole_model,
     )
+}
+
+fn visible_scene_page(app: &ShellApp) -> VizPage {
+    if app.shell_view() == crate::app::ShellView::Workbench
+        && crate::ui_view_models::active_workbench_page(app) == crate::app::WorkbenchPage::Map
+    {
+        return app.current_map_viz_page();
+    }
+    app.router.scene().page()
 }
 
 struct BoundSceneModel {

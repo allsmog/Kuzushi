@@ -48,7 +48,7 @@ fn config_model_summarizes_default_runtime_state() {
         .model_table
         .rows
         .iter()
-        .any(|row| row.cells[2] == "openai-oauth:gpt-5.4"));
+        .any(|row| row.cells[2] == "openai-oauth:gpt-5.6-terra"));
     assert!(model
         .model_table
         .rows
@@ -58,8 +58,8 @@ fn config_model_summarizes_default_runtime_state() {
     assert_eq!(
         model.commands,
         [
-            "Up/Down select",
-            "Enter choose",
+            "Up/Down scroll",
+            "Enter model picker",
             "model <n> [xhigh]",
             "auth login openai|anthropic",
         ]
@@ -164,7 +164,7 @@ fn plain_config_model_projects_plain_summary_and_model_table() {
         .model_table
         .rows
         .iter()
-        .any(|row| row.cells[1] == "openai-oauth:gpt-5.4"));
+        .any(|row| row.cells[1] == "openai-oauth:gpt-5.6-terra"));
     assert!(model
         .model_table
         .rows

@@ -89,7 +89,7 @@ impl<'a> PhaseReceiptBuilder<'a> {
         Ok(default_completed_continuation(
             self.phase,
             finding_delta,
-            has_finding_observation(self.projections),
+            has_complete_finding_observation(self.projections),
         ))
     }
 
@@ -143,15 +143,7 @@ impl<'a> PhaseReceiptBuilder<'a> {
 
     fn selection_is_allowed(&self) -> bool {
         self.selection_blocked_reason.is_none()
-            && !matches!(
-                self.status,
-                RunItemStatus::Blocked
-                    | RunItemStatus::Failed
-                    | RunItemStatus::Canceled
-                    | RunItemStatus::Interrupted
-                    | RunItemStatus::Pending
-                    | RunItemStatus::Running
-            )
+            && status_allows_selection(self.phase, self.status)
             && outstanding_question(self.projections).is_none()
     }
 
@@ -163,6 +155,21 @@ impl<'a> PhaseReceiptBuilder<'a> {
             .then(|| next_phase(self.phase))
             .flatten()
     }
+}
+
+fn status_allows_selection(phase: WorkflowPhase, status: RunItemStatus) -> bool {
+    if phase == WorkflowPhase::Prove {
+        return status == RunItemStatus::Completed;
+    }
+    !matches!(
+        status,
+        RunItemStatus::Blocked
+            | RunItemStatus::Failed
+            | RunItemStatus::Canceled
+            | RunItemStatus::Interrupted
+            | RunItemStatus::Pending
+            | RunItemStatus::Running
+    )
 }
 
 fn validate_projection(
@@ -302,10 +309,10 @@ fn terminal_continuation(
 fn default_completed_continuation(
     phase: WorkflowPhase,
     finding_delta: &FindingDeltaSummary,
-    has_finding_observation: bool,
+    has_complete_finding_observation: bool,
 ) -> WorkflowContinuation {
     if phase == WorkflowPhase::Scan
-        && has_finding_observation
+        && has_complete_finding_observation
         && finding_delta_is_empty(finding_delta)
     {
         return WorkflowContinuation::OpenReport {
@@ -320,10 +327,10 @@ fn default_completed_continuation(
     )
 }
 
-fn has_finding_observation(projections: &[RunProjection]) -> bool {
+fn has_complete_finding_observation(projections: &[RunProjection]) -> bool {
     projections
         .iter()
-        .any(|projection| !projection.finding_deltas.is_empty())
+        .all(|projection| !projection.finding_deltas.is_empty())
 }
 
 fn finding_delta_is_empty(delta: &FindingDeltaSummary) -> bool {
@@ -341,9 +348,16 @@ fn map_rebuild_reason(
     remediation: Option<super::failure_remediation::FailureRemediation>,
 ) -> String {
     remediation.map_or_else(
-        || "rebuild the current-revision map context after inspecting the failure evidence"
-            .to_string(),
-        |found| format!("rebuild the map context — {}: {} first", found.cause, found.action),
+        || {
+            "rebuild the current-revision map context after inspecting the failure evidence"
+                .to_string()
+        },
+        |found| {
+            format!(
+                "rebuild the map context — {}: {} first",
+                found.cause, found.action
+            )
+        },
     )
 }
 

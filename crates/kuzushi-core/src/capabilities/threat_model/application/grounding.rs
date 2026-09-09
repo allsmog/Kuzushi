@@ -2,6 +2,9 @@ use super::*;
 use crate::attack_surface::{AttackSurface, AttackSurfaceKind, AttackSurfaceRisk};
 use crate::findings::{Finding, FindingListFilter, ProofConfidence};
 
+#[cfg(test)]
+mod rust_test_scope_tests;
+
 /// Deterministic evidence handed to the agentic build so the model reasons
 /// over ground truth instead of re-deriving the surface from raw inventory.
 pub(crate) struct PromptGrounding {
@@ -977,6 +980,7 @@ mod tests {
             "src/one.rs",
             90,
         );
+        surface.metadata = json!({"sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY});
         surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
         let mut catalog = catalog(vec![surface]);
         catalog.target = target.path().canonicalize().unwrap().display().to_string();

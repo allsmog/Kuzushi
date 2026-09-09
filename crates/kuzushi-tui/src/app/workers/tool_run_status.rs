@@ -49,10 +49,7 @@ pub(crate) fn agent_worker(
             text: answer.text,
             audit: audit.with_cost(cost),
         },
-        Err(error) => AgentEvent::Failed {
-            error: error.error.to_string(),
-            audit: audit.with_outcome(error.cost, error.call_attempted),
-        },
+        Err(error) => failed_agent_event(error, audit),
     };
     sink.send(ShellEvent::Agent(event));
 }
@@ -80,6 +77,7 @@ pub(crate) fn read_only_agent_worker(
         question,
         run_id,
         authorization,
+        &sink,
         cancel,
     );
     let event = agent_event_from_read_only_result(result, audit);
@@ -97,10 +95,7 @@ fn agent_event_from_read_only_result(
                 .with_cost(cost)
                 .with_tool_policy_receipt(answer.tool_policy_receipt),
         },
-        Err(error) => AgentEvent::Failed {
-            error: error.error.to_string(),
-            audit: audit.with_outcome(error.cost, error.call_attempted),
-        },
+        Err(error) => failed_agent_event(error, audit),
     }
 }
 
@@ -135,6 +130,19 @@ pub(crate) fn run_agent_worker(
     )
 }
 
+fn agent_response_observer(
+    sink: &JobEventSink,
+    cancel: &ScanCancellation,
+) -> kuzushi_openai::langgraph_runtime::ResponseTextObserver {
+    let sink = sink.clone();
+    let cancel = cancel.clone();
+    kuzushi_openai::langgraph_runtime::ResponseTextObserver::new(move |event| {
+        if !cancel.is_cancelled() {
+            sink.send(ShellEvent::Agent(AgentEvent::ResponseText(event)));
+        }
+    })
+}
+
 fn agent_system_prompt() -> String {
     format!(
         "{ASK_SYSTEM_PROMPT}\n\nYou may call request_user_input when 1-3 concise operator choices materially affect the answer. Do not ask for credentials; direct credential work to Setup/Auth. Ask at most three times."
@@ -157,6 +165,7 @@ fn run_read_only_agent_query(
     prompt: String,
     run_id: String,
     authorization: kuzushi_core::runtime::AgentToolPolicyAuthorization,
+    sink: &JobEventSink,
     cancel: ScanCancellation,
 ) -> CostedWorkerResult<ReadOnlyAgentWorkerAnswer> {
     let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(&cwd, &run_id)
@@ -167,7 +176,8 @@ fn run_read_only_agent_query(
     let runtime = LangGraphRuntime::from_config(&config, &cwd)
         .map_err(CostedWorkerError::before_call)?
         .with_thinking_level(thinking_level)
-        .with_cancellation(cancel.clone());
+        .with_cancellation(cancel.clone())
+        .with_response_text(agent_response_observer(sink, &cancel));
     let artifact_target = cwd.clone();
     let request = read_only_agent_request(
         model,
@@ -413,10 +423,13 @@ fn prepare_root_shell_tool_loop(
         None => root_run_observation(&cwd, run_id, sink, intent.task_title)
             .map_err(CostedWorkerError::before_call)?,
     };
-    let runtime = LangGraphRuntime::from_config(&config, &cwd)
+    let mut runtime = LangGraphRuntime::from_config(&config, &cwd)
         .map_err(CostedWorkerError::before_call)?
         .with_thinking_level(thinking_level)
         .with_cancellation(cancel.clone());
+    if intent.terminalize_in_loop {
+        runtime = runtime.with_response_text(agent_response_observer(sink, cancel));
+    }
     let request = root_shell_agent_request(model, cwd.clone(), system_prompt, prompt);
     if let Err(error) = runtime.preflight_tool_loop_blocking(&request) {
         settle_preflight_failure(
@@ -579,9 +592,9 @@ fn root_run_observation(
 fn error_with_lifecycle(error: anyhow::Error, persisted: anyhow::Result<()>) -> anyhow::Error {
     match persisted {
         Ok(()) => error,
-        Err(persistence) => anyhow::anyhow!(
-            "{error:#}; additionally, semantic model-call persistence failed: {persistence:#}"
-        ),
+        Err(persistence) => error.context(format!(
+            "additionally, semantic model-call persistence failed: {persistence:#}"
+        )),
     }
 }
 
@@ -1288,12 +1301,14 @@ fn failed_plan_event(
     audit: AgentCallAudit,
     cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
 ) -> PlanEvent {
-    let message = error.error.to_string();
-    let safe_message = kuzushi_core::runtime::safe_model_failure_message(&message);
+    let audit = audit
+        .with_outcome(error.cost, error.call_attempted)
+        .with_failure(&error.error);
+    let safe_message = audit.failure_summary("");
     let persisted = run.fail_observed(&safe_message, cancellation, error.cost, lifecycle);
     PlanEvent::Failed {
         error: persistence_aware_failure(safe_message, persisted),
-        audit: audit.with_outcome(error.cost, error.call_attempted),
+        audit,
     }
 }
 

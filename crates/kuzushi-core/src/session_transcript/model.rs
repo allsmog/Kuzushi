@@ -95,6 +95,12 @@ pub enum SessionEvent {
     AgentAssistantTurn {
         text: String,
     },
+    AgentConversation {
+        snapshot: super::ConversationSnapshot,
+    },
+    AgentConversationCleared {
+        target: PathBuf,
+    },
     AttachmentRef {
         attachment_id: String,
         path: Option<PathBuf>,
@@ -118,6 +124,8 @@ impl SessionEvent {
                 | Self::OperatorAnswer { .. }
                 | Self::AgentUserTurn { .. }
                 | Self::AgentAssistantTurn { .. }
+                | Self::AgentConversation { .. }
+                | Self::AgentConversationCleared { .. }
                 | Self::SessionEnd { .. }
         )
     }

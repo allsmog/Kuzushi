@@ -5,11 +5,30 @@ use crate::ui_view_models::{
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
+    lines.push(config_navigation_hint(app, area.width));
     let model = config_model(app);
     push_config_summary(&mut lines, &model, area);
     push_config_model_table(&mut lines, &model, area);
     push_config_commands(&mut lines, &model, area);
     lines
+}
+
+fn config_navigation_hint(app: &ShellApp, width: u16) -> Line<'static> {
+    if app.input_mode() == crate::InputMode::Navigate && app.input().is_empty() {
+        return responsive_keybind_hint_line(
+            width as usize,
+            &[
+                ("Enter", "choose model"),
+                ("↑/↓", "scroll"),
+                ("Esc", "command"),
+            ],
+            &[("Enter", "model picker"), ("↑/↓", "scroll")],
+        );
+    }
+    muted(&fit(
+        "Type /model to choose a model · Esc navigate",
+        width as usize,
+    ))
 }
 
 fn push_config_summary(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {

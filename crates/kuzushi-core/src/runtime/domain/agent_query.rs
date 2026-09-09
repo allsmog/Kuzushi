@@ -34,6 +34,14 @@ pub struct AgentQueryRequest {
     /// matters (deep-audit relies on it to reduce verdict variance).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// Leading portion of `prompt` that repeats byte-for-byte across calls in
+    /// one run (a repository inventory, a shared briefing). Executors that can
+    /// express provider prompt caching send it as its own cache-marked block so
+    /// later calls read it at cache-read rates; every other consumer keeps
+    /// reading `prompt` whole, so ignoring this field never drops text. Set it
+    /// with `with_cacheable_prompt_prefix`; read it via `prompt_cache_split`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cacheable_prompt_prefix: Option<String>,
 }
 
 impl AgentQueryRequest {
@@ -55,6 +63,7 @@ impl AgentQueryRequest {
             max_output_tokens: None,
             runtime_options: None,
             temperature: None,
+            cacheable_prompt_prefix: None,
         }
     }
 
@@ -91,6 +100,24 @@ impl AgentQueryRequest {
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
         self
+    }
+
+    pub fn with_cacheable_prompt_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.cacheable_prompt_prefix = Some(prefix.into());
+        self
+    }
+
+    /// `(prefix, remainder)` when the declared cacheable prefix is non-empty
+    /// and really leads `prompt`. A stale or mismatched declaration yields
+    /// `None`, so callers fall back to the whole uncached prompt instead of
+    /// splitting text at a wrong boundary.
+    pub fn prompt_cache_split(&self) -> Option<(&str, &str)> {
+        let prefix = self.cacheable_prompt_prefix.as_deref()?;
+        if prefix.trim().is_empty() {
+            return None;
+        }
+        let remainder = self.prompt.strip_prefix(prefix)?;
+        Some((prefix, remainder))
     }
 }
 
@@ -230,5 +257,54 @@ impl McpAttachment {
             artifact_path: String::new(),
             artifact_identity: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(prompt: &str) -> AgentQueryRequest {
+        AgentQueryRequest::new("anthropic:claude-sonnet-4-6", ".", "system", prompt)
+    }
+
+    #[test]
+    fn prompt_cache_split_returns_prefix_and_remainder_when_the_prefix_leads_the_prompt() {
+        let request = request("shared inventory\nactor-specific tail")
+            .with_cacheable_prompt_prefix("shared inventory\n");
+
+        assert_eq!(
+            request.prompt_cache_split(),
+            Some(("shared inventory\n", "actor-specific tail"))
+        );
+    }
+
+    #[test]
+    fn prompt_cache_split_refuses_a_prefix_that_does_not_lead_the_prompt() {
+        let request = request("actor-specific tail").with_cacheable_prompt_prefix("inventory");
+
+        assert_eq!(request.prompt_cache_split(), None);
+    }
+
+    #[test]
+    fn prompt_cache_split_ignores_blank_and_absent_prefixes() {
+        assert_eq!(request("prompt").prompt_cache_split(), None);
+        assert_eq!(
+            request("   prompt")
+                .with_cacheable_prompt_prefix("   ")
+                .prompt_cache_split(),
+            None
+        );
+    }
+
+    #[test]
+    fn cacheable_prefix_is_absent_from_the_wire_shape_unless_declared() {
+        let plain = serde_json::to_value(request("prompt")).unwrap();
+        assert!(plain.get("cacheable_prompt_prefix").is_none());
+
+        let declared =
+            serde_json::to_value(request("prefix tail").with_cacheable_prompt_prefix("prefix "))
+                .unwrap();
+        assert_eq!(declared["cacheable_prompt_prefix"], "prefix ");
     }
 }

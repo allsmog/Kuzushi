@@ -126,6 +126,125 @@ never be mistaken for workflow advancement.
   unrelated retained run; Review confidence-first sort holds; Prove keeps
   identity, STATUS, NEXT, proof, sources, and stale-proof warning visible.
 
+### J54 — Accepted Map to Scan and Report
+- **Persona:** returning operator with an accepted, current Map and explicit target.
+- **Launch:** `--target <existing mapped target>` using the saved operator config.
+- **Sequence:** inspect the resting Scan page, open its planner, choose an explicit
+  scanner scope, execute, inspect the terminal result, deliberately select it,
+  and follow the truthful next action. A clean result may lead to Report;
+  unavailable engines must not become a clean bill of health.
+- **Judge:** scope and engine choices are understandable, execution stays bounded
+  by the selected plan, partial/failure states retain recovery, and selection
+  survives restart. Judge narrow reading and export after the primary flow.
+- **Evidence:** use the existing real source and Map artifacts; do not seed
+  findings or regenerate the Map to satisfy a screen assertion. Record source,
+  Map and config hashes outside the target before/after the run. The script is
+  extended as each observed checkpoint is accepted; unexercised steps stay open.
+- **Current checkpoint:** inspect and execute the Review planner against the saved
+  accepted Scan, inspect its model-backed decisions and explicit result acceptance,
+  then follow the reality-derived next action. Preserve source/Map/config hashes.
+  First restart after shared decision-read repairs to inspect the persisted local
+  decisions and available rerun controls; this checkpoint launches no model work.
+  After the explicit source-bound rerun and acceptance, the current recipe checks
+  restart and the Report exit at 80 columns. The current Report checkpoint also
+  checks truthful cost coverage, cursor editing/cancel, a directory-path export
+  failure, a corrected Unicode-path SARIF retry, receipt paging and return to
+  Review. Read back the actual export and compare protected hashes afterward.
+  After that recovery checkpoint, export all six formats at 120 columns and
+  read each file back against the same two reviewed identities. Keep the
+  previous recipe with its evidence; each journey runs sequentially.
+  Finally, at 40×12, page Report, edit a long Unicode destination, check quit
+  disclosure and Stay, then cancel the edit and return. This final variant
+  exports nothing and must preserve all existing exported files.
+  The next checkpoint cancels a real GPT-5.5 OAuth Ask after public response
+  text starts, checks the retained incomplete answer and reply, then sends an
+  explicit short follow-up. Restart and inspect Answers for truthful conversation
+  recovery. Keep cancellation distinct from provider failure and inspect each
+  run receipt; do not count incomplete text as completed model history. This
+  checkpoint launches only Ask and preserves the accepted engagement and exports.
+  After repair, send a short real Ask, exit, reopen its context-bound history,
+  and explicitly request a follow-up that depends on that history. Clear the
+  conversation and restart once more; the cleared answer must not return.
+  At 40×12, cancel a streamed real answer, confirm exit with the retained draft,
+  restart, page the incomplete response, edit the restored submitted question,
+  and explicitly retry. Clear the conversation before exiting with a status check.
+  The actionable-phase checkpoint uses a separate clean local clone at the same
+  Kuzushi commit, scoped to `tests/fixtures/canary-target`. This is labeled
+  planted source code. Let the real model-backed scan produce findings and the
+  real Review/Prove/Fix paths produce their own decisions and evidence; do not
+  import the expected-finding manifest as results. After real Review exposed
+  unsupported no-caller refutations, preserve that unaccepted result and
+  explicitly retriage after correcting the unresolved-assessment contract.
+  Inspect Setup disclosure on a fresh copy of the same five source files at
+  40, 80 and 120 columns; that copy receives no model work or finding imports.
+  First inspect fresh Setup
+  and its Map plan, then extend the recipe after each observed state. Preserve
+  the earlier descriptor target and its accepted engagement unchanged.
+  After accepting the canary Map, select Agentic SAST and Threat-model-driven
+  hunt in Scan, inspect their saved result and leave acceptance for a separate
+  observed checkpoint. This remains a labeled canary workflow check.
+  The earlier reading/navigation recipe is retained with the
+  [September 8 Review audit](../audits/2026-09-07/REVIEW_READING_2026-09-08.md).
+  Do not invent verdicts to advance the phase. Prove/Fix/Report remain open.
+
+Prove preflight variant (2026-09-08): resume the existing accepted Review, converge on Navigate after dismissing startup notices, open the selected finding in Prove, inspect static and local modes, try the unavailable local action, read the full card with successive Page Down captures, and close it with Escape. Run J54 sequentially at 80×24 and 40×12 against the existing canary checkout. No model or target execution is launched by this inspection. Earlier recipes are archived in the external prove-dispatch evidence folder.
+
+Model Prove variant (2026-09-08): continue with the same F-0001, selected
+GPT-5.5 OAuth model and one static analysis pass. Require the live Review,
+investigation and drafted-command states before sending launch keys; a missing
+prerequisite must stop the journey. Inspect the resulting model assessment and
+its evidence before acceptance, then restart to check persistence. Source-only
+analysis must remain distinct from runtime reproduction, and unresolved Review
+findings must not be marked complete by visiting Prove. Preserve the prior
+recipe and source/config/run hashes in the external model-prove evidence folder.
+
+J54 result-reading checkpoint: run one explicit same-model static verification
+for the existing canary F-0001, then inspect its pending result at 80×24 and
+40×12. Page the complete receipt without selecting it, restart, and verify
+that a fresh result opens on its assessment. Read the entire narrow result
+before using it, then check that selection preserves model-only evidence and
+required Review. Use required live-state checks before launch keys. Preserve
+all earlier run files and archive each recipe in the external
+prove-result-reading evidence folder. No new finding or verdict is seeded.
+
+J54 inconclusive-assessment checkpoint (2026-09-08): the first result-reading
+run returned insufficient finding detail but was mislabeled as a negative
+assessment. The old result remains unselected. The 40-column reading and
+selection-rejection journey passed after correcting a wrapped-text assertion.
+Rerun one explicit GPT-5.5 OAuth static pass with the corrected nullable
+assessment contract. Inspect its actual outcome at 80 columns, then restart at
+40 columns. An inconclusive result must show partial status, retain cost and
+source receipts, offer inspection/retry and never replace the prior accepted
+proof or advance to Fix. Do not require the nondeterministic model to produce
+a particular conclusion. Preserve recipes and prior evidence.
+
+J54 final scroll check: selection and restart passed at 40 columns, but the
+longer result exposed an unreachable final lineage row. The shared pane now
+measures the actual wrapped Paragraph. Run one fresh same-model pass and read
+its result at 80 and 40 columns, requiring the final lineage row before judging
+completion. This final reading check does not select another proof.
+
+J54 detail-controls checkpoint: with the existing final Prove result still
+pending, inspect Trace sequentially at 40×12 and 80×24. Check its visible controls, Page Down and Enter;
+Enter should only draft trace expansion, never dispatch it. Clear any draft
+before exit. Close Trace with Escape, inspect Investigation, switch between the two details, and return to the same result. Revalidate result selection and source/run hashes. Run sequentially
+and retain failures. No model call or proof selection is requested by this
+inspection; use test fixtures for potentially destructive result hotkeys.
+
+J54 Trace execution checkpoint (2026-09-08): submit one explicit expansion for
+canary F-0001 using the selected GPT-5.5 OAuth model. Require the Trace view and
+visible command prefix before launch, observe Run Focus, and inspect the actual
+completion without requiring a particular number of steps or verdict. Read all
+returned questions/evidence notes and restart to compare the durable view. Do
+not accept or discard the pending Prove result. Preserve prior run/result,
+source, config and proof hashes; retain the previous recipe. Run sequentially.
+
+J54 Trace recovery checkpoint: reopen the existing saved real expansion and page
+through its completion receipt, question, evidence notes and source-identity
+limitation at 80 and 40 columns. This variant makes no model call and does not
+accept/discard any Prove result. Proof-result classification remains a separate
+known defect. Archive each recipe before switching terminal size.
+
 ### J5 — Report the work
 - **Continues J4:** Fix → `report`; exercise SARIF, Markdown bundle, JSONL,
   JSON, and CSV in that order, plus completeness All/Open/Complete and edited
@@ -480,3 +599,33 @@ check it by hand.
 7. J36–J48 — deep-auditor taint tools, worklist, and grammar honesty (P2/P5/P6),
    release-blocking keyless set (J36, J37a, J38 steps 1–3, J39, J42–J47, J48);
    J37b, J38 steps 4–5, J40, J41 are advisory/live.
+
+J54 Trace result-ownership checkpoint (2026-09-09): recover the prior pending
+verification at 80×24, inspect preserved Trace history, then run one explicit
+same-model OAuth expansion and inspect its return, cost, source receipt and
+complete notes. Restart sequentially at 80×24 and 40×12. Trace must create no
+selectable phase attempt, and both workflow ledgers and the selected proof must
+remain unchanged. Archive each recipe before changing variants; judge each
+review item. No proof acceptance or discard is part of this checkpoint.
+
+J54 immediate-completion checkpoint (2026-09-09): the foreground Trace return
+must already show the new saved run and source status. Its informational
+completion notice must not consume Escape; one Escape returns to the existing
+pending verification. Warning/error notices retain explicit dismissal. Verify
+full outcome recovery at 80/40 columns, preserve all 36 baseline run/result
+files and both phase ledgers, and judge every captured review item.
+
+The first immediate-completion trial matched a prior successful receipt after a missing-analysis-component failure. Preserve that failed evidence. Build the source workspace sidecars before retrying; reject the old receipt id and cross-check the displayed new id against its successful canonical result. A generic source-status match alone is insufficient.
+
+J54 failure-notice checkpoint (2026-09-09): use an explicitly labeled, process-local missing tree-sitter helper override to repeat the observed failure without removing installed binaries. Require the error on the returned Trace screen, inspect the build remedy, dismiss the alert then return to the same verification, and reopen Activity for the failed run. Preserve existing sources, receipts, workflow and proof; do not mistake retained old Trace evidence for a new success.
+
+J54 Replay reader checkpoint (2026-09-09): open the existing failed run
+`tool-1788968317049-a1f28c471d3d`, wait for its healthy saved projection, and
+page the complete failure remedy and timeline at 80/40 columns. Replay is a
+dedicated reader; do not use generic Escape-to-Navigate convergence after
+opening it. Its footer must disclose Escape back and measured paging. Check
+return from repeated end paging, then one Escape to the original verification.
+Exercise resize through the real reducer/render-geometry regression; do not
+claim live resizing from separate fixed-size launches. No new model call, result selection or target change is required.
+
+At 40 columns, the generic `submit:` helper cannot validate a long run-id command on one visible prompt row. For this saved-run checkpoint, require the fresh Prompt cue, type the exact command, require its unique visible suffix, then press Enter. Preserve the failed setup trial and require the healthy Replay projection before judging reader behavior.

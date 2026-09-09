@@ -152,10 +152,17 @@ pub fn index_workspace_snapshot(workspace: &WorkspaceTarget) -> Result<IndexedWo
 }
 
 pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
+    current_workspace_tree_hash_with_observer(root, &mut |_| {})
+}
+
+pub(crate) fn current_workspace_tree_hash_with_observer(
+    root: impl AsRef<Path>,
+    on_files_hashed: &mut dyn FnMut(usize),
+) -> Result<String> {
     let root = root.as_ref();
     let mut entries = Vec::new();
     let mut budget = IndexBudget::tree_identity();
-    collect_current_tree_entries(root, root, &mut entries, &mut budget, &mut |_| {})?;
+    collect_current_tree_entries(root, root, &mut entries, &mut budget, on_files_hashed)?;
     entries.sort_by(|left, right| {
         left.name
             .cmp(&right.name)

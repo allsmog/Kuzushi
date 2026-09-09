@@ -5,6 +5,64 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- Static `verify:finding` results now use `exploitable: null` for incomplete
+  evidence, unsupported language, or an unresolved panel. These outcomes have
+  `status: partial` and cannot replace selected proof. Consumers must handle
+  null explicitly; false means the model cites evidence defeating the claim.
+  `consensus.inconclusiveVotes` and `proofVerdict: inconclusive` are additive.
+  Older model responses pairing false with an explicit incomplete verdict are
+  normalized to null on new execution. Historical run files and selected
+  evidence are not rewritten; rerun to obtain the corrected assessment.
+
+- `verify:finding mode=empirical` now delegates through the shared `verify:exploit`
+  dispatch boundary with explicit authorization and no model runtime. The public
+  input contract is unchanged. Prove discloses backend availability and validates
+  empirical receipt selection against the durable proof and current source.
+  Historical incomplete or stale proof receipts remain inspectable; rerun before
+  selecting them. No saved receipt is rewritten.
+
+- Session transcripts add `agent_conversation` and `agent_conversation_cleared`
+  events. The public Ask checkpoint retains its target/revision/Map/policy
+  receipt and incomplete-turn state. It uses the existing redaction, retention
+  and persistence opt-out. Historical unbound turns are not reconstructed into
+  model context. No existing transcript or target run is rewritten. Oversize
+  checkpoints explicitly disable recovery for that target instead of silently
+  restoring an older answer; see the bounds in [operator guidance](docs/OPERATOR.md).
+
+- Interactive Report destinations now default to `.kuzushi/reports/` instead
+  of the target source root. Explicit destinations and the shared export
+  format/path contracts retain their meaning; existing files are not moved.
+  Destination edits save or cancel independently of export, and each format
+  keeps its chosen path for the session. Report now discloses recent run-cost
+  coverage without treating campaign totals as workspace spend. No campaign
+  metric, run-cost record or serialized receipt is reinterpreted or migrated.
+
+- Registered model-backed Scan outputs add `data.snapshotHash` and
+  `data.treeHash` as adapter-owned source receipts. Existing result fields keep
+  their meaning. Historical runs without a verifiable source receipt remain
+  available for inspection; rerun them to obtain an execution-bound receipt
+  before accepting work on dirty or unversioned targets. The offensive threat
+  hunt now emits the same typed added/updated finding counts as Agentic SAST.
+  No stored run is retroactively rewritten.
+
+- Model-backed `threat-model:build` now includes `source-code` in its default
+  `sources` list. This supplies bounded, file/line-addressed source excerpts to
+  synthesis and refinement, with hashes and explicit coverage omissions.
+  Explicit source lists retain their meaning; `contextMode=off` continues to
+  exclude the default bundle. Code collection requires `maxSourceBytes >= 1024`.
+  See [source evidence options](docs/modules.md#source-evidence-for-model-backed-map)
+  for budgets, exclusions, and how to retain the previous input selection.
+
+- Rust surface metadata now carries `sourcePolicy: rust-test-scopes-v1`.
+  Production surface IDs ignore this extraction-policy marker, preserving
+  their prior identities; payload digests still authenticate it. Before a new
+  model run can reuse a context or explicit entry-point catalog with older
+  Rust rows, rebuild with `context:build` and `entry-points:extract`. Historical
+  models are not rewritten. The source projection excludes direct `#[cfg(test)]`
+  scopes, `#[test]` functions and inner `#![cfg(test)]` scopes. Compound cfg
+  expressions, unknown attribute macros and cross-file test-module ownership
+  remain conservative candidates, not proven production reachability.
+
 - Markdown-bundle and machine-export `derivedSourcePresent` now means that a
   finding has explicit source-grounded static proof. A constructor-generated
   source signature or automatic occurrence row remains provenance and no
@@ -269,6 +327,17 @@ gh workflow run published-release-smoke.yml -f version=0.24.0-alpha.14
 
 ## Surface Compatibility Migrations
 
+### Unresolved deep-auditor assessments (unreleased)
+
+The raw deep-auditor analysis now accepts `triggerable: null` for unresolved
+reachability or impact. Existing Boolean JSON remains readable, and persisted
+`TriageVerdict` values keep their existing format. Rust callers constructing
+`VulnAnalysis` must use `Some(true)`, `Some(false)`, or `None` for `triggerable`
+and handle the unresolved case explicitly. A false `implausible_trigger`
+assessment without an inspected `first_link` now remains `needs_review`, with
+the original rationale and an explanation retained. Existing stored decisions
+are preserved; an operator must explicitly retriage to produce new decisions.
+
 Before publishing a release that changes the registry surface, check
 `docs/api-compatibility.md` and the deferred-surface contract. Current
 compatibility folds intentionally keep old exact tool names runnable while
@@ -298,6 +367,20 @@ removing them from catalog/recommender discovery:
 
 `smoke:next-step` was a hidden runtime smoke-test helper and has no migration
 path.
+
+## Map source receipt compatibility (unreleased)
+
+`entry-points:extract` and `module-recommender:recommend` add
+`data.snapshotHash` and `data.treeHash` to successful results. Both use registered
+source snapshots and reject source changes detected during execution. Existing
+result fields, module names, options, and the manifest contract are preserved.
+
+Older completed Map attempts may lack a verifiable identity for one or more
+referenced runs. The shell now keeps those unresolved results inspectable and
+offers a fresh run instead of accepting a result that cannot advance the journey.
+Already recorded dispositions remain historical records. Rerun Map against the
+current source to create a usable receipt; do not backfill or rewrite old run
+identities. See [the module contract](docs/modules.md#map-result-source-identity).
 
 ## Five-phase Cockpit Spine and patch-lifecycle migration (unreleased)
 
@@ -398,6 +481,20 @@ and attack-chain findings remain fingerprint-keyed. Existing findings remain
 readable and derive a conservative basis when the persisted field is absent.
 Run `kuzushi findings identity-audit --target <root>` before changing any
 workspace policy to aggressive reconciliation or automatic model dedupe.
+
+Review readers now include finding-local decisions on the exact observation
+they address, even when that observation has a durable identity. These records
+do not propagate to other generations. Policy-aware lists use the latest
+observation, preserving source/evidence history, rather than choosing an older
+observation for its severity or proof rank. Existing finding and decision
+formats remain readable without rewriting them; the exhaustive generation
+reader keeps its prior sort order. Human-over-automated review priority and
+identity-fold policy are unchanged.
+
+`triage:run` now adds source snapshot/tree hashes to its result and marks source
+changes during work as partial without erasing classifications or spend.
+Completed historical Review attempts lacking this receipt require an explicit
+fresh run before reuse. No model, runtime, or reconciliation default changes.
 
 Optional PromptArmor, Shinsa, Trail of Bits, and Vuln Scout packages are no
 longer bundled or auto-discovered from `node_modules`. Configure an adapter
@@ -583,3 +680,38 @@ that never sets `--review-yield-shadow-model` produces none of them.
 - `--review-yield-mode visible` adds one advisory section to the finding
   detail. It changes no ordering, no filter, no stored artifact, and no other
   displayed value; `shadow` remains silent.
+
+
+## Trace cost-result migration
+
+Consumers of `trace:expand` results should replace the legacy
+`data.costUsd` + `data.costUsdExact` pair with the shared cost contract.
+`costUsd` is present only for exact metering; otherwise read
+`observedCostUsd` and `providerSpendUnresolved: true`. Do not interpret an
+absent exact total or an observed zero as a free call. Both the top-level
+result and its `data` object carry the canonical fields. Existing run
+artifacts are retained unchanged.
+
+A zero-step Trace result is a valid completed outcome. Preserve its questions
+and evidence notes independently of appended step counts. New results include
+source snapshot/tree identities; older results without those identities are
+shown with that limitation. The reader requires a call-correlated result
+receipt for complete-result recovery and reports unverifiable history rather
+than silently using it as current evidence.
+
+
+## Phase-result descriptor migration
+
+`ToolDescriptor` adds `phase_result`, defaulting to `true`. The default is
+omitted from serialized descriptors, preserving the identity of unchanged
+tools. Rust callers using struct literals must initialize the field; descriptor
+builders can use `without_phase_result()` for supporting-evidence tools.
+`trace:expand` opts out. Its Prove authorization phase, workspace-write effect,
+model requirement and normal JSON output remain intact.
+
+New workflow writers reject known supporting-evidence-only attempts and their
+selection. Recovery removes those attempts from the selectable phase projection
+while retaining raw v1/v2 events and canonical run history. Unknown historical
+tools retain existing validation and visibility. This migration does not accept,
+discard, delete or rewrite old attempts and does not select another proof.
+The package/file module manifest schema is unchanged.

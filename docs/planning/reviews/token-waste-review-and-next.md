@@ -193,6 +193,22 @@ what the history breakpoint cannot reach. This is the crux of §5.
 
 ## 5. What's next — plumb prompt-caching through the Rust runtime → bridge
 
+> **Status 2026-09-06:** A and B landed. `AgentQueryRequest::cacheable_prompt_prefix`
+> (`with_cacheable_prompt_prefix` / `prompt_cache_split`) rides the bridge
+> payload as `cacheablePromptPrefix`; the bridge's `humanMessageForRequest`
+> and the Rust Anthropic OAuth client both emit it as a cache-marked opening
+> block and fall back to the whole uncached prompt when the declared prefix
+> does not lead the prompt. Carlini declares its shared preamble + inventory
+> via `build_actor_prompt_parts`. C also landed: the bridge sums
+> `cache_read_input_tokens` / `cache_creation_input_tokens` per call (raw
+> Anthropic names or LangChain `input_token_details`), reports them only when
+> a call actually carried them, and `AgentQueryResponse.prompt_cache`
+> (`PromptCacheUsage`) carries them into run artifacts (carlini's per-actor
+> response artifact includes `promptCache`). `estimate_cost_usd_with_cache`
+> prices reads at 0.1x and writes at 1.25x of the input rate, so a run whose
+> `promptCache.read_input_tokens` stays 0 across identical-prefix calls is
+> visibly not caching.
+
 ### The residual, precisely
 
 `AgentQueryRequest` (`crates/kuzushi-core/src/runtime/domain/agent_query.rs:12`)

@@ -34,9 +34,16 @@ mod tests {
 
     impl AgentRuntime for SequencedRuntime {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-            self.responses.lock().unwrap().pop_front().unwrap_or_else(|| {
-                panic!("unexpected extra agentic SAST query for stage {:?}", request.stage)
-            })
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "unexpected extra agentic SAST query for stage {:?}",
+                        request.stage
+                    )
+                })
         }
 
         fn triage_finding_blocking(
@@ -285,6 +292,18 @@ mod tests {
 
         assert_eq!(report.count, 0);
         assert!((report.cost_usd - 0.073).abs() < 1e-9);
+        let result = crate::modules::ModuleRegistry::with_v2_builtins()
+            .execute_tool_with_runtime("agentic-sast:scan", json!({}), &ctx, Some(&runtime))
+            .unwrap();
+        assert_eq!(result["status"], "completed");
+        assert!(result
+            .pointer("/data/snapshotHash")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.len() == 64));
+        assert!(result
+            .pointer("/data/treeHash")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.len() == 64));
     }
 
     #[test]
@@ -296,7 +315,10 @@ mod tests {
         initialize_clean_git(temp.path());
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        let config = V2Config { model: Some("test:model".into()), ..V2Config::default() };
+        let config = V2Config {
+            model: Some("test:model".into()),
+            ..V2Config::default()
+        };
         let ctx = test_context(&config, &workspace, &store);
         let first_runtime = SequencedRuntime {
             responses: Mutex::new(VecDeque::from([
@@ -315,18 +337,24 @@ mod tests {
         };
         let second = agentic_checkpoint(temp.path(), "run-2");
         let _scope = crate::run_artifacts::StageCheckpointScope::install(Some(second));
-        let report = run_agentic_sast_report(&json!({"passes": 2}), &ctx, Some(&second_runtime))
-            .unwrap();
+        let report =
+            run_agentic_sast_report(&json!({"passes": 2}), &ctx, Some(&second_runtime)).unwrap();
 
         assert!(second_runtime.responses.lock().unwrap().is_empty());
         assert!((report.cost_usd - 0.2).abs() < 1e-9);
         assert!(report.cost_usd_exact);
     }
 
-    fn agentic_checkpoint(target: &Path, run_id: &str) -> std::sync::Arc<crate::run_artifacts::StageCheckpointHandle> {
+    fn agentic_checkpoint(
+        target: &Path,
+        run_id: &str,
+    ) -> std::sync::Arc<crate::run_artifacts::StageCheckpointHandle> {
         let store = crate::run_artifacts::StageCheckpointStore::discover(target, &[7; 32]).unwrap();
         std::sync::Arc::new(crate::run_artifacts::StageCheckpointHandle::open(
-            store, target, run_id, "agentic-sast:scan",
+            store,
+            target,
+            run_id,
+            "agentic-sast:scan",
         ))
     }
 

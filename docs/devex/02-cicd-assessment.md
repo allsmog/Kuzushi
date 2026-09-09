@@ -73,8 +73,9 @@ packaged wrapper. The shipped CLI is the native Rust binary through
 `bin/kuzushi-rs.mjs`, exposed as `kuzushi` and `kz`.
 
 **Fix:** parameterize the smoke script with `KUZUSHI_CMD` (defaulting to the
-local Rust CLI path) and point CI at `node bin/kuzushi-rs.mjs` after
-downloading the staged native binary. E2E downloads both the `dist/` artifact
+local Rust CLI path) and point CI at `node bin/kuzushi-rs.mjs` with
+`KUZUSHI_NATIVE_BIN` set to the downloaded staged native binary. Without that
+override, the source-checkout wrapper checks a local Cargo build. E2E downloads both the `dist/` artifact
 and `native/` artifact from the `build` job so it exercises the packaged Rust
 wrapper path, not the retired TypeScript CLI.
 
@@ -327,7 +328,7 @@ See commits on this worktree branch for exact changes. High-level:
 4. **`actionlint.yml`**: new workflow that lints `.github/workflows/**` on
    any change.
 5. **`tests/e2e/run-smoke.sh`**: parameterized via `KUZUSHI_CMD` env var so
-   CI can point it at `node bin/kuzushi-rs.mjs` with downloaded `native/`;
+   CI can point it at `node bin/kuzushi-rs.mjs` with `KUZUSHI_NATIVE_BIN` selecting downloaded `native/`;
    local runs default to the Rust CLI.
 6. **`.github/requirements-ci.txt`**: pinned `semgrep` for pip cache.
 

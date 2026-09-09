@@ -80,10 +80,12 @@ impl ShellApp {
         if text.is_empty() {
             return Some(InputUpdate::ignored());
         }
-        self.advisory()
-            .pending_confirm
-            .is_some()
-            .then(InputUpdate::handled)
+        let confirmation = self.advisory().pending_confirm.is_some()
+            || matches!(
+                self.shell_view(),
+                ShellView::QuitConfirm | ShellView::ConfirmDialog
+            );
+        confirmation.then(InputUpdate::handled)
     }
 
     fn prepare_picker_for_paste(&mut self) -> bool {
@@ -101,7 +103,23 @@ impl ShellApp {
     }
 
     fn capture_picker_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
-        if self.capture_auth_key_paste(text) {
+        if self.paste_operator_question_other(text) || self.capture_answer_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        if self.capture_map_scope_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        if self.capture_file_filter_paste(text) || self.capture_map_field_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        self.capture_other_editor_paste(text)
+    }
+
+    fn capture_other_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.capture_report_path_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        if self.capture_auth_key_paste(text) || self.capture_batch_number_paste(text) {
             return Some(InputUpdate::handled());
         }
         if self.capture_budget_paste(text) || self.capture_planning_option_paste(text) {
@@ -110,36 +128,19 @@ impl ShellApp {
         None
     }
 
-    fn capture_budget_paste(&mut self, text: &str) -> bool {
-        if self.shell_view() != ShellView::Setup
-            || self.router.setup().editor() != Some(crate::app::SetupEditor::Budget)
-        {
+    fn capture_file_filter_paste(&mut self, text: &str) -> bool {
+        if self.shell_view() != ShellView::FilePicker {
             return false;
         }
-        let value = text.trim();
-        if value.is_empty() || value.chars().any(|ch| !ch.is_ascii_digit() && ch != '.') {
-            self.router
-                .setup_mut()
-                .set_budget_error("paste a positive USD amount, such as 2.50");
-            return true;
-        }
-        for ch in value.chars() {
-            self.router.setup_mut().push_budget_char(ch);
-        }
+        self.router.file_picker_mut().paste_query(text);
         true
     }
 
     fn capture_planning_option_paste(&mut self, text: &str) -> bool {
-        if !matches!(
-            self.shell_view(),
-            ShellView::Setup | ShellView::PlanningPicker
-        ) {
+        if !self.planning_option_editor_open() {
             return false;
         }
-        let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() else {
-            return false;
-        };
-        edit.draft.push_str(text);
+        self.insert_planning_option_text(text);
         true
     }
 
@@ -209,6 +210,9 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_mouse(&mut self, mouse: MouseEvent) -> InputUpdate {
+        if let Some(update) = self.handle_answer_mouse(mouse) {
+            return update;
+        }
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                 InputUpdate::handled_if(self.handle_left_mouse_down(mouse.column, mouse.row))
@@ -313,9 +317,15 @@ impl ShellApp {
             return None;
         }
         let session = self.activity()?;
-        // Hit-testing must mirror render geometry: Activity draws into the
-        // rail-reduced body, so its pane layout derives from content columns.
-        let viewport = self.content_viewport();
+        let viewport = self.viewport();
+        let area = crate::renderer::workbench_primary_area(
+            self,
+            ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+        );
+        if !area.contains(ratatui::layout::Position::new(column, row)) {
+            return None;
+        }
+        let viewport = TerminalViewport::new(area.width, area.height);
         let crate::ui_view_models::ActivityViewModel::Active(model) =
             crate::ui_view_models::activity_view_model(self)
         else {
@@ -329,8 +339,8 @@ impl ShellApp {
             .saturating_sub(frame_layout.header_rows)
             .saturating_sub(frame_layout.footer_rows);
         activity_pane_for_click(
-            column,
-            row,
+            column - area.x,
+            row - area.y,
             viewport.columns,
             viewport.rows,
             session.tasks.is_empty(),
@@ -422,7 +432,7 @@ fn normalise_paste_text(text: &str) -> String {
 /// True when the keystroke is a Ctrl/Alt chord rather than typed text. Mirrors
 /// `picker_command_char`, so the composer and the picker prompt agree on what
 /// counts as a character the operator meant to type.
-fn chord_modified(key: KeyEvent) -> bool {
+pub(super) fn chord_modified(key: KeyEvent) -> bool {
     key.modifiers
         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
 }

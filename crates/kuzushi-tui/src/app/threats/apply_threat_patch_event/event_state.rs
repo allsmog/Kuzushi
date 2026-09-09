@@ -29,12 +29,16 @@ impl ShellApp {
                 self.log("threats", text);
                 self.set_completed_activity("threat model", "answer received");
             }
-            ThreatPatchEvent::Failed { error, .. } => {
-                let safe_error = kuzushi_core::runtime::safe_model_failure_message(&error);
-                self.log("error", format!("threats worker failed: {safe_error}"));
-                self.set_refused_activity("threat model", "worker failed");
+            ThreatPatchEvent::Failed { error, audit } => {
+                self.apply_failed_threat_event(error, audit);
             }
         }
+    }
+
+    fn apply_failed_threat_event(&mut self, error: String, audit: AgentCallAudit) {
+        let message = crate::ui_view_models::model_failure_text(&audit, &error, None);
+        self.set_refused_activity_state("threat model", &audit.failure_summary(&error));
+        self.set_error_notice("threat model", format!("threats worker failed: {message}"));
     }
 }
 

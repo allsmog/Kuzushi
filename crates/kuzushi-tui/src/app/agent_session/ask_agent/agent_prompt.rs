@@ -11,6 +11,7 @@ const FAILURE_PROMPT_TEXT_LIMIT: usize = 4_000;
 
 pub(super) enum AgentPromptAttachment<'a> {
     Screen(&'a ScreenContext),
+    ScreenWithMap(&'a ScreenContext, &'a ThreatModelSceneContext),
     ThreatModel(&'a ThreatModelSceneContext),
 }
 
@@ -74,7 +75,7 @@ fn prompt_sections(
 ) -> Vec<PromptSection> {
     let mut sections = Vec::new();
     if let Some(attachment) = attachment {
-        sections.push(attachment_section(attachment));
+        sections.extend(attachment_sections(attachment));
     }
     if let Some(failure) = failure {
         sections.push(PromptSection {
@@ -85,16 +86,27 @@ fn prompt_sections(
     sections
 }
 
-fn attachment_section(attachment: AgentPromptAttachment<'_>) -> PromptSection {
+fn attachment_sections(attachment: AgentPromptAttachment<'_>) -> Vec<PromptSection> {
     match attachment {
-        AgentPromptAttachment::Screen(screen) => PromptSection {
-            label: "screenContext",
-            body: screen.to_prompt_json(),
-        },
-        AgentPromptAttachment::ThreatModel(scene) => PromptSection {
-            label: "threatModelScene",
-            body: scene.to_prompt_json(),
-        },
+        AgentPromptAttachment::Screen(screen) => vec![screen_section(screen)],
+        AgentPromptAttachment::ThreatModel(scene) => vec![scene_section(scene)],
+        AgentPromptAttachment::ScreenWithMap(screen, scene) => {
+            vec![screen_section(screen), scene_section(scene)]
+        }
+    }
+}
+
+fn screen_section(screen: &ScreenContext) -> PromptSection {
+    PromptSection {
+        label: "screenContext",
+        body: screen.to_prompt_json(),
+    }
+}
+
+fn scene_section(scene: &ThreatModelSceneContext) -> PromptSection {
+    PromptSection {
+        label: "threatModelScene",
+        body: scene.to_prompt_json(),
     }
 }
 
@@ -237,6 +249,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn incomplete_response_text_is_excluded_from_model_history() {
+        let turn = ChatTurn {
+            question: "Continue".into(),
+            answer: None,
+            partial_answer: "UNFINISHED_PREVIEW".into(),
+            error: Some("cancelled".into()),
+        };
+        let prompt = history_prompt_json(&[turn]);
+        assert!(!prompt.contains("UNFINISHED_PREVIEW"));
+        assert!(prompt.contains("cancelled"));
+    }
+
+    #[test]
     fn total_untrusted_context_is_byte_bounded_on_utf8_boundary() {
         let section = PromptSection {
             label: "threatModelScene",
@@ -257,6 +282,7 @@ mod tests {
                 question: format!("question-{index}"),
                 answer: Some(format!("assistant-{index}-{}", "x".repeat(12_000))),
                 error: None,
+                partial_answer: String::new(),
             })
             .collect::<Vec<_>>();
 

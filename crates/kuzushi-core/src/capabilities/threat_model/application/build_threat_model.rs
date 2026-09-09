@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::source_snapshot::SourceSnapshot as ResultSnapshot;
 
 pub(crate) fn build_threat_model(
     input: Value,
@@ -73,10 +74,16 @@ fn build_single_threat_model(
     verb: &str,
     input: BuildInput,
 ) -> Result<Value> {
-    let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
-    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
+    let mut source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     let grounding = load_prompt_grounding(&input, ctx)?;
     source_bundle.authenticate_entry_point_sources(&grounding.entry_point_catalog.receipt)?;
+    source_bundle.attach_source_code(
+        &input,
+        &grounding.surfaces,
+        grounding.entry_point_catalog.receipt.tree_hash.as_deref(),
+        ctx,
+    )?;
+    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     emit_grounding_loaded(ctx, verb, &grounding);
     emit_seed_disclosure(ctx, verb, &input)?;
     let generated = generate_threat_model_document(
@@ -99,31 +106,13 @@ fn build_single_threat_model(
     )
 }
 
-struct ResultSnapshot {
-    snapshot_hash: String,
-    tree_hash: String,
-}
-
 fn register_result_snapshot(
     ctx: &ToolExecutionContext<'_>,
     verb: &str,
     target: &Path,
 ) -> Option<ResultSnapshot> {
-    let workspace = crate::workspace::WorkspaceTarget::new(target).ok()?;
-    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
-    let mut observer = |files: usize| {
-        if heartbeat.ready() {
-            emit_snapshot_progress(ctx, verb, format!("source identity · {files} files hashed"));
-        }
-    };
-    match crate::incremental_index::register_workspace_tree_identity_with_observer(
-        &workspace,
-        &mut observer,
-    ) {
-        Ok(indexed) => Some(ResultSnapshot {
-            snapshot_hash: indexed.snapshot_hash,
-            tree_hash: indexed.tree_hash,
-        }),
+    match ResultSnapshot::capture(ctx, verb, target) {
+        Ok(snapshot) => Some(snapshot),
         Err(error) => {
             emit_snapshot_progress(
                 ctx,
@@ -141,12 +130,11 @@ fn emit_snapshot_progress(ctx: &ToolExecutionContext<'_>, verb: &str, detail: St
     }
 }
 
-fn attach_result_snapshot(mut result: Value, snapshot: Option<ResultSnapshot>) -> Value {
-    if let (Some(data), Some(snapshot)) = (result["data"].as_object_mut(), snapshot) {
-        data.insert("snapshotHash".to_string(), json!(snapshot.snapshot_hash));
-        data.insert("treeHash".to_string(), json!(snapshot.tree_hash));
+fn attach_result_snapshot(result: Value, snapshot: Option<ResultSnapshot>) -> Value {
+    match snapshot {
+        Some(snapshot) => snapshot.attach(result),
+        None => result,
     }
-    result
 }
 
 fn finish_agentic_threat_model(
@@ -555,6 +543,7 @@ fn nondefault_sources_requested(input: &Value) -> bool {
         .map(|source| source.to_lowercase())
         .collect::<Vec<_>>();
     !sources.is_empty()
+        && !source_lists_match(&sources, DEFAULT_THREAT_MODEL_SOURCES)
         && !source_lists_match(&sources, &["context", "threat-model"])
         && !source_lists_match(&sources, &["none"])
 }

@@ -11,12 +11,21 @@ pub(super) fn append_batch_occurrence(
 ) {
     lines.push(blank());
     lines.push(divider("BATCH OCCURRENCE", area.width));
-    lines.push(Line::styled(batch_summary(report), theme::subtle()));
+    lines.extend(batch_wrapped(
+        &batch_summary(report),
+        area.width as usize,
+        theme::subtle(),
+    ));
     if let Some(gate) = &report.gate {
-        lines.push(Line::styled(batch_gate_summary(gate), theme::subtle()));
+        lines.extend(batch_wrapped(
+            &batch_gate_summary(gate),
+            area.width as usize,
+            theme::subtle(),
+        ));
     }
-    lines.push(Line::styled(
-        "  OCCURRENCE                          SEVERITY  LOCATION  TITLE · RUNS",
+    lines.extend(batch_wrapped(
+        "Occurrence counts completed trials; it does not establish proof.",
+        area.width as usize,
         theme::muted(),
     ));
     if report.rows.is_empty() {
@@ -30,7 +39,7 @@ pub(super) fn append_batch_occurrence(
         report
             .rows
             .iter()
-            .map(|row| batch_occurrence_row(row, area.width as usize)),
+            .flat_map(|row| batch_occurrence_row(row, area.width as usize)),
     );
 }
 
@@ -71,19 +80,46 @@ fn batch_summary(report: &BatchOccurrenceReport) -> String {
     )
 }
 
-fn batch_occurrence_row(row: &BatchOccurrenceRow, width: usize) -> Line<'static> {
-    let occurrence = format!(
-        "seen {} / completed {} · planned {} · failed {}",
-        row.seen, row.completed, row.planned, row.failed
+fn batch_occurrence_row(row: &BatchOccurrenceRow, width: usize) -> Vec<Line<'static>> {
+    let title = format!(
+        "{} · {}",
+        row.representative_severity, row.representative_title
     );
+    let mut lines = vec![blank()];
+    lines.extend(batch_wrapped(&title, width, theme::primary()));
+    lines.extend(batch_wrapped(
+        &format!(
+            "seen {} / completed {} · planned {} · failed {}",
+            row.seen, row.completed, row.planned, row.failed
+        ),
+        width,
+        theme::subtle(),
+    ));
+    lines.extend(batch_wrapped(
+        &row.representative_location,
+        width,
+        theme::primary(),
+    ));
+    lines.extend(batch_wrapped(
+        &format!("finding {}", row.representative_fingerprint),
+        width,
+        theme::subtle(),
+    ));
     let runs = if row.run_ids.is_empty() {
         "runs —".to_string()
     } else {
-        format!("runs {}", row.run_ids.join(","))
+        format!("runs {}", row.run_ids.join(", "))
     };
-    let label = format!(
-        "  {occurrence:<36} {:<9} {}  {} · {runs}",
-        row.representative_severity, row.representative_location, row.representative_title
-    );
-    Line::styled(fit(&label, width), theme::primary())
+    lines.extend(batch_wrapped(&runs, width, theme::subtle()));
+    lines
 }
+
+fn batch_wrapped(text: &str, width: usize, style: ratatui::style::Style) -> Vec<Line<'static>> {
+    wrap_text(text.trim(), width.saturating_sub(2).max(1))
+        .into_iter()
+        .map(|line| Line::styled(format!("  {line}"), style))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests;

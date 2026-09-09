@@ -1,5 +1,5 @@
-use super::*;
 use super::descriptor_validation::validate_declared_policy;
+use super::*;
 use crate::modules::registry::ToolExecutor;
 use std::collections::BTreeMap;
 
@@ -160,6 +160,7 @@ pub(in crate::modules) fn tool_with_options(
         runtime_requirement: RuntimeRequirement::Never,
         continuation: ContinuationSupport::None,
         phase: ToolPhase::default(),
+        phase_result: true,
         effect: ToolEffect::default(),
         approval: ApprovalPolicy::default(),
         workspace_requirement: WorkspaceRequirement::default(),

@@ -75,7 +75,7 @@ impl FindingStore {
     }
 
     fn policy_projected_findings(&self, policy: IdentityFoldPolicy) -> Result<Vec<Finding>> {
-        let generations = self.list_emitted_finding_generations()?;
+        let generations = self.finding_generations_in_observation_order()?;
         let mut projected = project_finding_generations(generations, policy);
         projected.sort_by(super::v3_finding_reads::finding_list_order);
         Ok(projected)
@@ -401,6 +401,97 @@ mod full_ledger_fetch_tests {
             .findings;
         assert_eq!(projected.len(), 2);
         assert_ne!(projected[0].source_signature, projected[1].source_signature);
+    }
+
+    fn insert_fallback_observation(
+        store: &FindingStore,
+        target: &std::path::Path,
+        run_id: &str,
+        tool: &str,
+        line: u32,
+        dedup_key: &str,
+    ) {
+        store
+            .record_run_started(run_id, target, "completed")
+            .unwrap();
+        let mut finding = Finding::new_tool(
+            tool,
+            "CWE-89",
+            "src/db.rs",
+            line,
+            Some(line),
+            Severity::High,
+            "SQL injection",
+        );
+        finding.fingerprint = format!("producer-{tool}-{line}");
+        finding.dedup_key = Some(dedup_key.to_string());
+        finding.source_signature = Some(format!("src/db.rs:{line}:CWE-89"));
+        store.insert_finding(run_id, &finding).unwrap();
+    }
+
+    /// The compatibility projection (`list_findings`) applies the same rule
+    /// as the Rust safe fold: a finding first minted with a weak file-fallback
+    /// identity joins that identity once a later run rediscovers it through
+    /// the shared dedup key, while a fallback nothing corroborates keeps its
+    /// own row.
+    #[test]
+    fn compatibility_projection_folds_a_weak_observation_only_into_corroborated_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(tmp.path().join("findings.db")).unwrap();
+        insert_fallback_observation(
+            &store,
+            tmp.path(),
+            "run-a",
+            "semgrep",
+            10,
+            "src/db.rs:CWE-89",
+        );
+        insert_fallback_observation(
+            &store,
+            tmp.path(),
+            "run-b",
+            "codeql",
+            12,
+            "src/db.rs:CWE-89",
+        );
+        insert_fallback_observation(
+            &store,
+            tmp.path(),
+            "run-c",
+            "semgrep",
+            90,
+            "src/db.rs:other",
+        );
+
+        let generations = store.list_emitted_finding_generations().unwrap();
+        assert_eq!(generations.len(), 3);
+        let strong = generations
+            .iter()
+            .filter(|finding| finding.effective_identity_basis().is_strong())
+            .count();
+        assert_eq!(
+            strong, 1,
+            "only the cross-run rediscovery carries a strong basis"
+        );
+
+        let projected = store.list_findings(10).unwrap();
+        let mut tools = projected
+            .iter()
+            .map(|finding| finding.tool.as_str())
+            .collect::<Vec<_>>();
+        tools.sort_unstable();
+        assert_eq!(
+            projected.len(),
+            2,
+            "corroborated pair folds; lone fallback stays"
+        );
+        assert_eq!(tools, vec!["codeql", "semgrep"]);
+        let folded = projected
+            .iter()
+            .find(|finding| finding.tool == "codeql")
+            .unwrap();
+        assert_eq!(folded.sources.len(), 2);
+        assert_eq!(folded.corroboration_count, 2);
     }
 
     #[test]

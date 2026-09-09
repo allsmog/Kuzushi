@@ -10,7 +10,7 @@ use super::options::{
     AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions, DEFAULT_ANTHROPIC_VERSION,
     DEFAULT_BASE_URL, DEFAULT_OAUTH_BETA, DEFAULT_TIMEOUT_SECS,
 };
-use super::response::{estimate_cost_usd, maybe_parse_json, strip_provider_prefix, ApiResponse};
+use super::response::{maybe_parse_json, strip_provider_prefix, ApiResponse};
 
 impl AnthropicOAuthRuntime {
     pub fn new(options: AnthropicOAuthRuntimeOptions) -> Result<Self> {
@@ -111,8 +111,26 @@ pub(crate) fn anthropic_messages_body(
         "model": model,
         "max_tokens": max_tokens,
         "system": system_prompt,
-        "messages": [{ "role": "user", "content": request.prompt }],
+        "messages": [{ "role": "user", "content": anthropic_user_content(request) }],
     })
+}
+
+/// The user turn as one plain string, or — when the request declares a
+/// verified cacheable prefix — as a cache-marked text block followed by the
+/// remainder, so every later call sharing that prefix reads it from cache.
+fn anthropic_user_content(request: &AgentQueryRequest) -> Value {
+    let Some((prefix, remainder)) = request.prompt_cache_split() else {
+        return Value::String(request.prompt.clone());
+    };
+    let mut blocks = vec![json!({
+        "type": "text",
+        "text": prefix,
+        "cache_control": { "type": "ephemeral" },
+    })];
+    if !remainder.is_empty() {
+        blocks.push(json!({ "type": "text", "text": remainder }));
+    }
+    Value::Array(blocks)
 }
 
 #[cfg(test)]
@@ -141,7 +159,13 @@ fn parse_anthropic_messages_response_observed(
     let text = super::response::anthropic_response_text(&parsed);
     let structured = maybe_parse_json(&text);
     let (input_tokens, output_tokens) = super::response::anthropic_response_usage(&parsed);
-    let estimated_cost_usd = estimate_cost_usd(model, input_tokens, output_tokens);
+    let prompt_cache = super::response::anthropic_response_prompt_cache(&parsed);
+    let estimated_cost_usd = super::response::estimate_cost_usd_with_cache(
+        model,
+        input_tokens,
+        output_tokens,
+        prompt_cache,
+    );
     let stop_reason = parsed.stop_reason.clone();
     let truncated = stop_reason.as_deref() == Some("max_tokens");
 
@@ -154,6 +178,7 @@ fn parse_anthropic_messages_response_observed(
             estimated_cost_usd,
             input_tokens,
             output_tokens,
+            prompt_cache,
             truncated,
             stop_reason,
         },

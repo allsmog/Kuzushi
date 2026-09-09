@@ -50,6 +50,11 @@ pub struct ToolDescriptor {
     /// (which land in OPERATE) deserializable.
     #[serde(default)]
     pub phase: ToolPhase,
+    /// Whether this tool can contribute a selectable phase result. This is
+    /// independent of its authorization phase and effect. Omission preserves
+    /// existing descriptors and their serialized identities.
+    #[serde(default = "default_phase_result", skip_serializing_if = "is_true")]
+    pub phase_result: bool,
     #[serde(default)]
     pub effect: ToolEffect,
     #[serde(default)]
@@ -80,6 +85,7 @@ impl PartialEq for ToolDescriptor {
             && self.runtime_requirement == other.runtime_requirement
             && self.continuation == other.continuation
             && self.phase == other.phase
+            && self.phase_result == other.phase_result
             && self.effect == other.effect
             && self.approval == other.approval
             && self.workspace_requirement == other.workspace_requirement
@@ -104,6 +110,14 @@ impl PromptSpec {
     pub fn override_relative_path(&self) -> std::path::PathBuf {
         crate::prompt_paths::relative_prompt_override_path(&self.module_id, &self.verb)
     }
+}
+
+fn default_phase_result() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn is_false(value: &bool) -> bool {
@@ -358,6 +372,11 @@ impl Eq for DagNodeDescriptor {}
 impl ToolDescriptor {
     pub fn with_prompt(mut self, prompt: PromptSpec) -> Self {
         self.prompts.push(prompt);
+        self
+    }
+
+    pub fn without_phase_result(mut self) -> Self {
+        self.phase_result = false;
         self
     }
 

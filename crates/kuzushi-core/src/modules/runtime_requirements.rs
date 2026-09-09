@@ -157,6 +157,7 @@ fn threat_model_build_needs_runtime(input: &Value) -> bool {
 
 fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
     match tool_name {
+        "verify:finding" => Some(!super::verification_is_empirical(input)),
         "context:build" => Some(context_build_needs_runtime(input)),
         "offense:chain" => Some(
             input

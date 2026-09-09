@@ -1,8 +1,7 @@
-use super::{
-    browser_summary_text, digest_summary, disposition_summary, entry_detail_lines, fit,
-    paired_digest_summary, provenance_summary, receipt_count_summary, responsive_summary,
-    revision_summary, timestamp_summary,
-};
+use super::{entry_detail_lines, fit};
+use layout::browser_layout;
+mod layout;
+mod receipt;
 use crate::renderer::shared::text::{display_width, fit_path, pad};
 use crate::theme;
 use crate::ui_view_models::{EntryPointBreakdown, EntryPointItem};
@@ -12,14 +11,9 @@ use ratatui::prelude::{Line, Style};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use std::sync::Arc;
 
-const WIDE_LAYOUT_MIN: u16 = 90;
-const PANE_GAP: u16 = 1;
-/// Widest the list pane grows beside the detail pane. A real catalog names
-/// most rows by kind alone, so the list needs room for a name *and* the
-/// location that separates two of them; the detail pane still keeps the
-/// larger share at every width that reaches this cap.
-const LIST_PANE_MAX: u16 = 60;
-const LIST_PANE_MIN: u16 = 32;
+#[cfg(test)]
+mod reading_tests;
+
 const SOURCE_SEPARATOR: &str = " · ";
 /// Narrowest a *truncated* location may be before it reads as fragments
 /// rather than a file and line. A location that already fits whole is never
@@ -71,49 +65,37 @@ fn render_browser(
         return;
     }
     let selection = selection.min(model.entries.len().saturating_sub(1));
-    let (summary, compact_summary) = frame_summary_text(area, model);
-    let summary_height = (summary.len() as u16).min(area.height);
-    render_summary(buf, summary_area(area, summary_height), summary);
-    let body = body_area(area, summary_height);
-    if area.width >= WIDE_LAYOUT_MIN && body.height >= 8 {
-        render_wide(buf, body, model, selection, detail_scroll, compact_summary);
-    } else {
-        render_stacked(buf, body, model, selection, detail_scroll, compact_summary);
-    }
+    let layout = browser_layout(area, model);
+    render_summary(buf, layout.summary_area, layout.summary);
+    render_entry_list(buf, layout.list, model, selection);
+    render_entry_detail(buf, layout.detail, model, selection, detail_scroll);
 }
 
-fn frame_summary_text(area: Rect, model: &EntryPointBreakdown) -> (Vec<String>, bool) {
-    let full = browser_summary_text(area.width as usize, model);
-    let compact = area.height.saturating_sub(full.len() as u16) < 10;
-    if !compact {
-        return (full, false);
+pub(crate) fn entry_point_page_scroll(app: &crate::ShellApp, direction: i32) -> Option<usize> {
+    let area = super::super::gallery_layout::entry_point_browser_area(app)?;
+    let model = crate::ui_view_models::entry_point_breakdown(app);
+    let selection = app
+        .router
+        .scene()
+        .entry_point_selection()
+        .min(model.entries.len().saturating_sub(1));
+    let entry = model.entries.get(selection)?;
+    let layout = browser_layout(area, &model);
+    let visible = layout.detail.height.saturating_sub(2) as usize;
+    if visible == 0 {
+        return None;
     }
-    let width = area.width as usize;
-    let mut lines = vec![
-        responsive_summary(width, model),
-        disposition_summary(width, model),
-        provenance_summary(width, model),
-        receipt_count_summary(width, model),
-    ];
-    if !model.receipt.warnings.is_empty() {
-        lines.push(fit(
-            &format!("WARNING · {}", model.receipt.warnings.join(" · ")),
-            width,
-        ));
-    }
-    (lines, true)
-}
-
-fn summary_area(area: Rect, height: u16) -> Rect {
-    Rect { height, ..area }
-}
-
-fn body_area(area: Rect, summary_height: u16) -> Rect {
-    Rect {
-        y: area.y.saturating_add(summary_height),
-        height: area.height.saturating_sub(summary_height),
-        ..area
-    }
+    let lines = browser_detail_lines(
+        layout.detail.width.saturating_sub(2) as usize,
+        &model,
+        entry,
+    );
+    Some(layout::page_offset(
+        app.router.scene().entry_point_detail_scroll(),
+        direction,
+        visible,
+        lines.len(),
+    ))
 }
 
 fn render_summary(buf: &mut Buffer, area: Rect, summary: Vec<String>) {
@@ -132,79 +114,18 @@ fn render_summary(buf: &mut Buffer, area: Rect, summary: Vec<String>) {
     Paragraph::new(lines).render(area, buf);
 }
 
-fn render_wide(
-    buf: &mut Buffer,
-    area: Rect,
-    model: &EntryPointBreakdown,
-    selection: usize,
-    detail_scroll: usize,
-    compact_summary: bool,
-) {
-    let list_width = (area.width * 2 / 5).clamp(LIST_PANE_MIN, LIST_PANE_MAX);
-    let list = Rect {
-        width: list_width,
-        ..area
-    };
-    let detail = Rect {
-        x: area.x.saturating_add(list_width + PANE_GAP),
-        width: area.width.saturating_sub(list_width + PANE_GAP),
-        ..area
-    };
-    render_entry_list(buf, list, model, selection);
-    render_entry_detail(
-        buf,
-        detail,
-        model,
-        selection,
-        detail_scroll,
-        compact_summary,
-    );
-}
-
-fn render_stacked(
-    buf: &mut Buffer,
-    area: Rect,
-    model: &EntryPointBreakdown,
-    selection: usize,
-    detail_scroll: usize,
-    compact_summary: bool,
-) {
-    if area.height == 0 {
-        return;
-    }
-    let list_height = stacked_list_height(area.height);
-    let list = Rect {
-        height: list_height,
-        ..area
-    };
-    let detail = Rect {
-        y: area.y.saturating_add(list_height + PANE_GAP),
-        height: area.height.saturating_sub(list_height + PANE_GAP),
-        ..area
-    };
-    render_entry_list(buf, list, model, selection);
-    render_entry_detail(
-        buf,
-        detail,
-        model,
-        selection,
-        detail_scroll,
-        compact_summary,
-    );
-}
-
-fn stacked_list_height(height: u16) -> u16 {
-    let preferred = if height < 10 {
-        height.saturating_sub(3).max(2)
-    } else {
-        (height / 3).clamp(5, 10)
-    };
-    let max_with_detail = height.saturating_sub(PANE_GAP + 3).max(2);
-    preferred.min(max_with_detail)
-}
-
 fn render_entry_list(buf: &mut Buffer, area: Rect, model: &EntryPointBreakdown, selection: usize) {
     if area.width == 0 || area.height == 0 {
+        return;
+    }
+    if area.height < 3 {
+        Paragraph::new(visible_entry_list_lines(
+            model,
+            selection,
+            area.width as usize,
+            1,
+        ))
+        .render(area, buf);
         return;
     }
     let title = format!(
@@ -354,7 +275,6 @@ fn render_entry_detail(
     model: &EntryPointBreakdown,
     selection: usize,
     detail_scroll: usize,
-    compact_summary: bool,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -363,7 +283,7 @@ fn render_entry_detail(
         return;
     };
     let width = area.width.saturating_sub(2) as usize;
-    let lines = browser_detail_lines(width, model, entry, compact_summary);
+    let lines = browser_detail_lines(width, model, entry);
     let block = detail_block(
         area,
         entry,
@@ -389,65 +309,16 @@ fn browser_detail_lines(
     width: usize,
     model: &EntryPointBreakdown,
     entry: &EntryPointItem,
-    compact_summary: bool,
 ) -> Vec<Line<'static>> {
-    let mut lines = entry_detail_lines(width, entry);
-    if !compact_summary {
-        return lines;
-    }
+    let mut lines: Vec<_> = crate::renderer::shared::text::wrap_text(&entry.name, width)
+        .into_iter()
+        .map(|text| Line::styled(text, theme::heading()))
+        .collect();
+    lines.extend(entry_detail_lines(width, entry).into_iter().skip(1));
     lines.push(Line::from(String::new()));
     lines.push(Line::styled("SOURCE RECEIPT", theme::label()));
-    lines.extend(receipt_detail_lines(width, model));
-    append_warning_details(&mut lines, width, model);
+    lines.extend(receipt::detail_lines(width, model));
     lines
-}
-
-fn receipt_detail_lines(
-    width: usize,
-    model: &EntryPointBreakdown,
-) -> impl Iterator<Item = Line<'static>> {
-    [
-        revision_summary(width, model),
-        digest_summary(width, "C SHA256", model.receipt.catalog_digest.as_deref()),
-        digest_summary(
-            width,
-            "M SHA256",
-            model.receipt.model_catalog_digest.as_deref(),
-        ),
-        paired_digest_summary(
-            width,
-            "CONTEXT",
-            model.receipt.context_digest.as_deref(),
-            model.receipt.model_context_digest.as_deref(),
-        ),
-        paired_digest_summary(
-            width,
-            "TREE",
-            model.receipt.tree_hash.as_deref(),
-            model.receipt.model_tree_hash.as_deref(),
-        ),
-        timestamp_summary(width, model),
-    ]
-    .into_iter()
-    .map(|text| Line::styled(text, theme::muted()))
-}
-
-fn append_warning_details(
-    lines: &mut Vec<Line<'static>>,
-    width: usize,
-    model: &EntryPointBreakdown,
-) {
-    if model.receipt.warnings.is_empty() {
-        return;
-    }
-    lines.push(Line::styled("WARNINGS", theme::label()));
-    for warning in &model.receipt.warnings {
-        lines.extend(
-            crate::renderer::shared::text::wrap_text(warning, width)
-                .into_iter()
-                .map(|text| Line::styled(text, theme::muted())),
-        );
-    }
 }
 
 fn detail_block(
@@ -470,13 +341,16 @@ fn detail_block(
     } else {
         String::new()
     };
+    let identity = if display_width(&entry.id) <= 12 {
+        format!("DETAIL {}", entry.id)
+    } else {
+        "DETAIL".to_string()
+    };
     bordered_block(
         &format!(
-            " DETAIL · {} · {}/{}{} ",
-            entry.id,
+            " {identity}{position} · {}/{} · PgUp/PgDn ",
             selection + 1,
-            total,
-            position
+            total
         ),
         area.width,
         theme::accent(),
@@ -572,7 +446,7 @@ mod tests {
             "selected detail must be visible:\n{text}"
         );
         assert!(text.contains("http route"), "{text}");
-        assert!(text.contains("threat model only"), "{text}");
+        assert!(text.contains("model only"), "{text}");
     }
 
     #[test]
@@ -592,7 +466,7 @@ mod tests {
 
         assert!(text.contains("rows"), "{text}");
         assert!(text.contains("CONTEXT"), "{text}");
-        assert!(text.contains("T(ms)"), "{text}");
+        assert!(text.contains("TIMESTAMPS MS"), "{text}");
         assert!(text.contains("EP-1"), "{text}");
     }
 
@@ -709,7 +583,7 @@ mod tests {
         model
     }
 
-    fn sample_model() -> EntryPointBreakdown {
+    pub(super) fn sample_model() -> EntryPointBreakdown {
         EntryPointBreakdown {
             entries: vec![EntryPointItem {
                 id: "EP-1".into(),
@@ -764,14 +638,14 @@ mod tests {
         }
     }
 
-    fn render_to_text(widget: impl Widget, width: u16, height: u16) -> String {
+    pub(super) fn render_to_text(widget: impl Widget, width: u16, height: u16) -> String {
         let area = Rect::new(0, 0, width, height);
         let mut buffer = Buffer::empty(area);
         widget.render(area, &mut buffer);
         buffer_text(&buffer)
     }
 
-    fn buffer_text(buffer: &Buffer) -> String {
+    pub(super) fn buffer_text(buffer: &Buffer) -> String {
         let area = buffer.area;
         (0..area.height)
             .map(|y| {

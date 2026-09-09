@@ -419,3 +419,41 @@ fn test_run_item(seq: u64, message: &str) -> kuzushi_core::run_lifecycle::RunIte
     )
     .unwrap()
 }
+
+#[test]
+fn jobhub_response_text_is_reliable_under_backpressure_and_generation_scoped() {
+    use kuzushi_openai::langgraph_runtime::ResponseTextEvent;
+    let mut hub = JobHub::default();
+    let old = hub.start(JobKind::Agent, "old Ask");
+    old.send(ShellEvent::Agent(AgentEvent::ResponseText(
+        ResponseTextEvent::Delta("stale".into()),
+    )));
+    old.complete();
+    let ticket = hub.start(JobKind::Agent, "current Ask");
+    let sink = ticket.sink();
+    let count = super::hub::JOB_EVENT_CHANNEL_CAPACITY + 8;
+    let sender = std::thread::spawn(move || {
+        for index in 0..count {
+            assert!(sink.send(ShellEvent::Agent(AgentEvent::ResponseText(
+                ResponseTextEvent::Delta(index.to_string())
+            ))));
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut text = Vec::new();
+    while text.len() < count {
+        assert!(std::time::Instant::now() < deadline);
+        for event in hub.drain(count) {
+            if let ShellEvent::Agent(AgentEvent::ResponseText(ResponseTextEvent::Delta(value))) =
+                event
+            {
+                text.push(value);
+            }
+        }
+        std::thread::yield_now();
+    }
+    sender.join().unwrap();
+    assert_eq!(text, (0..count).map(|n| n.to_string()).collect::<Vec<_>>());
+    assert!(hub.is_running(JobKind::Agent));
+    ticket.complete();
+}

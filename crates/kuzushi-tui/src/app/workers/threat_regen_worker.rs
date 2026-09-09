@@ -111,12 +111,14 @@ fn failed_threat_event(
     audit: AgentCallAudit,
     cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
 ) -> ThreatPatchEvent {
-    let message = error.error.to_string();
-    let safe_message = kuzushi_core::runtime::safe_model_failure_message(&message);
+    let audit = audit
+        .with_outcome(error.cost, error.call_attempted)
+        .with_failure(&error.error);
+    let safe_message = audit.failure_summary("");
     let persisted = run.fail_observed(&safe_message, cancellation, error.cost, lifecycle);
     ThreatPatchEvent::Failed {
         error: threat_persistence_aware_failure(safe_message, persisted),
-        audit: audit.with_outcome(error.cost, error.call_attempted),
+        audit,
     }
 }
 

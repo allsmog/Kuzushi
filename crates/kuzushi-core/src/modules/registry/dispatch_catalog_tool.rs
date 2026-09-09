@@ -665,5 +665,11 @@ pub(in crate::modules) fn run_agentic_sast_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    Ok(run_agentic_sast_report(input, ctx, runtime)?.to_tool_json())
+    let target = resolve_tool_target(input, ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "agentic-sast:scan",
+        &target,
+        || Ok(run_agentic_sast_report(input, ctx, runtime)?.to_tool_json()),
+    )
 }

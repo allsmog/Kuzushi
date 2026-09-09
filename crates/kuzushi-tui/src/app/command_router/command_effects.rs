@@ -342,6 +342,10 @@ impl ShellApp {
                 self.show_logs();
                 Some(Vec::new())
             }
+            ShellCommand::Answers => {
+                self.open_answers();
+                Some(Vec::new())
+            }
             ShellCommand::Prompt(raw) => {
                 self.set_shell_view(ShellView::PromptsEditor);
                 Some(self.reduce_prompt_verb(raw))
@@ -1024,7 +1028,6 @@ impl ShellApp {
 
     fn show_config_status(&mut self) {
         self.set_shell_view(ShellView::Config);
-        self.sync_selected_model_index();
         self.log(
             "config",
             format!(

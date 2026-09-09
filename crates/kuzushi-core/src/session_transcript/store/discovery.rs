@@ -21,6 +21,10 @@ pub(super) fn filename_has_session_id(path: &Path, session_id: &str) -> bool {
 }
 
 pub(super) fn read_safe_session_file(path: &Path) -> Result<String> {
+    read_session_file_bounded(path, MAX_SESSION_FILE_BYTES)
+}
+
+pub(super) fn read_session_file_bounded(path: &Path, limit: usize) -> Result<String> {
     let metadata = fs::symlink_metadata(path)?;
     anyhow::ensure!(
         !metadata.file_type().is_symlink(),
@@ -31,10 +35,10 @@ pub(super) fn read_safe_session_file(path: &Path) -> Result<String> {
         "session transcript is not a regular file"
     );
     anyhow::ensure!(
-        metadata.len() <= MAX_SESSION_FILE_BYTES as u64,
+        metadata.len() <= limit as u64,
         "session transcript exceeds the file limit"
     );
-    let bytes = crate::bounded_file::read_regular_bytes(path, MAX_SESSION_FILE_BYTES)?;
+    let bytes = crate::bounded_file::read_regular_bytes(path, limit)?;
     String::from_utf8(bytes).context("session transcript is not valid UTF-8")
 }
 

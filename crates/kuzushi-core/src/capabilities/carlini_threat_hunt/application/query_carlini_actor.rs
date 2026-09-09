@@ -89,7 +89,7 @@ fn prepare_carlini_actor_query(
     actor_hunt: &ActorHunt,
     actor_fingerprint: &str,
 ) -> Result<PreparedCarliniActorQuery> {
-    let prompt = build_actor_prompt(
+    let parts = build_actor_prompt_parts(
         target,
         actor_hunt,
         options,
@@ -101,10 +101,11 @@ fn prepare_carlini_actor_query(
         "CarliniThreatFindings",
         findings_schema(),
     );
-    let request = carlini_actor_request(model, target, prompt.clone(), input)?
+    let request = carlini_actor_request(model, target, parts.prompt.clone(), input)?
+        .with_cacheable_prompt_prefix(parts.cacheable_prefix)
         .with_structured_output(contract.runtime_contract());
     Ok(PreparedCarliniActorQuery {
-        prompt,
+        prompt: parts.prompt,
         contract,
         request,
     })

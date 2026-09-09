@@ -65,10 +65,10 @@ impl PreparedToolInput {
     /// Bind the explicit `kuzushi run <tool>` authorization to this prepared
     /// operation only.
     pub fn authorize_explicit_headless(self) -> Self {
-        let delegated_tools = implicit_delegated_tools(&self.tool_name);
+        let delegated_tools = implicit_delegated_tools(&self.tool_name, &self.value);
         self.authorize(
             crate::modules::execution_context::AuthorizationKind::ExplicitHeadless,
-            delegated_tools,
+            &delegated_tools,
         )
     }
 
@@ -87,7 +87,7 @@ impl PreparedToolInput {
     /// Bind an interactive confirmation request to this prepared operation.
     pub fn authorize_requested(self, request: ExecutionAuthorization) -> Result<Self> {
         let mut prepared = self;
-        let delegated_tools = implicit_delegated_tools(&prepared.tool_name);
+        let delegated_tools = implicit_delegated_tools(&prepared.tool_name, &prepared.value);
         prepared.authorization = if delegated_tools.is_empty() {
             request.bind_request(prepared.binding.operation_fingerprint)?
         } else {
@@ -147,25 +147,32 @@ impl PreparedToolInput {
     }
 }
 
-fn implicit_delegated_tools(tool_name: &str) -> &'static [&'static str] {
+fn implicit_delegated_tools(tool_name: &str, input: &Value) -> Vec<&'static str> {
     match tool_name {
         "threat-intel:harvest" | "threat-intel:research" => {
-            &["ndiff:fetch-cve", "ndiff:extract-fix-pattern"]
+            vec!["ndiff:fetch-cve", "ndiff:extract-fix-pattern"]
         }
-        _ => &[],
+        _ => crate::modules::delegated_execution_tools(tool_name, input),
     }
 }
 
 #[cfg(test)]
 mod implicit_delegation_tests {
     use super::implicit_delegated_tools;
+    use serde_json::json;
 
     #[test]
     fn threat_intel_delegates_only_to_its_fixed_harvest_steps() {
         let expected = &["ndiff:fetch-cve", "ndiff:extract-fix-pattern"];
-        assert_eq!(implicit_delegated_tools("threat-intel:research"), expected);
-        assert_eq!(implicit_delegated_tools("threat-intel:harvest"), expected);
-        assert!(implicit_delegated_tools("threat-intel:apply").is_empty());
+        assert_eq!(
+            implicit_delegated_tools("threat-intel:research", &json!({})),
+            expected
+        );
+        assert_eq!(
+            implicit_delegated_tools("threat-intel:harvest", &json!({})),
+            expected
+        );
+        assert!(implicit_delegated_tools("threat-intel:apply", &json!({})).is_empty());
     }
 }
 
@@ -766,7 +773,10 @@ mod model_preflight_tests {
         // The preflight must stay silent so the executor can name the remedy.
         assert_eq!(runtime.preflight_calls.load(Ordering::SeqCst), 0);
         assert!(error.contains("requires an explicit model"), "{error}");
-        assert!(error.contains("will not choose a fallback model"), "{error}");
+        assert!(
+            error.contains("will not choose a fallback model"),
+            "{error}"
+        );
     }
 
     #[test]

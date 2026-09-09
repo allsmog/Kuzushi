@@ -8,6 +8,7 @@
 mod domain;
 mod ledger;
 mod map_evidence;
+mod phase_result_policy;
 mod proof_deferral_service;
 mod proof_deferral_view;
 mod storage;

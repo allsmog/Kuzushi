@@ -12,7 +12,9 @@ mod identity_policy_approval;
 mod projections;
 mod review_decision_conflict;
 mod reviewed_refutation;
+mod run_delta;
 mod scan_comparison;
+pub(crate) use run_delta::emit_persisted_finding_delta;
 
 pub use batch_occurrence::{
     derive_batch_gate_binding, derive_batch_occurrence_report,

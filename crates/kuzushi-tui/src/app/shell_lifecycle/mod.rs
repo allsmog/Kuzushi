@@ -3,6 +3,7 @@ use super::*;
 mod construction;
 mod first_finding;
 mod log_and_scroll;
+mod model_picker;
 mod onboarding_open;
 
 pub(crate) use construction::{

@@ -5,7 +5,9 @@ use crate::ui_view_models::{
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
+mod pending_result;
 mod proof;
+mod trace;
 
 use proof::{
     compact_proof_lines, finding_header_lines, proof_ladder_lines, proof_lines, proof_title,
@@ -14,6 +16,21 @@ use proof::{
 const SIDE_BY_SIDE_MIN_WIDTH: u16 = 78;
 
 pub(super) fn render(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    state: PhaseRenderState,
+) {
+    if let Some(result) = model.pending_result.as_ref() {
+        return pending_result::render(frame, area, model, result, state);
+    }
+    if let Some(plan) = model.investigation.as_ref() {
+        return render_investigation_card(frame, area, plan, state);
+    }
+    render_prove_body(frame, area, model, state);
+}
+
+fn render_prove_body(
     frame: &mut Frame<'_>,
     area: Rect,
     model: &ProvePhaseModel,
@@ -52,32 +69,81 @@ fn render_investigation_card(
     plan: &InvestigationPlanModel,
     state: PhaseRenderState,
 ) {
+    let width = area.width.saturating_sub(2) as usize;
+    let mut lines = investigation_lines(plan, width);
+    if width < 60 {
+        lines.remove(0);
+    }
     render_lines_pane(
         frame,
         area,
-        "INVESTIGATE · Enter draft command · m boundary · v cancel",
-        investigation_lines(plan, area.width.saturating_sub(2) as usize),
+        format!("{} · {}", plan.reference, investigation_status_title(plan)),
+        lines,
         PhaseSurfaceId::ProveInvestigation,
         state,
     );
 }
 
+fn investigation_status_title(plan: &InvestigationPlanModel) -> &'static str {
+    if plan.empirical
+        && !plan
+            .local_readiness
+            .is_some_and(|readiness| readiness.can_attempt())
+    {
+        return "UNAVAILABLE";
+    }
+    "INVESTIGATE"
+}
+
 fn investigation_lines(plan: &InvestigationPlanModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::styled(
-            fit(&format!("{} · {}", plan.reference, plan.severity), width),
-            theme::heading(),
-        ),
-        Line::styled(fit(&plan.why, width), theme::muted()),
-        Line::styled(fit("EVIDENCE GOALS", width), theme::label()),
-    ];
-    append_evidence_goals(&mut lines, plan, width);
-    lines.push(Line::styled(fit("SAFETY BOUNDARY", width), theme::label()));
-    lines.extend(boundary_lines(plan.empirical, width));
+    let mut lines = vec![Line::styled(
+        fit(&format!("{} · {}", plan.reference, plan.severity), width),
+        theme::heading(),
+    )];
+    append_backend_readiness(&mut lines, plan, width);
     append_model_ladder(&mut lines, plan, width);
+    lines.push(Line::styled("SAFETY BOUNDARY", theme::label()));
+    lines.extend(boundary_lines(plan.empirical, width));
+    append_wrapped(&mut lines, &plan.why, width, theme::muted());
+    lines.push(Line::styled("EVIDENCE GOALS", theme::label()));
+    append_evidence_goals(&mut lines, plan, width);
     append_investigation_stop_conditions(&mut lines, width);
-    lines.push(Line::styled(fit(&plan.command, width), theme::accent()));
+    append_wrapped(&mut lines, &plan.command, width, theme::accent());
     lines
+}
+
+fn append_wrapped(
+    lines: &mut Vec<Line<'static>>,
+    text: &str,
+    width: usize,
+    style: ratatui::style::Style,
+) {
+    lines.extend(
+        wrap_text(text, width.max(1))
+            .into_iter()
+            .map(|row| Line::styled(row, style)),
+    );
+}
+
+fn append_backend_readiness(
+    lines: &mut Vec<Line<'static>>,
+    plan: &InvestigationPlanModel,
+    width: usize,
+) {
+    if !plan.empirical {
+        return;
+    }
+    let message = plan
+        .local_readiness
+        .map(|readiness| readiness.message())
+        .unwrap_or("Local reproduction availability has not been checked; reopen the card");
+    append_wrapped(lines, message, width, theme::primary());
+    append_wrapped(
+        lines,
+        "No model is used in this mode. Supported execution requires confirmation when submitted.",
+        width,
+        theme::muted(),
+    );
 }
 
 fn append_evidence_goals(
@@ -86,10 +152,7 @@ fn append_evidence_goals(
     width: usize,
 ) {
     for goal in &plan.evidence_goals {
-        lines.push(Line::styled(
-            fit(&format!("  ▸ {goal}"), width),
-            theme::primary(),
-        ));
+        append_wrapped(lines, &format!("  ▸ {goal}"), width, theme::primary());
     }
 }
 
@@ -98,169 +161,57 @@ fn append_model_ladder(
     plan: &InvestigationPlanModel,
     width: usize,
 ) {
-    lines.push(Line::styled(fit("MODEL LADDER", width), theme::label()));
+    if plan.empirical {
+        return;
+    }
+    if width >= 60 {
+        lines.push(Line::styled("MODEL SETTINGS", theme::label()));
+    }
     for rung in &plan.model_ladder {
-        lines.push(Line::styled(
-            fit(&format!("  · {rung}"), width),
-            theme::muted(),
-        ));
+        append_wrapped(lines, &format!("  · {rung}"), width, theme::muted());
     }
 }
 
 fn append_investigation_stop_conditions(lines: &mut Vec<Line<'static>>, width: usize) {
-    lines.push(Line::styled(fit("STOP CONDITIONS", width), theme::label()));
-    lines.push(Line::styled(
-        fit(
-            "  · nothing runs until you submit the drafted command",
-            width,
-        ),
+    lines.push(Line::styled("STOP CONDITIONS", theme::label()));
+    append_wrapped(
+        lines,
+        "  · nothing runs until you submit the drafted command",
+        width,
         theme::muted(),
-    ));
-    lines.push(Line::styled(
-        fit(
-            "  · destructive shell drafts require explicit confirmation",
-            width,
-        ),
-        theme::muted(),
-    ));
-}
-
-/// The Trace screen: the recorded path beside the operator-requested
-/// expansion, every hop cited to file:line, open questions as first-class
-/// `?` rows, and the evidence the last expansion added.
-fn render_trace_screen(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    trace: &TraceEvidenceModel,
-    state: PhaseRenderState,
-) {
-    render_lines_pane(
-        frame,
-        area,
-        "TRACE · Enter draft trace:expand · v investigate · t close",
-        trace_lines(trace, area.width.saturating_sub(2) as usize),
-        PhaseSurfaceId::ProveTrace,
-        state,
     );
-}
-
-fn trace_lines(trace: &TraceEvidenceModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::styled(
-        fit(
-            &format!(
-                "{} · {} · where does this value travel",
-                trace.reference, trace.severity
-            ),
-            width,
-        ),
-        theme::heading(),
-    )];
-    if let Some(identity) = trace.identity.as_ref() {
-        lines.push(Line::styled(fit(identity, width), theme::muted()));
-    }
-    lines.push(Line::styled(fit("RECORDED PATH", width), theme::label()));
-    if trace.original.is_empty() {
-        lines.push(Line::styled(
-            fit(
-                "  no located evidence anchors recorded for this finding",
-                width,
-            ),
-            theme::muted(),
-        ));
-    }
-    for hop in &trace.original {
-        lines.extend(trace_hop_lines(hop, width));
-    }
-    lines.push(Line::styled(
-        fit("EXPANDED PATH · requested by operator", width),
-        theme::label(),
-    ));
-    if trace.expanded.is_empty() {
-        lines.push(Line::styled(
-            fit(
-                "  no operator-requested hops yet — the durable evidence store has none for this finding",
-                width,
-            ),
-            theme::muted(),
-        ));
-    }
-    for hop in &trace.expanded {
-        lines.extend(trace_hop_lines(hop, width));
-    }
-    for question in &trace.open_questions {
-        lines.push(Line::styled(
-            fit(&format!("  ? open: {question}"), width),
-            theme::warn(),
-        ));
-    }
-    if !trace.evidence_deltas.is_empty() {
-        lines.push(Line::styled(fit("NEW EVIDENCE", width), theme::label()));
-        for delta in &trace.evidence_deltas {
-            lines.push(Line::styled(
-                fit(&format!("  + {delta}"), width),
-                theme::primary(),
-            ));
-        }
-    }
-    lines.push(Line::styled(
-        fit(&format!("NEXT · {}", trace.next_hint), width),
+    append_wrapped(
+        lines,
+        "  · local reproduction requires a supported backend and explicit confirmation",
+        width,
         theme::muted(),
-    ));
-    lines.push(Line::styled(
-        fit(&trace.expand_command, width),
-        theme::accent(),
-    ));
-    lines
-}
-
-fn trace_hop_lines(hop: &TraceHopModel, width: usize) -> Vec<Line<'static>> {
-    let location = if hop.location.is_empty() {
-        "location unrecorded".to_string()
-    } else {
-        hop.location.clone()
-    };
-    let mut lines = vec![Line::styled(
-        fit(&format!("  ▾ {} — {}", hop.label, location), width),
-        theme::primary(),
-    )];
-    if !hop.annotation.is_empty() {
-        lines.push(Line::styled(
-            fit(&format!("      {}", hop.annotation), width),
-            theme::muted(),
-        ));
-    }
-    lines
+    );
 }
 
 fn boundary_lines(empirical: bool, width: usize) -> Vec<Line<'static>> {
     let rows = [
         (
             !empirical,
-            "Static-only (mode=model) — adversarial analysis, no code executes",
+            "Static-only (mode=model) — source analysis, no target or harness code executes",
         ),
         (
             empirical,
-            "Local reproduction (mode=empirical) — sandboxed PoC execution here",
+            "Local reproduction (mode=empirical) — attempt an isolated proof harness",
         ),
     ];
-    rows.into_iter()
-        .map(|(selected, label)| {
-            let marker = if selected { "(•)" } else { "( )" };
-            Line::styled(
-                fit(&format!("  {marker} {label}"), width),
-                if selected {
-                    theme::primary()
-                } else {
-                    theme::muted()
-                },
-            )
-        })
-        .collect()
+    let mut lines = Vec::new();
+    for (selected, label) in rows {
+        let marker = if selected { "(•)" } else { "( )" };
+        append_wrapped(
+            &mut lines,
+            &format!("  {marker} {label}"),
+            width,
+            theme::primary(),
+        );
+    }
+    lines
 }
 
-/// The Choose-Next-Action menu: every row is an existing Prove hotkey with
-/// its one-line consequence, so the operator authorizes the next move instead
-/// of the agent silently picking one.
 fn render_next_action_menu(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -479,12 +430,15 @@ mod compact_confidence_tests {
 }
 
 pub(super) fn plain_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'static>> {
+    if let Some(result) = model.pending_result.as_ref() {
+        return pending_result::lines(model, result, width);
+    }
     let Some(finding) = model.finding.as_ref() else {
         return divider_lines("STATUS / NEXT", empty_selection_lines(model), width);
     };
     let mut lines = Vec::new();
     if let Some(trace) = model.trace.as_ref() {
-        lines.extend(divider_lines("TRACE", trace_lines(trace, width), width));
+        lines.extend(divider_lines("TRACE", trace::lines(trace), width));
     }
     if let Some(plan) = model.investigation.as_ref() {
         lines.extend(divider_lines(
@@ -690,7 +644,7 @@ fn render_zoomed(
     }
     if surface == PhaseSurfaceId::ProveTrace {
         if let Some(trace) = model.trace.as_ref() {
-            return render_trace_screen(frame, area, trace, state);
+            return trace::render(frame, area, trace, state);
         }
     }
     match surface {
@@ -860,6 +814,7 @@ mod investigation_card_tests {
                 "Attempt safe reproduction and record a runtime witness".to_string(),
             ],
             empirical,
+            local_readiness: Some(kuzushi_core::verification::application::LocalVerificationReadiness::NoSupportedBackend),
             model_ladder: vec![
                 "gate: not set (rejection only)".to_string(),
                 "panel: workspace model x 1 pass(es)".to_string(),
@@ -908,16 +863,30 @@ mod investigation_card_tests {
     }
 
     #[test]
-    fn card_discloses_the_model_ladder_in_execution_order() {
+    fn local_mode_shows_the_missing_backend_without_a_model_ladder() {
+        for width in [38, 78] {
+            let lines = investigation_lines(&plan(true), width);
+            let body = text(&lines);
+            let joined = body.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(joined.contains("bubblewrap on Linux"), "{body}");
+            assert!(joined.contains("No model is used"), "{body}");
+            assert!(!body.contains("MODEL SETTINGS"), "{body}");
+            assert!(lines.iter().all(|line| line.width() <= width), "{body}");
+            assert!(joined.contains("explicit confirmation"), "{body}");
+        }
+    }
+
+    #[test]
+    fn card_discloses_the_configured_models() {
         let body = text(&investigation_lines(&plan(false), 100));
-        assert!(body.contains("MODEL LADDER"), "{body}");
+        assert!(body.contains("MODEL SETTINGS"), "{body}");
         assert!(body.contains("gate: not set (rejection only)"), "{body}");
         assert!(
             body.contains("panel: workspace model x 1 pass(es)"),
             "{body}"
         );
         // The ladder sits above the drafted command it summarizes.
-        let ladder_at = body.find("MODEL LADDER").unwrap();
+        let ladder_at = body.find("MODEL SETTINGS").unwrap();
         let command_at = body.find("run verify:finding {").unwrap();
         assert!(ladder_at < command_at, "{body}");
     }
@@ -936,6 +905,7 @@ mod dataflow_prove_tests {
             why: "evidence message-only".to_string(),
             evidence_goals: vec!["Recover structured evidence anchors".to_string()],
             empirical: false,
+            local_readiness: None,
             model_ladder: vec!["panel: workspace model x 1 pass(es)".to_string()],
             command: "run verify:finding {\"fingerprint\":\"abc\"}".to_string(),
         }
@@ -958,6 +928,7 @@ mod dataflow_prove_tests {
 
     fn prove_model() -> ProvePhaseModel {
         ProvePhaseModel {
+            pending_result: None,
             deferral: None,
             finding: Some(finding_with_dataflow()),
             attack_path: TaintFlowPath::default(),
@@ -978,12 +949,12 @@ mod dataflow_prove_tests {
     }
 
     /// The AUDITED DATAFLOW section is additive: it renders after EVIDENCE
-    /// without displacing the P1 MODEL LADDER block.
+    /// without displacing the P1 MODEL SETTINGS block.
     #[test]
     fn prove_renders_audited_dataflow_and_keeps_the_model_ladder() {
         let text = body(&prove_model());
 
-        assert!(text.contains("MODEL LADDER"), "{text}");
+        assert!(text.contains("MODEL SETTINGS"), "{text}");
         assert!(text.contains("AUDITED DATAFLOW"), "{text}");
         assert!(text.contains("guard · src/users.ts:91"), "{text}");
         let evidence_at = text.find("EVIDENCE").unwrap();
@@ -1050,7 +1021,7 @@ mod dataflow_prove_tests {
         let text = body(&model);
 
         assert!(!text.contains("AUDITED DATAFLOW"), "{text}");
-        assert!(text.contains("MODEL LADDER"), "{text}");
+        assert!(text.contains("MODEL SETTINGS"), "{text}");
     }
 
     fn helper_text(finding: &FindingDetailModel) -> String {
@@ -1098,7 +1069,8 @@ mod dataflow_prove_tests {
             scroll: &scroll,
             density: LayoutDensity::Dense,
         };
-        let model = prove_model();
+        let mut model = prove_model();
+        model.investigation = None;
 
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         terminal
@@ -1127,6 +1099,7 @@ mod trace_screen_tests {
 
     fn trace_model() -> TraceEvidenceModel {
         TraceEvidenceModel {
+            last_outcome: None,
             reference: "F-2".to_string(),
             severity: "HIGH".to_string(),
             identity: Some("target demo@1a2b3c4d · threat model @9f8e7d6c".to_string()),
@@ -1153,7 +1126,7 @@ mod trace_screen_tests {
 
     #[test]
     fn trace_screen_separates_recorded_and_operator_requested_paths() {
-        let body = text(&trace_lines(&trace_model(), 100));
+        let body = text(&trace::lines(&trace_model()));
         assert!(
             body.contains("F-2 · HIGH · where does this value travel"),
             "{body}"
@@ -1165,7 +1138,7 @@ mod trace_screen_tests {
         assert!(body.contains("RECORDED PATH"), "{body}");
         assert!(body.contains("▾ source — src/input.rs:4"), "{body}");
         assert!(
-            body.contains("EXPANDED PATH · requested by operator"),
+            body.contains("RECORDED EXPANSIONS · requested by operator"),
             "{body}"
         );
         assert!(body.contains("▾ parse_header — src/parse.rs:32"), "{body}");
@@ -1188,7 +1161,7 @@ mod trace_screen_tests {
         model.open_questions.clear();
         model.evidence_deltas.clear();
         model.next_hint = "no operator-requested hops yet".to_string();
-        let body = text(&trace_lines(&model, 100));
+        let body = text(&trace::lines(&model));
         assert!(
             body.contains("no located evidence anchors recorded"),
             "{body}"

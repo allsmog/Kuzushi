@@ -33,13 +33,14 @@ pub(super) fn trace_evidence_model(
         .map(|snapshot| snapshot.open_questions.clone())
         .unwrap_or_default();
     Some(TraceEvidenceModel {
+        last_outcome: expansion.and_then(|snapshot| snapshot.last_outcome.clone()),
         identity: super::identity::engagement_identity_line(app),
         reference: alias
             .clone()
             .unwrap_or_else(|| detail.identity_label.clone()),
         severity: detail.severity_label.clone(),
         original: original_hops(finding, attack_path, &detail.dataflow_evidence),
-        next_hint: next_hint(&expanded, &open_questions),
+        next_hint: next_hint(&expanded, &open_questions, expansion.is_some()),
         expanded,
         open_questions,
         evidence_deltas: expansion
@@ -118,14 +119,13 @@ fn expanded_hop(step: &crate::app::TraceExpansionStep) -> TraceHopModel {
     }
 }
 
-fn next_hint(expanded: &[TraceHopModel], open_questions: &[String]) -> String {
-    if expanded.is_empty() {
-        "no operator-requested hops yet — Enter drafts trace:expand for this finding".to_string()
+fn next_hint(expanded: &[TraceHopModel], open_questions: &[String], has_outcome: bool) -> String {
+    if expanded.is_empty() && !has_outcome {
+        "no operator-requested hops yet — draft trace expansion for this finding".to_string()
     } else if open_questions.is_empty() {
-        "path deepened — press v to draft the investigation that proves it".to_string()
+        "open an investigation to assess the recorded evidence".to_string()
     } else {
-        "resolve the open questions below, or press v to draft the proving investigation"
-            .to_string()
+        "resolve the recorded open questions, or open an investigation".to_string()
     }
 }
 
@@ -242,13 +242,13 @@ mod tests {
 
     #[test]
     fn next_hint_tracks_expansion_state() {
-        assert!(next_hint(&[], &[]).contains("Enter drafts trace:expand"));
+        assert!(next_hint(&[], &[], false).contains("draft trace expansion"));
         let hop = TraceHopModel {
             label: "f".to_string(),
             location: "a:1".to_string(),
             annotation: String::new(),
         };
-        assert!(next_hint(std::slice::from_ref(&hop), &[]).contains("press v"));
-        assert!(next_hint(&[hop], &["role unknown".to_string()]).contains("open questions"));
+        assert!(next_hint(std::slice::from_ref(&hop), &[], true).contains("open an investigation"));
+        assert!(next_hint(&[hop], &["role unknown".to_string()], true).contains("open questions"));
     }
 }
