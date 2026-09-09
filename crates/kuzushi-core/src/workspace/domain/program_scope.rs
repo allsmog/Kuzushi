@@ -627,6 +627,25 @@ mod tests {
     }
 
     #[test]
+    fn a_forbidden_decoded_reading_is_dropped_rather_than_matched() {
+        // This deny rule matches only the decoded reading
+        // `admin.example:evil.test`; the raw authority carries no `:` at all.
+        // The verdict stays `Unknown` precisely because a decoded `:` is a
+        // forbidden domain code point, so that reading names no host a client
+        // can reach and is dropped instead of judged.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example:*"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("https://admin.example%3aevil.test/"),
+            ScopeVerdict::Unknown
+        );
+    }
+
+    #[test]
     fn percent_decoded_host_only_reports_a_second_reachable_reading() {
         assert_eq!(
             percent_decoded_host("admin.example%2ecom"),
