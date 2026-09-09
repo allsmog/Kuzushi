@@ -1,3 +1,5 @@
+use super::capture_payload::{decode_base64_field, disclosure, rationale_with, DecodedField};
+use super::CaptureTally;
 use crate::findings::{Finding, FindingEvidence, FindingStore, Severity};
 use crate::workspace::{load_program_scope, ProgramScope, WorkspaceTarget};
 use anyhow::{Context, Result};
@@ -7,13 +9,17 @@ use uuid::Uuid;
 
 /// Outcome of one HAR import call. The TUI surfaces `imported` and
 /// `skipped_out_of_scope` so operators see scope-gate hits at a glance
-/// without rereading the transcript.
+/// without rereading the transcript. Every entry lands in exactly one
+/// counter, so the three add up to the entry count of the file.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HarImportSummary {
     pub run_id: String,
     pub imported: usize,
     pub skipped_out_of_scope: usize,
+    /// Entries carrying no request URL. They cannot be scope-checked or
+    /// addressed, so they are dropped — but never without saying how many.
+    pub skipped_unusable: usize,
     pub source_path: String,
 }
 
@@ -34,26 +40,19 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = format!("har-{}", Uuid::new_v4());
-    let (imported, skipped) = store.with_run_lifecycle(&run_id, workspace.root(), || {
-        let mut imported = 0usize;
-        let mut skipped = 0usize;
+    let tally = store.with_run_lifecycle(&run_id, workspace.root(), || {
+        let mut tally = CaptureTally::default();
         for entry in entries {
-            persist_har_entry(
-                &store,
-                &run_id,
-                scope.as_ref(),
-                entry,
-                &mut imported,
-                &mut skipped,
-            )?;
+            persist_har_entry(&store, &run_id, scope.as_ref(), entry, &mut tally)?;
         }
-        Ok(((imported, skipped), imported))
+        Ok((tally, tally.imported))
     })?;
 
     Ok(HarImportSummary {
         run_id,
-        imported,
-        skipped_out_of_scope: skipped,
+        imported: tally.imported,
+        skipped_out_of_scope: tally.skipped_out_of_scope,
+        skipped_unusable: tally.skipped_unusable,
         source_path: path.display().to_string(),
     })
 }
@@ -70,24 +69,23 @@ fn persist_har_entry(
     run_id: &str,
     scope: Option<&ProgramScope>,
     entry: &Value,
-    imported: &mut usize,
-    skipped: &mut usize,
+    tally: &mut CaptureTally,
 ) -> Result<()> {
-    let Some(request) = entry.get("request") else {
+    let url = entry
+        .pointer("/request/url")
+        .and_then(Value::as_str)
+        .filter(|url| !url.is_empty());
+    let (Some(request), Some(url)) = (entry.get("request"), url) else {
+        tally.skipped_unusable += 1;
         return Ok(());
     };
-    let Some(url) = request.get("url").and_then(Value::as_str) else {
+    if scope.is_some_and(|scope| !scope.host_allowed(url)) {
+        tally.skipped_out_of_scope += 1;
         return Ok(());
-    };
-    if let Some(scope) = scope {
-        if !scope.host_allowed(url) {
-            *skipped += 1;
-            return Ok(());
-        }
     }
     let finding = build_har_finding(url, request, entry.get("response"));
     store.insert_finding(run_id, &finding)?;
-    *imported += 1;
+    tally.imported += 1;
     Ok(())
 }
 
@@ -96,21 +94,21 @@ fn build_har_finding(url: &str, request: &Value, response: Option<&Value>) -> Fi
         .get("method")
         .and_then(Value::as_str)
         .unwrap_or("GET");
-    let request_blob = render_har_request(request);
-    let response_blob = response.map(render_har_response).unwrap_or_default();
+    let request_message = render_har_request(request);
+    let response_message = response.map(render_har_response).unwrap_or_default();
+    let notes: Vec<String> = [request_message.note, response_message.note]
+        .into_iter()
+        .flatten()
+        .collect();
     let evidence = FindingEvidence {
         kind: "http-request".to_string(),
         file_path: url.to_string(),
         line: 0,
         snippet: format!("{method} {url}"),
-        rationale: "Imported from HAR capture".to_string(),
+        rationale: rationale_with("Imported from HAR capture", &notes),
         confidence: 50,
-        request_blob: Some(request_blob),
-        response_blob: if response_blob.is_empty() {
-            None
-        } else {
-            Some(response_blob)
-        },
+        request_blob: Some(request_message.text),
+        response_blob: Some(response_message.text).filter(|blob| !blob.is_empty()),
     };
     let summary = format!("{method} {url} (imported)");
     Finding::new_tool(
@@ -125,7 +123,14 @@ fn build_har_finding(url: &str, request: &Value, response: Option<&Value>) -> Fi
     .with_evidence(vec![evidence])
 }
 
-fn render_har_request(request: &Value) -> String {
+/// One rendered HTTP message, with the disclosure its body needed (if any).
+#[derive(Default)]
+struct RenderedMessage {
+    text: String,
+    note: Option<String>,
+}
+
+fn render_har_request(request: &Value) -> RenderedMessage {
     let method = request
         .get("method")
         .and_then(Value::as_str)
@@ -137,18 +142,10 @@ fn render_har_request(request: &Value) -> String {
         .unwrap_or("HTTP/1.1");
     let mut out = format!("{method} {url} {version}\n");
     render_har_headers(request.get("headers"), &mut out);
-    if let Some(body) = request
-        .pointer("/postData/text")
-        .and_then(Value::as_str)
-        .filter(|body| !body.is_empty())
-    {
-        out.push('\n');
-        out.push_str(body);
-    }
-    out
+    append_har_body(out, har_body(request.get("postData")), "request body")
 }
 
-fn render_har_response(response: &Value) -> String {
+fn render_har_response(response: &Value) -> RenderedMessage {
     let status = response.get("status").and_then(Value::as_u64).unwrap_or(0);
     let status_text = response
         .get("statusText")
@@ -160,15 +157,45 @@ fn render_har_response(response: &Value) -> String {
         .unwrap_or("HTTP/1.1");
     let mut out = format!("{version} {status} {status_text}\n");
     render_har_headers(response.get("headers"), &mut out);
-    if let Some(body) = response
-        .pointer("/content/text")
+    append_har_body(out, har_body(response.get("content")), "response body")
+}
+
+/// HAR carries a binary or compressed payload as base64 and says so with
+/// `encoding = "base64"`. Storing that text as-is would present base64 as the
+/// HTTP body, so the encoded form is decoded and anything the decode could not
+/// preserve is disclosed.
+fn har_body(container: Option<&Value>) -> Option<DecodedField> {
+    let container = container?;
+    let text = container
+        .get("text")
         .and_then(Value::as_str)
-        .filter(|body| !body.is_empty())
-    {
-        out.push('\n');
-        out.push_str(body);
+        .filter(|text| !text.is_empty())?;
+    if !har_declares_base64(container) {
+        return Some(DecodedField {
+            text: text.to_string(),
+            note: None,
+        });
     }
-    out
+    Some(decode_base64_field(text))
+}
+
+fn har_declares_base64(container: &Value) -> bool {
+    container
+        .get("encoding")
+        .and_then(Value::as_str)
+        .is_some_and(|encoding| encoding.eq_ignore_ascii_case("base64"))
+}
+
+fn append_har_body(mut text: String, body: Option<DecodedField>, label: &str) -> RenderedMessage {
+    let Some(body) = body else {
+        return RenderedMessage { text, note: None };
+    };
+    text.push('\n');
+    text.push_str(&body.text);
+    RenderedMessage {
+        note: disclosure(label, &body),
+        text,
+    }
 }
 
 fn render_har_headers(headers: Option<&Value>, out: &mut String) {
@@ -306,6 +333,96 @@ mod tests {
 
         assert_eq!(summary.imported, 0);
         assert_eq!(summary.skipped_out_of_scope, 1);
+    }
+
+    fn import_entries(entries: serde_json::Value) -> (HarImportSummary, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let path = tmp.path().join("capture.har");
+        fs::write(
+            &path,
+            serde_json::json!({ "log": { "entries": entries } }).to_string(),
+        )
+        .unwrap();
+
+        (import_har(&workspace, &path).unwrap(), tmp)
+    }
+
+    fn imported_evidence(tmp: &tempfile::TempDir) -> FindingEvidence {
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store.list_findings(10).unwrap()[0].evidence[0].clone()
+    }
+
+    fn entry_with_content(content: serde_json::Value) -> serde_json::Value {
+        serde_json::json!([{
+            "request": { "method": "GET", "url": "https://api.lab.test/x", "headers": [] },
+            "response": { "status": 200, "headers": [], "content": content },
+        }])
+    }
+
+    #[test]
+    fn base64_encoded_response_body_is_decoded_before_it_is_stored() {
+        let encoded = super::super::capture_payload::encode_base64(b"{\"ok\":true}");
+        let (summary, tmp) =
+            import_entries(entry_with_content(serde_json::json!({
+                "text": encoded,
+                "encoding": "base64",
+            })));
+
+        assert_eq!(summary.imported, 1);
+        let evidence = imported_evidence(&tmp);
+        let blob = evidence.response_blob.as_deref().unwrap();
+        assert!(
+            blob.ends_with("{\"ok\":true}"),
+            "a base64 body must not be stored as base64: {blob}"
+        );
+        assert_eq!(evidence.rationale, "Imported from HAR capture");
+    }
+
+    #[test]
+    fn binary_response_body_is_disclosed_instead_of_passing_as_http_text() {
+        let encoded = super::super::capture_payload::encode_base64(b"\x89PNG\r\n\x1a\n");
+        let (_, tmp) = import_entries(entry_with_content(serde_json::json!({
+            "text": encoded,
+            "encoding": "base64",
+        })));
+
+        let evidence = imported_evidence(&tmp);
+        assert!(evidence.response_blob.as_deref().unwrap().contains('\u{FFFD}'));
+        assert_eq!(
+            evidence.rationale,
+            "Imported from HAR capture. The response body is binary or not valid UTF-8; \
+             undecodable bytes are shown as U+FFFD"
+        );
+    }
+
+    #[test]
+    fn a_plain_text_body_is_stored_verbatim_without_disclosure() {
+        let (_, tmp) = import_entries(entry_with_content(serde_json::json!({
+            "text": "{\"ok\":true}",
+        })));
+
+        let evidence = imported_evidence(&tmp);
+        assert!(evidence
+            .response_blob
+            .as_deref()
+            .unwrap()
+            .ends_with("{\"ok\":true}"));
+        assert_eq!(evidence.rationale, "Imported from HAR capture");
+    }
+
+    #[test]
+    fn entries_without_a_request_url_are_counted_rather_than_dropped_silently() {
+        let (summary, _tmp) = import_entries(serde_json::json!([
+            { "response": { "status": 200 } },
+            { "request": { "method": "GET", "headers": [] } },
+            { "request": { "method": "GET", "url": "https://api.lab.test/x", "headers": [] } },
+        ]));
+
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.skipped_out_of_scope, 0);
+        assert_eq!(summary.skipped_unusable, 2);
     }
 
     #[test]
