@@ -12,13 +12,15 @@ pub(crate) struct ConfirmCardModel {
     pub(crate) allowlist: Option<String>,
     pub(crate) allows_decision: bool,
     pub(crate) allows_remembered_yes: bool,
+    pub(crate) minimum_viewport: Option<(u16, u16)>,
 }
 
 pub(crate) fn confirm_card_model(app: &ShellApp) -> Option<ConfirmCardModel> {
-    app.advisory()
-        .pending_confirm
-        .as_ref()
-        .map(ConfirmCardModel::from_confirm)
+    app.advisory().pending_confirm.as_ref().map(|confirm| {
+        let mut model = ConfirmCardModel::from_confirm(confirm);
+        model.allows_decision &= crate::app::allowance::approval_visible(app);
+        model
+    })
 }
 
 impl ConfirmCardModel {
@@ -34,6 +36,7 @@ impl ConfirmCardModel {
             allowlist: confirm.allowlist.clone(),
             allows_decision: confirm.kind.allows_yes(),
             allows_remembered_yes: confirm.kind.allows_remembered_yes(),
+            minimum_viewport: crate::app::allowance::minimum_viewport(confirm.kind),
         }
     }
 }

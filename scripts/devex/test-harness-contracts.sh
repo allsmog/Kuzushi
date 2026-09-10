@@ -72,10 +72,23 @@ if devex_file_contains_any "$TEST_ROOT/wait-screen.txt" \
 fi
 devex_footer_is_navigate $'Esc prompt\nSCAN VIEW › NAVIGATE' \
   || { printf 'FAIL: Navigate footer was not recognized\n' >&2; exit 1; }
+devex_footer_is_navigate $'last command\nlast notice\nNAVIGATION MODE — view keys active · Esc returns to prompt' \
+  || { printf 'FAIL: generic Navigate footer was not recognized\n' >&2; exit 1; }
 if devex_footer_is_navigate $'Esc prompt\nERROR · Review is locked  Esc dismiss'; then
   printf 'FAIL: dismissible error was mistaken for Navigate readiness\n' >&2
   exit 1
 fi
+
+for prompt in 'kz> report' 'kuzushi> report' 'MAP VIEW › report' 'kz> report  export'; do
+  devex_prompt_contains_draft "$prompt" report \
+    || { printf 'FAIL: intact draft was not recognized: %s\n' "$prompt" >&2; exit 1; }
+done
+for prompt in 'kz> reports' 'kz> re' 'kz> report export' 'NAVIGATION MODE'; do
+  if devex_prompt_contains_draft "$prompt" report; then
+    printf 'FAIL: absent or changed draft was accepted: %s\n' "$prompt" >&2
+    exit 1
+  fi
+done
 
 TARGET_FIXTURE="$TEST_ROOT/target"
 mkdir -p "$TARGET_FIXTURE"

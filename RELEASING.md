@@ -5,6 +5,100 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- Spend databases add a durable ledger identity and investigation allowance
+  revision/reservation tables. Existing dollar rows and operation caps retain
+  their meaning. Deposits now read current operation caps and reserve within a
+  SQLite write transaction across workers. Stage failures or incomplete cost
+  receipts no longer refund context-generation deposits as zero. These are
+  estimated commitments, not guaranteed maximum provider charges.
+  The additive `kuzushi_core::allowance` API uses version-1 approval/snapshot
+  documents with explicit model, call limits, protected review and revision
+  checks. `AgentRuntime::with_allowance_binding` opts a runtime into host-bound
+  accounting. The bundled LangGraph bridge reserves each provider attempt,
+  including internal turns and transport retries, and disables hidden SDK
+  retries in this mode. Tracing preserves the binding. Other adapters reject
+  binding unless they implement this contract. Supported built-in descriptors
+  expose the additive JSON `allowanceRef` option. Shared prepared dispatch
+  validates it and binds the runtime before preflight; nested dispatch cannot
+  replace inherited accounting. Ordinary unbound calls retain their existing
+  behavior. This API does not itself approve an investigation or job list.
+
+- `campaign:approve-allowance` records exact limits under explicit authorization;
+  `campaign:allowance` reads them without creating a spend ledger. Approval is a
+  Map preparation action with `phaseResult=false`, not an accepted Map or Scan.
+  The shell confirmation shows the model, revision, total calls and protected
+  review allocation. Its current card requires 80×24 before approval; smaller
+  terminals preserve the pending request and support cancellation. A dedicated
+  narrow-terminal allowance editor remains in progress. No jobs start when an
+  allowance is approved.
+
+- `campaign:study` compiles the existing scan-batch format without starting
+  children, with three passes and one worker by default. Its additive
+  `requiresWorkApproval` marker blocks launch until exact plan approval.
+  `campaign:approve-allowance` optionally accepts `campaignId`,
+  `campaignPlanSha256`, `campaignJobs` and `maxJobAttempts` to bind those jobs.
+  Approval/snapshot version 1 gains an optional `workPlan`; Rust struct-literal
+  callers should set it to `None` for legacy allowance-only behavior. The
+  additive SQLite `investigation_work_attempts` table preserves failed,
+  canceled and interrupted starts. Revised approvals cannot erase consumed
+  attempts or reuse their identities for changed input/source/configuration.
+  The campaign dispatcher attaches allowance references automatically and
+  counts quota failures against approved attempt limits. Shared dispatch
+  verifies the job and atomically claims it before executor entry. These plan
+  approvals currently support discovery scan batches; immutable context
+  isolation and review/learning job planning remain in progress. The shell
+  requires 120×36 for the combined work/allowance receipt and preserves the
+  pending request on smaller screens. Older campaign plans retain their
+  existing launch contract.
+
+- Source indexing now evaluates ignored directory names relative to the selected
+  workspace. Repositories beneath an ancestor named `target`, `dist`,
+  `node_modules` or `bazel-*` are no longer silently hashed as empty. Recompute
+  older identities from affected paths before claiming unchanged dirty content;
+  previously frozen study keys may correctly require a new plan.
+
+- Runtime failure metadata adds `allowance_refused` to `run.items.schema.json`
+  and `run.failures.schema.json`. Exhaustive consumers must accept this category.
+  The optional `stdio-v1` provider-admission channel requires a startup
+  acknowledgement within ten seconds; missing acknowledgement never falls
+  back to an unaccounted call. Legacy bridge requests without an allowance keep
+  their existing protocol. Unresolved reservations persist after cancellation,
+  and absent dollar receipts remain unknown. Call limits do not promise a
+  strict dollar ceiling. Failure handoffs offer reporting and explicit allowance
+  review instead of recommending automatic stage resumption for this category.
+
+- Tool descriptors add the `report` phase. `report:build` and `report:sarif`
+  move from `fix` to `report`; tool names, outputs, saved workflow phases and
+  historical receipts retain their meaning. Consumers with exhaustive phase
+  enums must accept `report`. Re-approve local KWP descriptors when changing
+  their phase. Reports are available at any autonomy posture and do not advance
+  the persisted workflow; explicit export authorization still applies.
+  Repository execution and external actions cannot use the Report phase.
+
+- Repository size and model recommendations no longer preselect subdivision.
+  The Map planner retains whole-repository work and an explicit scope action,
+  including after a failed subdivision attempt.
+
+- Repository inventory adds an optional `inspection` receipt with enumeration
+  mode, entry/byte limits, omitted paths, and files inspected only as prefixes.
+  Missing receipts in older artifacts mean the inspection extent is unknown.
+  Prefix inspection now marks the inventory partial. Existing inventory fields
+  retain their types, and existing artifacts are not rewritten.
+
+- `pack:suggest-shards` derives at most eight candidates from one bounded
+  inventory. Small repositories and parents with loose files can remain whole.
+  New drafts rank extracted entry points (`signals.entrypoints`) rather than
+  substring hits. New candidate IDs include a path digest to avoid slug
+  collisions; saved shard manifests and scope trees are unchanged until the
+  operator explicitly replaces them. Review scope references when accepting a
+  new tree. `emitScopes` refuses incomplete inventory; the draft remains for
+  inspection. Child scopes inherit parent context and threat-model sections.
+
+- The interactive cost-halt action opens a cap editor instead of doubling the
+  cap. Editing and cancellation preserve the halt; a specific amount above
+  observed spend must be approved to continue. Unknown proposal estimates no
+  longer pass a configured budget check as zero-cost work.
+
 - Static `verify:finding` results now use `exploitable: null` for incomplete
   evidence, unsupported language, or an unresolved panel. These outcomes have
   `status: partial` and cannot replace selected proof. Consumers must handle
@@ -756,3 +850,18 @@ while retaining raw v1/v2 events and canonical run history. Unknown historical
 tools retain existing validation and visibility. This migration does not accept,
 discard, delete or rewrite old attempts and does not select another proof.
 The package/file module manifest schema is unchanged.
+
+### Revision comparison disclosure
+
+Run comparison adds `baseSource`, `compareSource`, and `absenceCoverage` to CLI
+JSON. Existing classification fields remain compatible. Source metadata includes
+the complete recorded Git SHA, branch, dirty state, and available indexed-content
+and snapshot hashes. Legacy hashes remain unknown; a dirty flag alone does not
+identify a working tree. Hash equality does not establish complete scan coverage.
+
+The shell and CLI use the same coverage check to separate absent findings covered
+by a completed engine receipt from findings that were not reassessed. Missing or
+partial receipts, missing finding snapshots, and out-of-scope paths cannot prove
+absence. Nondeterministic absence never changes a finding's verdict or establishes
+a fix. Existing deterministic reconciliation remains a separate compatibility
+classification; this change does not add a human-confirmed fix workflow.

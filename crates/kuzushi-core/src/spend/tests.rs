@@ -148,3 +148,75 @@ mod tests {
         assert!(s.deposit(Operation::Triage, 1.0).is_err());
     }
 }
+
+#[cfg(test)]
+mod workers {
+    use super::super::*;
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn independent_connections_reserve_under_one_operation_cap() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ledger.sqlite3");
+        let owner = SpendLimiter::open(&path).unwrap();
+        owner.set_cap(Operation::Triage, 1.0).unwrap();
+        let workers: Vec<_> = (0..12).map(|_| SpendLimiter::open(&path).unwrap()).collect();
+        let barrier = Arc::new(Barrier::new(workers.len()));
+        let threads: Vec<_> = workers.into_iter().map(|worker| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                worker.deposit(Operation::Triage, 1.0).is_ok()
+            })
+        }).collect();
+        let admitted = threads.into_iter().map(|thread| usize::from(thread.join().unwrap())).sum::<usize>();
+        assert_eq!(admitted, 1);
+        assert_eq!(owner.total_spent_all().unwrap(), 1.0);
+    }
+
+    #[test]
+    fn admission_and_remaining_observe_other_connections_cap_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ledger.sqlite3");
+        let owner = SpendLimiter::open(&path).unwrap();
+        let worker = SpendLimiter::open(&path).unwrap();
+        owner.set_cap(Operation::Triage, 2.0).unwrap();
+        assert_eq!(worker.remaining(Operation::Triage).unwrap(), 2.0);
+        let _ticket = worker.deposit(Operation::Triage, 1.0).unwrap();
+        owner.set_cap(Operation::Triage, 1.0).unwrap();
+        assert_eq!(worker.remaining(Operation::Triage).unwrap(), 0.0);
+        assert!(worker.deposit(Operation::Triage, 1.0).is_err());
+    }
+
+    #[test]
+    fn settlement_cannot_overwrite_a_ticket_in_another_ledger() {
+        let first = SpendLimiter::open_in_memory().unwrap();
+        let second = SpendLimiter::open_in_memory().unwrap();
+        let ticket = first.deposit(Operation::Triage, 1.0).unwrap();
+        let _other = second.deposit(Operation::Triage, 1.0).unwrap();
+        assert!(second.refund(ticket, 0.0).unwrap_err().to_string().contains("another ledger"));
+        assert_eq!(first.total_spent_all().unwrap(), 1.0);
+        assert_eq!(second.total_spent_all().unwrap(), 1.0);
+    }
+
+    #[test]
+    fn reopening_preserves_unsettled_tickets_and_allows_explicit_settlement() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ledger.sqlite3");
+        let first = SpendLimiter::open(&path).unwrap();
+        let ticket = first.deposit(Operation::Triage, 1.0).unwrap();
+        drop(first);
+        let resumed = SpendLimiter::open(&path).unwrap();
+        assert_eq!(resumed.total_spent_all().unwrap(), 1.0);
+        resumed.refund(ticket, 0.5).unwrap();
+        assert_eq!(resumed.total_spent_all().unwrap(), 0.5);
+    }
+
+    #[test]
+    fn invalid_legacy_ceiling_fails_closed_at_admission() {
+        let limiter = SpendLimiter::open_in_memory().unwrap();
+        limiter.set_hard_ceiling(Some(f64::NAN));
+        assert!(limiter.deposit(Operation::Triage, 1.0).is_err());
+        assert_eq!(limiter.total_spent_all().unwrap(), 0.0);
+    }
+}

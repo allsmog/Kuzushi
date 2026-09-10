@@ -1,8 +1,10 @@
+mod bridge_observation;
 mod bridge_payloads;
 mod bridge_process;
 #[cfg(test)]
 mod bridge_process_tests;
 mod next_step_bridge;
+mod provider_admission;
 mod response_frames;
 mod response_text;
 mod runtime_config;

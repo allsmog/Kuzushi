@@ -29,7 +29,7 @@ fn cost_cap_halt_model_formats_spend_against_limit() {
         model.header,
         "■ COST CAP HALT · spent $1.5000 / cap $1.0000"
     );
-    assert_eq!(model.compact, "COST CAP: c=continue · a=abort");
+    assert_eq!(model.compact, "COST CAP: c=review cap · a=abort");
 }
 
 #[test]

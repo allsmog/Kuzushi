@@ -73,6 +73,9 @@ pub struct ComparedFinding {
     pub class: ScanComparisonClass,
     /// For `NotRescanned`: the specific proof the compare run is missing.
     pub reason: Option<String>,
+    /// For an absent finding, why the later run cannot establish reassessment.
+    /// Independent of the legacy resolution classification and never proof of a fix.
+    pub reassessment_block: Option<String>,
     pub before: Option<ScanFindingSignature>,
     pub after: Option<ScanFindingSignature>,
 }

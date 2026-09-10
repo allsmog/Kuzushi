@@ -13,10 +13,28 @@ pub struct RepositoryInventory {
     pub entrypoints: Vec<InventoryEntrypoint>,
     pub routes_controllers: Vec<InventoryRouteController>,
     pub generated_vendor_paths: Vec<InventoryPathClassification>,
+    /// Missing on legacy inventories: the inspection extent is then unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspection: Option<InventoryInspection>,
     /// Present when a walk budget was exhausted: the inventory is usable but
     /// PARTIAL, and downstream surfaces must never label it complete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncation: Option<InventoryTruncation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryInspection {
+    /// Enumerated regular files, including non-source files and uninspected content.
+    #[serde(default)]
+    pub files: Vec<String>,
+    pub enumeration: String,
+    pub entries: usize,
+    pub inspected_bytes: usize,
+    pub max_entries: usize,
+    pub max_inspected_bytes: usize,
+    pub max_file_inspection_bytes: usize,
+    pub omitted_paths: Vec<InventoryPathClassification>,
+    pub truncated_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -89,6 +107,8 @@ pub struct InventoryPathClassification {
 
 #[derive(Debug, Default)]
 pub(crate) struct InventoryBuilder {
+    pub(crate) enumerated_files: BTreeSet<String>,
+    pub(crate) omitted_paths: BTreeMap<String, InventoryPathClassification>,
     pub(crate) languages: BTreeMap<String, LanguageAccumulator>,
     pub(crate) source_files: BTreeMap<String, InventorySourceFile>,
     pub(crate) manifests: BTreeMap<String, InventoryFile>,

@@ -79,6 +79,7 @@ fn model_failure_recovery_has_one_action_for_every_known_category() {
         Class::Timeout,
         Class::Transport,
         Class::RuntimeError,
+        Class::AllowanceRefused,
     ];
     for class in classes {
         assert_eq!(
@@ -92,4 +93,18 @@ fn model_failure_recovery_has_one_action_for_every_known_category() {
         assert!(text.contains("Next: "), "{class}");
         assert!(!text.contains("RAW_PROVIDER_RESPONSE"));
     }
+}
+
+#[test]
+fn model_failure_allowance_stop_preserves_evidence_without_suggesting_a_retry() {
+    let failure = RuntimeFailure::allowance_handshake_timeout();
+    let audit = AgentCallAudit::test().with_failure(&anyhow::Error::new(failure));
+    let text = model_failure_text(&audit, "PRIVATE_LEDGER_ERROR", Some("bounded-call"));
+    assert!(text.contains("Investigation allowance refused"));
+    assert!(text.contains("No provider request was admitted"));
+    assert!(text.contains("Finish with /report"));
+    assert!(text.contains("review the investigation allowance and remaining work"));
+    assert!(!text.contains("retry"));
+    assert!(!text.contains("/model"));
+    assert!(!text.contains("PRIVATE_LEDGER_ERROR"));
 }

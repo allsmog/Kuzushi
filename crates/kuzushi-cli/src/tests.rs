@@ -1551,6 +1551,15 @@ mod tests {
             "same-target completed semgrep re-scan proves absence"
         );
         assert!(diff.keys_of(ScanComparisonClass::NotRescanned).is_empty());
+        let json: serde_json::Value =
+            serde_json::from_str(&runs_diff_output(&diff, true).unwrap()).unwrap();
+        assert!(json.get("baseSource").is_some());
+        assert!(json["baseSource"]["treeHash"].is_null());
+        assert_eq!(json["absenceCoverage"][0]["status"], "not_reassessed");
+        assert!(json["absenceCoverage"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("receipt"));
         assert_eq!(diff.stable_count(), 1);
         let changed = diff.changed();
         assert_eq!(changed.len(), 1);

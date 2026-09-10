@@ -22,6 +22,7 @@ pub use crate::pr_comment::{
 };
 pub use crate::remediation::patch::run_patch_finding;
 pub use crate::source_span::{extract_source_span, SourceSpan};
+pub use crate::spend::allowance;
 pub use crate::spend::{
     parse_budget_flag, Operation as SpendOperation, SpendError, SpendLimiter, SpendTicket,
 };

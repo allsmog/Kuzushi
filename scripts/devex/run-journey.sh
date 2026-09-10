@@ -249,6 +249,16 @@ d_size() { # COLSxROWS (ignored when --size override is set)
   J_COLS=${1%x*}; J_ROWS=${1#*x}
 }
 
+d_resize() { # Resize a running journey; subsequent captures record the new size.
+  ensure_session
+  [[ "$1" =~ ^[1-9][0-9]*x[1-9][0-9]*$ ]] || devex_die "resize: expected positive COLSxROWS"
+  local cols=${1%x*} rows=${1#*x}
+  tmux resize-window -t "$SESSION" -x "$cols" -y "$rows"
+  J_COLS=$cols
+  J_ROWS=$rows
+  report step "resize: $1"
+}
+
 d_cwd() {
   local dir; dir=$(expand_tokens "$1")
   mkdir -p "$dir"
@@ -371,6 +381,19 @@ d_type() { # literal text, no Enter
   report step "type: $1"
 }
 
+d_paste_file() { # bounded literal bracketed paste, no Enter
+  ensure_session
+  local path bytes buffer
+  path=$(expand_tokens "$1")
+  [ -f "$path" ] || { fail "paste-file requires a regular file: $path"; return 1; }
+  bytes=$(wc -c < "$path")
+  [ "$bytes" -le 65536 ] || { fail "paste-file exceeds 64 KiB: $path"; return 1; }
+  buffer="${SESSION}-paste"
+  tmux load-buffer -b "$buffer" "$path"
+  tmux paste-buffer -d -p -b "$buffer" -t "$SESSION"
+  report step "paste-file: $path ($bytes bytes)"
+}
+
 d_submit() { # literal text + Enter (the common "type a verb" case)
   ensure_session
   # Normalize the shell to a clean Prompt before typing. Esc is a toggle
@@ -415,13 +438,11 @@ d_submit() { # literal text + Enter (the common "type a verb" case)
       # A clean draft ends the line, or is followed by a two-space-separated
       # inline completion ghost (e.g. "› findings  export"). A one-character
       # corruption ("› scanj") matches neither form.
-      case $line in
-        *"› $text" | *"kuzushi> $text" \
-        | *"› $text  "* | *"kuzushi> $text  "*)
+      if devex_prompt_contains_draft "$line" "$text"; then
           tmux send-keys -t "$SESSION" Enter
           report step "submit: $1"
-          return 0;;
-      esac
+          return 0
+      fi
       sleep 0.25
     done
     tmux send-keys -t "$SESSION" Escape       # clear the corrupted draft
@@ -812,6 +833,7 @@ dispatch() { # <directive> <value>
     name)            printf '%s\n' "$2" >> "$REPORT";;
     note)            printf '  note: %s\n' "$2" >> "$REPORT";;
     size)            d_size "$2";;
+    resize)          d_resize "$2";;
     cwd)             d_cwd "$2";;
     env)             d_env "$2";;
     env-unset)       d_env_unset "$2";;
@@ -823,6 +845,7 @@ dispatch() { # <directive> <value>
     launch-raw)      d_launch_raw "$2";;
     keys)            d_keys "$2";;
     type)            d_type "$2";;
+    paste-file)      d_paste_file "$2";;
     submit)          d_submit "$2";;
     nav-mode)        d_nav_mode;;
     phase-result)    d_phase_result "$2";;

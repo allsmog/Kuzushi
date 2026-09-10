@@ -219,6 +219,7 @@ impl ShellApp {
             | ShellView::Activity
             | ShellView::SastTasks
             | ShellView::Context
+            | ShellView::FailureHandoff
             | ShellView::ProjectModel
             | ShellView::StrategyQueue
             | ShellView::Workspace

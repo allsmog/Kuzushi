@@ -132,3 +132,6 @@ pub fn load_scan_stage_data(
         .rev()
         .find(|receipt| receipt.phase == WorkflowPhase::Scan && receipt.scan.is_some()))
 }
+
+mod scope;
+pub(crate) use scope::scan_paths_cover_file;

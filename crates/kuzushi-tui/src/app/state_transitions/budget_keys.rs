@@ -15,7 +15,7 @@ impl ShellApp {
             return self.commit_setup_budget();
         }
         if key.code == KeyCode::Esc && key.modifiers.is_empty() {
-            self.router.setup_mut().finish_editor();
+            self.finish_budget_editor();
         } else {
             self.router.setup_mut().edit_budget_key(key);
         }
@@ -34,7 +34,8 @@ impl ShellApp {
         let result = parse_setup_budget(
             self.router.setup().budget_draft(),
             self.config().operator.spend_hard_ceiling_usd,
-        );
+        )
+        .and_then(|value| self.validate_halted_budget(value));
         match result {
             Ok(value) => self.apply_setup_budget(value),
             Err(error) => self.router.setup_mut().set_budget_error(error),
@@ -43,13 +44,42 @@ impl ShellApp {
     }
 
     fn apply_setup_budget(&mut self, value: Option<f64>) {
+        let previous = self.session().session_budget_usd();
         self.session_mut().set_session_budget_usd(value);
-        self.router.setup_mut().finish_editor();
+        self.advisory_mut().budget_halt = None;
+        self.maybe_trigger_budget_halt();
+        self.finish_budget_editor();
+        let previous = previous
+            .map(|amount| format!("${amount:?}"))
+            .unwrap_or_else(|| "not set".into());
         let message = match value {
-            Some(value) => format!("session budget set to ${value:?}"),
+            Some(value) => format!("session budget set to ${value:?} (previous: {previous})"),
             None => "session budget unset".to_string(),
         };
         self.log("setup", message);
+    }
+
+    fn validate_halted_budget(&self, value: Option<f64>) -> Result<Option<f64>, String> {
+        if !self.is_budget_halted() {
+            return Ok(value);
+        }
+        if !self.session().cost_accounting_is_complete() {
+            return Err("Resolve incomplete cost accounting before raising the cap".into());
+        }
+        let spent = self.session().session_cost_usd();
+        if !value.is_some_and(|amount| amount > spent) {
+            return Err(format!(
+                "Approve a new cap above spent ${spent:?}; empty cannot clear this halt"
+            ));
+        }
+        Ok(value)
+    }
+
+    fn finish_budget_editor(&mut self) {
+        self.router.setup_mut().finish_editor();
+        if let Some(origin) = self.router.setup_mut().take_budget_return_view() {
+            self.set_shell_view(origin);
+        }
     }
 }
 

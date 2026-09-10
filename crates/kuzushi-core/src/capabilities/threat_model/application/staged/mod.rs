@@ -6,6 +6,7 @@ pub(crate) use provenance::*;
 pub(crate) use refine::*;
 
 mod advisories;
+mod budget;
 mod coverage;
 mod evidence;
 mod gap_fill;

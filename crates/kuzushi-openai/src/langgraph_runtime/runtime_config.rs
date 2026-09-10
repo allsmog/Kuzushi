@@ -16,6 +16,7 @@ pub struct LangGraphRuntime {
     pub(crate) oauth_allow_env_token: bool,
     pub(crate) cancellation: Option<ScanCancellation>,
     pub(crate) response_text: Option<super::ResponseTextObserver>,
+    pub(crate) allowance: Option<kuzushi_core::allowance::AllowanceBinding>,
     pub(crate) retry: BridgeRetryPolicy,
 }
 
@@ -108,6 +109,7 @@ impl LangGraphRuntime {
             oauth_allow_env_token: oauth.allow_env_token,
             cancellation: None,
             response_text: None,
+            allowance: None,
             retry: BridgeRetryPolicy::from_runtime_config(runtime),
         })
     }

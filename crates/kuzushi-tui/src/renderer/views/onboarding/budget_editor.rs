@@ -4,7 +4,12 @@ pub(super) fn budget_editor_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     let width = area.width as usize;
     let mut lines = vec![divider("SESSION BUDGET", area.width)];
     lines.extend(budget_policy_lines(app, width));
-    lines.push(muted(&fit("Budget USD · empty + Enter unsets", width)));
+    let field_label = if app.is_budget_halted() {
+        "New stop USD · Enter approves"
+    } else {
+        "Stop USD · empty + Enter unsets"
+    };
+    lines.push(muted(&fit(field_label, width)));
     let errors = budget_error_lines(app, width);
     let field_height = (area.height as usize)
         .saturating_sub(lines.len() + errors.len() + 1)
@@ -34,14 +39,22 @@ fn budget_policy_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
         app.config().operator.spend_hard_ceiling_usd,
         "not configured",
     );
-    [
-        format!("Current session cap: {saved}"),
-        format!("Hard ceiling: {ceiling}"),
-    ]
-    .into_iter()
-    .flat_map(|text| wrap_text(&text, width))
-    .map(|line| muted(&line))
-    .collect()
+    let mut policy = vec![
+        format!("Observed spend stop: {saved}"),
+        format!("Maximum setting: {ceiling}"),
+        "Cost receipts can arrive after overspend.".to_string(),
+    ];
+    if app.is_budget_halted() {
+        policy.push(format!(
+            "Spent: ${:?} · work remains halted until approval",
+            app.session().session_cost_usd()
+        ));
+    }
+    policy
+        .into_iter()
+        .flat_map(|text| wrap_text(&text, width))
+        .map(|line| muted(&line))
+        .collect()
 }
 
 fn budget_amount_label(value: Option<f64>, unset: &str) -> String {

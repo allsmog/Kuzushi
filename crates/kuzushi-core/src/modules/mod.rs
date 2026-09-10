@@ -53,6 +53,7 @@ pub(in crate::modules) use verify_module::*;
 pub(in crate::modules) use worklist_module::*;
 pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
+mod allowance_dispatch;
 mod application;
 pub mod autonomy;
 mod builtins;

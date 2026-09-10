@@ -87,11 +87,13 @@ fn single_campaign_status(
 ) -> Result<Value> {
     let snapshot = load_campaign_snapshot(root, campaign_id)?;
     let counts = snapshot.state_counts();
+    let plan_digest = super::campaign_plan_digest(root, campaign_id)?;
     let output = format!(
-        "campaign {} — {} job(s): {}",
+        "campaign {} — {} job(s): {}\nPlan digest: {}",
         campaign_id,
         snapshot.jobs.len(),
-        counts_line(&counts)
+        counts_line(&counts),
+        plan_digest,
     );
     Ok(crate::module_result::completed_output_result(
         output.clone(),
@@ -99,6 +101,7 @@ fn single_campaign_status(
         json!({
             "campaignId": snapshot.campaign_id,
             "planPath": super::campaign_plan_path(root, campaign_id).display().to_string(),
+            "planSha256": plan_digest,
             "tool": snapshot.tool,
             "createdAtMs": snapshot.created_at_ms,
             "pausedUntilMs": snapshot.paused_until_ms,

@@ -1692,6 +1692,9 @@ impl ShellApp {
             let effects = self.resolve_model_switch_consent(action.outcome);
             return InputUpdate::handled_with_effects(effects);
         }
+        if resolved.is_none() && self.advisory().pending_confirm.is_some() {
+            return InputUpdate::handled();
+        }
         let launch = self.confirmed_run_launch(action, resolved.as_ref());
         self.advisory_mut().pending_confirm_launch = None;
         match launch {
@@ -1720,7 +1723,7 @@ impl ShellApp {
     }
 
     pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if !self.is_budget_halted() {
+        if !self.is_budget_halted() || self.budget_editor_open() {
             return InputUpdate::ignored();
         }
         let effect = match (key.code, key.modifiers.is_empty()) {

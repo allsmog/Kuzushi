@@ -127,7 +127,15 @@ json_escape() { # <text> — JSON string body, quotes excluded
 devex_footer_is_navigate() { # <last-three-lines>
   case $1 in
     *'Esc dismiss'*) return 1;;
-    *'Esc prompt'*) return 0;;
+    *'Esc prompt'*|*'NAVIGATION MODE — view keys active'*) return 0;;
+    *) return 1;;
+  esac
+}
+
+devex_prompt_contains_draft() { # <prompt-line> <literal-draft>
+  case $1 in
+    *"› $2" | *"kz> $2" | *"kuzushi> $2" \
+    | *"› $2  "* | *"kz> $2  "* | *"kuzushi> $2  "*) return 0;;
     *) return 1;;
   esac
 }

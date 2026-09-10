@@ -1,11 +1,10 @@
 use super::super::*;
+use super::budget::{is_spend_cap_exhausted, reserve_stage_budget, settle_gap_fill_cost, settle_stage_budget, staged_spend_limiter};
 use super::gap_fill::{run_gap_fill, GapFillOutcome};
 use super::research::{research_artifact_json, research_stats, run_research, ResearchDossier};
 use super::synthesis::staged_synthesis_prompt;
 use super::variant_scan::{run_variant_scan, variant_scan_stats, VariantScanOutcome};
-use crate::spend::{Operation, SpendLimiter, SpendTicket};
-
-const ESTIMATED_STAGE_DEPOSIT_USD: f64 = 1.0;
+use crate::spend::{SpendLimiter, SpendTicket};
 
 struct StagedBuildOutput {
     generated: GeneratedThreatModel,
@@ -319,7 +318,7 @@ fn record_gap_fill_cost(
     generated: &mut GeneratedThreatModel,
     outcome: &GapFillOutcome,
 ) -> Result<()> {
-    settle_gap_fill_cost(spend, ticket, ledger_usd(outcome.cost))?;
+    settle_gap_fill_cost(spend, ticket, outcome.cost.exact_usd())?;
     generated.cost = generated
         .cost
         .checked_add(outcome.cost, "staged threat-model cost")?;
@@ -529,66 +528,6 @@ fn budget_exhausted(budget_usd: Option<f64>, spent: crate::runtime::RuntimeCostR
 
 /// The workspace spend ledger settles to the estimate when the provider
 /// reported no charge, so unmetered calls still count toward its ceiling.
-fn ledger_usd(cost: crate::runtime::RuntimeCostReport) -> f64 {
-    cost.estimated_total_usd().unwrap_or(cost.observed_usd())
-}
-
-/// Workspace spend-ledger protection (hard ceiling + operator caps), same
-/// shape as full-mode chunks: deposit an estimate, refund to actual.
-fn staged_spend_limiter(ctx: &ToolExecutionContext<'_>) -> Result<Option<SpendLimiter>> {
-    ctx.workspace
-        .map(|workspace| {
-            SpendLimiter::open_with_hard_ceiling(
-                workspace.findings_db_path(),
-                ctx.config.operator.spend_hard_ceiling_usd,
-            )
-        })
-        .transpose()
-}
-
-fn reserve_stage_budget(spend: Option<&SpendLimiter>) -> Result<Option<SpendTicket>> {
-    match spend {
-        Some(limiter) => limiter
-            .deposit(Operation::ThreatModelStaged, ESTIMATED_STAGE_DEPOSIT_USD)
-            .context("threat-model staged: spend deposit failed")
-            .map(Some),
-        None => Ok(None),
-    }
-}
-
-fn settle_stage_budget(
-    spend: Option<&SpendLimiter>,
-    ticket: Option<SpendTicket>,
-    costed: &Result<crate::structured_output::CostedStructuredJson<Value>>,
-) -> Result<()> {
-    let actual = match costed.as_ref().map(|costed| costed.cost_report()) {
-        Ok(Ok(cost)) => ledger_usd(cost),
-        _ => 0.0,
-    };
-    settle_gap_fill_cost(spend, ticket, actual)
-}
-
-fn settle_gap_fill_cost(
-    spend: Option<&SpendLimiter>,
-    ticket: Option<SpendTicket>,
-    actual_usd: f64,
-) -> Result<()> {
-    if let (Some(limiter), Some(ticket)) = (spend, ticket) {
-        limiter.refund(ticket, actual_usd)?;
-    }
-    Ok(())
-}
-
-fn is_spend_cap_exhausted(error: &anyhow::Error) -> bool {
-    matches!(
-        error.downcast_ref::<crate::spend::SpendError>(),
-        Some(
-            crate::spend::SpendError::Exceeded { .. }
-                | crate::spend::SpendError::HardCeilingExceeded { .. }
-        )
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

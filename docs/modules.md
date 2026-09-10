@@ -20,6 +20,31 @@ for Core, Labs, and Compatibility discovery policy;
 [`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
 for the historical SDK audit that shaped the current surface.
 
+## Report surface
+
+`report:build` and `report:sarif` declare `phase: report`, a catalog and dispatch
+surface separate from the persisted Map/Scan/Review/Prove/Fix workflow. Reports
+export existing evidence at any autonomy posture and never advance a workflow
+phase. File exports retain descriptor authorization. The Report phase permits
+read, workspace-write and target-write effects; repository-execute and
+external-action descriptors are rejected. Phase metadata never schedules work.
+
+## Bounded shard proposals
+
+`pack:suggest-shards` uses one repository inventory and proposes at most eight
+scopes. It keeps small repositories whole and retains a parent when splitting
+would omit loose files. The result adds `inventoryComplete`,
+`inventoryPartialReason`, `maxProposedScopes`, and `inspection`; `inspection`
+records enumeration mode, resource limits, omitted paths, and prefix-only file
+inspection. A Git-index inventory covers tracked working copies, not untracked
+files. A partial inventory cannot establish full repository coverage.
+
+`signals.entrypoints` counts inventory-derived entry points. Candidate IDs have
+a stable path digest suffix. Existing saved manifests are not changed by
+generating a draft. Explicit `emitScopes` keeps its existing scope-tree output,
+but refuses partial inventory; emitted child scopes inherit parent context and
+threat-model sections. No proposal launches a scan or performs model calls.
+
 ## Source-bound model Scan results
 
 The registered `agentic-sast:scan`, `carlini-threat-hunt:run`, and
@@ -292,6 +317,61 @@ execution policy is resolved, missing or incompatible runtime/model selection
 is an error. A tool must not add a literal default model, a provider fallback
 chain, or a target-local model override.
 
+### Provider-call allowances
+
+`AgentRuntime::with_allowance_binding` accepts host-approved investigation,
+revision, run, work and model attribution. The bundled LangGraph runtime uses
+the durable allowance ledger before each underlying provider attempt. This
+includes internal model turns and transport retries; the admitted model disables
+hidden SDK retries. The tracing wrapper forwards the binding and retains the
+normal model-call lifecycle. Adapters that do not implement the contract refuse
+binding rather than running without accounting.
+
+The optional bridge channel is `providerAdmission: "stdio-v1"`. The host sends
+one newline-terminated request, keeps stdin for admission replies, and reads
+framed `provider_admission` messages from stdout. A version-1 hello precedes
+reservations. The host mints each request identity, persists it before granting
+transport, and acknowledges its receipt after settlement. A missing hello stops
+the bridge after ten seconds. Cancellation or broken receipt exchange retains
+the reservation. Missing dollar usage is unknown, even when a call failed.
+Neither this channel nor the existing retrospective dollar stop guarantees a
+strict dollar ceiling.
+
+This is an opt-in dispatch contract under implementation. Eligible built-ins
+declare `allowanceRef` as a JSON option containing `schemaVersion: 1`,
+`investigationId`, the approved `revision`, and `workId`. Shared prepared
+dispatch checks the reference and selected model before runtime preflight.
+The tool descriptor supplies its work category; input cannot label discovery
+as review to spend the protected allocation. Governance fields are removed
+before engine parsing or model prompting, while the prepared operation retains
+their identity. Nested tools inherit the bound runtime and cannot replace it.
+
+`campaign:approve-allowance` requires explicit operator authorization and exact
+model, total-call, protected-review and expected-revision values. Approval
+preserves previous commitments and starts no jobs. `campaign:allowance` reads
+the durable state without initializing a ledger. Neither tool requires provider
+credentials. The shell exposes exact terms before confirmation; the current
+card requires an 80×24 viewport, with resize guidance and cancellation below
+that size.
+
+`campaign:study` drafts an immutable discovery batch using the existing campaign
+compiler. It starts no children. The optional `campaignId`,
+`campaignPlanSha256`, `campaignJobs` and `maxJobAttempts` approval options bind
+that exact batch to the allowance. Each child receives its host-selected work
+reference; shared dispatch verifies prepared input, source identity and config
+before atomically consuming a job attempt. Cancellation and restart do not
+refund attempts. Quota failures count against the finite attempt limit. The
+combined shell approval receipt requires 120×36 until the paged editor lands.
+The approval/snapshot contract adds optional `workPlan` and the spend database
+adds `investigation_work_attempts`; legacy records omit this field.
+
+The dedicated allowance editor and planning for context, review and learning
+jobs are still required before every guided model action is bound automatically.
+An allowance reference does not approve additional jobs, retries beyond the
+approved limits, or a new context experiment. Existing unbound bridge calls
+keep their public contract. Dynamic adapters are not certified by these
+built-in descriptor changes.
+
 ## Dynamic KWP modules
 
 Local KWP modules are self-contained `.mjs` files. They export a plain module
@@ -362,7 +442,7 @@ them.
 | `description` | optional | Operator/model-facing summary. |
 | `headless` | required | Whether `kuzushi run` may invoke the tool. |
 | `runtimeRequirement` | optional | `never` or `always`; defaults to `never`. |
-| `phase` | required for effectful tools | `map`, `scan`, `review`, `prove`, `fix`, or `operate`. Deprecated `hunt` and `confirm` inputs normalize to `scan` and `prove`. |
+| `phase` | required for effectful tools | `map`, `scan`, `review`, `prove`, `fix`, `report`, or `operate`. Deprecated `hunt` and `confirm` inputs normalize to `scan` and `prove`. |
 | `effect` | required | `read`, `workspace-write`, `target-write`, `repository-execute`, or `external-action`. |
 | `approval` | required | `none` or `explicit`. Target writes, repository execution, and external actions require `explicit`. |
 | `workspaceRequirement` | required | `optional` or `required`. |
@@ -687,3 +767,10 @@ Trace run artifacts and raw workflow events remain available as history; they
 are excluded from active phase selection. Unknown historical tool identities
 retain the existing checks and are never silently removed. See `RELEASING.md`
 for the Rust descriptor migration.
+
+Revision comparison reads the complete recorded Git SHA and available indexed
+content hashes from run artifacts. CLI JSON adds `baseSource`, `compareSource`
+and `absenceCoverage`; the shell wraps values without removing hash characters.
+Missing legacy hashes remain unknown. Covered but absent findings are separate
+from work that was not reassessed. Neither a nondeterministic miss nor a missing
+snapshot establishes a fix.

@@ -314,6 +314,9 @@ fn quit_confirm_keybindings(has_running_work: bool) -> Vec<FooterKeybinding> {
 }
 
 pub(super) fn pending_confirm_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if !crate::app::allowance::approval_visible(app) {
+        return vec![bind("Esc", "cancel allowance approval")];
+    }
     let Some(confirm) = app.advisory().pending_confirm.as_ref() else {
         return vec![bind("Esc", "back"), bind("Ctrl+C", "quit")];
     };

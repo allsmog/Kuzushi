@@ -56,6 +56,16 @@ fn confirm_identity_rows(
     width: usize,
     max_rows: usize,
 ) -> Vec<Line<'static>> {
+    if confirm.tool == "campaign:approve-allowance" && confirm.allows_decision {
+        let mut rows = confirm_wrapped_field("tool", &confirm.tool, width, theme::primary());
+        rows.extend(confirm_wrapped_field(
+            "target",
+            &confirm.target,
+            width,
+            theme::primary(),
+        ));
+        return rows;
+    }
     if max_rows >= CONFIRM_FULL_IDENTITY_ROWS {
         return vec![
             confirm_field_line("tool", &confirm.tool, width, theme::primary()),
@@ -97,10 +107,34 @@ fn confirm_optional_rows(confirm: &ConfirmCardModel, width: usize) -> Vec<Line<'
         ("allowlist", confirm.allowlist.as_deref(), theme::muted()),
     ]
     .into_iter()
-    .filter_map(|(label, value, style)| {
-        value.map(|value| confirm_field_line(label, value, width, style))
+    .flat_map(|(label, value, style)| {
+        value
+            .map(|value| confirm_wrapped_field(label, value, width, style))
+            .unwrap_or_default()
     })
     .collect()
+}
+
+fn confirm_wrapped_field(
+    label: &str,
+    value: &str,
+    width: usize,
+    style: Style,
+) -> Vec<Line<'static>> {
+    let prefix = confirm_field_prefix(label, width);
+    let available = width.saturating_sub(display_width(&prefix)).max(1);
+    wrap_text(value, available)
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let prefix = if index == 0 {
+                prefix.clone()
+            } else {
+                " ".repeat(display_width(&prefix))
+            };
+            fitted_spans(prefix, theme::muted(), &line, style, width)
+        })
+        .collect()
 }
 
 fn confirm_header_line(confirm: &ConfirmCardModel, width: usize) -> Line<'static> {
@@ -153,6 +187,14 @@ fn fitted_spans(
 
 fn confirm_action_line(confirm: &ConfirmCardModel, width: usize) -> Line<'static> {
     if !confirm.allows_decision {
+        if !confirm.header_danger {
+            return confirm_field_line(
+                "review",
+                &crate::app::allowance::resize_hint(confirm.minimum_viewport),
+                width,
+                theme::warn(),
+            );
+        }
         return confirm_field_line(
             "rule",
             "destructive verb · always refused (no override)",
@@ -332,6 +374,7 @@ mod tests {
             allowlist: Some("example.test".to_string()),
             allows_decision: true,
             allows_remembered_yes: true,
+            minimum_viewport: None,
         }
     }
 

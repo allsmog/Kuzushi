@@ -251,6 +251,17 @@ fn remove_connected_region(cells: &mut std::collections::BTreeSet<(u16, u16)>, s
     }
 }
 
+#[test]
+fn selection_regions_join_card_rows_but_keep_separate_controls_distinct() {
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 5, 4));
+    for point in [(0, 0), (1, 0), (1, 1), (4, 3)] {
+        buffer[point].set_bg(Color::Red);
+    }
+    assert_eq!(style_region_count(&buffer, |cell| cell.bg == Color::Red), 2);
+    buffer[(4, 3)].set_bg(Color::Reset);
+    assert_eq!(style_region_count(&buffer, |cell| cell.bg == Color::Red), 1);
+}
+
 fn assert_profile_colors(buffer: &Buffer, profile: TerminalProfile) {
     let colors = buffer.content.iter().flat_map(|cell| [cell.fg, cell.bg]);
     match profile {

@@ -104,6 +104,13 @@ impl ModuleRegistry {
         self.tools.get(name)
     }
 
+    /// Shared discovery policy for guided actions that refer to an exact tool.
+    /// Registration alone does not make an internal or research tool a default.
+    pub fn tool_is_discoverable(&self, name: &str) -> bool {
+        self.resolve_tool(name)
+            .is_some_and(|tool| self.is_tool_discoverable(tool))
+    }
+
     /// Whether an input key names a filesystem path in this tool's declared
     /// contract. `target` is deliberately overloaded across Kuzushi: scanners
     /// use a path, while recon/offense tools use the same spelling for a host.

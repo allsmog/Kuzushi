@@ -24,7 +24,7 @@ KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ●
 │ c  Generate attack chain model prerequisites, trust transitions, and...
 │ 5  Draft patch           open Fix with this finding to stage a remediation
 │ x  Add suppression rule  draft an expiring rule with an auditable reason
-run route · ⠋ context:build · 42s · 1/2...  6 findings / 1 crit / 2 high / 2 med
+⛭ autonomy:fix · run route · ⠋ context:b... 6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◎ PROVE VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

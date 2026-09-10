@@ -21,7 +21,7 @@ pub const RECEIPTLESS_ATTEMPT_OUTCOME: &str = "abandoned-before-receipt";
 const SCAN_TOOL: &str = "sast:scan";
 
 mod child_receipt;
-mod equivalence;
+pub(super) mod equivalence;
 mod gate;
 mod validation;
 
@@ -131,6 +131,14 @@ pub fn acquire_scan_batch_threat_model_lease(
 }
 
 pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPlanHandle> {
+    compile_batch_plan(spec, false)
+}
+
+pub(super) fn compile_study_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPlanHandle> {
+    compile_batch_plan(spec, true)
+}
+
+fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool) -> Result<CampaignPlanHandle> {
     validate_trial_count(spec.trials)?;
     let batch_id = spec.batch_id.clone().unwrap_or_else(generated_batch_id);
     validate_scan_batch_id(&batch_id)?;
@@ -143,7 +151,7 @@ pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPl
     let parallel_safety = batch_parallel_safety(&spec, &base_input)?;
     let equivalence_key =
         capture_batch_equivalence(spec.root, &base_input, spec.config, spec.registry)?;
-    let plan = scan_batch_plan_document(
+    let mut plan = scan_batch_plan_document(
         &batch_id,
         spec.trials,
         &base_input,
@@ -151,6 +159,7 @@ pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPl
         &parallel_safety,
         &spec.gate_policy,
     );
+    if requires_work_approval { plan["requiresWorkApproval"] = Value::Bool(true); }
     let plan_path = campaign_plan_path(spec.root, &batch_id);
     anyhow::ensure!(
         !plan_path.exists(),

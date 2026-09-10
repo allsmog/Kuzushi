@@ -1097,9 +1097,9 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
             tool.effect
         );
     }
-    if tool.effect != ToolEffect::Read && tool.phase == ToolPhase::Operate {
+    if super::autonomy::classify_descriptor(tool).is_none() {
         anyhow::bail!(
-            "dynamic tool {:?} must declare map|scan|review|prove|fix for an effectful operation",
+            "dynamic tool {:?} must declare map|scan|review|prove|fix|report with a compatible effect",
             tool.name
         );
     }

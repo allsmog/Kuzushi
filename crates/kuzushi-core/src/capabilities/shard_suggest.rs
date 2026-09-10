@@ -1,10 +1,4 @@
-//! `pack:suggest-shards` — deterministic shard-candidate proposal for a
-//! fresh target (an acquisition, a new product line). NO model calls:
-//! candidates come from directory file counts, language mix, entry-point
-//! identifier density, and test-vs-shipped path heuristics. Emits a DRAFT
-//! shards.toml under the workspace state dir, commented with the signal
-//! evidence per shard, for an operator to edit — it never installs the
-//! draft as `.kuzushi/shards.toml`.
+//! Inventory-derived shard candidates. Proposals are bounded and remain drafts.
 
 use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
@@ -14,26 +8,9 @@ use std::path::{Path, PathBuf};
 
 /// Scope-size target: directories above it are split into their children.
 const TARGET_SCOPE_FILES: usize = 50;
-/// Recursion depth cap for candidate splitting.
-const MAX_SPLIT_DEPTH: usize = 6;
-/// Per-file content-scan byte cap; larger files count only as files.
-const MAX_SCAN_BYTES: u64 = 262_144;
-/// Total content-scanned file budget — keeps the walk bounded on huge trees.
-const MAX_SCANNED_FILES: usize = 4000;
+mod candidates;
 
 const DRAFT_RELATIVE_PATH: &str = "reports/suggested-shards.toml";
-
-/// Identifier signals that mark attacker-input entry points. Substring
-/// match over source text; densities feed ranking and evidence comments.
-const ENTRY_SIGNALS: [&str; 10] = [
-    "parse", "deserialize", "unmarshal", "decode", "recv", "listen", "accept", "handler",
-    "socket", "main(",
-];
-
-const SOURCE_EXTENSIONS: [&str; 18] = [
-    "c", "cc", "cpp", "cxx", "h", "hpp", "rs", "go", "py", "java", "scala", "kt", "ts", "js",
-    "rb", "php", "cs", "swift",
-];
 
 /// Path segments that mark non-shipped code; such directories are skipped
 /// and reported so the operator sees what was deliberately excluded.
@@ -41,34 +18,52 @@ const NON_SHIPPED_SEGMENTS: [&str; 9] = [
     "test", "tests", "spec", "specs", "fixtures", "mocks", "examples", "benches", "benchmarks",
 ];
 
-/// Infrastructure directories never worth shard scopes.
-const SKIPPED_DIRS: [&str; 8] = [
-    "node_modules", "target", "build", "dist", "out", "vendor", ".git", "__pycache__",
-];
-
 pub fn execute_suggest_shards(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let workspace = ctx
         .workspace
         .context("pack:suggest-shards requires an active workspace target")?;
     let root = workspace.root();
-    let mut budget = ScanBudget::default();
-    let mut excluded = Vec::new();
-    let mut candidates = Vec::new();
-    collect_candidates(root, root, 0, &mut budget, &mut excluded, &mut candidates);
-    // Non-shipped directories are recorded on every walk pass that sees them.
-    excluded.sort();
-    excluded.dedup();
+    let inventory = collect_inventory(root, ctx)?;
+    let candidates::InventoryCandidates { mut candidates, excluded } =
+        candidates::from_inventory(&inventory);
     rank_candidates(&mut candidates);
-    let draft = render_draft(root, &candidates, &excluded);
+    let mut draft = render_draft(root, &candidates, &excluded);
+    if let Some(partial) = &inventory.truncation {
+        draft.push_str(&format!("\n# PARTIAL inventory: {}\n", partial.reason));
+    }
     let path = write_draft(root, input, &draft)?;
-    let scopes_path = emit_scopes_if_requested(root, input, &candidates)?;
+    let scopes_path = emit_scopes_if_requested(root, input, &candidates, inventory.truncation.is_some())?;
     Ok(suggest_result(
         &path,
         scopes_path.as_deref(),
         &candidates,
         &excluded,
         draft,
+        inventory.truncation.as_ref(),
+        inventory.inspection.as_ref(),
     ))
+}
+
+fn collect_inventory(
+    root: &Path,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<crate::workspace::RepositoryInventory> {
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let mut progress = |entries| {
+        if heartbeat.ready() {
+            emit_inventory_progress(ctx, entries);
+        }
+    };
+    crate::workspace::build_repository_inventory_with_observer(
+        root, &mut progress, &|| ctx.is_cancelled(),
+    )
+}
+
+fn emit_inventory_progress(ctx: &ToolExecutionContext<'_>, entries: usize) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("tool-progress", "pack:suggest-shards",
+            format!("repository inventory · {entries} entries examined")).emit();
+    }
 }
 
 /// `emitScopes=true` (the planner's DecomposeModules preset) closes the
@@ -79,6 +74,7 @@ fn emit_scopes_if_requested(
     root: &Path,
     input: &Value,
     candidates: &[ShardCandidate],
+    partial: bool,
 ) -> Result<Option<PathBuf>> {
     let requested = input
         .get("emitScopes")
@@ -88,6 +84,7 @@ fn emit_scopes_if_requested(
     if !requested {
         return Ok(None);
     }
+    anyhow::ensure!(!partial, "inventory is incomplete; review the draft before accepting scan scopes");
     let tree = scope_tree_from_candidates(root, candidates);
     crate::workspace::save_nested_project_scopes(root, &tree).map(Some)
 }
@@ -104,12 +101,12 @@ fn scope_tree_from_candidates(
         rel_path: ".".to_string(),
         inherited_sections: Vec::new(),
     }];
-    scopes.extend(candidates.iter().map(|candidate| NestedProjectScope {
+    scopes.extend(candidates.iter().filter(|candidate| candidate.relative_path != ".").map(|candidate| NestedProjectScope {
         id: candidate.shard_name(),
         parent: Some(crate::workspace::ROOT_SCOPE_ID.to_string()),
         kind: NestedProjectKind::EntrypointCluster,
         rel_path: candidate.relative_path.clone(),
-        inherited_sections: Vec::new(),
+        inherited_sections: vec!["context-feed".into(), "threat-model".into()],
     }));
     let _ = root;
     crate::workspace::NestedProjectScopeTree {
@@ -117,11 +114,6 @@ fn scope_tree_from_candidates(
         root: crate::workspace::ROOT_SCOPE_ID.to_string(),
         scopes,
     }
-}
-
-#[derive(Default)]
-struct ScanBudget {
-    scanned_files: usize,
 }
 
 #[derive(Debug)]
@@ -134,8 +126,7 @@ pub struct ShardCandidate {
 }
 
 impl ShardCandidate {
-    /// Entry-signal hits per file — the ranking key. Attack-surface-dense
-    /// directories (parsers, wire handlers) float to the top of the draft.
+    /// Extracted entry points per inventoried file, not a confidence score.
     fn density(&self) -> f64 {
         if self.file_count == 0 {
             return 0.0;
@@ -144,6 +135,7 @@ impl ShardCandidate {
     }
 
     fn shard_name(&self) -> String {
+        if self.relative_path == "." { return "repository".into(); }
         let slug: String = self
             .relative_path
             .chars()
@@ -155,161 +147,8 @@ impl ShardCandidate {
                 }
             })
             .collect();
-        slug.trim_matches('-').to_string()
-    }
-}
-
-/// Depth-first split: a directory whose recursive file count fits the
-/// target becomes one candidate; an oversized one recurses into child
-/// directories (loose files at that level are ignored — the operator sees
-/// the children instead). A leaf that is still oversized is emitted with
-/// an `oversized` flag rather than silently dropped.
-fn collect_candidates(
-    root: &Path,
-    dir: &Path,
-    depth: usize,
-    budget: &mut ScanBudget,
-    excluded: &mut Vec<String>,
-    into: &mut Vec<ShardCandidate>,
-) {
-    let stats = directory_stats(root, dir, budget, excluded);
-    if stats.file_count == 0 {
-        return;
-    }
-    // Depth 0 always splits: the root itself is never a useful shard scope,
-    // even when the whole tree fits the target size.
-    if depth > 0 && (stats.file_count <= TARGET_SCOPE_FILES || depth >= MAX_SPLIT_DEPTH) {
-        if let Some(candidate) = candidate_from_stats(root, dir, stats) {
-            into.push(candidate);
-        }
-        return;
-    }
-    let mut children = child_directories(dir, excluded, root);
-    children.sort();
-    if children.is_empty() {
-        if let Some(candidate) = candidate_from_stats(root, dir, stats) {
-            into.push(candidate);
-        }
-        return;
-    }
-    for child in children {
-        collect_candidates(root, &child, depth + 1, budget, excluded, into);
-    }
-}
-
-struct DirStats {
-    file_count: usize,
-    languages: BTreeMap<String, usize>,
-    signals: BTreeMap<&'static str, usize>,
-}
-
-fn candidate_from_stats(root: &Path, dir: &Path, stats: DirStats) -> Option<ShardCandidate> {
-    let relative = dir.strip_prefix(root).ok()?;
-    let relative_path = relative.to_string_lossy().replace('\\', "/");
-    if relative_path.is_empty() {
-        return None; // never propose the whole root as one shard
-    }
-    Some(ShardCandidate {
-        relative_path,
-        file_count: stats.file_count,
-        oversized: stats.file_count > TARGET_SCOPE_FILES,
-        languages: stats.languages,
-        signals: stats.signals,
-    })
-}
-
-fn directory_stats(
-    root: &Path,
-    dir: &Path,
-    budget: &mut ScanBudget,
-    excluded: &mut Vec<String>,
-) -> DirStats {
-    let mut stats = DirStats {
-        file_count: 0,
-        languages: BTreeMap::new(),
-        signals: BTreeMap::new(),
-    };
-    accumulate_stats(root, dir, budget, excluded, &mut stats);
-    stats
-}
-
-fn accumulate_stats(
-    root: &Path,
-    dir: &Path,
-    budget: &mut ScanBudget,
-    excluded: &mut Vec<String>,
-    stats: &mut DirStats,
-) {
-    for entry in sorted_entries(dir) {
-        if entry.is_dir() {
-            if skip_directory(&entry, root, excluded) {
-                continue;
-            }
-            accumulate_stats(root, &entry, budget, excluded, stats);
-        } else if let Some(extension) = source_extension(&entry) {
-            stats.file_count += 1;
-            *stats.languages.entry(extension).or_insert(0) += 1;
-            scan_signals(&entry, budget, &mut stats.signals);
-        }
-    }
-}
-
-fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|iter| iter.flatten().map(|entry| entry.path()).collect())
-        .unwrap_or_default();
-    entries.sort();
-    entries
-}
-
-fn child_directories(dir: &Path, excluded: &mut Vec<String>, root: &Path) -> Vec<PathBuf> {
-    sorted_entries(dir)
-        .into_iter()
-        .filter(|entry| entry.is_dir() && !skip_directory(entry, root, excluded))
-        .collect()
-}
-
-fn skip_directory(dir: &Path, root: &Path, excluded: &mut Vec<String>) -> bool {
-    let name = dir
-        .file_name()
-        .map(|name| name.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    if name.starts_with('.') || SKIPPED_DIRS.contains(&name.as_str()) {
-        return true;
-    }
-    if NON_SHIPPED_SEGMENTS.contains(&name.as_str()) {
-        if let Ok(relative) = dir.strip_prefix(root) {
-            excluded.push(relative.to_string_lossy().replace('\\', "/"));
-        }
-        return true;
-    }
-    false
-}
-
-fn source_extension(path: &Path) -> Option<String> {
-    let extension = path.extension()?.to_string_lossy().to_lowercase();
-    SOURCE_EXTENSIONS
-        .contains(&extension.as_str())
-        .then_some(extension)
-}
-
-fn scan_signals(path: &Path, budget: &mut ScanBudget, signals: &mut BTreeMap<&'static str, usize>) {
-    if budget.scanned_files >= MAX_SCANNED_FILES {
-        return;
-    }
-    if std::fs::metadata(path).map(|m| m.len() > MAX_SCAN_BYTES).unwrap_or(true) {
-        return;
-    }
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return;
-    };
-    budget.scanned_files += 1;
-    let lower = body.to_lowercase();
-    for signal in ENTRY_SIGNALS {
-        let hits = lower.matches(signal).count();
-        if hits > 0 {
-            *signals.entry(signal).or_insert(0) += hits;
-        }
+        let digest = blake3::hash(self.relative_path.as_bytes()).to_hex();
+        format!("{}-{}", slug.trim_matches('-'), &digest[..8])
     }
 }
 
@@ -330,14 +169,14 @@ fn render_draft(root: &Path, candidates: &[ShardCandidate], excluded: &[String])
         "# Review and edit before installing as <target>/.kuzushi/shards.toml:".to_string(),
         "# merge sibling scopes that share a trust boundary, rename shards after".to_string(),
         "# the boundary they cover, and delete scopes that are not attack surface.".to_string(),
-        "# Ranked by entry-signal density (hits/file), then path.".to_string(),
+        "# Ranked by inventoried entry points per file, then path. At most eight scopes.".to_string(),
         String::new(),
     ];
     for candidate in candidates {
         lines.push(render_candidate(candidate));
     }
     if !excluded.is_empty() {
-        lines.push("# Excluded as non-shipped (tests/specs/fixtures/examples):".to_string());
+        lines.push("# Excluded test, generated, or dependency paths:".to_string());
         for path in excluded {
             lines.push(format!("#   {path}"));
         }
@@ -362,10 +201,10 @@ fn render_candidate(candidate: &ShardCandidate) -> String {
     }
     if candidate.oversized {
         lines.push(format!(
-            "# WARNING: scope exceeds {TARGET_SCOPE_FILES} files with no child directories to split into — narrow by hand"
+            "# WARNING: scope exceeds {TARGET_SCOPE_FILES} files; retained to preserve coverage within the proposal limits"
         ));
     }
-    lines.push(format!("paths = [\"{}\"]", candidate.relative_path));
+    lines.push(format!("paths = [{}]", json!(candidate.relative_path)));
     lines.push(String::new());
     lines.join("\n")
 }
@@ -411,22 +250,26 @@ fn suggest_result(
     candidates: &[ShardCandidate],
     excluded: &[String],
     draft: String,
+    partial: Option<&crate::workspace::InventoryTruncation>,
+    inspection: Option<&crate::workspace::InventoryInspection>,
 ) -> Value {
     let oversized = candidates.iter().filter(|c| c.oversized).count();
-    let scopes_line = scopes_path
-        .map(|path| format!("\nScope tree materialized at {}.", path.display()))
+    let scopes_line = scope_installation_note(scopes_path);
+    let inventory_note = partial
+        .map(|item| format!("\nPARTIAL inventory: {}", item.reason))
         .unwrap_or_default();
     let output = format!(
-        "pack:suggest-shards proposed {} shard scope(s) ({} oversized, {} non-shipped dir(s) excluded) — draft at {}\nReview and edit the draft; it is never auto-installed.{scopes_line}",
+        "pack:suggest-shards proposed {} shard scope(s) ({} oversized, {} excluded path(s)) — draft at {}\nReview and edit the draft; it is never auto-installed.{scopes_line}{inventory_note}",
         candidates.len(),
         oversized,
         excluded.len(),
         path.display()
     );
-    crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({
+    let data = json!({
+            "inventoryComplete": partial.is_none(),
+            "inventoryPartialReason": partial.map(|item| &item.reason),
+            "inspection": inspection,
+            "maxProposedScopes": candidates::MAX_PROPOSED_SCOPES,
             "draftPath": path.display().to_string(),
             "scopesPath": scopes_path.map(|path| path.display().to_string()),
             "shardCount": candidates.len(),
@@ -434,8 +277,22 @@ fn suggest_result(
             "excluded": excluded,
             "draft": draft,
             "shards": candidates.iter().map(candidate_json).collect::<Vec<_>>(),
-        }),
-    )
+        });
+    suggestion_output(output, data, partial)
+}
+
+fn suggestion_output(output: String, data: Value, partial: Option<&crate::workspace::InventoryTruncation>) -> Value {
+    if let Some(partial) = partial {
+        return crate::module_result::partial_output_result(
+            output.clone(), output, vec![json!(partial.reason)], data,
+        );
+    }
+    crate::module_result::completed_output_result(output.clone(), output, data)
+}
+
+fn scope_installation_note(path: Option<&Path>) -> String {
+    path.map(|path| format!("\nScope tree materialized at {}.", path.display()))
+        .unwrap_or_default()
 }
 
 fn candidate_json(candidate: &ShardCandidate) -> Value {
@@ -509,11 +366,11 @@ mod tests {
         let result = run_suggest(tmp.path());
         let shards = result["data"]["shards"].as_array().unwrap();
 
-        let paths: Vec<&str> = shards.iter().map(|s| s["path"].as_str().unwrap()).collect();
-        // Density ranking: parser (8 hits / 3 files) > api (4/2) > silent dirs by path.
+        let mut paths: Vec<&str> = shards.iter().map(|s| s["path"].as_str().unwrap()).collect();
+        paths.sort();
         assert_eq!(
             paths,
-            vec!["src/parser", "src/api", "src/big/alpha", "src/big/beta", "src/quiet"],
+            vec!["src/api", "src/big/alpha", "src/big/beta", "src/parser", "src/quiet"],
             "{result}"
         );
         // src/big (60 files) was split into its ≤50-file children.
@@ -522,10 +379,10 @@ mod tests {
         let excluded = result["data"]["excluded"].as_array().unwrap();
         assert_eq!(excluded.len(), 1);
         assert_eq!(excluded[0], "tests");
-        // Signal evidence is carried per shard.
-        assert_eq!(shards[0]["signals"]["parse"], 6);
-        assert_eq!(shards[0]["signals"]["recv"], 3);
-        assert_eq!(shards[0]["languages"]["c"], 3);
+        assert!(shards.iter().all(|shard| shard["signals"]["entrypoints"].is_u64()));
+        let parser = shards.iter().find(|shard| shard["path"] == "src/parser").unwrap();
+        assert_eq!(parser["languages"]["c"], 3);
+        assert_eq!(result["data"]["inventoryComplete"], true);
     }
 
     #[test]
@@ -544,7 +401,7 @@ mod tests {
         let manifest = toml::from_str::<toml::Value>(&body).unwrap();
         let shard_table = manifest.get("shards").and_then(toml::Value::as_table).unwrap();
         assert_eq!(shard_table.len(), 5);
-        assert!(body.contains("# signals: parse(6) recv(3)"), "{body}");
+        assert!(body.contains("# signals: entrypoints("), "{body}");
         assert!(body.contains("DRAFT shard manifest"), "{body}");
         // The draft must never land at the live manifest location.
         assert!(draft_path.ends_with("reports/suggested-shards.toml"));
@@ -569,6 +426,50 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("WARNING: scope exceeds 50 files"));
+    }
+
+    #[test]
+    fn partial_inventory_is_reported_and_cannot_install_scopes() {
+        let temp = tempfile::tempdir().unwrap();
+        write(&temp.path().join("large.rs"), &"x".repeat(256 * 1024 + 1));
+        let result = run_suggest(temp.path());
+        assert_eq!(result["status"], "partial");
+        assert_eq!(result["data"]["inventoryComplete"], false);
+        assert_eq!(result["data"]["inspection"]["truncated_files"][0], "large.rs");
+        assert!(emit_scopes_if_requested(temp.path(), &json!({"emitScopes": true}), &[], true).is_err());
+        assert!(crate::workspace::load_nested_project_scopes(temp.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn draft_paths_are_quoted_and_scope_names_do_not_collapse() {
+        let candidate = |path: &str| ShardCandidate {
+            relative_path: path.into(), file_count: 1, oversized: false,
+            languages: BTreeMap::new(), signals: BTreeMap::new(),
+        };
+        let first = candidate("src/a.b");
+        let second = candidate("src/a-b");
+        assert_ne!(first.shard_name(), second.shard_name());
+        let quoted = candidate("src/a\"b");
+        let parsed: toml::Value = toml::from_str(&render_candidate(&quoted)).unwrap();
+        assert_eq!(parsed["shards"][quoted.shard_name()]["paths"][0].as_str(), Some("src/a\"b"));
+        let tree = scope_tree_from_candidates(Path::new("."), &[first, second]);
+        assert_eq!(tree.scopes.len(), 3);
+        assert_eq!(tree.scopes[1].inherited_sections, ["context-feed", "threat-model"]);
+    }
+
+    #[test]
+    fn non_source_parent_and_sibling_files_remain_covered_by_proposals() {
+        for extra in ["README.md", "docs/architecture.md", "Cargo.toml"] {
+            let temp = tempfile::tempdir().unwrap();
+            synthetic_tree(temp.path());
+            write(&temp.path().join(extra), "# repository context");
+            let result = run_suggest(temp.path());
+            let shards = result["data"]["shards"].as_array().unwrap();
+            assert_eq!(shards.len(), 1, "{extra}: {shards:?}");
+            assert_eq!(shards[0]["path"], ".", "{extra}");
+            let files = result["data"]["inspection"]["files"].as_array().unwrap();
+            assert!(files.iter().any(|file| file == extra));
+        }
     }
 
     #[test]

@@ -161,6 +161,11 @@ reversal is one more decision, never an edit (§5).
 
 ### Report deck — `report`
 
+Reporting is available at any autonomy posture, including Review. The
+`report:build` and `report:sarif` tool descriptors belong to the Report export
+surface; exporting does not complete or advance a Map/Scan/Review/Prove/Fix
+phase. File-write authorization still applies to SARIF destinations.
+
 The exit surface exports the findings ledger as SARIF, Markdown bundle, JSONL,
 JSON, CSV, or VULN-FINDINGS, defaulting completeness to All. `j/k` selects a
 format, `c` changes completeness, and `Enter` exports. New destinations start
@@ -186,8 +191,9 @@ applied), use `report:sarif` — default output
 
 ## 3. Budget semantics
 
-Three independent ceilings; all are inclusive (`spent >= cap` trips) and
-an unset budget means **not enforced**, never a hidden default:
+The existing dollar controls stop work from estimates or observed receipts.
+They do not guarantee a maximum charge. An unset budget means **not enforced**,
+never a hidden default. The Setup editor labels its value an observed spend stop.
 
 1. **Setup budget (shell)** — the per-engagement ceiling set in the Setup
    deck. Must be positive and within the hard ceiling; enforcement halts
@@ -204,12 +210,11 @@ an unset budget means **not enforced**, never a hidden default:
    auto-retried** (retrying would spend the same money on the same
    failure), and rate-limit sniffing cannot convert that park into a free
    retry. Re-plan or raise the cap (then `--resume`) to run it again.
-   **Granularity caveat:** the guard reads live per-model-call cost from
-   the child's trace, so its overshoot bound is one in-flight call. A
-   tool that makes ONE big call for the whole job (e.g. single-shot
-   agentic scans) reports cost only at the end and cannot be bounded —
-   run such jobs with `strategy=chunked` so per-chunk calls give the
-   guard telemetry to act on.
+   **Granularity caveat:** the guard reads completed runtime cost receipts
+   from the child's trace. One runtime request can contain several internal
+   model turns or retries, so this does not establish a dollar overshoot bound.
+   Chunked work emits receipts more often, but still requires admission before
+   provider requests to enforce a shared investigation allowance.
    **Kill-loses-findings caveat:** the guard SIGKILLs the child, and a
    chunked hunt persists findings only when it finishes — a killed run
    loses every finding it had gathered. Prefer the tool-level
@@ -228,6 +233,52 @@ an unset budget means **not enforced**, never a hidden default:
    per-run budgets — `budgetUsd` is the per-run knob.
 
 `kuzushi ci` performs no model work at all, so it needs no budget.
+
+Call allowances are available as an opt-in shared dispatch control. For example,
+these shell commands approve nine total provider calls, protect three for review,
+and then inspect the durable allowance. Replace `<selected-model-id>` with the
+exact model ID selected in your configuration. Neither command makes model requests:
+
+```text
+run campaign:approve-allowance {"investigationId":"study-1","expectedRevision":0,"model":"<selected-model-id>","maxProviderCalls":9,"protectedReviewCalls":3,"reason":"Initial investigation allowance"}
+run campaign:allowance {"investigationId":"study-1"}
+```
+
+The confirmation shows the exact terms before approval. Use `logs` to read the
+receipt. The current approval card requires 80×24; below that size it preserves
+the request and offers cancellation until you resize. Approval starts no scans
+and does not select or switch the configured runtime/model.
+
+To bind a supported tool invocation, include
+`"allowanceRef":{"schemaVersion":1,"investigationId":"study-1","revision":1,"workId":"context-1"}`
+in its input. The shared dispatcher checks the model and approval before runtime
+preflight. Internal provider turns and retries each consume a call. Review and
+Report can use the protected allocation; discovery cannot. Missing price receipts
+remain unavailable. Revising an allowance requires its current revision and new
+exact totals; previous commitments remain counted.
+
+To draft three discovery passes without starting them, use:
+
+```text
+run campaign:study {"campaignId":"study-batch","scanInput":{"taskMode":"manual","tasks":["secret-scan"]}}
+```
+
+Review the returned plan file and digest. Include `campaignId`,
+`campaignPlanSha256`, `campaignJobs:3` and an explicit `maxJobAttempts:1` in
+the allowance approval to bind that exact batch. Use the actual digest from
+the draft. Combined plan and allowance approval currently requires 120×36;
+resize or cancel if its terms cannot fit. Approval starts no jobs.
+
+The existing `kuzushi --target <repo> campaign batch study-batch` command
+executes the approved batch, attaches the allowance to every child and reopens
+its durable queue after restart. Each failed or canceled start consumes an
+attempt. A changed source/configuration, exhausted attempt limit or changed
+plan stops execution until specific remaining work is approved. This path
+currently covers discovery; the guided context/review/learning planner and
+responsive work editor remain in development.
+
+An unbound legacy invocation keeps its existing spending behavior.
+Call limits do not establish a dollar ceiling or approve follow-up work.
 
 ## 4. Campaign workflow (plan → run → status → gap-fill)
 
@@ -415,10 +466,13 @@ calibration) **outside** the kuzushi core — core stays generic. Authoring
 workflow lives in your packs repository's `TEMPLATE/NEW-PACK.md`; the
 tooling half:
 
-- `pack:suggest-shards` — deterministic draft of a shard layout for a
-  target tree (entry-point signal density ranking), written with evidence
-  comments to `.kuzushi/v3/reports/suggested-shards.toml`. It never
-  installs anything; copy the rows you agree with into the pack.
+- `pack:suggest-shards` — proposes at most eight scopes from a bounded
+  inventory, ranked by extracted entry points per file. Small repositories can
+  stay whole, and parent-level files remain covered. The draft is written to
+  `.kuzushi/v3/reports/suggested-shards.toml`; inspect its exclusions and any
+  partial-inventory warning before choosing scopes. It makes no model calls.
+  The draft is never installed automatically. Explicit `emitScopes=true`
+  publishes a nested scope tree only when inventory is complete.
 - `pack:lint` — structural gate over `pack.toml` and its products: shard
   scopes must exist (WARN over 50 files), every product needs a
   threat-model closure, severities/CWEs must be well-formed, prompts must

@@ -86,6 +86,12 @@ fn default_body_rows(app: &ShellApp) -> Vec<String> {
 
 fn confirm_dialog_action_row(confirm: &super::ConfirmCardModel) -> String {
     if !confirm.allows_decision {
+        if !confirm.header_danger {
+            return format!(
+                "   {}",
+                crate::app::allowance::resize_hint(confirm.minimum_viewport)
+            );
+        }
         return "   this request is refused unconditionally".to_string();
     }
     if confirm.allows_remembered_yes {

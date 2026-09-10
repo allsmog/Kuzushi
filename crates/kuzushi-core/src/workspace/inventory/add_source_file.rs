@@ -82,14 +82,24 @@ impl InventoryBuilder {
             .or_insert(item);
     }
 
+    pub(crate) fn omit_path(&mut self, path: &str, reason: &str) {
+        self.omitted_paths.entry(path.into()).or_insert_with(|| InventoryPathClassification {
+            path: path.into(), kind: "omitted".into(), reason: reason.into(),
+        });
+    }
+
     pub(crate) fn finish(
         self,
         root_name: String,
         truncation: Option<InventoryTruncation>,
+        mut inspection: InventoryInspection,
     ) -> RepositoryInventory {
+        inspection.files = self.enumerated_files.into_iter().collect();
+        inspection.omitted_paths = self.omitted_paths.into_values().collect();
         RepositoryInventory {
             root_name,
             truncation,
+            inspection: Some(inspection),
             languages: self
                 .languages
                 .into_iter()

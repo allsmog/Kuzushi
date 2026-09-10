@@ -22,8 +22,10 @@ pub enum ToolPhase {
     /// Verify actionable findings with empirical evidence.
     #[serde(alias = "confirm")]
     Prove,
-    /// Patch findings and produce reports.
+    /// Patch findings.
     Fix,
+    /// Export evidence and decisions without advancing the investigation.
+    Report,
     /// Configure providers, models, catalogs, and policy — also the honest
     /// "expert/other" bucket for tools (including dynamic/SDK modules) that
     /// declare no phase.
@@ -33,12 +35,13 @@ pub enum ToolPhase {
 
 impl ToolPhase {
     /// Canonical group order shared by every phase-grouped surface.
-    pub const ORDER: [ToolPhase; 6] = [
+    pub const ORDER: [ToolPhase; 7] = [
         ToolPhase::Map,
         ToolPhase::Scan,
         ToolPhase::Review,
         ToolPhase::Prove,
         ToolPhase::Fix,
+        ToolPhase::Report,
         ToolPhase::Operate,
     ];
 
@@ -50,6 +53,7 @@ impl ToolPhase {
             ToolPhase::Review => "REVIEW",
             ToolPhase::Prove => "PROVE",
             ToolPhase::Fix => "FIX",
+            ToolPhase::Report => "REPORT",
             ToolPhase::Operate => "OPERATE",
         }
     }
@@ -62,7 +66,7 @@ impl ToolPhase {
             ToolPhase::Review => Some("査"),
             ToolPhase::Prove => Some("作"),
             ToolPhase::Fix => Some("掛"),
-            ToolPhase::Operate => None,
+            ToolPhase::Report | ToolPhase::Operate => None,
         }
     }
 
@@ -73,7 +77,8 @@ impl ToolPhase {
             ToolPhase::Scan => "find candidate vulnerabilities and security signals",
             ToolPhase::Review => "triage, classify, and decide candidate findings",
             ToolPhase::Prove => "verify actionable findings with empirical evidence",
-            ToolPhase::Fix => "patch findings and produce reports",
+            ToolPhase::Fix => "patch findings",
+            ToolPhase::Report => "export evidence, decisions, coverage, and consumption",
             ToolPhase::Operate => "configure providers, models, catalogs, and policy",
         }
     }
@@ -86,6 +91,7 @@ impl ToolPhase {
             ToolPhase::Review => "review",
             ToolPhase::Prove => "prove",
             ToolPhase::Fix => "fix",
+            ToolPhase::Report => "report",
             ToolPhase::Operate => "operate",
         }
     }
@@ -99,6 +105,7 @@ impl ToolPhase {
             "review" => Some(ToolPhase::Review),
             "prove" | "confirm" | "verify" | "tsukuri" | "作" => Some(ToolPhase::Prove),
             "fix" | "kake" | "掛" => Some(ToolPhase::Fix),
+            "report" => Some(ToolPhase::Report),
             "operate" | "expert" | "other" => Some(ToolPhase::Operate),
             _ => None,
         }
@@ -146,7 +153,8 @@ pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) 
             ToolPhase::Review
         }
         "verify" => ToolPhase::Prove,
-        "patch" | "report" => ToolPhase::Fix,
+        "patch" => ToolPhase::Fix,
+        "report" => ToolPhase::Report,
         _ => fallback_tool_phase(kind, tool_name),
     }
 }
@@ -160,8 +168,11 @@ fn tool_phase_override(tool_name: &str) -> Option<ToolPhase> {
 }
 
 fn fallback_tool_phase(kind: ModuleKind, tool_name: &str) -> ToolPhase {
-    if tool_name.contains("patch") || tool_name.contains("report") {
+    if tool_name.contains("patch") {
         return ToolPhase::Fix;
+    }
+    if tool_name.contains("report") {
+        return ToolPhase::Report;
     }
     match kind {
         ModuleKind::Offense | ModuleKind::Scan | ModuleKind::Defense => ToolPhase::Scan,
@@ -180,11 +191,31 @@ mod tests {
 
     #[test]
     fn order_is_stable_and_labelled() {
-        assert_eq!(ToolPhase::ORDER.len(), 6);
+        assert_eq!(ToolPhase::ORDER.len(), 7);
         assert_eq!(ToolPhase::Map.label(), "MAP");
         assert_eq!(ToolPhase::Operate.label(), "OPERATE");
         assert_eq!(ToolPhase::Scan.kanji(), Some("崩"));
         assert_eq!(ToolPhase::Operate.kanji(), None);
+    }
+
+    #[test]
+    fn report_is_a_round_trippable_export_surface() {
+        assert_eq!(ToolPhase::parse("report"), Some(ToolPhase::Report));
+        assert_eq!(ToolPhase::Report.label(), "REPORT");
+        assert_eq!(ToolPhase::Report.as_str(), "report");
+        assert_eq!(ToolPhase::Report.kanji(), None);
+        assert_eq!(
+            serde_json::to_string(&ToolPhase::Report).unwrap(),
+            "\"report\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ToolPhase>("\"report\"").unwrap(),
+            ToolPhase::Report
+        );
+        assert_eq!(
+            canonical_tool_phase("report", ModuleKind::Defense, "report:build"),
+            ToolPhase::Report
+        );
     }
 
     #[test]
@@ -288,10 +319,10 @@ mod tests {
             canonical_tool_phase("mystery", ModuleKind::Config, "mystery:tune"),
             ToolPhase::Operate
         );
-        // A patch/report tool name overrides the kind fallback into FIX.
+        // Report is a separate export surface, independent of Fix.
         assert_eq!(
             canonical_tool_phase("mystery", ModuleKind::Config, "mystery:report"),
-            ToolPhase::Fix
+            ToolPhase::Report
         );
     }
 }

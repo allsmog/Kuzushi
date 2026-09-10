@@ -54,6 +54,9 @@ pub fn descriptor_approval_confirm(
     if descriptor.approval != kuzushi_core::modules::ApprovalPolicy::Explicit {
         return None;
     }
+    if descriptor.name == "campaign:approve-allowance" {
+        return Some(super::allowance::confirmation(input));
+    }
     let target = ["target", "url", "path"]
         .into_iter()
         .find_map(|key| input.get(key).and_then(serde_json::Value::as_str))
