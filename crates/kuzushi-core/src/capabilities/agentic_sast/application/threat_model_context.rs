@@ -15,9 +15,9 @@ pub(crate) struct PromptEnrichment {
 }
 
 impl PromptEnrichment {
-    pub(crate) fn for_run(target: &Path, tool_policy: &AgentToolPolicy) -> Result<Self> {
+    pub(crate) fn for_run(target: &Path, tool_policy: &AgentToolPolicy, input: &Value) -> Result<Self> {
         Ok(Self {
-            threat_context: threat_model_scan_context(target)?,
+            threat_context: selected_threat_model_scan_context(target, input)?,
             context_enrichment: context_enrichment_scan_context(target),
             attached_mcps: tool_policy
                 .mcps_attached
@@ -122,9 +122,16 @@ fn first_evidence_suffix(claim: &Value) -> String {
 /// scan stays runnable without one. Store corruption remains a hard integrity
 /// error; a stale or verification-failed document keeps its digest but leads
 /// with an honesty warning.
+#[cfg(test)]
 pub(crate) fn threat_model_scan_context(target: &Path) -> Result<Option<String>> {
+    selected_threat_model_scan_context(target, &Value::Null)
+}
+
+pub(crate) fn selected_threat_model_scan_context(target: &Path, input: &Value) -> Result<Option<String>> {
+    use crate::capabilities::threat_model::{load_selected_threat_model, ThreatModelSelection};
+    let selection = ThreatModelSelection::from_input(input)?;
     let Some(document) =
-        crate::capabilities::threat_model::try_load_persistent_threat_model(target)?
+        load_selected_threat_model(target, &selection)?
     else {
         return Ok(None);
     };

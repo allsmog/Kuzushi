@@ -71,3 +71,21 @@ fn artifact_json(app: &ShellApp, run: &str, leaf: &str) -> Option<serde_json::Va
         _ => None,
     }
 }
+
+pub(super) fn context_label(app: &ShellApp, run: &str) -> String {
+    recorded_context(app, run).label()
+}
+
+pub(super) fn context_comparison(app: &ShellApp, left: &str, right: &str) -> String {
+    recorded_context(app, left)
+        .comparison_label(&recorded_context(app, right))
+        .to_string()
+}
+
+fn recorded_context(
+    app: &ShellApp,
+    run: &str,
+) -> kuzushi_core::run_artifacts::RunThreatModelContext {
+    let input = artifact_json(app, run, "scan-input.json");
+    kuzushi_core::run_artifacts::RunThreatModelContext::from_scan_input(input.as_ref())
+}

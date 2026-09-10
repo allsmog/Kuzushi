@@ -341,6 +341,7 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_polic
         return Ok(policy);
     }
     let policy = policy.try_with_mcps_for_target(target)?;
+    let policy = crate::runtime::mcp_probe::bind_selected_threat_model_attachment(policy, input, target)?;
     ensure_required_mcps(&policy, target, required_mcps_for_backend(selected_backend))?;
     Ok(policy)
 }

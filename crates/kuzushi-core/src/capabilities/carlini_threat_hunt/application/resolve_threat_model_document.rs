@@ -1,6 +1,13 @@
 use super::*;
 
 pub(crate) fn resolve_threat_model_document(input: &Value, target: &Path) -> Result<Value> {
+    use crate::capabilities::threat_model::{load_selected_threat_model, ThreatModelSelection};
+    let selection = ThreatModelSelection::from_input(input)?;
+    if selection.is_bound() {
+        return load_selected_threat_model(target, &selection)?
+            .context("threat-model hunt requires a selected threat model; threatModelRef is null")
+            .and_then(unwrap_document);
+    }
     if let Some(value) = input
         .get("document")
         .or_else(|| input.get("threatModel"))

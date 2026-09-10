@@ -149,11 +149,14 @@ pub(in crate::modules) fn run_sast_triage(
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
     let fingerprints = fingerprints_for_sast_runs(store, run_ids)?;
-    let triage_input = if fingerprints.is_empty() {
+    let mut triage_input = if fingerprints.is_empty() {
         json!({ "scanId": run_ids.primary.clone() })
     } else {
         json!({ "fingerprints": fingerprints })
     };
+    if let Some(reference) = input.get("threatModelRef") {
+        triage_input["threatModelRef"] = reference.clone();
+    }
     let triage_input =
         with_sast_prompt_override(triage_input, input, ctx, "triage", "TRIAGE_PROMPT")?;
     let output = run_sast_phase_subtool(

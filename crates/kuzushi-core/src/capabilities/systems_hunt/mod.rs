@@ -9,6 +9,7 @@ use crate::modules::ToolExecutionContext;
 use crate::proof::whitebox_policy::{
     agentic_hunter_thinking_level, mark_whitebox_static_findings,
     try_whitebox_static_policy_for_target, whitebox_static_profile_requested,
+    selected_whitebox_static_policy_for_target,
 };
 use crate::runtime::SubagentRole;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};

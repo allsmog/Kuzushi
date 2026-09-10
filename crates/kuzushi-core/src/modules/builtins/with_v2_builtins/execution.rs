@@ -1958,13 +1958,12 @@ mod prompt_file_default_tests {
         let still_bound: crate::capabilities::threat_model::ThreatModelRef =
             serde_json::from_value(prepared["threatModelRef"].clone()).unwrap();
         assert_eq!(still_bound, expected);
-        let error = crate::capabilities::threat_model::acquire_exact_threat_model_read_lease(
+        let lease = crate::capabilities::threat_model::acquire_exact_threat_model_read_lease(
             temp.path(),
             Some(&still_bound),
         )
-        .err()
-        .expect("a pointer change must invalidate the prepared scan");
-        assert!(error.to_string().contains("active threat model changed"));
+        .expect("changing the active pointer must preserve an immutable prepared reference");
+        assert_eq!(lease.model_ref(), Some(&expected));
     }
 
     #[test]

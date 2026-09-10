@@ -163,7 +163,7 @@ fn load_taint_iris_next_planning_context(
     source_paths: &[TaintIrisNextSourcePath],
 ) -> Result<TaintIrisNextPlanningContext> {
     let context = load_taint_iris_next_context(repo_root);
-    let threat_model = load_taint_iris_next_threat_model(repo_root);
+    let threat_model = load_selected_taint_threat_model(repo_root, &options.threat_model)?;
     let languages =
         resolve_taint_iris_next_languages(options, context.value.as_ref(), source_paths)?;
     let threat_cwes = collect_taint_iris_next_cwes(threat_model.value.as_ref());
@@ -1497,6 +1497,49 @@ pub(crate) fn load_taint_iris_next_threat_model(repo_root: &Path) -> TaintIrisNe
         Ok(Some(value)) => artifact_load_result(path, "loaded", Some(value), true),
         Ok(None) => artifact_load_result(path, "not found", None, false),
         Err(error) => artifact_load_result(path, &error.to_string(), None, false),
+    }
+}
+
+fn load_selected_taint_threat_model(
+    root: &Path,
+    selection: &crate::capabilities::threat_model::ThreatModelSelection,
+) -> Result<TaintIrisNextArtifactLoad> {
+    use crate::capabilities::threat_model::{load_selected_threat_model, threat_model_object_path, ThreatModelSelection};
+    if !selection.is_bound() { return Ok(load_taint_iris_next_threat_model(root)); }
+    let value = load_selected_threat_model(root, selection)?;
+    let path = match selection {
+        ThreatModelSelection::Revision(reference) => Some(threat_model_object_path(root, &reference.sha256)?.display().to_string()),
+        _ => None,
+    };
+    let reason = if value.is_some() { "selected immutable revision" } else { "explicitly omitted by scan context" };
+    Ok(TaintIrisNextArtifactLoad {
+        status: TaintIrisNextArtifactStatus { ok: value.is_some(), path, reason: reason.to_string() },
+        value,
+    })
+}
+
+#[cfg(test)]
+mod bound_context_tests {
+    use super::*;
+
+    #[test]
+    fn planning_consumes_bound_context_and_reports_explicit_omissions() {
+        let root = tempfile::tempdir().unwrap();
+        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
+        let options = TaintIrisNextInput::from_tool_input(&json!({"threatModelRef": first})).unwrap();
+        let plan = load_taint_iris_next_planning_context(root.path(), root.path(), &options, &[]).unwrap();
+        assert_eq!(plan.threat_model.value.unwrap()["title"], "ACCEPTED_ALPHA");
+        assert_eq!(plan.threat_model.status.reason, "selected immutable revision");
+        assert!(plan.threat_model.status.path.unwrap().contains("objects"));
+        let none = crate::capabilities::threat_model::ThreatModelSelection::None;
+        let omitted = load_selected_taint_threat_model(root.path(), &none).unwrap();
+        assert!(omitted.value.is_none());
+        assert!(omitted.status.path.is_none());
+        assert_eq!(omitted.status.reason, "explicitly omitted by scan context");
+        let path = crate::capabilities::threat_model::threat_model_object_path(root.path(), &first.sha256).unwrap();
+        std::fs::write(path, b"{}").unwrap();
+        assert!(load_selected_taint_threat_model(root.path(), &options.threat_model).is_err());
     }
 }
 

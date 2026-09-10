@@ -111,6 +111,9 @@ pub struct DeepAuditConfig {
     /// Human-reviewed historical signal supplied by bulk triage. It is shown
     /// as advisory context and never changes the finding or tool policy.
     pub reviewed_refutation_context: Option<String>,
+    /// Selected threat-model digest supplied by triage, preserved across passes.
+    /// It guides questions and impact assessment without determining a verdict.
+    pub threat_model_context: Option<String>,
 }
 
 impl DeepAuditConfig {
@@ -125,6 +128,7 @@ impl DeepAuditConfig {
             passes: DEFAULT_PASSES,
             taint_tools: TaintToolPolicy::default(),
             reviewed_refutation_context: None,
+            threat_model_context: None,
         }
     }
 }

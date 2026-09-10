@@ -94,7 +94,7 @@ fn query_deep_semantic_cwe_select(
             format_inventory(&run.inventory)
         ),
         )
-        .with_tool_policy(try_whitebox_static_policy_for_target(&run.target)?)
+        .with_tool_policy(selected_whitebox_static_policy_for_target(&run.target, input)?)
         .with_thinking_level(agentic_hunter_thinking_level(input)),
         StructuredJsonContract::new(
             "systems-hunt:deep-semantic-cwe-select",

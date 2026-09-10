@@ -111,7 +111,7 @@ impl CarliniInput {
         let prompt_override = optional_string(input, &["CARLINI_THREAT_HUNT_PROMPT"])?
             .map(|value| resolve_prompt_override(&value, target))
             .transpose()?;
-        let kb_context = carlini_artifact_context(ctx, target);
+        let kb_context = carlini_context_for_input(ctx, target, input)?;
         Ok(Self {
             model: optional_string(input, &["model"])?.or_else(|| ctx.config.model.clone()),
             max_findings: read_usize(input, &["maxFindings", "max_findings"], 50, 1).min(500),
@@ -132,6 +132,46 @@ impl CarliniInput {
             kb_context,
         })
     }
+}
+
+fn carlini_context_for_input(
+    ctx: &ToolExecutionContext<'_>, target: &Path, input: &Value,
+) -> Result<ArtifactKnowledgePromptContext> {
+    use crate::capabilities::threat_model::{load_selected_threat_model, ThreatModelSelection};
+    let selection = ThreatModelSelection::from_input(input)?;
+    let mut context = carlini_artifact_context(ctx, target);
+    if !selection.is_bound() { return Ok(context); }
+    let document = load_selected_threat_model(target, &selection)?;
+    let previous_count = context.snippets.len();
+    context.snippets.retain(|snippet| !is_mutable_model_context(snippet));
+    let omitted = previous_count - context.snippets.len();
+    if let Some(document) = document {
+        context.snippets.insert(0, selected_model_snippet(&selection, &document)?);
+    }
+    context.status = format!("selected immutable threat-model context; {omitted} mutable model/lead snippet(s) replaced or omitted; other artifact context retains its recorded sources");
+    Ok(context)
+}
+
+fn is_mutable_model_context(snippet: &ArtifactKnowledgeSnippet) -> bool {
+    matches!(snippet.module_id.as_str(), "threat-model" | "threat-leads")
+        || snippet.source_path.contains("threat-model")
+        || snippet.source_path.contains("threat-leads")
+}
+
+fn selected_model_snippet(
+    selection: &crate::capabilities::threat_model::ThreatModelSelection, document: &Value,
+) -> Result<ArtifactKnowledgeSnippet> {
+    let crate::capabilities::threat_model::ThreatModelSelection::Revision(reference) = selection else {
+        anyhow::bail!("selected model document requires a revision reference");
+    };
+    let body = serde_json::to_string(document)?;
+    Ok(ArtifactKnowledgeSnippet {
+        source_path: format!("threat-model:{}@{} ({})", reference.model_id, reference.revision_id, reference.sha256),
+        module_id: "threat-model".to_string(), run_id: None,
+        title: "Selected threat-model revision".to_string(),
+        summary: "The immutable revision explicitly supplied to this run.".to_string(),
+        snippet: compact_carlini_context_text(&body, 1200), refs: Vec::new(),
+    })
 }
 
 pub(crate) fn carlini_artifact_context(
@@ -371,6 +411,26 @@ fn compact_carlini_context_text(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bound_context_replaces_active_model_and_unbound_lead_snippets() {
+        let root = tempfile::tempdir().unwrap();
+        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
+        fs::write(root.path().join(".kuzushi/threat-leads.md"), "ACTIVE_BETA_LEAD").unwrap();
+        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+        let config = crate::config::V2Config::default();
+        let ctx = ToolExecutionContext { config: &config, workspace: Some(&workspace), findings_store: None,
+            trace: None, cancellation: None, authorization: Default::default() };
+        let input = json!({"threatModelRef": first});
+        let document = resolve_threat_model_document(&input, root.path()).unwrap();
+        assert_eq!(document["title"], "ACCEPTED_ALPHA");
+        let options = CarliniInput::from_tool_input(&input, &ctx, root.path()).unwrap();
+        let context = serde_json::to_string(&options.kb_context).unwrap();
+        assert!(context.contains("ACCEPTED_ALPHA"), "{context}");
+        assert!(!context.contains("ACTIVE_BETA"), "{context}");
+        assert!(context.contains("replaced or omitted"));
+    }
 
     #[test]
     fn explicit_carlini_context_snippets_use_shared_persistent_artifact_paths() {

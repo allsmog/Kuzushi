@@ -42,6 +42,7 @@ fn carlini_threat_hunt_tool() -> ToolDescriptor {
 pub(in crate::modules) fn carlini_threat_hunt_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
+        bound_threat_model_option(),
         max_findings_option(20),
         carlini_max_actors_option(),
         carlini_runs_per_actor_option(),
@@ -379,6 +380,7 @@ fn prompt_option(name: &str, role: &str) -> OptionSpec {
 fn taint_iris_next_review_options() -> Vec<OptionSpec> {
     let mut options = vec![
         target_option(),
+        bound_threat_model_option(),
         max_findings_option(20),
         model_option(),
         opt(
@@ -395,7 +397,7 @@ fn taint_iris_next_review_options() -> Vec<OptionSpec> {
 }
 
 fn taint_iris_next_planning_options() -> Vec<OptionSpec> {
-    let mut options = vec![target_option()];
+    let mut options = vec![target_option(), bound_threat_model_option()];
     options.extend(taint_iris_next_planning_knobs());
     options
 }
@@ -614,11 +616,16 @@ fn systems_hunt_tools() -> Vec<ToolDescriptor> {
 }
 
 fn systems_hunt_tool(name: &str, description: &str) -> ToolDescriptor {
+    let mut options = systems_hunt_options();
+    if matches!(name, "systems-hunt:systems-hunt" | "systems-hunt:systems-invariant-extract"
+        | "systems-hunt:deep-semantic-cwe-select" | "systems-hunt:deep-semantic-hunt") {
+        options.push(bound_threat_model_option());
+    }
     SYSTEMS_PROMPT_BINDINGS
         .iter()
         .filter(|binding| binding.applies_to(name))
         .fold(
-            hidden_tool_with_options(name, description, systems_hunt_options()),
+            hidden_tool_with_options(name, description, options),
             |tool, binding| tool.with_prompt(binding.prompt()),
         )
 }

@@ -243,6 +243,7 @@ fn deep_audit_config(
         passes: options.passes,
         taint_tools: options.taint_tools,
         reviewed_refutation_context: None,
+        threat_model_context: None,
     }
 }
 

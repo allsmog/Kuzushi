@@ -409,6 +409,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn selected_threat_context_reaches_all_deep_passes_without_determining_the_verdict() {
+        let root = tempfile::tempdir().unwrap();
+        let (runtime, scripted) = routed_runtime_with_role_typed(vec![
+            verdict_final(false), verdict_final(false), verdict_final(false),
+        ]);
+        let cfg = DeepAuditConfig {
+            passes: 3, include_static_evidence: false,
+            threat_model_context: Some("ACCEPTED_ALPHA high-priority modeled threat".to_string()),
+            ..DeepAuditConfig::new(root.path())
+        };
+        let outcome = run_deep_auditor(&runtime, None, &cfg, &finding()).unwrap();
+        assert_eq!(outcome.triage.verdict, TriageVerdict::FalsePositive);
+        let expected = crate::runbooks::untrusted::render_untrusted_derived_block(
+            "threat-model-digest", cfg.threat_model_context.as_deref().unwrap());
+        let prompts = scripted.captured_prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 3);
+        assert!(prompts.iter().all(|prompt| prompt.contains(&expected)));
+    }
+
     fn needs_review_final() -> AgentLoopStep {
         AgentLoopStep::Final {
             text: "I cannot determine triggerability".to_string(),

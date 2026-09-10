@@ -82,7 +82,7 @@ fn resolve_systems_hunt_execution<'a>(
     Ok(SystemsHuntExecution {
         runtime,
         model,
-        agent_tool_policy: try_whitebox_static_policy_for_target(target)?,
+        agent_tool_policy: selected_whitebox_static_policy_for_target(target, input)?,
         thinking_level: agentic_hunter_thinking_level(input),
         whitebox_static,
     })

@@ -261,16 +261,6 @@ fn batch_equivalence_key_option() -> OptionSpec {
     .advanced()
 }
 
-fn bound_threat_model_option() -> OptionSpec {
-    opt(
-        "threatModelRef",
-        OptionType::Json,
-        "Exact immutable threat-model revision bound by scan-batch dispatch; null records an explicitly model-free batch.",
-    )
-    .aliases(&["threat_model_ref"])
-    .advanced()
-}
-
 fn identity_fold_option() -> OptionSpec {
     opt(
         "identityFold",
@@ -615,6 +605,7 @@ fn agentic_sast_scan_tool() -> ToolDescriptor {
 fn agentic_sast_scan_options() -> Vec<OptionSpec> {
     let mut options = vec![
         target_option(),
+        bound_threat_model_option(),
         max_findings_option(40),
         opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
         agentic_sast_mode_option(),

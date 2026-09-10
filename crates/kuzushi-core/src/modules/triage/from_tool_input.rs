@@ -34,6 +34,7 @@ pub(in crate::modules) enum ModelDedupePolicy {
 pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) fingerprints: Option<Vec<String>>,
     pub(in crate::modules) prompt_template: Option<String>,
+    pub(in crate::modules) threat_model_context: Option<String>,
     pub(in crate::modules) scan_id: Option<String>,
     pub(in crate::modules) scope: TriageScope,
     /// Classify with the code-reading deep auditor instead of the single-shot
@@ -107,6 +108,7 @@ impl TriageRunInput {
             deep: triage_deep_enabled(input, scope, fingerprints.is_none()),
             fingerprints,
             prompt_template: parse_triage_prompt_template(input, cwd)?,
+            threat_model_context: None,
             scan_id,
             scope,
             concurrency: parse_triage_concurrency(input)?,

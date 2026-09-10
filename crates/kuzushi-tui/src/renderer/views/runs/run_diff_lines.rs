@@ -45,6 +45,18 @@ fn append_comparison_header(
 ) {
     lines.push(Line::from(format!("Base source: {}", model.left_source)));
     lines.push(Line::from(format!("Later source: {}", model.right_source)));
+    lines.push(Line::styled(
+        format!("Threat model: {}", model.context_status),
+        theme::accent(),
+    ));
+    lines.push(Line::from(format!(
+        "Base threat model: {}",
+        model.left_context
+    )));
+    lines.push(Line::from(format!(
+        "Later threat model: {}",
+        model.right_context
+    )));
     let not_assessed = model
         .not_seen
         .iter()

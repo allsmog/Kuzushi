@@ -403,7 +403,7 @@ impl AgenticSastRun {
             &options.include_patterns,
             &options.exclude_patterns,
         )?;
-        let enrichment = PromptEnrichment::for_run(&target, &tool_policy)?;
+        let enrichment = PromptEnrichment::for_run(&target, &tool_policy, input)?;
         Ok(Self {
             target,
             options,

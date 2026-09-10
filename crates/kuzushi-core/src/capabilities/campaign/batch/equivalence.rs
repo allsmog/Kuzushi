@@ -114,15 +114,7 @@ fn bound_threat_model_ref(root: &Path, input: &Value) -> Result<Option<Value>> {
     if let Some(bound) = input.get("threatModelRef").filter(|value| !value.is_null()) {
         let expected: crate::capabilities::threat_model::ThreatModelRef =
             serde_json::from_value(bound.clone()).context("invalid bound threatModelRef")?;
-        let loaded = crate::capabilities::threat_model::load_threat_model_revision(
-            root,
-            &expected.model_id,
-            Some(&expected.revision_id),
-        )?;
-        anyhow::ensure!(
-            loaded.model_ref == expected,
-            "bound threatModelRef failed immutable object verification"
-        );
+        crate::capabilities::threat_model::load_exact_threat_model(root, &expected)?;
         return Ok(Some(bound.clone()));
     }
     Ok(None)

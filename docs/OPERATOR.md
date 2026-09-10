@@ -234,6 +234,21 @@ never a hidden default. The Setup editor labels its value an observed spend stop
 
 `kuzushi ci` performs no model work at all, so it needs no budget.
 
+Compare source and context separately when reviewing runs. `runs diff <base>
+<later>` in the shell shows each recorded full Git SHA, available indexed content
+hash and threat-model revision. The content hash distinguishes dirty edits at
+the same SHA. Changed threat-model context means the scan conditions differ;
+missing historical context is unknown. Findings absent from covered work remain
+separate from findings that were not reassessed. Neither category establishes
+a fix. A future fix decision must name the revision it was verified against;
+it must not close the finding on every branch.
+
+Supported discovery and triage tools accept an explicit `threatModelRef` object
+with `modelId`, `revisionId` and `sha256`, or `null` to omit threat-model context.
+This reads the selected immutable revision without activating it globally.
+Missing or changed objects stop the run. Other context artifacts are not yet
+frozen by this option, so it does not guarantee identical scan conditions.
+
 Call allowances are available as an opt-in shared dispatch control. For example,
 these shell commands approve nine total provider calls, protect three for review,
 and then inspect the durable allowance. Replace `<selected-model-id>` with the

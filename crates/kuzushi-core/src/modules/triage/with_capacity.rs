@@ -435,6 +435,7 @@ fn deep_triage_config(
         temperature: tuning.temperature.unwrap_or(base.temperature),
         taint_tools: tuning.taint_tools,
         reviewed_refutation_context: reviewed_refutation_prompt_note(input, finding),
+        threat_model_context: input.threat_model_context.clone(),
         ..base
     }
 }
@@ -443,6 +444,22 @@ fn deep_triage_config(
 mod reviewed_refutation_prior_tests {
     use super::*;
     use crate::findings::{RefutationCohortKey, ReviewedRefutationPrior};
+
+    #[test]
+    fn deep_triage_carries_the_selected_context_into_every_audit_pass() {
+        let root = tempfile::tempdir().unwrap();
+        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
+        let raw = json!({"threatModelRef": first, "votes": 3});
+        let mut input = TriageRunInput::from_tool_input(&raw, root.path()).unwrap();
+        apply_threat_model_triage_context(&mut input, root.path(), &raw).unwrap();
+        let execution = TriageExecutionConfig::new(root.path().to_path_buf(), "openai:gpt-5.5".to_string());
+        let config = deep_triage_config(&execution, &input, &finding("candidate", "fixture"));
+        assert_eq!(config.passes, 3);
+        let digest = config.threat_model_context.unwrap();
+        assert!(digest.contains("ACCEPTED_ALPHA"));
+        assert!(!digest.contains("ACTIVE_BETA"));
+    }
 
     fn finding(fingerprint: &str, rule: &str) -> Finding {
         let mut finding = Finding::new_tool(

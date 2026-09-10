@@ -29,4 +29,6 @@ mod run_sast_verification_and_patch;
 mod sastpipelinereports;
 mod taint_iris_next_hunt_input;
 mod write;
+#[cfg(test)]
+mod context_tests;
 pub(in crate::modules) use run_sast_scan::run_sast_scan_with_registry;
