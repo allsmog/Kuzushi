@@ -35,10 +35,13 @@ impl SpendLimiter {
             );
         }
         ensure_schema(&conn)?;
+        crate::spend::allowance::persistence::ensure_schema(&conn)?;
+        let ledger_id = super::super::identity::ledger_identity(&conn)?;
         let caps = load_caps(&conn)?;
         Ok(Self {
             state: Mutex::new(LimiterState {
                 conn,
+                ledger_id,
                 caps,
                 hard_ceiling,
             }),

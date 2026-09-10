@@ -8,6 +8,8 @@ const ADAPTIVE_THINKING_DETAIL: &str =
 const OPENAI_OAUTH_DETAIL: &str =
     "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.";
 const MODEL_UNAVAILABLE_DETAIL: &str = "The selected model is unavailable for this provider or account. Choose an available model explicitly.";
+const ALLOWANCE_UNSUPPORTED_DETAIL: &str = "The selected runtime bridge does not enforce provider-call allowances. Select a compatible adapter explicitly.";
+const ALLOWANCE_HANDSHAKE_DETAIL: &str = "The runtime bridge did not acknowledge provider-call allowances before its startup deadline. No provider request was admitted.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +29,7 @@ pub enum RuntimeFailureClass {
     Timeout,
     Transport,
     RuntimeError,
+    AllowanceRefused,
 }
 
 impl RuntimeFailureClass {
@@ -47,7 +50,7 @@ impl RuntimeFailureClass {
     }
 }
 
-const FAILURE_CLASS_NAMES: [&str; 13] = [
+const FAILURE_CLASS_NAMES: [&str; 14] = [
     "authentication",
     "bridge_internal",
     "cancelled",
@@ -61,9 +64,10 @@ const FAILURE_CLASS_NAMES: [&str; 13] = [
     "timeout",
     "transport",
     "runtime_error",
+    "allowance_refused",
 ];
 
-const PUBLIC_FAILURE_MESSAGES: [&str; 13] = [
+const PUBLIC_FAILURE_MESSAGES: [&str; 14] = [
     "Provider authentication failed",
     "Bridge operation failed",
     "Model operation was cancelled",
@@ -77,11 +81,12 @@ const PUBLIC_FAILURE_MESSAGES: [&str; 13] = [
     "Provider request timed out",
     "Provider request failed before a response was received",
     "Model runtime failed",
+    "Investigation allowance refused this request; finish and report or review the remaining work",
 ];
 
 fn runtime_failure_class_at(index: usize) -> RuntimeFailureClass {
     use RuntimeFailureClass::*;
-    const CLASSES: [RuntimeFailureClass; 13] = [
+    const CLASSES: [RuntimeFailureClass; 14] = [
         Authentication,
         BridgeInternal,
         Cancelled,
@@ -95,6 +100,7 @@ fn runtime_failure_class_at(index: usize) -> RuntimeFailureClass {
         Timeout,
         Transport,
         RuntimeError,
+        AllowanceRefused,
     ];
     CLASSES[index]
 }
@@ -205,6 +211,21 @@ pub struct RuntimeFailure {
 }
 
 impl RuntimeFailure {
+    pub fn allowance_handshake_timeout() -> Self {
+        Self::new(RuntimeFailureMetadata::new(
+            RuntimeFailureClass::AllowanceRefused,
+            None,
+            Some(ALLOWANCE_HANDSHAKE_DETAIL),
+        ))
+    }
+
+    pub fn allowance_unsupported() -> Self {
+        Self::new(RuntimeFailureMetadata::new(
+            RuntimeFailureClass::AllowanceRefused,
+            None,
+            Some(ALLOWANCE_UNSUPPORTED_DETAIL),
+        ))
+    }
     pub fn new(metadata: RuntimeFailureMetadata) -> Self {
         Self { metadata }
     }
@@ -254,6 +275,16 @@ fn allowlisted_failure_detail(
 
 const SAFE_DETAILS: &[(RuntimeFailureClass, &[&str], &str)] = &[
     (
+        RuntimeFailureClass::AllowanceRefused,
+        &["the runtime bridge did not acknowledge provider-call allowances before its startup deadline. no provider request was admitted."],
+        ALLOWANCE_HANDSHAKE_DETAIL,
+    ),
+    (
+        RuntimeFailureClass::AllowanceRefused,
+        &["the selected runtime bridge does not enforce provider-call allowances. select a compatible adapter explicitly."],
+        ALLOWANCE_UNSUPPORTED_DETAIL,
+    ),
+    (
         RuntimeFailureClass::SdkClientValidation,
         &["temperature", "thinking"],
         ADAPTIVE_THINKING_DETAIL,
@@ -273,6 +304,19 @@ const SAFE_DETAILS: &[(RuntimeFailureClass, &[&str], &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allowance_failure_roundtrips_as_a_safe_distinct_class() {
+        let failure = RuntimeFailure::allowance_unsupported();
+        let metadata = failure.metadata();
+        assert_eq!(RuntimeFailureClass::from_safe_class("allowance_refused"), metadata.error_class);
+        assert_eq!(metadata.error_class.to_string(), "allowance_refused");
+        let value = serde_json::to_value(metadata).unwrap();
+        assert_eq!(value["errorClass"], "allowance_refused");
+        assert_eq!(serde_json::from_value::<RuntimeFailureMetadata>(value).unwrap(), *metadata);
+        let unknown = RuntimeFailureMetadata::new(RuntimeFailureClass::AllowanceRefused, None, Some("private ledger detail"));
+        assert_eq!(unknown.detail, None);
+    }
 
     #[test]
     fn metadata_keeps_only_allowlisted_canonical_detail() {

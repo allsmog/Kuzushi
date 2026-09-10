@@ -9,8 +9,22 @@ pub use metadata::{
 };
 
 pub struct TracedRuntime<'a> {
-    inner: &'a dyn AgentRuntime,
+    inner: InnerRuntime<'a>,
     trace: TraceHandle,
+}
+
+enum InnerRuntime<'a> {
+    Borrowed(&'a dyn AgentRuntime),
+    Bound(Box<dyn AgentRuntime + 'a>),
+}
+
+impl InnerRuntime<'_> {
+    fn get(&self) -> &dyn AgentRuntime {
+        match self {
+            Self::Borrowed(runtime) => *runtime,
+            Self::Bound(runtime) => runtime.as_ref(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -21,7 +35,7 @@ struct ModelCallLifecycle {
 
 impl<'a> TracedRuntime<'a> {
     pub fn new(inner: &'a dyn AgentRuntime, trace: TraceHandle) -> Self {
-        Self { inner, trace }
+        Self { inner: InnerRuntime::Borrowed(inner), trace }
     }
 
     fn record_model_call_start(
@@ -364,8 +378,18 @@ fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelU
 
 #[async_trait]
 impl AgentRuntime for TracedRuntime<'_> {
+    fn with_allowance_binding(
+        &self,
+        allowance: crate::allowance::AllowanceBinding,
+    ) -> Result<Box<dyn AgentRuntime + '_>> {
+        Ok(Box::new(TracedRuntime {
+            inner: InnerRuntime::Bound(self.inner.get().with_allowance_binding(allowance)?),
+            trace: self.trace.clone(),
+        }))
+    }
+
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
-        self.inner.preflight_model_blocking(model)
+        self.inner.get().preflight_model_blocking(model)
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -390,6 +414,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .query_observed_blocking(request)
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
@@ -430,6 +455,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .query_observed_blocking_controlled(request, control)
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
@@ -463,6 +489,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .triage_finding_observed_blocking(request)
             .and_then(|observed| observed.try_map(TriageOutcome::validate_cost));
         self.record_triage_result(
@@ -475,7 +502,7 @@ impl AgentRuntime for TracedRuntime<'_> {
     }
 
     fn supports_tools(&self) -> bool {
-        self.inner.supports_tools()
+        self.inner.get().supports_tools()
     }
 
     fn next_step_blocking(
@@ -503,6 +530,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .next_step_observed_blocking(request, history)
             .and_then(|observed| observed.try_map(AgentLoopStep::validate_cost));
         self.record_step(
@@ -516,7 +544,7 @@ impl AgentRuntime for TracedRuntime<'_> {
     }
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
-        let result = self.inner.preflight_tool_loop_blocking(request);
+        let result = self.inner.get().preflight_tool_loop_blocking(request);
         match &result {
             Ok(()) => {
                 let _ = self
@@ -540,7 +568,7 @@ impl AgentRuntime for TracedRuntime<'_> {
     }
 
     fn model_for_tier(&self, tier: ModelTier, configured: &str) -> String {
-        self.inner.model_for_tier(tier, configured)
+        self.inner.get().model_for_tier(tier, configured)
     }
 
     fn spawn_subagent_blocking(
@@ -571,6 +599,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .spawn_subagent_observed_blocking(role, request)
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(

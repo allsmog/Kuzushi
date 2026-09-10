@@ -44,8 +44,13 @@ fn disclose_hidden_filters(lines: &mut Vec<String>, budget: usize) {
 fn card(row: &ReviewQueueRow, width: usize, height: usize, selected: bool) -> Vec<Line<'static>> {
     let style = review_queue_row_style(theme::primary(), selected);
     let pointer = if selected { "▸" } else { " " };
+    let source = if height < 3 {
+        format!(" s{}", row.source_count)
+    } else {
+        String::new()
+    };
     let mut text = vec![format!(
-        "{pointer}{} {} {}",
+        "{pointer}{} {} {}{source}",
         row.alias,
         severity_glyph(row.severity_tone),
         proof_label(row)

@@ -127,7 +127,7 @@ impl PhaseCompositionContract {
         match self.phase {
             kuzushi_core::WorkflowPhase::Map => &["Viewing Map", "SYSTEM SUMMARY"],
             kuzushi_core::WorkflowPhase::Scan => &["Viewing Scan", "complete", "scan-phase"],
-            kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "[●●●]", "s1"],
+            kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "runtime verified", "s1"],
             kuzushi_core::WorkflowPhase::Prove => &["F-0001", "STATUS", "NEXT", "[●●●]"],
             kuzushi_core::WorkflowPhase::Fix => {
                 &["REMEDIATION", "Staged", "patch apply", "patch reject"]
@@ -162,7 +162,10 @@ fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static
 }
 
 fn contains_contract_atom(text: &str, atom: &str) -> bool {
-    text.contains(atom) || (atom == "[●●●]" && text.contains("[***]"))
+    text.contains(atom)
+        || (atom == "[●●●]" && text.contains("[***]"))
+        || (atom == "runtime verified" && text.to_ascii_lowercase().contains(atom))
+        || (atom == "s1" && text.contains("sources:1"))
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -203,24 +206,49 @@ fn assert_one_accent_region(buffer: &Buffer, profile: TerminalProfile, phase: &s
 }
 
 fn style_region_count(buffer: &Buffer, matches: impl Fn(&ratatui::buffer::Cell) -> bool) -> usize {
-    (0..buffer.area.height)
-        .map(|y| row_region_count(buffer, y, &matches))
-        .sum()
-}
-
-fn row_region_count(
-    buffer: &Buffer,
-    y: u16,
-    matches: &impl Fn(&ratatui::buffer::Cell) -> bool,
-) -> usize {
-    let mut inside = false;
+    let mut cells = styled_cells(buffer, matches);
     let mut regions = 0;
-    for x in 0..buffer.area.width {
-        let matched = matches(&buffer[(x, y)]);
-        regions += usize::from(matched && !inside);
-        inside = matched;
+    while let Some(&origin) = cells.first() {
+        remove_connected_region(&mut cells, origin);
+        regions += 1;
     }
     regions
+}
+
+fn styled_cells(
+    buffer: &Buffer,
+    matches: impl Fn(&ratatui::buffer::Cell) -> bool,
+) -> std::collections::BTreeSet<(i32, i32)> {
+    let mut cells = std::collections::BTreeSet::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            if matches(&buffer[(x, y)]) {
+                cells.insert((i32::from(x), i32::from(y)));
+            }
+        }
+    }
+    cells
+}
+
+fn remove_connected_region(cells: &mut std::collections::BTreeSet<(i32, i32)>, origin: (i32, i32)) {
+    let mut pending = vec![origin];
+    while let Some((x, y)) = pending.pop() {
+        if !cells.remove(&(x, y)) {
+            continue;
+        }
+        pending.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]);
+    }
+}
+
+#[test]
+fn selection_regions_join_card_rows_but_keep_separate_controls_distinct() {
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 5, 4));
+    for point in [(0, 0), (1, 0), (1, 1), (4, 3)] {
+        buffer[point].set_bg(Color::Red);
+    }
+    assert_eq!(style_region_count(&buffer, |cell| cell.bg == Color::Red), 2);
+    buffer[(4, 3)].set_bg(Color::Reset);
+    assert_eq!(style_region_count(&buffer, |cell| cell.bg == Color::Red), 1);
 }
 
 fn assert_profile_colors(buffer: &Buffer, profile: TerminalProfile) {

@@ -4415,10 +4415,16 @@ fn run_diff_view_renders_new_and_not_seen_findings_and_revisions() {
     assert!(rendered.contains("conflicts=1"));
     assert!(rendered.contains("CHANGED IN RIGHT"));
     assert!(rendered.contains("changed item"));
+    app.router.default_scroll_mut().set(8);
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(rendered.contains("UNCERTAIN MATCHES"));
     assert!(rendered.contains("line shifted item"));
     assert!(rendered.contains("review before carrying decisions"));
-    assert!(rendered.contains("NOT SEEN IN RIGHT"));
+    app.router.default_scroll_mut().set(12);
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+    assert!(rendered.contains("NOT REASSESSED IN RIGHT"));
     assert!(rendered.contains("not seen item"));
 }
 
@@ -5496,7 +5502,7 @@ fn cost_cap_halt_renders_compact_fallback_on_short_terminals() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("COST CAP: c=continue"));
+    assert!(rendered.contains("COST CAP: c=review cap"));
     assert!(rendered.contains("a=abort"));
 }
 
@@ -7813,4 +7819,40 @@ fn plain_project_model_rows_carry_the_same_state_and_action_cells() {
         !rendered.contains('│'),
         "plain output must not depend on box drawing: {rendered}"
     );
+}
+
+#[test]
+fn run_diff_preserves_full_source_hashes_across_viewport_widths() {
+    let temp = tempfile::tempdir().unwrap();
+    let sha = "a".repeat(40);
+    let hash = "bc".repeat(32);
+    for run in ["run-left", "run-right"] {
+        write_run_diff_fixture(temp.path(), run, &sha, serde_json::json!([]));
+        let path = crate::ui_view_models::ui_run_dir(Some(temp.path()), run).join("result.json");
+        std::fs::write(
+            path,
+            serde_json::json!({"data":{"treeHash":hash}}).to_string(),
+        )
+        .unwrap();
+    }
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.router.run_diff_mut().open("run-left", "run-right");
+    app.set_shell_view(ShellView::RunDiff);
+    app.hydrate_active_view_blocking();
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        let lines = run_diff_lines(
+            &app,
+            Rect::new(0, 0, width, height),
+            "run-left",
+            "run-right",
+        );
+        assert!(lines.iter().all(|line| line.width() <= width as usize));
+        let text = lines.iter().map(line_text).collect::<String>();
+        assert!(text.contains(&sha), "complete SHA at {width}x{height}");
+        assert!(
+            text.contains(&hash),
+            "complete content hash at {width}x{height}"
+        );
+    }
 }

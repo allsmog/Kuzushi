@@ -202,10 +202,7 @@ pub fn gate_descriptor(
     let Some(classification) = classify_descriptor(tool) else {
         return AutonomyDecision::RefuseUnclassified;
     };
-    let ToolClassification::Phase(needed) = classification else {
-        return AutonomyDecision::Allow;
-    };
-    let decision = gate_phase(needed, posture);
+    let decision = classification_gate(classification, posture);
     if decision != AutonomyDecision::Allow {
         return decision;
     }
@@ -213,6 +210,16 @@ pub fn gate_descriptor(
         return AutonomyDecision::RequireApproval;
     }
     AutonomyDecision::Allow
+}
+
+fn classification_gate(
+    classification: ToolClassification,
+    posture: AutonomyPosture,
+) -> AutonomyDecision {
+    match classification {
+        ToolClassification::Phase(needed) => gate_phase(needed, posture),
+        ToolClassification::Read | ToolClassification::Report => AutonomyDecision::Allow,
+    }
 }
 
 /// Gate an explicitly resolved workflow phase. Composite tools use this after
@@ -351,6 +358,31 @@ mod tests {
             gate("patch:finding", AutonomyPosture::Fix),
             AutonomyDecision::RequireApproval
         );
+    }
+
+    #[test]
+    fn reports_are_exits_at_every_posture_and_keep_export_approval() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let report = registry.resolve_tool("report:build").unwrap();
+        let sarif = registry.resolve_tool("report:sarif").unwrap();
+        for posture in AutonomyPosture::ORDER {
+            assert_eq!(gate_descriptor(report, *posture), AutonomyDecision::Allow);
+            assert_eq!(gate_descriptor(sarif, *posture), AutonomyDecision::RequireApproval);
+        }
+        assert_eq!(crate::modules::phase_results::phase_result_phase(report), None);
+        assert_eq!(crate::modules::phase_results::phase_result_phase(sarif), None);
+    }
+
+    #[test]
+    fn report_phase_cannot_authorize_repository_execution_or_external_actions() {
+        use crate::modules::descriptor::{ApprovalPolicy, ToolEffect};
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut tool = registry.resolve_tool("report:build").unwrap().clone();
+        tool.approval = ApprovalPolicy::Explicit;
+        for effect in [ToolEffect::RepositoryExecute, ToolEffect::ExternalAction] {
+            tool.effect = effect;
+            assert_eq!(gate_descriptor(&tool, AutonomyPosture::Fix), AutonomyDecision::RefuseUnclassified);
+        }
     }
 
     #[test]

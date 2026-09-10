@@ -8,10 +8,10 @@ KUZUSHI · Viewing Review · ● LIVE
  ▸ NEXT record terminal dispositions for
         6 of 6 ledger candidates
 │▸ FINDINGS · 6
-│▸F-0001 C runtime verified
+│▸F-0001 C runtime verified s1
 │  SQL injection reaches query
 │
-run rout... 6 findings · 1 C · 2 H · 2 M
+⛭ autonomy:fix ·   6 findings · 1 C ·...
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

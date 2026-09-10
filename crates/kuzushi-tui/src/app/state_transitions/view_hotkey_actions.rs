@@ -332,7 +332,7 @@ impl ShellApp {
         let crate::ui_view_models::PhaseCockpitBody::Map(map) = model.body else {
             return;
         };
-        if map.decompose_first.is_some() {
+        if map.scope_suggestion.is_some() {
             self.open_map_action_plan(PlanningTaskId::DecomposeModules);
             self.log(
                 "map",

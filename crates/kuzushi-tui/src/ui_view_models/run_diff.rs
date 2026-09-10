@@ -14,6 +14,8 @@ pub(crate) struct RunDiffModel {
     pub(crate) right_run: String,
     pub(crate) left_revision: String,
     pub(crate) right_revision: String,
+    pub(crate) left_source: String,
+    pub(crate) right_source: String,
     pub(crate) left_status: String,
     pub(crate) right_status: String,
     pub(crate) new_findings: Vec<RunDiffFindingRow>,
@@ -31,6 +33,8 @@ pub(crate) struct RunDiffFindingRow {
     pub(crate) title: String,
     pub(crate) state: RunDiffFindingState,
     pub(crate) location: String,
+    pub(crate) file_path: String,
+    pub(crate) reassessment_block: Option<String>,
     pub(crate) tool: String,
     pub(crate) match_key: Option<String>,
 }
@@ -83,7 +87,14 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
     append_status_warning(&mut warnings, right, &right_metadata.status);
     let left_findings = load_run_findings(app, left, &mut warnings);
     let right_findings = load_run_findings(app, right, &mut warnings);
-    let rows = classified_run_diff_rows(&left_findings, &right_findings);
+    let mut rows = classified_run_diff_rows(&left_findings, &right_findings);
+    assessment::classify_absences(
+        app,
+        right,
+        &left_metadata,
+        &right_metadata,
+        &mut rows.not_seen,
+    );
     let decision_summary = run_diff_decision_summary(app, &right_findings);
 
     RunDiffModel {
@@ -91,6 +102,8 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
         right_run: right.to_string(),
         left_revision: left_metadata.revision,
         right_revision: right_metadata.revision,
+        left_source: assessment::source_label(app, left),
+        right_source: assessment::source_label(app, right),
         left_status: left_metadata.status,
         right_status: right_metadata.status,
         new_findings: rows.new_findings,
@@ -289,17 +302,14 @@ impl RunDiffFindingRow {
     fn with_key(&self, key: &str) -> Self {
         Self {
             key: key.to_string(),
-            title: self.title.clone(),
-            state: self.state.clone(),
-            location: self.location.clone(),
-            tool: self.tool.clone(),
-            match_key: self.match_key.clone(),
+            ..self.clone()
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RunDiffMetadata {
+    target: Option<String>,
     revision: String,
     status: String,
 }
@@ -308,10 +318,12 @@ fn run_metadata(app: &ShellApp, run_id: &str) -> RunDiffMetadata {
     let run_state = run_json_state(app, run_id, RUN_FILE);
     match run_state {
         ViewDataState::Ready(run_state) => RunDiffMetadata {
+            target: assessment::run_target(&run_state),
             revision: run_revision_label(run_state.clone()),
             status: run_status_label(run_state),
         },
         ViewDataState::NotRequested | ViewDataState::Loading => RunDiffMetadata {
+            target: None,
             revision: "rev:loading".to_string(),
             status: "loading".to_string(),
         },
@@ -399,6 +411,8 @@ fn run_diff_finding_row(value: &serde_json::Value) -> Option<RunDiffFindingRow> 
         title: finding_title(value),
         state: run_diff_finding_state(value),
         location: location_label(file, line),
+        file_path: file.to_string(),
+        reassessment_block: None,
         tool: string_field(value, &["tool", "source"])
             .unwrap_or("-")
             .to_string(),
@@ -572,6 +586,8 @@ fn target_git_revision_label(git: &RunTargetGitMetadata) -> String {
         format!("rev:{short}{dirty}")
     }
 }
+
+mod assessment;
 
 #[cfg(test)]
 mod tests;

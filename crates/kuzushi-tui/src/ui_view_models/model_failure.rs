@@ -13,7 +13,7 @@ pub(crate) fn model_failure_text(
     // Legacy auth detail contains a CLI login command that is shell-only now.
     if matches!(
         failure.error_class,
-        Class::SdkClientValidation | Class::ProviderRejected
+        Class::SdkClientValidation | Class::ProviderRejected | Class::AllowanceRefused
     ) {
         lines.extend(failure.detail);
     }
@@ -36,6 +36,10 @@ fn recovery_step(class: Class, detail: Option<&str>) -> &'static str {
 }
 
 const RECOVERY_STEPS: &[(Class, &str)] = &[
+    (
+        Class::AllowanceRefused,
+        "Finish with /report, or review the investigation allowance and remaining work before another request.",
+    ),
     (
         Class::Authentication,
         "Open /auth to check credentials for the selected provider and reconnect, then retry.",

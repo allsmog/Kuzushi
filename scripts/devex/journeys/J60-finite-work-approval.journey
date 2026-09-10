@@ -1,0 +1,45 @@
+# Real offline study draft + durable approval. No discovery or model launch.
+name: Finite study draft, exact approval, resize and durable receipt
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+type: run campaign:study {"campaignId":"offline-finite","scanInput":{"taskMode":"manual","tasks":["secret-scan"]}}
+keys: Enter
+require-live-snap: 30 run receipt · completed | draft-completed
+submit: logs
+require-live-snap: 20 Study draft: offline-finite | draft-receipt
+expect: 3 discovery jobs
+expect: 1 worker
+expect: No jobs started
+ask: Does the draft disclose the fixed work and source identity while making review and approval the next step?
+shell: python3 @REPO/scripts/devex/fixtures/study_approval.py @TMP_TARGET @ART/approval-command.txt
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 20 CONFIRM · finite investigation work | work-terms
+expect: Total provider calls: 9
+expect: protected review: 3
+expect: 3 fixed jobs
+expect: 1 attempt(s) each
+expect: Plan digest: sha256:
+expect: cancellation consume attempts
+expect: starts no jobs
+ask: Are the exact jobs, attempt limits, plan digest, model and allowance all visible before approval?
+resize: 80x24
+require-live-snap: 20 resize to 120×36 | work-too-small
+keys: y
+live-snap: hidden-work-cannot-approve
+expect: CONFIRM · finite investigation work
+expect-not: y allow once
+ask: Is approval blocked with visible resize guidance and cancellation, while the request remains intact?
+resize: 120x36
+require-live-snap: 20 3 fixed jobs | work-restored
+keys: y
+require-live-snap: 25 Approved campaign: offline-finite | approved-work-receipt
+expect: 3 fixed jobs
+expect: 0/9
+expect: no jobs started
+ask: Does the durable receipt distinguish approved work from executed work and retain exact source provenance?
+keys: C-c

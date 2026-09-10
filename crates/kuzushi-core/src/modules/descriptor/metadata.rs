@@ -112,7 +112,7 @@ pub(in crate::modules) fn module(
             kind,
             description: description.to_string(),
         },
-        tools,
+        tools: tools.into_iter().map(super::super::allowance_dispatch::declare_allowance_option).collect(),
         dag_nodes,
         tool_executors: BTreeMap::new(),
         dag_executors: BTreeMap::new(),

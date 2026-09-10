@@ -9,6 +9,7 @@ pub(crate) fn run_artifact_max_scroll(app: &ShellApp) -> Option<u16> {
     let lines = match app.shell_view() {
         ShellView::Replay => replay_lines(app, area, app.router.replay().run_id()),
         ShellView::Trace => trace_lines(app, area, app.router.trace().run_id()),
+        ShellView::FailureHandoff => failure_handoff_lines(app, area),
         _ => return None,
     };
     let max = lines.len().saturating_sub(usize::from(area.height).max(1));
@@ -16,7 +17,10 @@ pub(crate) fn run_artifact_max_scroll(app: &ShellApp) -> Option<u16> {
 }
 
 fn run_artifact_area(app: &ShellApp) -> Option<Rect> {
-    if !matches!(app.shell_view(), ShellView::Replay | ShellView::Trace) {
+    if !matches!(
+        app.shell_view(),
+        ShellView::Replay | ShellView::Trace | ShellView::FailureHandoff
+    ) {
         return None;
     }
     let viewport = app.viewport();

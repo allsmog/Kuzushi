@@ -36,7 +36,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                            │── SOURCE · observation (on-disk excerpt) ──
 │                                            │  src/auth/login.rs:17
 │                                            │    14 │ }
-run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...   6 findings / 1 crit / 2 high / 2 med
+⛭ autonomy:fix · run route · ⠋ context:build · 42s · 1/2 · notify:unavailable ·...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ▣ REVIEW VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

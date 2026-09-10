@@ -185,8 +185,8 @@ pub(crate) struct MapPhaseModel {
     pub(crate) threat_model_freshness: super::ThreatModelFreshnessModel,
     pub(crate) empty_hint: Option<String>,
     /// Set on very large, still-undecomposed repositories: the NEXT ACTION
-    /// card recommends module decomposition before threat-model generation.
-    pub(crate) decompose_first: Option<String>,
+    /// card offers a scope proposal alongside whole-repository planning.
+    pub(crate) scope_suggestion: Option<String>,
 }
 
 /// Coverage-ledger scan recommendations shown inside the HOT MODULES pane.

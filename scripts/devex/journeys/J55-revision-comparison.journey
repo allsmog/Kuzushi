@@ -1,0 +1,27 @@
+# Offline synthetic artifacts exercise comparison presentation; no model is called.
+name: Exact source revisions and honest nondeterministic absence
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+shell: python3 @REPO/scripts/devex/fixtures/revision_comparison.py @TMP_TARGET
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | shell-ready
+submit: runs diff fixture-base fixture-later
+require-live-snap: 20 1 not observed | revision-comparison
+expect: rev:aaaaaaa*
+expect: content:bbbb
+expect: content:cccc
+expect: 1 not observed
+expect: 1 not reassessed
+expect: 1 seen again
+expect: Absence does not establish a fix.
+ask: Can the operator distinguish the same SHA with two content hashes and understand that absence does not prove a fix?
+nav-mode:
+keys: NPage
+live-snap: comparison-coverage
+expect: NOT OBSERVED IN COVERED WORK
+expect: NOT REASSESSED IN RIGHT
+expect: outside the recorded scan scope
+ask: Are both absence categories readable and reachable by keyboard, with the uncovered finding's reason visible?
+keys: C-c

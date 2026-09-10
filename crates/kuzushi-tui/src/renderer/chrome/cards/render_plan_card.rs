@@ -118,7 +118,7 @@ pub(crate) fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &Shel
             Span::raw(" "),
             Span::styled("c", theme::accent()),
             Span::raw(" "),
-            Span::styled("continue past cap", theme::warn()),
+            Span::styled("review cap", theme::warn()),
             Span::raw("   "),
             Span::styled("a", theme::accent()),
             Span::raw(" "),

@@ -1,3 +1,5 @@
+mod scan_assessment;
+pub use scan_assessment::scan_reassessment_block;
 use super::domain::*;
 use super::presentation::{proof_state_label, runtime_validation_label};
 use serde::Serialize;

@@ -1,6 +1,42 @@
 use super::*;
 use kuzushi_core::V2Config;
 
+#[test]
+fn cap_review_requires_a_specific_amount_and_restores_the_origin() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Activity);
+    app.session_mut().set_session_budget_usd(Some(0.05));
+    app.record_cost(0.10);
+    app.continue_past_budget();
+    assert!(app.is_budget_halted());
+    app.reduce_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    press(&mut app, KeyCode::Enter);
+    assert!(
+        app.is_budget_halted(),
+        "empty input must not bypass the cap"
+    );
+    assert!(app.router.setup().budget_error().is_some());
+    app.reduce_paste("0.2");
+    assert_eq!(app.session().session_budget_usd(), Some(0.05));
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.session().session_budget_usd(), Some(0.2));
+    assert!(!app.is_budget_halted());
+    assert_eq!(app.shell_view(), ShellView::Activity);
+}
+
+#[test]
+fn cancelling_cap_review_preserves_halt_and_origin() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Report);
+    app.session_mut().set_session_budget_usd(Some(0.05));
+    app.record_cost(0.10);
+    app.continue_past_budget();
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.shell_view(), ShellView::Report);
+    assert_eq!(app.session().session_budget_usd(), Some(0.05));
+    assert!(app.is_budget_halted());
+}
+
 fn editing_budget(current: Option<f64>) -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Setup);
@@ -205,7 +241,11 @@ fn budget_editor_saved_setup_receipt_keeps_precision_and_ceiling_identity() {
         .iter()
         .find(|row| row.id == SetupRowId::Budget)
         .unwrap();
-    assert_eq!(budget.detail, "$0.00125 session cap");
+    assert_eq!(budget.status, "OBSERVED STOP");
+    assert_eq!(
+        budget.detail,
+        "$0.00125 after cost receipts; charges may exceed this amount"
+    );
     app.config_mut().operator.spend_hard_ceiling_usd = Some(0.00124);
     let model = crate::ui_view_models::setup_readiness_model(&app);
     let budget = model

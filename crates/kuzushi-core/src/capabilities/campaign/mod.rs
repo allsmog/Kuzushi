@@ -9,6 +9,8 @@
 //! Neither tool calls a model: planning is pure workspace-file computation.
 
 mod batch;
+mod allowance;
+mod approved_work;
 pub mod coverage;
 mod dispatcher_lease;
 mod parallel_safety;
@@ -17,6 +19,7 @@ mod prior_runs;
 mod shards;
 pub mod snapshot;
 mod status;
+mod study_plan;
 #[cfg(test)]
 mod tests;
 mod threats;
@@ -36,6 +39,9 @@ pub use batch::{
     SCAN_BATCH_KIND, SCAN_BATCH_SCHEMA_VERSION,
 };
 pub use coverage::execute_campaign_coverage;
+pub use allowance::{execute_allowance_status, execute_approve_allowance};
+pub use approved_work::{campaign_plan_digest, work_input_digest};
+pub(crate) use approved_work::require_study_reference;
 pub use dispatcher_lease::{
     acquire_batch_controller_lease, acquire_dispatcher_lease, BatchControllerLease,
     CampaignDispatcherLease,
@@ -46,6 +52,7 @@ pub use parallel_safety::{
 };
 pub use plan::execute_campaign_plan;
 pub use status::execute_campaign_status;
+pub use study_plan::execute_study_plan;
 
 use anyhow::{Context, Result};
 use serde_json::Value;

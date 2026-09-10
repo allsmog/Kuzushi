@@ -240,7 +240,7 @@ fn collect_current_tree_entries(
     for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
-        if should_ignore_path(&path) {
+        if should_ignore_path(path.strip_prefix(root)?) {
             continue;
         }
         let kind = entry.file_type()?;
@@ -506,7 +506,7 @@ fn collect_indexed_files_from(
     for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
-        if should_ignore_path(&path) {
+        if should_ignore_path(path.strip_prefix(root)?) {
             continue;
         }
         let kind = entry.file_type()?;

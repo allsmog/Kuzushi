@@ -14,7 +14,7 @@ fn budget_editor_field_validation_and_save_cancel_stay_visible() {
     app.router
         .setup_mut()
         .set_budget_error("Amount exceeds hard ceiling $10.12345");
-    for (width, height) in [(40, 12), (80, 24), (120, 36)] {
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
             .draw(|frame| crate::renderer::render_app(frame, &app))
@@ -33,6 +33,8 @@ fn budget_editor_field_validation_and_save_cancel_stay_visible() {
             "hard ceiling $10.12345",
             "Enter save",
             "Esc cancel",
+            "Observed spend stop",
+            "overspend.",
         ] {
             assert!(
                 text.contains(expected),

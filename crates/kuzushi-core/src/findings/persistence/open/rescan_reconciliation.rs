@@ -111,28 +111,7 @@ impl CompletedScanScope {
     /// within the recorded scan paths. Whole-target scans cover every file; a
     /// path that cannot be resolved inside the target is never covered.
     pub(crate) fn covers_file(&self, file_path: &str) -> bool {
-        if self.paths.is_empty() {
-            return true;
-        }
-        let Some(relative) = self.target_relative(file_path) else {
-            return false;
-        };
-        self.paths
-            .iter()
-            .any(|scope| path_is_within(&relative, scope))
-    }
-
-    /// `file_path` as a lexically normalized target-relative path.
-    fn target_relative(&self, file_path: &str) -> Option<String> {
-        let path = Path::new(file_path);
-        let stripped = match path.strip_prefix(&self.target) {
-            Ok(stripped) => stripped,
-            // An absolute path outside the target proves nothing: normalizing it
-            // would drop the leading `/` and let `/etc/passwd` match scope `etc`.
-            Err(_) if path.is_absolute() => return None,
-            Err(_) => path,
-        };
-        lexically_normalized(&stripped.to_string_lossy().replace('\\', "/"))
+        crate::run_artifacts::scan_paths_cover_file(&self.target, &self.paths, file_path)
     }
 }
 
@@ -155,38 +134,6 @@ fn receipt_scan_evidence(scan: ScanStageData) -> RecordedScanEvidence {
             .map(|engine| engine.engine)
             .collect(),
     }
-}
-
-/// Lexically normalize a '/'-joined relative path: drop `.` and empty
-/// segments, resolve `..` against earlier segments. `None` when the path
-/// escapes its root or normalizes to nothing — callers fail closed.
-fn lexically_normalized(path: &str) -> Option<String> {
-    let mut out: Vec<&str> = Vec::new();
-    for segment in path.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                out.pop()?;
-            }
-            other => out.push(other),
-        }
-    }
-    (!out.is_empty()).then(|| out.join("/"))
-}
-
-fn path_is_within(path: &str, scope_path: &str) -> bool {
-    let scope = scope_path.trim_matches('/');
-    if scope.is_empty() || scope == "." {
-        return true;
-    }
-    // A scope entry that escapes itself (`lib/..`) proves nothing.
-    let Some(scope) = lexically_normalized(scope) else {
-        return false;
-    };
-    path == scope
-        || path
-            .strip_prefix(&scope)
-            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 impl FindingStore {
@@ -301,6 +248,13 @@ impl FindingStore {
             .flat_map(|tool| tool_components(tool).map(str::to_string))
             .chain(scope.receipt_engines.iter().cloned())
             .collect())
+    }
+
+    pub(crate) fn scan_reassessment_receipt(
+        &self, run_id: &str,
+    ) -> Result<Option<crate::run_artifacts::PhaseStageReceipt>> {
+        let Some(root) = self.v3_workspace_root() else { return Ok(None); };
+        crate::run_artifacts::load_scan_stage_data(root, run_id)
     }
 
     /// The scanned target path recorded for `run_id`, if known.

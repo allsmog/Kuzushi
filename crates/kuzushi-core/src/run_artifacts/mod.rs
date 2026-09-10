@@ -28,6 +28,9 @@ mod run_retention;
 mod run_summary_store;
 mod running;
 mod scan_stage;
+mod source_revision;
+pub use source_revision::RunSourceRevision;
+pub(crate) use scan_stage::scan_paths_cover_file;
 mod stage_checkpoint;
 mod terminal_intent;
 #[cfg(test)]

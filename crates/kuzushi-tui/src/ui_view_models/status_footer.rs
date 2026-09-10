@@ -25,8 +25,18 @@ pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
     }
 }
 
+/// The operator's ceiling must survive truncation of routing and diagnostics.
+fn leading_footer_segments(app: &ShellApp) -> Vec<String> {
+    let mut segments = Vec::new();
+    if !setup_is_in_progress(app) {
+        segments.extend(autonomy_footer_segment(app));
+    }
+    segments.push(routing_mode_segment(app));
+    segments
+}
+
 fn compact_status_footer_left_segments(app: &ShellApp) -> Vec<String> {
-    let mut segments = vec![routing_mode_segment(app)];
+    let mut segments = leading_footer_segments(app);
     if let Some(attention) = attention_footer_segment(app) {
         segments.push(attention);
     }
@@ -45,10 +55,8 @@ fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Vec<String> {
-    // Activity is ambient safety state, so keep it immediately after routing.
-    // Lower-priority journey/model chips may truncate at narrow widths without
-    // hiding the fact that work is still executing in the background.
-    let mut segments = vec![routing_mode_segment(app), activity.label];
+    let mut segments = leading_footer_segments(app);
+    segments.push(activity.label);
     segments.extend(optional_active_chips(app));
     segments.extend([view_status_segment(app), model_footer_segment(app)]);
     segments
@@ -62,7 +70,7 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // strip, so the bottom bar stays routing + view. The bug-bounty scope
     // chip (M2 §2.1) is kept here — it's live gating state, not a session
     // fact, so it belongs with routing/view rather than the cockpit strip.
-    let mut segments = vec![routing_mode_segment(app)];
+    let mut segments = leading_footer_segments(app);
     // Engagement orientation (M-journey): the same `組 map 1/5` phase chip used
     // by the Workbench keeps the current journey step visible on every view,
     // not just inside the launch walker.
@@ -77,9 +85,6 @@ fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
         attention_footer_segment(app),
         notification_availability_footer_segment(app),
         (!onboarding).then(|| journey_footer_segment(app)).flatten(),
-        (!onboarding)
-            .then(|| autonomy_footer_segment(app))
-            .flatten(),
         review_conflict_footer_segment(app),
         workspace_stale_footer_segment(app),
     ]
@@ -93,11 +98,6 @@ fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
         attention_footer_segment(app),
         notification_availability_footer_segment(app),
         (!onboarding).then(|| journey_footer_segment(app)).flatten(),
-        // The autonomy dial rides beside the phase chip — the always-visible
-        // master control (`⛭ autonomy:prove`, with `⚠` when it throttles the walker).
-        (!onboarding)
-            .then(|| autonomy_footer_segment(app))
-            .flatten(),
         scope_footer_segment(app),
         project_scope_footer_segment(app),
         review_conflict_footer_segment(app),

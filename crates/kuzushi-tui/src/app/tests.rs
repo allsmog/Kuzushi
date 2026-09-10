@@ -17033,7 +17033,7 @@ fn plan_discard_without_pending_plan_explains_no_action() {
 }
 
 #[test]
-fn budget_halt_c_continues_a_aborts() {
+fn budget_halt_c_reviews_without_raising_a_aborts() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.session_mut().set_session_budget_usd(Some(0.05));
     app.record_cost(0.10);
@@ -17043,7 +17043,10 @@ fn budget_halt_c_continues_a_aborts() {
         &mut app,
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
     );
-    assert!(!app.is_budget_halted(), "c should clear the halt");
+    assert!(app.is_budget_halted(), "reviewing a cap is not approval");
+    assert_eq!(app.session().session_budget_usd(), Some(0.05));
+    assert!(app.budget_editor_open());
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     app.session_mut().set_session_cost_usd_for_test(0.30);
     app.session_mut().set_session_budget_usd(Some(0.20));
@@ -17061,7 +17064,7 @@ fn budget_halt_c_continues_a_aborts() {
 }
 
 #[test]
-fn budget_continue_raises_cap_above_both_limit_and_observed_spend() {
+fn budget_continue_opens_review_without_choosing_a_new_cap() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.session_mut().set_session_cost_usd_for_test(1.0);
     app.session_mut().set_session_budget_usd(Some(100.0));
@@ -17072,8 +17075,10 @@ fn budget_continue_raises_cap_above_both_limit_and_observed_spend() {
 
     app.continue_past_budget();
 
-    assert_eq!(app.session().session_budget_usd(), Some(200.0));
-    assert!(!app.is_budget_halted());
+    assert_eq!(app.session().session_budget_usd(), Some(100.0));
+    assert!(app.is_budget_halted());
+    assert!(app.budget_editor_open());
+    assert_eq!(app.router.setup().budget_draft(), "100");
 }
 
 #[test]
@@ -17123,8 +17128,12 @@ fn budget_continue_key_returns_effect_without_mutating_cap_inline() {
     assert!(app.is_budget_halted());
 
     EffectRuntime::execute(&mut app, result.effects);
-    assert!(!app.is_budget_halted());
-    assert_ne!(app.session().session_budget_usd(), before_budget);
+    assert!(
+        app.is_budget_halted(),
+        "opening review must not approve more spending"
+    );
+    assert!(app.budget_editor_open());
+    assert_eq!(app.session().session_budget_usd(), before_budget);
 }
 
 #[test]
@@ -18481,7 +18490,7 @@ fn skipped_result_is_neutral_terminal_and_never_continues() {
 }
 
 #[test]
-fn failure_handoff_command_opens_dedicated_view() {
+fn failure_handoff_command_opens_view_without_claiming_saved_details_are_absent() {
     let mut app = ShellApp::new(V2Config::default(), None);
 
     run_command(&mut app, ShellCommand::FailureHandoff);
@@ -18490,7 +18499,11 @@ fn failure_handoff_command_opens_dedicated_view() {
     assert!(app
         .log_lines()
         .iter()
-        .any(|line| line.prefix == "handoff" && line.body.contains("no failure handoff")));
+        .any(|line| line.prefix == "view" && line.body == "failure details"));
+    assert!(!app
+        .log_lines()
+        .iter()
+        .any(|line| line.body.contains("no failure handoff")));
 }
 
 #[test]

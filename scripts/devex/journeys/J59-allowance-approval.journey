@@ -1,0 +1,41 @@
+# Real durable allowance approval/status tools, with no model invocation.
+name: Explicit call allowance approval and restart-safe status
+size: 80x24
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | shell-ready
+type: run campaign:approve-allowance {"investigationId":"offline-study","expectedRevision":0,"model":"openai-codex:gpt-5.5","maxProviderCalls":9,"protectedReviewCalls":3,"reason":"Offline TUI test; no provider execution"}
+keys: Enter
+require-live-snap: 20 CONFIRM · investigation allowance | allowance-terms
+expect: Total provider calls: 9
+expect: protected review: 3
+expect: openai-codex:gpt-5.5
+expect: Dollar ceiling: not enforced
+ask: Can the operator review the exact allowance before approving, with no dollar-ceiling or automatic-work promise?
+resize: 40x12
+require-live-snap: 20 resize to 80×24 | allowance-too-small
+expect-not: y allow once
+keys: y
+live-snap: hidden-terms-cannot-approve
+expect: CONFIRM · investigation allowance
+expect: resize to 80×24
+ask: Is approval blocked while its terms do not fit, with cancellation visible and the pending request preserved?
+resize: 80x24
+require-live-snap: 20 Total provider calls: 9 | allowance-terms-restored
+expect: protected review: 3
+keys: y
+require-live-snap: 20 run receipt · completed | approved
+submit: logs
+require-live-snap: 20 Allowance approved; no jobs started | approval-receipt
+expect: no jobs started
+expect: 0/9
+expect: protected review
+ask: Does the result show the exact approved calls, model and protected review allocation, without implying scans started or dollar charges are bounded?
+submit: run campaign:allowance {"investigationId":"offline-study"}
+require-live-snap: 20 Investigation allowance: offline-study revision 1 | allowance-status
+expect: Unresolved calls: 0
+expect: not enforced
+ask: Is the durable allowance understandable and inspectable without credentials or another model action?
+keys: C-c

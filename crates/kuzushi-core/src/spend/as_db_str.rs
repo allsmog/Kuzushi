@@ -52,6 +52,7 @@ impl Operation {
 
 #[derive(Debug)]
 pub struct SpendTicket {
+    pub(crate) ledger_id: String,
     pub(crate) id: i64,
     pub(crate) op: Operation,
     pub(crate) est_usd: f64,
@@ -97,7 +98,8 @@ pub struct SpendLimiter {
 
 pub(crate) struct LimiterState {
     pub(crate) conn: Connection,
-    /// Caps loaded once at init; mutated through [`SpendLimiter::set_cap`].
+    pub(crate) ledger_id: String,
+    /// Compatibility cache for infallible accessors. Admission reloads durable caps.
     pub(crate) caps: BTreeMap<Operation, f64>,
     /// Optional hard ceiling for the current limiter; `None` = unlimited.
     pub(crate) hard_ceiling: Option<f64>,

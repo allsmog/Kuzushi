@@ -5112,6 +5112,8 @@ mod tests {
 
         let (class, reason) = comparison_class_of(&comparison, "agent-hunted flow");
         assert_eq!(class, ScanComparisonClass::NotRescanned);
+        let absent = comparison.findings.iter().find(|row| row.after.is_none()).unwrap();
+        assert!(absent.reassessment_block.as_ref().unwrap().contains("unavailable"));
         assert!(
             reason.unwrap().contains("not a deterministic engine"),
             "reason must name the missing proof"

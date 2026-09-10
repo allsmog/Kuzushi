@@ -1,0 +1,34 @@
+# Synthetic persisted failure; no model or scanner is dispatched.
+name: Allowance refusal keeps partial evidence and explicit recovery visible
+size: 80x24
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+shell: python3 @REPO/scripts/devex/fixtures/allowance_failure.py @TMP_TARGET
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | shell-ready
+submit: failure
+require-live-snap: 20 allowance_refused | allowance-failure
+expect: agentic-sast:scan
+expect: openai-codex:gpt-5.5
+expect: scan incomplete
+expect-not: resume automatically
+ask: Does this screen identify the stopped scan and unchanged model, without claiming the scan completed?
+nav-mode:
+keys: NPage
+live-snap: allowance-recovery
+expect: Finish and report
+expect: approve a specific allowance
+expect: revision before another model request
+expect: unresolved
+expect: reservations
+expect: failure does not
+expect: establish zero cost
+expect-not: resume automatically
+ask: Can an operator read the entire recovery guidance, including explicit approval and unknown-cost limits, using the keyboard?
+keys: Escape
+submit: report
+require-live-snap: 20 Workspace spend: total unavailable | report-exit
+expect-not: RUN FOCUS
+ask: Is Report reachable from the stopped investigation without starting new work?
+keys: C-c

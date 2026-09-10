@@ -28,6 +28,13 @@ tools remain callable when the operator supplies their complete registered id:
 kuzushi --target . run fuzz:status --input '{}'
 ```
 
+Guided phase planners and capability actions use the same Core/visibility
+predicate as the default catalog. A task table or exact tool name cannot make a
+Labs or hidden tool a default action. This curates discovery only; presence in
+Core still does not prove that the current target, prerequisites or allowance
+are ready. Individual-tool readiness evidence is tracked in the
+[bounded investigation audit](assessments/bounded-investigation-tools.json).
+
 Catalog omission does not bypass policy. Exact dispatch still passes through
 descriptor input validation, workspace containment, effect approval, runtime
 selection, lifecycle recording, and artifact contracts.

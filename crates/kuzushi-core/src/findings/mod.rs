@@ -1,3 +1,4 @@
+pub use application::scan_reassessment_block;
 mod application;
 mod domain;
 pub mod import;

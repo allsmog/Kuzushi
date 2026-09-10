@@ -182,10 +182,10 @@ pub use onboarding::{
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
 pub(crate) use onboarding::{
-    bound_target_candidate, eligible_leaf_scopes, immediate_target_candidate,
-    large_repository_needs_decomposition, owning_leaf_scope, planning_task_explicit_input,
-    scoped_regeneration_input, MapRunConfigSummary, PlanningOperation, ALL_LEAF_SCOPES,
-    ALL_SCOPES_HARD_CAP, ALL_SCOPES_REVIEW_THRESHOLD, DECOMPOSE_FIRST_FILE_THRESHOLD,
+    bound_target_candidate, eligible_leaf_scopes, immediate_target_candidate, owning_leaf_scope,
+    planning_task_explicit_input, scoped_regeneration_input, MapRunConfigSummary,
+    PlanningOperation, ALL_LEAF_SCOPES, ALL_SCOPES_HARD_CAP, ALL_SCOPES_REVIEW_THRESHOLD,
+    SCOPE_SUGGESTION_FILE_THRESHOLD,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqFinalInput, PrereqPlanAction,

@@ -18,12 +18,12 @@ pub(crate) fn report_module() -> BuiltinModule {
                 ],
             )
             .with_policy(workspace_policy(
-                ToolPhase::Fix,
+                ToolPhase::Report,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             )),
             report_sarif_tool().with_policy(target_write_policy(
-                ToolPhase::Fix,
+                ToolPhase::Report,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             )),

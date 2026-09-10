@@ -185,8 +185,8 @@ fn map_action_card_lines(
     model: &MapPhaseModel,
     width: usize,
 ) -> (&'static str, Vec<Line<'static>>) {
-    if let Some(hint) = model.decompose_first.as_deref() {
-        return ("NEXT ACTION", decompose_first_lines(hint, width));
+    if let Some(hint) = model.scope_suggestion.as_deref() {
+        return ("NEXT ACTION", scope_suggestion_lines(hint, width));
     }
     map_evidence_action(model, width).unwrap_or_else(|| ready_map_lines(model, width))
 }
@@ -314,27 +314,17 @@ fn stale_context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>
     ]
 }
 
-/// Very large, still-undecomposed repositories get module decomposition as
-/// the first recommendation — a whole-repo threat model on a monorepo is
-/// noise until the target is broken into scoped modules.
-fn decompose_first_lines(hint: &str, width: usize) -> Vec<Line<'static>> {
+/// Repository size can motivate a scope proposal without requiring a split.
+fn scope_suggestion_lines(hint: &str, width: usize) -> Vec<Line<'static>> {
     vec![
-        Line::styled(
-            fit("⚠ Large monorepo — decompose before modeling", width),
-            theme::warn(),
-        ),
+        Line::styled(fit("Optional: repository scopes", width), theme::warn()),
         Line::styled(fit(hint, width), theme::muted()),
+        Line::styled(fit("▸ Enter review scope proposal", width), theme::accent()),
         Line::styled(
-            fit(
-                "scoped modules make threat models and scans tractable",
-                width,
-            ),
+            fit("Type next for whole-repository Map", width),
             theme::muted(),
         ),
-        Line::from(vec![
-            Span::styled("▸ Enter suggest module decomposition", theme::accent()),
-            Span::styled("   Tab focus map · not now", theme::muted()),
-        ]),
+        Line::styled(fit("Tab focus map", width), theme::muted()),
     ]
 }
 
@@ -800,7 +790,7 @@ mod next_scan_tests {
     }
 
     #[test]
-    fn decompose_first_card_outranks_threat_model_generation() {
+    fn scope_suggestion_card_discloses_whole_repository_choice() {
         let app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
         let model = crate::ui_view_models::phase_cockpit_model_for_phase(
             &app,
@@ -813,19 +803,28 @@ mod next_scan_tests {
             map.dfd.empty_hint.is_some() || map.empty_hint.is_some(),
             "fixture must be in the missing-threat-model state"
         );
-        map.decompose_first =
-            Some("81259 files indexed — break the target into logical modules first".to_string());
+        map.scope_suggestion = Some("81259 files indexed — optional scopes".to_string());
 
-        let (title, lines) = map_action_card_lines(&map, 100);
-
-        assert_eq!(title, "NEXT ACTION");
-        let rendered = text(&lines);
-        assert!(
-            rendered.contains("suggest module decomposition"),
-            "{rendered}"
-        );
-        assert!(rendered.contains("81259 files indexed"), "{rendered}");
-        assert!(!rendered.contains("generate threat model"), "{rendered}");
+        for width in [38, 58, 78, 94, 118, 158] {
+            let (title, lines) = map_action_card_lines(&map, width);
+            assert_eq!(title, "NEXT ACTION");
+            let rendered = text(&lines);
+            assert!(
+                rendered.contains("review scope proposal"),
+                "{width}: {rendered}"
+            );
+            assert!(
+                rendered.contains("81259 files indexed"),
+                "{width}: {rendered}"
+            );
+            assert!(rendered.contains("Optional:"), "{width}: {rendered}");
+            assert!(
+                rendered.contains("Type next for whole-repository Map"),
+                "{width}: {rendered}"
+            );
+            assert!(!rendered.contains("generate threat model"), "{rendered}");
+            assert!(lines.iter().all(|line| line.width() <= width));
+        }
     }
 
     #[test]

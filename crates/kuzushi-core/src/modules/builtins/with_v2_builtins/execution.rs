@@ -322,6 +322,7 @@ impl ModuleRegistry {
             return Ok(input);
         };
         let input = validate_tool_input_options(tool, input)?;
+        crate::modules::allowance_dispatch::validate_reference(&input)?;
         validate_tool_prompt_inputs(tool, &input)?;
         Ok(input)
     }
@@ -389,6 +390,13 @@ impl ModuleRegistry {
             require_observation,
         )?;
         let operation_binding = prepared.binding.operation_fingerprint;
+        let allowance_runtime = match crate::modules::allowance_dispatch::bind_runtime(
+            descriptor, &prepared.value, ctx, runtime,
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => return lifecycle.rejected(error),
+        };
+        let runtime = allowance_runtime.as_deref().or(runtime);
         let mut input = prepared.value;
         let authorized_ctx = tool_context_with_authorization(ctx, prepared.authorization);
         if let Err(error) = authorize_prepared_execution(
@@ -551,7 +559,8 @@ impl ModuleRegistry {
         let executor = self.executors.get(name).with_context(|| {
             format!("registered tool or DAG node {name:?} has no Rust executor mapping")
         })?;
-        executor(self, name, input, ctx, runtime)
+        let input = crate::modules::allowance_dispatch::executor_input(input);
+        executor(self, name, &input, ctx, runtime)
             .map(|output| normalize_tool_output_contract(name, output))
     }
 
@@ -647,7 +656,8 @@ fn authorize_prepared_execution(
     enforce_descriptor_approval(descriptor, ctx, operation_binding)?;
     registry.enforce_runtime_requirement(name, input, runtime)?;
     preflight_execution_model(registry, name, input, ctx, runtime)?;
-    enforce_descriptor_finding_store(descriptor, ctx)
+    enforce_descriptor_finding_store(descriptor, ctx)?;
+    crate::modules::allowance_dispatch::claim_work(input, name, ctx)
 }
 
 /// Reject unusable model credentials before the executor starts.

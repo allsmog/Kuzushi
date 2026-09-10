@@ -2,6 +2,7 @@ const HTTP_STATUS_MIN = 100;
 const HTTP_STATUS_MAX = 599;
 
 const PUBLIC_FAILURES = Object.freeze({
+  allowance_refused: "Investigation allowance refused this request; finish and report or review the remaining work.",
   authentication: "Provider authentication failed.",
   bridge_internal: "Bridge operation failed; raw error details were suppressed.",
   cancelled: "Bridge operation was cancelled.",

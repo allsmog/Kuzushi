@@ -1,4 +1,4 @@
-use super::bridge_process::run_bridge_observed;
+use super::bridge_process::run_bridge_admitted;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
@@ -36,6 +36,18 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 
 #[async_trait]
 impl AgentRuntime for LangGraphRuntime {
+    fn with_allowance_binding(
+        &self,
+        allowance: kuzushi_core::allowance::AllowanceBinding,
+    ) -> Result<Box<dyn AgentRuntime + '_>> {
+        if let Some(existing) = &self.allowance {
+            existing.require_same_work(&allowance)?;
+        }
+        let mut runtime = self.clone();
+        runtime.allowance = Some(allowance);
+        Ok(Box::new(runtime))
+    }
+
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         self.validated_model_credential(model).map(|_| ())
     }
@@ -469,6 +481,7 @@ impl LangGraphRuntime {
             self.cancellation.as_ref(),
             &self.retry,
             self.response_text.as_ref(),
+            self.allowance.as_ref(),
         )?;
         Ok((response, model))
     }
@@ -574,16 +587,18 @@ fn run_bridge_with_transport_retries(
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     retry_policy: &super::runtime_config::BridgeRetryPolicy,
     observer: Option<&super::ResponseTextObserver>,
+    allowance: Option<&kuzushi_core::allowance::AllowanceBinding>,
 ) -> Result<BridgeResponse> {
     let mut attempt = 0;
     loop {
         attempt += 1;
         ensure_not_cancelled(cancellation)?;
-        let (error, failure) = match bridge_attempt_outcome(run_bridge_observed(
+        let (error, failure) = match bridge_attempt_outcome(run_bridge_admitted(
             command,
             &request,
             cancellation,
             observer,
+            allowance,
         ))? {
             BridgeAttempt::Success(response) => return Ok(response),
             BridgeAttempt::Retry { error, failure } => (error, failure),
@@ -645,6 +660,9 @@ fn bridge_response_error(response: BridgeResponse) -> Result<BridgeAttempt> {
 }
 
 fn bridge_transport_error(error: anyhow::Error) -> Result<BridgeAttempt> {
+    if error.downcast_ref::<RuntimeFailure>().is_some() {
+        return Err(error);
+    }
     let message = error.to_string();
     let error = bridge_runtime_failure(None, None, Some(&message), None);
     let Some(failure) = transport_retry::message_transient_failure(&message) else {

@@ -12,7 +12,7 @@ impl ShellApp {
         self.log(
             "budget",
             format!(
-                "{label} blocked by the session cost halt; c raises the cap, a aborts active work"
+                "{label} blocked by the session cost halt; c reviews the cap, a aborts active work"
             ),
         );
         self.set_error_notice(
@@ -53,7 +53,7 @@ impl ShellApp {
         self.log(
             "budget",
             format!(
-                "session cost ${:.4} reached cap ${limit:.4}; c=continue · a=abort",
+                "session cost ${:.4} reached cap ${limit:.4}; c=review cap · a=abort",
                 self.session().session_cost_usd()
             ),
         );
@@ -75,24 +75,18 @@ impl ShellApp {
             );
             return;
         }
-        let Some(halt) = self.advisory().budget_halt.clone() else {
+        if !self.is_budget_halted() {
             return;
-        };
-        let doubled = match doubled_budget_cap(halt.limit_usd, halt.spent_usd) {
-            Ok(cost) => cost,
-            Err(error) => {
-                self.report_cost_accounting_error(error);
-                return;
-            }
-        };
-        self.session_mut().set_session_budget_usd(Some(doubled));
-        self.advisory_mut().budget_halt = None;
+        }
+        let origin = self.shell_view();
+        let current = self.session().session_budget_usd();
+        self.set_shell_view(ShellView::Setup);
+        self.router
+            .setup_mut()
+            .begin_budget_revision(current, origin);
         self.log(
             "budget",
-            format!(
-                "continuing past ${:.4}; new soft cap ${doubled:.4}",
-                halt.spent_usd
-            ),
+            "review and approve a new cap; work remains halted while editing",
         );
     }
 
@@ -105,13 +99,4 @@ impl ShellApp {
             ),
         );
     }
-}
-
-fn doubled_budget_cap(limit_usd: f64, spent_usd: f64) -> anyhow::Result<f64> {
-    let base = kuzushi_core::runtime::RuntimeCost::from_usd(
-        limit_usd.max(spent_usd),
-        "budget continuation spend",
-    )?;
-    base.checked_add(base, "budget continuation cap")
-        .map(kuzushi_core::runtime::RuntimeCost::usd)
 }

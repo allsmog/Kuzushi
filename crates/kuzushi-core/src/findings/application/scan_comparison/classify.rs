@@ -15,6 +15,7 @@ pub(super) struct RetirementCoverage {
     base_target: Option<String>,
     scope: Option<CompletedScanScope>,
     tools: BTreeSet<String>,
+    receipt: Option<crate::run_artifacts::PhaseStageReceipt>,
 }
 
 impl RetirementCoverage {
@@ -41,6 +42,7 @@ impl RetirementCoverage {
             base_target: store.run_target(base_run_id)?,
             scope,
             tools,
+            receipt: store.scan_reassessment_receipt(compare_run_id).unwrap_or(None),
         })
     }
 
@@ -51,6 +53,13 @@ impl RetirementCoverage {
             Err(reason) => Some(reason),
             Ok(scope) => engine_block(finding, scope, &self.tools),
         }
+    }
+
+    fn reassessment_block(&self, finding: &Finding) -> Option<String> {
+        crate::findings::scan_reassessment_block(
+            self.base_target.as_deref(), &self.compare_status, self.receipt.as_ref(),
+            &finding.file_path, &finding.tool,
+        ).map(str::to_string)
     }
 
     /// The compare run's recorded scope, or the run-level reason the compare
@@ -195,14 +204,16 @@ fn classify_base_only(
         None => (ScanComparisonClass::Resolved, None),
         Some(reason) => (ScanComparisonClass::NotRescanned, Some(reason)),
     };
-    compared(
+    let mut row = compared(
         key,
         finding,
         class,
         reason,
         Some(ScanFindingSignature::of(finding)),
         None,
-    )
+    );
+    row.reassessment_block = coverage.reassessment_block(finding);
+    row
 }
 
 fn compared(
@@ -214,6 +225,7 @@ fn compared(
     after: Option<ScanFindingSignature>,
 ) -> ComparedFinding {
     ComparedFinding {
+        reassessment_block: None,
         stable_key: key.to_string(),
         title: finding.title.clone(),
         tool: finding.tool.clone(),

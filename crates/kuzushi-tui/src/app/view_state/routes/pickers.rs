@@ -67,6 +67,7 @@ pub struct SetupRouteState {
     editor: Option<SetupEditor>,
     budget_draft: crate::app::FieldEditor,
     budget_error: Option<String>,
+    budget_return_view: Option<crate::app::ShellView>,
     map_run_config: MapRunConfigRouteState,
 }
 
@@ -76,6 +77,7 @@ impl SetupRouteState {
         self.editor = None;
         self.budget_draft = crate::app::FieldEditor::default();
         self.budget_error = None;
+        self.budget_return_view = None;
         self.cursor = self.cursor.min(SetupRowId::ALL.len().saturating_sub(1));
     }
 
@@ -120,9 +122,23 @@ impl SetupRouteState {
     pub(crate) fn begin_budget_edit(&mut self, current: Option<f64>) {
         self.begin_editor(SetupEditor::Budget);
         self.focus = PickerFocus::List;
+        self.budget_return_view = None;
         self.budget_draft = crate::app::FieldEditor::new(
             current.map(|value| value.to_string()).unwrap_or_default(),
         );
+    }
+
+    pub(crate) fn begin_budget_revision(
+        &mut self,
+        current: Option<f64>,
+        origin: crate::app::ShellView,
+    ) {
+        self.begin_budget_edit(current);
+        self.budget_return_view = Some(origin);
+    }
+
+    pub(crate) fn take_budget_return_view(&mut self) -> Option<crate::app::ShellView> {
+        self.budget_return_view.take()
     }
 
     pub(crate) fn budget_draft(&self) -> &str {

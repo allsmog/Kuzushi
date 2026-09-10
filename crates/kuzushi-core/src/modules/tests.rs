@@ -4940,7 +4940,7 @@ OUT
         write_run_summary(workspace.root(), &source).unwrap();
 
         let registry = ModuleRegistry::with_v2_builtins();
-        let config = V2Config::default();
+        let config = V2Config { autonomy: autonomy::AutonomyPosture::Review, ..V2Config::default() };
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -4949,9 +4949,10 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
-        let result = registry
-            .execute_tool("report:build", json!({"runId": "run-report-source"}), &ctx)
+        let prepared = registry
+            .prepare_dispatch_input("report:build", json!({"runId": "run-report-source"}), &ctx, None)
             .unwrap();
+        let result = registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None).unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(

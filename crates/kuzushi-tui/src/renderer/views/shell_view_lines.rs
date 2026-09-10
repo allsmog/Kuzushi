@@ -235,7 +235,9 @@ fn workspace_session_shell_view_lines(
             area.height,
             app.router.kb().scroll(),
         ),
-        ShellView::FailureHandoff => failure_handoff_lines(app, area),
+        ShellView::FailureHandoff => {
+            default_scrolled_lines(app, area, failure_handoff_lines(app, area))
+        }
         ShellView::History => viewport_lines(
             history_lines(app, area),
             area.height,
@@ -277,6 +279,7 @@ mod tests {
         for view in [
             ShellView::Runs,
             ShellView::Context,
+            ShellView::FailureHandoff,
             ShellView::ProjectModel,
             ShellView::StrategyQueue,
             ShellView::Workspace,

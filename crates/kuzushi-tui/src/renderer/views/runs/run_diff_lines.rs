@@ -24,26 +24,50 @@ pub(crate) fn run_diff_lines(
         format!("status: {} -> {}", model.left_status, model.right_status),
         theme::muted(),
     ));
-    lines.push(Line::from(format!(
-        "+{} new   ~{} changed   ?{} uncertain   -{} not seen   ={} unchanged",
-        model.new_findings.len(),
-        model.changed_findings.len(),
-        model.uncertain_matches.len(),
-        model.not_seen.len(),
-        model.unchanged_count
-    )));
+    append_comparison_header(&mut lines, &model);
     append_decision_summary(&mut lines, model.decision_summary.as_ref());
     append_warnings(&mut lines, &model.warnings);
     append_section(&mut lines, "NEW IN RIGHT", '+', &model.new_findings);
     append_changed_section(&mut lines, &model.changed_findings);
     append_uncertain_section(&mut lines, &model.uncertain_matches);
-    append_section(&mut lines, "NOT SEEN IN RIGHT", '-', &model.not_seen);
+    append_absence_sections(&mut lines, &model.not_seen);
     lines.push(blank());
     lines.push(command_list_line(
         &["runs", "replay <runId>", "trace <runId>", "back"],
         area.width as usize,
     ));
-    lines
+    wrap_document_lines(lines, area.width)
+}
+
+fn append_comparison_header(
+    lines: &mut Vec<Line<'static>>,
+    model: &crate::ui_view_models::RunDiffModel,
+) {
+    lines.push(Line::from(format!("Base source: {}", model.left_source)));
+    lines.push(Line::from(format!("Later source: {}", model.right_source)));
+    let not_assessed = model
+        .not_seen
+        .iter()
+        .filter(|row| row.reassessment_block.is_some())
+        .count();
+    lines.push(Line::from(format!(
+        "+{} new   ~{} changed   ?{} uncertain   {} not observed   {} not reassessed   {} seen again",
+        model.new_findings.len(), model.changed_findings.len(), model.uncertain_matches.len(),
+        model.not_seen.len() - not_assessed, not_assessed, model.unchanged_count + model.changed_findings.len(),
+    )));
+    lines.push(Line::styled(
+        "Absence does not establish a fix. Unknown content cannot distinguish dirty revisions.",
+        theme::muted(),
+    ));
+}
+
+fn append_absence_sections(lines: &mut Vec<Line<'static>>, rows: &[RunDiffFindingRow]) {
+    let (not_assessed, not_observed): (Vec<_>, Vec<_>) = rows
+        .iter()
+        .cloned()
+        .partition(|row| row.reassessment_block.is_some());
+    append_section(lines, "NOT OBSERVED IN COVERED WORK", '-', &not_observed);
+    append_section(lines, "NOT REASSESSED IN RIGHT", '?', &not_assessed);
 }
 
 fn append_warnings(lines: &mut Vec<Line<'static>>, warnings: &[String]) {
@@ -89,12 +113,19 @@ fn append_section(
     }
     for row in rows.iter().take(DIFF_ROW_LIMIT) {
         lines.push(run_diff_row(marker, row));
+        append_reassessment_reason(lines, row);
     }
     if rows.len() > DIFF_ROW_LIMIT {
         lines.push(Line::styled(
             format!("  +{} more", rows.len() - DIFF_ROW_LIMIT),
             theme::muted(),
         ));
+    }
+}
+
+fn append_reassessment_reason(lines: &mut Vec<Line<'static>>, row: &RunDiffFindingRow) {
+    if let Some(reason) = &row.reassessment_block {
+        lines.push(Line::styled(format!("    {reason}"), theme::muted()));
     }
 }
 

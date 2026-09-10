@@ -1,0 +1,39 @@
+# Offline editor journey. No Start Map, provider calls, or scan dispatch.
+name: Budget editing discloses retrospective stops and preserves explicit choices
+size: 40x12
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | setup
+keys: Down Down Down Down Down Down Enter
+require-live-snap: 20 SESSION BUDGET | budget-editor
+expect: Observed spend stop
+expect: overspend
+expect: Enter save
+expect: Esc cancel
+type: -5
+keys: Enter
+require-live-snap: 20 Amount must be finite | invalid-amount
+expect: -5
+expect: Enter save
+expect: Esc cancel
+ask: Are the draft, rejection, spending limitation and save/cancel controls readable in this narrow terminal?
+keys: C-u
+type: 2.50
+keys: Enter
+require-live-snap: 20 OBSERVED STOP | saved-stop
+expect-not: Budget ENFORCED
+keys: Enter
+require-live-snap: 20 SESSION BUDGET | reopen-saved
+expect: $2.5
+keys: C-u
+type: 99
+keys: Escape
+require-live-snap: 20 OBSERVED STOP | cancel-edit
+keys: Enter
+require-live-snap: 20 SESSION BUDGET | saved-choice-preserved
+expect: $2.5
+expect-not: $99
+ask: Is the prior setting preserved after cancellation, with no claim of a guaranteed dollar ceiling or newly launched work?
+keys: C-c

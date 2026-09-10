@@ -329,7 +329,7 @@ fn budget_row(app: &ShellApp) -> SetupReadinessRow {
             SetupRowId::Budget,
             "Budget",
             "NOT ENFORCED",
-            "set a positive session cap, or continue without one",
+            "set an observed spending stop, or continue without one",
         );
     };
     if !budget.is_finite() || budget <= 0.0 {
@@ -357,8 +357,8 @@ fn budget_row(app: &ShellApp) -> SetupReadinessRow {
     ready_row(
         SetupRowId::Budget,
         "Budget",
-        "ENFORCED",
-        format!("${budget:?} session cap"),
+        "OBSERVED STOP",
+        format!("${budget:?} after cost receipts; charges may exceed this amount"),
     )
 }
 

@@ -29,6 +29,7 @@ pub(crate) use confirm_gate_for_tool::*;
 pub(crate) use contains_destructive_shell_fragment::*;
 pub(crate) use label::*;
 pub(crate) use selected_patch::*;
+pub(crate) mod allowance;
 mod confirm_gate_for_tool;
 mod contains_destructive_shell_fragment;
 mod label;
