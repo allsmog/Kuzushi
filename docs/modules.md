@@ -372,6 +372,29 @@ approved limits, or a new context experiment. Existing unbound bridge calls
 keep their public contract. Dynamic adapters are not certified by these
 built-in descriptor changes.
 
+### Recorded threat-model selection
+
+Supported discovery and triage tools declare the advanced JSON option
+`threatModelRef`, with compatibility alias `threat_model_ref`. A reference
+contains `modelId`, `revisionId` and `sha256`; explicit `null` omits threat-model
+context. With no option, legacy direct calls still select the active model.
+Campaign compilation records the selected revision or omission in each scan
+input and preserves a caller's explicit selection.
+
+Bound readers authenticate that immutable object without changing the active
+pointer. Missing objects, invalid references and digest mismatches fail without
+falling back to a different model. Agentic SAST, Carlini, taint planning, static
+ranking and standard/deep triage consume the selected context in their relevant
+prompt or artifact paths. Supported whitebox MCP attachments point to the same
+object; the threat-model server checks its digest on each query. Explicit
+omission removes that attachment. Model context guides inspection and impact
+assessment; it never establishes a finding verdict.
+
+This binds threat-model context only. Auxiliary context snapshots, other
+knowledge artifacts, attachments and reviewed lessons still need the complete
+immutable context-bundle contract. Descriptor option changes can require a new
+explicitly approved plan when checking an older frozen equivalence key.
+
 ## Dynamic KWP modules
 
 Local KWP modules are self-contained `.mjs` files. They export a plain module
@@ -774,3 +797,10 @@ and `absenceCoverage`; the shell wraps values without removing hash characters.
 Missing legacy hashes remain unknown. Covered but absent findings are separate
 from work that was not reassessed. Neither a nondeterministic miss nor a missing
 snapshot establishes a fix.
+
+Comparison also reads each run's recorded `scan-input.json`, adding
+`baseContext`, `compareContext` and `contextComparison` to CLI JSON. The shell
+shows full model/revision/digest references separately from source identity.
+Changed context is labeled as changed scan conditions. Unavailable historical
+context cannot be equated with an explicit omission or the currently active
+model. These comparisons do not adjudicate a fix for a revision or branch.

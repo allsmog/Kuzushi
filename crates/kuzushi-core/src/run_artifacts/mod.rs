@@ -29,6 +29,8 @@ mod run_summary_store;
 mod running;
 mod scan_stage;
 mod source_revision;
+mod threat_model_context;
+pub use threat_model_context::RunThreatModelContext;
 pub use source_revision::RunSourceRevision;
 pub(crate) use scan_stage::scan_paths_cover_file;
 mod stage_checkpoint;

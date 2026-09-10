@@ -162,9 +162,9 @@ mod threat_model_binding_tests {
     }
 
     #[test]
-    fn scan_refuses_a_bound_revision_after_the_active_pointer_changes() {
+    fn scan_refuses_an_unknown_bound_revision() {
         let target = tempfile::tempdir().unwrap();
-        crate::capabilities::threat_model::open_writable_threat_model_store(target.path()).unwrap();
+        crate::capabilities::threat_model::commit_test_model(target.path(), "existing-model");
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let stale_ref = crate::capabilities::threat_model::ThreatModelRef {
             model_id: crate::capabilities::threat_model::ThreatModelId::new(),
@@ -177,7 +177,7 @@ mod threat_model_binding_tests {
                 .err()
                 .expect("a stale immutable reference must be refused");
 
-        assert!(error.to_string().contains("active threat model changed"));
+        assert!(error.to_string().contains("was not found"), "{error:#}");
     }
 }
 

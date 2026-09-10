@@ -77,7 +77,7 @@ fn systems_invariant_query_request(
 ) -> Result<SystemsInvariantQueryRequest> {
     Ok(SystemsInvariantQueryRequest {
         model: systems_invariant_model(input, ctx, options)?,
-        tool_policy: try_whitebox_static_policy_for_target(target)?,
+        tool_policy: selected_whitebox_static_policy_for_target(target, input)?,
         thinking_level: agentic_hunter_thinking_level(input),
     })
 }

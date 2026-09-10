@@ -16,10 +16,12 @@ pub(in crate::modules) fn parse_triage_prompt_template(
 pub(in crate::modules) fn apply_threat_model_triage_context(
     input: &mut TriageRunInput,
     root: &Path,
+    raw_input: &Value,
 ) -> Result<()> {
-    let Some(digest) = crate::capabilities::agentic_sast::threat_model_scan_context(root)? else {
+    let Some(digest) = crate::capabilities::agentic_sast::selected_threat_model_scan_context(root, raw_input)? else {
         return Ok(());
     };
+    input.threat_model_context = Some(digest.clone());
     let base = input
         .prompt_template
         .clone()
@@ -30,6 +32,29 @@ judging impact; the digest is derived context, not ground truth.\n{}",
         crate::runbooks::untrusted::render_untrusted_derived_block("threat-model-digest", &digest),
     ));
     Ok(())
+}
+
+#[cfg(test)]
+mod bound_context_tests {
+    use super::*;
+
+    #[test]
+    fn triage_prompt_uses_the_selected_revision_and_never_adopts_a_new_active_model() {
+        let root = tempfile::tempdir().unwrap();
+        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
+        let input = json!({"threatModelRef": first});
+        let mut run = TriageRunInput::from_tool_input(&input, root.path()).unwrap();
+        apply_threat_model_triage_context(&mut run, root.path(), &input).unwrap();
+        let prompt = run.prompt_template.unwrap();
+        let context = crate::runbooks::untrusted::render_untrusted_derived_block("threat-model-digest",
+            crate::capabilities::agentic_sast::selected_threat_model_scan_context(root.path(), &input).unwrap().unwrap());
+        assert!(prompt.contains(&context));
+        let omitted = json!({"threatModelRef": null});
+        let mut run = TriageRunInput::from_tool_input(&omitted, root.path()).unwrap();
+        apply_threat_model_triage_context(&mut run, root.path(), &omitted).unwrap();
+        assert!(run.prompt_template.is_none());
+    }
 }
 
 pub(in crate::modules) fn parse_triage_scan_id(input: &Value) -> Result<Option<String>> {

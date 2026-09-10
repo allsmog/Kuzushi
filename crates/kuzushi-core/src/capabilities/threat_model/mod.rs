@@ -23,6 +23,9 @@ pub(crate) use domain::*;
 pub(crate) use persistence::*;
 
 pub use adapters::execute_threat_model_tool;
+pub(crate) use persistence::{load_exact_threat_model, load_selected_threat_model, ThreatModelSelection};
+#[cfg(test)]
+pub(crate) use persistence::commit_test_model;
 pub use application::{
     apply_threat_model_patch_revision, classify_scope_binding, current_scope_ref_for_path,
     ScopeBindingStatus, ThreatModelPatchCommit,

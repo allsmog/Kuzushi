@@ -64,9 +64,10 @@ pub(in crate::modules) fn write_static_ranking_json(
     store: &FindingStore,
     run_ids: &SastRunIds,
     artifacts: &SastRunArtifacts,
+    input: &Value,
 ) -> Result<Value> {
     let findings = findings_for_sast_runs(store, run_ids)?;
-    let mut enrichments = load_static_ranking_enrichments(workspace);
+    let mut enrichments = load_static_ranking_enrichments(workspace, input)?;
     let (ranked, evidence_warnings) = rank_static_findings_with_threats_degraded(
         &findings,
         enrichments.attack_surface.as_ref(),
@@ -87,7 +88,7 @@ struct StaticRankingEnrichments {
     warnings: Vec<String>,
 }
 
-fn load_static_ranking_enrichments(workspace: &WorkspaceTarget) -> StaticRankingEnrichments {
+fn load_static_ranking_enrichments(workspace: &WorkspaceTarget, input: &Value) -> Result<StaticRankingEnrichments> {
     let mut warnings = Vec::new();
     let attack_surface = optional_enrichment(
         "attack surface",
@@ -99,18 +100,20 @@ fn load_static_ranking_enrichments(workspace: &WorkspaceTarget) -> StaticRanking
         StaticEvidenceStore::open(workspace),
         &mut warnings,
     );
-    let threat_model = optional_enrichment(
+    let selection = crate::capabilities::threat_model::ThreatModelSelection::from_input(input)?;
+    let loaded = crate::capabilities::threat_model::load_selected_threat_model(workspace.root(), &selection);
+    let threat_model = if selection.is_bound() { loaded? } else { optional_enrichment(
         "threat model",
-        crate::try_load_persistent_threat_model(workspace.root()),
+        loaded,
         &mut warnings,
     )
-    .flatten();
-    StaticRankingEnrichments {
+    .flatten() };
+    Ok(StaticRankingEnrichments {
         attack_surface,
         evidence_store,
         threat_model,
         warnings,
-    }
+    })
 }
 
 fn static_ranking_report(

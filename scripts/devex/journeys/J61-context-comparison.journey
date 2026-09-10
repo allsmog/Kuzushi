@@ -1,0 +1,34 @@
+# Two real CLI scans over labeled imported contexts; no provider or target code execution.
+name: Recorded context comparison across immutable revisions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+shell: python3 @REPO/scripts/devex/fixtures/context_comparison.py @TMP_TARGET @ART/fixture
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | shell-ready
+submit: runs diff context-base context-later
+require-live-snap: 25 Threat model: changed | recorded-contexts
+require-live-snap: 30 status: completed -> completed | loaded-contexts
+expect: Base threat model: tm_
+expect: Later threat model: tm_
+expect: scan conditions differ
+expect: Absence does not establish a fix.
+ask: Do the source and threat-model identities make the changed scan conditions clear without implying a finding was fixed?
+resize: 80x24
+live-snap: narrow-contexts
+expect: Threat model: changed
+ask: At 80x24, are the source and context values wrapped legibly with the comparison state visible?
+nav-mode:
+keys: NPage
+keys: NPage
+live-snap: comparison-details
+expect: NOT OBSERVED IN COVERED WORK
+ask: Can the operator reach the remaining comparison details and see that unavailable evidence has not established a fix?
+keys: PPage
+keys: PPage
+live-snap: comparison-origin
+expect: context-base
+expect: context-later
+ask: Can the operator return by keyboard to the same run pair after scrolling?
+keys: C-c

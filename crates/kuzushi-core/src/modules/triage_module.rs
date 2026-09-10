@@ -110,6 +110,7 @@ fn chain_hunt_options() -> Vec<OptionSpec> {
 
 fn triage_run_options() -> Vec<OptionSpec> {
     let mut options = vec![
+        bound_threat_model_option(),
         opt("scanId", OptionType::String, "Scan run id to triage.").aliases(&["scan_id"]),
         triage_scope_option(),
         triage_fingerprint_option(),

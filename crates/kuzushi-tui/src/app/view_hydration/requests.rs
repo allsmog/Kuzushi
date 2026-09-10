@@ -406,6 +406,7 @@ fn append_run_json_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     keys.push(run_artifact_key(run_id, "run.json"));
     keys.push(run_artifact_key(run_id, "findings.json"));
     keys.push(run_artifact_key(run_id, "result.json"));
+    keys.push(run_artifact_key(run_id, "scan-input.json"));
     keys.push(ViewHydrationKey::ScanStageReceipt {
         run_id: run_id.to_string(),
     });

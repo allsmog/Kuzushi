@@ -34,6 +34,8 @@ pub(crate) struct RunsDiff {
     pub(crate) comparison: ScanRunComparison,
     pub(crate) base_source: kuzushi_core::run_artifacts::RunSourceRevision,
     pub(crate) compare_source: kuzushi_core::run_artifacts::RunSourceRevision,
+    pub(crate) base_context: kuzushi_core::run_artifacts::RunThreatModelContext,
+    pub(crate) compare_context: kuzushi_core::run_artifacts::RunThreatModelContext,
     pub(crate) warnings: Vec<String>,
     pub(crate) decision_summary: Option<RunsDiffDecisionSummary>,
 }
@@ -133,6 +135,8 @@ pub(crate) fn runs_diff(
     Ok(RunsDiff {
         base_source: run_source_revision(target, base_run_id),
         compare_source: run_source_revision(target, compare_run_id),
+        base_context: run_threat_model_context(target, base_run_id),
+        compare_context: run_threat_model_context(target, compare_run_id),
         comparison,
         warnings,
         decision_summary,
@@ -153,6 +157,14 @@ fn run_artifact_json(target: &Path, run: &str, leaf: &str) -> Option<Value> {
         return None;
     };
     serde_json::from_str(&value).ok()
+}
+
+fn run_threat_model_context(
+    target: &Path,
+    run: &str,
+) -> kuzushi_core::run_artifacts::RunThreatModelContext {
+    let input = run_artifact_json(target, run, "scan-input.json");
+    kuzushi_core::run_artifacts::RunThreatModelContext::from_scan_input(input.as_ref())
 }
 
 fn append_result_artifact_warning(target: &Path, run_id: &str, warnings: &mut Vec<String>) {
@@ -250,6 +262,9 @@ fn runs_diff_json(diff: &RunsDiff) -> Value {
         "compareRunId": diff.comparison.compare_run_id,
         "baseSource": diff.base_source,
         "compareSource": diff.compare_source,
+        "baseContext": diff.base_context,
+        "compareContext": diff.compare_context,
+        "contextComparison": diff.base_context.comparison_label(&diff.compare_context),
         "baseStatus": diff.base_status(),
         "compareStatus": diff.compare_status(),
         "counts": {
@@ -325,6 +340,15 @@ fn runs_diff_plain(diff: &RunsDiff) -> String {
     let mut lines = vec![diff_title(diff), diff_status(diff), diff_counts(diff)];
     lines.push(format!("Base source: {}", diff.base_source.label()));
     lines.push(format!("Later source: {}", diff.compare_source.label()));
+    lines.push(format!(
+        "Threat model: {}",
+        diff.base_context.comparison_label(&diff.compare_context)
+    ));
+    lines.push(format!("Base threat model: {}", diff.base_context.label()));
+    lines.push(format!(
+        "Later threat model: {}",
+        diff.compare_context.label()
+    ));
     append_absence_coverage(&mut lines, &diff.comparison);
     append_warnings(&mut lines, &diff.warnings);
     append_decision_summary(&mut lines, diff.decision_summary.as_ref());

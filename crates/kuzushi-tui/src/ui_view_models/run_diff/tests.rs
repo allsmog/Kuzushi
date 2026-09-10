@@ -9,6 +9,41 @@ fn hydrate_diff(app: &mut ShellApp, left: &str, right: &str) {
 }
 
 #[test]
+fn run_diff_hydrates_recorded_context_and_distinguishes_missing_from_omitted() {
+    let temp = tempfile::tempdir().unwrap();
+    write_run(temp.path(), "context-left", "a", json!([]));
+    write_run(temp.path(), "context-right", "a", json!([]));
+    let reference = json!({"modelId": format!("tm_{}", "a".repeat(32)),
+        "revisionId": format!("tmr_{}", "b".repeat(32)), "sha256": format!("sha256:{}", "c".repeat(64))});
+    let runs = temp.path().join(".kuzushi/v3/runs");
+    std::fs::write(
+        runs.join("context-left/scan-input.json"),
+        json!({"threatModelRef": reference}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        runs.join("context-right/scan-input.json"),
+        json!({"threatModelRef": null}).to_string(),
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_diff(&mut app, "context-left", "context-right");
+    let model = run_diff_model(&app, "context-left", "context-right");
+    assert!(model
+        .left_context
+        .contains(reference["revisionId"].as_str().unwrap()));
+    assert!(model
+        .left_context
+        .contains(reference["sha256"].as_str().unwrap()));
+    assert_eq!(model.right_context, "explicitly no threat-model context");
+    assert_eq!(
+        run_diff_model(&app, "unrecorded", "unrecorded").left_context,
+        "not recorded or unreadable"
+    );
+}
+
+#[test]
 fn run_diff_model_compares_findings_by_stable_identity() {
     let temp = tempfile::tempdir().unwrap();
     write_run(

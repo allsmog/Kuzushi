@@ -1,6 +1,5 @@
-//! Read-only tools over `.kuzushi/threat-model.json` (STRIDE by default;
-//! pass `KUZUSHI_MCP_THREAT_MODEL_ARTIFACT` pointing at the PASTA
-//! sibling to serve that methodology instead).
+//! Read-only queries over the bridge-selected threat-model artifact. Bound
+//! scans use an immutable object plus its expected content digest.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -10,6 +9,7 @@ use std::path::Path;
 
 pub(crate) const ARTIFACT_ENV: &str = "KUZUSHI_MCP_THREAT_MODEL_ARTIFACT";
 const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+const IDENTITY_ENV: &str = "KUZUSHI_MCP_THREAT_MODEL_ARTIFACT_IDENTITY";
 
 pub(crate) fn build_registry() -> Result<ToolRegistry> {
     Ok(build_registry_with_capability(
@@ -118,8 +118,32 @@ pub(crate) fn load_artifact(read_capability: &ReadRootCapability) -> Result<Valu
     let body = read_capability
         .read_utf8(Path::new(&path), MAX_ARTIFACT_BYTES)
         .with_context(|| format!("reading threat-model artifact at {path}"))?;
+    verify_selected_identity(body.as_bytes(), selected_artifact_identity()?.as_deref())?;
     serde_json::from_str(&body)
         .with_context(|| format!("parsing threat-model at {path}: expected valid JSON"))
+}
+
+fn selected_artifact_identity() -> Result<Option<String>> {
+    match std::env::var(IDENTITY_ENV) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(error).context("selected threat-model identity is not valid Unicode"),
+    }
+}
+
+fn verify_selected_identity(body: &[u8], expected: Option<&str>) -> Result<()> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let observed = format!(
+        "sha256:{}",
+        kuzushi_mcp_common::cache::sha256_hex_bytes(body)
+    );
+    anyhow::ensure!(
+        observed == expected,
+        "selected threat-model artifact changed; immutable digest verification failed"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -127,6 +151,36 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[tokio::test]
+    async fn every_query_checks_the_selected_context_digest() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("immutable.json");
+        let body = br#"{"threats":[{"id":"accepted-a"}]}"#;
+        std::fs::write(&path, body).unwrap();
+        let identity = format!(
+            "sha256:{}",
+            kuzushi_mcp_common::cache::sha256_hex_bytes(body)
+        );
+        std::env::set_var(ARTIFACT_ENV, &path);
+        std::env::set_var(IDENTITY_ENV, identity);
+        let capability = ReadRootCapability::new([tmp.path().to_path_buf()]).unwrap();
+        let handler = GetHandler(capability.clone());
+        assert_eq!(
+            handler.call(json!({})).await.unwrap()["threats"][0]["id"],
+            "accepted-a"
+        );
+        std::fs::write(&path, br#"{"threats":[{"id":"changed-b"}]}"#).unwrap();
+        assert!(handler.call(json!({})).await.is_err());
+        assert!(ThreatsHandler(capability.clone())
+            .call(json!({}))
+            .await
+            .is_err());
+        assert!(ElementsHandler(capability).call(json!({})).await.is_err());
+        std::env::remove_var(IDENTITY_ENV);
+        std::env::remove_var(ARTIFACT_ENV);
+    }
 
     #[tokio::test]
     async fn severity_filter_lowercases_input() {

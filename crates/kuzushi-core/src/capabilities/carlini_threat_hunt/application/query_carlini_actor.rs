@@ -245,13 +245,16 @@ fn carlini_actor_request(
     prompt: String,
     input: &Value,
 ) -> Result<AgentQueryRequest> {
+    let policy = crate::runtime::mcp_probe::bind_selected_threat_model_attachment(
+        try_whitebox_static_policy_for_target(target)?, input, target,
+    )?;
     let request = AgentQueryRequest::new(
         model.to_string(),
         target.to_path_buf(),
         carlini_system_prompt(),
         prompt,
     )
-    .with_tool_policy(try_whitebox_static_policy_for_target(target)?)
+    .with_tool_policy(policy)
     .with_thinking_level(agentic_hunter_thinking_level(input));
 
     Ok(match max_output_tokens_from_input(input) {

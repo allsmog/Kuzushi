@@ -285,12 +285,32 @@ fn active_model_switch_keeps_the_batch_bound_to_its_immutable_revision() {
             target.path(),
             Some(&first_ref)
         )
-        .is_err()
+        .is_ok()
     );
 }
 
 #[test]
-fn controller_lease_blocks_activation_until_the_batch_finishes() {
+fn compilation_preserves_an_explicit_revision_or_omission_instead_of_the_active_model() {
+    let target = tempfile::tempdir().unwrap();
+    let registry = ModuleRegistry::with_v2_builtins();
+    let first = commit_active_model(target.path(), "first");
+    let second = commit_active_model(target.path(), "second");
+    for (id, selection) in [("selected", json!(first)), ("omitted", Value::Null)] {
+        let handle = compile_scan_batch_plan(ScanBatchPlanSpec {
+            root: target.path(), batch_id: Some(format!("batch-{id}")), trials: 3,
+            requested_workers: 1, gate_policy: ScanBatchGatePolicy::default(),
+            prepared_input: json!({"threat_model_ref": selection, "triage": false}),
+            config: &V2Config::default(), registry: &registry,
+        }).unwrap();
+        let plan: Value = serde_json::from_slice(&std::fs::read(handle.plan_path).unwrap()).unwrap();
+        assert_eq!(plan["baseInput"]["threatModelRef"], selection);
+        assert!(plan["baseInput"].get("threat_model_ref").is_none());
+    }
+    assert_eq!(crate::capabilities::threat_model::load_active_threat_model(target.path()).unwrap().unwrap().model_ref, second);
+}
+
+#[test]
+fn controller_lease_allows_activation_while_preserving_the_bound_revision() {
     let target = tempfile::tempdir().unwrap();
     let registry = ModuleRegistry::with_v2_builtins();
     commit_active_model(target.path(), "first");
@@ -318,13 +338,10 @@ fn controller_lease_blocks_activation_until_the_batch_finishes() {
     });
 
     started_rx.recv().unwrap();
-    assert!(done_rx
-        .recv_timeout(std::time::Duration::from_millis(100))
-        .is_err());
-    drop(lease);
     let activated = done_rx
         .recv_timeout(std::time::Duration::from_secs(5))
-        .unwrap();
+        .expect("a bound revision must not block changing the active model");
+    drop(lease);
     worker.join().unwrap();
     let active = crate::capabilities::threat_model::load_active_threat_model(target.path())
         .unwrap()

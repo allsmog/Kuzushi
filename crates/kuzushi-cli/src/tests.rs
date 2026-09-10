@@ -1554,6 +1554,8 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&runs_diff_output(&diff, true).unwrap()).unwrap();
         assert!(json.get("baseSource").is_some());
+        assert_eq!(json["baseContext"]["state"], "unavailable");
+        assert_eq!(json["contextComparison"], "comparison unavailable");
         assert!(json["baseSource"]["treeHash"].is_null());
         assert_eq!(json["absenceCoverage"][0]["status"], "not_reassessed");
         assert!(json["absenceCoverage"][0]["reason"]

@@ -1,5 +1,8 @@
 use super::*;
 
+pub(in crate::modules) use context_options::*;
+mod context_options;
+
 pub(in crate::modules) use max_findings_option::*;
 pub(in crate::modules) use mcp_options::*;
 pub(in crate::modules) use metadata::*;

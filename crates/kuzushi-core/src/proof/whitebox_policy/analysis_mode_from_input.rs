@@ -45,6 +45,14 @@ pub fn try_whitebox_static_policy_for_target(
     default_whitebox_static_agent_tool_policy().try_with_mcps_for_target(target)
 }
 
+pub(crate) fn selected_whitebox_static_policy_for_target(
+    target: &std::path::Path, input: &Value,
+) -> Result<AgentToolPolicy> {
+    crate::runtime::mcp_probe::bind_selected_threat_model_attachment(
+        try_whitebox_static_policy_for_target(target)?, input, target,
+    )
+}
+
 pub fn whitebox_static_policy_for_target(target: &std::path::Path) -> AgentToolPolicy {
     default_whitebox_static_agent_tool_policy().with_mcps_for_target(target)
 }
@@ -57,7 +65,8 @@ pub fn agent_tool_policy_for_input_and_target(
     input: &Value,
     target: &std::path::Path,
 ) -> Result<AgentToolPolicy> {
-    agent_tool_policy_for_input(input)?.try_with_mcps_for_target(target)
+    let policy = agent_tool_policy_for_input(input)?.try_with_mcps_for_target(target)?;
+    crate::runtime::mcp_probe::bind_selected_threat_model_attachment(policy, input, target)
 }
 
 pub fn agentic_hunter_thinking_level(input: &Value) -> String {

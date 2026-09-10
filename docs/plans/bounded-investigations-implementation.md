@@ -227,7 +227,8 @@ context/review/learning job plans under the shared allowance, full model-backed
 three-pass aggregation/triage/report/restart, optional AI scope review and the
 responsive investigation editor. Discovery-only work approvals currently cannot
 plan model-backed review or learning jobs; protected review calls remain held.
-No live provider requests were made. Implementation remains uncommitted.
+No live provider requests were made. This checkpoint was subsequently committed
+and pushed as `14130a4eb76ef10fc376edbb32e30bc6b0966702`.
 
 
 After the source-identity correction, the real CLI campaign completed three
@@ -240,3 +241,46 @@ The earlier CLI fixture is retained as evidence of the ancestor-filter defect.
 The 15 existing scan-batch tests and two complete registry policy checks also
 pass; the workspace build passes. These are offline source-analysis checks,
 not live model validation or evidence of finding resolution.
+
+### Immutable threat-model reader checkpoint
+
+Discovery and triage now consume an explicit immutable `threatModelRef` without
+activating it globally. Explicit omission stays omitted. Campaign compilation
+preserves the selected revision; changed active pointers no longer invalidate
+that selection. Selected MCP attachments authenticate their object on each
+query. Deep triage receives the same advisory digest on every pass. Run
+comparisons expose recorded context independently of full source SHA and
+indexed content identity. Auxiliary context bundles remain unfinished.
+
+Focused Rust checks cover selection, corruption, dispatch, campaign compilation,
+MCP binding, triage propagation and comparison projections; the workspace build
+and the CRAP-risk gate pass. The prompt test initially assumed quoted data would
+remove ordinary words; it now checks the encoded line boundary and lossless
+derived-record decoding. The existing synthetic secret fixture is unchanged;
+its reviewed whole-file hash was refreshed after a revision-binding test edit.
+
+J61 runs two real offline CLI `secret-scan` jobs against labeled imported context
+revisions. Its fixture confirms exact `scan-input.json` references and an
+unchanged global active pointer, with zero provider calls. The TUI audit is
+**not passed**. Evidence is retained at
+`/tmp/kuzushi-bounded-investigations-tui/20260909-221651/J61/` and
+`/tmp/kuzushi-bounded-investigations-tui/20260909-221835/J61/`.
+Keyboard paging and return work, but refresh can temporarily replace a recorded
+context with unavailable/loading state. These headless tool runs also lack the
+`findings.json` snapshots consumed by comparison. Their absent source metadata
+is disclosed as unknown, so these fixtures cannot establish SHA comparison or
+coverage. The earlier CLI source-identity receipt remains separate evidence.
+
+A further receipt defect remains open: the top-level `run.json` provenance
+captures the globally active model at startup even when the explicit scan input
+selects another immutable revision. The new comparison reads the recorded scan
+input, but other consumers of the summary can still misattribute context. Fix
+shared start-time provenance before claiming context consistency end to end.
+The latest J61 waits for loaded run status and tests return navigation, but
+still needs a passing audit after hydration and receipt corrections.
+
+Per-revision fix adjudication also remains open. A decision must identify the
+source SHA and dirty content identity that supplied its evidence, with branch
+ancestry considered when carrying it forward. A nondeterministic miss is an
+observation, not a global resolution decision. This checkpoint does not claim
+that a finding is fixed on any revision.

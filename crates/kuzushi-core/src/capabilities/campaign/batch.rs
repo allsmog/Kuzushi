@@ -142,10 +142,8 @@ fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool)
     validate_trial_count(spec.trials)?;
     let batch_id = spec.batch_id.clone().unwrap_or_else(generated_batch_id);
     validate_scan_batch_id(&batch_id)?;
-    crate::capabilities::threat_model::open_writable_threat_model_store(spec.root)?;
-    let threat_model_lease =
-        crate::capabilities::threat_model::acquire_threat_model_read_lease(spec.root)?;
     let mut base_input = scan_batch_base_input(spec.prepared_input.clone());
+    let threat_model_lease = acquire_plan_threat_model_lease(spec.root, &spec.prepared_input)?;
     equivalence::force_discovery_only(&mut base_input)?;
     bind_threat_model_ref(&mut base_input, threat_model_lease.model_ref())?;
     let parallel_safety = batch_parallel_safety(&spec, &base_input)?;
@@ -178,6 +176,23 @@ fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool)
     })
 }
 
+fn acquire_plan_threat_model_lease(
+    root: &Path, input: &Value,
+) -> Result<crate::capabilities::threat_model::ThreatModelReadLease> {
+    use crate::capabilities::threat_model::{
+        acquire_exact_threat_model_read_lease, acquire_threat_model_read_lease,
+        open_writable_threat_model_store, ThreatModelSelection,
+    };
+    match ThreatModelSelection::from_input(input)? {
+        ThreatModelSelection::Active => {
+            open_writable_threat_model_store(root)?;
+            acquire_threat_model_read_lease(root)
+        }
+        ThreatModelSelection::None => acquire_exact_threat_model_read_lease(root, None),
+        ThreatModelSelection::Revision(reference) => acquire_exact_threat_model_read_lease(root, Some(&reference)),
+    }
+}
+
 fn batch_parallel_safety(
     spec: &ScanBatchPlanSpec<'_>,
     input: &Value,
@@ -201,6 +216,7 @@ fn bind_threat_model_ref(
     let object = input
         .as_object_mut()
         .context("prepared sast:scan input must be an object")?;
+    object.remove("threat_model_ref");
     object.insert(
         "threatModelRef".to_string(),
         serde_json::to_value(model_ref)?,

@@ -5,6 +5,23 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- Supported discovery and triage descriptors accept `threatModelRef` (alias
+  `threat_model_ref`). An explicit reference selects and authenticates that
+  immutable object without changing or locking the global active model;
+  explicit `null` omits threat-model context. Missing options retain legacy
+  active-model behavior. Missing or corrupt selected objects fail without
+  fallback. Campaign compilation preserves an explicit selection. Descriptor
+  changes can invalidate frozen plan equivalence; draft and approve a new plan
+  instead of modifying an approved plan. Auxiliary context is not yet frozen.
+  `DeepAuditConfig` adds `threat_model_context`; Rust struct-literal callers
+  should use `None` to preserve legacy behavior.
+
+- Run comparison JSON adds `baseContext`, `compareContext` and
+  `contextComparison`, derived from recorded scan input. Missing historical
+  context is unknown, distinct from an explicit omission. These fields augment
+  full Git SHA and indexed content identities. Neither changed context nor an
+  absent observation establishes that a finding was fixed on either revision.
+
 - Spend databases add a durable ledger identity and investigation allowance
   revision/reservation tables. Existing dollar rows and operation caps retain
   their meaning. Deposits now read current operation caps and reserve within a
