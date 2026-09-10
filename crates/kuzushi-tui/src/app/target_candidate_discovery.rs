@@ -316,10 +316,22 @@ fn count_fact_entry(
 }
 
 fn should_descend_for_facts(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return true;
+    };
     !matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(".git" | ".kuzushi" | "target" | "node_modules")
-    )
+        name,
+        ".git"
+            | ".kuzushi"
+            | ".next"
+            | ".turbo"
+            | "coverage"
+            | "dist"
+            | "native"
+            | "node_modules"
+            | "target"
+    ) && !kuzushi_core::incremental_index::is_bazel_output_component(name)
+        && (!name.starts_with('.') || name == ".github")
 }
 
 impl TargetCandidateDiscoveryRuntime {
@@ -507,6 +519,43 @@ mod tests {
         let facts = inspect_target_candidate(target.path().to_path_buf());
 
         assert!(facts.build_systems.contains(&"Bazel".to_string()));
+    }
+
+    #[test]
+    fn target_file_count_matches_analysis_directory_scope() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(target.path().join("src")).unwrap();
+        std::fs::write(target.path().join("src/app.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(target.path().join(".env"), "TOKEN=fixture\n").unwrap();
+        std::fs::create_dir_all(target.path().join(".github/workflows")).unwrap();
+        std::fs::write(target.path().join(".github/workflows/ci.yml"), "name: ci\n").unwrap();
+
+        for directory in [
+            ".git",
+            ".kuzushi",
+            ".next",
+            ".turbo",
+            ".claude",
+            "coverage",
+            "dist",
+            "native",
+            "node_modules",
+            "target",
+            "bazel-out",
+        ] {
+            let path = target.path().join(directory);
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("ignored.txt"), "generated\n").unwrap();
+        }
+
+        let (file_count, capped) = bounded_file_count(target.path(), 100);
+
+        assert_eq!(file_count, 3);
+        assert!(!capped);
+        assert!(should_descend_for_facts(&target.path().join(".github")));
+        assert!(!should_descend_for_facts(&target.path().join(".claude")));
+        assert!(!should_descend_for_facts(&target.path().join("dist")));
+        assert!(!should_descend_for_facts(&target.path().join("bazel-out")));
     }
 
     #[test]
