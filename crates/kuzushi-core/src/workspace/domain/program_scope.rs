@@ -201,18 +201,105 @@ const URL_STANDARD_AUTHORITY_END: &[char] = &['/', '\\', '?', '#'];
 /// gate cannot know, so it refuses to pick the permissive reading: the caller
 /// weighs every host the target could reach.
 ///
+/// Each reading is also weighed in its percent-decoded form, because a client
+/// that decodes the domain reaches a different host than one that does not.
+/// See [`percent_decoded_host`].
+///
 /// Legitimate targets carry none of those characters, so both readings agree
 /// and this returns the single host [`extract_host`] always returned.
 fn candidate_hosts(target: &str) -> Vec<String> {
-    let mut hosts = vec![extract_host(target, RFC_3986_AUTHORITY_END)];
-    let url_standard = extract_host(
-        &strip_url_standard_whitespace(target),
-        URL_STANDARD_AUTHORITY_END,
+    let mut hosts = Vec::new();
+    push_readings(&mut hosts, extract_host(target, RFC_3986_AUTHORITY_END));
+    push_readings(
+        &mut hosts,
+        extract_host(
+            &strip_url_standard_whitespace(target),
+            URL_STANDARD_AUTHORITY_END,
+        ),
     );
-    if !hosts.contains(&url_standard) {
-        hosts.push(url_standard);
-    }
     hosts
+}
+
+fn push_readings(hosts: &mut Vec<String>, host: String) {
+    if let Some(decoded) = percent_decoded_host(&host) {
+        push_unique(hosts, decoded);
+    }
+    push_unique(hosts, host);
+}
+
+fn push_unique(hosts: &mut Vec<String>, host: String) {
+    if !hosts.contains(&host) {
+        hosts.push(host);
+    }
+}
+
+/// The host an escaped authority names once its percent-escapes are resolved,
+/// or `None` when it carries no escape and the raw reading is the only one.
+///
+/// The URL Standard percent-decodes the domain before resolving it, and
+/// RFC 3986 §3.2.2 defines a reg-name as percent-encoded text, so a client on
+/// either side of the split above can reach `admin.example.com` through
+/// `admin.example%2ecom`. A client that instead resolves the escape literally
+/// reaches nothing, so this is an extra reading rather than a replacement.
+///
+/// `None` also when decoding yields bytes that are not UTF-8, or a forbidden
+/// domain code point such as `/` or `:`: the URL Standard rejects the whole URL
+/// there, so it names no host and no rule should be spent on it.
+///
+/// IDNA is deliberately not applied. A decoded non-ASCII domain is judged in
+/// the Unicode form it was written in, exactly as a raw non-ASCII target
+/// already is, rather than in the punycode a browser would resolve.
+fn percent_decoded_host(host: &str) -> Option<String> {
+    let decoded = String::from_utf8(percent_decode(host)?).ok()?;
+    if decoded.chars().any(is_forbidden_domain_code_point) {
+        return None;
+    }
+    Some(normalize_host(&decoded))
+}
+
+/// Code points the URL Standard forbids inside a domain, beyond the controls
+/// [`char::is_control`] already covers.
+const FORBIDDEN_DOMAIN_CODE_POINTS: &[char] = &[
+    ' ', '#', '%', '/', ':', '<', '>', '?', '@', '[', '\\', ']', '^', '|',
+];
+
+fn is_forbidden_domain_code_point(character: char) -> bool {
+    character.is_control() || FORBIDDEN_DOMAIN_CODE_POINTS.contains(&character)
+}
+
+/// The bytes an escaped host decodes to, or `None` when it carries no escape.
+/// A `%` that does not begin a complete two-digit escape stays as written,
+/// which is what the URL Standard's percent-decode does with it.
+fn percent_decode(host: &str) -> Option<Vec<u8>> {
+    let bytes = host.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    let mut escaped = false;
+    while index < bytes.len() {
+        match hex_escape(bytes, index) {
+            Some(byte) => {
+                decoded.push(byte);
+                index += 3;
+                escaped = true;
+            }
+            None => {
+                decoded.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    escaped.then_some(decoded)
+}
+
+/// The byte a `%XX` escape at `index` names. Both digits must be ASCII hex:
+/// `u8::from_str_radix` would otherwise accept a sign and read `%+a` as an
+/// escape the standards do not define.
+fn hex_escape(bytes: &[u8], index: usize) -> Option<u8> {
+    let escape = bytes.get(index..index + 3)?;
+    if escape[0] != b'%' || !escape[1..].iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    u8::from_str_radix(std::str::from_utf8(&escape[1..]).ok()?, 16).ok()
 }
 
 /// Drop the ASCII tab, CR, and LF that the URL Standard removes from a URL
@@ -464,6 +551,121 @@ mod tests {
             scope.verdict("https://admin.exa\r\nmple.com/panel"),
             ScopeVerdict::OutOfScope
         );
+    }
+
+    #[test]
+    fn a_percent_escaped_dot_cannot_evade_a_deny_rule() {
+        // A client that percent-decodes the domain — every browser does, and
+        // RFC 3986 defines a reg-name as percent-encoded — reaches
+        // `admin.example.com`.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example.com"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("https://admin.example%2ecom/panel"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("https://ADMIN.EXAMPLE%2ECOM/panel"),
+            ScopeVerdict::OutOfScope
+        );
+        // The escape may also spell the whole label separator away from the
+        // authority delimiters the earlier readings split on.
+        assert_eq!(
+            scope.verdict("admin%2eexample%2ecom:8443"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn an_allow_list_must_cover_both_readings_of_an_escaped_target() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["*.example.com"]
+            "#,
+        );
+        // Only the decoding reading lands inside the allow list; a client that
+        // resolves the escape literally reaches a host nothing allows.
+        assert_eq!(
+            scope.verdict("https://api.example%2ecom/"),
+            ScopeVerdict::OutOfScope
+        );
+        // An unescaped target is unaffected.
+        assert_eq!(
+            scope.verdict("https://api.example.com/"),
+            ScopeVerdict::InScope
+        );
+    }
+
+    #[test]
+    fn an_escape_that_decodes_to_a_forbidden_code_point_names_no_host() {
+        // The URL Standard refuses a domain containing `/`, `:`, or `%`, so
+        // these URLs reach nothing and no rule is spent on the text after the
+        // escape.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["evil.test", "admin.example.com"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("https://admin.example%2fevil.test/"),
+            ScopeVerdict::Unknown
+        );
+        assert_eq!(
+            scope.verdict("https://admin.example%3aevil.test/"),
+            ScopeVerdict::Unknown
+        );
+        assert_eq!(
+            scope.verdict("https://admin.example%252ecom/"),
+            ScopeVerdict::Unknown
+        );
+    }
+
+    #[test]
+    fn a_forbidden_decoded_reading_is_dropped_rather_than_matched() {
+        // This deny rule matches only the decoded reading
+        // `admin.example:evil.test`; the raw authority carries no `:` at all.
+        // The verdict stays `Unknown` precisely because a decoded `:` is a
+        // forbidden domain code point, so that reading names no host a client
+        // can reach and is dropped instead of judged.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example:*"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("https://admin.example%3aevil.test/"),
+            ScopeVerdict::Unknown
+        );
+    }
+
+    #[test]
+    fn percent_decoded_host_only_reports_a_second_reachable_reading() {
+        assert_eq!(
+            percent_decoded_host("admin.example%2ecom"),
+            Some("admin.example.com".to_string())
+        );
+        // A trailing root dot written as an escape normalizes with the rest.
+        assert_eq!(
+            percent_decoded_host("admin.example.com%2e"),
+            Some("admin.example.com".to_string())
+        );
+        // No escape at all, so the raw reading is the only one.
+        assert_eq!(percent_decoded_host("admin.example.com"), None);
+        // `%` that begins no complete escape stays as written, and a literal
+        // `%` is forbidden inside a domain.
+        assert_eq!(percent_decoded_host("admin.example.com%"), None);
+        assert_eq!(percent_decoded_host("admin.example.com%2"), None);
+        // `u8::from_str_radix` accepts a sign; a `%+a` is not an escape.
+        assert_eq!(percent_decoded_host("admin.example.com%+a"), None);
+        // Decoded bytes that are not UTF-8 name no host a client can resolve.
+        assert_eq!(percent_decoded_host("admin.example%ffcom"), None);
     }
 
     #[test]
