@@ -208,7 +208,7 @@ fn collect_scan_root_outputs(
 ) -> Result<()> {
     for scanner in scanners {
         let mut scanner_output = scanner.scan_artifacts(&root.path, cancellation)?;
-        scanner_output.ensure_empty_result_is_complete()?;
+        ensure_aggregate_scan_coverage(scanner.id(), &scanner_output.scan_errors)?;
         rewrite_scoped_findings(root, &mut scanner_output.findings);
         output.findings.append(&mut scanner_output.findings);
         output
@@ -216,6 +216,56 @@ fn collect_scan_root_outputs(
             .append(&mut scanner_output.codeql_sarif_documents);
     }
     Ok(())
+}
+
+const MAX_AGGREGATE_SCAN_ERRORS: usize = 3;
+const MAX_AGGREGATE_SCAN_ERROR_CHARS: usize = 240;
+
+/// The aggregate scan result has no coverage-error field. Until it does, an
+/// engine that reports any unscanned portion must fail here rather than let a
+/// non-empty finding set make the umbrella run look complete.
+fn ensure_aggregate_scan_coverage(scanner_id: &str, scan_errors: &[String]) -> Result<()> {
+    if scan_errors.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{scanner_id} scan coverage incomplete: {} part{} of the target went unanalyzed; aggregate scan cannot report partial coverage: {}",
+        scan_errors.len(),
+        if scan_errors.len() == 1 { "" } else { "s" },
+        bounded_scan_error_summary(scan_errors)
+    )
+}
+
+fn bounded_scan_error_summary(scan_errors: &[String]) -> String {
+    let mut summaries = scan_errors
+        .iter()
+        .take(MAX_AGGREGATE_SCAN_ERRORS)
+        .map(|error| {
+            let first_line = error.lines().next().unwrap_or_default().trim();
+            let first_line = if first_line.is_empty() {
+                "unspecified scan error"
+            } else {
+                first_line
+            };
+            let mut chars = first_line.chars();
+            let visible = chars
+                .by_ref()
+                .take(MAX_AGGREGATE_SCAN_ERROR_CHARS)
+                .collect::<String>();
+            if chars.next().is_some() {
+                format!("{visible}…")
+            } else {
+                visible
+            }
+        })
+        .collect::<Vec<_>>();
+    if scan_errors.len() > MAX_AGGREGATE_SCAN_ERRORS {
+        summaries.push(format!(
+            "... and {} more scan errors",
+            scan_errors.len() - MAX_AGGREGATE_SCAN_ERRORS
+        ));
+    }
+    summaries.join("; ")
 }
 
 fn rewrite_scoped_findings(root: &ScanRoot, findings: &mut [Finding]) {
@@ -362,4 +412,82 @@ pub(crate) struct SemgrepExtra {
     pub(crate) message: Option<String>,
     #[serde(default)]
     pub(crate) severity: Option<String>,
+}
+
+#[cfg(test)]
+mod aggregate_coverage_tests {
+    use super::*;
+
+    struct PartialCoverageScanner;
+
+    impl ScanEngine for PartialCoverageScanner {
+        fn id(&self) -> &'static str {
+            "partial-native"
+        }
+
+        fn scan(
+            &self,
+            _target: &Path,
+            _cancellation: &ScanCancellation,
+        ) -> Result<Vec<Finding>> {
+            unreachable!("aggregate runner should use scan_artifacts")
+        }
+
+        fn scan_artifacts(
+            &self,
+            _target: &Path,
+            _cancellation: &ScanCancellation,
+        ) -> Result<ScanEngineOutput> {
+            Ok(ScanEngineOutput {
+                findings: vec![Finding::new_tool(
+                    self.id(),
+                    "partial/demo",
+                    "src/app.rs",
+                    12,
+                    None,
+                    Severity::High,
+                    "finding from the analyzed portion",
+                )],
+                codeql_sarif_documents: Vec::new(),
+                scan_errors: vec!["src/missed.rs: parser failed".to_string()],
+            })
+        }
+    }
+
+    #[test]
+    fn aggregate_scan_refuses_findings_that_would_hide_a_coverage_gap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(PartialCoverageScanner)];
+
+        let error = run_scan_engines_with_options(
+            &workspace,
+            &store,
+            &scanners,
+            &ScanRunOptions::default(),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("partial-native scan coverage incomplete"));
+        assert!(error.contains("1 part of the target went unanalyzed"));
+        assert!(store.list_findings(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn aggregate_scan_error_summary_is_bounded() {
+        let errors = vec![
+            "a".repeat(MAX_AGGREGATE_SCAN_ERROR_CHARS + 40),
+            "second\nsecret-looking second line".to_string(),
+            "third".to_string(),
+            "fourth".to_string(),
+        ];
+
+        let summary = bounded_scan_error_summary(&errors);
+
+        assert!(summary.contains('…'));
+        assert!(!summary.contains("secret-looking second line"));
+        assert!(summary.contains("... and 1 more scan errors"));
+    }
 }
