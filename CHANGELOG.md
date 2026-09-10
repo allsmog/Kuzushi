@@ -19,6 +19,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `.kuzushi/scope.toml` CIDR rules now cover the shorthand IPv4 notations a
+  real client resolves. The gate tested a candidate against a range only when
+  `IpAddr::from_str` accepted it, which means only the dotted quad — so
+  `http://2852039166/`, `http://0xa9.0xfe.0xa9.0xfe/`,
+  `http://0251.0376.0251.0376/`, and `http://169.254.43518/` matched no rule,
+  while browsers, `curl`, Go, and libc `inet_aton` reach 169.254.169.254
+  through every one of them. A `169.254.0.0/16` deny list therefore returned
+  `Unknown` and let recon dispatch and the amass/httpx/nuclei/nmap-xml/HAR/Burp
+  import gates through. Each host reading the gate already weighs now also
+  yields the dotted quad the URL Standard's IPv4 parser reads it as, and a
+  host rule an operator spelled the same way is compiled in both forms, so
+  neither side of the comparison depends on which notation was written. A host
+  whose last label is not a number stays a domain, a host the parser fails on
+  contributes no candidate rather than a guessed address, and a target already
+  written as a dotted quad keeps exactly the verdict it had.
+
 - `.kuzushi/scope.toml` can no longer be walked past with a percent-escaped
   host. The gate compared rules against the authority exactly as written, so
   `https://admin.example%2ecom/panel` matched no rule naming

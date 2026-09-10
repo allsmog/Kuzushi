@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use globset::Glob;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 
 /// Operator-controlled bug-bounty scope file loaded from
@@ -128,9 +128,14 @@ fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
         // uppercase letters or a root dot still denies the asset it names.
         // Character classes are normalized too: `[A-Z]` becomes `[a-z]`, which
         // matches the same hosts once the candidate is lowercased.
-        let glob = Glob::new(&normalize_host(raw))
-            .with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
-        compiled.push(HostPattern::HostGlob(glob));
+        let normalized = normalize_host(raw);
+        compiled.push(host_glob(&normalized, raw)?);
+        // Candidates arrive carrying the dotted quad a shorthand IPv4 host
+        // names, so a rule spelled that way is compiled in both forms too and
+        // keeps naming the one asset an operator wrote down.
+        if let Some(address) = ipv4_shorthand_address(&normalized) {
+            compiled.push(host_glob(&address, raw)?);
+        }
     }
     for raw in &list.cidrs {
         let cidr =
@@ -138,6 +143,12 @@ fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
         compiled.push(HostPattern::Cidr(cidr));
     }
     Ok(compiled)
+}
+
+fn host_glob(pattern: &str, raw: &str) -> Result<HostPattern> {
+    Glob::new(pattern)
+        .map(HostPattern::HostGlob)
+        .with_context(|| format!("invalid host glob in scope.toml: {raw}"))
 }
 
 fn matches_any(patterns: &[HostPattern], host: &str) -> bool {
@@ -180,6 +191,117 @@ fn mapped_ipv4(addr: IpAddr) -> Option<IpAddr> {
     }
 }
 
+/// The dotted-quad address a host written in one of the URL Standard's other
+/// IPv4 notations names, or `None` when the host is a domain or already a
+/// canonical dotted quad.
+///
+/// The URL Standard's IPv4 parser reads a host whose last label is a number as
+/// an address, in hexadecimal (`0xa9.0xfe.0xa9.0xfe`), octal
+/// (`0251.0376.0251.0376`), or with the last label filling every octet the
+/// earlier ones left (`169.254.43518`, `2852039166`). Browsers, `curl`, Go, and
+/// libc `inet_aton` all reach 169.254.169.254 through each of those. But
+/// `IpAddr::from_str` accepts only the dotted quad, so [`cidr_contains_host`]
+/// saw no address to test and a `169.254.0.0/16` deny rule left the target
+/// `Unknown` — the deny-list-shaped bypass, since an allow list refuses a host
+/// it does not match either way.
+///
+/// The address is one more reading of the same target, never a replacement, so
+/// a rule written against the literal keeps matching it. A host the parser
+/// fails on names no host a client can reach, so it contributes nothing rather
+/// than a guessed address.
+fn ipv4_shorthand_address(host: &str) -> Option<String> {
+    if !ends_in_ipv4_number(host) {
+        return None;
+    }
+    let canonical = parse_ipv4_host(host)?.to_string();
+    (canonical != host).then_some(canonical)
+}
+
+/// The URL Standard reads a host as IPv4 only when its last label is a number.
+/// Every other host stays a domain, so `api.example.com` and `host1.corp` are
+/// never re-read as addresses.
+fn ends_in_ipv4_number(host: &str) -> bool {
+    let last = ipv4_parts(host).last().copied().unwrap_or_default();
+    if last.is_empty() {
+        return false;
+    }
+    last.bytes().all(|byte| byte.is_ascii_digit()) || ipv4_number(last).is_some()
+}
+
+/// The labels the URL Standard's IPv4 parser reads, dropping the trailing empty
+/// label a root dot leaves behind.
+fn ipv4_parts(host: &str) -> Vec<&str> {
+    let mut parts: Vec<&str> = host.split('.').collect();
+    if parts.len() > 1 && parts.last() == Some(&"") {
+        parts.pop();
+    }
+    parts
+}
+
+/// The address a host of IPv4 numbers names: the last label fills every octet
+/// no earlier label claimed, which is what makes `127.1` and `2130706433` the
+/// same address as `127.0.0.1`. `None` when the host carries more than four
+/// labels, or a label overflows the room left for it — the URL Standard fails
+/// the whole URL there.
+fn parse_ipv4_host(host: &str) -> Option<Ipv4Addr> {
+    let parts = ipv4_parts(host);
+    if parts.len() > 4 {
+        return None;
+    }
+    let numbers: Vec<u64> = parts.iter().map(|part| ipv4_number(part)).collect::<Option<_>>()?;
+    let (last, leading) = numbers.split_last()?;
+    if leading.iter().any(|number| *number > 255) {
+        return None;
+    }
+    if *last >= 256u64.pow(4 - leading.len() as u32) {
+        return None;
+    }
+    Some(Ipv4Addr::from(packed_ipv4_address(*last as u32, leading)))
+}
+
+fn packed_ipv4_address(last: u32, leading: &[u64]) -> u32 {
+    leading
+        .iter()
+        .enumerate()
+        .fold(last, |address, (index, number)| {
+            address + (*number as u32) * 256u32.pow(3 - index as u32)
+        })
+}
+
+/// One label of an IPv4 literal, in the radix its prefix names. `None` for a
+/// label that is not a number in that radix, which leaves the host a domain.
+fn ipv4_number(label: &str) -> Option<u64> {
+    if label.is_empty() {
+        return None;
+    }
+    let (radix, digits) = ipv4_radix(label);
+    if digits.is_empty() {
+        return Some(0);
+    }
+    if !digits.chars().all(|digit| digit.is_digit(radix)) {
+        return None;
+    }
+    u64::from_str_radix(digits, radix).ok()
+}
+
+/// `0x` marks hexadecimal and a leading `0` octal, both only on a label long
+/// enough to carry a digit after the prefix, so a lone `0` stays decimal zero.
+fn ipv4_radix(label: &str) -> (u32, &str) {
+    if label.len() < 2 {
+        return (10, label);
+    }
+    if let Some(digits) = label
+        .strip_prefix("0x")
+        .or_else(|| label.strip_prefix("0X"))
+    {
+        return (16, digits);
+    }
+    match label.strip_prefix('0') {
+        Some(digits) => (8, digits),
+        None => (10, label),
+    }
+}
+
 /// Where the authority stops under RFC 3986, which Go's `net/url` and most
 /// non-browser HTTP clients implement. A backslash is an ordinary character
 /// there, so it stays inside the authority.
@@ -203,7 +325,10 @@ const URL_STANDARD_AUTHORITY_END: &[char] = &['/', '\\', '?', '#'];
 ///
 /// Each reading is also weighed in its percent-decoded form, because a client
 /// that decodes the domain reaches a different host than one that does not.
-/// See [`percent_decoded_host`].
+/// See [`percent_decoded_host`]. A reading written in one of the URL Standard's
+/// other IPv4 notations additionally yields the dotted quad it names, so a CIDR
+/// rule is tested against the address a client actually connects to. See
+/// [`ipv4_shorthand_address`].
 ///
 /// Legitimate targets carry none of those characters, so both readings agree
 /// and this returns the single host [`extract_host`] always returned.
@@ -222,7 +347,16 @@ fn candidate_hosts(target: &str) -> Vec<String> {
 
 fn push_readings(hosts: &mut Vec<String>, host: String) {
     if let Some(decoded) = percent_decoded_host(&host) {
-        push_unique(hosts, decoded);
+        push_address_and_host(hosts, decoded);
+    }
+    push_address_and_host(hosts, host);
+}
+
+/// Push one host reading, preceded by the dotted-quad address it names when it
+/// is written in one of the URL Standard's other IPv4 notations.
+fn push_address_and_host(hosts: &mut Vec<String>, host: String) {
+    if let Some(address) = ipv4_shorthand_address(&host) {
+        push_unique(hosts, address);
     }
     push_unique(hosts, host);
 }
@@ -859,6 +993,91 @@ mod tests {
         // An even run is literal backslashes the dot merely follows.
         assert_eq!(trim_root_dot(r"admin.example.com\\."), r"admin.example.com\\");
         assert_eq!(trim_root_dot("."), "");
+    }
+
+    #[test]
+    fn deny_cidr_covers_the_shorthand_ipv4_notations_a_client_resolves() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["169.254.0.0/16"]
+            "#,
+        );
+        for target in [
+            "http://169.254.169.254/latest/meta-data",
+            "http://2852039166/latest/meta-data",
+            "http://0xa9.0xfe.0xa9.0xfe/",
+            "http://0xa9fea9fe/",
+            "http://0251.0376.0251.0376/",
+            "http://169.254.43518/",
+            "http://169.254.169.254.:443/",
+            "http://2852039166:8080/",
+        ] {
+            assert_eq!(scope.verdict(target), ScopeVerdict::OutOfScope, "{target}");
+        }
+    }
+
+    #[test]
+    fn deny_host_rule_written_as_a_shorthand_address_covers_the_dotted_quad() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["2130706433"]
+            "#,
+        );
+        assert_eq!(scope.verdict("127.0.0.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("http://2130706433/"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn an_allow_list_still_admits_a_host_written_as_a_shorthand_address() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["012.0.0.1"]
+            "#,
+        );
+        assert_eq!(scope.verdict("10.0.0.1"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("012.0.0.1"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("10.0.0.2"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_domain_is_never_reread_as_an_address() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["0.0.0.0/0"]
+            "#,
+        );
+        for target in ["api.example.com", "host1.corp", "0x.example", "1.2.3.4.5"] {
+            assert_eq!(scope.verdict(target), ScopeVerdict::Unknown, "{target}");
+        }
+    }
+
+    #[test]
+    fn ipv4_shorthand_address_reads_every_notation_and_declines_the_rest() {
+        assert_eq!(
+            ipv4_shorthand_address("2852039166").as_deref(),
+            Some("169.254.169.254")
+        );
+        assert_eq!(ipv4_shorthand_address("127.1").as_deref(), Some("127.0.0.1"));
+        assert_eq!(ipv4_shorthand_address("0x7f.1").as_deref(), Some("127.0.0.1"));
+        assert_eq!(ipv4_shorthand_address("0177.0.0.1").as_deref(), Some("127.0.0.1"));
+        // A canonical quad is already the address it names, so it adds no
+        // second reading of itself.
+        assert_eq!(ipv4_shorthand_address("127.0.0.1"), None);
+        assert_eq!(ipv4_shorthand_address("0.0.0.0"), None);
+        // Labels the URL Standard fails on name no reachable host.
+        assert_eq!(ipv4_shorthand_address("1.2.3.4.5"), None);
+        assert_eq!(ipv4_shorthand_address("256.0.0.1"), None);
+        assert_eq!(ipv4_shorthand_address("127.16777216"), None);
+        assert_eq!(ipv4_shorthand_address("0x1p2"), None);
+        assert_eq!(ipv4_shorthand_address("018"), None);
+        assert_eq!(ipv4_shorthand_address("99999999999999999999"), None);
+        assert_eq!(ipv4_shorthand_address("example.com"), None);
+        assert_eq!(ipv4_shorthand_address("::1"), None);
+        assert_eq!(ipv4_shorthand_address(""), None);
     }
 
     #[test]
