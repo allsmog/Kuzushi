@@ -3,8 +3,9 @@ use super::*;
 const TOOL: &str = "recon:import-amass";
 
 /// Import an Amass JSONL recon dump (`amass enum -json out.jsonl`) into
-/// the recon store as `ReconHost` rows. Out-of-scope hosts (per
-/// `.kuzushi/scope.toml`) are skipped silently with a counter.
+/// the recon store as `ReconHost` rows. Hosts `.kuzushi/scope.toml` puts
+/// out of scope are skipped, and the count is disclosed in the report and
+/// its output line.
 pub(crate) fn run_recon_import_amass(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,

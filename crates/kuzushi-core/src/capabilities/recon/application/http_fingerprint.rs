@@ -179,6 +179,7 @@ fn http_fingerprint_report(
             host_count: store.count_hosts()?,
             service_count: store.count_services()?,
         },
+        skipped_out_of_scope: None,
         subdomains: Vec::new(),
         fingerprint: fingerprint_data,
     })

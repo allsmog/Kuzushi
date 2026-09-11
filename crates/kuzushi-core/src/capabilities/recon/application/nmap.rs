@@ -214,6 +214,7 @@ fn recon_nmap_report(run: &ReconNmapRun<'_>, persisted: PersistedReconNmap) -> R
             host_count: persisted.host_count,
             service_count: persisted.service_count,
         },
+        skipped_out_of_scope: None,
         subdomains: Vec::new(),
         fingerprint: BTreeMap::new(),
     }

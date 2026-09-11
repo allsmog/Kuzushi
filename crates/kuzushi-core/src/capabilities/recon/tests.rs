@@ -193,6 +193,10 @@ JSON
             result.pointer("/data/subdomains/0").and_then(Value::as_str),
             Some("api.example.com")
         );
+        assert!(
+            result["data"].get("skippedOutOfScope").is_none(),
+            "a verb that takes one target refuses it at dispatch, so it reports no skipped entries"
+        );
         assert_eq!(
             result
                 .pointer("/data/hosts")
@@ -614,7 +618,136 @@ authorization: Default::default(),
         let hosts = result["data"]["hosts"].as_array().unwrap();
         assert_eq!(hosts.len(), 1, "out-of-scope host must be skipped");
         assert_eq!(hosts[0]["address"], "api.lab.test");
+        assert_eq!(result["data"]["skippedOutOfScope"], 1);
+        let output = result["output"].as_str().unwrap();
+        assert!(
+            output.contains("1 out-of-scope skipped"),
+            "the scope gate's refusal must reach the operator: {output}"
+        );
     }
+
+    fn scoped_workspace(workspace_dir: &Path) -> WorkspaceTarget {
+        let scope_dir = workspace_dir.join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[out_of_scope]\nhosts = [\"evil.com\", \"10.0.0.1\"]\n",
+        )
+        .unwrap();
+        WorkspaceTarget::new(workspace_dir).unwrap()
+    }
+
+    #[test]
+    fn recon_import_nuclei_discloses_the_entries_scope_refused() {
+        // The counter was incremented and then dropped: `into_report` never
+        // carried it and the output line said only "completed for <path>", so
+        // a dump the scope file denied entirely read as a clean import.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = scoped_workspace(workspace_dir.path());
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("nuclei.jsonl");
+        fs::write(
+            &dump,
+            "{\"template-id\":\"exposed-panel\",\"info\":{\"severity\":\"high\"},\"host\":\"evil.com\"}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("nuclei", &dump), &ctx)
+            .expect("nuclei import succeeds");
+
+        assert!(result["data"]["notes"].as_array().unwrap().is_empty());
+        assert_eq!(result["data"]["skippedOutOfScope"], 1);
+        let output = result["output"].as_str().unwrap();
+        assert_eq!(
+            output,
+            format!(
+                "recon:import nuclei imported nothing from {} · 1 out-of-scope skipped",
+                dump.display()
+            ),
+            "an import that landed nothing must not read as a completed one"
+        );
+    }
+
+    #[test]
+    fn recon_import_nmap_xml_discloses_the_hosts_scope_refused() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = scoped_workspace(workspace_dir.path());
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("nmap.xml");
+        fs::write(
+            &dump,
+            r#"<?xml version="1.0"?>
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.1" addrtype="ipv4" />
+                <ports>
+                  <port protocol="tcp" portid="80">
+                    <state state="open" />
+                    <service name="http" />
+                  </port>
+                </ports>
+              </host>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.2" addrtype="ipv4" />
+                <ports>
+                  <port protocol="tcp" portid="80">
+                    <state state="open" />
+                    <service name="http" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>"#,
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("nmap-xml", &dump), &ctx)
+            .expect("nmap-xml import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0]["address"], "10.0.0.2");
+        assert_eq!(result["data"]["skippedOutOfScope"], 1);
+        let output = result["output"].as_str().unwrap();
+        assert!(
+            output.starts_with("recon:import nmap-xml imported 1 host, 1 service from"),
+            "the output must name what landed: {output}"
+        );
+        assert!(output.ends_with(" · 1 out-of-scope skipped"), "got: {output}");
+    }
+
+    #[test]
+    fn a_complete_recon_import_names_its_rows_and_discloses_no_skips() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("amass.jsonl");
+        fs::write(
+            &dump,
+            "{\"name\":\"api.lab.test\",\"sources\":[\"crtsh\"]}\n\
+             {\"name\":\"www.lab.test\",\"sources\":[\"crtsh\"]}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("amass", &dump), &ctx)
+            .expect("amass import succeeds");
+
+        assert_eq!(result["data"]["skippedOutOfScope"], 0);
+        let output = result["output"].as_str().unwrap();
+        assert_eq!(
+            output,
+            format!(
+                "recon:import amass imported 2 hosts, 1 note from {}",
+                dump.display()
+            ),
+            "nothing was skipped, so nothing is disclosed"
+        );
+    }
+
 
     #[test]
     fn recon_import_nmap_xml_skips_non_open_ports() {
