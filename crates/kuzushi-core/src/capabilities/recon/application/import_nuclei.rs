@@ -4,8 +4,9 @@ const TOOL_PREFIX: &str = "recon:import-nuclei";
 
 /// Import a nuclei JSONL findings dump (`nuclei -jsonl -o out.jsonl`)
 /// into the recon store as `ReconNote` rows. One note per template hit,
-/// tagged with `severity` for later filtering. Out-of-scope hosts (per
-/// `.kuzushi/scope.toml`) are skipped silently with a counter.
+/// tagged with `severity` for later filtering. Hosts `.kuzushi/scope.toml`
+/// puts out of scope are skipped, and the count is disclosed in the report
+/// and its output line.
 pub(crate) fn run_recon_import_nuclei(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,

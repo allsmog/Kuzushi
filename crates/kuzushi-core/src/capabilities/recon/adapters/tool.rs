@@ -34,7 +34,49 @@ impl ReconReport {
                     self.target
                 )
             }
-            _ => format!("{} completed for {}", self.tool, self.target),
+            _ => self.completion_output(),
+        }
+    }
+
+    /// The line a verb outside the three scan verbs above completes with. For a
+    /// `recon:import` adapter that is what it put in the recon store and what
+    /// the scope gate refused on the way. The generic "completed for <path>"
+    /// line this replaces said the same thing whether a dump imported whole or
+    /// `.kuzushi/scope.toml` denied every entry in it, so a partial import read
+    /// as a complete one — the disclosure the HAR and Burp importers already
+    /// make. A tool name this cannot place keeps the old wording.
+    fn completion_output(&self) -> String {
+        let Some(source) = self.tool.strip_prefix("recon:import-") else {
+            return format!("{} completed for {}", self.tool, self.target);
+        };
+        let skipped = self
+            .skipped_out_of_scope
+            .and_then(|count| crate::findings::import::capture_skip_phrase(count, 0))
+            .map(|phrase| format!(" · {phrase}"))
+            .unwrap_or_default();
+        format!(
+            "recon:import {source} imported {} from {}{skipped}",
+            self.imported_rows(),
+            self.target
+        )
+    }
+
+    /// The rows an import landed, named in a stable order and only when it
+    /// landed any. An import that persisted nothing says so rather than
+    /// listing three zeroes.
+    fn imported_rows(&self) -> String {
+        let named: Vec<String> = [
+            (self.hosts.len(), "host"),
+            (self.services.len(), "service"),
+            (self.notes.len(), "note"),
+        ]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, noun)| format!("{count} {noun}{}", plural(count)))
+        .collect();
+        match named.is_empty() {
+            true => "nothing".to_string(),
+            false => named.join(", "),
         }
     }
 

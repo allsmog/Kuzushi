@@ -56,6 +56,12 @@ pub(crate) struct ReconReport {
     pub(crate) services: Vec<ReconService>,
     pub(crate) notes: Vec<ReconNote>,
     pub(crate) persisted: ReconPersisted,
+    /// How many entries `.kuzushi/scope.toml` refused, for the import verbs
+    /// that read a dump of many entries and gate each one. `Some(0)` is a
+    /// complete import; `None` belongs to the verbs that take a single target,
+    /// whose scope refusal is a dispatch error rather than a skipped entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) skipped_out_of_scope: Option<usize>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) subdomains: Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]

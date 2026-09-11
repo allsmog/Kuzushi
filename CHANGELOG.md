@@ -19,6 +19,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `recon:import` now says what it imported and what `.kuzushi/scope.toml`
+  refused. Every native adapter gates each parsed entry against the scope file,
+  but only the HAR and Burp importers disclosed the refusals: amass and httpx
+  buried the count in a store note, and nuclei and nmap-xml counted it and threw
+  the count away. All four then completed with `"<tool> completed for <path>"`,
+  the same line whether a dump imported whole or the scope file denied every
+  entry in it, so an import filtered down to nothing read as a successful one.
+  The report now carries `skippedOutOfScope` and the output line names the rows
+  that landed beside the entries that did not — `recon:import nuclei imported
+  nothing from dump.jsonl · 1 out-of-scope skipped`. Reports for `recon:nmap`,
+  `recon:subdomain`, and `recon:http-fingerprint`, which take one target and
+  refuse it at dispatch, are unchanged.
+
 - `.kuzushi/scope.toml` CIDR rules now cover the shorthand IPv4 notations a
   real client resolves. The gate tested a candidate against a range only when
   `IpAddr::from_str` accepted it, which means only the dotted quad — so

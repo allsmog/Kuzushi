@@ -7,7 +7,8 @@ const TOOL: &str = "recon:import-nmap-xml";
 /// `ReconHost` + `ReconService` rows. Parsed in-process via `quick-xml`
 /// — no `nmap` binary required to ingest. Skips a host when its status
 /// is not `up`, skips services that are not in the `open` state (P2
-/// review), and skips hosts outside `.kuzushi/scope.toml` (P1 review).
+/// review), and skips hosts outside `.kuzushi/scope.toml` (P1 review),
+/// disclosing that count in the report and its output line.
 pub(crate) fn run_recon_import_nmap_xml(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,

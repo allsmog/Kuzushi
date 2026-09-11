@@ -29,6 +29,7 @@ pub(crate) fn run_recon_subdomain(
         services: Vec::new(),
         notes: vec![persisted.note],
         persisted: persisted.summary,
+        skipped_out_of_scope: None,
         subdomains,
         fingerprint: BTreeMap::new(),
     })

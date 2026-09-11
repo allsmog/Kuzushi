@@ -66,6 +66,7 @@ impl<'a> ReconImportContext<'a> {
                 host_count,
                 service_count,
             },
+            skipped_out_of_scope: Some(self.skipped_out_of_scope),
             subdomains: Vec::new(),
             fingerprint: BTreeMap::new(),
         })
