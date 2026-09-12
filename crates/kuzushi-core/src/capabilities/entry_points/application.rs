@@ -35,6 +35,7 @@ pub(crate) fn ensure_current_entry_point_catalog(
         });
     };
     validate_snapshot_for_current_target(target, &snapshot)?;
+    snapshot_coverage(&snapshot.value).require_complete()?;
     if let Ok(Some(catalog)) = read_entry_point_catalog(target) {
         if validate_catalog(target, &catalog, &snapshot).is_ok() {
             revalidate_snapshot_source(target, &snapshot.identity)?;
@@ -72,6 +73,7 @@ pub(crate) fn load_explicit_entry_point_catalog(
     validate_catalog_source_identity(target, &catalog)
         .context("explicit entry-points source is stale against the current target")?;
     validate_catalog_extraction_policy(&catalog)?;
+    catalog.snapshot_coverage.require_complete()?;
     Ok(EntryPointCatalogResolution {
         catalog: Some(catalog),
         status: "explicit".to_string(),
@@ -124,7 +126,6 @@ pub(super) fn authenticate_catalog_against_context_documents(
         identity,
     };
     validate_snapshot_target(target, &snapshot.identity)?;
-    validate_snapshot_completeness(&snapshot.value)?;
     validate_catalog(target, &catalog, &snapshot)?;
     Ok(EntryPointCatalogAuthentication {
         sha256: catalog.provenance.sha256,
@@ -141,7 +142,23 @@ pub(crate) fn validate_catalog(
     snapshot: &ContextSnapshotDocument,
 ) -> Result<()> {
     validate_catalog_shape(target, catalog)?;
-    let identity = &snapshot.identity;
+    validate_catalog_snapshot_identity(catalog, &snapshot.identity)?;
+    anyhow::ensure!(
+        catalog.snapshot_coverage == snapshot_coverage(&snapshot.value),
+        "entry-point coverage does not match its context snapshot"
+    );
+    let expected = collect_entry_points(&snapshot.value)?;
+    anyhow::ensure!(
+        catalog.entry_points == expected,
+        "entry-point catalog rows do not match the authenticated context snapshot"
+    );
+    Ok(())
+}
+
+fn validate_catalog_snapshot_identity(
+    catalog: &EntryPointCatalog,
+    identity: &ContextSnapshotIdentity,
+) -> Result<()> {
     anyhow::ensure!(
         catalog.snapshot_timestamp == identity.timestamp,
         "entry-point snapshot timestamp is stale"
@@ -165,11 +182,6 @@ pub(crate) fn validate_catalog(
     anyhow::ensure!(
         catalog.provenance.context_snapshot_tree_hash == identity.tree_hash,
         "entry-point tree identity does not match its context snapshot"
-    );
-    let expected = collect_entry_points(&snapshot.value)?;
-    anyhow::ensure!(
-        catalog.entry_points == expected,
-        "entry-point catalog rows do not match the authenticated context snapshot"
     );
     Ok(())
 }
@@ -228,6 +240,7 @@ fn catalog_from_snapshot(
         snapshot_timestamp: snapshot.identity.timestamp,
         total: entry_points.len(),
         entry_points,
+        snapshot_coverage: snapshot_coverage(&snapshot.value),
         provenance: EntryPointCatalogProvenance {
             built_at_ms,
             sha256,
@@ -268,24 +281,28 @@ fn validate_snapshot_for_current_target(
     snapshot: &ContextSnapshotDocument,
 ) -> Result<()> {
     validate_snapshot_target(target, &snapshot.identity)?;
-    validate_snapshot_completeness(&snapshot.value)?;
     validate_current_source_identity(target, &snapshot.identity)
 }
 
-fn validate_snapshot_completeness(snapshot: &Value) -> Result<()> {
+/// A snapshot states its own truncation; the catalog inherits that coverage
+/// rather than refusing to exist, so large targets still get an entry-point
+/// catalog that says exactly what it could not see.
+fn snapshot_coverage(snapshot: &Value) -> EntryPointSnapshotCoverage {
     let marker = snapshot
         .pointer("/repositoryInventory/truncation")
         .or_else(|| snapshot.pointer("/snapshotTruncation"));
     let Some(marker) = marker.filter(|marker| !marker.is_null()) else {
-        return Ok(());
+        return EntryPointSnapshotCoverage::Complete;
     };
-    let reason = marker
-        .get("reason")
-        .and_then(Value::as_str)
-        .unwrap_or("unspecified truncation");
-    anyhow::bail!(
-        "entry-point catalog requires a complete context snapshot; repository inventory is truncated ({reason})"
-    )
+    EntryPointSnapshotCoverage::Partial {
+        reason: marker
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or("unspecified truncation")
+            .to_string(),
+        array_cap: marker.get("arrayCap").and_then(Value::as_u64),
+        omitted_entries: marker.get("omittedEntries").and_then(Value::as_u64),
+    }
 }
 
 fn validate_catalog_target(target: &Path, recorded: &str) -> Result<()> {

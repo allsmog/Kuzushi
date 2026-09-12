@@ -36,6 +36,91 @@ pub(crate) struct EntryPointCatalogProvenance {
     pub(crate) context_snapshot_tree_hash: Option<String>,
 }
 
+/// How much of the target the context snapshot let the extractor see. A
+/// snapshot that declared its own truncation still yields usable rows, but
+/// only as a disclosed partial catalog: the rows it lacks were never in the
+/// snapshot to extract.
+///
+/// `Unrecorded` is what an artifact carrying no coverage deserializes to.
+/// Silence is not a completeness claim: the payload digest covers only the
+/// rows, so a field an older writer never wrote — or one removed from a
+/// partial catalog — would otherwise read as a catalog that saw everything.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub(crate) enum EntryPointSnapshotCoverage {
+    #[default]
+    Unrecorded,
+    Complete,
+    #[serde(rename_all = "camelCase")]
+    Partial {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        array_cap: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        omitted_entries: Option<u64>,
+    },
+}
+
+impl EntryPointSnapshotCoverage {
+    /// One operator-facing line naming what this catalog cannot account for,
+    /// or `None` when it records that the snapshot covered the whole target.
+    pub(crate) fn disclosure(&self) -> Option<String> {
+        match self {
+            Self::Complete => None,
+            Self::Unrecorded => {
+                Some("the catalog records no snapshot coverage of its own".to_string())
+            }
+            Self::Partial {
+                reason,
+                array_cap,
+                omitted_entries,
+            } => Some(partial_disclosure(reason, *array_cap, *omitted_entries)),
+        }
+    }
+
+    /// Refusal for consumers that ground on the catalog as the complete
+    /// entry-point set, where partial rows would read as proven absence.
+    pub(crate) fn require_complete(&self) -> anyhow::Result<()> {
+        match self {
+            Self::Complete => Ok(()),
+            Self::Unrecorded => anyhow::bail!(
+                "entry-point grounding requires a catalog that records the snapshot coverage it \
+                 was built from; this one records none, so its rows cannot stand as the complete \
+                 entry-point set — rebuild it with `entry-points:extract`"
+            ),
+            Self::Partial {
+                reason,
+                array_cap,
+                omitted_entries,
+            } => anyhow::bail!(
+                "entry-point grounding requires a complete context snapshot, but {}; \
+                 `entry-points:extract` still writes a partial catalog — ground on a narrower \
+                 target root for complete coverage",
+                partial_disclosure(reason, *array_cap, *omitted_entries)
+            ),
+        }
+    }
+}
+
+fn partial_disclosure(reason: &str, array_cap: Option<u64>, omitted: Option<u64>) -> String {
+    let mut text = format!("the context snapshot is truncated ({reason})");
+    if let Some(omitted) = omitted {
+        text.push_str(&format!("; {omitted} snapshot entr{} omitted", plural(omitted)));
+    }
+    if let Some(cap) = array_cap {
+        text.push_str(&format!(" at the {cap}-entry array cap"));
+    }
+    text
+}
+
+fn plural(count: u64) -> &'static str {
+    if count == 1 {
+        "y"
+    } else {
+        "ies"
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct EntryPointCatalog {
@@ -45,6 +130,10 @@ pub(crate) struct EntryPointCatalog {
     pub(crate) total: usize,
     pub(crate) entry_points: Vec<EntryPointRecord>,
     pub(crate) provenance: EntryPointCatalogProvenance,
+    /// Absent on catalogs written before coverage was recorded, which read as
+    /// `Unrecorded` rather than as a claim of completeness.
+    #[serde(default)]
+    pub(crate) snapshot_coverage: EntryPointSnapshotCoverage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

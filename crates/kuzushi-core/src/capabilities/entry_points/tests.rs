@@ -200,8 +200,43 @@ fn context_row_with_a_noncanonical_id_is_rejected() {
     assert!(error.to_string().contains("non-canonical stable id"));
 }
 
+/// A snapshot that capped its own arrays still holds real rows. Extraction
+/// keeps them and declares the coverage it had, instead of refusing to write
+/// any catalog at all for a target too large to snapshot whole.
 #[test]
-fn truncated_context_snapshot_cannot_produce_a_complete_catalog() {
+fn truncated_context_snapshot_extracts_a_declared_partial_catalog() {
+    let target = tempfile::tempdir().unwrap();
+    let mut value = snapshot(target.path());
+    value["snapshotTruncation"] = json!({
+        "reason": "snapshot byte budget",
+        "arrayCap": 2000,
+        "omittedEntries": 1186,
+    });
+    write_snapshot(target.path(), &value);
+
+    let (catalog, path) = refresh_entry_point_catalog(target.path()).unwrap();
+
+    assert_eq!(catalog.total, 1);
+    assert_eq!(
+        catalog.snapshot_coverage,
+        super::domain::EntryPointSnapshotCoverage::Partial {
+            reason: "snapshot byte budget".to_string(),
+            array_cap: Some(2000),
+            omitted_entries: Some(1186),
+        }
+    );
+    let disclosure = catalog.snapshot_coverage.disclosure().unwrap();
+    assert!(disclosure.contains("snapshot byte budget"), "{disclosure}");
+    assert!(disclosure.contains("1186 snapshot entries omitted"), "{disclosure}");
+    assert!(path.exists());
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written["snapshotCoverage"]["state"], json!("partial"));
+}
+
+/// The inventory spelling of the same marker, with no counts to report.
+#[test]
+fn inventory_truncation_without_counts_is_still_declared_partial() {
     let target = tempfile::tempdir().unwrap();
     let mut value = snapshot(target.path());
     value["repositoryInventory"] = json!({
@@ -209,28 +244,79 @@ fn truncated_context_snapshot_cannot_produce_a_complete_catalog() {
     });
     write_snapshot(target.path(), &value);
 
-    let error = refresh_entry_point_catalog(target.path()).unwrap_err();
+    let (catalog, _) = refresh_entry_point_catalog(target.path()).unwrap();
 
-    assert!(error.to_string().contains("repository inventory is truncated"));
-    assert!(!crate::workspace::workspace_state_root(target.path())
-        .join(ENTRY_POINTS_FILE)
-        .exists());
+    assert_eq!(
+        catalog.snapshot_coverage.disclosure().unwrap(),
+        "the context snapshot is truncated (content-inspection cap)"
+    );
 }
 
+/// Grounding consumers read the catalog as the complete entry-point set, so
+/// they refuse a partial one rather than treating its gaps as absence.
 #[test]
-fn ensure_refuses_truncation_even_when_an_older_catalog_exists() {
+fn grounding_refuses_a_partial_catalog_extraction_still_wrote() {
     let target = tempfile::tempdir().unwrap();
     let mut value = snapshot(target.path());
+    value["snapshotTruncation"] = json!({"reason": "snapshot byte budget", "omittedEntries": 7});
     write_snapshot(target.path(), &value);
     refresh_entry_point_catalog(target.path()).unwrap();
-    value["repositoryInventory"] = json!({
-        "truncation": {"reason": "snapshot byte budget"}
-    });
+
+    let ensured = ensure_current_entry_point_catalog(target.path()).unwrap_err();
+    let explicit = load_explicit_entry_point_catalog(target.path()).unwrap_err();
+
+    for error in [&ensured, &explicit] {
+        assert!(
+            error.to_string().contains("requires a complete context snapshot"),
+            "{error:#}"
+        );
+        assert!(error.to_string().contains("7 snapshot entries omitted"), "{error:#}");
+    }
+}
+
+/// The payload digest covers only the rows, so a coverage field removed from
+/// a partial catalog must not read as a completeness claim. Grounding refuses
+/// a catalog that records no coverage of its own.
+#[test]
+fn a_catalog_stripped_of_its_coverage_is_not_read_as_complete() {
+    let target = tempfile::tempdir().unwrap();
+    let mut value = snapshot(target.path());
+    value["snapshotTruncation"] = json!({"reason": "snapshot byte budget"});
     write_snapshot(target.path(), &value);
+    let (_, path) = refresh_entry_point_catalog(target.path()).unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document.as_object_mut().unwrap().remove("snapshotCoverage");
+    std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
 
-    let error = ensure_current_entry_point_catalog(target.path()).unwrap_err();
+    let error = load_explicit_entry_point_catalog(target.path()).unwrap_err();
 
-    assert!(error.to_string().contains("repository inventory is truncated"));
+    assert!(
+        error.to_string().contains("records none"),
+        "a stripped catalog must not stand as complete: {error:#}"
+    );
+}
+
+/// Coverage is decision-carrying: a catalog may not claim it saw the whole
+/// target when its context snapshot says otherwise.
+#[test]
+fn a_catalog_cannot_claim_complete_coverage_of_a_truncated_snapshot() {
+    let target = tempfile::tempdir().unwrap();
+    let mut value = snapshot(target.path());
+    value["snapshotTruncation"] = json!({"reason": "snapshot byte budget"});
+    write_snapshot(target.path(), &value);
+    let (mut catalog, _) = refresh_entry_point_catalog(target.path()).unwrap();
+    catalog.snapshot_coverage = super::domain::EntryPointSnapshotCoverage::Complete;
+    let context = super::persistence::read_context_snapshot(target.path())
+        .unwrap()
+        .unwrap();
+
+    let error = validate_catalog(target.path(), &catalog, &context).unwrap_err();
+
+    assert!(
+        error.to_string().contains("coverage does not match its context snapshot"),
+        "{error:#}"
+    );
 }
 
 #[test]
@@ -402,7 +488,7 @@ fn verification_still_fails_on_an_incomplete_snapshot() {
     let error = resolve_entry_point_catalog_for_verification(target.path()).unwrap_err();
 
     assert!(
-        error.to_string().contains("repository inventory is truncated"),
+        error.to_string().contains("requires a complete context snapshot"),
         "only stale source identity degrades: {error:#}"
     );
 }

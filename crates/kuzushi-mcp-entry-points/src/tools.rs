@@ -117,10 +117,16 @@ fn filter_entries(artifact: Value, predicate: impl Fn(&Value) -> bool) -> Value 
         .into_iter()
         .filter(|entry| predicate(entry))
         .collect();
-    json!({
+    let mut result = json!({
         "total": filtered.len(),
         "entryPoints": filtered,
-    })
+    });
+    // A filter over a catalog the context snapshot only partly supplied must
+    // carry that coverage, or an empty match reads as proven absence.
+    if let Some(coverage) = artifact.get("snapshotCoverage") {
+        result["snapshotCoverage"] = coverage.clone();
+    }
+    result
 }
 
 pub(crate) fn load_artifact(read_capability: &ReadRootCapability) -> Result<Value> {
@@ -180,6 +186,29 @@ mod tests {
         assert_eq!(gets["total"], 1);
         let posts = handler.call(json!({"method": "post"})).await.unwrap();
         assert_eq!(posts["total"], 1);
+        std::env::remove_var(ARTIFACT_ENV);
+    }
+
+    /// An empty filter result over a partial catalog must not read as proven
+    /// absence, so the catalog's declared coverage travels with it.
+    #[tokio::test]
+    async fn a_filter_carries_the_catalogs_declared_partial_coverage() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let (tmp, path) = write_fixture(
+            r#"{"snapshotCoverage":{"state":"partial","reason":"snapshot byte budget",
+                "omittedEntries":1186},
+                "entryPoints":[{"kind":"http-route","method":"GET","path":"/a"}]}"#,
+        );
+        std::env::set_var(ARTIFACT_ENV, &path);
+
+        let posts = ByMethodHandler(capability(&tmp))
+            .call(json!({"method": "POST"}))
+            .await
+            .unwrap();
+
+        assert_eq!(posts["total"], 0);
+        assert_eq!(posts["snapshotCoverage"]["state"], "partial");
+        assert_eq!(posts["snapshotCoverage"]["omittedEntries"], 1186);
         std::env::remove_var(ARTIFACT_ENV);
     }
 }

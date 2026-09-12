@@ -15,7 +15,7 @@ use fields::{receipt_fields, ReceiptFields};
 use freshness::{
     freshness_state, warn_provenance_disagreements, warn_when_dirty_freshness_is_unprovable,
 };
-use validation::validate_receipt_counts;
+use validation::{validate_receipt_counts, warn_unless_coverage_is_complete};
 
 #[derive(Debug, Clone)]
 pub(super) struct ArtifactDocument {
@@ -131,6 +131,7 @@ pub(super) fn build_receipt(
     let catalog_context_authenticated =
         authenticate_catalog_context(catalog, catalog_authenticated, &mut fields, &mut warnings);
     let composition = composition_state(catalog, model, &fields);
+    warn_unless_coverage_is_complete(catalog.doc(), &mut warnings);
     validate_receipt_counts(catalog.doc(), &fields, counts, &mut warnings);
     warn_provenance_disagreements(
         catalog_authenticated,

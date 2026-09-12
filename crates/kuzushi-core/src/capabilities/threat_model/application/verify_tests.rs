@@ -123,6 +123,7 @@ fn explicit_catalog(
         snapshot_timestamp: 9,
         total: entries.len(),
         entry_points: entries,
+        snapshot_coverage: crate::capabilities::entry_points::EntryPointSnapshotCoverage::Complete,
         provenance: crate::capabilities::entry_points::EntryPointCatalogProvenance {
             built_at_ms: 10,
             sha256: sha256.clone(),

@@ -475,7 +475,9 @@ is expected to behave identically and should be filed as a parity bug.
     deprioritized, extracted-only, and model-only rows and reports extracted,
     selected, modeled, and linked counts plus exact catalog/model provenance.
     Stale, malformed, legacy-unverifiable, and changed-since-model catalogs are
-    disclosed rather than presented as current. `j/k` selects every union row,
+    disclosed rather than presented as current, as is a catalog whose own
+    `snapshotCoverage` records that the context snapshot it was extracted from
+    was truncated. `j/k` selects every union row,
     `PgUp/PgDn` scrolls only its evidence, and `Enter` jumps when a resolved DFD
     node/flow/boundary exists. Wide terminals render list + detail side by side;
     narrow terminals stack a bounded list above the selected detail. Plain output
