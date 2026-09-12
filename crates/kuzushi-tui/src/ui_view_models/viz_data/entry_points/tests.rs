@@ -596,6 +596,63 @@ fn impossible_receipt_counts_are_warned_instead_of_presented_as_authoritative() 
     );
 }
 
+/// A catalog the context snapshot could only partly supply must say so on the
+/// page; its rows are real but they are not the whole attack surface.
+#[test]
+fn partial_catalog_coverage_is_disclosed_instead_of_read_as_the_whole_surface() {
+    let target = tempfile::tempdir().unwrap();
+    let row = catalog_row("EP-1", "one", "http_route", "src/a.rs", json!({}));
+    let mut document = authenticated_catalog(target.path(), vec![row], "rev", false)
+        .doc()
+        .unwrap()
+        .clone();
+    document["snapshotCoverage"] = json!({
+        "state": "partial", "reason": "snapshot byte budget",
+        "arrayCap": 2000, "omittedEntries": 1186
+    });
+    let catalog = authenticated_artifact(target.path(), document);
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &ArtifactDocument::without_value(EntryPointArtifactStatus::Missing),
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    assert_eq!(breakdown.entries.len(), 1);
+    let warnings = breakdown.receipt.warnings.join("\n");
+    assert!(warnings.contains("catalog coverage partial"), "{warnings}");
+    assert!(warnings.contains("snapshot byte budget"), "{warnings}");
+    assert!(
+        warnings.contains("1186 snapshot entries omitted"),
+        "{warnings}"
+    );
+}
+
+/// An artifact written before coverage was recorded could only come from a
+/// complete snapshot, so it must not collect a speculative warning.
+#[test]
+fn a_catalog_without_recorded_coverage_is_not_warned_about() {
+    let target = tempfile::tempdir().unwrap();
+    let row = catalog_row("EP-1", "one", "http_route", "src/a.rs", json!({}));
+    let catalog = authenticated_catalog(target.path(), vec![row], "rev", false);
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &ArtifactDocument::without_value(EntryPointArtifactStatus::Missing),
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    let warnings = breakdown.receipt.warnings.join("\n");
+    assert!(!warnings.contains("coverage partial"), "{warnings}");
+    assert!(!warnings.contains("unreadable coverage"), "{warnings}");
+}
+
 fn authenticated_catalog(
     target: &Path,
     rows: Vec<Value>,

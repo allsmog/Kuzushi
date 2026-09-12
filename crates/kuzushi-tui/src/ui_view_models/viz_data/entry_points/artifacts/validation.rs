@@ -2,6 +2,36 @@ use super::super::model::EntryPointCounts;
 use super::fields::{pointer_usize, ReceiptFields};
 use serde_json::Value;
 
+/// A catalog the context snapshot could only partly supply says so in its own
+/// artifact. The page repeats that, so its rows never read as the whole
+/// attack surface. An artifact written before coverage was recorded omits the
+/// field; those could only be built from a complete snapshot.
+pub(super) fn warn_unless_coverage_is_complete(
+    catalog: Option<&Value>,
+    warnings: &mut Vec<String>,
+) {
+    let Some(coverage) = catalog.and_then(|doc| doc.get("snapshotCoverage")) else {
+        return;
+    };
+    match coverage.get("state").and_then(Value::as_str) {
+        Some("complete") => {}
+        Some("partial") => warnings.push(partial_coverage_warning(coverage)),
+        _ => warnings.push("catalog declares an unreadable coverage state".to_string()),
+    }
+}
+
+fn partial_coverage_warning(coverage: &Value) -> String {
+    let reason = coverage
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("unstated reason");
+    let mut warning = format!("catalog coverage partial: context snapshot truncated ({reason})");
+    if let Some(omitted) = coverage.get("omittedEntries").and_then(Value::as_u64) {
+        warning.push_str(&format!("; {omitted} snapshot entries omitted"));
+    }
+    warning
+}
+
 pub(super) fn validate_receipt_counts(
     catalog: Option<&Value>,
     fields: &ReceiptFields,

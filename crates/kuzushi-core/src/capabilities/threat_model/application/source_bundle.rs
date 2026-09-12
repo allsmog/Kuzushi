@@ -1285,6 +1285,7 @@ mod source_size_contract_tests {
             snapshot_timestamp: 9,
             total: entries.len(),
             entry_points: entries,
+            snapshot_coverage: Default::default(),
             provenance: crate::capabilities::entry_points::EntryPointCatalogProvenance {
                 built_at_ms: 10,
                 sha256,

@@ -17,7 +17,8 @@ pub(crate) use verification::{
 };
 #[cfg(test)]
 pub(crate) use domain::{
-    EntryPointCatalogProvenance, EntryPointRecord, ENTRY_POINTS_FILE, MAX_ENTRY_POINTS_BYTES,
+    EntryPointCatalogProvenance, EntryPointRecord, EntryPointSnapshotCoverage, ENTRY_POINTS_FILE,
+    MAX_ENTRY_POINTS_BYTES,
 };
 
 pub use domain::EntryPointCatalogAuthentication;

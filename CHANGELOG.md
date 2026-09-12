@@ -19,6 +19,27 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `entry-points:extract` no longer refuses a target too large to snapshot
+  whole. `context:build` caps its own arrays to stay inside the snapshot byte
+  budget and records `snapshotTruncation` when it does, and the extractor read
+  that marker as grounds to bail: on a 3186-surface monorepo the snapshot
+  capped `attackSurfaceMap.surfaces` at 2000 and `entry-points:extract` then
+  failed with `entry-point catalog requires a complete context snapshot`,
+  writing no `.kuzushi/entry-points.json` at all. Headless `kuzushi run`, the
+  scan orchestrator, and the shell Map page were blocked identically, so a
+  large repository got no entry-point catalog rather than a partial one. The
+  catalog now records the coverage it was built from, and the 2000 real rows
+  are kept and disclosed instead of discarded: the artifact carries
+  `snapshotCoverage`, the tool reports `status: "partial"` with the reason and
+  omitted-entry count in its summary, output, and warnings, the Entry points
+  page warns `catalog coverage partial …`, and `entry_points:by_framework` /
+  `entry_points:by_method` carry the same coverage so an empty filter never
+  reads as proven absence. Consumers that ground on the catalog as the complete
+  entry-point set — threat-model grounding, explicit catalog sources, and
+  verification — still refuse a partial catalog, now naming what the snapshot
+  withheld, and a catalog may not claim complete coverage of a snapshot that
+  declared truncation.
+
 - `recon:import` now says what it imported and what `.kuzushi/scope.toml`
   refused. Every native adapter gates each parsed entry against the scope file,
   but only the HAR and Burp importers disclosed the refusals: amass and httpx
