@@ -38,7 +38,12 @@ Notable changes to Kuzushi. Release procedure lives in
   entry-point set — threat-model grounding, explicit catalog sources, and
   verification — still refuse a partial catalog, now naming what the snapshot
   withheld, and a catalog may not claim complete coverage of a snapshot that
-  declared truncation.
+  declared truncation. Recording no coverage is not a completeness claim
+  either: the payload digest covers only the rows, so an artifact with no
+  `snapshotCoverage` — one written before the field existed, or one it was
+  removed from — reads as `unrecorded`, is disclosed as such on the Entry
+  points page, and is refused by grounding until `entry-points:extract`
+  rebuilds it.
 
 - `recon:import` now says what it imported and what `.kuzushi/scope.toml`
   refused. Every native adapter gates each parsed entry against the scope file,

@@ -3,22 +3,29 @@ use super::fields::{pointer_usize, ReceiptFields};
 use serde_json::Value;
 
 /// A catalog the context snapshot could only partly supply says so in its own
-/// artifact. The page repeats that, so its rows never read as the whole
-/// attack surface. An artifact written before coverage was recorded omits the
-/// field; those could only be built from a complete snapshot.
+/// artifact. The page repeats that, so its rows never read as the whole attack
+/// surface. A catalog recording no coverage at all — an older artifact, or one
+/// the field was removed from — is disclosed too rather than assumed complete.
 pub(super) fn warn_unless_coverage_is_complete(
     catalog: Option<&Value>,
     warnings: &mut Vec<String>,
 ) {
-    let Some(coverage) = catalog.and_then(|doc| doc.get("snapshotCoverage")) else {
+    let Some(doc) = catalog else {
+        return;
+    };
+    let Some(coverage) = doc.get("snapshotCoverage") else {
+        warnings.push(NO_RECORDED_COVERAGE.to_string());
         return;
     };
     match coverage.get("state").and_then(Value::as_str) {
         Some("complete") => {}
         Some("partial") => warnings.push(partial_coverage_warning(coverage)),
+        Some("unrecorded") => warnings.push(NO_RECORDED_COVERAGE.to_string()),
         _ => warnings.push("catalog declares an unreadable coverage state".to_string()),
     }
 }
+
+const NO_RECORDED_COVERAGE: &str = "catalog records no snapshot coverage of its own";
 
 fn partial_coverage_warning(coverage: &Value) -> String {
     let reason = coverage

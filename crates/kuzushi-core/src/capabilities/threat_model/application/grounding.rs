@@ -767,7 +767,7 @@ mod tests {
             snapshot_timestamp: 9,
             total: entry_points.len(),
             entry_points,
-            snapshot_coverage: Default::default(),
+            snapshot_coverage: crate::capabilities::entry_points::EntryPointSnapshotCoverage::Complete,
             provenance: crate::capabilities::entry_points::EntryPointCatalogProvenance {
                 built_at_ms: 10,
                 sha256,

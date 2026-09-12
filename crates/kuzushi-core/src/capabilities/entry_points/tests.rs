@@ -274,6 +274,29 @@ fn grounding_refuses_a_partial_catalog_extraction_still_wrote() {
     }
 }
 
+/// The payload digest covers only the rows, so a coverage field removed from
+/// a partial catalog must not read as a completeness claim. Grounding refuses
+/// a catalog that records no coverage of its own.
+#[test]
+fn a_catalog_stripped_of_its_coverage_is_not_read_as_complete() {
+    let target = tempfile::tempdir().unwrap();
+    let mut value = snapshot(target.path());
+    value["snapshotTruncation"] = json!({"reason": "snapshot byte budget"});
+    write_snapshot(target.path(), &value);
+    let (_, path) = refresh_entry_point_catalog(target.path()).unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document.as_object_mut().unwrap().remove("snapshotCoverage");
+    std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
+
+    let error = load_explicit_entry_point_catalog(target.path()).unwrap_err();
+
+    assert!(
+        error.to_string().contains("records none"),
+        "a stripped catalog must not stand as complete: {error:#}"
+    );
+}
+
 /// Coverage is decision-carrying: a catalog may not claim it saw the whole
 /// target when its context snapshot says otherwise.
 #[test]

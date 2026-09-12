@@ -631,10 +631,10 @@ fn partial_catalog_coverage_is_disclosed_instead_of_read_as_the_whole_surface() 
     );
 }
 
-/// An artifact written before coverage was recorded could only come from a
-/// complete snapshot, so it must not collect a speculative warning.
+/// A catalog recording no coverage — an older artifact, or one the field was
+/// removed from — is disclosed as such, never presented as complete.
 #[test]
-fn a_catalog_without_recorded_coverage_is_not_warned_about() {
+fn a_catalog_recording_no_coverage_is_disclosed_not_assumed_complete() {
     let target = tempfile::tempdir().unwrap();
     let row = catalog_row("EP-1", "one", "http_route", "src/a.rs", json!({}));
     let catalog = authenticated_catalog(target.path(), vec![row], "rev", false);
@@ -649,8 +649,35 @@ fn a_catalog_without_recorded_coverage_is_not_warned_about() {
     );
 
     let warnings = breakdown.receipt.warnings.join("\n");
-    assert!(!warnings.contains("coverage partial"), "{warnings}");
-    assert!(!warnings.contains("unreadable coverage"), "{warnings}");
+    assert!(
+        warnings.contains("records no snapshot coverage of its own"),
+        "{warnings}"
+    );
+}
+
+/// A catalog that states complete coverage collects no coverage warning.
+#[test]
+fn a_complete_coverage_catalog_is_not_warned_about() {
+    let target = tempfile::tempdir().unwrap();
+    let row = catalog_row("EP-1", "one", "http_route", "src/a.rs", json!({}));
+    let mut document = authenticated_catalog(target.path(), vec![row], "rev", false)
+        .doc()
+        .unwrap()
+        .clone();
+    document["snapshotCoverage"] = json!({"state": "complete"});
+    let catalog = authenticated_artifact(target.path(), document);
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &ArtifactDocument::without_value(EntryPointArtifactStatus::Missing),
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    let warnings = breakdown.receipt.warnings.join("\n");
+    assert!(!warnings.contains("coverage"), "{warnings}");
 }
 
 fn authenticated_catalog(
