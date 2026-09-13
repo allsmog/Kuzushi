@@ -145,7 +145,8 @@ pub(crate) fn validate_catalog(
     validate_catalog_snapshot_identity(catalog, &snapshot.identity)?;
     anyhow::ensure!(
         catalog.snapshot_coverage == snapshot_coverage(&snapshot.value),
-        "entry-point coverage does not match its context snapshot"
+        "{}",
+        coverage_refusal(&catalog.snapshot_coverage)
     );
     let expected = collect_entry_points(&snapshot.value)?;
     anyhow::ensure!(
@@ -153,6 +154,19 @@ pub(crate) fn validate_catalog(
         "entry-point catalog rows do not match the authenticated context snapshot"
     );
     Ok(())
+}
+
+/// Why a catalog's coverage cannot stand against the snapshot beside it.
+/// Absence and disagreement are different failures: a catalog that records no
+/// coverage states nothing to conflict with, so naming it a mismatch would
+/// imply a claim the artifact never made.
+fn coverage_refusal(recorded: &EntryPointSnapshotCoverage) -> &'static str {
+    match recorded {
+        EntryPointSnapshotCoverage::Unrecorded => {
+            "entry-point catalog records no snapshot coverage of its own"
+        }
+        _ => "entry-point coverage does not match its context snapshot",
+    }
 }
 
 fn validate_catalog_snapshot_identity(

@@ -72,7 +72,7 @@ struct ByMethodHandler(ReadRootCapability);
 #[async_trait]
 impl ToolHandler for ListHandler {
     async fn call(&self, _args: Value) -> Result<Value> {
-        load_artifact(&self.0)
+        Ok(with_declared_coverage(load_artifact(&self.0)?))
     }
 }
 
@@ -123,10 +123,29 @@ fn filter_entries(artifact: Value, predicate: impl Fn(&Value) -> bool) -> Value 
     });
     // A filter over a catalog the context snapshot only partly supplied must
     // carry that coverage, or an empty match reads as proven absence.
-    if let Some(coverage) = artifact.get("snapshotCoverage") {
-        result["snapshotCoverage"] = coverage.clone();
-    }
+    result["snapshotCoverage"] = declared_coverage(&artifact);
     result
+}
+
+/// The coverage an artifact declares. A catalog written before the field
+/// existed, or stripped of it, records none, and a result must say so rather
+/// than carry no coverage at all: silence is what lets an agent read the rows
+/// it got as the complete entry-point set. Serializes as
+/// `EntryPointSnapshotCoverage::Unrecorded` does in kuzushi-core.
+fn declared_coverage(artifact: &Value) -> Value {
+    artifact
+        .get("snapshotCoverage")
+        .cloned()
+        .unwrap_or_else(|| json!({"state": "unrecorded"}))
+}
+
+/// The whole catalog, with the coverage it declares stated on it.
+fn with_declared_coverage(mut artifact: Value) -> Value {
+    let coverage = declared_coverage(&artifact);
+    if let Some(object) = artifact.as_object_mut() {
+        object.insert("snapshotCoverage".to_string(), coverage);
+    }
+    artifact
 }
 
 pub(crate) fn load_artifact(read_capability: &ReadRootCapability) -> Result<Value> {
@@ -209,6 +228,55 @@ mod tests {
         assert_eq!(posts["total"], 0);
         assert_eq!(posts["snapshotCoverage"]["state"], "partial");
         assert_eq!(posts["snapshotCoverage"]["omittedEntries"], 1186);
+        std::env::remove_var(ARTIFACT_ENV);
+    }
+
+    /// A catalog written before coverage was recorded declares none. Saying so
+    /// is what keeps an empty filter over it from reading as proven absence.
+    #[tokio::test]
+    async fn a_filter_over_a_catalog_without_coverage_reports_it_unrecorded() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let (tmp, path) =
+            write_fixture(r#"{"entryPoints":[{"kind":"http-route","method":"GET","path":"/a"}]}"#);
+        std::env::set_var(ARTIFACT_ENV, &path);
+
+        let posts = ByMethodHandler(capability(&tmp))
+            .call(json!({"method": "POST"}))
+            .await
+            .unwrap();
+
+        assert_eq!(posts["total"], 0);
+        assert_eq!(posts["snapshotCoverage"]["state"], "unrecorded");
+        std::env::remove_var(ARTIFACT_ENV);
+    }
+
+    #[tokio::test]
+    async fn list_states_the_coverage_the_catalog_records() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let (tmp, path) = write_fixture(
+            r#"{"snapshotCoverage":{"state":"partial","reason":"snapshot byte budget"},
+                "entryPoints":[{"kind":"http-route","method":"GET","path":"/a"}]}"#,
+        );
+        std::env::set_var(ARTIFACT_ENV, &path);
+
+        let value = ListHandler(capability(&tmp)).call(json!({})).await.unwrap();
+
+        assert_eq!(value["snapshotCoverage"]["state"], "partial");
+        assert_eq!(value["snapshotCoverage"]["reason"], "snapshot byte budget");
+        std::env::remove_var(ARTIFACT_ENV);
+    }
+
+    #[tokio::test]
+    async fn list_over_a_catalog_without_coverage_reports_it_unrecorded() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let (tmp, path) =
+            write_fixture(r#"{"entryPoints":[{"kind":"http-route","method":"GET","path":"/a"}]}"#);
+        std::env::set_var(ARTIFACT_ENV, &path);
+
+        let value = ListHandler(capability(&tmp)).call(json!({})).await.unwrap();
+
+        assert_eq!(value["entryPoints"].as_array().unwrap().len(), 1);
+        assert_eq!(value["snapshotCoverage"]["state"], "unrecorded");
         std::env::remove_var(ARTIFACT_ENV);
     }
 }

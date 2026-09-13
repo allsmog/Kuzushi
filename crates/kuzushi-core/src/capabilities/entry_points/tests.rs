@@ -297,6 +297,48 @@ fn a_catalog_stripped_of_its_coverage_is_not_read_as_complete() {
     );
 }
 
+/// The other half of the backward-compatibility contract: a catalog written
+/// before coverage existed is not refused forever. Against a complete snapshot
+/// `ensure` rewrites it, so the artifact states the coverage it was built from
+/// instead of carrying its silence forward.
+#[test]
+fn ensure_rewrites_a_pre_coverage_catalog_with_the_coverage_it_was_built_from() {
+    let target = tempfile::tempdir().unwrap();
+    write_snapshot(target.path(), &snapshot(target.path()));
+    let (_, path) = refresh_entry_point_catalog(target.path()).unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document.as_object_mut().unwrap().remove("snapshotCoverage");
+    std::fs::write(&path, serde_json::to_string_pretty(&document).unwrap()).unwrap();
+
+    let resolution = ensure_current_entry_point_catalog(target.path()).unwrap();
+
+    assert_eq!(resolution.status, "refreshed");
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written["snapshotCoverage"]["state"], json!("complete"));
+}
+
+/// A catalog that records no coverage is refused for recording none, not for
+/// disagreeing: absence states nothing to conflict with.
+#[test]
+fn a_pre_coverage_catalog_is_refused_for_its_silence_not_a_mismatch() {
+    let target = tempfile::tempdir().unwrap();
+    write_snapshot(target.path(), &snapshot(target.path()));
+    let (mut catalog, _) = refresh_entry_point_catalog(target.path()).unwrap();
+    catalog.snapshot_coverage = super::domain::EntryPointSnapshotCoverage::Unrecorded;
+    let context = super::persistence::read_context_snapshot(target.path())
+        .unwrap()
+        .unwrap();
+
+    let error = validate_catalog(target.path(), &catalog, &context).unwrap_err();
+
+    assert!(
+        error.to_string().contains("records no snapshot coverage of its own"),
+        "{error:#}"
+    );
+}
+
 /// Coverage is decision-carrying: a catalog may not claim it saw the whole
 /// target when its context snapshot says otherwise.
 #[test]
