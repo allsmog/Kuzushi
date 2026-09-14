@@ -431,9 +431,19 @@ fn idna_ascii_domain(host: &str) -> Option<String> {
     if host.is_ascii() {
         return None;
     }
-    idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::URL)
-        .ok()
-        .map(|domain| domain.into_owned())
+    let mapped = idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::URL).ok()?;
+    normalized_spelling(&mapped)
+}
+
+/// Put a mapped spelling back into the form both sides of the comparison are
+/// written in. UTS 46 rewrites non-ASCII label separators, so
+/// `admin.example.com。` maps to an ASCII root dot that [`normalize_host`] ran
+/// too early to trim; without this the mapped reading would miss the very rule
+/// it was derived to match. A spelling that normalizes to nothing names no
+/// host, so it is dropped rather than compared as an empty one.
+fn normalized_spelling(mapped: &str) -> Option<String> {
+    let normalized = normalize_host(mapped);
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 /// The ASCII spelling of one non-ASCII host rule, mapped without the URL
@@ -445,7 +455,7 @@ fn idna_ascii_rule_spelling(pattern: &str) -> Option<String> {
     if pattern.is_ascii() {
         return None;
     }
-    idna::domain_to_ascii(pattern).ok()
+    normalized_spelling(&idna::domain_to_ascii(pattern).ok()?)
 }
 
 /// The Unicode domain a punycode host rule encodes, or `None` when the rule
@@ -461,7 +471,7 @@ fn punycode_decoded_domain(pattern: &str) -> Option<String> {
     }
     let (unicode, result) = idna::domain_to_unicode(pattern);
     result.ok()?;
-    (unicode != pattern).then_some(unicode)
+    normalized_spelling(&unicode).filter(|domain| domain != pattern)
 }
 
 /// The host an escaped authority names once its percent-escapes are resolved,
@@ -1193,6 +1203,10 @@ mod tests {
             "https://admin\u{3002}example.com/",
             // U+FF21 FULLWIDTH LATIN CAPITAL LETTER A case-folds too.
             "https://\u{FF21}DMIN.example.com:8443/",
+            // U+3002 as the *root* label separator: the mapping leaves an ASCII
+            // root dot behind, after the trim that would have removed it.
+            "https://admin.example.com\u{3002}/",
+            "https://admin\u{3002}example.com\u{3002}:8443/",
             // The same fullwidth `a`, hidden behind its UTF-8 escapes.
             "https://%EF%BD%81dmin.example.com/",
         ] {
@@ -1279,6 +1293,43 @@ mod tests {
         // and the URL Standard rejects the whole URL there.
         assert_eq!(idna_ascii_domain("evil.test\u{FF1A}8080"), None);
         assert_eq!(idna_ascii_domain("admin\u{FF0F}evil.test"), None);
+        // The mapping can put back a root dot the trim already ran past, so
+        // the spelling is normalized again before it is compared.
+        assert_eq!(
+            idna_ascii_domain("admin.example.com\u{3002}").as_deref(),
+            Some("admin.example.com")
+        );
+        // A host that maps to nothing but a root label names no host at all.
+        assert_eq!(idna_ascii_domain("\u{3002}"), None);
+    }
+
+    #[test]
+    fn a_rule_spelling_is_normalized_like_the_rule_it_came_from() {
+        assert_eq!(
+            idna_ascii_rule_spelling("b\u{FC}cher.example\u{3002}").as_deref(),
+            Some("xn--bcher-kva.example")
+        );
+        assert_eq!(
+            punycode_decoded_domain("xn--bcher-kva.example\u{3002}").as_deref(),
+            Some("b\u{FC}cher.example")
+        );
+
+        // Written with its root separator spelled U+3002, the rule still names
+        // the one asset, in both spellings of it.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["bücher.example。"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("b\u{FC}cher.example"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("xn--bcher-kva.example"),
+            ScopeVerdict::OutOfScope
+        );
     }
 
     #[test]
