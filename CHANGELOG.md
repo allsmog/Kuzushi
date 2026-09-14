@@ -58,6 +58,27 @@ Notable changes to Kuzushi. Release procedure lives in
   `recon:subdomain`, and `recon:http-fingerprint`, which take one target and
   refuse it at dispatch, are unchanged.
 
+- `.kuzushi/scope.toml` now judges a non-ASCII target by the domain a client
+  resolves it to. DNS carries ASCII, so every client that accepts a Unicode
+  host first maps it with UTS 46 and encodes the result as punycode — and that
+  mapping case-folds, applies compatibility decompositions, and rewrites label
+  separators. The gate compared only the written form, so
+  `https://ａdmin.example.com/` (U+FF41) and `https://admin。example.com/`
+  (U+3002) both reach `admin.example.com` while matching no rule naming it, and
+  a rule written `bücher.example` matched no target written
+  `xn--bcher-kva.example`. A deny-list file therefore returned `Unknown` and
+  let recon dispatch and the amass/httpx/nuclei/nmap-xml/HAR/Burp import gates
+  through. Each host reading the gate already weighs — raw, percent-decoded, or
+  either URL-parser reading — now also yields the ASCII domain UTS 46 resolves
+  it to, and it is that reading the IPv4-shorthand pass runs on next, so a
+  shorthand address written in non-ASCII digits still names its dotted quad. A
+  host rule gains the same ASCII spelling, and a rule written in punycode
+  additionally gains the Unicode domain it encodes, so an allow list keeps
+  admitting the asset the operator listed in whichever spelling they used. A
+  host UTS 46 rejects — invalid punycode, a code point disallowed in a domain —
+  names nothing a client can resolve, so it contributes no reading rather than
+  a mangled one, and an ASCII target keeps exactly the verdict it had.
+
 - `.kuzushi/scope.toml` CIDR rules now cover the shorthand IPv4 notations a
   real client resolves. The gate tested a candidate against a range only when
   `IpAddr::from_str` accepted it, which means only the dotted quad — so
@@ -86,9 +107,7 @@ Notable changes to Kuzushi. Release procedure lives in
   cover both. An escape that decodes to a code point the URL Standard forbids
   in a domain (`/`, `:`, a literal `%`, a control) names no host a client can
   reach, so it contributes no candidate rather than a guessed one, and a
-  target whose host carries no `%` keeps exactly the verdict it had. IDNA is
-  still not applied — a decoded non-ASCII domain is judged in the Unicode form
-  it was written in, as a raw non-ASCII target already was.
+  target whose host carries no `%` keeps exactly the verdict it had.
 
 - Capture imports no longer present an encoded payload as the raw HTTP
   message, and no longer drop entries without saying so. Burp marks a

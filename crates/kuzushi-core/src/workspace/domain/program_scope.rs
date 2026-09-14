@@ -124,18 +124,7 @@ fn unmatched_scope_verdict(has_allow_list: bool) -> ScopeVerdict {
 fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
     let mut compiled = Vec::with_capacity(list.hosts.len() + list.cidrs.len());
     for raw in &list.hosts {
-        // Both sides of the comparison are normalized, so a glob written with
-        // uppercase letters or a root dot still denies the asset it names.
-        // Character classes are normalized too: `[A-Z]` becomes `[a-z]`, which
-        // matches the same hosts once the candidate is lowercased.
-        let normalized = normalize_host(raw);
-        compiled.push(host_glob(&normalized, raw)?);
-        // Candidates arrive carrying the dotted quad a shorthand IPv4 host
-        // names, so a rule spelled that way is compiled in both forms too and
-        // keeps naming the one asset an operator wrote down.
-        if let Some(address) = ipv4_shorthand_address(&normalized) {
-            compiled.push(host_glob(&address, raw)?);
-        }
+        push_host_patterns(&mut compiled, raw)?;
     }
     for raw in &list.cidrs {
         let cidr =
@@ -143,6 +132,40 @@ fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
         compiled.push(HostPattern::Cidr(cidr));
     }
     Ok(compiled)
+}
+
+/// Compile one host rule in every spelling the candidate it names can arrive
+/// in. Both sides of the comparison are normalized, so a glob written with
+/// uppercase letters or a root dot still denies the asset it names. Character
+/// classes are normalized too: `[A-Z]` becomes `[a-z]`, which matches the same
+/// hosts once the candidate is lowercased.
+fn push_host_patterns(compiled: &mut Vec<HostPattern>, raw: &str) -> Result<()> {
+    let normalized = normalize_host(raw);
+    compiled.push(host_glob(&normalized, raw)?);
+    for spelling in alternate_rule_spellings(&normalized) {
+        compiled.push(host_glob(&spelling, raw)?);
+    }
+    Ok(())
+}
+
+/// The other spellings of one host rule, each naming the same asset the
+/// operator wrote down rather than a new one. Candidates arrive carrying the
+/// dotted quad a shorthand IPv4 host names and the ASCII domain IDNA resolves a
+/// non-ASCII host to, so a rule written either way is compiled in both forms;
+/// a rule written in punycode also gains the Unicode domain it encodes, so it
+/// keeps matching a target spelled the way an operator reads it.
+fn alternate_rule_spellings(normalized: &str) -> Vec<String> {
+    let mut spellings = Vec::new();
+    if let Some(address) = ipv4_shorthand_address(normalized) {
+        spellings.push(address);
+    }
+    if let Some(ascii) = idna_ascii_rule_spelling(normalized) {
+        spellings.push(ascii);
+    }
+    if let Some(unicode) = punycode_decoded_domain(normalized) {
+        spellings.push(unicode);
+    }
+    spellings
 }
 
 fn host_glob(pattern: &str, raw: &str) -> Result<HostPattern> {
@@ -328,7 +351,9 @@ const URL_STANDARD_AUTHORITY_END: &[char] = &['/', '\\', '?', '#'];
 /// See [`percent_decoded_host`]. A reading written in one of the URL Standard's
 /// other IPv4 notations additionally yields the dotted quad it names, so a CIDR
 /// rule is tested against the address a client actually connects to. See
-/// [`ipv4_shorthand_address`].
+/// [`ipv4_shorthand_address`]. A non-ASCII reading additionally yields the ASCII
+/// domain IDNA resolves it to, so a rule is tested against the name that
+/// actually goes on the wire. See [`idna_ascii_domain`].
 ///
 /// Legitimate targets carry none of those characters, so both readings agree
 /// and this returns the single host [`extract_host`] always returned.
@@ -347,7 +372,18 @@ fn candidate_hosts(target: &str) -> Vec<String> {
 
 fn push_readings(hosts: &mut Vec<String>, host: String) {
     if let Some(decoded) = percent_decoded_host(&host) {
-        push_address_and_host(hosts, decoded);
+        push_domain_and_host(hosts, decoded);
+    }
+    push_domain_and_host(hosts, host);
+}
+
+/// Push one host reading, preceded by the ASCII domain IDNA resolves it to.
+/// The mapped spelling goes through [`push_address_and_host`] too, so a host
+/// whose IPv4 shorthand is written in non-ASCII digits still yields the address
+/// it names.
+fn push_domain_and_host(hosts: &mut Vec<String>, host: String) {
+    if let Some(ascii) = idna_ascii_domain(&host) {
+        push_address_and_host(hosts, ascii);
     }
     push_address_and_host(hosts, host);
 }
@@ -367,6 +403,77 @@ fn push_unique(hosts: &mut Vec<String>, host: String) {
     }
 }
 
+/// The ASCII domain a non-ASCII host resolves to under UTS 46, or `None` when
+/// the host is already ASCII or names no domain at all.
+///
+/// DNS carries ASCII, so every client that accepts a Unicode host first maps it
+/// with UTS 46 and encodes the result as punycode. That mapping is not a
+/// spelling change: it case-folds, applies compatibility decompositions, and
+/// rewrites label separators, so `ａdmin.example.com` (U+FF41) and
+/// `admin。example.com` (U+3002) both resolve to `admin.example.com`, and
+/// `bücher.example` resolves to `xn--bcher-kva.example`. Comparing only the
+/// written form let a target reach a denied host while matching no rule — the
+/// deny-list-shaped bypass, since an allow list refuses a host it does not
+/// match either way.
+///
+/// The domain is one more reading of the same target, never a replacement, so a
+/// rule written against the Unicode form keeps matching it. A host UTS 46
+/// rejects names nothing a client can resolve, so it contributes no reading
+/// rather than a mangled one: invalid punycode, a disallowed code point, or a
+/// mapping that lands on a code point the URL Standard forbids in a domain —
+/// U+FF1A FULLWIDTH COLON becomes `:`, which ends the host rather than
+/// extending it, so the whole URL is rejected there.
+///
+/// An ASCII host is already the name that goes on the wire and gains nothing
+/// from the mapping. Skipping it also keeps IP literals away from the deny
+/// list, which forbids the `:` every IPv6 literal is written with.
+fn idna_ascii_domain(host: &str) -> Option<String> {
+    if host.is_ascii() {
+        return None;
+    }
+    let mapped = idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::URL).ok()?;
+    normalized_spelling(&mapped)
+}
+
+/// Put a mapped spelling back into the form both sides of the comparison are
+/// written in. UTS 46 rewrites non-ASCII label separators, so
+/// `admin.example.com。` maps to an ASCII root dot that [`normalize_host`] ran
+/// too early to trim; without this the mapped reading would miss the very rule
+/// it was derived to match. A spelling that normalizes to nothing names no
+/// host, so it is dropped rather than compared as an empty one.
+fn normalized_spelling(mapped: &str) -> Option<String> {
+    let normalized = normalize_host(mapped);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+/// The ASCII spelling of one non-ASCII host rule, mapped without the URL
+/// Standard's forbidden-code-point list because a rule is a glob: `[a-z]` and
+/// `?` are the operator's own metacharacters, not a host a client rejects.
+/// UTS 46 leaves every ASCII character of a glob as written, so only the
+/// Unicode labels are encoded.
+fn idna_ascii_rule_spelling(pattern: &str) -> Option<String> {
+    if pattern.is_ascii() {
+        return None;
+    }
+    normalized_spelling(&idna::domain_to_ascii(pattern).ok()?)
+}
+
+/// The Unicode domain a punycode host rule encodes, or `None` when the rule
+/// carries no punycode label or its labels do not decode.
+///
+/// Candidates are weighed in both spellings, so a rule an operator wrote as
+/// `xn--bcher-kva.example` has to cover the `bücher.example` reading as well —
+/// an allow list requires every reading to match, and without this the operator
+/// would be refused the very asset they listed.
+fn punycode_decoded_domain(pattern: &str) -> Option<String> {
+    if !pattern.contains("xn--") {
+        return None;
+    }
+    let (unicode, result) = idna::domain_to_unicode(pattern);
+    result.ok()?;
+    normalized_spelling(&unicode).filter(|domain| domain != pattern)
+}
+
 /// The host an escaped authority names once its percent-escapes are resolved,
 /// or `None` when it carries no escape and the raw reading is the only one.
 ///
@@ -380,9 +487,9 @@ fn push_unique(hosts: &mut Vec<String>, host: String) {
 /// domain code point such as `/` or `:`: the URL Standard rejects the whole URL
 /// there, so it names no host and no rule should be spent on it.
 ///
-/// IDNA is deliberately not applied. A decoded non-ASCII domain is judged in
-/// the Unicode form it was written in, exactly as a raw non-ASCII target
-/// already is, rather than in the punycode a browser would resolve.
+/// A decoded non-ASCII domain reaches [`idna_ascii_domain`] through
+/// [`push_domain_and_host`] like any other reading, so an escape that hides a
+/// Unicode spelling is still judged by the domain it resolves to.
 fn percent_decoded_host(host: &str) -> Option<String> {
     let decoded = String::from_utf8(percent_decode(host)?).ok()?;
     if decoded.chars().any(is_forbidden_domain_code_point) {
@@ -1078,6 +1185,214 @@ mod tests {
         assert_eq!(ipv4_shorthand_address("example.com"), None);
         assert_eq!(ipv4_shorthand_address("::1"), None);
         assert_eq!(ipv4_shorthand_address(""), None);
+    }
+
+    #[test]
+    fn deny_host_rule_covers_the_unicode_spellings_a_client_resolves() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example.com"]
+            "#,
+        );
+        for target in [
+            "https://admin.example.com/",
+            // U+FF41 FULLWIDTH LATIN SMALL LETTER A maps to `a`.
+            "https://\u{FF41}dmin.example.com/",
+            // U+3002 IDEOGRAPHIC FULL STOP is a label separator.
+            "https://admin\u{3002}example.com/",
+            // U+FF21 FULLWIDTH LATIN CAPITAL LETTER A case-folds too.
+            "https://\u{FF21}DMIN.example.com:8443/",
+            // U+3002 as the *root* label separator: the mapping leaves an ASCII
+            // root dot behind, after the trim that would have removed it.
+            "https://admin.example.com\u{3002}/",
+            "https://admin\u{3002}example.com\u{3002}:8443/",
+            // The same fullwidth `a`, hidden behind its UTF-8 escapes.
+            "https://%EF%BD%81dmin.example.com/",
+        ] {
+            assert_eq!(scope.verdict(target), ScopeVerdict::OutOfScope, "{target}");
+        }
+        assert_eq!(scope.verdict("api.example.com"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn deny_host_rule_written_in_unicode_covers_the_punycode_a_client_sends() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["bücher.example"]
+            "#,
+        );
+        for target in [
+            "b\u{FC}cher.example",
+            "xn--bcher-kva.example",
+            "https://xn--bcher-kva.example/catalog",
+        ] {
+            assert_eq!(scope.verdict(target), ScopeVerdict::OutOfScope, "{target}");
+        }
+    }
+
+    #[test]
+    fn an_allow_list_admits_a_host_written_in_either_idn_spelling() {
+        let punycode = scope(
+            r#"
+            [in_scope]
+            hosts = ["xn--bcher-kva.example"]
+            "#,
+        );
+        assert_eq!(punycode.verdict("b\u{FC}cher.example"), ScopeVerdict::InScope);
+        assert_eq!(
+            punycode.verdict("xn--bcher-kva.example"),
+            ScopeVerdict::InScope
+        );
+        assert_eq!(
+            punycode.verdict("\u{5225}.example.com"),
+            ScopeVerdict::OutOfScope
+        );
+
+        let unicode = scope(
+            r#"
+            [in_scope]
+            hosts = ["*.bücher.example"]
+            "#,
+        );
+        assert_eq!(
+            unicode.verdict("api.b\u{FC}cher.example"),
+            ScopeVerdict::InScope
+        );
+        assert_eq!(
+            unicode.verdict("api.xn--bcher-kva.example"),
+            ScopeVerdict::InScope
+        );
+        assert_eq!(
+            unicode.verdict("api.example.com"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn idna_ascii_domain_maps_only_a_host_dns_cannot_carry() {
+        assert_eq!(
+            idna_ascii_domain("b\u{FC}cher.example").as_deref(),
+            Some("xn--bcher-kva.example")
+        );
+        assert_eq!(
+            idna_ascii_domain("\u{FF41}dmin.example.com").as_deref(),
+            Some("admin.example.com")
+        );
+        // An ASCII host is already the name that goes on the wire, so it adds
+        // no second reading of itself.
+        assert_eq!(idna_ascii_domain("admin.example.com"), None);
+        assert_eq!(idna_ascii_domain("xn--bcher-kva.example"), None);
+        assert_eq!(idna_ascii_domain("169.254.169.254"), None);
+        // U+2488 DIGIT ONE FULL STOP is disallowed in a domain, so the host
+        // names nothing a client can resolve.
+        assert_eq!(idna_ascii_domain("\u{2488}example.com"), None);
+        // Mappings that land on a forbidden domain code point end the host
+        // rather than extending it — U+FF1A becomes `:` and U+FF0F becomes `/`,
+        // and the URL Standard rejects the whole URL there.
+        assert_eq!(idna_ascii_domain("evil.test\u{FF1A}8080"), None);
+        assert_eq!(idna_ascii_domain("admin\u{FF0F}evil.test"), None);
+        // The mapping can put back a root dot the trim already ran past, so
+        // the spelling is normalized again before it is compared.
+        assert_eq!(
+            idna_ascii_domain("admin.example.com\u{3002}").as_deref(),
+            Some("admin.example.com")
+        );
+        // A host that maps to nothing but a root label names no host at all.
+        assert_eq!(idna_ascii_domain("\u{3002}"), None);
+    }
+
+    #[test]
+    fn a_rule_spelling_is_normalized_like_the_rule_it_came_from() {
+        assert_eq!(
+            idna_ascii_rule_spelling("b\u{FC}cher.example\u{3002}").as_deref(),
+            Some("xn--bcher-kva.example")
+        );
+        assert_eq!(
+            punycode_decoded_domain("xn--bcher-kva.example\u{3002}").as_deref(),
+            Some("b\u{FC}cher.example")
+        );
+
+        // Written with its root separator spelled U+3002, the rule still names
+        // the one asset, in both spellings of it.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["bücher.example。"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("b\u{FC}cher.example"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("xn--bcher-kva.example"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn a_rule_glob_keeps_its_metacharacters_in_the_ascii_spelling() {
+        // `[ab]` is the operator's character class, not a host a client
+        // rejects, so the rule's ASCII spelling is mapped without the URL
+        // Standard's forbidden-code-point list.
+        assert_eq!(
+            idna_ascii_rule_spelling("[ab]pi.b\u{FC}cher.example").as_deref(),
+            Some("[ab]pi.xn--bcher-kva.example")
+        );
+        assert_eq!(idna_ascii_rule_spelling("[ab]pi.example.com"), None);
+
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["[ab]pi.bücher.example"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("api.b\u{FC}cher.example"),
+            ScopeVerdict::InScope
+        );
+        assert_eq!(
+            scope.verdict("bpi.xn--bcher-kva.example"),
+            ScopeVerdict::InScope
+        );
+        assert_eq!(
+            scope.verdict("cpi.xn--bcher-kva.example"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn punycode_decoded_domain_reads_only_a_rule_that_encodes_one() {
+        assert_eq!(
+            punycode_decoded_domain("xn--bcher-kva.example").as_deref(),
+            Some("b\u{FC}cher.example")
+        );
+        assert_eq!(
+            punycode_decoded_domain("*.xn--bcher-kva.example").as_deref(),
+            Some("*.b\u{FC}cher.example")
+        );
+        assert_eq!(punycode_decoded_domain("admin.example.com"), None);
+        assert_eq!(punycode_decoded_domain("b\u{FC}cher.example"), None);
+        // Labels that do not decode name no asset the operator listed.
+        assert_eq!(punycode_decoded_domain("xn--a.example.com"), None);
+    }
+
+    #[test]
+    fn a_unicode_host_still_yields_the_address_its_digits_name() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["169.254.0.0/16"]
+            "#,
+        );
+        // Fullwidth digits map to ASCII, leaving the shorthand IPv4 notation
+        // the next reading resolves to 169.254.169.254.
+        assert_eq!(
+            scope.verdict("http://\u{FF12}852039166/"),
+            ScopeVerdict::OutOfScope
+        );
     }
 
     #[test]
