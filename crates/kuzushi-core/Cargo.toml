@@ -29,6 +29,10 @@ ed25519-dalek = "3.0"
 # Lets operators express `*.example.com` style allow/deny rules so
 # recon and Burp/HAR import refuse out-of-scope hosts.
 globset = "0.4"
+# idna applies the UTS 46 mapping `.kuzushi/scope.toml` needs to judge a
+# non-ASCII target by the domain a client resolves it to. Already in the tree
+# under `url`; declared here so the scope gate does not rely on that edge.
+idna = "1.1"
 # ipnet powers CIDR-range matching in `.kuzushi/scope.toml`.
 ipnet = "2.10"
 kuzushi-codeindex = { path = "../kuzushi-codeindex" }
