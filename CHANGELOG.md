@@ -19,6 +19,25 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `.kuzushi/scope.toml` now judges a target that names an address block by
+  every address in it, instead of by the single host the string starts with.
+  `recon:nmap` hands its target straight to nmap, which takes blocks —
+  `10.0.0.0/8`, `10.99.0-255.1`, `10.0.0.1,2` — and the gate read only the first
+  reading of each, so it was wrong in both directions. A deny rule was reached
+  by widening the target: `10.0.0.0/8` covers every address a `10.99.0.0/16`
+  deny rule names, but its own network address falls outside that rule, so the
+  target came back `Unknown` and the scan ran across the denied block. An allow
+  list was satisfied by a network address while the scan continued past it:
+  `10.0.0.0/7` matched a `10.0.0.0/8` allow rule and then reached
+  `11.0.0.0/8`. And a plainly in-scope `10.0.0-255.5` was refused outright,
+  because the literal matched no rule at all. A block is now refused when a CIDR
+  deny rule overlaps it anywhere, and admitted when a CIDR allow rule contains
+  all of it; a block of 256 addresses or fewer is additionally weighed one
+  address at a time, so a rule written as a host glob or split across two
+  `cidrs` entries still covers a `/24`. Blocks are weighed against a rule in
+  either address family, as single hosts already were. Single-host targets,
+  hostnames carrying a hyphen, and URLs are unaffected — they name no block, so
+  the existing host readings still judge them.
 - `entry-points:extract` no longer refuses a target too large to snapshot
   whole. `context:build` caps its own arrays to stay inside the snapshot byte
   budget and records `snapshotTruncation` when it does, and the extractor read

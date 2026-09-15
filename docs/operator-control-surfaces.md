@@ -542,6 +542,16 @@ rules match bare IPv6 literals (`2001:db8::1`) as well as bracketed ones
 spelling of the addresses it names, so `10.99.0.0/16` denies `::ffff:10.99.0.1`
 too.
 
+A target that names a block rather than one host — `10.0.0.0/8`,
+`10.99.0-255.1`, `10.0.0.1,2`, the forms `recon:nmap` passes straight to nmap —
+is judged as every address in that block. A CIDR deny rule refuses the block as
+soon as it overlaps it, and a CIDR allow rule admits it only by containing all
+of it, so widening the target cannot reach past the scope file. A block of 256
+addresses or fewer is additionally weighed one address at a time, which is what
+lets a rule written as a host glob (`10.0.0.*`) or split across two `cidrs`
+entries cover a `/24`. A wider block is left to the CIDR rules alone, so name
+addresses under `cidrs` rather than as host globs.
+
 ## Patch application and re-verification
 
 `PatchResult` controls patch synthesis and disposable-worktree validation only.

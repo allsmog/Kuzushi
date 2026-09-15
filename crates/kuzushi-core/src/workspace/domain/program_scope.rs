@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use globset::Glob;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 
 /// Operator-controlled bug-bounty scope file loaded from
@@ -101,15 +101,35 @@ impl ProgramScope {
     /// A target that two real URL parsers read as two different hosts is
     /// judged as every host it could name: one deny match denies it, and an
     /// allow list has to cover all of them. See [`candidate_hosts`].
+    ///
+    /// A target that names a range of addresses rather than one host is judged
+    /// as the whole range. See [`candidate_range`].
     pub fn verdict(&self, target: &str) -> ScopeVerdict {
         let hosts = candidate_hosts(target);
-        if hosts.iter().any(|host| matches_any(&self.out_of_scope, host)) {
+        let range = candidate_range(target);
+        if self.denies(&hosts, range) {
             return ScopeVerdict::OutOfScope;
         }
-        if hosts.iter().all(|host| matches_any(&self.in_scope, host)) {
+        if self.admits(&hosts, range) {
             return ScopeVerdict::InScope;
         }
         unmatched_scope_verdict(!self.in_scope.is_empty())
+    }
+
+    /// `true` when one deny rule names any host this target reaches: a rule
+    /// matching one of the target's readings, or a rule reaching into the range
+    /// it spans.
+    fn denies(&self, hosts: &[String], range: Option<AddressRange>) -> bool {
+        hosts.iter().any(|host| matches_any(&self.out_of_scope, host))
+            || range.is_some_and(|range| reaches_range(&self.out_of_scope, range))
+    }
+
+    /// `true` when the allow list covers every host this target reaches.
+    fn admits(&self, hosts: &[String], range: Option<AddressRange>) -> bool {
+        match range {
+            Some(range) => covers_range(&self.in_scope, range),
+            None => hosts.iter().all(|host| matches_any(&self.in_scope, host)),
+        }
     }
 }
 
@@ -212,6 +232,217 @@ fn mapped_ipv4(addr: IpAddr) -> Option<IpAddr> {
         IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4),
         IpAddr::V4(_) => None,
     }
+}
+
+/// An inclusive run of addresses, in one family, as comparable numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AddressRange {
+    is_ipv4: bool,
+    low: u128,
+    high: u128,
+}
+
+/// The range a target names when it names more than one address, or `None`
+/// when it names a single host that [`candidate_hosts`] already judges.
+///
+/// Scanners take a block, not just a host: `nmap 10.0.0.0/8`, `10.99.0-255.1`,
+/// and `10.0.0.1,2` each probe every address between their ends. Reading only
+/// the one host such a target starts with broke the gate in both directions.
+/// A deny rule was evaded by widening the target — `10.0.0.0/8` reaches every
+/// address a `10.99.0.0/16` deny rule names, but its own network address sits
+/// outside that rule, so the target came back `Unknown` and the scan ran. An
+/// allow list was satisfied by a network address while the scan continued past
+/// it — `10.0.0.0/7` matched a `10.0.0.0/8` allow rule and then reached
+/// `11.0.0.0/8` — and a plainly in-scope `10.0.0-255.5` was refused, because
+/// the literal matched no rule at all.
+///
+/// The range is weighed alongside the host readings, never instead of them, so
+/// a rule written against the block's own address keeps matching it. A form
+/// this cannot read names no range it can judge, so it contributes none rather
+/// than a guessed one, exactly as before.
+fn candidate_range(target: &str) -> Option<AddressRange> {
+    let trimmed = target.trim();
+    let range = cidr_target_range(trimmed).or_else(|| octet_target_range(trimmed))?;
+    (range.low < range.high).then_some(range)
+}
+
+/// The range a CIDR block covers. `ipnet` parses only `address/prefix`, so a
+/// URL, a bare host, and a dotted quad all yield nothing here.
+fn cidr_target_range(target: &str) -> Option<AddressRange> {
+    Some(cidr_range(IpNet::from_str(target).ok()?))
+}
+
+fn cidr_range(cidr: IpNet) -> AddressRange {
+    match cidr {
+        IpNet::V4(v4) => AddressRange {
+            is_ipv4: true,
+            low: u128::from(u32::from(v4.network())),
+            high: u128::from(u32::from(v4.broadcast())),
+        },
+        IpNet::V6(v6) => AddressRange {
+            is_ipv4: false,
+            low: u128::from(v6.network()),
+            high: u128::from(v6.broadcast()),
+        },
+    }
+}
+
+/// The range an nmap octet specification names: every address between the
+/// lowest and highest value each octet allows. `None` unless all four octets
+/// are decimal numbers, ranges, or lists, so `my-host.test` and a hostname
+/// carrying a hyphen are left to the host readings.
+///
+/// A discontinuous list is judged by the run it spans, so `10.0.0.1,9` is
+/// weighed as `10.0.0.1`–`10.0.0.9`. That can refuse a deny rule naming only an
+/// address the list skips; erring toward refusal on a target the operator can
+/// spell exactly is the safe direction.
+fn octet_target_range(target: &str) -> Option<AddressRange> {
+    let bounds: Vec<(u8, u8)> = target.split('.').map(octet_bounds).collect::<Option<_>>()?;
+    let [first, second, third, fourth] = <[(u8, u8); 4]>::try_from(bounds).ok()?;
+    Some(AddressRange {
+        is_ipv4: true,
+        low: packed_octets([first.0, second.0, third.0, fourth.0]),
+        high: packed_octets([first.1, second.1, third.1, fourth.1]),
+    })
+}
+
+fn packed_octets(octets: [u8; 4]) -> u128 {
+    u128::from(u32::from(Ipv4Addr::from(octets)))
+}
+
+/// The lowest and highest value one octet of an nmap specification allows,
+/// across every comma-separated item in it.
+fn octet_bounds(octet: &str) -> Option<(u8, u8)> {
+    let items: Vec<(u8, u8)> = octet.split(',').map(octet_item_bounds).collect::<Option<_>>()?;
+    let low = items.iter().map(|(low, _)| *low).min()?;
+    let high = items.iter().map(|(_, high)| *high).max()?;
+    Some((low, high))
+}
+
+/// One item of an octet: `7`, `7-9`, or a range with an end left open, which
+/// nmap fills with the widest value that end allows.
+fn octet_item_bounds(item: &str) -> Option<(u8, u8)> {
+    let Some((low, high)) = item.split_once('-') else {
+        let value = item.parse().ok()?;
+        return Some((value, value));
+    };
+    let low = octet_end(low, u8::MIN)?;
+    let high = octet_end(high, u8::MAX)?;
+    (low <= high).then_some((low, high))
+}
+
+fn octet_end(text: &str, open: u8) -> Option<u8> {
+    match text.is_empty() {
+        true => Some(open),
+        false => text.parse().ok(),
+    }
+}
+
+/// `true` when one rule names an address inside the block.
+fn reaches_range(patterns: &[HostPattern], range: AddressRange) -> bool {
+    weigh_range(patterns, range, |rule, reading| {
+        rule.low <= reading.high && reading.low <= rule.high
+    }) || addresses_in_range(range).is_some_and(|addresses| {
+        addresses.iter().any(|address| matches_any(patterns, address))
+    })
+}
+
+/// `true` when the rules name every address in the block.
+///
+/// A CIDR rule has to contain all of it on its own. Stitching a block together
+/// from several rules is attempted only where every address can be weighed
+/// individually, because that is where the answer is exact: the operator can
+/// write the block they mean, and refusing the target they did not write is the
+/// safe direction to be wrong in.
+fn covers_range(patterns: &[HostPattern], range: AddressRange) -> bool {
+    weigh_range(patterns, range, |rule, reading| {
+        rule.low <= reading.low && reading.high <= rule.high
+    }) || addresses_in_range(range).is_some_and(|addresses| {
+        addresses.iter().all(|address| matches_any(patterns, address))
+    })
+}
+
+/// How many addresses a block may hold and still be weighed one address at a
+/// time. A host glob names names, so the only exact way to learn whether one
+/// covers a block is to ask it about every address in the block. A `/24` and
+/// the octet specifications operators write are worth expanding that way; a
+/// larger block is left to the CIDR rules, which answer without expanding
+/// anything.
+const ENUMERABLE_BLOCK_ADDRESSES: u128 = 256;
+
+/// Every address in a block small enough to expand, or `None` when it is not.
+/// A rule written as a host glob therefore reaches a `/24` but not a `/8`; an
+/// operator naming addresses should write them as `cidrs`, which carry no such
+/// limit.
+fn addresses_in_range(range: AddressRange) -> Option<Vec<String>> {
+    let width = range.high.checked_sub(range.low)?;
+    (width < ENUMERABLE_BLOCK_ADDRESSES).then(|| {
+        (range.low..=range.high)
+            .map(|value| range_address(range.is_ipv4, value))
+            .collect()
+    })
+}
+
+fn range_address(is_ipv4: bool, value: u128) -> String {
+    match u32::try_from(value) {
+        Ok(v4) if is_ipv4 => Ipv4Addr::from(v4).to_string(),
+        _ => Ipv6Addr::from(value).to_string(),
+    }
+}
+
+/// `true` when one CIDR rule stands in the given relation to the target range,
+/// each weighed in the family the rule is written in. Host globs name names,
+/// not addresses, so they take no part in weighing a range.
+fn weigh_range(
+    patterns: &[HostPattern],
+    range: AddressRange,
+    relation: impl Fn(AddressRange, AddressRange) -> bool,
+) -> bool {
+    let readings = range_readings(range);
+    rule_ranges(patterns).any(|rule| {
+        readings
+            .iter()
+            .any(|reading| reading.is_ipv4 == rule.is_ipv4 && relation(rule, *reading))
+    })
+}
+
+fn rule_ranges(patterns: &[HostPattern]) -> impl Iterator<Item = AddressRange> + '_ {
+    patterns.iter().filter_map(|pattern| match pattern {
+        HostPattern::Cidr(cidr) => Some(cidr_range(*cidr)),
+        HostPattern::HostGlob(_) => None,
+    })
+}
+
+/// Where the IPv4-mapped IPv6 block `::ffff:0:0/96` begins (RFC 4291 §2.5.5.2).
+const IPV4_MAPPED_BASE: u128 = 0xffff_0000_0000;
+
+/// Every family a target range can be read in. An IPv4 range is also the
+/// mapped IPv6 range a client reaches through `::ffff:…`, and a mapped IPv6
+/// range is also the IPv4 range it names, so a rule written in either family
+/// weighs the same addresses. This is the equivalence [`cidr_contains_host`]
+/// already applies to a single host.
+fn range_readings(range: AddressRange) -> Vec<AddressRange> {
+    match mapped_range_reading(range) {
+        Some(mapped) => vec![range, mapped],
+        None => vec![range],
+    }
+}
+
+fn mapped_range_reading(range: AddressRange) -> Option<AddressRange> {
+    if range.is_ipv4 {
+        return Some(AddressRange {
+            is_ipv4: false,
+            low: IPV4_MAPPED_BASE + range.low,
+            high: IPV4_MAPPED_BASE + range.high,
+        });
+    }
+    let low = range.low.checked_sub(IPV4_MAPPED_BASE)?;
+    let high = range.high.checked_sub(IPV4_MAPPED_BASE)?;
+    (high <= u128::from(u32::MAX)).then_some(AddressRange {
+        is_ipv4: true,
+        low,
+        high,
+    })
 }
 
 /// The dotted-quad address a host written in one of the URL Standard's other
@@ -1393,6 +1624,146 @@ mod tests {
             scope.verdict("http://\u{FF12}852039166/"),
             ScopeVerdict::OutOfScope
         );
+    }
+
+    #[test]
+    fn a_denied_block_cannot_be_reached_by_widening_the_target() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.99.0.0/16"]
+            "#,
+        );
+        // Every address the deny rule names lies inside each of these, so a
+        // scanner handed one probes the denied block.
+        assert_eq!(scope.verdict("10.0.0.0/8"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("10.99.0-255.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("10.99.0.1,2"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("10.98-99.0.1"), ScopeVerdict::OutOfScope);
+        // A block beside the denied one is still nobody's business to refuse.
+        assert_eq!(scope.verdict("10.98.0.0/16"), ScopeVerdict::Unknown);
+        assert_eq!(scope.verdict("10.98.0.1-9"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn an_allow_list_must_cover_every_address_a_block_names() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/8"]
+            "#,
+        );
+        assert_eq!(scope.verdict("10.0.0.0/24"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("10.0.0-255.5"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("10.0.0.1,9"), ScopeVerdict::InScope);
+        // `10.0.0.0/7` starts on the allow rule's own network address and then
+        // runs past it into 11.0.0.0/8.
+        assert_eq!(scope.verdict("10.0.0.0/7"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("10.0.0-255.5,9"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("9-10.0.0.5"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_rule_naming_names_still_reaches_a_block_it_can_be_asked_about() {
+        let allow = scope(
+            r#"
+            [in_scope]
+            hosts = ["10.0.0.*"]
+            "#,
+        );
+        assert_eq!(allow.verdict("10.0.0.0/24"), ScopeVerdict::InScope);
+        assert_eq!(allow.verdict("10.0.0.1-9"), ScopeVerdict::InScope);
+        // A block too wide to weigh address by address is left to the CIDR
+        // rules, which this file has none of.
+        assert_eq!(allow.verdict("10.0.0.0/16"), ScopeVerdict::OutOfScope);
+        let deny = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["10.0.0.7"]
+            "#,
+        );
+        assert_eq!(deny.verdict("10.0.0.0/24"), ScopeVerdict::OutOfScope);
+        assert_eq!(deny.verdict("10.0.1.0/24"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn two_allow_rules_cover_a_block_only_where_every_address_is_weighed() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/25", "10.0.0.128/25", "10.1.0.0/17", "10.1.128.0/17"]
+            "#,
+        );
+        assert_eq!(scope.verdict("10.0.0.0/24"), ScopeVerdict::InScope);
+        // The same split one block wider than the gate expands, so the halves
+        // are not stitched together and the target is refused.
+        assert_eq!(scope.verdict("10.1.0.0/16"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_block_is_weighed_against_a_rule_in_either_address_family() {
+        let mapped = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["::ffff:10.99.0.0/112"]
+            "#,
+        );
+        assert_eq!(mapped.verdict("10.0.0.0/8"), ScopeVerdict::OutOfScope);
+        let ipv4 = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.99.0.0/16"]
+            "#,
+        );
+        assert_eq!(
+            ipv4.verdict("::ffff:10.99.0.0/112"),
+            ScopeVerdict::OutOfScope
+        );
+        // An IPv6 block outside the mapped range names no IPv4 address.
+        assert_eq!(ipv4.verdict("2001:db8::/32"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn a_single_host_target_is_unchanged_by_range_matching() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["10.0.0.5"]
+            cidrs = ["10.1.0.0/16"]
+            "#,
+        );
+        // A one-address block carries no range a rule has to cover, so the host
+        // readings judge it exactly as they did before.
+        assert_eq!(scope.verdict("10.0.0.5/32"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("10.0.0.5"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("10.1.4.7"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("10.2.0.1"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_hostname_is_never_read_as_an_octet_range() {
+        assert_eq!(octet_target_range("my-host.example.com"), None);
+        assert_eq!(octet_target_range("10.0.0"), None);
+        assert_eq!(octet_target_range("10.0.0.1-300"), None);
+        assert_eq!(octet_target_range("10.0.0.9-1"), None);
+        assert_eq!(octet_target_range("10..0.1"), None);
+        // A spec naming one address carries no range, so the host readings
+        // keep judging it.
+        assert_eq!(candidate_range("10.0.0.1"), None);
+        assert_eq!(candidate_range("api.example.com"), None);
+        assert_eq!(candidate_range("https://api.example.com/path"), None);
+    }
+
+    #[test]
+    fn an_open_ended_octet_covers_the_values_nmap_fills_in() {
+        assert_eq!(octet_item_bounds("7"), Some((7, 7)));
+        assert_eq!(octet_item_bounds("7-9"), Some((7, 9)));
+        assert_eq!(octet_item_bounds("-"), Some((0, 255)));
+        assert_eq!(octet_item_bounds("7-"), Some((7, 255)));
+        assert_eq!(octet_item_bounds("-9"), Some((0, 9)));
+        assert_eq!(octet_item_bounds("x"), None);
+        assert_eq!(octet_bounds("9,1-3"), Some((1, 9)));
+        assert_eq!(octet_bounds(""), None);
     }
 
     #[test]
