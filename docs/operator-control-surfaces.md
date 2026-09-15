@@ -542,15 +542,21 @@ rules match bare IPv6 literals (`2001:db8::1`) as well as bracketed ones
 spelling of the addresses it names, so `10.99.0.0/16` denies `::ffff:10.99.0.1`
 too.
 
-A target that names a block rather than one host — `10.0.0.0/8`,
-`10.99.0-255.1`, `10.0.0.1,2`, the forms `recon:nmap` passes straight to nmap —
-is judged as every address in that block. A CIDR deny rule refuses the block as
-soon as it overlaps it, and a CIDR allow rule admits it only by containing all
-of it, so widening the target cannot reach past the scope file. A block of 256
-addresses or fewer is additionally weighed one address at a time, which is what
-lets a rule written as a host glob (`10.0.0.*`) or split across two `cidrs`
-entries cover a `/24`. A wider block is left to the CIDR rules alone, so name
-addresses under `cidrs` rather than as host globs.
+`recon:nmap` is the one verb whose target names an address block rather than a
+host — `10.0.0.0/8`, `10.99.0-255.1`, `10.0.0.1,2` all go straight to nmap — and
+its targets are judged as every address in the block. A CIDR deny rule refuses
+the block as soon as it overlaps it, and a CIDR allow rule admits it only by
+containing all of it, so widening the target cannot reach past the scope file. A
+block of 256 addresses or fewer is additionally weighed one address at a time,
+which is what lets a rule written as a host glob (`10.0.0.*`) or split across
+two `cidrs` entries cover a `/24`. A wider block is left to the CIDR rules
+alone, so name addresses under `cidrs` rather than as host globs.
+
+Every other verb — `recon:subdomain`, `recon:http-fingerprint`, the recon and
+bounty importers — reads its target as a single host, because that is what curl
+and the importers do with it: `10.0.0.1-2` is a domain name to them and resolves
+to whatever DNS answers with, so it is judged as the one host it is and not as
+the pair it reads like.
 
 ## Patch application and re-verification
 

@@ -38,6 +38,21 @@ pub enum HostPattern {
     Cidr(IpNet),
 }
 
+/// How the tool that received a target will read it, which decides whether the
+/// string can name more than one address.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum TargetSyntax {
+    /// A host, IP literal, or URL — what curl, the HTTP clients, and the
+    /// importers read. `10.0.0.1-2` is a domain name to every one of them, so
+    /// it names whatever DNS resolves it to, not the two addresses it reads
+    /// like, and judging it as a block would admit an asset no rule covers.
+    #[default]
+    Host,
+    /// An nmap target specification, which also names a CIDR block or an octet
+    /// range or list. Only a tool that hands its target to nmap may use this.
+    AddressBlock,
+}
+
 /// Outcome of validating a candidate target against the active scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScopeVerdict {
@@ -102,11 +117,19 @@ impl ProgramScope {
     /// judged as every host it could name: one deny match denies it, and an
     /// allow list has to cover all of them. See [`candidate_hosts`].
     ///
-    /// A target that names a range of addresses rather than one host is judged
-    /// as the whole range. See [`candidate_range`].
+    /// Reads the target as a host. A caller whose tool reads its target as an
+    /// nmap target specification calls [`ProgramScope::verdict_for`] instead.
     pub fn verdict(&self, target: &str) -> ScopeVerdict {
+        self.verdict_for(target, TargetSyntax::Host)
+    }
+
+    /// As [`ProgramScope::verdict`], for a caller that knows how its tool reads
+    /// the target. Under [`TargetSyntax::AddressBlock`] a target that names a
+    /// block of addresses rather than one host is judged as the whole block.
+    /// See [`candidate_range`].
+    pub fn verdict_for(&self, target: &str, syntax: TargetSyntax) -> ScopeVerdict {
         let hosts = candidate_hosts(target);
-        let range = candidate_range(target);
+        let range = candidate_range(target, syntax);
         if self.denies(&hosts, range) {
             return ScopeVerdict::OutOfScope;
         }
@@ -242,25 +265,33 @@ struct AddressRange {
     high: u128,
 }
 
-/// The range a target names when it names more than one address, or `None`
+/// The block a target names when it names more than one address, or `None`
 /// when it names a single host that [`candidate_hosts`] already judges.
 ///
-/// Scanners take a block, not just a host: `nmap 10.0.0.0/8`, `10.99.0-255.1`,
-/// and `10.0.0.1,2` each probe every address between their ends. Reading only
-/// the one host such a target starts with broke the gate in both directions.
-/// A deny rule was evaded by widening the target — `10.0.0.0/8` reaches every
-/// address a `10.99.0.0/16` deny rule names, but its own network address sits
-/// outside that rule, so the target came back `Unknown` and the scan ran. An
-/// allow list was satisfied by a network address while the scan continued past
-/// it — `10.0.0.0/7` matched a `10.0.0.0/8` allow rule and then reached
+/// nmap takes a block, not just a host: `nmap 10.0.0.0/8`, `10.99.0-255.1`, and
+/// `10.0.0.1,2` each probe every address between their ends. Reading only the
+/// one host such a target starts with broke the gate in both directions. A deny
+/// rule was evaded by widening the target — `10.0.0.0/8` reaches every address
+/// a `10.99.0.0/16` deny rule names, but its own network address sits outside
+/// that rule, so the target came back `Unknown` and the scan ran. An allow list
+/// was satisfied by a network address while the scan continued past it —
+/// `10.0.0.0/7` matched a `10.0.0.0/8` allow rule and then reached
 /// `11.0.0.0/8` — and a plainly in-scope `10.0.0-255.5` was refused, because
 /// the literal matched no rule at all.
 ///
-/// The range is weighed alongside the host readings, never instead of them, so
+/// Only a caller reading an nmap target specification gets this, because the
+/// syntax is nmap's. Every other client resolves `10.0.0.1-2` as a domain name,
+/// which can answer with any address at all, so reading it as the two addresses
+/// it looks like would admit an asset no rule covers.
+///
+/// The block is weighed alongside the host readings, never instead of them, so
 /// a rule written against the block's own address keeps matching it. A form
-/// this cannot read names no range it can judge, so it contributes none rather
-/// than a guessed one, exactly as before.
-fn candidate_range(target: &str) -> Option<AddressRange> {
+/// this cannot read names no block it can judge, so it contributes none rather
+/// than a guessed one.
+fn candidate_range(target: &str, syntax: TargetSyntax) -> Option<AddressRange> {
+    if syntax != TargetSyntax::AddressBlock {
+        return None;
+    }
     let trimmed = target.trim();
     let range = cidr_target_range(trimmed).or_else(|| octet_target_range(trimmed))?;
     (range.low < range.high).then_some(range)
@@ -862,6 +893,11 @@ mod tests {
 
     fn scope(toml_text: &str) -> ProgramScope {
         ProgramScope::parse(toml_text).expect("scope must parse")
+    }
+
+    /// The verdict a caller reading an nmap target specification gets.
+    fn block_verdict(scope: &ProgramScope, target: &str) -> ScopeVerdict {
+        scope.verdict_for(target, TargetSyntax::AddressBlock)
     }
 
     #[test]
@@ -1636,13 +1672,13 @@ mod tests {
         );
         // Every address the deny rule names lies inside each of these, so a
         // scanner handed one probes the denied block.
-        assert_eq!(scope.verdict("10.0.0.0/8"), ScopeVerdict::OutOfScope);
-        assert_eq!(scope.verdict("10.99.0-255.1"), ScopeVerdict::OutOfScope);
-        assert_eq!(scope.verdict("10.99.0.1,2"), ScopeVerdict::OutOfScope);
-        assert_eq!(scope.verdict("10.98-99.0.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.0/8"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.99.0-255.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.99.0.1,2"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.98-99.0.1"), ScopeVerdict::OutOfScope);
         // A block beside the denied one is still nobody's business to refuse.
-        assert_eq!(scope.verdict("10.98.0.0/16"), ScopeVerdict::Unknown);
-        assert_eq!(scope.verdict("10.98.0.1-9"), ScopeVerdict::Unknown);
+        assert_eq!(block_verdict(&scope, "10.98.0.0/16"), ScopeVerdict::Unknown);
+        assert_eq!(block_verdict(&scope, "10.98.0.1-9"), ScopeVerdict::Unknown);
     }
 
     #[test]
@@ -1653,14 +1689,44 @@ mod tests {
             cidrs = ["10.0.0.0/8"]
             "#,
         );
-        assert_eq!(scope.verdict("10.0.0.0/24"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("10.0.0-255.5"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("10.0.0.1,9"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.0/24"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.0.0-255.5"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.1,9"), ScopeVerdict::InScope);
         // `10.0.0.0/7` starts on the allow rule's own network address and then
         // runs past it into 11.0.0.0/8.
-        assert_eq!(scope.verdict("10.0.0.0/7"), ScopeVerdict::OutOfScope);
-        assert_eq!(scope.verdict("10.0.0-255.5,9"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("9-10.0.0.5"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.0/7"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.0.0-255.5,9"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "9-10.0.0.5"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_host_shaped_target_is_never_read_as_an_address_block() {
+        let allow = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/24"]
+            "#,
+        );
+        // curl and the importers resolve `10.0.0.1-2` as a domain name, which
+        // can answer with any address at all, so the two addresses it reads
+        // like are not what the caller reaches. Only nmap's own reading may
+        // treat it as a block.
+        assert_eq!(allow.verdict("10.0.0.1-2"), ScopeVerdict::OutOfScope);
+        assert_eq!(allow.verdict("10.0.0.1,2"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&allow, "10.0.0.1-2"), ScopeVerdict::InScope);
+        // The same target under a deny-only file stays unknown rather than
+        // silently admitted as a covered pair.
+        let deny = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.99.0.0/16"]
+            "#,
+        );
+        assert_eq!(deny.verdict("10.99.0.1-2"), ScopeVerdict::Unknown);
+        assert_eq!(
+            block_verdict(&deny, "10.99.0.1-2"),
+            ScopeVerdict::OutOfScope
+        );
     }
 
     #[test]
@@ -1671,19 +1737,19 @@ mod tests {
             hosts = ["10.0.0.*"]
             "#,
         );
-        assert_eq!(allow.verdict("10.0.0.0/24"), ScopeVerdict::InScope);
-        assert_eq!(allow.verdict("10.0.0.1-9"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&allow, "10.0.0.0/24"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&allow, "10.0.0.1-9"), ScopeVerdict::InScope);
         // A block too wide to weigh address by address is left to the CIDR
         // rules, which this file has none of.
-        assert_eq!(allow.verdict("10.0.0.0/16"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&allow, "10.0.0.0/16"), ScopeVerdict::OutOfScope);
         let deny = scope(
             r#"
             [out_of_scope]
             hosts = ["10.0.0.7"]
             "#,
         );
-        assert_eq!(deny.verdict("10.0.0.0/24"), ScopeVerdict::OutOfScope);
-        assert_eq!(deny.verdict("10.0.1.0/24"), ScopeVerdict::Unknown);
+        assert_eq!(block_verdict(&deny, "10.0.0.0/24"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&deny, "10.0.1.0/24"), ScopeVerdict::Unknown);
     }
 
     #[test]
@@ -1694,10 +1760,10 @@ mod tests {
             cidrs = ["10.0.0.0/25", "10.0.0.128/25", "10.1.0.0/17", "10.1.128.0/17"]
             "#,
         );
-        assert_eq!(scope.verdict("10.0.0.0/24"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.0/24"), ScopeVerdict::InScope);
         // The same split one block wider than the gate expands, so the halves
         // are not stitched together and the target is refused.
-        assert_eq!(scope.verdict("10.1.0.0/16"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.1.0.0/16"), ScopeVerdict::OutOfScope);
     }
 
     #[test]
@@ -1708,7 +1774,7 @@ mod tests {
             cidrs = ["::ffff:10.99.0.0/112"]
             "#,
         );
-        assert_eq!(mapped.verdict("10.0.0.0/8"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&mapped, "10.0.0.0/8"), ScopeVerdict::OutOfScope);
         let ipv4 = scope(
             r#"
             [out_of_scope]
@@ -1716,11 +1782,11 @@ mod tests {
             "#,
         );
         assert_eq!(
-            ipv4.verdict("::ffff:10.99.0.0/112"),
+            block_verdict(&ipv4, "::ffff:10.99.0.0/112"),
             ScopeVerdict::OutOfScope
         );
         // An IPv6 block outside the mapped range names no IPv4 address.
-        assert_eq!(ipv4.verdict("2001:db8::/32"), ScopeVerdict::Unknown);
+        assert_eq!(block_verdict(&ipv4, "2001:db8::/32"), ScopeVerdict::Unknown);
     }
 
     #[test]
@@ -1734,10 +1800,10 @@ mod tests {
         );
         // A one-address block carries no range a rule has to cover, so the host
         // readings judge it exactly as they did before.
-        assert_eq!(scope.verdict("10.0.0.5/32"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("10.0.0.5"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("10.1.4.7"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("10.2.0.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.5/32"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.0.0.5"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.1.4.7"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&scope, "10.2.0.1"), ScopeVerdict::OutOfScope);
     }
 
     #[test]
@@ -1749,9 +1815,9 @@ mod tests {
         assert_eq!(octet_target_range("10..0.1"), None);
         // A spec naming one address carries no range, so the host readings
         // keep judging it.
-        assert_eq!(candidate_range("10.0.0.1"), None);
-        assert_eq!(candidate_range("api.example.com"), None);
-        assert_eq!(candidate_range("https://api.example.com/path"), None);
+        assert_eq!(candidate_range("10.0.0.1", TargetSyntax::AddressBlock), None);
+        assert_eq!(candidate_range("api.example.com", TargetSyntax::AddressBlock), None);
+        assert_eq!(candidate_range("https://api.example.com/path", TargetSyntax::AddressBlock), None);
     }
 
     #[test]

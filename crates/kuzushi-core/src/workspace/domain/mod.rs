@@ -18,7 +18,7 @@ pub use nested_scope::{
     NestedProjectScopeTree, PROJECT_MODEL_DIR, PROJECT_MODEL_SCOPES_FILE, ROOT_SCOPE_ID,
 };
 pub use program_scope::{
-    HostPattern, ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict,
+    HostPattern, ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict, TargetSyntax,
 };
 pub(crate) use workspace_state_io::{
     ensure_workspace_descendant_dir, validated_workspace_descendant,

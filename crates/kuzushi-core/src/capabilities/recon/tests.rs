@@ -586,6 +586,45 @@ authorization: Default::default(),
     }
 
     #[test]
+    fn only_the_nmap_verb_reads_its_target_as_an_address_block() {
+        // P1 review: `recon:nmap` hands its target to a scanner whose target
+        // specification names a whole block, but `recon:http-fingerprint`
+        // hands the same string to curl, which resolves `10.0.0.1-2` as a
+        // domain name reaching whatever DNS answers with. Reading it as a
+        // covered pair there would admit an asset no rule covers, so the
+        // block reading stops at the nmap verb.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let scope_dir = workspace_dir.path().join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[in_scope]\ncidrs = [\"10.0.0.0/24\"]\n",
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let err = execute_recon_tool(
+            "recon:http-fingerprint",
+            json!({"target": "10.0.0.1-2"}),
+            &ctx,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("out of scope"), "got: {err}");
+        // The same target reaches nmap's own binary resolution, so the gate
+        // passes it and the run fails on the missing binary instead.
+        let err = execute_recon_tool(
+            "recon:nmap",
+            json!({"target": "10.0.0.1-2", "binary": workspace_dir.path().join("missing-nmap").display().to_string()}),
+            &ctx,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(!err.contains("out of scope"), "got: {err}");
+    }
+
+    #[test]
     fn recon_import_amass_skips_out_of_scope_hosts_per_entry() {
         // P1 review: `recon:import` requests carry `{tool, path}` and
         // no top-level target, so the dispatch-level scope guard

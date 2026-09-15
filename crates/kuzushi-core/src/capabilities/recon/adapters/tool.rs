@@ -219,13 +219,28 @@ fn enforce_recon_scope(
     let Some(target) = recon_target_field(input) else {
         return Ok(());
     };
-    if scope.verdict(target) == crate::workspace::ScopeVerdict::OutOfScope {
+    if scope.verdict_for(target, recon_target_syntax(name))
+        == crate::workspace::ScopeVerdict::OutOfScope
+    {
         anyhow::bail!(
             "{name} refused: target {target:?} is out of scope per .kuzushi/scope.toml. \
              Update the file's [in_scope] or [out_of_scope] lists if this is wrong."
         );
     }
     Ok(())
+}
+
+/// How a recon verb reads its target. `recon:nmap` hands the string to a
+/// scanner whose target specification names a whole address block, so the gate
+/// has to weigh every address in it. Every other verb hands the string to curl
+/// or an importer, which resolve `10.0.0.1-2` as a domain name reaching
+/// whatever DNS answers with — reading it as a block there would admit an asset
+/// no rule covers.
+fn recon_target_syntax(name: &str) -> crate::workspace::TargetSyntax {
+    match name {
+        "recon:nmap" => crate::workspace::TargetSyntax::AddressBlock,
+        _ => crate::workspace::TargetSyntax::Host,
+    }
 }
 
 /// Recon tools name their target field differently (`target`, `domain`,
