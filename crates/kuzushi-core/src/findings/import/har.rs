@@ -90,11 +90,8 @@ fn persist_har_entry(
 }
 
 fn build_har_finding(url: &str, request: &Value, response: Option<&Value>) -> Finding {
-    let method = request
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or("GET");
-    let request_message = render_har_request(request);
+    let method = recorded_str(request, "method");
+    let request_message = render_har_request(url, method, request);
     let response_message = response.map(render_har_response).unwrap_or_default();
     let notes: Vec<String> = [request_message.note, response_message.note]
         .into_iter()
@@ -130,42 +127,59 @@ struct RenderedMessage {
     note: Option<String>,
 }
 
-fn render_har_request(request: &Value) -> RenderedMessage {
-    let method = request
-        .get("method")
+/// What a rendered message shows in place of a field the capture did not
+/// record. The Burp importer already spells an unknown method this way, and
+/// both importers write the same `http-request` evidence, so they must not
+/// disagree on how absence reads.
+const UNRECORDED: &str = "?";
+
+/// The non-empty string a HAR object recorded under `key`, or [`UNRECORDED`].
+///
+/// HAR marks these fields required, so an absent one means the producer wrote
+/// a partial entry. Filling it in would put a method or protocol version in
+/// the stored evidence that no capture ever observed.
+fn recorded_str<'a>(object: &'a Value, key: &str) -> &'a str {
+    object
+        .get(key)
         .and_then(Value::as_str)
-        .unwrap_or("GET");
-    let url = request.get("url").and_then(Value::as_str).unwrap_or("");
-    let version = request
-        .get("httpVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("HTTP/1.1");
+        .filter(|value| !value.is_empty())
+        .unwrap_or(UNRECORDED)
+}
+
+/// The status a HAR response recorded, or [`UNRECORDED`]. A recorded `0` is
+/// kept: browsers write it for a request that never got a response, which is
+/// a fact about the capture, unlike an absent field.
+fn recorded_status(response: &Value) -> String {
+    response
+        .get("status")
+        .and_then(Value::as_u64)
+        .map_or_else(|| UNRECORDED.to_string(), |status| status.to_string())
+}
+
+fn render_har_request(url: &str, method: &str, request: &Value) -> RenderedMessage {
+    let version = recorded_str(request, "httpVersion");
     let mut out = format!("{method} {url} {version}\n");
     render_har_headers(request.get("headers"), &mut out);
-    append_har_body(out, har_body(request.get("postData")), "request body")
+    append_har_body(out, request.get("postData"), "request body")
 }
 
 fn render_har_response(response: &Value) -> RenderedMessage {
-    let status = response.get("status").and_then(Value::as_u64).unwrap_or(0);
+    let status = recorded_status(response);
     let status_text = response
         .get("statusText")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let version = response
-        .get("httpVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("HTTP/1.1");
+    let version = recorded_str(response, "httpVersion");
     let mut out = format!("{version} {status} {status_text}\n");
     render_har_headers(response.get("headers"), &mut out);
-    append_har_body(out, har_body(response.get("content")), "response body")
+    append_har_body(out, response.get("content"), "response body")
 }
 
 /// HAR carries a binary or compressed payload as base64 and says so with
 /// `encoding = "base64"`. Storing that text as-is would present base64 as the
 /// HTTP body, so the encoded form is decoded and anything the decode could not
 /// preserve is disclosed.
-fn har_body(container: Option<&Value>) -> Option<DecodedField> {
-    let container = container?;
+fn har_body(container: &Value) -> Option<DecodedField> {
     let text = container
         .get("text")
         .and_then(Value::as_str)
@@ -186,9 +200,15 @@ fn har_declares_base64(container: &Value) -> bool {
         .is_some_and(|encoding| encoding.eq_ignore_ascii_case("base64"))
 }
 
-fn append_har_body(mut text: String, body: Option<DecodedField>, label: &str) -> RenderedMessage {
-    let Some(body) = body else {
+fn append_har_body(mut text: String, container: Option<&Value>, label: &str) -> RenderedMessage {
+    let Some(container) = container else {
         return RenderedMessage { text, note: None };
+    };
+    let Some(body) = har_body(container) else {
+        return RenderedMessage {
+            note: unstored_body_note(container, label),
+            text,
+        };
     };
     text.push('\n');
     text.push_str(&body.text);
@@ -196,6 +216,40 @@ fn append_har_body(mut text: String, body: Option<DecodedField>, label: &str) ->
         note: disclosure(label, &body),
         text,
     }
+}
+
+/// The disclosure a container owes when it describes a body whose bytes it did
+/// not store. Without it the rendered message shows headers and nothing after
+/// them, which reads as a capture that observed an empty body.
+///
+/// Both shapes come from real exporters: HAR may record a form submission only
+/// as `postData.params`, and a browser that declines to keep a large or binary
+/// response still records its `content.size`. Neither is rebuilt into body
+/// text — parsed parameters do not name the bytes that were on the wire, and a
+/// byte count names none at all. `None` for a container that simply carried no
+/// body, so a genuinely empty message stays free of disclosure noise.
+fn unstored_body_note(container: &Value, label: &str) -> Option<String> {
+    if let Some(count) = har_param_count(container) {
+        return Some(format!(
+            "The {label} was recorded only as parsed form parameters ({count}); \
+             the capture stored no body text"
+        ));
+    }
+    let size = container
+        .get("size")
+        .and_then(Value::as_u64)
+        .filter(|size| *size > 0)?;
+    Some(format!(
+        "The {label} was recorded as {size} bytes but the capture stored no body text"
+    ))
+}
+
+fn har_param_count(container: &Value) -> Option<usize> {
+    container
+        .get("params")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .filter(|count| *count > 0)
 }
 
 fn render_har_headers(headers: Option<&Value>, out: &mut String) {
@@ -410,6 +464,122 @@ mod tests {
             .unwrap()
             .ends_with("{\"ok\":true}"));
         assert_eq!(evidence.rationale, "Imported from HAR capture");
+    }
+
+    fn entry_with_request(request: serde_json::Value) -> serde_json::Value {
+        serde_json::json!([{ "request": request }])
+    }
+
+    #[test]
+    fn an_unrecorded_request_method_reads_as_unknown_rather_than_get() {
+        let (_, tmp) = import_entries(entry_with_request(serde_json::json!({
+            "url": "https://api.lab.test/x",
+            "httpVersion": "HTTP/2",
+            "headers": [],
+        })));
+
+        let evidence = imported_evidence(&tmp);
+        assert_eq!(evidence.snippet, "? https://api.lab.test/x");
+        assert!(
+            evidence
+                .request_blob
+                .as_deref()
+                .unwrap()
+                .starts_with("? https://api.lab.test/x HTTP/2"),
+            "an entry that recorded no method must not be stored as a GET"
+        );
+    }
+
+    #[test]
+    fn an_unrecorded_http_version_is_not_asserted_as_http_1_1() {
+        let (_, tmp) = import_entries(serde_json::json!([{
+            "request": { "method": "POST", "url": "https://api.lab.test/x", "headers": [] },
+            "response": { "status": 200, "statusText": "OK", "headers": [] },
+        }]));
+
+        let evidence = imported_evidence(&tmp);
+        assert!(evidence
+            .request_blob
+            .as_deref()
+            .unwrap()
+            .starts_with("POST https://api.lab.test/x ?"));
+        assert!(evidence
+            .response_blob
+            .as_deref()
+            .unwrap()
+            .starts_with("? 200 OK"));
+    }
+
+    #[test]
+    fn an_unrecorded_response_status_reads_as_unknown_while_a_recorded_zero_survives() {
+        let (_, tmp) = import_entries(serde_json::json!([{
+            "request": { "method": "GET", "url": "https://api.lab.test/x", "headers": [] },
+            "response": { "httpVersion": "HTTP/2", "headers": [] },
+        }]));
+        assert!(imported_evidence(&tmp)
+            .response_blob
+            .as_deref()
+            .unwrap()
+            .starts_with("HTTP/2 ?"));
+
+        let (_, tmp) = import_entries(serde_json::json!([{
+            "request": { "method": "GET", "url": "https://api.lab.test/x", "headers": [] },
+            "response": { "status": 0, "httpVersion": "HTTP/2", "headers": [] },
+        }]));
+        assert!(
+            imported_evidence(&tmp)
+                .response_blob
+                .as_deref()
+                .unwrap()
+                .starts_with("HTTP/2 0"),
+            "a browser records 0 for a request that never got a response; that is a fact"
+        );
+    }
+
+    #[test]
+    fn a_form_body_kept_only_as_parameters_is_disclosed_rather_than_rebuilt() {
+        let (_, tmp) = import_entries(entry_with_request(serde_json::json!({
+            "method": "POST",
+            "url": "https://api.lab.test/login",
+            "headers": [],
+            "postData": {
+                "mimeType": "application/x-www-form-urlencoded",
+                "params": [{ "name": "u", "value": "a" }, { "name": "p", "value": "b" }],
+            },
+        })));
+
+        let evidence = imported_evidence(&tmp);
+        assert_eq!(
+            evidence.rationale,
+            "Imported from HAR capture. The request body was recorded only as parsed form \
+             parameters (2); the capture stored no body text"
+        );
+        assert!(
+            !evidence.request_blob.as_deref().unwrap().contains("u=a"),
+            "parsed parameters do not name the bytes that were on the wire"
+        );
+    }
+
+    #[test]
+    fn a_response_body_the_capture_did_not_keep_is_disclosed_by_its_size() {
+        let (_, tmp) = import_entries(entry_with_content(serde_json::json!({
+            "size": 4096,
+            "mimeType": "image/png",
+        })));
+
+        let evidence = imported_evidence(&tmp);
+        assert_eq!(
+            evidence.rationale,
+            "Imported from HAR capture. The response body was recorded as 4096 bytes but the \
+             capture stored no body text"
+        );
+    }
+
+    #[test]
+    fn a_genuinely_empty_body_stays_free_of_disclosure_noise() {
+        let (_, tmp) = import_entries(entry_with_content(serde_json::json!({ "size": 0 })));
+
+        assert_eq!(imported_evidence(&tmp).rationale, "Imported from HAR capture");
     }
 
     #[test]

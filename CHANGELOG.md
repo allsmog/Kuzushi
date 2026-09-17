@@ -19,6 +19,24 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `bounty:import-har` (and `recon:import {"tool":"har"}`) no longer states HTTP
+  facts the capture did not record. An entry with no `request.method` was stored
+  as a `GET` — in the finding title, the evidence snippet, and the request line
+  of the `request_blob` an operator reads as the raw message — so a partial HAR
+  turned an unknown method into a specific, wrong one. A missing `httpVersion`
+  asserted `HTTP/1.1` on both messages, and a missing response `status` rendered
+  as `0`, which browsers also write for a request that never got a response, so
+  absence and that observation read alike. Each unrecorded field is now shown as
+  `?`, the spelling the sibling Burp importer already used for an unknown
+  method; a recorded `0` still prints as `0`. The importer also stopped dropping
+  a body the capture described but did not store: a form submission recorded
+  only as `postData.params` and a response body kept only as `content.size`
+  both rendered as headers followed by nothing, which reads as an observed empty
+  body. Both now carry a disclosure in the evidence rationale, and neither is
+  rebuilt into body text, because parsed parameters and a byte count do not name
+  the bytes that were on the wire. A well-formed capture imports byte-for-byte
+  as before.
+
 - `entry-points:extract` no longer refuses a target too large to snapshot
   whole. `context:build` caps its own arrays to stay inside the snapshot byte
   budget and records `snapshotTruncation` when it does, and the extractor read
