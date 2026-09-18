@@ -155,12 +155,15 @@ fn normalized_category(threat: &serde_json::Value) -> Option<String> {
         .map(|category| category.to_lowercase().replace('_', "-"))
 }
 
+/// The category tone is the worst impact its threats recorded. A category
+/// whose threats recorded none — including an empty one — is unmeasured, not
+/// low.
 fn max_severity(threats: &[&serde_json::Value]) -> Severity {
     threats
         .iter()
         .filter_map(|threat| threat_impact(threat))
         .max_by_key(|severity| super::threat_impact::severity_rank(*severity))
-        .unwrap_or(Severity::Low)
+        .unwrap_or(Severity::Unknown)
 }
 
 fn threat_impact(threat: &serde_json::Value) -> Option<Severity> {
@@ -251,7 +254,11 @@ mod tests {
         assert_eq!(members[1].title, "stolen token");
         assert_eq!(rollup.rows[1].tone, ThreatStrideTone::Critical);
         assert_eq!(rollup.rows[1].members[0].title, "config tamper");
-        assert_eq!(rollup.rows[2].tone, ThreatStrideTone::Low);
+        assert_eq!(
+            rollup.rows[2].tone,
+            ThreatStrideTone::Unknown,
+            "a category with no threat is unmeasured, not low"
+        );
         assert!(rollup.rows[2].members.is_empty());
         assert_eq!(rollup.rows[3].members[0].title, "log leak");
     }
@@ -311,5 +318,37 @@ mod tests {
         assert_eq!(rollup.rows[5].cells[0], "E");
         assert_eq!(rollup.rows[5].cells[2], "1");
         assert_eq!(rollup.rows[5].tone, ThreatStrideTone::Critical);
+    }
+
+    #[test]
+    fn a_category_whose_threats_recorded_no_impact_is_unknown_not_low() {
+        let doc = json!({
+            "threats": [
+                {"id": "T-001", "category": "spoofing", "title": "unrated", "impact": "unknown"},
+                {"id": "T-002", "category": "spoofing", "title": "no impact field"}
+            ]
+        });
+
+        let rollup = threat_stride_rollup_from_doc(&doc).expect("expected rollup");
+        let spoofing = &rollup.rows[0];
+
+        assert_eq!(spoofing.cells[2], "2", "both threats still count");
+        assert_eq!(spoofing.tone, ThreatStrideTone::Unknown);
+        assert_eq!(spoofing.members[0].severity, "UNKNOWN");
+        assert_eq!(spoofing.members[1].severity, "UNKNOWN");
+    }
+
+    #[test]
+    fn a_recorded_impact_still_outranks_an_unrated_sibling() {
+        let doc = json!({
+            "threats": [
+                {"id": "T-001", "category": "spoofing", "title": "unrated", "impact": "unknown"},
+                {"id": "T-002", "category": "spoofing", "title": "rated", "impact": "high"}
+            ]
+        });
+
+        let rollup = threat_stride_rollup_from_doc(&doc).expect("expected rollup");
+
+        assert_eq!(rollup.rows[0].tone, ThreatStrideTone::High);
     }
 }
