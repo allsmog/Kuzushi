@@ -863,6 +863,13 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
         Some(detail) => format!("cached · {detail}"),
         None => "cached".to_string(),
     };
+    // This note wins over `last_attempt_note`, so an artifact a partial pass
+    // left behind would otherwise be offered as a complete cache. Tools whose
+    // partial result persists its document (`threat-model:build`) reach here.
+    let cached = match row.last_attempt {
+        Some(crate::app::LastAttempt::Partial { .. }) => format!("{cached} (partial)"),
+        _ => cached,
+    };
     if let Some(cli) = row.required_cli.filter(|_| !row.cli_available) {
         return Some(format!("{cached} — rebuild needs {cli}"));
     }
@@ -910,7 +917,9 @@ fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) 
 }
 
 /// Honest ledger note: a resumable failed attempt continues instead of
-/// restarting; blocked and completed attempts remain distinct.
+/// restarting; blocked, partial, and completed attempts remain distinct. A
+/// partial pass produced a disclosed incomplete result, so it never borrows
+/// the wording of a pass that produced nothing.
 fn last_attempt_note(row: &PlanningTaskRow) -> Option<String> {
     use crate::app::LastAttempt;
     match row.last_attempt.as_ref()? {
@@ -923,6 +932,15 @@ fn last_attempt_note(row: &PlanningTaskRow) -> Option<String> {
             resume_from: None,
         } => Some("continue from checkpoint".to_string()),
         LastAttempt::Failed { .. } => Some("retry from start · failed last pass".to_string()),
+        LastAttempt::Partial {
+            resumable: true,
+            resume_from: Some(stage),
+        } => Some(format!("continue · partial · resumes at {stage}")),
+        LastAttempt::Partial {
+            resumable: true,
+            resume_from: None,
+        } => Some("continue from checkpoint · partial".to_string()),
+        LastAttempt::Partial { .. } => Some("retry from start · partial last pass".to_string()),
         LastAttempt::Blocked => Some("blocked last pass".to_string()),
         LastAttempt::Completed if matches!(row.artifact_state, PlanningArtifactState::Action) => {
             Some("done this pass".to_string())
@@ -1970,6 +1988,73 @@ mod tests {
         assert_eq!(
             last_attempt_note(&row).as_deref(),
             Some("retry from start · failed last pass")
+        );
+    }
+
+    #[test]
+    fn partial_attempt_is_not_presented_as_a_failed_one() {
+        let target = tempfile::tempdir().unwrap();
+        let mut row =
+            PlanningTaskRow::for_task(crate::app::PlanningTaskId::ScanAgenticSast, target.path());
+        row.last_attempt = Some(crate::app::LastAttempt::Partial {
+            resumable: false,
+            resume_from: None,
+        });
+        assert_eq!(
+            last_attempt_note(&row).as_deref(),
+            Some("retry from start · partial last pass")
+        );
+
+        row.last_attempt = Some(crate::app::LastAttempt::Partial {
+            resumable: true,
+            resume_from: Some("evidence".to_string()),
+        });
+        assert_eq!(
+            last_attempt_note(&row).as_deref(),
+            Some("continue · partial · resumes at evidence")
+        );
+
+        row.last_attempt = Some(crate::app::LastAttempt::Partial {
+            resumable: true,
+            resume_from: None,
+        });
+        assert_eq!(
+            last_attempt_note(&row).as_deref(),
+            Some("continue from checkpoint · partial")
+        );
+    }
+
+    #[test]
+    fn a_cache_a_partial_pass_left_behind_is_not_offered_as_a_complete_one() {
+        let target = tempfile::tempdir().unwrap();
+        let mut row =
+            PlanningTaskRow::for_task(crate::app::PlanningTaskId::BuildThreatModel, target.path());
+        row.artifact_state = PlanningArtifactState::Cached;
+        row.last_attempt = Some(crate::app::LastAttempt::Partial {
+            resumable: false,
+            resume_from: None,
+        });
+
+        // Reuse is the one outcome where the cached note wins over
+        // `last_attempt_note`, so it has to carry the disclosure itself.
+        assert_eq!(
+            cached_row_note(&row, RowOutcome::Reuse).as_deref(),
+            Some("cached (partial) · Space runs fresh")
+        );
+
+        // A deselected cached row is Skip, where the cached note declines and
+        // the partial wording reaches the operator through `last_attempt_note`.
+        assert_eq!(cached_row_note(&row, RowOutcome::Skip), None);
+        assert_eq!(
+            last_attempt_note(&row).as_deref(),
+            Some("retry from start · partial last pass")
+        );
+
+        // A completed pass still reads as a plain cache.
+        row.last_attempt = Some(crate::app::LastAttempt::Completed);
+        assert_eq!(
+            cached_row_note(&row, RowOutcome::Reuse).as_deref(),
+            Some("cached · Space runs fresh")
         );
     }
 

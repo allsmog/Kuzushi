@@ -105,14 +105,14 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
     }
 }
 
-/// Item 5b: reality-aware pre-check overriding the static table. A
-/// FAILED-but-resumable attempt is pre-checked so Enter continues it from
+/// Item 5b: reality-aware pre-check overriding the static table. A FAILED- or
+/// PARTIAL-but-resumable attempt is pre-checked so Enter continues it from
 /// its checkpoint; an action task that already completed this pass is never
 /// silently re-checked (the static table would invert both).
 fn ledger_preselect(row: &PlanningTaskRow) -> Option<bool> {
     use super::task_row::LastAttempt;
     match &row.last_attempt {
-        Some(LastAttempt::Failed { .. }) => Some(true),
+        Some(LastAttempt::Failed { .. } | LastAttempt::Partial { .. }) => Some(true),
         Some(LastAttempt::Completed) if matches!(row.artifact_state, ArtifactState::Action) => {
             Some(false)
         }
@@ -360,6 +360,25 @@ mod tests {
             recommended_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source), &rows);
 
         assert!(!picked.contains(&PlanningTaskId::ScanAgenticSast));
+        assert!(picked.contains(&PlanningTaskId::ScanSecrets));
+    }
+
+    #[test]
+    fn partial_action_outcome_stays_pre_checked_like_a_failed_one() {
+        let mut rows = rows_for(WorkflowPhase::Scan);
+        let partial = rows
+            .iter_mut()
+            .find(|row| row.id == PlanningTaskId::ScanSecrets)
+            .unwrap();
+        partial.artifact_state = ArtifactState::Action;
+        partial.last_attempt = Some(crate::app::LastAttempt::Partial {
+            resumable: false,
+            resume_from: None,
+        });
+
+        let picked =
+            recommended_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source), &rows);
+
         assert!(picked.contains(&PlanningTaskId::ScanSecrets));
     }
 }
