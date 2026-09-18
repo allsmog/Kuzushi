@@ -40,7 +40,19 @@ Notable changes to Kuzushi. Release procedure lives in
   and bounty importers hand their target to curl or a parser, which resolve
   `10.0.0.1-2` as a domain name reaching whatever DNS answers with, so they keep
   judging it as the one host it is. Single-host targets, hostnames carrying a
-  hyphen, and URLs are unaffected everywhere.
+  hyphen, and URLs are unaffected everywhere. nmap's other block form is refused
+  rather than guessed: `<name>/<numbits>` resolves the name and then sweeps
+  every address sharing those first bits, so `api.example.com/8` was judged as
+  the bare host `api.example.com` and admitted by a `*.example.com` allow rule
+  while the scan covered 2^24 addresses. The gate cannot resolve a name, so it
+  cannot bound that block, and a block it cannot bound is never admitted — it is
+  refused under an allow list and reported unknown under a deny-only file. A
+  block whose base is an `inet_aton` shorthand address is bounded instead of
+  refused, so `0xa.0.0.0/8` is weighed as exactly the addresses `10.0.0.0/8`
+  names. The suffix reading is nmap's target grammar only: a bare base followed
+  by one to three digits, so `api.example.com/path`,
+  `https://api.example.com/8080/x`, and every `Host`-syntax caller are
+  untouched.
 
 - The shell's threat pages no longer present an unrated threat as a rated one.
   The threat-model normalizer keeps an impact it does not recognize verbatim
