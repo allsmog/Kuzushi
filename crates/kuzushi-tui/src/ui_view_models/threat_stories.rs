@@ -119,12 +119,14 @@ fn threat_listing_id(threat: &serde_json::Value) -> Option<String> {
     string_field(threat, "displayId").or_else(|| string_field(threat, "id"))
 }
 
+/// A threat that records no impact at all is as unrated as one whose impact
+/// nobody recognized; both read UNKNOWN and sort last.
 fn threat_severity(threat: &serde_json::Value) -> Severity {
     threat
         .get("impact")
         .and_then(serde_json::Value::as_str)
         .map(super::threat_impact::impact_to_severity)
-        .unwrap_or(Severity::Medium)
+        .unwrap_or(Severity::Unknown)
 }
 
 fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
@@ -209,6 +211,30 @@ mod tests {
     };
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn an_unrated_threat_reads_unknown_and_sorts_below_every_rated_one() {
+        let doc = json!({
+            "threats": [
+                {"id": "T-001", "title": "unrated", "impact": "unknown"},
+                {"id": "T-002", "title": "no impact field"},
+                {"id": "T-003", "title": "unrecognized", "impact": "moderate"},
+                {"id": "T-004", "title": "rated", "impact": "low"}
+            ]
+        });
+
+        let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
+
+        assert_eq!(model.rows[0].cells[0], "T-004", "a rated threat leads");
+        assert_eq!(model.rows[0].cells[1], "LOW");
+        for row in &model.rows[1..] {
+            assert_eq!(
+                row.cells[1], "UNKNOWN",
+                "an impact the model never assigned must not read as a band"
+            );
+            assert_eq!(row.tone, ThreatStoryTone::Unknown);
+        }
+    }
 
     #[test]
     fn threat_story_model_from_doc_sorts_by_impact_severity() {

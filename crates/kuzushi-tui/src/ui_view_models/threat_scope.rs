@@ -5,11 +5,15 @@ use kuzushi_core::Severity;
 const SCOPE_ITEM_LIMIT: usize = 4;
 
 /// Bucket order and labels for real threats; the counts come from the doc.
-const SCOPE_BUCKET_LABELS: [(Severity, &str); 4] = [
+/// Every band a threat can carry needs a bucket — a threat with no bucket to
+/// land in would drop out of both the list and the issue total.
+const SCOPE_BUCKET_LABELS: [(Severity, &str); 6] = [
     (Severity::Critical, "critical"),
     (Severity::High, "high"),
     (Severity::Medium, "medium"),
     (Severity::Low, "low"),
+    (Severity::Info, "info"),
+    (Severity::Unknown, "unknown"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,12 +100,14 @@ fn push_threat_into_bucket(buckets: &mut [ThreatScopeBucket], threat: &serde_jso
     }
 }
 
+/// A threat that records no impact at all is as unrated as one whose impact
+/// nobody recognized; both land in the UNKNOWN bucket.
 fn threat_severity(threat: &serde_json::Value) -> Severity {
     threat
         .get("impact")
         .and_then(serde_json::Value::as_str)
         .map(super::threat_impact::impact_to_severity)
-        .unwrap_or(Severity::Medium)
+        .unwrap_or(Severity::Unknown)
 }
 
 fn threat_title(threat: &serde_json::Value) -> String {
@@ -198,6 +204,44 @@ mod tests {
         assert_eq!(buckets[1].overflow_label.as_deref(), Some("… 1 more"));
         assert_eq!(buckets[2].tone, ThreatScopeTone::Medium);
         assert_eq!(buckets[2].item_count, 1);
+    }
+
+    #[test]
+    fn an_unrated_threat_is_bucketed_unknown_and_still_counted() {
+        let doc = json!({
+            "threats": [
+                {"title": "rated", "impact": "high"},
+                {"title": "unrated", "impact": "unknown"},
+                {"title": "unrecognized", "impact": "moderate"},
+                {"title": "no impact field"},
+                {"title": "informational", "impact": "info"}
+            ]
+        });
+
+        let model = threat_scope_model_from_doc(&doc).expect("non-empty");
+        let buckets = &model.buckets;
+
+        assert_eq!(
+            model.header, "SCOPE · 5 issues",
+            "no threat may drop out of the total for want of a bucket"
+        );
+        assert!(
+            !buckets
+                .iter()
+                .any(|bucket| bucket.tone == ThreatScopeTone::Medium),
+            "an unrated threat must not be presented as medium: {buckets:?}"
+        );
+        let info = buckets
+            .iter()
+            .find(|bucket| bucket.tone == ThreatScopeTone::Info)
+            .expect("info bucket");
+        assert_eq!(info.item_count, 1);
+        let unknown = buckets
+            .iter()
+            .find(|bucket| bucket.tone == ThreatScopeTone::Unknown)
+            .expect("unknown bucket");
+        assert_eq!(unknown.item_count, 3);
+        assert_eq!(unknown.header, "UNKNOWN · 3");
     }
 
     #[test]
