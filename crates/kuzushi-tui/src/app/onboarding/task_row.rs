@@ -28,8 +28,8 @@ pub struct PlanningTaskRow {
     pub cached_detail: Option<String>,
     /// Most recent terminal run outcome for this task's tool, overlaid from
     /// the run ledger by `overlay_last_attempts`. Drives honest
-    /// preselection: failed-but-resumable ⇒ pre-checked continue; work
-    /// completed this pass is never silently re-checked.
+    /// preselection: failed- or partial-but-resumable ⇒ pre-checked continue;
+    /// work completed this pass is never silently re-checked.
     pub last_attempt: Option<LastAttempt>,
 }
 
@@ -37,6 +37,14 @@ pub struct PlanningTaskRow {
 pub enum LastAttempt {
     Completed,
     Blocked,
+    /// The tool reached a terminal `partial` result: it produced a disclosed
+    /// incomplete result rather than failing. Kept separate from `Failed` so
+    /// the picker never tells an operator that a pass which did produce
+    /// evidence produced nothing.
+    Partial {
+        resumable: bool,
+        resume_from: Option<String>,
+    },
     Failed {
         /// The tool declares continuation and left resumable state behind —
         /// re-running the same task resumes instead of restarting.
@@ -277,19 +285,32 @@ fn last_attempt(
     match status {
         "completed" => Some(LastAttempt::Completed),
         "blocked" => Some(LastAttempt::Blocked),
-        "failed" | "partial" | "interrupted" => {
-            Some(failed_attempt(target, row, operation, run_id))
+        "partial" => {
+            let (resumable, resume_from) = continuation_evidence(target, row, operation, run_id);
+            Some(LastAttempt::Partial {
+                resumable,
+                resume_from,
+            })
+        }
+        "failed" | "interrupted" => {
+            let (resumable, resume_from) = continuation_evidence(target, row, operation, run_id);
+            Some(LastAttempt::Failed {
+                resumable,
+                resume_from,
+            })
         }
         _ => None,
     }
 }
 
-fn failed_attempt(
+/// Whether re-running this exact operation resumes from the checkpoint the
+/// prior attempt left behind, and the stage it resumes at.
+fn continuation_evidence(
     target: &Path,
     row: &PlanningTaskRow,
     operation: &PlanningOperation,
     run_id: &str,
-) -> LastAttempt {
+) -> (bool, Option<String>) {
     let continuation = kuzushi_core::modules::tool_continuation(row.tool_name);
     let coordinates = kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id)
         .filter(|coordinates| {
@@ -299,10 +320,10 @@ fn failed_attempt(
                 .is_some_and(|fingerprint| fingerprint == coordinates.fingerprint)
         });
     let resumable = continuation.is_continuable() && coordinates.is_some();
-    LastAttempt::Failed {
+    (
         resumable,
-        resume_from: coordinates.and_then(|coordinates| coordinates.resume_from),
-    }
+        coordinates.and_then(|coordinates| coordinates.resume_from),
+    )
 }
 
 /// The live threat model's real methodology + ledger version, so the picker
@@ -751,6 +772,75 @@ mod tests {
             row.tool_name,
             &serde_json::json!({}),
             "partial",
+            100,
+        );
+        let task = row.id;
+
+        overlay_last_attempts(
+            std::slice::from_mut(&mut row),
+            target.path(),
+            &BTreeMap::from([(task, planning_operation(serde_json::json!({})))]),
+        );
+
+        assert_eq!(
+            row.last_attempt,
+            Some(LastAttempt::Partial {
+                resumable: false,
+                resume_from: None,
+            })
+        );
+    }
+
+    #[test]
+    fn partial_attempt_is_not_recorded_as_a_failed_one() {
+        let target = tempfile::tempdir().unwrap();
+        let mut rows = [
+            PlanningTaskRow::for_task(PlanningTaskId::BuildThreatModel, target.path()),
+            PlanningTaskRow::for_task(PlanningTaskId::ScanAgenticSast, target.path()),
+        ];
+        record_terminal_run(
+            target.path(),
+            "tool-partial",
+            rows[0].tool_name,
+            &serde_json::json!({}),
+            "partial",
+            100,
+        );
+        record_terminal_run(
+            target.path(),
+            "tool-failed",
+            rows[1].tool_name,
+            &serde_json::json!({}),
+            "failed",
+            100,
+        );
+        let operations = BTreeMap::from([
+            (rows[0].id, planning_operation(serde_json::json!({}))),
+            (rows[1].id, planning_operation(serde_json::json!({}))),
+        ]);
+
+        overlay_last_attempts(&mut rows, target.path(), &operations);
+
+        assert!(matches!(
+            rows[0].last_attempt,
+            Some(LastAttempt::Partial { .. })
+        ));
+        assert!(matches!(
+            rows[1].last_attempt,
+            Some(LastAttempt::Failed { .. })
+        ));
+    }
+
+    #[test]
+    fn interrupted_attempt_still_reads_as_failed() {
+        let target = tempfile::tempdir().unwrap();
+        let mut row = PlanningTaskRow::for_task(PlanningTaskId::BuildThreatModel, target.path());
+        record_terminal_run(
+            target.path(),
+            "tool-interrupted",
+            row.tool_name,
+            &serde_json::json!({}),
+            "interrupted",
             100,
         );
         let task = row.id;

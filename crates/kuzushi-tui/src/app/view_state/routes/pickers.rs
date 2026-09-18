@@ -855,7 +855,9 @@ fn selection_override_for_reality(row: &PlanningTaskRow, rebuilding: bool) -> Op
         {
             Some(false)
         }
-        Some(crate::app::LastAttempt::Failed { .. }) => Some(true),
+        Some(crate::app::LastAttempt::Failed { .. } | crate::app::LastAttempt::Partial { .. }) => {
+            Some(true)
+        }
         _ => None,
     }
 }
