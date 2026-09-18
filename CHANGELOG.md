@@ -19,6 +19,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The shell's threat pages no longer present an unrated threat as a rated one.
+  The threat-model normalizer keeps an impact it does not recognize verbatim
+  with a warning, leaves an explicit `unknown` alone, and ranks both last — and
+  the Stories, Scope, and STRIDE view models then read all of that as a band.
+  Every impact outside the display mapping's five arms, the literal `unknown`
+  included, became `MEDIUM`, as did a threat carrying no `impact` field at all,
+  so an unrated threat sorted among the genuinely medium ones. The STRIDE
+  rollup understated the same absence as `LOW`, which also toned an empty
+  category as low rather than unmeasured while its own member rows already read
+  `UNKNOWN`. All three now fail closed to the `Unknown` band the tone enums and
+  rank tables already carried; `medium` keeps an explicit arm and `info` stays
+  banded because the model stated it. The Scope page gained `info` and
+  `unknown` buckets so those threats stop vanishing: without a bucket to land
+  in they were dropped from the list *and* from the `SCOPE · N issues` total,
+  which already understated the count for info-rated threats today.
+
 - `bounty:import-har` (and `recon:import {"tool":"har"}`) no longer states HTTP
   facts the capture did not record. An entry with no `request.method` was stored
   as a `GET` — in the finding title, the evidence snippet, and the request line
