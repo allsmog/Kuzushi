@@ -101,15 +101,16 @@ impl<'a> PhaseReceiptBuilder<'a> {
             return Ok(Some(inspect_continuation(self.final_run()?, reason)));
         }
         if self.status != RunItemStatus::Completed {
-            return Ok(Some(self.failure_continuation()?));
+            return Ok(Some(self.non_completed_continuation()?));
         }
         Ok(None)
     }
 
-    /// A failed Map asks the operator to rebuild the context (Retry maps to
-    /// the card's run-again action); other failed phases inspect with the
-    /// recognized remediation drafted in. Unknown classes stay generic.
-    fn failure_continuation(&self) -> Result<WorkflowContinuation> {
+    /// A non-completed Map asks the operator to rebuild the context (Retry maps
+    /// to the card's run-again action) without collapsing a partial result into
+    /// failure language. Other phases inspect with the recognized remediation
+    /// drafted in. Unknown classes stay generic.
+    fn non_completed_continuation(&self) -> Result<WorkflowContinuation> {
         if self.status == RunItemStatus::Blocked {
             return Ok(inspect_continuation(
                 self.final_run()?,
