@@ -542,6 +542,29 @@ rules match bare IPv6 literals (`2001:db8::1`) as well as bracketed ones
 spelling of the addresses it names, so `10.99.0.0/16` denies `::ffff:10.99.0.1`
 too.
 
+`recon:nmap` is the one verb whose target names an address block rather than a
+host — `10.0.0.0/8`, `10.99.0-255.1`, `10.0.0.1,2` all go straight to nmap — and
+its targets are judged as every address in the block. A CIDR deny rule refuses
+the block as soon as it overlaps it, and a CIDR allow rule admits it only by
+containing all of it, so widening the target cannot reach past the scope file. A
+block of 256 addresses or fewer is additionally weighed one address at a time,
+which is what lets a rule written as a host glob (`10.0.0.*`) or split across
+two `cidrs` entries cover a `/24`. A wider block is left to the CIDR rules
+alone, so name addresses under `cidrs` rather than as host globs. A block that
+holds one address counts as a block too, so a respelling such as `10.0.0.5-5`
+is judged as the `10.0.0.5` it scans. nmap also accepts `<name>/<numbits>`
+(`scanme.nmap.org/16`), which resolves the name and then sweeps every address
+sharing those first bits; the scope file cannot resolve a name, so it cannot
+bound that block and never admits it — such a target is refused when an
+`[in_scope]` list is present and reported unknown under a deny-only file. Write
+the block as a CIDR under `cidrs` if you mean to scan it.
+
+Every other verb — `recon:subdomain`, `recon:http-fingerprint`, the recon and
+bounty importers — reads its target as a single host, because that is what curl
+and the importers do with it: `10.0.0.1-2` is a domain name to them and resolves
+to whatever DNS answers with, so it is judged as the one host it is and not as
+the pair it reads like.
+
 ## Patch application and re-verification
 
 `PatchResult` controls patch synthesis and disposable-worktree validation only.

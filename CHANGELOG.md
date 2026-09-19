@@ -19,6 +19,49 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `.kuzushi/scope.toml` now judges a `recon:nmap` target that names an address
+  block by every address in it, instead of by the single host the string starts
+  with. nmap takes blocks —
+  `10.0.0.0/8`, `10.99.0-255.1`, `10.0.0.1,2` — and the gate read only the first
+  reading of each, so it was wrong in both directions. A deny rule was reached
+  by widening the target: `10.0.0.0/8` covers every address a `10.99.0.0/16`
+  deny rule names, but its own network address falls outside that rule, so the
+  target came back `Unknown` and the scan ran across the denied block. An allow
+  list was satisfied by a network address while the scan continued past it:
+  `10.0.0.0/7` matched a `10.0.0.0/8` allow rule and then reached
+  `11.0.0.0/8`. And a plainly in-scope `10.0.0-255.5` was refused outright,
+  because the literal matched no rule at all. A block is now refused when a CIDR
+  deny rule overlaps it anywhere, and admitted when a CIDR allow rule contains
+  all of it; a block of 256 addresses or fewer is additionally weighed one
+  address at a time, so a rule written as a host glob or split across two
+  `cidrs` entries still covers a `/24`. Blocks are weighed against a rule in
+  either address family, as single hosts already were. The block reading stops
+  at the nmap verb: `recon:subdomain`, `recon:http-fingerprint`, and the recon
+  and bounty importers hand their target to curl or a parser, which resolve
+  `10.0.0.1-2` as a domain name reaching whatever DNS answers with, so they keep
+  judging it as the one host it is. Single-host targets, hostnames carrying a
+  hyphen, and URLs are unaffected everywhere. nmap's other block form is refused
+  rather than guessed: `<name>/<numbits>` resolves the name and then sweeps
+  every address sharing those first bits, so `api.example.com/8` was judged as
+  the bare host `api.example.com` and admitted by a `*.example.com` allow rule
+  while the scan covered 2^24 addresses. The gate cannot resolve a name, so it
+  cannot bound that block, and a block it cannot bound is never admitted — it is
+  refused under an allow list and reported unknown under a deny-only file. A
+  block whose base is an `inet_aton` shorthand address is bounded instead of
+  refused, so `0xa.0.0.0/8` is weighed as exactly the addresses `10.0.0.0/8`
+  names. The suffix reading is nmap's target grammar only: a bare base followed
+  by one to three digits, so `api.example.com/path`,
+  `https://api.example.com/8080/x`, and every `Host`-syntax caller are
+  untouched. A block holding a single address is now weighed as a block as
+  well: `10.0.0.5-5`, `10.0.0.5,5`, and `10.0-0.0.5` are valid nmap targets for
+  exactly `10.0.0.5`, but their only host reading is the literal string, which
+  parses as no address, so a `10.0.0.5/32` deny rule had nothing to match and a
+  denied address was reached by respelling it. Because a block reading now
+  covers those single addresses, admitting one also requires every address the
+  target's own readings name to be in scope, so `010.0.0.5` — the block
+  `10.0.0.5` to a decimal octet parser and the host `8.0.0.5` to an `inet_aton`
+  one — is still refused unless the file names both.
+
 - The shell's threat pages no longer present an unrated threat as a rated one.
   The threat-model normalizer keeps an impact it does not recognize verbatim
   with a warning, leaves an explicit `unknown` alone, and ranks both last — and
