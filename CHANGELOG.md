@@ -19,6 +19,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The entry-point browser no longer reports a real catalog's own numbers as
+  unknown before a threat model exists. Every count on its `RECEIPT` line was
+  read only out of the threat-model document's `entryPointCatalog` provenance
+  block, so a freshly extracted 458-row catalog rendered `RECEIPT · catalog ? ·
+  grounding ?/? limit · modeled ? · linked ? · status unknown · policy unknown`
+  directly beneath a source receipt stating `catalog ready` — the same screen
+  contradicting itself, with the page's own `458 extracted` header one line
+  above. The record count now falls back to the catalog artifact's declared
+  `total`, which the page already cross-checks against the rows it parsed, so
+  the catalog states its size whether or not a model has been built. Grounding,
+  modeled, linked, the recorded catalog status, and the selection policy are
+  written only by `threat-model:build`; rather than print each as unknown when
+  no model artifact exists, the line now says the model selection has not run.
+  A model that does exist stays authoritative for all of them, and a model that
+  exists but cannot be read still reports unknown, because then it truly is.
+
 - `.kuzushi/scope.toml` now judges a `recon:nmap` target that names an address
   block by every address in it, instead of by the single host the string starts
   with. nmap takes blocks —

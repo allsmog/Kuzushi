@@ -11,7 +11,7 @@ mod authentication;
 mod fields;
 mod freshness;
 mod validation;
-use fields::{receipt_fields, ReceiptFields};
+use fields::{pointer_usize, receipt_fields, ReceiptFields};
 use freshness::{
     freshness_state, warn_provenance_disagreements, warn_when_dirty_freshness_is_unprovable,
 };
@@ -181,7 +181,7 @@ fn receipt_from_fields(
         freshness,
         &fields,
     );
-    apply_receipt_counts(&mut receipt, &fields);
+    apply_receipt_counts(&mut receipt, &fields, catalog.doc());
     receipt.warnings = warnings;
     receipt
 }
@@ -216,8 +216,20 @@ fn provenance_receipt(
     }
 }
 
-fn apply_receipt_counts(receipt: &mut EntryPointReceipt, fields: &ReceiptFields) {
-    receipt.records = fields.records;
+/// How many records the catalog holds, in descending order of authority: what
+/// the model recorded reading, then the model's own coverage rollup, then the
+/// catalog's declared `total`. The last source is the only one a catalog with
+/// no threat model beside it has, and it is the count `validate_receipt_counts`
+/// already cross-checks against the rows the page parsed, so quoting it leaves
+/// the receipt no less checked — and stops a real catalog from reporting its
+/// size as unknown. The remaining counts are written only by
+/// `threat-model:build`, so they stay absent until it runs.
+fn apply_receipt_counts(
+    receipt: &mut EntryPointReceipt,
+    fields: &ReceiptFields,
+    catalog: Option<&Value>,
+) {
+    receipt.records = fields.records.or_else(|| pointer_usize(catalog, "/total"));
     receipt.records_selected = fields.records_selected;
     receipt.grounding_limit = fields.grounding_limit;
     receipt.grounding_records_selected = fields.grounding_records_selected;
