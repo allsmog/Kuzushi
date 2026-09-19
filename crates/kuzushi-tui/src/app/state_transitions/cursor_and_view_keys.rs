@@ -38,7 +38,11 @@ impl ShellApp {
     }
 
     fn view_key_navigation_is_active(&self) -> bool {
-        self.input_mode() == InputMode::Navigate && self.input().is_empty()
+        // Navigate owns view controls even when the shared composer keeps a
+        // preserved draft. Prompt mode is the only mode in which printable
+        // keys may extend that draft; a stale/nonempty buffer must not turn an
+        // advertised Navigate key such as `1..5` back into prompt text.
+        self.input_mode() == InputMode::Navigate
     }
 
     fn handle_specialized_view_key(
@@ -668,6 +672,52 @@ const UNMODIFIED_CURSOR_KEY_ACTIONS: &[(KeyCode, fn(&mut ShellApp))] = &[
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn navigate_mode_keeps_phase_keys_active_with_a_preserved_draft() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Prove));
+        app.set_input("preserved draft");
+        app.set_input_mode(InputMode::Navigate);
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+
+        assert!(update.handled);
+        assert_eq!(
+            crate::ui_view_models::active_workbench_page(&app),
+            crate::app::WorkbenchPage::Fix
+        );
+        assert_eq!(app.input(), "preserved draft");
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+    }
+
+    #[test]
+    fn prompt_mode_still_appends_phase_digits_to_the_draft() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Prove));
+        app.set_input("draft");
+        app.set_input_mode(InputMode::Prompt);
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+
+        assert!(update.handled);
+        assert_eq!(
+            crate::ui_view_models::active_workbench_page(&app),
+            crate::app::WorkbenchPage::Prove
+        );
+        assert_eq!(app.input(), "draft5");
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+    }
 
     #[test]
     fn dfd_g_prepares_regeneration_for_the_leaf_that_owns_structured_evidence() {
