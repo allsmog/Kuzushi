@@ -52,7 +52,15 @@ Notable changes to Kuzushi. Release procedure lives in
   names. The suffix reading is nmap's target grammar only: a bare base followed
   by one to three digits, so `api.example.com/path`,
   `https://api.example.com/8080/x`, and every `Host`-syntax caller are
-  untouched.
+  untouched. A block holding a single address is now weighed as a block as
+  well: `10.0.0.5-5`, `10.0.0.5,5`, and `10.0-0.0.5` are valid nmap targets for
+  exactly `10.0.0.5`, but their only host reading is the literal string, which
+  parses as no address, so a `10.0.0.5/32` deny rule had nothing to match and a
+  denied address was reached by respelling it. Because a block reading now
+  covers those single addresses, admitting one also requires every address the
+  target's own readings name to be in scope, so `010.0.0.5` — the block
+  `10.0.0.5` to a decimal octet parser and the host `8.0.0.5` to an `inet_aton`
+  one — is still refused unless the file names both.
 
 - The shell's threat pages no longer present an unrated threat as a rated one.
   The threat-model normalizer keeps an impact it does not recognize verbatim

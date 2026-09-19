@@ -152,10 +152,28 @@ impl ProgramScope {
     /// be shown to contain addresses that have not been computed.
     fn admits(&self, hosts: &[String], block: BlockReading) -> bool {
         match block {
-            BlockReading::Bounded(range) => covers_range(&self.in_scope, range),
+            BlockReading::Bounded(range) => {
+                covers_range(&self.in_scope, range) && self.admits_address_readings(hosts)
+            }
             BlockReading::Unboundable => false,
             BlockReading::NoBlock => hosts.iter().all(|host| matches_any(&self.in_scope, host)),
         }
+    }
+
+    /// `true` when the allow list also covers every address the target's own
+    /// readings name. [`candidate_hosts`] promises that an allow list has to
+    /// cover every host a target could reach, and a block reading must not
+    /// quietly drop that promise: `010.0.0.5` is the block `10.0.0.5` to a
+    /// decimal octet parser and the host `8.0.0.5` to an `inet_aton` one, so an
+    /// allow rule naming only the first admits a scan the second would send
+    /// somewhere no rule covers. A reading that parses as no address names no
+    /// address to check, which is every ordinary block spelling — `10.0.0-255.5`
+    /// reads as nothing but itself, so its range decides alone.
+    fn admits_address_readings(&self, hosts: &[String]) -> bool {
+        hosts
+            .iter()
+            .filter(|host| IpAddr::from_str(host).is_ok())
+            .all(|host| matches_any(&self.in_scope, host))
     }
 }
 
@@ -268,8 +286,9 @@ struct AddressRange {
     high: u128,
 }
 
-/// The block a target names when it names more than one address, or `None`
-/// when it names a single host that [`candidate_hosts`] already judges.
+/// The block a target names under the caller's syntax, or `None` when the
+/// string names no block this gate can read and [`candidate_hosts`] judges it
+/// alone.
 ///
 /// nmap takes a block, not just a host: `nmap 10.0.0.0/8`, `10.99.0-255.1`, and
 /// `10.0.0.1,2` each probe every address between their ends. Reading only the
@@ -287,6 +306,13 @@ struct AddressRange {
 /// which can answer with any address at all, so reading it as the two addresses
 /// it looks like would admit an asset no rule covers.
 ///
+/// A block holding one address is still a block, because the spelling is what
+/// the host readings cannot follow: `10.0.0.5-5`, `10.0.0.5,5`, and
+/// `10.0-0.0.5` are valid nmap targets that scan exactly `10.0.0.5`, and the
+/// only host reading of each is the literal string, which parses as no address
+/// at all. Dropping their range left a `10.0.0.5/32` deny rule with nothing to
+/// match, so a denied address was reached by respelling it.
+///
 /// The block is weighed alongside the host readings, never instead of them, so
 /// a rule written against the block's own address keeps matching it. A form
 /// this cannot read names no block it can judge, so it contributes none rather
@@ -300,7 +326,9 @@ fn candidate_range(target: &str, syntax: TargetSyntax) -> Option<AddressRange> {
     let range = cidr_target_range(trimmed)
         .or_else(|| octet_target_range(trimmed))
         .or_else(|| shorthand_cidr_range(trimmed))?;
-    (range.low < range.high).then_some(range)
+    // Every parse above yields its ends in order; an inverted one would name a
+    // block nothing can be weighed against, so it contributes none.
+    (range.low <= range.high).then_some(range)
 }
 
 /// What a target names once the block forms of the caller's syntax are read.
@@ -1893,7 +1921,7 @@ mod tests {
     }
 
     #[test]
-    fn a_single_host_target_is_unchanged_by_range_matching() {
+    fn a_single_address_target_is_judged_as_the_one_address_block_it_names() {
         let scope = scope(
             r#"
             [in_scope]
@@ -1901,12 +1929,111 @@ mod tests {
             cidrs = ["10.1.0.0/16"]
             "#,
         );
-        // A one-address block carries no range a rule has to cover, so the host
-        // readings judge it exactly as they did before.
+        // A one-address block is weighed as a block, which reaches the same
+        // verdicts the host readings did: a CIDR rule contains it, and a block
+        // this small is weighed address by address, so a host rule names it too.
         assert_eq!(block_verdict(&scope, "10.0.0.5/32"), ScopeVerdict::InScope);
         assert_eq!(block_verdict(&scope, "10.0.0.5"), ScopeVerdict::InScope);
         assert_eq!(block_verdict(&scope, "10.1.4.7"), ScopeVerdict::InScope);
         assert_eq!(block_verdict(&scope, "10.2.0.1"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_one_address_ipv6_block_is_judged_like_its_ipv4_counterpart() {
+        let allow = scope(
+            r#"
+            [in_scope]
+            cidrs = ["2001:db8::/32"]
+            "#,
+        );
+        assert_eq!(block_verdict(&allow, "2001:db8::/128"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&allow, "2001:db8::1/128"), ScopeVerdict::InScope);
+        assert_eq!(
+            block_verdict(&allow, "2001:db9::1/128"),
+            ScopeVerdict::OutOfScope
+        );
+        let deny = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["2001:db8::1/128"]
+            "#,
+        );
+        assert_eq!(
+            block_verdict(&deny, "2001:db8::1/128"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(block_verdict(&deny, "2001:db8::2/128"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn a_degenerate_octet_spelling_still_names_the_address_it_scans() {
+        // Each of these is a valid nmap target that scans exactly 10.0.0.5, and
+        // the only host reading of each is the literal string, which parses as
+        // no address. Without the one-address block the deny rule had nothing
+        // to match and the denied address was reached by respelling it.
+        let deny = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.0.0.5/32"]
+            "#,
+        );
+        assert_eq!(block_verdict(&deny, "10.0.0.5-5"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&deny, "10.0.0.5,5"), ScopeVerdict::OutOfScope);
+        assert_eq!(block_verdict(&deny, "10.0-0.0.5"), ScopeVerdict::OutOfScope);
+        // A host rule naming the address reaches the same respellings, because
+        // a block this small is weighed one address at a time.
+        let named = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["10.0.0.5"]
+            "#,
+        );
+        assert_eq!(block_verdict(&named, "10.0.0.5-5"), ScopeVerdict::OutOfScope);
+        // A respelling of an address the file does not name is still nobody's
+        // business to refuse.
+        assert_eq!(block_verdict(&deny, "10.0.0.6-6"), ScopeVerdict::Unknown);
+        let allow = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/24"]
+            "#,
+        );
+        assert_eq!(block_verdict(&allow, "10.0.0.5-5"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&allow, "10.0.0.5,5"), ScopeVerdict::InScope);
+        assert_eq!(block_verdict(&allow, "10.1.0.5-5"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_block_is_admitted_only_when_its_other_address_readings_are_in_scope_too() {
+        let allow = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/24"]
+            "#,
+        );
+        // A decimal octet parser reads `010.0.0.5` as the block 10.0.0.5, while
+        // an `inet_aton` one reads the host 8.0.0.5. The allow list names only
+        // the first, so admitting the target would let the second reading reach
+        // an address no rule covers: the block is refused, as it was before it
+        // had a range at all.
+        assert_eq!(block_verdict(&allow, "010.0.0.5"), ScopeVerdict::OutOfScope);
+        assert_eq!(allow.verdict("010.0.0.5"), ScopeVerdict::OutOfScope);
+        // Naming both readings admits it.
+        let both = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/24", "8.0.0.0/24"]
+            "#,
+        );
+        assert_eq!(block_verdict(&both, "010.0.0.5"), ScopeVerdict::InScope);
+        // A deny rule on either reading still refuses it.
+        let deny = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.0.0.5/32"]
+            "#,
+        );
+        assert_eq!(block_verdict(&deny, "010.0.0.5"), ScopeVerdict::OutOfScope);
     }
 
     #[test]
@@ -1916,9 +2043,21 @@ mod tests {
         assert_eq!(octet_target_range("10.0.0.1-300"), None);
         assert_eq!(octet_target_range("10.0.0.9-1"), None);
         assert_eq!(octet_target_range("10..0.1"), None);
-        // A spec naming one address carries no range, so the host readings
-        // keep judging it.
-        assert_eq!(candidate_range("10.0.0.1", TargetSyntax::AddressBlock), None);
+        // A spec naming one address is the block holding just that address, so
+        // a rule can be weighed against it however the operator spelled it.
+        assert_eq!(
+            candidate_range("10.0.0.1", TargetSyntax::AddressBlock),
+            Some(AddressRange {
+                is_ipv4: true,
+                low: packed_octets([10, 0, 0, 1]),
+                high: packed_octets([10, 0, 0, 1]),
+            })
+        );
+        assert_eq!(
+            candidate_range("10.0.0.1-1", TargetSyntax::AddressBlock),
+            candidate_range("10.0.0.1", TargetSyntax::AddressBlock)
+        );
+        // A name is still no block at all.
         assert_eq!(candidate_range("api.example.com", TargetSyntax::AddressBlock), None);
         assert_eq!(candidate_range("https://api.example.com/path", TargetSyntax::AddressBlock), None);
     }

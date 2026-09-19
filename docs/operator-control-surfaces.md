@@ -550,7 +550,14 @@ containing all of it, so widening the target cannot reach past the scope file. A
 block of 256 addresses or fewer is additionally weighed one address at a time,
 which is what lets a rule written as a host glob (`10.0.0.*`) or split across
 two `cidrs` entries cover a `/24`. A wider block is left to the CIDR rules
-alone, so name addresses under `cidrs` rather than as host globs.
+alone, so name addresses under `cidrs` rather than as host globs. A block that
+holds one address counts as a block too, so a respelling such as `10.0.0.5-5`
+is judged as the `10.0.0.5` it scans. nmap also accepts `<name>/<numbits>`
+(`scanme.nmap.org/16`), which resolves the name and then sweeps every address
+sharing those first bits; the scope file cannot resolve a name, so it cannot
+bound that block and never admits it — such a target is refused when an
+`[in_scope]` list is present and reported unknown under a deny-only file. Write
+the block as a CIDR under `cidrs` if you mean to scan it.
 
 Every other verb — `recon:subdomain`, `recon:http-fingerprint`, the recon and
 bounty importers — reads its target as a single host, because that is what curl
