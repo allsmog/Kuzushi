@@ -11,7 +11,7 @@ mod authentication;
 mod fields;
 mod freshness;
 mod validation;
-use fields::{pointer_usize, receipt_fields, ReceiptFields};
+use fields::{receipt_fields, ReceiptFields};
 use freshness::{
     freshness_state, warn_provenance_disagreements, warn_when_dirty_freshness_is_unprovable,
 };
@@ -181,7 +181,7 @@ fn receipt_from_fields(
         freshness,
         &fields,
     );
-    apply_receipt_counts(&mut receipt, &fields, catalog.doc());
+    apply_receipt_counts(&mut receipt, &fields);
     receipt.warnings = warnings;
     receipt
 }
@@ -216,20 +216,15 @@ fn provenance_receipt(
     }
 }
 
-/// How many records the catalog holds, in descending order of authority: what
-/// the model recorded reading, then the model's own coverage rollup, then the
-/// catalog's declared `total`. The last source is the only one a catalog with
-/// no threat model beside it has, and it is the count `validate_receipt_counts`
-/// already cross-checks against the rows the page parsed, so quoting it leaves
-/// the receipt no less checked — and stops a real catalog from reporting its
-/// size as unknown. The remaining counts are written only by
+/// `resolved_records` carries the catalog's declared total where no model
+/// recorded one, which is the only record count a catalog with no threat model
+/// beside it has. `validate_receipt_counts` has already weighed that same
+/// number against the rows the page parsed and against the model's own counts,
+/// so it arrives no less checked — it simply stops a real catalog from
+/// reporting its size as unknown. The remaining counts are written only by
 /// `threat-model:build`, so they stay absent until it runs.
-fn apply_receipt_counts(
-    receipt: &mut EntryPointReceipt,
-    fields: &ReceiptFields,
-    catalog: Option<&Value>,
-) {
-    receipt.records = fields.records.or_else(|| pointer_usize(catalog, "/total"));
+fn apply_receipt_counts(receipt: &mut EntryPointReceipt, fields: &ReceiptFields) {
+    receipt.records = fields.resolved_records();
     receipt.records_selected = fields.records_selected;
     receipt.grounding_limit = fields.grounding_limit;
     receipt.grounding_records_selected = fields.grounding_records_selected;

@@ -752,6 +752,46 @@ fn a_model_receipt_record_count_outranks_the_catalog_total() {
     );
 }
 
+/// A receipt naming how many records the model selected while declaring no
+/// record count of its own is still weighed against the total the line shows.
+/// Without that, the page reported `catalog 1 · modeled 2` — the first read off
+/// the catalog, the second off the model — and warned about neither.
+#[test]
+fn model_counts_are_weighed_against_the_total_the_receipt_reports() {
+    let target = tempfile::tempdir().unwrap();
+    let rows = vec![catalog_row(
+        "EP-1",
+        "one",
+        "http_route",
+        "src/a.rs",
+        json!({}),
+    )];
+    let catalog = authenticated_catalog(target.path(), rows, "rev", false);
+    let digest = catalog_digest(&catalog);
+    let model = artifact(json!({
+        "provenance": {"entryPointCatalog": {
+            "status": "loaded", "sha256": digest,
+            "recordsSelected": 2, "revision": "rev", "revisionDirty": false,
+            "contextSha256": "sha256:context"
+        }},
+        "attackSurface": {"entryPoints": []}
+    }));
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &model,
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    assert_eq!(breakdown.receipt.records, Some(1));
+    assert_eq!(breakdown.receipt.records_selected, Some(2));
+    let warnings = breakdown.receipt.warnings.join("\n");
+    assert!(warnings.contains("selected exceeds records"), "{warnings}");
+}
+
 fn authenticated_catalog(
     target: &Path,
     rows: Vec<Value>,
