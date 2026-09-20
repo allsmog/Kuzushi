@@ -680,6 +680,118 @@ fn a_complete_coverage_catalog_is_not_warned_about() {
     assert!(!warnings.contains("coverage"), "{warnings}");
 }
 
+/// A catalog with no threat model beside it still knows how many records it
+/// holds. Reading that count only out of the model's provenance receipt left a
+/// real, current catalog reporting its own size as unknown.
+#[test]
+fn a_catalog_without_a_model_still_reports_its_own_record_count() {
+    let target = tempfile::tempdir().unwrap();
+    let rows = vec![
+        catalog_row("EP-1", "one", "http_route", "src/a.rs", json!({})),
+        catalog_row("EP-2", "two", "http_route", "src/b.rs", json!({})),
+    ];
+    let catalog = authenticated_catalog(target.path(), rows, "rev", false);
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &ArtifactDocument::without_value(EntryPointArtifactStatus::Missing),
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    assert_eq!(breakdown.receipt.records, Some(2));
+    assert_eq!(breakdown.counts.extracted, 2);
+    // Selection is the model's work, so it stays absent rather than inheriting
+    // the catalog's count.
+    assert_eq!(breakdown.receipt.records_selected, None);
+    assert_eq!(breakdown.receipt.grounding_limit, None);
+    assert_eq!(breakdown.receipt.grounding_records_selected, None);
+    assert_eq!(breakdown.receipt.records_linked, None);
+    assert_eq!(breakdown.receipt.selection_policy, None);
+}
+
+/// What the model recorded reading stays authoritative where it exists; the
+/// catalog's declared total is only the fallback.
+#[test]
+fn a_model_receipt_record_count_outranks_the_catalog_total() {
+    let target = tempfile::tempdir().unwrap();
+    let rows = vec![catalog_row(
+        "EP-1",
+        "one",
+        "http_route",
+        "src/a.rs",
+        json!({}),
+    )];
+    let catalog = authenticated_catalog(target.path(), rows, "rev", false);
+    let digest = catalog_digest(&catalog);
+    let model = artifact(json!({
+        "provenance": {"entryPointCatalog": {
+            "status": "loaded", "sha256": digest, "records": 7,
+            "revision": "rev", "revisionDirty": false,
+            "contextSha256": "sha256:context"
+        }},
+        "attackSurface": {"entryPoints": []}
+    }));
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &model,
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    assert_eq!(breakdown.receipt.records, Some(7));
+    let warnings = breakdown.receipt.warnings.join("\n");
+    assert!(
+        warnings.contains("catalog receipt records 7 does not match 1"),
+        "{warnings}"
+    );
+}
+
+/// A receipt naming how many records the model selected while declaring no
+/// record count of its own is still weighed against the total the line shows.
+/// Without that, the page reported `catalog 1 · modeled 2` — the first read off
+/// the catalog, the second off the model — and warned about neither.
+#[test]
+fn model_counts_are_weighed_against_the_total_the_receipt_reports() {
+    let target = tempfile::tempdir().unwrap();
+    let rows = vec![catalog_row(
+        "EP-1",
+        "one",
+        "http_route",
+        "src/a.rs",
+        json!({}),
+    )];
+    let catalog = authenticated_catalog(target.path(), rows, "rev", false);
+    let digest = catalog_digest(&catalog);
+    let model = artifact(json!({
+        "provenance": {"entryPointCatalog": {
+            "status": "loaded", "sha256": digest,
+            "recordsSelected": 2, "revision": "rev", "revisionDirty": false,
+            "contextSha256": "sha256:context"
+        }},
+        "attackSurface": {"entryPoints": []}
+    }));
+
+    let breakdown = entry_point_breakdown_from_artifacts(
+        target.path(),
+        &catalog,
+        &model,
+        &DfdModel::default(),
+        None,
+        None,
+    );
+
+    assert_eq!(breakdown.receipt.records, Some(1));
+    assert_eq!(breakdown.receipt.records_selected, Some(2));
+    let warnings = breakdown.receipt.warnings.join("\n");
+    assert!(warnings.contains("selected exceeds records"), "{warnings}");
+}
+
 fn authenticated_catalog(
     target: &Path,
     rows: Vec<Value>,

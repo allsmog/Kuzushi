@@ -216,8 +216,15 @@ fn provenance_receipt(
     }
 }
 
+/// `resolved_records` carries the catalog's declared total where no model
+/// recorded one, which is the only record count a catalog with no threat model
+/// beside it has. `validate_receipt_counts` has already weighed that same
+/// number against the rows the page parsed and against the model's own counts,
+/// so it arrives no less checked — it simply stops a real catalog from
+/// reporting its size as unknown. The remaining counts are written only by
+/// `threat-model:build`, so they stay absent until it runs.
 fn apply_receipt_counts(receipt: &mut EntryPointReceipt, fields: &ReceiptFields) {
-    receipt.records = fields.records;
+    receipt.records = fields.resolved_records();
     receipt.records_selected = fields.records_selected;
     receipt.grounding_limit = fields.grounding_limit;
     receipt.grounding_records_selected = fields.grounding_records_selected;

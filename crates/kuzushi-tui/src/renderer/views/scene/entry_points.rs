@@ -1,5 +1,7 @@
 use crate::theme;
-use crate::ui_view_models::{EntryPointBreakdown, EntryPointItem};
+use crate::ui_view_models::{
+    EntryPointArtifactStatus, EntryPointBreakdown, EntryPointItem, EntryPointReceipt,
+};
 use ratatui::prelude::{Line, Span};
 
 mod browser;
@@ -157,6 +159,9 @@ fn provenance_summary(width: usize, model: &EntryPointBreakdown) -> String {
 }
 
 fn receipt_count_summary(width: usize, model: &EntryPointBreakdown) -> String {
+    if model.receipt.model_artifact == EntryPointArtifactStatus::Missing {
+        return unmodeled_receipt_summary(width, &model.receipt);
+    }
     let counts = format!(
         "catalog {} · grounding {}/{} limit · modeled {} · linked {}",
         optional_count(model.receipt.records),
@@ -175,6 +180,22 @@ fn receipt_count_summary(width: usize, model: &EntryPointBreakdown) -> String {
         width,
         format!("RECEIPT · {counts} · status {status} · policy {policy}"),
         format!("{counts} · {status} · {policy}"),
+    )
+}
+
+/// The receipt for a catalog with no threat model beside it. Grounding,
+/// modeled, linked, the recorded catalog status, and the selection policy are
+/// all written by `threat-model:build`; with no model artifact on disk they
+/// were never produced, so reporting each as `?`/`unknown` read as an
+/// unreadable catalog one line under a `catalog ready` source receipt. The
+/// catalog's own record count stands without a model, so it is the one count
+/// this line keeps.
+fn unmodeled_receipt_summary(width: usize, receipt: &EntryPointReceipt) -> String {
+    let catalog = optional_count(receipt.records);
+    responsive_value(
+        width,
+        format!("RECEIPT · catalog {catalog} · model selection not run"),
+        format!("catalog {catalog} · not modeled"),
     )
 }
 
@@ -375,6 +396,30 @@ mod tests {
         assert!(summary.contains("grounding 100/100 limit"), "{summary}");
         assert!(summary.contains("modeled 16"), "{summary}");
         assert!(summary.contains("linked 7"), "{summary}");
+    }
+
+    /// Pre-threat-model, every model-side receipt field is absent. The line
+    /// used to print `catalog ? · grounding ?/? limit · modeled ? · linked ? ·
+    /// status unknown · policy unknown` directly under a source receipt
+    /// asserting the catalog was ready.
+    #[test]
+    fn receipt_summary_states_an_unmodeled_catalog_instead_of_unknowns() {
+        let mut model = sample_model();
+        model.receipt.model_artifact = EntryPointArtifactStatus::Missing;
+        model.receipt.records = Some(458);
+        model.receipt.records_selected = None;
+        model.receipt.grounding_limit = None;
+        model.receipt.grounding_records_selected = None;
+        model.receipt.records_linked = None;
+        model.receipt.catalog_status = None;
+        model.receipt.selection_policy = None;
+
+        let summary = receipt_count_summary(160, &model);
+
+        assert!(summary.contains("catalog 458"), "{summary}");
+        assert!(summary.contains("model selection not run"), "{summary}");
+        assert!(!summary.contains('?'), "{summary}");
+        assert!(!summary.contains("unknown"), "{summary}");
     }
 
     fn sample_model() -> EntryPointBreakdown {

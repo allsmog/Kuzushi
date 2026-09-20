@@ -19,6 +19,11 @@ pub(super) struct ReceiptFields {
     pub(super) model_context_digest: Option<String>,
     pub(super) model_tree_hash: Option<String>,
     pub(super) records: Option<usize>,
+    /// The record count the catalog artifact declares for itself. Held apart
+    /// from `records` so the model-declared count stays the only input to the
+    /// receipt-versus-rows check, while `resolved_records` still weighs the
+    /// model's own counts against whichever total the receipt line shows.
+    pub(super) catalog_declared_records: Option<usize>,
     pub(super) records_selected: Option<usize>,
     pub(super) grounding_limit: Option<usize>,
     pub(super) grounding_records_selected: Option<usize>,
@@ -26,10 +31,21 @@ pub(super) struct ReceiptFields {
     pub(super) selection_policy: Option<String>,
 }
 
+impl ReceiptFields {
+    /// How many records the receipt line reports, in descending order of
+    /// authority: what the model recorded reading, then the catalog's own
+    /// declared total. Validation and presentation both read this, so the
+    /// counts a warning weighs are the counts the operator sees.
+    pub(super) fn resolved_records(&self) -> Option<usize> {
+        self.records.or(self.catalog_declared_records)
+    }
+}
+
 pub(super) fn receipt_fields(catalog: Option<&Value>, model: Option<&Value>) -> ReceiptFields {
     let receipt = model.and_then(|doc| doc.pointer("/provenance/entryPointCatalog"));
     let mut fields = artifact_receipt_fields(catalog, model, receipt);
     apply_coverage_fields(&mut fields, model, receipt);
+    fields.catalog_declared_records = pointer_usize(catalog, "/total");
     fields
 }
 

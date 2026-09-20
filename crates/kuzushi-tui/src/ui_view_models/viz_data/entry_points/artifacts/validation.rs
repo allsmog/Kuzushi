@@ -75,19 +75,25 @@ fn validate_artifact_counts(
     );
 }
 
+/// The model's own counts are weighed against the record total the receipt
+/// line will show, not only against the one the model declared. A receipt
+/// naming `recordsSelected` while omitting its own record count would
+/// otherwise present `catalog 1 · modeled 2` — read off the catalog and the
+/// model receipt respectively — with nothing saying the pair is impossible.
 fn validate_count_relations(fields: &ReceiptFields, warnings: &mut Vec<String>) {
+    let records = fields.resolved_records();
     push_invalid_relation(
         "selected",
         fields.records_selected,
         "records",
-        fields.records,
+        records,
         warnings,
     );
     push_invalid_relation(
         "linked",
         fields.records_linked,
         "records",
-        fields.records,
+        records,
         warnings,
     );
     push_invalid_relation(
