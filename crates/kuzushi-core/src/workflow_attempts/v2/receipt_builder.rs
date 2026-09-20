@@ -101,15 +101,16 @@ impl<'a> PhaseReceiptBuilder<'a> {
             return Ok(Some(inspect_continuation(self.final_run()?, reason)));
         }
         if self.status != RunItemStatus::Completed {
-            return Ok(Some(self.failure_continuation()?));
+            return Ok(Some(self.non_completed_continuation()?));
         }
         Ok(None)
     }
 
-    /// A failed Map asks the operator to rebuild the context (Retry maps to
-    /// the card's run-again action); other failed phases inspect with the
-    /// recognized remediation drafted in. Unknown classes stay generic.
-    fn failure_continuation(&self) -> Result<WorkflowContinuation> {
+    /// A non-completed Map asks the operator to rebuild the context (Retry maps
+    /// to the card's run-again action) without collapsing a partial result into
+    /// failure language. Other phases inspect with the recognized remediation
+    /// drafted in. Unknown classes stay generic.
+    fn non_completed_continuation(&self) -> Result<WorkflowContinuation> {
         if self.status == RunItemStatus::Blocked {
             return Ok(inspect_continuation(
                 self.final_run()?,
@@ -119,7 +120,7 @@ impl<'a> PhaseReceiptBuilder<'a> {
         let remediation = self.terminal_remediation();
         if self.phase == WorkflowPhase::Map {
             return Ok(WorkflowContinuation::Retry {
-                reason: SafeText::operator_visible(map_rebuild_reason(remediation)),
+                reason: SafeText::operator_visible(map_rebuild_reason(self.status, remediation)),
             });
         }
         let reason = remediation.map_or_else(
@@ -345,12 +346,19 @@ fn inspect_continuation(run_id: RunId, reason: &str) -> WorkflowContinuation {
 }
 
 fn map_rebuild_reason(
+    status: RunItemStatus,
     remediation: Option<super::failure_remediation::FailureRemediation>,
 ) -> String {
     remediation.map_or_else(
-        || {
-            "rebuild the current-revision map context after inspecting the failure evidence"
-                .to_string()
+        || match status {
+            RunItemStatus::Partial => {
+                "rebuild the current-revision map context after inspecting the partial evidence"
+                    .to_string()
+            }
+            _ => {
+                "rebuild the current-revision map context after inspecting the failure evidence"
+                    .to_string()
+            }
         },
         |found| {
             format!(
@@ -405,6 +413,52 @@ fn next_phase(phase: WorkflowPhase) -> Option<WorkflowPhase> {
         WorkflowPhase::Review => Some(WorkflowPhase::Prove),
         WorkflowPhase::Prove => Some(WorkflowPhase::Fix),
         WorkflowPhase::Fix => None,
+    }
+}
+
+#[cfg(test)]
+mod partial_receipt_truth_tests {
+    use super::*;
+    use crate::run_lifecycle::TerminalProjection;
+
+    #[test]
+    fn partial_map_receipt_names_partial_evidence_instead_of_failure_evidence() {
+        let run_id =
+            RunId::parse(&crate::run_artifacts::new_run_id("partial-receipt-test")).unwrap();
+        let mut projection = RunProjection {
+            run_id: Some(run_id.clone()),
+            ..RunProjection::default()
+        };
+        projection.terminal = Some(TerminalProjection {
+            item_id: RunItemId::new(),
+            status: RunItemStatus::Partial,
+            summary: SafeText::operator_visible("entry-points:extract returned partial coverage"),
+            cost: RuntimeCostReport::UNAVAILABLE,
+            continuation: WorkflowContinuation::NoFurtherAction {
+                reason: SafeText::operator_visible("await phase receipt"),
+            },
+        });
+
+        let item = PhaseReceiptBuilder::new(
+            WorkflowPhase::Map,
+            RunItemStatus::Partial,
+            std::slice::from_ref(&run_id),
+            std::slice::from_ref(&projection),
+        )
+        .build()
+        .unwrap();
+        let RunItemV1::PhaseReceipt { continuation, .. } = item else {
+            panic!("expected a phase receipt");
+        };
+        let WorkflowContinuation::Retry { reason } = continuation else {
+            panic!("partial Map should offer a retry continuation");
+        };
+
+        assert_eq!(
+            reason.as_str(),
+            "rebuild the current-revision map context after inspecting the partial evidence",
+        );
+        assert!(!reason.as_str().contains("failure"));
     }
 }
 
