@@ -1536,19 +1536,32 @@ mod tests {
     fn unresolved_partial_scan_acknowledgement_outranks_generic_next_action() {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
-        let snapshot = PhaseTargetSnapshot::capture(target.path());
         append_phase_checkpoint_skipped(
             target.path(),
-            PhaseCheckpointSkipped::new(WorkflowPhase::Map, snapshot.clone()),
+            PhaseCheckpointSkipped::new(
+                WorkflowPhase::Map,
+                PhaseTargetSnapshot::capture(target.path()),
+            ),
         )
         .unwrap();
-        let partial = PhaseAttemptCompleted::new(
+        crate::test_support::record_indexed_run(
+            target.path(),
+            "scan-partial",
+            "sast:scan",
+            serde_json::json!({
+                "ok": true,
+                "status": "partial",
+                "summary": "partial scan",
+                "warnings": ["incomplete engine"],
+                "data": {"count": 0}
+            }),
+        );
+        crate::test_support::append_typed_attempt(
+            target.path(),
             WorkflowPhase::Scan,
-            vec!["scan-partial".to_string()],
-            snapshot,
+            "scan-partial",
             PhaseAttemptOutcome::Partial,
         );
-        append_phase_attempt_completed(target.path(), partial).unwrap();
 
         let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
 
@@ -1566,13 +1579,7 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         record_selected_scan_attempt(target.path(), PhaseAttemptOutcome::Completed);
-        let map = PhaseAttemptCompleted::new(
-            WorkflowPhase::Map,
-            vec!["map-new".to_string()],
-            PhaseTargetSnapshot::capture(target.path()),
-            PhaseAttemptOutcome::Completed,
-        );
-        append_phase_attempt_completed(target.path(), map).unwrap();
+        record_attempt(target.path(), WorkflowPhase::Map, "map-new", false);
 
         let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
 
@@ -2120,13 +2127,18 @@ mod tests {
     }
 
     fn record_attempt(target: &Path, phase: WorkflowPhase, run_id: &str, discarded: bool) {
-        let completed = PhaseAttemptCompleted::new(
+        crate::test_support::record_indexed_run(
+            target,
+            run_id,
+            "context:build",
+            serde_json::json!({"ok": true, "data": {"snapshot": {"filesIndexed": 1}}}),
+        );
+        let completed = crate::test_support::append_typed_attempt(
+            target,
             phase,
-            vec![run_id.to_string()],
-            PhaseTargetSnapshot::capture(target),
+            run_id,
             PhaseAttemptOutcome::Completed,
         );
-        append_phase_attempt_completed(target, completed.clone()).unwrap();
         if discarded {
             append_phase_attempt_disposition(
                 target,

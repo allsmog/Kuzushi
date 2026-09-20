@@ -740,7 +740,14 @@ fn legacy_restarted_result_card_requires_typed_run_evidence() {
     );
     assert!(card.detail.contains("run receipt unavailable"));
     assert!(!card.detail.contains("$0.4200"));
-    assert!(card.recommended.contains("open the failed run"));
+    // The referenced runs carry no authenticatable content identity, so the
+    // card names that rather than replaying the attempt's stored receipt.
+    assert!(
+        card.recommended
+            .contains("recorded source identity is unavailable or no longer current"),
+        "{}",
+        card.recommended
+    );
     assert_eq!(card.control_hint, "Esc Navigate to resolve this result");
 }
 
