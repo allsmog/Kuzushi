@@ -19,6 +19,23 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The campaign folds no longer present a findings ledger they could not read
+  as an empty one. `campaign:status` folded its review decisions with
+  `list_all_review_decisions().ok().unwrap_or_default()`, so an unopenable
+  findings database produced `TREND  FP rate — (no decisions) · 0 confirmed`,
+  and `campaign:status` then appended that fabricated zero to
+  `.kuzushi/trend-history.jsonl`, where it dipped every sparkline drawn
+  afterwards. `campaign:coverage` did the same with `list_all_findings()`, so
+  a shard nobody could count reported the same `0` as a shard that is clean —
+  in the one fold whose purpose is to answer "where have we looked and what
+  did we find". A read that failed is now its own state: `TrendMetrics` carries
+  `decisions_unreadable` (no FP rate, no cost-per-confirmed, `confirmed
+  unknown` on the strip, `decisionsUnreadable` in `trend`), the history
+  recorder refuses such a snapshot, and `campaign:coverage` states the
+  degraded read beside its counts and reports `findingLedger` in its result
+  data. An absent findings store still folds over an empty ledger, as it
+  always has — there is no database to have failed.
+
 - The entry-point browser no longer reports a real catalog's own numbers as
   unknown before a threat model exists. Every count on its `RECEIPT` line was
   read only out of the threat-model document's `entryPointCatalog` provenance

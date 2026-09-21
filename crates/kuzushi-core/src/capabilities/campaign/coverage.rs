@@ -22,6 +22,50 @@ pub struct CoverageFinding {
     pub confirmed: bool,
 }
 
+/// How the projected findings were obtained. Zero findings from a store the
+/// fold could not read is not the same claim as zero findings from a store it
+/// read: only the second means a shard is clean, and the matrix exists to
+/// answer exactly that question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindingLedgerRead {
+    /// Findings and their review decisions both read.
+    Read,
+    /// No findings store was attached to this execution.
+    NoStore,
+    /// The findings could not be read; every shard count is zero for that
+    /// reason alone.
+    FindingsUnreadable,
+    /// Findings read, but their review decisions could not be, so every
+    /// confirmed count is a lower bound.
+    DecisionsUnreadable,
+}
+
+impl FindingLedgerRead {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::NoStore => "no-store",
+            Self::FindingsUnreadable => "findings-unreadable",
+            Self::DecisionsUnreadable => "decisions-unreadable",
+        }
+    }
+
+    /// What the operator must be told before reading a count, or `None` when
+    /// the counts are a measurement.
+    pub fn degraded_note(self) -> Option<&'static str> {
+        match self {
+            Self::Read => None,
+            Self::NoStore => Some(" — no findings store; shard finding counts are NOT measured"),
+            Self::FindingsUnreadable => {
+                Some(" — findings unreadable; shard finding counts are NOT measured")
+            }
+            Self::DecisionsUnreadable => {
+                Some(" — review decisions unreadable; confirmed counts are a lower bound")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CoverageCellState {
     /// No campaign has ever planned this shard × source combination.
@@ -300,6 +344,46 @@ mod tests {
         assert!(CoverageCellState::Planned > CoverageCellState::Never);
     }
 
+    fn empty_report(unreadable_campaigns: usize) -> CoverageReport {
+        CoverageReport {
+            columns: vec!["threat-model.json".to_string()],
+            rows: Vec::new(),
+            campaign_count: 1,
+            unreadable_campaigns,
+        }
+    }
+
+    #[test]
+    fn counts_from_a_store_the_fold_could_not_read_are_disclosed_as_unmeasured() {
+        let report = empty_report(0);
+
+        let read = coverage_output_line(&report, FindingLedgerRead::Read);
+        assert!(!read.contains("NOT measured"), "{read}");
+        assert!(!read.contains("lower bound"), "{read}");
+        for ledger in [FindingLedgerRead::NoStore, FindingLedgerRead::FindingsUnreadable] {
+            let line = coverage_output_line(&report, ledger);
+            assert!(line.contains("NOT measured"), "{line}");
+        }
+        let decisions = coverage_output_line(&report, FindingLedgerRead::DecisionsUnreadable);
+        assert!(decisions.contains("confirmed counts are a lower bound"), "{decisions}");
+        assert_eq!(
+            coverage_report_json(&report, FindingLedgerRead::FindingsUnreadable)["findingLedger"],
+            "findings-unreadable"
+        );
+        assert_eq!(
+            coverage_report_json(&report, FindingLedgerRead::Read)["findingLedger"],
+            "read"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_campaign_dir_and_an_unreadable_ledger_are_both_stated() {
+        let line = coverage_output_line(&empty_report(2), FindingLedgerRead::FindingsUnreadable);
+
+        assert!(line.contains("2 campaign dir(s) unreadable"), "{line}");
+        assert!(line.contains("findings unreadable"), "{line}");
+    }
+
     #[test]
     fn shard_prefix_matching_stops_at_path_component_boundaries() {
         let paths = vec!["src/api".to_string()];
@@ -320,8 +404,20 @@ pub fn execute_campaign_coverage(
     let workspace = ctx
         .workspace
         .context("campaign:coverage requires an active workspace target")?;
-    let findings = store_coverage_findings(ctx);
+    let (findings, ledger) = store_coverage_findings(ctx);
     let report = coverage_report(workspace.root(), &findings)?;
+    let output = coverage_output_line(&report, ledger);
+    Ok(crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        coverage_report_json(&report, ledger),
+    ))
+}
+
+/// The one-line result. Both ways the fold can be short of the truth — a
+/// campaign dir it could not read, a finding ledger it could not read —
+/// travel with the counts they weaken.
+fn coverage_output_line(report: &CoverageReport, ledger: FindingLedgerRead) -> String {
     let covered = report
         .rows
         .iter()
@@ -331,51 +427,61 @@ pub fn execute_campaign_coverage(
                 .any(|cell| *cell == CoverageCellState::Completed)
         })
         .count();
-    let degraded = if report.unreadable_campaigns > 0 {
-        format!(
-            " — {} campaign dir(s) unreadable; their coverage is NOT counted",
-            report.unreadable_campaigns
-        )
-    } else {
-        String::new()
-    };
-    let output = format!(
-        "campaign:coverage — {} shard(s) × {} threat source(s), {} shard(s) with completed coverage, {} campaign(s){degraded}",
+    let campaigns = unreadable_campaigns_note(report);
+    let findings = ledger.degraded_note().unwrap_or_default();
+    format!(
+        "campaign:coverage — {} shard(s) × {} threat source(s), {} shard(s) with completed coverage, {} campaign(s){campaigns}{findings}",
         report.rows.len(),
         report.columns.len(),
         covered,
         report.campaign_count,
-    );
-    Ok(crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        coverage_report_json(&report),
-    ))
+    )
 }
 
+fn unreadable_campaigns_note(report: &CoverageReport) -> String {
+    if report.unreadable_campaigns == 0 {
+        return String::new();
+    }
+    format!(
+        " — {} campaign dir(s) unreadable; their coverage is NOT counted",
+        report.unreadable_campaigns
+    )
+}
+
+/// Project the store's findings, reporting which of the two reads it took
+/// actually succeeded. A caller that only received the findings would have
+/// no way to tell an empty workspace from an unopenable database.
 pub fn store_coverage_findings(
     ctx: &crate::modules::ToolExecutionContext<'_>,
-) -> Vec<CoverageFinding> {
+) -> (Vec<CoverageFinding>, FindingLedgerRead) {
     let Some(store) = ctx.findings_store else {
-        return Vec::new();
+        return (Vec::new(), FindingLedgerRead::NoStore);
     };
-    let findings = store.list_all_findings().unwrap_or_default();
-    let confirmed_ids = confirmed_finding_ids(store, &findings);
-    findings
+    let Ok(findings) = store.list_all_findings() else {
+        return (Vec::new(), FindingLedgerRead::FindingsUnreadable);
+    };
+    let (confirmed_ids, ledger) = confirmed_finding_ids(store, &findings);
+    let projected = findings
         .iter()
         .map(|finding| coverage_finding(finding, &confirmed_ids))
-        .collect()
+        .collect();
+    (projected, ledger)
 }
 
 fn confirmed_finding_ids(
     store: &crate::findings::FindingStore,
     findings: &[crate::findings::Finding],
-) -> std::collections::BTreeSet<i64> {
-    confirmed_finding_ids_from_decisions(
-        &store
-            .list_review_decisions_for_findings(findings)
-            .unwrap_or_default(),
-    )
+) -> (std::collections::BTreeSet<i64>, FindingLedgerRead) {
+    match store.list_review_decisions_for_findings(findings) {
+        Ok(records) => (
+            confirmed_finding_ids_from_decisions(&records),
+            FindingLedgerRead::Read,
+        ),
+        Err(_) => (
+            std::collections::BTreeSet::new(),
+            FindingLedgerRead::DecisionsUnreadable,
+        ),
+    }
 }
 
 /// A finding counts as confirmed when its LATEST review decision confirms it
@@ -419,11 +525,12 @@ pub fn coverage_finding(
     }
 }
 
-fn coverage_report_json(report: &CoverageReport) -> serde_json::Value {
+fn coverage_report_json(report: &CoverageReport, ledger: FindingLedgerRead) -> serde_json::Value {
     serde_json::json!({
         "columns": report.columns,
         "campaignCount": report.campaign_count,
         "unreadableCampaigns": report.unreadable_campaigns,
+        "findingLedger": ledger.label(),
         "rows": report.rows.iter().map(|row| serde_json::json!({
             "shard": row.shard,
             "paths": row.paths,
