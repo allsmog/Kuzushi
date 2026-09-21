@@ -33,7 +33,9 @@ Notable changes to Kuzushi. Release procedure lives in
   unknown` on the strip, `decisionsUnreadable` in `trend`), the history
   recorder refuses such a snapshot, and `campaign:coverage` states the
   degraded read beside its counts and reports `findingLedger` in its result
-  data. An absent findings store still folds over an empty ledger, as it
+  data. An unreadable decision read leaves the confirmed counts resting on
+  embedded triage verdicts that carry no review reversal, so it is disclosed
+  as unmeasured rather than as a bound in either direction. An absent findings store still folds over an empty ledger, as it
   always has — there is no database to have failed.
 
 - The entry-point browser no longer reports a real catalog's own numbers as

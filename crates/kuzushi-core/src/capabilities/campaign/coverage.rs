@@ -35,8 +35,9 @@ pub enum FindingLedgerRead {
     /// The findings could not be read; every shard count is zero for that
     /// reason alone.
     FindingsUnreadable,
-    /// Findings read, but their review decisions could not be, so every
-    /// confirmed count is a lower bound.
+    /// Findings read, but their review decisions could not be. The confirmed
+    /// counts then rest on embedded triage verdicts alone, which carry no
+    /// review reversal, so they are not a measurement in either direction.
     DecisionsUnreadable,
 }
 
@@ -60,7 +61,7 @@ impl FindingLedgerRead {
                 Some(" — findings unreadable; shard finding counts are NOT measured")
             }
             Self::DecisionsUnreadable => {
-                Some(" — review decisions unreadable; confirmed counts are a lower bound")
+                Some(" — review decisions unreadable; confirmed counts are NOT measured")
             }
         }
     }
@@ -359,13 +360,18 @@ mod tests {
 
         let read = coverage_output_line(&report, FindingLedgerRead::Read);
         assert!(!read.contains("NOT measured"), "{read}");
-        assert!(!read.contains("lower bound"), "{read}");
         for ledger in [FindingLedgerRead::NoStore, FindingLedgerRead::FindingsUnreadable] {
             let line = coverage_output_line(&report, ledger);
-            assert!(line.contains("NOT measured"), "{line}");
+            assert!(line.contains("shard finding counts are NOT measured"), "{line}");
         }
+        // Confirmed counts fall back on embedded triage verdicts that carry no
+        // review reversal, so the note claims no direction, not a lower bound.
         let decisions = coverage_output_line(&report, FindingLedgerRead::DecisionsUnreadable);
-        assert!(decisions.contains("confirmed counts are a lower bound"), "{decisions}");
+        assert!(
+            decisions.contains("confirmed counts are NOT measured"),
+            "{decisions}"
+        );
+        assert!(!decisions.contains("lower bound"), "{decisions}");
         assert_eq!(
             coverage_report_json(&report, FindingLedgerRead::FindingsUnreadable)["findingLedger"],
             "findings-unreadable"
