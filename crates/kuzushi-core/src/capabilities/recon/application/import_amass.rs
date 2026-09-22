@@ -4,8 +4,8 @@ const TOOL: &str = "recon:import-amass";
 
 /// Import an Amass JSONL recon dump (`amass enum -json out.jsonl`) into
 /// the recon store as `ReconHost` rows. Hosts `.kuzushi/scope.toml` puts
-/// out of scope are skipped, and the count is disclosed in the report and
-/// its output line.
+/// out of scope are skipped, and parsed rows without a usable `name` are
+/// counted separately so neither class of refusal disappears from the report.
 pub(crate) fn run_recon_import_amass(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -15,11 +15,13 @@ pub(crate) fn run_recon_import_amass(
         .context(crate::workspace::active_workspace_required_message("recon:import"))?;
     let (path, body) = read_jsonl_path(input, "recon:import amass needs a `path` field")?;
     let mut context = ReconImportContext::open(workspace)?;
+    let record_count = body.lines().filter(|line| !line.trim().is_empty()).count();
     for (lineno, line) in body.lines().enumerate() {
         ingest_amass_line(&mut context, line, lineno)?;
     }
     let host_count = context.hosts.len();
     let skipped = context.skipped_out_of_scope;
+    let skipped_unusable = record_count.saturating_sub(host_count + skipped);
     context.notes.push(context.store.create_note(
         &context.workspace_id,
         None,
@@ -27,8 +29,10 @@ pub(crate) fn run_recon_import_amass(
         TOOL,
         json!({
             "path": path.display().to_string(),
+            "records": record_count,
             "count": host_count,
             "skippedOutOfScope": skipped,
+            "skippedUnusable": skipped_unusable,
         }),
     )?);
     context.into_report(TOOL, path.display().to_string())
