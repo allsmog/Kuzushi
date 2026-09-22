@@ -19,6 +19,7 @@ pub(crate) struct ReconImportContext<'a> {
     pub(crate) services: Vec<ReconService>,
     pub(crate) notes: Vec<ReconNote>,
     pub(crate) skipped_out_of_scope: usize,
+    pub(crate) skipped_unusable: usize,
 }
 
 impl<'a> ReconImportContext<'a> {
@@ -35,6 +36,7 @@ impl<'a> ReconImportContext<'a> {
             services: Vec::new(),
             notes: Vec::new(),
             skipped_out_of_scope: 0,
+            skipped_unusable: 0,
         })
     }
 
@@ -49,6 +51,14 @@ impl<'a> ReconImportContext<'a> {
         }
         self.skipped_out_of_scope += 1;
         false
+    }
+
+    /// Record a parsed input row that cannot name the host the recon store
+    /// needs. Increment at the decision point rather than inferring this class
+    /// later from arithmetic so future intentional filters cannot be mislabeled
+    /// as malformed/unusable input.
+    pub(crate) fn skip_unusable_host(&mut self) {
+        self.skipped_unusable += 1;
     }
 
     pub(crate) fn into_report(self, tool: &str, target: String) -> Result<ReconReport> {
