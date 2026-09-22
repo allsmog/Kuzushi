@@ -49,7 +49,7 @@ fn ingest_amass_line(
     }
     let entry: Value = serde_json::from_str(trimmed)
         .with_context(|| format!("amass JSONL line {} is not valid JSON", lineno + 1))?;
-    let Some(name) = entry.get("name").and_then(Value::as_str) else {
+    let Some(name) = amass_name(&entry) else {
         return Ok(());
     };
     if !context.admit_host(name) {
@@ -66,6 +66,14 @@ fn ingest_amass_line(
     Ok(())
 }
 
+fn amass_name(entry: &Value) -> Option<&str> {
+    entry
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+}
+
 fn amass_host_metadata(entry: &Value) -> Value {
     json!({
         "discoveredBy": TOOL,
@@ -75,4 +83,17 @@ fn amass_host_metadata(entry: &Value) -> Value {
         "addresses": entry.get("addresses").cloned().unwrap_or(Value::Null),
         "raw": entry.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_nonempty_amass_name_is_addressable() {
+        assert_eq!(amass_name(&json!({"name": " api.example.com "})), Some("api.example.com"));
+        assert_eq!(amass_name(&json!({"name": ""})), None);
+        assert_eq!(amass_name(&json!({"name": "   "})), None);
+        assert_eq!(amass_name(&json!({"domain": "example.com"})), None);
+    }
 }
