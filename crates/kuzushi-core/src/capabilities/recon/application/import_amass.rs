@@ -21,7 +21,7 @@ pub(crate) fn run_recon_import_amass(
     }
     let host_count = context.hosts.len();
     let skipped = context.skipped_out_of_scope;
-    let skipped_unusable = record_count.saturating_sub(host_count + skipped);
+    let skipped_unusable = context.skipped_unusable;
     context.notes.push(context.store.create_note(
         &context.workspace_id,
         None,
@@ -50,6 +50,7 @@ fn ingest_amass_line(
     let entry: Value = serde_json::from_str(trimmed)
         .with_context(|| format!("amass JSONL line {} is not valid JSON", lineno + 1))?;
     let Some(name) = amass_name(&entry) else {
+        context.skip_unusable_host();
         return Ok(());
     };
     if !context.admit_host(name) {
