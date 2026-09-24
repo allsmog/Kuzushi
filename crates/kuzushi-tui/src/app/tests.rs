@@ -1427,6 +1427,33 @@ JSON
     binary
 }
 
+/// Stands in for bubblewrap so patch validation does not depend on the host.
+/// Validation refuses to run repository commands without an isolating
+/// sandbox; this shell test covers bridge dispatch and persistence, while the
+/// sandbox policy itself is covered in kuzushi-core. The shim records every
+/// invocation and runs the command after `--` inside the validation checkout.
+#[cfg(target_os = "linux")]
+fn fake_bwrap_on_path(dir: &Path) -> (PathBuf, EnvVarGuard) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = dir.join("sandbox-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let calls = dir.join("bwrap-calls.log");
+    let shim = bin.join("bwrap");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\nexec \"$@\"\n",
+        calls.display()
+    );
+    fs::write(&shim, script).unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&inherited)))
+        .unwrap();
+    (calls, EnvVarGuard::set("PATH", path.to_str().unwrap()))
+}
+
 #[cfg(unix)]
 fn init_git_repo(dir: &PathBuf) {
     for args in [
@@ -10602,6 +10629,8 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         .unwrap();
     let bridge_tmp = tempfile::tempdir().unwrap();
     let bridge = fake_patch_bridge(&bridge_tmp.path().to_path_buf());
+    #[cfg(target_os = "linux")]
+    let (sandbox_calls, _sandbox_path) = fake_bwrap_on_path(bridge_tmp.path());
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
@@ -10651,6 +10680,18 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         .unwrap();
     assert_eq!(patch_results.len(), 1);
     assert_eq!(patch_results[0].status.as_str(), "SOUND");
+    #[cfg(target_os = "linux")]
+    assert_validation_commands_ran_sandboxed(&sandbox_calls, 2);
+}
+
+#[cfg(target_os = "linux")]
+fn assert_validation_commands_ran_sandboxed(calls: &Path, expected: usize) {
+    let calls = fs::read_to_string(calls).unwrap_or_default();
+    let sandboxed = calls
+        .lines()
+        .filter(|call| call.contains("--unshare-all"))
+        .count();
+    assert_eq!(sandboxed, expected, "sandbox invocations: {calls}");
 }
 
 #[cfg(unix)]
