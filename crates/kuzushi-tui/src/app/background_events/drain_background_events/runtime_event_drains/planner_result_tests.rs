@@ -75,7 +75,7 @@ fn completed_planner_scan_renders_use_scan_at_ordinary_sizes() {
         let backend = ratatui::backend::TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| crate::renderer::render_app(frame, &mut app))
+            .draw(|frame| crate::renderer::render_app(frame, &app))
             .unwrap();
         let text: String = terminal
             .backend()

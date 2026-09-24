@@ -123,6 +123,7 @@ pub(crate) fn threat_model_freshness(app: &ShellApp) -> ThreatModelFreshnessMode
     }
 }
 
+#[cfg(test)]
 fn picker_from_value(value: serde_json::Value) -> ThreatModelPickerModel {
     let manifest = serde_json::from_value::<ThreatModelManifest>(value);
     match manifest {

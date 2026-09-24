@@ -157,6 +157,7 @@ fn bound_snapshot_scene(app: &ShellApp, snapshot: &ThreatModelSceneSnapshot) -> 
     )
 }
 
+#[cfg(test)]
 fn bound_active_scene(
     app: &ShellApp,
     active: &kuzushi_core::capabilities::ActiveThreatModel,
@@ -165,6 +166,7 @@ fn bound_active_scene(
     bound_scene_parts(app, Some(active.document.clone()), model_ref)
 }
 
+#[cfg(test)]
 fn bound_legacy_scene(app: &ShellApp) -> BoundSceneModel {
     let document = threat_model_doc(app);
     let model_ref = document.as_ref().map(legacy_model_ref_value);
@@ -234,6 +236,7 @@ fn threat_model_ref_value(model_ref: &kuzushi_core::capabilities::ThreatModelRef
     })
 }
 
+#[cfg(test)]
 fn legacy_model_ref_value(document: &Value) -> Value {
     json!({
         "modelId": optional_document_id(document, &["/modelId", "/metadata/modelId", "/provenance/modelId"]),
