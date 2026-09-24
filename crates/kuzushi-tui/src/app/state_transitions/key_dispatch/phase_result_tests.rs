@@ -552,6 +552,10 @@ fn card_key_off_the_workbench_reveals_the_card_without_applying_it() {
 
     fixture.press('u');
     assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert!(
+        fixture.notice_message().is_none(),
+        "the reveal notice is stale once the card is resolved"
+    );
 }
 
 #[test]

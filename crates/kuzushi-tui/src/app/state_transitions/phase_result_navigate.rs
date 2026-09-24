@@ -9,6 +9,8 @@
 
 use super::*;
 
+const RESULT_CARD_NOTICE_SOURCE: &str = "result";
+
 impl ShellApp {
     /// Claim a default result-card key that the on-screen card did not own.
     pub(super) fn reduce_unclaimed_phase_result_key(
@@ -34,8 +36,22 @@ impl ShellApp {
             return;
         }
         self.editor_mut().set_resolved_result_key(Some(ch));
+        self.clear_result_card_notice();
         if is_stray_result_card_draft(self.input()) {
             self.editor_mut().clear_input();
+        }
+    }
+
+    /// A "press again" notice from revealing the card is stale once the card
+    /// is resolved; leave any other source's notice alone.
+    fn clear_result_card_notice(&mut self) {
+        let from_result_card = self
+            .advisory()
+            .notice
+            .as_ref()
+            .is_some_and(|notice| notice.source == RESULT_CARD_NOTICE_SOURCE);
+        if from_result_card {
+            self.clear_notice();
         }
     }
 
@@ -63,7 +79,7 @@ impl ShellApp {
     fn reveal_phase_result_card(&mut self, phase: WorkflowPhase, ch: char) -> InputUpdate {
         self.set_workbench_page(WorkbenchPage::from_phase(phase));
         self.set_info_notice(
-            "result",
+            RESULT_CARD_NOTICE_SOURCE,
             format!(
                 "{} result card opened — press {ch} again to apply it",
                 phase.title()
@@ -74,7 +90,7 @@ impl ShellApp {
 
     fn absorb_resolved_result_echo(&mut self, ch: char) -> InputUpdate {
         self.set_info_notice(
-            "result",
+            RESULT_CARD_NOTICE_SOURCE,
             format!("{ch} already resolved that result · Esc returns to the prompt"),
         );
         InputUpdate::handled()
