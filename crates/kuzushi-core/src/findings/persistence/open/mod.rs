@@ -19,6 +19,8 @@ mod rescan_reconciliation;
 mod review_decisions;
 mod run_lifecycle;
 mod static_proof_history;
+#[cfg(test)]
+mod structural_identity_tests;
 mod suppression_events;
 mod threat_model_versions;
 mod triage_and_verification;

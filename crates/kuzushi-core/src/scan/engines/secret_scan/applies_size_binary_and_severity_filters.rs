@@ -132,6 +132,29 @@ pub(crate) fn missing_target_failure_is_actionable() {
 }
 
 #[test]
+pub(crate) fn repeated_secret_occurrences_get_line_independent_distinct_locators() {
+    let temp = tempfile::tempdir().unwrap();
+    let key = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH";
+    let scan = |text: String| {
+        fs::write(temp.path().join("keys.txt"), text).unwrap();
+        SecretScanScanner
+            .scan(temp.path(), &ScanCancellation::default())
+            .unwrap()
+            .into_iter()
+            .map(|finding| finding.symbol_locator.unwrap())
+            .collect::<Vec<_>>()
+    };
+
+    let first = scan(format!("{key}\n{key}\n"));
+    let shifted = scan(format!("# rotated soon\n\n{key}\n{key}\n"));
+
+    assert_eq!(first.len(), 2);
+    assert_ne!(first[0], first[1]);
+    assert_eq!(first, shifted);
+    assert!(first.iter().all(|locator| !locator.contains("sk-proj")));
+}
+
+#[test]
 pub(crate) fn scanner_converts_results_to_core_findings() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(

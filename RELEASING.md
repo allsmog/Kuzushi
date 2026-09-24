@@ -504,6 +504,44 @@ Keep those packages out of both `dependencies` and `optionalDependencies`;
 `pnpm verify:pack` rejects their accidental reintroduction, including Git URL
 dependencies that would make a fresh npm install depend on GitHub availability.
 
+## Structural producer identity migration (unreleased)
+
+`dep-hygiene`, `cargo-audit`, and `iac-scan` used to fingerprint a finding by
+tool, rule, and file only. Every issue of one rule in one file therefore
+landed in a single stored row: fifteen risky specifiers in one `package.json`
+became one finding with `corroboration_count: 15`, and six public-ingress
+blocks in one Terraform file became one finding. These producers now emit a
+discriminating identity input:
+
+- `dep-hygiene` records `symbolLocator` `<manifest>#<package>` (for example
+  `package.json#neostandard`) and `cargo-audit` records
+  `Cargo.lock#<crate>@<version>`. Both mint the strong `source_locator`
+  identity basis, so rescans of the same dependency corroborate one identity.
+- `iac-scan` keys Terraform `key = value` statements inside labeled blocks by
+  their block path (for example
+  `aws_security_group.alb.ingress[1].cidr_blocks`), also recorded as
+  `symbolLocator`. Other IaC findings are keyed by their exact line and keep
+  their existing weak `file_fallback` identity.
+- `IacScanFinding` gains an optional `locator` field in tool JSON.
+
+Existing durable identities, rows, and review decisions are not rewritten, and
+no `FindingRekeyed` edge is written: a one-to-many split has no unambiguous
+target, and a decision made about a merged row cannot be attributed to any one
+of the issues it absorbed. On the first rescan, each distinct issue mints its
+own identity (new fingerprints and the new locator make the merged identity
+ineligible for exact-fingerprint or dedup-key reuse). The merged identity is
+no longer observed, so the deterministic rescan reconciler marks it stale.
+Re-review split findings that previously inherited a decision from the merged
+row.
+
+`sast:scan` `data.findingsCount` and `data.coreFindings` now use the same safe
+identity fold as `--fail-on` and scan-scoped SARIF instead of collapsing every
+observation that shares a durable identity. Weak `file_fallback` identities,
+such as one secret repeated on identical lines, stay distinct per source
+signature. `data.observationsCount` and the `kuzushi scan --json`
+`observationsCount` field are additive; the summary line reads
+`N distinct finding(s) from M observation(s)` only when the two differ.
+
 ## Run status vocabulary migration (unreleased)
 
 The public run-artifact vocabulary additively includes `"blocked"` and
