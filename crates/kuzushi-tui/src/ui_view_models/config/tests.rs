@@ -85,9 +85,33 @@ fn config_marks_only_the_exact_canonical_catalog_model() {
 }
 
 #[test]
-fn config_prepends_truthful_explicit_row_for_model_outside_catalog() {
+fn config_marks_the_oauth_catalog_row_for_its_codex_spelling() {
     let mut config = V2Config::default();
     config.model = Some("openai-codex:gpt-5.5".to_string());
+    let app = ShellApp::new(config, None);
+
+    let model = config_model(&app);
+    let selected = model
+        .model_table
+        .rows
+        .iter()
+        .filter(|row| row.cells[0] == ">")
+        .collect::<Vec<_>>();
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].cells[1], "12");
+    assert_eq!(selected[0].cells[2], "openai-oauth:gpt-5.5");
+    assert!(model
+        .model_table
+        .rows
+        .iter()
+        .all(|row| row.cells[1] != "explicit"));
+}
+
+#[test]
+fn config_prepends_truthful_explicit_row_for_model_outside_catalog() {
+    let mut config = V2Config::default();
+    config.model = Some("openai-codex:gpt-5.2".to_string());
     let app = ShellApp::new(config, None);
 
     let model = config_model(&app);
@@ -95,7 +119,7 @@ fn config_prepends_truthful_explicit_row_for_model_outside_catalog() {
 
     assert_eq!(explicit.cells[0], ">");
     assert_eq!(explicit.cells[1], "explicit");
-    assert_eq!(explicit.cells[2], "openai-oauth:gpt-5.5");
+    assert_eq!(explicit.cells[2], "openai-oauth:gpt-5.2");
     assert!(model
         .model_table
         .rows
