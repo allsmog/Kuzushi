@@ -100,6 +100,32 @@ fn verified_result_is_keyed_by_digest_and_discloses_omissions() {
     assert_eq!(cell.disclosure.as_ref().unwrap().omitted_count, Some(2));
 }
 
+/// The disclosure line appends its own `omitted=N` count, so the reason
+/// must not also end in "omitted" and stutter as `omitted · omitted=N`.
+#[test]
+fn result_omission_disclosure_states_its_count_once() {
+    let run_id = RunId::parse("run-presentation-omission").unwrap();
+    let item_id = RunItemId::new();
+    let projection = super::super::reduce_run_items(tool_call_items(
+        &run_id,
+        item_id,
+        RunCallId::new(),
+    ));
+    let mut hydration = RunPresentationHydrationV1::default();
+    hydration.insert_verified(item_id, result_summary(&run_id));
+    let presentation =
+        present_projection_with_hydration(&projection, RunProjectionSource::TypedV1, &hydration);
+
+    let lines = find_result_cell(&presentation).display_lines();
+    let disclosure = lines
+        .iter()
+        .find(|line| line.starts_with("Disclosure"))
+        .expect("result omission disclosure");
+
+    assert!(disclosure.contains("omitted=2"), "{disclosure}");
+    assert_eq!(disclosure.matches("omitted").count(), 1, "{disclosure}");
+}
+
 /// Single-line tool outputs are routinely the summary restated; the preview
 /// row must not echo the heading verbatim while distinct lines still show.
 #[test]
