@@ -440,15 +440,20 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
   # footer does not render its mode segment for several seconds (observed
   # >3s on a 442k-file monorepo), so give convergence the same order of
   # patience as the page waits (30s) while still failing honestly.
-  local tries=0 tail3
+  # A key sent just before (e.g. `keys: Escape`) may not have rendered yet,
+  # so one read of a stale Navigate footer is not convergence: the footer
+  # must hold across two identical footer captures 0.5s apart. Otherwise the next
+  # page digit lands in Prompt mode and is typed (seen on a loaded host).
+  local tries=0 frame settled
   while (( tries++ <= 60 )); do
-    tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
-    if devex_footer_is_navigate "$tail3"; then
+    frame=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    sleep 0.5
+    settled=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    if [ "$frame" = "$settled" ] && devex_footer_is_navigate "$settled"; then
       report step "nav-mode (converged)"
       return 0
     fi
-    tmux send-keys -t "$SESSION" Escape
-    sleep 0.5
+    [ "$frame" = "$settled" ] && tmux send-keys -t "$SESSION" Escape
   done
   fail "nav-mode — Navigate footer never rendered"
 }
