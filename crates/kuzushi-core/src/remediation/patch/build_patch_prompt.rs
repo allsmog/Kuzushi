@@ -105,6 +105,7 @@ pub(crate) fn parse_patch_synthesis(raw: Value) -> Result<PatchSynthesisPayload>
     };
     let diff = read_object_raw_string(&object, &["diff"])
         .context("patch synthesis output parse failed: missing non-empty diff")?;
+    let diff = super::recount_hunks::recount_hunk_headers(&diff);
     let explanation = read_object_string(&object, &["explanation"]).unwrap_or_default();
     Ok(PatchSynthesisPayload { diff, explanation })
 }
