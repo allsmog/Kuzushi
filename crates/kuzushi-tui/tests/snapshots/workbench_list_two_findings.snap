@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 164
 ---
- KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
+ KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
- type Esc then B review decision backlog · type Enter open in Prove · type findings show full queue
+ type Esc then B review decision backlog · type Enter queue > Prove · type findings show full queue
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
 2 of 2 · [completeness:all]
@@ -20,6 +20,7 @@ facets before search · severity critical:1 high:1
 >F-0001  C [*oo] s1 @A unverified unassigned review-order:1 decision:confirmed...  sql injection via order_id...
  F-0002  H [*oo] s1 @– unverified unassigned review-order:2 decision:needs_revi... path traversal in /assets/<file>...
  -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
+F-0001 · critical · sources:1
 * candidate - o corroborated - o reproduced - o proven
 claim · unverified scanner assertion
 sql injection via order_id concatenation

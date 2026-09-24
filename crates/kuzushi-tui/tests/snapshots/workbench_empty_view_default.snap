@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
+ KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
- type Esc then B review decision backlog · type Enter open in Prove · type findings show full queue
+ type Esc then B review decision backlog · type Enter queue > Prove · type findings show full queue
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
 0 of 0 · [completeness:all]

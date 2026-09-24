@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 265
 ---
- KUZUSHI › kb · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
+ KUZUSHI › kb · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- KB ATTACHMENTS -----------------------------------------------------------------------------------------------------
 module: context

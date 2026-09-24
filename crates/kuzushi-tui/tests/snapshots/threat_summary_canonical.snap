@@ -2,9 +2,9 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 57
 ---
-KUZUSHI shell route · view:threats:summary · target:none · model:unconfigured · context not built · cost:$0.00 (no...
+ KUZUSHI › threats:summary · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS
+1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS  MODELS
 
  -- THREAT MODEL REVIEW ------------------------------------------------------------------------------------------------
 status             no target selected

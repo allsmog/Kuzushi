@@ -15,4 +15,4 @@ priority  tool                        runtime   signal                          
 ⚠ high    semgrep:scan                no        frameworks: Falcon, Litestar...     Source files match the fast native
                                                                                     SAST path.
 
-> try: run <tool> [json] · trace <run> · runs · back
+> try: run <tool> [key=value] · trace <run> · runs · back

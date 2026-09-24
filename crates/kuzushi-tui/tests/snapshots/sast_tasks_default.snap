@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 137
 ---
- KUZUSHI › tasks · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
+ KUZUSHI › tasks · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
