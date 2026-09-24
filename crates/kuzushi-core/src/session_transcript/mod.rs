@@ -20,7 +20,7 @@ pub use session_lint::{
     lint_session_records, SessionLintFinding, SessionLintKind, SessionLintOptions,
 };
 pub use store::{default_sessions_root, render_session_markdown, SessionTranscriptStore};
-pub use time::unix_seconds_from_timestamp;
+pub use time::{unix_seconds_from_timestamp, utc_timestamp_from_unix_seconds};
 pub use writer::SessionRecorder;
 
 pub const SESSION_TRANSCRIPT_SCHEMA_VERSION: u8 = 1;

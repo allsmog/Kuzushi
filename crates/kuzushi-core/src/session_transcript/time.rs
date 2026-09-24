@@ -42,6 +42,20 @@ fn timestamp_from_millis(millis: u64) -> String {
     )
 }
 
+/// Format Unix seconds as an RFC 3339 UTC timestamp (`2026-09-24T14:43:03Z`).
+/// Stores that record decisions as bare epoch seconds are rendered through
+/// this so operators never read a raw integer as a time.
+pub fn utc_timestamp_from_unix_seconds(seconds: u64) -> String {
+    let (year, month, day) = civil_from_days((seconds / 86_400) as i64);
+    let within_day = seconds % 86_400;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        within_day / 3_600,
+        (within_day % 3_600) / 60,
+        within_day % 60
+    )
+}
+
 fn filename_timestamp(seconds: u64, millis: u64, year: i64, month: i64, day: i64) -> String {
     let within_day = seconds % 86_400;
     format!(

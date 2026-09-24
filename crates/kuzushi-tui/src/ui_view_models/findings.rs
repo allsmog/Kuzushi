@@ -467,7 +467,7 @@ fn apply_decision_history(
                 .actor
                 .clone()
                 .unwrap_or_else(|| record.decision.author.as_str().to_string()),
-            created_at: record.created_at.clone(),
+            created_at: decision_timestamp_label(&record.created_at),
             rationale: record.decision.rationale.clone(),
         })
         .collect();
@@ -1278,6 +1278,33 @@ fn active_batch_cache_value(app: &ShellApp) -> String {
         " batch:{}:{}/{}/{}:{fingerprints}",
         report.batch_id, report.completed, report.planned, report.failed
     )
+}
+
+/// Decisions recorded by the local store carry bare epoch seconds; render
+/// those as UTC. Anything else (already RFC 3339) is shown as recorded.
+fn decision_timestamp_label(created_at: &str) -> String {
+    created_at
+        .trim()
+        .parse::<u64>()
+        .map(kuzushi_core::session_transcript::utc_timestamp_from_unix_seconds)
+        .unwrap_or_else(|_| created_at.to_string())
+}
+
+#[cfg(test)]
+mod decision_timestamp_tests {
+    use super::decision_timestamp_label;
+
+    #[test]
+    fn epoch_decision_timestamps_render_as_utc() {
+        assert_eq!(
+            decision_timestamp_label("1790260983"),
+            "2026-09-24T14:43:03Z"
+        );
+        assert_eq!(
+            decision_timestamp_label("2026-09-24T00:00:00Z"),
+            "2026-09-24T00:00:00Z"
+        );
+    }
 }
 
 #[cfg(test)]
