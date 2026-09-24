@@ -398,6 +398,55 @@ mod tests {
         assert!(!shard_contains(&paths, "src/api2/handler.rs"));
         assert!(shard_contains(&[], "anything/at/all.rs"));
     }
+
+    #[test]
+    fn human_review_reversal_overrides_cached_auto_triage_in_coverage() {
+        use crate::findings::{
+            Finding, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity,
+            TriageAuthor, TriageOutcome, TriageVerdict,
+        };
+
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "rules.example",
+            "src/api.rs",
+            7,
+            Some(7),
+            Severity::High,
+            "example finding",
+        );
+        finding.id = Some(7);
+        finding.identity_id = Some("finding_identity_shared".to_string());
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.9,
+            rationale: "automated triage marked this real".to_string(),
+            ..TriageOutcome::default()
+        });
+        finding.triaged_by = Some(TriageAuthor::Auto);
+
+        let auto_only = coverage_findings_from_review_state(std::slice::from_ref(&finding), &[]);
+        assert!(auto_only[0].confirmed);
+
+        let human_rejection = ReviewDecisionRecord {
+            id: 11,
+            finding_id: 8,
+            identity_id: Some("finding_identity_shared".to_string()),
+            decision: ReviewDecision {
+                verdict: ReviewDecisionVerdict::RejectedFalsePositive,
+                author: TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "operator rejected the durable security case".to_string(),
+                dismiss_reason: None,
+                actor: Some("operator".to_string()),
+            },
+            triage_verdict: Some(TriageVerdict::FalsePositive),
+            created_at: "2026-09-24T00:00:00Z".to_string(),
+            provenance: None,
+        };
+        let reviewed = coverage_findings_from_review_state(&[finding], &[human_rejection]);
+        assert!(!reviewed[0].confirmed);
+    }
 }
 
 /// `campaign:coverage` — the matrix fold rendered as a tool result. Headless
@@ -466,33 +515,46 @@ pub fn store_coverage_findings(
     let Ok(findings) = store.list_all_findings() else {
         return (Vec::new(), FindingLedgerRead::FindingsUnreadable);
     };
-    let (confirmed_ids, ledger) = confirmed_finding_ids(store, &findings);
-    let projected = findings
-        .iter()
-        .map(|finding| coverage_finding(finding, &confirmed_ids))
-        .collect();
-    (projected, ledger)
+    let (records, ledger) = match store.list_review_decisions_for_findings(&findings) {
+        Ok(records) => (records, FindingLedgerRead::Read),
+        Err(_) => (Vec::new(), FindingLedgerRead::DecisionsUnreadable),
+    };
+    (
+        coverage_findings_from_review_state(&findings, &records),
+        ledger,
+    )
 }
 
-fn confirmed_finding_ids(
-    store: &crate::findings::FindingStore,
+/// Project campaign coverage through the same effective-review authority used
+/// by review lists and proof gating. A cached auto-triage verdict is only the
+/// fallback when no applicable review decision exists; human decisions and
+/// durable-identity decisions keep their normal precedence instead of being
+/// re-derived from a row-id-only confirmed set.
+pub fn coverage_findings_from_review_state(
     findings: &[crate::findings::Finding],
-) -> (std::collections::BTreeSet<i64>, FindingLedgerRead) {
-    match store.list_review_decisions_for_findings(findings) {
-        Ok(records) => (
-            confirmed_finding_ids_from_decisions(&records),
-            FindingLedgerRead::Read,
-        ),
-        Err(_) => (
-            std::collections::BTreeSet::new(),
-            FindingLedgerRead::DecisionsUnreadable,
-        ),
-    }
+    records: &[crate::findings::ReviewDecisionRecord],
+) -> Vec<CoverageFinding> {
+    let review_state =
+        crate::findings::EffectiveReviewStateIndex::from_findings_and_decisions(findings, records);
+    findings
+        .iter()
+        .map(|finding| {
+            let effective = review_state.effective_decision_for(finding);
+            CoverageFinding {
+                file_path: finding.file_path.clone(),
+                confirmed: crate::findings::decision_is_review_actionable(
+                    finding,
+                    effective.as_ref(),
+                ),
+            }
+        })
+        .collect()
 }
 
-/// A finding counts as confirmed when its LATEST review decision confirms it
-/// (Confirmed or ToFix — a later reversal wins). Pure so the cockpit can fold
-/// its cached decision records without reopening the store.
+/// Compatibility summary for callers that need only the row ids whose latest
+/// recorded review decision is confirming. Campaign coverage itself must use
+/// `coverage_findings_from_review_state` so negative human decisions and
+/// durable-identity decisions are not lost before triage fallback is applied.
 pub fn confirmed_finding_ids_from_decisions(
     records: &[crate::findings::ReviewDecisionRecord],
 ) -> std::collections::BTreeSet<i64> {
@@ -516,6 +578,10 @@ pub fn confirmed_finding_ids_from_decisions(
         .collect()
 }
 
+/// Compatibility projection for callers that already resolved the effective
+/// confirmed set. Raw review ledgers should use
+/// `coverage_findings_from_review_state` so a negative review can override a
+/// cached positive triage verdict.
 pub fn coverage_finding(
     finding: &crate::findings::Finding,
     confirmed_ids: &std::collections::BTreeSet<i64>,
