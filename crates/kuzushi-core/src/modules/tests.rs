@@ -3929,6 +3929,7 @@ OUT
     #[cfg(unix)]
     #[test]
     fn sast_scan_runs_verify_patch_and_writes_run_artifacts() {
+        crate::remediation::patch_process_adapter::require_patch_validation_sandbox();
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(
@@ -5711,6 +5712,7 @@ OUT
     #[cfg(unix)]
     #[test]
     fn dispatches_patch_finding_through_runtime_and_persists_result() {
+        crate::remediation::patch_process_adapter::require_patch_validation_sandbox();
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(
@@ -5837,6 +5839,7 @@ OUT
     #[cfg(unix)]
     #[test]
     fn patch_synthesis_and_validation_ignore_concurrent_live_tree_edits() {
+        crate::remediation::patch_process_adapter::require_patch_validation_sandbox();
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(

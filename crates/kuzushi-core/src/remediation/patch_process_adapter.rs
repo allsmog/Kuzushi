@@ -533,6 +533,19 @@ fn append_linux_child_environment(command: &mut Command) {
     ]);
 }
 
+/// Tests that assert a SOUND patch validation need an isolating sandbox,
+/// because without one validation fails closed by design. Fail with install
+/// guidance instead of an unexplained `TestsFailed != Sound`.
+#[cfg(test)]
+pub(crate) fn require_patch_validation_sandbox() {
+    assert!(
+        validation_network_sandbox_available(),
+        "this test needs an isolating patch-validation sandbox (Linux: install bubblewrap, \
+         e.g. `apt-get install bubblewrap`; CI uses .github/actions/install-patch-validation-sandbox). \
+         Without one, patch validation fails closed by design."
+    );
+}
+
 pub(crate) fn validation_network_sandbox_available() -> bool {
     #[cfg(target_os = "macos")]
     if Path::new("/usr/bin/sandbox-exec").is_file() {
@@ -674,9 +687,11 @@ mod tests {
 
     #[test]
     fn disclosure_never_claims_network_denial_without_a_sandbox() {
+        // Both wordings mention a "host sandbox"; only the sandboxed one may
+        // claim that the network is denied.
         let disclosure = patch_network_isolation_disclosure();
         assert_eq!(
-            disclosure.contains("host sandbox"),
+            disclosure.contains("network denied"),
             validation_network_sandbox_available()
         );
     }
