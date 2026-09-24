@@ -71,7 +71,7 @@ fn index_codeql_static_evidence(
         crate::static_evidence::StaticEvidenceIndexReport::new(evidence_store.db_path());
     for sarif in sarif_documents {
         let report =
-            index_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
+            index_grounded_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
         append_static_evidence_report(&mut combined, report);
     }
     Ok(combined)
@@ -86,6 +86,7 @@ fn append_static_evidence_report(
     combined.edges_indexed += report.edges_indexed;
     combined.node_ids.extend(report.node_ids);
     combined.edge_ids.extend(report.edge_ids);
+    combined.results_omitted += report.results_omitted;
 }
 
 pub(in crate::modules) fn persist_iac_findings(

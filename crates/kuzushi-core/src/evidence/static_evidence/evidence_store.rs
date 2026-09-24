@@ -72,6 +72,15 @@ pub struct StaticEvidenceIndexReport {
     pub edges_indexed: usize,
     pub node_ids: Vec<String>,
     pub edge_ids: Vec<String>,
+    /// Source results the indexer could not ground in a physical location.
+    /// The scan engine discloses the same omission in its `scan_errors`; the
+    /// count rides here so the index receipt never reads as a complete copy.
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub results_omitted: usize,
+}
+
+fn is_zero_count(value: &usize) -> bool {
+    *value == 0
 }
 
 impl StaticEvidenceIndexReport {
@@ -83,6 +92,7 @@ impl StaticEvidenceIndexReport {
             edges_indexed: 0,
             node_ids: Vec::new(),
             edge_ids: Vec::new(),
+            results_omitted: 0,
         }
     }
 }
