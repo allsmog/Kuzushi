@@ -21,7 +21,8 @@ impl ShellApp {
             deck.notice = Some("select a target to fold coverage".to_string());
             return;
         };
-        let findings = coverage_findings_from_review_state(self.findings(), self.review_decisions());
+        let findings =
+            coverage_findings_from_review_state(self.findings(), self.review_decisions());
         let deck = self.router.coverage_mut();
         match coverage_report(&target, &findings) {
             Ok(report) => {
