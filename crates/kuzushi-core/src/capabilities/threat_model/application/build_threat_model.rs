@@ -185,6 +185,7 @@ fn finalize_single_document(
         single_pipeline_gap_fill_method(&coverage),
         parked,
     );
+    stamp_grounding_selection(document, &grounding.selection);
     stamp_entry_point_catalog_receipt(document, &grounding.entry_point_catalog);
     Ok((coverage, parked))
 }
@@ -666,8 +667,8 @@ pub(crate) fn emit_grounding_loaded(
                 "tool-progress",
                 verb,
                 format!(
-                    "grounding: {} surfaces · {} confirmed findings",
-                    grounding.surfaces.len(),
+                    "grounding: {} · {} confirmed findings",
+                    grounding.selection.surfaces_label(),
                     grounding.confirmed_findings.len()
                 ),
             )
@@ -1134,6 +1135,11 @@ mod catalog_receipt_tests {
                 catalog_ids: ["AS-one".to_string()].into_iter().collect(),
                 catalog_surfaces: Vec::new(),
             },
+            selection: GroundingSelection {
+                selected: 40,
+                available: 70,
+                limit: 40,
+            },
         };
         let mut document = json!({
             "threats": [],
@@ -1151,6 +1157,16 @@ mod catalog_receipt_tests {
             json!(30)
         );
         assert_eq!(document["coverage"]["catalogEntryPointsLinked"], json!(1));
+        assert_eq!(
+            document["coverage"]["grounding"],
+            json!({
+                "surfacesAvailable": 70,
+                "surfacesSelected": 40,
+                "limit": 40,
+                "maxRowsPerFile": 2,
+            }),
+            "the grounding denominator survives the coverage rewrite"
+        );
     }
 
     #[test]

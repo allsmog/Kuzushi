@@ -449,6 +449,7 @@ fn stamp_staged_document(
         gap_fill.method,
         parked,
     );
+    stamp_grounding_selection(&mut generated.document, &dossier.grounding.selection);
     stamp_entry_point_catalog_receipt(
         &mut generated.document,
         &dossier.grounding.entry_point_catalog,
@@ -503,8 +504,8 @@ fn emit_research(ctx: &ToolExecutionContext<'_>, verb: &str, dossier: &ResearchD
                 "tool",
                 verb,
                 format!(
-                    "research: {} surfaces · {} vuln commits · {} confirmed findings",
-                    dossier.grounding.surfaces.len(),
+                    "research: {} · {} vuln commits · {} confirmed findings",
+                    dossier.grounding.selection.surfaces_label(),
                     dossier.vuln_commits.len(),
                     dossier.grounding.confirmed_findings.len()
                 ),
@@ -616,6 +617,7 @@ mod tests {
                 surfaces: Vec::new(),
                 confirmed_findings: Vec::new(),
                 entry_point_catalog: catalog_grounding(),
+                selection: GroundingSelection::default(),
             },
             vuln_commits: Vec::new(),
             history_mined: false,
