@@ -535,13 +535,7 @@ fn store_dep_hygiene_findings(
         .iter()
         .map(|finding| finding.to_core_finding(target))
         .collect::<Vec<_>>();
-    let persisted = crate::findings::persist_tool_findings(
-        ctx.finding_run_id(),
-        target,
-        &findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = crate::findings::persist_tool_findings(ctx, target, &findings)?;
     let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
         core_findings,
@@ -559,13 +553,7 @@ fn store_secret_scan_findings(
         .iter()
         .map(|finding| finding.to_core_finding())
         .collect::<Vec<_>>();
-    let persisted = crate::findings::persist_tool_findings(
-        ctx.finding_run_id(),
-        target,
-        &findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = crate::findings::persist_tool_findings(ctx, target, &findings)?;
     let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
         core_findings,

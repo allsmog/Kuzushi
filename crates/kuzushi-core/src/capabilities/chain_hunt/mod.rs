@@ -112,13 +112,7 @@ fn persist_chain_findings(
         .iter()
         .map(chain_finding::model_chain_finding)
         .collect();
-    crate::findings::persist_tool_findings(
-        ctx.finding_run_id(),
-        workspace.root(),
-        &findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )
+    crate::findings::persist_tool_findings(ctx, workspace.root(), &findings)
 }
 
 fn prior_chain_findings(store: &crate::findings::FindingStore) -> Result<Vec<Finding>> {

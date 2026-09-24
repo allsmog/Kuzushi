@@ -25,7 +25,7 @@ pub(in crate::modules) fn persist_semgrep_findings(
     };
 
     let run_id = ctx.finding_run_id();
-    persist_findings_run(store, &run_id, target, findings)?;
+    persist_findings_run(ctx, store, &run_id, target, findings)?;
 
     Ok(Some(SemgrepPersistedRun {
         run_id,
@@ -53,7 +53,7 @@ pub(in crate::modules) fn persist_codeql_findings(
     };
 
     let run_id = ctx.finding_run_id();
-    persist_findings_run(store, &run_id, target, findings)?;
+    persist_findings_run(ctx, store, &run_id, target, findings)?;
 
     Ok(Some(CodeqlPersistedRun {
         run_id,
@@ -100,7 +100,7 @@ pub(in crate::modules) fn persist_iac_findings(
 
     workspace.ensure_state_dir()?;
     let run_id = ctx.finding_run_id();
-    persist_findings_run(store, &run_id, target, findings)?;
+    persist_findings_run(ctx, store, &run_id, target, findings)?;
 
     Ok(Some(json!({
         "runId": run_id,
@@ -108,18 +108,22 @@ pub(in crate::modules) fn persist_iac_findings(
     })))
 }
 
+/// Commit through the shared observed path so the dispatching run records a
+/// typed finding delta (receipts would otherwise show an unmeasured `+0`).
 fn persist_findings_run(
+    ctx: &ToolExecutionContext<'_>,
     store: &FindingStore,
     run_id: &str,
     target: &Path,
     findings: &[Finding],
 ) -> Result<()> {
-    store.with_run_lifecycle(run_id, target, || {
-        for finding in findings {
-            store.insert_finding(run_id, finding)?;
-        }
-        Ok(((), findings.len()))
-    })
+    crate::findings::commit_observed_findings(
+        store,
+        ctx.run_observation().as_ref(),
+        run_id,
+        target,
+        findings,
+    )
 }
 
 #[cfg(all(test, unix))]
@@ -167,6 +171,21 @@ mod tests {
             .unwrap();
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].scan_id.as_deref(), Some("run-registry-semgrep"));
+
+        // Dropping the trace joins the run-item writer so the projection
+        // read sees the committed delta.
+        drop(trace);
+        let delta = last_finding_delta(fixture.path(), "run-registry-semgrep");
+        assert_eq!((delta.added, delta.updated), (1, 0));
+    }
+
+    fn last_finding_delta(target: &Path, run_id: &str) -> crate::run_lifecycle::FindingDeltaSummary {
+        crate::run_lifecycle::load_run_projection(target, run_id)
+            .unwrap()
+            .projection
+            .finding_deltas
+            .pop()
+            .expect("semgrep persistence commits a typed finding delta")
     }
 
     fn fake_semgrep_binary(root: &Path) -> PathBuf {

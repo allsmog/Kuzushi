@@ -15,7 +15,9 @@ mod review_decision_conflict;
 mod reviewed_refutation;
 mod run_delta;
 mod scan_comparison;
-pub(crate) use run_delta::emit_persisted_finding_delta;
+pub(crate) use run_delta::{
+    commit_observed_findings, emit_finding_delta, emit_persisted_finding_delta,
+};
 
 pub use batch_occurrence::{
     derive_batch_gate_binding, derive_batch_occurrence_report,
@@ -35,8 +37,8 @@ pub(crate) use finding_review_gate::{
     ReviewConfirmation, MISSING_CONFIRMATION_GUIDANCE,
 };
 pub(crate) use generic_tool_findings::{
-    normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
-    GenericPersistedRun,
+    normalize_agent_json_findings, persist_tool_findings, persist_tool_findings_to,
+    render_generic_findings_output, GenericPersistedRun, ToolFindingsSink,
 };
 pub use identity_audit::{
     audit_finding_identities, FindingIdentityAuditGroup, FindingIdentityAuditIssueKind,

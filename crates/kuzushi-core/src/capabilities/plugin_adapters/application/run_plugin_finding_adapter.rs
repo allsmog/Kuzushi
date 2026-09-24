@@ -197,13 +197,7 @@ fn persist_plugin_adapter_findings(
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
-    persist_tool_findings(
-        ctx.finding_run_id(),
-        &run.target,
-        findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )
+    persist_tool_findings(ctx, &run.target, findings)
 }
 
 fn emit_plugin_adapter_done(

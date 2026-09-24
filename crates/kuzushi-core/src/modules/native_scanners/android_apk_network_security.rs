@@ -19,13 +19,7 @@ pub(in crate::modules) fn run_network_security_config_scan(
             ));
         }
     };
-    let persisted = persist_tool_findings(
-        ctx.finding_run_id(),
-        &target,
-        &outcome.findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = persist_tool_findings(ctx, &target, &outcome.findings)?;
     emit_network_security_done(ctx, outcome.findings.len());
     Ok(network_security_output(&outcome, persisted))
 }

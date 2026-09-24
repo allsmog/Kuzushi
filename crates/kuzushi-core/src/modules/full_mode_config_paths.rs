@@ -132,51 +132,19 @@ pub(crate) fn persist_full_mode_report(
     };
     let store = FindingStore::open(workspace.findings_db_path())?;
     let scan_id = ctx.finding_run_id();
-    let (added, updated) = store.fingerprint_delta(&report.findings)?;
+    let counts = store.fingerprint_delta(&report.findings)?;
     store.with_run_lifecycle(&scan_id, workspace.root(), || {
         for finding in &mut report.findings {
             finding.id = Some(store.insert_finding(&scan_id, finding)?);
         }
         Ok(((), report.findings.len()))
     })?;
-    emit_full_mode_finding_delta(ctx, &store, added, updated, &report.findings)
-}
-
-/// Record the chunked run's store delta so `agentic-sast:scan strategy=chunked`
-/// receipts show real added/updated counts instead of an absent observation.
-/// A zero delta is still emitted: it is what lets a clean chunked scan offer
-/// the Report continuation truthfully.
-fn emit_full_mode_finding_delta(
-    ctx: &ToolExecutionContext<'_>,
-    store: &FindingStore,
-    added: u64,
-    updated: u64,
-    findings: &[crate::findings::Finding],
-) -> Result<()> {
-    let Some(observation) = ctx.run_observation() else {
-        return Ok(());
-    };
-    let store_watermark = store.projection_meta()?.applied_seq;
-    let finding_id_samples = findings
-        .iter()
-        .take(crate::run_lifecycle::MAX_FINDING_ID_SAMPLES)
-        .map(|finding| crate::run_lifecycle::SafeText::operator_visible(&finding.fingerprint))
-        .collect();
-    observation.emit(crate::run_lifecycle::RunItemRecord::new(
-        crate::run_lifecycle::RunItemId::new(),
-        crate::run_lifecycle::RunItemSource::Persistence,
-        crate::run_lifecycle::RunItemV1::FindingDelta {
-            delta: crate::run_lifecycle::FindingDeltaSummary {
-                added,
-                updated,
-                removed: 0,
-                store_watermark: crate::run_lifecycle::SafeText::operator_visible(
-                    store_watermark.to_string(),
-                ),
-                finding_id_samples,
-            },
-        },
-    ))
+    crate::findings::emit_finding_delta(
+        ctx.run_observation().as_ref(),
+        &store,
+        &report.findings,
+        counts,
+    )
 }
 
 #[cfg(test)]

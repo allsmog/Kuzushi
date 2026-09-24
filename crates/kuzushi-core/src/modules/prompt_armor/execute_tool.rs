@@ -162,7 +162,6 @@ fn run_prompt_armor_runtime(
 ) -> Result<Value> {
     prompt_armor_capability::run_runtime_tool(
         prompt_armor_capability::PromptArmorRuntimeInput {
-            finding_run_id: ctx.finding_run_id(),
             tool_name: &inputs.tool_name,
             command: &inputs.command,
             input: &inputs.input,
@@ -170,8 +169,7 @@ fn run_prompt_armor_runtime(
             plugin_root: &inputs.plugin_root,
             model,
             runtime,
-            workspace: ctx.workspace,
-            findings_store: ctx.findings_store,
+            findings_sink: crate::findings::ToolFindingsSink::for_context(ctx),
         },
     )
 }
