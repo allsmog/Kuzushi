@@ -1091,18 +1091,27 @@ fn fake_ask_bridge(dir: &PathBuf) -> PathBuf {
         &binary,
         r#"#!/bin/sh
 request="$(cat)"
+# JSON member order is not part of the bridge protocol (the runtime encodes
+# requests through a key-sorted serde_json::Value), so match the request type
+# and the question independently.
 case "$request" in
   *'"type":"next-step-preflight"'*)
     printf '%s' '{"ok":true}'
-    ;;
-  *'"type":"next-step"'*'What should I run first?'*)
-    printf '%s' '{"ok":true,"step":"final","text":"Run context build, then next","costUsd":0.034}'
-    ;;
-  *)
-    printf '%s' '{"ok":false,"error":"unexpected ask request"}'
-    exit 1
+    exit 0
     ;;
 esac
+case "$request" in
+  *'"type":"next-step"'*)
+    case "$request" in
+      *'What should I run first?'*)
+        printf '%s' '{"ok":true,"step":"final","text":"Run context build, then next","costUsd":0.034}'
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+printf '%s' '{"ok":false,"error":"unexpected ask request"}'
+exit 1
 "#,
     )
     .unwrap();
