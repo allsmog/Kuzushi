@@ -285,7 +285,7 @@ fn run_started_sast_scan(
         primary_run_id: &primary_run_id,
         whitebox_static: whitebox_static.is_some(),
     })?;
-    let findings_count = executed.findings_count;
+    let findings_count = executed.tally.distinct;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
     persist_sast_scan_result(
         ctx,
@@ -718,14 +718,14 @@ impl SastScanExecutionInput<'_> {
     fn output_lines(
         &self,
         primary_run_id: &str,
-        findings_count: usize,
+        tally: SastFindingTally,
         reports: &SastPipelineReports,
         whitebox_artifacts: &WhiteboxArtifacts,
         post_processing: &SastPostProcessing,
     ) -> Vec<String> {
         sast_output_lines(
             primary_run_id,
-            findings_count,
+            tally,
             self.workspace,
             reports,
             self.whitebox_static,
@@ -741,7 +741,7 @@ struct ExecutedSastScan {
     run_ids: SastRunIds,
     artifacts: SastRunArtifacts,
     reports: SastPipelineReports,
-    findings_count: usize,
+    tally: SastFindingTally,
     core_findings: Vec<crate::findings::Finding>,
     whitebox_artifacts: WhiteboxArtifacts,
     post_processing: SastPostProcessing,
@@ -777,10 +777,10 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         baseline.target_snapshot,
     )?;
     let post_processing = input.post_processing(&run_ids, &artifacts)?;
-    let findings_count = core_findings.len();
+    let tally = SastFindingTally::for_runs(input.store, &run_ids, core_findings.len())?;
     let lines = input.output_lines(
         primary_run_id.as_str(),
-        findings_count,
+        tally,
         &reports,
         &whitebox_artifacts,
         &post_processing,
@@ -790,7 +790,7 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         run_ids,
         artifacts,
         reports,
-        findings_count,
+        tally,
         core_findings,
         whitebox_artifacts,
         post_processing,
@@ -1135,7 +1135,7 @@ impl ExecutedSastScan {
             run_ids,
             artifacts,
             reports,
-            findings_count,
+            tally,
             core_findings,
             whitebox_artifacts,
             post_processing,
@@ -1147,7 +1147,7 @@ impl ExecutedSastScan {
             workspace,
             reports: &reports,
             whitebox_static,
-            findings_count,
+            tally,
             core_findings,
             whitebox_artifacts,
             post_processing: &post_processing,
@@ -1197,7 +1197,7 @@ struct SastScanResultParts<'a> {
     workspace: &'a crate::workspace::WorkspaceTarget,
     reports: &'a SastPipelineReports,
     whitebox_static: Option<&'a WhiteboxStaticPolicy>,
-    findings_count: usize,
+    tally: SastFindingTally,
     core_findings: Vec<crate::findings::Finding>,
     whitebox_artifacts: WhiteboxArtifacts,
     post_processing: &'a SastPostProcessing,
@@ -1276,7 +1276,8 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
         "target": parts.workspace.root().display().to_string(),
         "mode": whitebox_mode_label(parts.whitebox_static),
         "whiteboxStatic": parts.whitebox_static.map(|policy| policy.to_json()),
-        "findingsCount": parts.findings_count,
+        "findingsCount": parts.tally.distinct,
+        "observationsCount": parts.tally.observations,
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),

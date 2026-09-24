@@ -258,7 +258,7 @@ fn sast_verification_exploitable(verification: &Value) -> Result<bool> {
 
 pub(in crate::modules) fn sast_output_lines(
     primary_run_id: &str,
-    findings_count: usize,
+    tally: SastFindingTally,
     workspace: &crate::workspace::WorkspaceTarget,
     reports: &SastPipelineReports,
     whitebox_enabled: bool,
@@ -267,9 +267,9 @@ pub(in crate::modules) fn sast_output_lines(
     requests: &SastScanRequests,
 ) -> Vec<String> {
     let mut lines = vec![format!(
-        "sast:scan {} completed: {} finding(s), db {}",
+        "sast:scan {} completed: {}, db {}",
         primary_run_id,
-        findings_count,
+        tally.label(),
         workspace.findings_db_path().display()
     )];
     if whitebox_enabled {

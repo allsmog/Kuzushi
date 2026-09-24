@@ -122,6 +122,19 @@ impl FindingStore {
         self.hydrate_v3_findings(dedupe_latest_by_projected_id(findings))
     }
 
+    pub(crate) fn v3_observation_count_for_scan_id(&self, scan_id: &str) -> Result<usize> {
+        let count = self
+            .conn
+            .query_row(
+                "select count(*) from finding_observations
+                  where finding_json is not null and run_id = ?1",
+                params![scan_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("Could not count v3 observations for scan run")?;
+        Ok(usize::try_from(count).unwrap_or(0))
+    }
+
     pub(crate) fn v3_all_findings(&self) -> Result<Vec<Finding>> {
         let mut stmt = self.conn.prepare(LATEST_FINDING_PROJECTION_SQL)?;
         let rows = stmt.query_map([], row_to_v3_projected_finding)?;

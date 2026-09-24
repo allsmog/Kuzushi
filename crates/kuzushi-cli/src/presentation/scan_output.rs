@@ -107,6 +107,7 @@ pub(crate) fn scan_json_output(
         "runId": data.get("runId").cloned(),
         "target": data.get("target").cloned(),
         "findingsCount": data.get("findingsCount").cloned(),
+        "observationsCount": data.get("observationsCount").cloned(),
         "costUsd": scan_cost_usd(result),
         "db": workspace.findings_db_path(),
         "mode": data.get("mode").cloned(),
