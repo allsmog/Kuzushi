@@ -300,6 +300,7 @@ fn fira_shaped_map_attempt(target: &Path) -> PhaseAttemptCompleted {
         elapsed_secs: 1,
         cost: "cost not recorded".to_string(),
         changed_findings: 0,
+        finding_delta_observed: None,
         changed_artifacts: (0..15).map(|index| format!("artifact-{index}")).collect(),
         interaction_count: 0,
         rerun_specification: None,

@@ -124,6 +124,13 @@ pub struct PhaseAttemptReceipt {
     pub elapsed_secs: u64,
     pub cost: String,
     pub changed_findings: u64,
+    /// Whether `changed_findings` is a measurement: `Some(true)` when every
+    /// referenced run committed a typed finding delta, `Some(false)` when at
+    /// least one did not (the count is then a lower bound at best). `None`
+    /// marks receipts written before this was recorded, whose zero cannot be
+    /// told apart from a missing observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_delta_observed: Option<bool>,
     /// Bounded preview only. Canonical run artifacts remain authoritative; a
     /// final marker reports entries omitted from the durable receipt.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

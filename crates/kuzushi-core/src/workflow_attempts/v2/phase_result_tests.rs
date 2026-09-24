@@ -50,6 +50,25 @@ fn save_historical_attempt(target: &Path, mut completed: PhaseAttemptCompleted) 
 }
 
 #[test]
+fn delta_less_run_projects_an_unmeasured_compatibility_receipt() {
+    let target = tempfile::tempdir().unwrap();
+    let mut completed = completed_tool(target.path(), "verify-no-delta", "verify:finding");
+    let attempt_id = RunAttemptId::parse(&completed.attempt_id).unwrap();
+    completed.target_snapshot = referenced_run_state(target.path(), &completed.run_refs).target_snapshot;
+    let receipt = emit_or_load_phase_receipt(target.path(), &completed, attempt_id).unwrap();
+
+    project_typed_receipt_to_legacy(target.path(), &mut completed, &receipt).unwrap();
+
+    let receipt = completed.receipt.expect("projected compatibility receipt");
+    assert_eq!(receipt.changed_findings, 0);
+    assert_eq!(
+        receipt.finding_delta_observed,
+        Some(false),
+        "a run without a typed finding commit must not read as a measured +0"
+    );
+}
+
+#[test]
 fn evidence_only_trace_cannot_create_a_phase_attempt() {
     let target = tempfile::tempdir().unwrap();
     let trace = completed_tool(target.path(), "trace-no-phase", "trace:expand");

@@ -16,7 +16,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN was blocked before it could run. Open the run, adjust the autonomy posture or input, then... │
-          │receipt · blocked · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 0 artifact(s) · 0...       │
+          │receipt · blocked · 1 run(s) · cost not recorded · findings unmeasured · 0 artifact(s) · 0...     │
           │Outcome · blocked · scenario blocked                                                              │
           │3 run ledger cell(s) omitted from the result card · inspect replay                                │
           │8 timeline cell(s) omitted from the result card · inspect replay                                  │

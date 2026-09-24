@@ -1,6 +1,7 @@
 use crate::run_lifecycle::{
     FindingDeltaSummary, ProjectionHealth, RunId, RunItemId, RunItemStatus, RunItemV1,
     RunProjection, SafeText, WorkflowContinuation, MAX_ARTIFACT_REFERENCES, MAX_FINDING_ID_SAMPLES,
+    UNOBSERVED_FINDING_WATERMARK_PREFIX,
 };
 use crate::runtime::{RuntimeCost, RuntimeCostReport};
 use crate::WorkflowPhase;
@@ -239,9 +240,7 @@ fn aggregate_finding_delta(projections: &[RunProjection]) -> Result<FindingDelta
         added: sum_delta(&deltas, |delta| delta.added)?,
         updated: sum_delta(&deltas, |delta| delta.updated)?,
         removed: sum_delta(&deltas, |delta| delta.removed)?,
-        store_watermark: deltas
-            .last()
-            .map_or_else(unavailable_watermark, |delta| delta.store_watermark.clone()),
+        store_watermark: aggregate_watermark(projections.len(), &deltas),
         finding_id_samples: deltas
             .iter()
             .flat_map(|delta| delta.finding_id_samples.iter().cloned())
@@ -261,8 +260,24 @@ fn sum_delta(
     })
 }
 
-fn unavailable_watermark() -> SafeText {
-    SafeText::operator_visible("unavailable:no typed finding commit")
+/// A run without a typed finding commit makes the summed counts a partial
+/// lower bound, not a measurement, so the watermark records the gap instead of
+/// borrowing another run's store position.
+fn aggregate_watermark(run_count: usize, deltas: &[&FindingDeltaSummary]) -> SafeText {
+    let unobserved = run_count.saturating_sub(deltas.len());
+    match deltas.last() {
+        Some(delta) if unobserved == 0 => delta.store_watermark.clone(),
+        _ => unobserved_watermark(unobserved, run_count),
+    }
+}
+
+fn unobserved_watermark(unobserved: usize, run_count: usize) -> SafeText {
+    let detail = if unobserved >= run_count {
+        "no typed finding commit".to_string()
+    } else {
+        format!("no typed finding commit for {unobserved} of {run_count} run(s)")
+    };
+    SafeText::operator_visible(format!("{UNOBSERVED_FINDING_WATERMARK_PREFIX}{detail}"))
 }
 
 fn artifact_ids(projections: &[RunProjection]) -> Vec<RunItemId> {

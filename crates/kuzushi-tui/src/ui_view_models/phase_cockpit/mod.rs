@@ -693,7 +693,7 @@ fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String 
     parts.extend([
         format!("{} run(s)", summary.run_count),
         format!("{} artifact(s)", summary.artifact_count),
-        format!("findings +{}", summary.changed_findings),
+        summary.findings_label(),
     ]);
     parts.join(" · ")
 }

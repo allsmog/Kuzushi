@@ -151,18 +151,27 @@ fn phase_action(continuation: &WorkflowContinuation) -> PhaseResultAction {
 fn receipt_detail_lines(receipt: &PhaseReceiptProjection) -> Vec<String> {
     // The continuation is NOT repeated here: the card's trailing `next:` row
     // already carries `receipt.continuation` via the receipt policy.
-    let delta = &receipt.finding_delta;
     vec![format!(
-        "receipt · {} · {} run(s) · {} · findings +{} ~{} -{} · {} artifact(s) · {} interaction(s)",
+        "receipt · {} · {} run(s) · {} · {} · {} artifact(s) · {} interaction(s)",
         receipt.status.label(),
         receipt.run_ids.len(),
         kuzushi_core::run_lifecycle::cost_label(receipt.cost),
-        delta.added,
-        delta.updated,
-        delta.removed,
+        typed_finding_delta_label(&receipt.finding_delta),
         receipt.artifact_ids.len(),
         receipt.interaction_count,
     )]
+}
+
+fn typed_finding_delta_label(delta: &kuzushi_core::run_lifecycle::FindingDeltaSummary) -> String {
+    let total = delta
+        .added
+        .saturating_add(delta.updated)
+        .saturating_add(delta.removed);
+    super::finding_delta_label(
+        &format!("+{} ~{} -{}", delta.added, delta.updated, delta.removed),
+        total,
+        Some(delta.is_fully_observed()),
+    )
 }
 
 #[cfg(test)]
@@ -188,6 +197,23 @@ mod tests {
                 "{outcome:?}"
             );
         }
+    }
+
+    #[test]
+    fn typed_detail_line_says_unmeasured_when_no_run_committed_a_delta() {
+        let delta = |watermark: &str| kuzushi_core::run_lifecycle::FindingDeltaSummary {
+            added: 0,
+            updated: 0,
+            removed: 0,
+            store_watermark: kuzushi_core::run_lifecycle::SafeText::operator_visible(watermark),
+            finding_id_samples: Vec::new(),
+        };
+
+        assert_eq!(
+            typed_finding_delta_label(&delta("unavailable:no typed finding commit")),
+            "findings unmeasured"
+        );
+        assert_eq!(typed_finding_delta_label(&delta("12")), "findings +0 ~0 -0");
     }
 
     #[test]

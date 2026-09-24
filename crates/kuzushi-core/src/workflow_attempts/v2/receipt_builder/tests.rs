@@ -181,6 +181,82 @@ fn failed_scan_receipt_keeps_generic_inspect_reason_for_unknown_failures() {
     );
 }
 
+fn observed_delta(added: u64) -> FindingDeltaSummary {
+    FindingDeltaSummary {
+        added,
+        updated: 0,
+        removed: 0,
+        store_watermark: SafeText::operator_visible("ledger:7"),
+        finding_id_samples: Vec::new(),
+    }
+}
+
+fn scan_receipt_delta(run_ids: &[RunId], projections: &[RunProjection]) -> FindingDeltaSummary {
+    let item = PhaseReceiptBuilder::new(
+        WorkflowPhase::Scan,
+        RunItemStatus::Completed,
+        run_ids,
+        projections,
+    )
+    .build()
+    .unwrap();
+    let RunItemV1::PhaseReceipt { finding_delta, .. } = item else {
+        panic!("expected phase receipt");
+    };
+    finding_delta
+}
+
+#[test]
+fn delta_less_runs_mark_the_receipt_finding_delta_unobserved() {
+    let (first, second) = (run_id(), run_id());
+    let projections = [
+        projection(first.clone(), RunItemStatus::Completed),
+        projection(second.clone(), RunItemStatus::Completed),
+    ];
+
+    let delta = scan_receipt_delta(&[first, second], &projections);
+
+    assert!(!delta.is_fully_observed(), "absent commits are not a +0");
+    assert_eq!(
+        delta.store_watermark.as_str(),
+        "unavailable:no typed finding commit"
+    );
+}
+
+#[test]
+fn one_delta_less_run_keeps_the_observed_counts_but_marks_them_partial() {
+    let (first, second) = (run_id(), run_id());
+    let mut observed = projection(first.clone(), RunItemStatus::Completed);
+    observed.finding_deltas.push(observed_delta(6));
+    let projections = [
+        observed,
+        projection(second.clone(), RunItemStatus::Completed),
+    ];
+
+    let delta = scan_receipt_delta(&[first, second], &projections);
+
+    assert_eq!(delta.added, 6);
+    assert!(!delta.is_fully_observed());
+    assert_eq!(
+        delta.store_watermark.as_str(),
+        "unavailable:no typed finding commit for 1 of 2 run(s)"
+    );
+}
+
+#[test]
+fn every_run_committing_a_delta_is_a_full_measurement() {
+    let (first, second) = (run_id(), run_id());
+    let mut secrets = projection(first.clone(), RunItemStatus::Completed);
+    secrets.finding_deltas.push(observed_delta(67));
+    let mut semgrep = projection(second.clone(), RunItemStatus::Completed);
+    semgrep.finding_deltas.push(observed_delta(6));
+
+    let delta = scan_receipt_delta(&[first, second], &[secrets, semgrep]);
+
+    assert_eq!(delta.added, 73);
+    assert!(delta.is_fully_observed());
+}
+
 #[test]
 fn derives_interactions_and_clean_scan_destination_from_typed_projection() {
     let run_id = run_id();

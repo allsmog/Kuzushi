@@ -30,10 +30,15 @@ verified; the saved result and recorded spend remain available. These fields
 come from the Rust adapter, not the model. Existing phase acceptance checks
 authenticate the snapshot and require it to match the current source.
 
-Agentic SAST and the offensive threat hunt emit typed finding deltas after the
-finding store commits. Counts distinguish newly added fingerprints from existing
+Agentic SAST, the offensive threat hunt, and every built-in that persists
+through the shared tool-findings path (native scanners such as `secret-scan`,
+`dep-hygiene`, `semgrep`, `codeql`, IaC, APK, chains, and plugin adapters) emit
+typed finding deltas after the finding store commits, including a zero delta
+for a clean run. Counts distinguish newly added fingerprints from existing
 fingerprints seen again. A phase can infer a clean Scan from zero deltas only
-when every referenced run supplied a finding observation. Older runs without
+when every referenced run supplied a finding observation; otherwise the phase
+receipt's watermark records the gap and the shell labels the count
+`findings unmeasured` (or `partly unmeasured`) instead of a measured `+0`. Older runs without
 source receipts remain inspectable and require a new run before acceptance on
 an unversioned or dirty target; their historical records are not rewritten.
 
