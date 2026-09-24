@@ -148,25 +148,18 @@ fn findings_section(app: &ShellApp, width: usize) -> Option<RailSection> {
 }
 
 /// Always present: spend is monotonically worsening and always relevant.
+/// Spend is rendered through the shared runtime-cost formatter, so a session
+/// whose calls were not metered (subscription/OAuth models report no price)
+/// never reads as a measured `$0.00`, and a budget share over incomplete
+/// metering is labelled a lower bound.
 fn cost_section(app: &ShellApp) -> RailSection {
-    let spent = app.session().session_cost_usd();
-    let rows = match app.session().session_budget_usd() {
-        Some(budget) if budget > 0.0 => {
-            let percent = ((spent / budget) * 100.0).round() as u64;
-            vec![
-                Line::styled(format!("${spent:.2} of ${budget:.2}"), theme::muted()),
-                Line::styled(
-                    format!("{percent}% of budget"),
-                    if percent >= 80 {
-                        theme::warn()
-                    } else {
-                        theme::muted()
-                    },
-                ),
-            ]
-        }
+    let session = app.session();
+    let report = session.session_cost_report();
+    let metered = report.is_complete() && session.cost_accounting_error().is_none();
+    let rows = match session.session_budget_usd() {
+        Some(budget) if budget > 0.0 => budget_rows(report.observed_usd(), budget, metered),
         _ => vec![
-            Line::styled(format!("${spent:.2} spent"), theme::muted()),
+            Line::styled(unbudgeted_spend_label(app), theme::muted()),
             Line::styled("budget not enforced".to_string(), theme::subtle()),
         ],
     };
@@ -174,6 +167,43 @@ fn cost_section(app: &ShellApp) -> RailSection {
         title: "COST",
         rows,
     }
+}
+
+/// A metered session reads `$X spent`; anything else keeps the shared
+/// formatter's own qualifier (`>=$X (metering incomplete)`, `cost not
+/// recorded`, `cost accounting error`) instead of a bare measured amount.
+fn unbudgeted_spend_label(app: &ShellApp) -> String {
+    let session = app.session();
+    let spent = super::format_runtime_cost(
+        session.session_cost_report(),
+        session.cost_accounting_error(),
+    );
+    if session.session_cost_report().is_complete() && session.cost_accounting_error().is_none() {
+        return format!("{spent} spent");
+    }
+    spent
+}
+
+fn budget_rows(observed: f64, budget: f64, metered: bool) -> Vec<Line<'static>> {
+    let percent = ((observed / budget) * 100.0).round() as u64;
+    let bound = if metered { "" } else { ">=" };
+    let share = if metered {
+        format!("{percent}% of budget")
+    } else {
+        format!(">={percent}% · calls unmetered")
+    };
+    let style = if percent >= 80 {
+        theme::warn()
+    } else {
+        theme::muted()
+    };
+    vec![
+        Line::styled(
+            format!("{bound}${observed:.2} of ${budget:.2}"),
+            theme::muted(),
+        ),
+        Line::styled(share, style),
+    ]
 }
 
 fn muted_row(text: &str, width: usize) -> Line<'static> {
@@ -235,6 +265,28 @@ mod tests {
 
         assert_eq!(cost.rows[0].to_string(), "$0.00 spent");
         assert_eq!(cost.rows[1].to_string(), "budget not enforced");
+    }
+
+    #[test]
+    fn unmetered_spend_never_reads_as_a_measured_zero() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.session_mut().set_session_cost_report_for_test(
+            kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+        );
+        let sections = rail_sections(&app, 40);
+        let cost = sections.last().unwrap();
+
+        assert_eq!(cost.rows[0].to_string(), ">=$0.00 (metering incomplete)");
+    }
+
+    #[test]
+    fn a_budget_share_over_unmetered_calls_is_a_lower_bound() {
+        let unmetered = budget_rows(1.0, 10.0, false);
+        assert_eq!(unmetered[0].to_string(), ">=$1.00 of $10.00");
+        assert_eq!(unmetered[1].to_string(), ">=10% · calls unmetered");
+        let metered = budget_rows(1.0, 10.0, true);
+        assert_eq!(metered[0].to_string(), "$1.00 of $10.00");
+        assert_eq!(metered[1].to_string(), "10% of budget");
     }
 
     #[test]

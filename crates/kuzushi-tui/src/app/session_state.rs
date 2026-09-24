@@ -359,6 +359,14 @@ impl SessionState {
     }
 
     #[cfg(test)]
+    pub(crate) fn set_session_cost_report_for_test(&mut self, report: RuntimeCostReport) {
+        self.session_cost = report;
+        self.unscoped_cost = report;
+        self.run_costs.clear();
+        self.cost_accounting_error = None;
+    }
+
+    #[cfg(test)]
     pub(crate) fn set_last_tool_cost_usd_for_test(&mut self, cost: Option<f64>) {
         self.last_tool_cost = cost.map(|cost| {
             RuntimeCostReport::known(
