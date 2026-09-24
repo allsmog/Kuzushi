@@ -201,9 +201,10 @@ fn partially_reported_multi_call_usage_has_no_estimate() {
 
 #[test]
 fn bridge_cache_counters_reach_the_response_and_discount_the_estimate() {
+    // LangChain's input total includes both cache buckets.
     let response: BridgeResponse = serde_json::from_value(json!({
         "ok": true,
-        "input_tokens": 1_000,
+        "input_tokens": 13_000,
         "output_tokens": 500,
         "cache_read_input_tokens": 10_000,
         "cache_creation_input_tokens": 2_000,
@@ -218,6 +219,18 @@ fn bridge_cache_counters_reach_the_response_and_discount_the_estimate() {
     //       + 2k writes at 1.25x ($0.0075) + 500 out ($0.0075).
     let estimate = estimated_bridge_cost(&response, "vertex:claude-sonnet-4-6").unwrap();
     assert!((estimate - 0.021).abs() < 1e-12, "{estimate}");
+
+    let inconsistent: BridgeResponse = serde_json::from_value(json!({
+        "ok": true,
+        "input_tokens": 1_000,
+        "output_tokens": 500,
+        "cache_read_input_tokens": 10_000,
+    }))
+    .unwrap();
+    assert_eq!(
+        estimated_bridge_cost(&inconsistent, "anthropic:claude-sonnet-4-6"),
+        None
+    );
 }
 
 #[test]
@@ -491,6 +504,7 @@ fn bridge_requests_serialize_protocol_version() {
         runtime_options: None,
         temperature: None,
         cacheable_prompt_prefix: None,
+        spend_estimate_rates: None,
     };
 
     let value = serde_json::to_value(request).unwrap();

@@ -19,6 +19,23 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Verify with MCP tools no longer stops after the first Claude call. The
+  bridge's observed-spend stop treated every Anthropic call as unpriceable
+  and ended the agent loop with `observed_spend_incomplete`, which surfaced
+  as "structured output failed". Kuzushi now sends its list-price rates with
+  spend-stopped bridge requests, and the stop enforces tokens × rates (cache
+  buckets priced apart from LangChain's inclusive input total). Mixed
+  receipts, missing token counts, or unknown models still stop fail-closed.
+  A structured-output repair now accepts estimated spend too.
+- "structured output failed" now names an allowlisted cause: the typed
+  runtime failure (for example the missing MCP sidecar), a refused repair,
+  truncation, or an output still invalid after one repair. Raw provider text
+  still never reaches the message. A failed tool keeps the cost its model
+  calls observed instead of reporting it as unavailable.
+- `patch:finding` refusals for a missing detector binding now say which run
+  last observed the finding (for example a `sast:scan` umbrella run) and
+  which detector to re-run on its own.
+
 - Claude calls that report tokens but no charge (the LangGraph bridge and
   OAuth paths) are now priced locally from token usage and a versioned list
   price table. The estimate is carried beside observed spend, labelled `~$X

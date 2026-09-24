@@ -7,9 +7,11 @@ import {
   credentialForRequest,
   humanMessageForRequest,
   isTruncatedStopReason,
+  modelContinuationDecision,
   openAiAccountIdFromJwt,
   openAiCredentialFromRefreshResponse,
   promptCacheSplit,
+  spendForStop,
   usageFromMessages,
 } from "./model.mjs";
 import { oauthModelForRequest, openAiOauthHeaders } from "./oauth-models.mjs";
@@ -496,4 +498,53 @@ test("Anthropic OAuth passes prompt-cache usage through to the message usage", a
     output_tokens: 3,
     cache_read_input_tokens: 900,
   });
+});
+
+const HAIKU_RATES = {
+  inputUsdPerMtok: 1,
+  outputUsdPerMtok: 5,
+  cacheReadUsdPerMtok: 0.1,
+  cacheCreationUsdPerMtok: 1.25,
+};
+
+function unmeteredCall(input, output, details) {
+  return new AIMessage({
+    content: "",
+    tool_calls: [{ name: "read_source", args: {}, id: "call-1" }],
+    usage_metadata: {
+      input_tokens: input,
+      output_tokens: output,
+      total_tokens: input + output,
+      ...(details ? { input_token_details: details } : {}),
+    },
+  });
+}
+
+test("unmetered calls continue under a spend stop when list prices estimate them", () => {
+  const messages = [unmeteredCall(100_000, 2_000)];
+  assert.equal(modelContinuationDecision(messages, 1, undefined, HAIKU_RATES), "continue");
+  assert.equal(modelContinuationDecision(messages, 0.1, undefined, HAIKU_RATES), "observed_spend_exhausted");
+  assert.equal(modelContinuationDecision(messages, 1), "observed_spend_incomplete");
+});
+
+test("the stop estimate prices cache buckets apart from the inclusive input total", () => {
+  const usage = usageFromMessages([
+    unmeteredCall(13_000, 500, { cache_read: 10_000, cache_creation: 2_000 }),
+  ]);
+  // 1k uncached ($0.001) + 10k reads ($0.001) + 2k writes ($0.0025) + 500 out ($0.0025).
+  assert.ok(Math.abs(spendForStop(usage, HAIKU_RATES) - 0.007) < 1e-12);
+});
+
+test("mixed receipts, missing tokens, or malformed rates stay unknown", () => {
+  const metered = new AIMessage({
+    content: "",
+    usage_metadata: { input_tokens: 10, output_tokens: 10, total_tokens: 20, cost_usd: 0.01 },
+  });
+  const mixed = usageFromMessages([metered, unmeteredCall(10, 10)]);
+  assert.equal(spendForStop(mixed, HAIKU_RATES), undefined);
+  const tokenless = usageFromMessages([new AIMessage("no usage")]);
+  assert.equal(spendForStop(tokenless, HAIKU_RATES), undefined);
+  const priced = usageFromMessages([unmeteredCall(10, 10)]);
+  assert.equal(spendForStop(priced, { ...HAIKU_RATES, outputUsdPerMtok: -1 }), undefined);
+  assert.equal(spendForStop(priced, undefined), undefined);
 });

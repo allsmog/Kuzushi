@@ -142,8 +142,9 @@ fn persistence_failure_status(status: RunItemStatus) -> RunItemStatus {
 pub(super) fn result_fields(
     result: &Result<Value>,
 ) -> (RunItemStatus, RuntimeCostReport, Vec<SafeText>, u64, u64) {
-    let Ok(output) = result else {
-        return failed_result_fields();
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => return failed_result_fields(error),
     };
     let cost = crate::run_artifacts::tool_run_output_cost_report(output)
         .unwrap_or(RuntimeCostReport::UNAVAILABLE);
@@ -156,10 +157,19 @@ pub(super) fn result_fields(
     )
 }
 
-fn failed_result_fields() -> (RunItemStatus, RuntimeCostReport, Vec<SafeText>, u64, u64) {
+/// A failed tool may still have paid for model calls. A structured-output
+/// failure carries what it observed (including a labelled estimate); any other
+/// error has no receipt.
+fn failed_result_fields(
+    error: &anyhow::Error,
+) -> (RunItemStatus, RuntimeCostReport, Vec<SafeText>, u64, u64) {
+    let cost = error
+        .chain()
+        .find_map(|source| source.downcast_ref::<crate::structured_output::StructuredOutputError>())
+        .map_or(RuntimeCostReport::UNAVAILABLE, |failure| failure.cost_report());
     (
         RunItemStatus::Failed,
-        RuntimeCostReport::UNAVAILABLE,
+        cost,
         Vec::new(),
         0,
         1,
@@ -201,4 +211,30 @@ fn message_count(output: &Value, field: &str) -> u64 {
         .get(field)
         .and_then(Value::as_array)
         .map_or(0, |messages| messages.len() as u64)
+}
+
+#[cfg(test)]
+mod failed_cost_tests {
+    use super::*;
+    use crate::runtime::RuntimeCost;
+
+    #[test]
+    fn a_failed_structured_output_keeps_its_observed_estimate() {
+        let estimate = RuntimeCost::from_usd(0.17, "cost").unwrap();
+        let observed = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(estimate));
+        let error = anyhow::Error::from(
+            crate::structured_output::StructuredOutputError::from_source_and_cost(
+                anyhow::anyhow!("invalid"),
+                observed,
+            ),
+        )
+        .context("verify:finding failed");
+
+        let (status, cost, ..) = result_fields(&Err(error));
+
+        assert_eq!(status, RunItemStatus::Failed);
+        assert_eq!(cost.estimated_total_usd(), Some(0.17));
+        let (_, plain_cost, ..) = result_fields(&Err(anyhow::anyhow!("no model call")));
+        assert!(plain_cost.is_unavailable());
+    }
 }

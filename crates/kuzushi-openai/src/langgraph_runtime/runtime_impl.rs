@@ -290,6 +290,7 @@ fn bridge_request_from(
     let cacheable_prompt_prefix = request
         .prompt_cache_split()
         .map(|(prefix, _)| prefix.to_string());
+    let spend_estimate_rates = bridge_spend_estimate_rates(&request);
     let thinking_level = request
         .thinking_level
         .or_else(|| runtime.thinking_level.clone());
@@ -312,7 +313,16 @@ fn bridge_request_from(
         runtime_options: request.runtime_options,
         temperature: request.temperature,
         cacheable_prompt_prefix,
+        spend_estimate_rates,
     }
+}
+
+fn bridge_spend_estimate_rates(
+    request: &AgentQueryRequest,
+) -> Option<crate::anthropic_oauth::SpendEstimateRates> {
+    let options = request.runtime_options.as_ref()?;
+    options.observed_spend_stop_usd?;
+    crate::anthropic_oauth::spend_estimate_rates(&request.model)
 }
 
 fn observed_agent_response_from_bridge(
@@ -359,12 +369,22 @@ pub(super) fn estimated_bridge_cost(response: &BridgeResponse, model: &str) -> O
     if response.cost_usd.is_some() || !every_call_reported_tokens(response) {
         return None;
     }
+    let cache = bridge_prompt_cache(response);
     crate::anthropic_oauth::estimate_cost_usd_with_cache(
         model,
-        clamp_token_count_u32(response.input_tokens?),
+        uncached_bridge_input_tokens(response.input_tokens?, cache)?,
         clamp_token_count_u32(response.output_tokens?),
-        bridge_prompt_cache(response),
+        cache,
     )
+}
+
+/// LangChain reports `input_tokens` inclusive of cache reads and writes, while
+/// the estimator prices the three buckets separately. Counts that cannot be
+/// split consistently get no estimate.
+fn uncached_bridge_input_tokens(input: u64, cache: Option<PromptCacheUsage>) -> Option<u32> {
+    let cache = cache.unwrap_or_default();
+    let cached = u64::from(cache.read_input_tokens) + u64::from(cache.creation_input_tokens);
+    input.checked_sub(cached).map(clamp_token_count_u32)
 }
 
 /// A token total that misses some calls would under-price the estimate, so a
@@ -749,4 +769,38 @@ fn triage_structured_output() -> AgentStructuredOutput {
             }
         }),
     )
+}
+
+#[cfg(test)]
+mod spend_estimate_rate_tests {
+    use super::*;
+    use kuzushi_core::runtime::AgentRuntimeOptions;
+
+    fn request(model: &str, stop: Option<f64>) -> AgentQueryRequest {
+        AgentQueryRequest::new(model, ".", "s", "p").with_runtime_options(AgentRuntimeOptions {
+            observed_spend_stop_usd: stop,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn rates_ride_only_with_a_spend_stop_on_a_priced_model() {
+        let rates =
+            bridge_spend_estimate_rates(&request("anthropic:claude-haiku-4-5", Some(1.0))).unwrap();
+        assert_eq!(rates.input_usd_per_mtok, 1.0);
+        assert_eq!(rates.output_usd_per_mtok, 5.0);
+        assert!((rates.cache_read_usd_per_mtok - 0.1).abs() < 1e-12);
+        assert!((rates.cache_creation_usd_per_mtok - 1.25).abs() < 1e-12);
+        let wire = serde_json::to_value(rates).unwrap();
+        assert_eq!(wire["inputUsdPerMtok"], 1.0);
+
+        assert_eq!(
+            bridge_spend_estimate_rates(&request("anthropic:claude-haiku-4-5", None)),
+            None
+        );
+        assert_eq!(
+            bridge_spend_estimate_rates(&request("openai:gpt-5.5", Some(1.0))),
+            None
+        );
+    }
 }

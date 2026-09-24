@@ -20,6 +20,7 @@ fn operator_cwe_selection(
         value: cwes,
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     }
 }
 
@@ -59,6 +60,7 @@ fn query_taint_cwe_selection(
         value: parse_taint_cwe_select_raw(raw.value)?,
         cost_usd: raw.cost_usd,
         cost_usd_exact: raw.cost_usd_exact,
+        estimated_cost_usd: raw.estimated_cost_usd,
     })
 }
 

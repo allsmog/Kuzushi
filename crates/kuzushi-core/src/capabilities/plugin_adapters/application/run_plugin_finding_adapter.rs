@@ -147,6 +147,7 @@ fn run_plugin_finding_query(
         )?,
         cost_usd: raw.cost_usd,
         cost_usd_exact: raw.cost_usd_exact,
+        estimated_cost_usd: raw.estimated_cost_usd,
     })
 }
 

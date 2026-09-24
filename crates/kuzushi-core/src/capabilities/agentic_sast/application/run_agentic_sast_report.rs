@@ -187,6 +187,7 @@ impl AgenticSastStageCheckpoint {
             value: self.findings,
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         }
     }
 }
@@ -219,6 +220,7 @@ fn review_agentic_sast_with_scope(
             value: findings,
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
     }
     let _validation_scope =
@@ -231,6 +233,7 @@ fn review_agentic_sast_with_scope(
         value: findings,
         cost_usd: review.cost_usd,
         cost_usd_exact: review.cost_usd_exact,
+        estimated_cost_usd: review.estimated_cost_usd,
     })
 }
 

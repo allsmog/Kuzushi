@@ -107,6 +107,7 @@ fn build_assessment_report(
             value: report,
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
     }
     query_assessment_object(root, prompts, runtime, resolve_model).map(|object| {
@@ -115,6 +116,7 @@ fn build_assessment_report(
             value: report,
             cost_usd: object.cost_usd,
             cost_usd_exact: object.cost_usd_exact,
+            estimated_cost_usd: object.estimated_cost_usd,
         }
     })
 }
@@ -146,6 +148,7 @@ fn query_assessment_object(
                 value: required_object(raw.value),
                 cost_usd: raw.cost_usd,
                 cost_usd_exact: raw.cost_usd_exact,
+                estimated_cost_usd: raw.estimated_cost_usd,
             })
         })
     })

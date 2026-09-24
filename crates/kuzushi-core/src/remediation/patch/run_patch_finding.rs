@@ -567,9 +567,11 @@ fn patch_provenance(
     finding: &Finding,
     source_commit: &str,
 ) -> Result<PatchProvenance> {
-    let detector_binding = direct_detector_binding(target, finding).context(
-        "patch:finding requires a canonical detector run and input; re-scan the finding before generating a patch",
-    )?;
+    let detector_binding = direct_detector_binding(target, finding).map_err(|reason| {
+        anyhow::anyhow!(
+            "patch:finding requires a canonical detector run and input so patch:reverify can replay it: {reason:#}"
+        )
+    })?;
     let empirical = current_empirical_patch_binding(finding);
     let provenance = PatchProvenance {
         source_commit: source_commit.to_string(),
@@ -627,19 +629,41 @@ struct DirectDetectorBinding {
     input_digest: String,
 }
 
-fn direct_detector_binding(target: &Path, finding: &Finding) -> Option<DirectDetectorBinding> {
-    let run_id = finding.scan_id.as_deref()?;
-    let summary = crate::run_artifacts::load_run_summary(target, run_id).ok()?;
-    let tool = summary.tool?;
-    super::detector_identity::qualified_tool_matches_identity(&tool, &finding.tool).then_some(())?;
+/// The finding's latest observation must come from a run of its own detector:
+/// that run's exact input is what `patch:reverify` replays. Each refusal names
+/// the next step instead of a generic "re-scan".
+fn direct_detector_binding(target: &Path, finding: &Finding) -> Result<DirectDetectorBinding> {
+    let run_id = finding.scan_id.as_deref().with_context(|| {
+        format!(
+            "finding has no recorded detector run; re-run the `{}` detector on its own, then retry",
+            finding.tool
+        )
+    })?;
+    let tool = observing_detector_tool(target, finding, run_id)?;
     let (_, input) = crate::run_artifacts::read_run_artifact_text(target, run_id, "input.json")
         .require("originating detector input")
-        .ok()?;
-    Some(DirectDetectorBinding {
+        .with_context(|| format!("detector run {run_id} has no replayable input"))?;
+    Ok(DirectDetectorBinding {
         tool,
         run_id: run_id.to_string(),
         input_digest: PatchProvenance::digest_detector_input(input.as_bytes()),
     })
+}
+
+fn observing_detector_tool(target: &Path, finding: &Finding, run_id: &str) -> Result<String> {
+    let summary = crate::run_artifacts::load_run_summary(target, run_id)
+        .with_context(|| format!("detector run {run_id} is unavailable"))?;
+    let tool = summary.tool.unwrap_or_default();
+    anyhow::ensure!(
+        super::detector_identity::qualified_tool_matches_identity(&tool, &finding.tool),
+        "finding was last observed by `{}` run {run_id}, which cannot replay one `{}` detector; \
+         re-run the `{}` detector on its own (for example `kuzushi run {}:scan`), then retry",
+        if tool.is_empty() { "an unnamed tool" } else { &tool },
+        finding.tool,
+        finding.tool,
+        finding.tool,
+    );
+    Ok(tool)
 }
 
 fn emit_patch_done(ctx: &ToolExecutionContext<'_>, result: &PatchResult) {
@@ -690,7 +714,32 @@ mod detector_provenance_tests {
             .to_string();
 
         assert!(error.contains("canonical detector run"), "{error}");
-        assert!(error.contains("re-scan"), "{error}");
+        assert!(error.contains("no recorded detector run"), "{error}");
+    }
+
+    #[test]
+    fn umbrella_scan_observation_names_the_detector_to_rerun() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "scan-umbrella";
+        record_tool_run_started(
+            ToolRunRecord::new(target.path(), run_id, "scan", "sast:scan"),
+            &serde_json::json!({"tasks": ["semgrep"]}),
+        );
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "demo.rule",
+            "src/lib.rs",
+            1,
+            None,
+            Severity::High,
+            "candidate",
+        );
+        finding.scan_id = Some(run_id.to_string());
+
+        let error = format!("{:#}", direct_detector_binding(target.path(), &finding).err().unwrap());
+
+        assert!(error.contains("last observed by `sast:scan` run scan-umbrella"), "{error}");
+        assert!(error.contains("kuzushi run semgrep:scan"), "{error}");
     }
 
     #[test]

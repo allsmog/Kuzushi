@@ -139,6 +139,10 @@ pub(crate) struct BridgeRequest {
     /// cache-marked user content block ahead of the remainder.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cacheable_prompt_prefix: Option<String>,
+    /// List prices the bridge's observed-spend stop may use for calls whose
+    /// provider reports tokens but no charge. Sent only with a spend stop.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) spend_estimate_rates: Option<crate::anthropic_oauth::SpendEstimateRates>,
 }
 
 /// `type: "ping"` envelope consumed by the bridge's `handlePing`. The wire

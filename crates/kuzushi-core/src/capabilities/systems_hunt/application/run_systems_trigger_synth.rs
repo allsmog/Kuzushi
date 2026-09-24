@@ -141,6 +141,7 @@ pub(crate) fn systems_invariants_from_input_or_query_with_cost(
             value: output,
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         }),
         None => query_systems_invariants_with_cost(
             runtime,

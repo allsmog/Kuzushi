@@ -942,7 +942,10 @@ pub fn accepts_scope(scope: &str) -> bool {
         let error = run_randori_pasta_with_runtime(temp.path(), &runtime).unwrap_err();
         let err = format!("{error:#}");
 
-        assert_eq!(error.to_string(), "structured output failed");
+        assert_eq!(
+            error.to_string(),
+            "structured output failed: model output still violated the schema after one repair attempt"
+        );
         assert!(err.contains("randori:pasta"), "{err}");
         assert!(err.contains("ThreatModelDocument"), "{err}");
         assert!(

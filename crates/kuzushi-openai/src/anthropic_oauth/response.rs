@@ -126,6 +126,26 @@ pub(crate) fn estimate_cost_usd_with_cache(
     Some((input_usd + f64::from(output_tokens) * rates.output) / 1_000_000.0)
 }
 
+/// Per-million-token list prices a spend stop may use to estimate unmetered
+/// calls. Wire names are the bridge's camelCase keys.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SpendEstimateRates {
+    pub(crate) input_usd_per_mtok: f64,
+    pub(crate) output_usd_per_mtok: f64,
+    pub(crate) cache_read_usd_per_mtok: f64,
+    pub(crate) cache_creation_usd_per_mtok: f64,
+}
+
+pub(crate) fn spend_estimate_rates(model: &str) -> Option<SpendEstimateRates> {
+    model_rates(model).map(|rates| SpendEstimateRates {
+        input_usd_per_mtok: rates.input,
+        output_usd_per_mtok: rates.output,
+        cache_read_usd_per_mtok: rates.cache_read,
+        cache_creation_usd_per_mtok: rates.input * CACHE_CREATION_INPUT_RATE,
+    })
+}
+
 fn model_rates(model: &str) -> Option<&'static ModelRates> {
     let id = canonical_model_id(model);
     MODEL_RATES

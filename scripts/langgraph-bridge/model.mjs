@@ -564,13 +564,14 @@ export function modelContinuationDecision(
   messages,
   observedSpendStopUsd,
   maxModelTurns = DEFAULT_MAX_MODEL_TURNS,
+  estimateRates = undefined,
 ) {
   const usage = usageFromMessages(messages);
   validateMaxModelTurns(maxModelTurns);
   if (usage.modelCalls >= maxModelTurns) return "model_turn_limit";
   const stop = observedSpendStop(observedSpendStopUsd);
   if (stop === undefined) return "continue";
-  return observedSpendDecision(usage, stop);
+  return observedSpendDecision(usage, stop, estimateRates);
 }
 
 function validateMaxModelTurns(maxModelTurns) {
@@ -588,9 +589,51 @@ function observedSpendStop(raw) {
   return stop;
 }
 
-function observedSpendDecision(usage, stop) {
-  if (usage.costReportedCalls !== usage.modelCalls) return "observed_spend_incomplete";
-  return usage.costUsd >= stop ? "observed_spend_exhausted" : "continue";
+function observedSpendDecision(usage, stop, estimateRates) {
+  const spent = spendForStop(usage, estimateRates);
+  if (spent === undefined) return "observed_spend_incomplete";
+  return spent >= stop ? "observed_spend_exhausted" : "continue";
+}
+
+// Exact provider cost when every call reported one. When no call reported a
+// charge, the Rust caller's list prices (the one price table) estimate it from
+// tokens. Mixed receipts, missing token counts, or no rates stay unknown.
+export function spendForStop(usage, estimateRates) {
+  if (usage.costReportedCalls === usage.modelCalls) return usage.costUsd;
+  if (usage.costReportedCalls !== 0 || !validEstimateRates(estimateRates)) return undefined;
+  if (!everyCallReportedTokens(usage)) return undefined;
+  return estimatedUsd(usage, estimateRates);
+}
+
+const ESTIMATE_RATE_KEYS = [
+  "inputUsdPerMtok",
+  "outputUsdPerMtok",
+  "cacheReadUsdPerMtok",
+  "cacheCreationUsdPerMtok",
+];
+
+function validEstimateRates(rates) {
+  return ESTIMATE_RATE_KEYS.every((key) => Number.isFinite(rates?.[key]) && rates[key] >= 0);
+}
+
+function everyCallReportedTokens(usage) {
+  return (
+    usage.inputReportedCalls === usage.modelCalls && usage.outputReportedCalls === usage.modelCalls
+  );
+}
+
+// LangChain's input total includes both cache buckets; price them apart.
+function estimatedUsd(usage, rates) {
+  const cacheRead = usage.cacheReadInputTokens ?? 0;
+  const cacheCreation = usage.cacheCreationInputTokens ?? 0;
+  const uncached = usage.inputTokens - cacheRead - cacheCreation;
+  if (!(uncached >= 0)) return undefined;
+  const micro =
+    uncached * rates.inputUsdPerMtok +
+    cacheRead * rates.cacheReadUsdPerMtok +
+    cacheCreation * rates.cacheCreationUsdPerMtok +
+    usage.outputTokens * rates.outputUsdPerMtok;
+  return micro / 1_000_000;
 }
 
 function addMessageUsage(total, message) {

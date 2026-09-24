@@ -244,7 +244,8 @@ function queryStopReason(messages, request) {
   if (!isAiMessage(last) || !last.tool_calls?.length) return undefined;
   const options = request.runtimeOptions ?? request.runtime_options ?? {};
   const stop = options.observedSpendStopUsd ?? options.observed_spend_stop_usd;
-  const decision = modelContinuationDecision(messages, stop);
+  const rates = request.spendEstimateRates ?? request.spend_estimate_rates;
+  const decision = modelContinuationDecision(messages, stop, undefined, rates);
   return decision === "continue" ? undefined : decision;
 }
 

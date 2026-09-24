@@ -856,6 +856,22 @@ fi
 
     #[test]
     fn tool_loop_preflight_surfaces_classified_rejection_before_first_step() {
+        // A stored OAuth bag passes the local credential gate, so the preflight
+        // reaches the mock bridge whose classified rejection is under test.
+        let dir = tempfile::tempdir().unwrap();
+        let oauth_path = dir.path().join("oauth-credentials.json");
+        std::fs::write(
+            &oauth_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "access": "test-access-token",
+                    "refresh": "test-refresh-token",
+                    "expires": 4_102_444_800_000_u64
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
@@ -871,7 +887,10 @@ fi
             worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
             bridge_retry_attempts: None,
             bridge_retry_backoff_ms: None,
-            anthropic_oauth: None,
+            anthropic_oauth: Some(kuzushi_core::AnthropicOauthConfig {
+                credentials_path: Some(oauth_path),
+                allow_env_token: false,
+            }),
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let req = AgentToolLoopRequest {
