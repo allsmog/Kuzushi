@@ -39,23 +39,43 @@ pub(crate) fn map_gallery_is_primary(app: &ShellApp) -> bool {
     !map_requires_action(&map_phase_model(app))
 }
 
-/// Receipt rows the Map status card shows. The renderer takes the same number
-/// of project rows, so the layout can size the card without the two surfaces
-/// disagreeing about how tall it is.
-pub(crate) const MAP_CONTEXT_ROW_LIMIT: usize = 8;
-
 /// The card's heading and its artifact status line, which it always renders.
 const MAP_CONTEXT_FIXED_ROWS: usize = 2;
 
-/// Content rows the Map status card renders: heading, the optional empty
-/// hint, the artifact status line, and the receipt rows. The layout bounds
-/// the card to these rows instead of stretching one short card over the whole
-/// body.
-pub(crate) fn map_status_card_rows(model: &MapPhaseModel) -> u16 {
-    let rows = MAP_CONTEXT_FIXED_ROWS
-        + usize::from(model.empty_hint.is_some())
-        + model.project.rows.len().min(MAP_CONTEXT_ROW_LIMIT);
-    u16::try_from(rows).unwrap_or(u16::MAX)
+/// How the Map status card lays out its receipt for one content box. The
+/// layout sizes the card from this and the renderer draws from it, so the two
+/// cannot disagree about the card's height. Every receipt row always renders;
+/// summaries wrap only when every wrapped row fits, otherwise each row keeps
+/// one fitted line and a card taller than the body scrolls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MapContextFit {
+    pub(crate) wrap_summaries: bool,
+    pub(crate) content_rows: u16,
+}
+
+pub(crate) fn map_context_fit(
+    model: &MapPhaseModel,
+    content_width: usize,
+    available_rows: u16,
+) -> MapContextFit {
+    let fixed = MAP_CONTEXT_FIXED_ROWS + usize::from(model.empty_hint.is_some());
+    let table = crate::ui_view_models::project_context_columns(&model.project, content_width);
+    let wrapped = fixed
+        + table
+            .rows
+            .iter()
+            .map(|row| row.summary_lines.len())
+            .sum::<usize>();
+    let wrap_summaries = wrapped <= usize::from(available_rows);
+    let rows = if wrap_summaries {
+        wrapped
+    } else {
+        fixed + table.rows.len()
+    };
+    MapContextFit {
+        wrap_summaries,
+        content_rows: u16::try_from(rows).unwrap_or(u16::MAX),
+    }
 }
 
 pub(super) fn map_requires_action(model: &MapPhaseModel) -> bool {

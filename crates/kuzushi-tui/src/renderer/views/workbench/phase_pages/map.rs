@@ -2,7 +2,7 @@ use super::*;
 use crate::ui_view_models::{
     project_context_columns, AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel,
     MapPhaseModel, ModuleRisk, NextScansState, ProjectContextCell, ProjectContextRow,
-    ProjectModelOrigin, WorklistRowModel, MAP_CONTEXT_ROW_LIMIT,
+    ProjectModelOrigin, WorklistRowModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
@@ -57,7 +57,11 @@ pub(super) fn plain_lines(
         lines.push(map_artifact_status_line(model, width));
         return lines;
     }
-    let mut lines = divider_lines("PROJECT CONTEXT", context_lines(model, width), width);
+    let mut lines = divider_lines(
+        "PROJECT CONTEXT",
+        context_lines(model, width, STACKED_CONTEXT_ROWS),
+        width,
+    );
     lines.extend(divider_lines(
         "ATTACK SURFACE",
         attack_surface_lines(model.attack_surface.as_ref(), width),
@@ -98,7 +102,7 @@ fn render_compact(
     state: PhaseRenderState,
 ) {
     let width = area.width.saturating_sub(2) as usize;
-    let mut lines = context_lines(model, width);
+    let mut lines = context_lines(model, width, STACKED_CONTEXT_ROWS);
     lines.push(divider("ATTACK SURFACE", area.width.saturating_sub(2)));
     lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
     lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
@@ -364,13 +368,21 @@ fn render_context(
         frame,
         area,
         "PROJECT CONTEXT",
-        context_lines(model, area.width.saturating_sub(2) as usize),
+        context_lines(
+            model,
+            area.width.saturating_sub(2) as usize,
+            area.height.saturating_sub(1),
+        ),
         PhaseSurfaceId::MapReadiness,
         state,
     );
 }
 
-fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+/// Stacked Map projections continue with further sections below the receipt,
+/// so they grant it no spare rows: one line per receipt row.
+const STACKED_CONTEXT_ROWS: u16 = 0;
+
+fn context_lines(model: &MapPhaseModel, width: usize, rows: u16) -> Vec<Line<'static>> {
     let mut lines = vec![context_heading_line(
         &model.project.scope_label,
         &model.project.revision_label,
@@ -383,24 +395,36 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
         fit(&context_status_line(model), width),
         artifact_state_style(model.context.state),
     ));
+    let wrap = crate::ui_view_models::map_context_fit(model, width, rows).wrap_summaries;
     let table = project_context_columns(&model.project, width);
-    lines.extend(
-        table
-            .rows
-            .iter()
-            .take(MAP_CONTEXT_ROW_LIMIT)
-            .map(context_row_line),
-    );
+    for row in &table.rows {
+        if wrap {
+            lines.extend(
+                row.wrapped_segments()
+                    .into_iter()
+                    .map(|segments| context_segments_line_for(row.origin, segments)),
+            );
+        } else {
+            lines.push(context_row_line(row));
+        }
+    }
     lines
 }
 
 /// One receipt row, styled from the shared column projection so the pane and
 /// plain output cannot disagree about which cells a row has.
 fn context_row_line(row: &ProjectContextRow) -> Line<'static> {
+    context_segments_line_for(row.origin, row.segments())
+}
+
+fn context_segments_line_for(
+    origin: ProjectModelOrigin,
+    segments: Vec<crate::ui_view_models::ProjectContextSegment>,
+) -> Line<'static> {
     Line::from(
-        row.segments()
+        segments
             .into_iter()
-            .map(|segment| Span::styled(segment.text, context_cell_style(segment.cell, row.origin)))
+            .map(|segment| Span::styled(segment.text, context_cell_style(segment.cell, origin)))
             .collect::<Vec<_>>(),
     )
 }
@@ -957,7 +981,7 @@ mod next_scan_tests {
             "fixture must carry the widest section label"
         );
 
-        let rendered = text(&context_lines(&map, 60));
+        let rendered = text(&context_lines(&map, 60, STACKED_CONTEXT_ROWS));
 
         assert!(rendered.contains("review surface 0 items"), "{rendered}");
     }
@@ -969,7 +993,7 @@ mod next_scan_tests {
     fn wide_context_rows_carry_the_state_and_next_action() {
         let map = map_fixture();
 
-        let rendered = text(&context_lines(&map, 100));
+        let rendered = text(&context_lines(&map, 100, STACKED_CONTEXT_ROWS));
 
         assert!(rendered.contains("review surface"), "{rendered}");
         assert!(
@@ -1075,7 +1099,7 @@ mod next_scan_tests {
 #[cfg(test)]
 mod context_card_tests {
     use super::*;
-    use crate::ui_view_models::{map_status_card_rows, ProjectModelOrigin, ProjectModelRow};
+    use crate::ui_view_models::{map_context_fit, ProjectModelOrigin, ProjectModelRow};
 
     fn map_model() -> crate::ui_view_models::MapPhaseModel {
         let app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
@@ -1101,39 +1125,65 @@ mod context_card_tests {
             .collect()
     }
 
-    /// The layout sizes the status card from `map_status_card_rows`, so a
+    /// The layout sizes the status card from `map_context_fit`, so a
     /// disagreement with the lines this pane emits would either clip a receipt
     /// row or leave the blank rows the card exists to remove.
     #[test]
     fn card_height_matches_the_lines_the_pane_renders() {
         let mut model = map_model();
-        for (rows, hint) in [
-            (0, None),
-            (3, None),
-            (12, Some("no context yet".to_string())),
+        for (rows, hint, budget) in [
+            (0, None, 40),
+            (3, None, 40),
+            (12, Some("no context yet".to_string()), 40),
+            (12, None, 6),
         ] {
             model.project.rows = receipt_rows(rows);
             model.empty_hint = hint;
             assert_eq!(
-                context_lines(&model, 100).len(),
-                map_status_card_rows(&model) as usize,
-                "{rows} receipt rows"
+                context_lines(&model, 100, budget).len(),
+                map_context_fit(&model, 100, budget).content_rows as usize,
+                "{rows} receipt rows in {budget} spare rows"
             );
         }
     }
 
+    /// No receipt row is ever dropped: the old eight-row cap hid everything
+    /// past it without saying so.
     #[test]
-    fn receipt_rows_past_the_limit_do_not_grow_the_card() {
+    fn every_receipt_row_renders_even_past_the_old_limit() {
         let mut model = map_model();
         model.empty_hint = None;
-        model.project.rows = receipt_rows(MAP_CONTEXT_ROW_LIMIT + 5);
-        assert_eq!(
-            map_status_card_rows(&model) as usize,
-            context_lines(&model, 100).len()
-        );
-        assert_eq!(
-            map_status_card_rows(&model) as usize,
-            MAP_CONTEXT_ROW_LIMIT + 2
-        );
+        model.project.rows = receipt_rows(13);
+        let text = text(&context_lines(&model, 100, 40));
+        assert!(text.contains("row 12"), "{text}");
+        assert_eq!(map_context_fit(&model, 100, 40).content_rows, 15);
+    }
+
+    /// With vertical room a long summary wraps under its own column instead of
+    /// being cut off with an ellipsis; without room each row keeps one line.
+    #[test]
+    fn long_summaries_wrap_only_when_the_card_has_room() {
+        let mut model = map_model();
+        model.empty_hint = None;
+        let mut rows = receipt_rows(1);
+        rows[0].summary = "no persisted nested scopes yet; run next to decompose the \
+                           repository into logical modules before threat modeling"
+            .to_string();
+        model.project.rows = rows;
+
+        let roomy = text(&context_lines(&model, 90, 40));
+        assert!(roomy.contains("threat modeling"), "{roomy}");
+        assert!(!roomy.contains('…'), "{roomy}");
+
+        let tight = context_lines(&model, 90, 3);
+        assert_eq!(tight.len(), 3, "one line per row without room");
+    }
+
+    fn text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

@@ -635,7 +635,7 @@ fn assert_map_status_card_bounds(body: &PhaseCockpitBody, state: SemanticFixture
     };
     assert_eq!(
         content_rows,
-        super::map::map_status_card_rows(model),
+        expected_card_rows(model, area),
         "{cell}: card sized from the rows the renderer emits"
     );
     assert!(
@@ -650,13 +650,20 @@ fn assert_map_status_card_bounds(body: &PhaseCockpitBody, state: SemanticFixture
     );
 }
 
+/// Content rows the Map status card promises inside `area`, from the same fit
+/// the renderer uses.
+fn expected_card_rows(model: &super::MapPhaseModel, area: Rect) -> u16 {
+    let (width, rows) = super::composition::status_card_content_box(area);
+    super::map::map_context_fit(model, width, rows).content_rows
+}
+
 /// The unbuilt-Map card and the rows it promises, for one terminal size.
 fn unbuilt_map_card(area: Rect) -> (PlannedPhaseSurface, u16) {
     let body = fixture_body(WorkflowPhase::Map, SemanticFixture::Empty);
     let PhaseCockpitBody::Map(model) = &body else {
         unreachable!("Map fixture body")
     };
-    let content_rows = super::map::map_status_card_rows(model);
+    let content_rows = expected_card_rows(model, area);
     let plan = phase_presentation_plan(&body, area, None, None, AttentionMode::Normal);
     assert_eq!(plan.surfaces.len(), 1, "unbuilt Map shows one card");
     (plan.surfaces[0], content_rows)

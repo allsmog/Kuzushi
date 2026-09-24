@@ -40,7 +40,7 @@ pub(crate) use layout::{
     PhasePresentationPlan, PhaseSurfaceId, PlannedPhaseSurface, SurfaceInteraction, SurfaceState,
 };
 use map::map_phase_model;
-pub(crate) use map::{map_gallery_is_primary, map_status_card_rows, MAP_CONTEXT_ROW_LIMIT};
+pub(crate) use map::{map_context_fit, map_gallery_is_primary, MapContextFit};
 use phase_bodies::{fix_phase_model, review_phase_model};
 use scan::scan_phase_model;
 

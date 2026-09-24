@@ -299,6 +299,16 @@ fn centered_form_rect(area: Rect) -> Rect {
 /// `content_rows` lines occupies one row more than it writes.
 const CARD_TITLE_ROWS: u16 = 1;
 
+/// Content columns and rows a status card can write inside `area`: the form
+/// width minus the pane's side borders, and the body minus the title row.
+pub(super) fn status_card_content_box(area: Rect) -> (usize, u16) {
+    let form = centered_form_rect(area);
+    (
+        usize::from(form.width.saturating_sub(2)),
+        form.height.saturating_sub(CARD_TITLE_ROWS),
+    )
+}
+
 /// The card keeps the form's width cap and top edge but stops at its own last
 /// row. Content taller than the body still takes the whole body — the pane
 /// scrolls rather than dropping the rows it promised.

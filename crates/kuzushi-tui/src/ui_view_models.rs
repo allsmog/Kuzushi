@@ -241,7 +241,7 @@ pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    map_gallery_is_primary, map_status_card_rows, phase_cockpit_model_for_phase,
+    map_context_fit, map_gallery_is_primary, phase_cockpit_model_for_phase,
     phase_presentation_plan, phase_surface_specs, AttentionMode, ChainArtifactsModel,
     ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
     EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
@@ -250,7 +250,7 @@ pub(crate) use phase_cockpit::{
     ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
     RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
     ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
-    TraceEvidenceModel, TraceHopModel, MAP_CONTEXT_ROW_LIMIT,
+    TraceEvidenceModel, TraceHopModel,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{
@@ -263,8 +263,8 @@ pub(crate) use prereq_prompt::{
 };
 pub(crate) use project_model::{
     project_context_columns, project_model, project_revision_label, ProjectContextCell,
-    ProjectContextRow, ProjectContextTable, ProjectModel, ProjectModelOrigin, ProjectModelRow,
-    CONTEXT_COLUMN_RULE,
+    ProjectContextRow, ProjectContextSegment, ProjectContextTable, ProjectModel,
+    ProjectModelOrigin, ProjectModelRow, CONTEXT_COLUMN_RULE,
 };
 pub(crate) use prompt::{
     navigation_prompt_label, prompt_model, prompt_text, workbench_prompt_mode,
