@@ -8,11 +8,13 @@ import {
   exchangeAuthorizationCode,
   mergeCredentialBag,
   OAUTH_PROVIDERS,
+  oauthTokenHttpError,
   parseOauthLoginArgs,
   parsePastedCode,
   pkcePair,
   resolveProviderConfig,
   runOauthLogin,
+  tokenExchangeBody,
 } from "./oauth-login.mjs";
 
 function base64url(buffer) {
@@ -253,4 +255,25 @@ test("unsupported OAuth login providers fail before interactive side effects", a
   assert.deepEqual(writes, [
     'unsupported oauth provider "unsupported" (expected openai or anthropic)\n',
   ]);
+});
+
+test("the Claude paste-code exchange carries the issued state; OpenAI's does not", () => {
+  const params = { code: "c", state: "issued-state", verifier: "v", redirectUri: "r" };
+  const anthropic = JSON.parse(tokenExchangeBody(OAUTH_PROVIDERS.anthropic, params).body);
+  assert.equal(anthropic.state, "issued-state");
+  assert.equal(anthropic.code_verifier, "v");
+  const openai = new URLSearchParams(tokenExchangeBody(OAUTH_PROVIDERS["openai-codex"], params).body);
+  assert.equal(openai.get("state"), null);
+});
+
+test("a rejected token exchange names the OAuth error code and nothing else", () => {
+  const named = oauthTokenHttpError(400, JSON.stringify({ error: "invalid_grant", error_description: "secret-ish detail" }));
+  assert.equal(named.message, "Provider rejected the request (HTTP 400: invalid_grant).");
+  const typed = oauthTokenHttpError(400, JSON.stringify({ error: { type: "invalid_request_error" } }));
+  assert.equal(typed.message, "Provider rejected the request (HTTP 400: invalid_request_error).");
+  assert.equal(oauthTokenHttpError(400, "<html>not json</html>").message, "Provider rejected the request (HTTP 400).");
+  assert.equal(
+    oauthTokenHttpError(400, JSON.stringify({ error: "Bearer abc.def" })).message,
+    "Provider rejected the request (HTTP 400).",
+  );
 });
