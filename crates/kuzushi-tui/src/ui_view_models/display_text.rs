@@ -87,6 +87,34 @@ pub(crate) fn format_runtime_cost(
     }
 }
 
+/// Local stores record some times (review decisions, export receipts) as
+/// bare epoch seconds; render those as RFC 3339 UTC so an operator never
+/// reads a raw integer as a time. Anything else is shown as recorded.
+pub(crate) fn recorded_timestamp_label(recorded: &str) -> String {
+    recorded
+        .trim()
+        .parse::<u64>()
+        .map(kuzushi_core::session_transcript::utc_timestamp_from_unix_seconds)
+        .unwrap_or_else(|_| recorded.to_string())
+}
+
+#[cfg(test)]
+mod recorded_timestamp_tests {
+    use super::recorded_timestamp_label;
+
+    #[test]
+    fn epoch_seconds_render_as_utc_and_other_values_as_recorded() {
+        assert_eq!(
+            recorded_timestamp_label("1790260983"),
+            "2026-09-24T14:43:03Z"
+        );
+        assert_eq!(
+            recorded_timestamp_label("2026-09-24T00:00:00Z"),
+            "2026-09-24T00:00:00Z"
+        );
+    }
+}
+
 #[cfg(test)]
 mod runtime_cost_tests {
     use super::*;
