@@ -16,7 +16,7 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 
           ┌ MAP · RESULT READY ──────────────────────────────────────────────────────────────────────────────┐
           │MAP returned partial evidence. Review it and choose a recovery action.                            │
-          │receipt · completed · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 7 artifact(s) · 0...     │
+          │receipt · completed · 1 run(s) · cost not recorded · findings unmeasured · 7 artifact(s) · 0...   │
           │Result · Run SAST scan (sast:scan) · completed · scenario completed                               │
           │artifacts: tool input=input.json, run metadata=run.json, run events=events.jsonl, semantic...     │
           │12 run ledger cell(s) omitted from the result card · inspect replay                               │

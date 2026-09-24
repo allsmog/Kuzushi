@@ -16,7 +16,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN returned partial evidence. Review it and choose a recovery action.                           │
-          │receipt · partial · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 8 artifact(s) · 0...       │
+          │receipt · partial · 1 run(s) · cost not recorded · findings unmeasured · 8 artifact(s) · 0...     │
           │Result · Run SAST scan (sast:scan) · partial · scenario partial                                   │
           │⚠ scenario engine incomplete                                                                      │
           │artifacts: tool input=input.json, run metadata=run.json, run events=events.jsonl, semantic...     │
