@@ -5650,6 +5650,9 @@ fn compact_trace_page_down_reaches_steps() {
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    // Paging is clamped to the app's measured viewport, as the live event
+    // loop keeps it in step with the terminal.
+    app.set_viewport(crate::TerminalViewport::new(60, 20));
     app.set_target(Some(tmp.path().to_path_buf()));
     seed_compact_scroll_findings(&mut app);
     app.router.trace_mut().open(run_id);
