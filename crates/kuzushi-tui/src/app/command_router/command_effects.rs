@@ -1395,7 +1395,7 @@ impl ShellApp {
         self.open_modules_view();
         self.log(
             "recommend",
-            "phase-native capabilities are derived from workspace reality · press Esc, then e for engines",
+            "phase-native capabilities are derived from workspace reality · press e for expert engines",
         );
         Vec::new()
     }

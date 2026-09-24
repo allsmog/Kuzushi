@@ -344,13 +344,29 @@ fn auth_intro_text(app: &ShellApp, provider: &str, recovery: bool) -> String {
     if provider == "openai-codex" {
         return openai_oauth_auth_intro(app, recovery);
     }
+    let oauth_ready = oauth_ready_for_scene_provider(app, provider);
     let provider = auth_provider_label(provider);
+    if oauth_ready {
+        return stored_oauth_intro(&provider, recovery);
+    }
     if recovery {
         return format!(
             "Provider {provider} needs credentials to resume the preserved Scan. Choose a compatible method below."
         );
     }
     format!("Provider {provider} needs credentials. Paste a key, sign in, or try the demo.")
+}
+
+/// A provider whose OAuth connection is already stored does not "need
+/// credentials": lead with the stored state and offer the other methods as
+/// alternatives rather than presenting a first-run gate.
+fn stored_oauth_intro(provider: &str, recovery: bool) -> String {
+    let outcome = if recovery {
+        "Choose it to resume the preserved Scan"
+    } else {
+        "Choose it to reuse the connection"
+    };
+    format!("A {provider} OAuth connection is already stored. {outcome}, or paste a key instead.")
 }
 
 fn openai_oauth_auth_intro(app: &ShellApp, recovery: bool) -> String {
@@ -397,7 +413,7 @@ fn compact_auth_intro_text(app: &ShellApp, provider: &str, recovery: bool) -> St
     match provider {
         "openai" => compact_openai_api_intro(app, recovery),
         "openai-codex" => compact_openai_oauth_intro(app, recovery),
-        _ => compact_other_auth_intro(provider, recovery),
+        _ => compact_other_auth_intro(app, provider, recovery),
     }
 }
 
@@ -423,8 +439,11 @@ fn compact_openai_oauth_intro(app: &ShellApp, recovery: bool) -> String {
         .unwrap_or(detail)
 }
 
-fn compact_other_auth_intro(provider: &str, recovery: bool) -> String {
+fn compact_other_auth_intro(app: &ShellApp, provider: &str, recovery: bool) -> String {
     let label = auth_provider_label(provider);
+    if oauth_ready_for_scene_provider(app, provider) {
+        return format!("{label}: OAuth stored · reuse it or paste a key");
+    }
     if recovery {
         return format!("{label}: credentials needed · Scan preserved");
     }
@@ -536,6 +555,30 @@ mod tests {
         assert!(text.contains("openai-oauth:gpt-5.4"), "{text}");
         assert!(text.contains("preserved Scan"), "{text}");
         assert!(!text.contains("Offline demo"), "{text}");
+    }
+
+    #[test]
+    fn stored_anthropic_oauth_is_not_presented_as_missing_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        let credentials = temp.path().join("oauth-credentials.json");
+        let far_future_ms = 4_102_444_800_000_u64; // 2100-01-01
+        std::fs::write(
+            &credentials,
+            format!(r#"{{"anthropic":{{"refresh":"r","access":"a","expires":{far_future_ms}}}}}"#),
+        )
+        .unwrap();
+        let mut config = kuzushi_core::V2Config::default();
+        config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+            credentials_path: Some(credentials),
+            allow_env_token: false,
+        });
+        let app = ShellApp::new(config, None);
+
+        let intro = auth_intro_text(&app, "anthropic", false);
+        assert!(!intro.contains("needs credentials"), "{intro}");
+        assert!(intro.contains("already stored"), "{intro}");
+        let compact = compact_auth_intro_text(&app, "anthropic", false);
+        assert!(compact.contains("OAuth stored"), "{compact}");
     }
 
     #[test]
