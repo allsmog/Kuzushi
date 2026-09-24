@@ -20,6 +20,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+assert_eq 'a\\b\"c\td\re\nf' "$(json_escape "$(printf 'a\\b"c\td\re\nf')")" \
+  "json_escape escapes backslash, quote, tab, CR and LF"
 assert_eq 0 "$(devex_journey_exit_code 0 0)" "clean journey exit"
 assert_eq 1 "$(devex_journey_exit_code 1 3)" "machine failure wins over review"
 assert_eq 4 "$(devex_journey_exit_code 0 3)" "open review has distinct exit"

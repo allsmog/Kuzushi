@@ -523,11 +523,6 @@ prepare_snapshot() { # <label>
   PENDING_META="$JDIR/$PENDING_SNAP_NAME.provenance.json"
 }
 
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g; s/
-/\\r/g'
-}
-
 canonical_file_path() {
   devex_canonical_path "$1" || printf '%s' "$1"
 }
