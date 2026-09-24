@@ -293,6 +293,8 @@ fn recon_target_field(input: &Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capabilities::recon::domain::{ReconNote, ReconPersisted};
+    use std::collections::BTreeMap;
 
     #[test]
     fn native_recon_skip_phrase_names_each_drop_class() {
