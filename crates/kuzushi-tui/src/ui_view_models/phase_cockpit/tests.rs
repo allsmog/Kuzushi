@@ -838,6 +838,29 @@ fn compact_result_summary_says_unmeasured_instead_of_a_fake_plus_zero() {
 }
 
 #[test]
+fn a_map_card_makes_no_finding_claim_it_cannot_measure() {
+    // Map tools never persist findings; "findings unmeasured" on a Map card
+    // (seen on Juice Shop) would suggest an unknown where there is none.
+    let mut summary = crate::PhaseResultCompactSummary {
+        phase: WorkflowPhase::Map,
+        outcome: PhaseAttemptOutcome::Completed,
+        run_count: 3,
+        artifact_count: 16,
+        changed_findings: 0,
+        finding_delta_observed: Some(false),
+        cost: None,
+        revision_recorded: true,
+        receipt_recorded: true,
+    };
+    let rendered = compact_result_summary(&summary);
+    assert!(!rendered.contains("findings"), "{rendered}");
+    assert!(rendered.ends_with("16 artifact(s)"), "{rendered}");
+
+    summary.finding_delta_observed = Some(true);
+    assert!(compact_result_summary(&summary).ends_with("findings +0"));
+}
+
+#[test]
 fn card_model_drops_the_detail_row_that_duplicates_the_trailing_next() {
     // The strip renders `recommended` as its own `next:` row after the
     // control hint; the identical presentation detail row must not make

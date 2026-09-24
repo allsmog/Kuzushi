@@ -80,6 +80,16 @@ impl PhaseResultCompactSummary {
             self.finding_delta_observed,
         )
     }
+
+    /// The card's findings segment, or `None` for a Map attempt that touched
+    /// no findings: Map tools never persist findings, so "unmeasured" there
+    /// would suggest an unknown where the phase makes no finding claim.
+    pub(crate) fn findings_segment(&self) -> Option<String> {
+        let unmeasured_map = self.phase == WorkflowPhase::Map
+            && self.changed_findings == 0
+            && self.finding_delta_observed != Some(true);
+        (!unmeasured_map).then(|| self.findings_label())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
