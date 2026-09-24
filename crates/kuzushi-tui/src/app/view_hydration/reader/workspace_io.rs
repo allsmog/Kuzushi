@@ -319,6 +319,24 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn catalog_hydration_rejects_a_catalog_recording_no_coverage_off_thread() {
+        let target = tempfile::tempdir().unwrap();
+        let catalog = write_empty_catalog_and_context(target.path());
+        let mut document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&catalog).unwrap()).unwrap();
+        document.as_object_mut().unwrap().remove("snapshotCoverage");
+        std::fs::write(&catalog, serde_json::to_string(&document).unwrap()).unwrap();
+
+        let hydration = read_json_file(target.path(), &catalog);
+
+        assert!(matches!(
+            hydration.entry_point_catalog_context_authentication,
+            Some(EntryPointCatalogContextAuthentication::Rejected(error))
+                if error.contains("records no snapshot coverage")
+        ));
+    }
+
     fn write_empty_catalog_and_context(target: &Path) -> PathBuf {
         let context_path = kuzushi_core::context_snapshot_path(target);
         std::fs::create_dir_all(context_path.parent().unwrap()).unwrap();
@@ -336,6 +354,7 @@ mod tests {
             "snapshotTimestamp": 10,
             "total": 0,
             "entryPoints": [],
+            "snapshotCoverage": {"state": "complete"},
             "provenance": {
                 "builtAtMs": 20,
                 "sha256": kuzushi_core::prompt_content_sha256("[]"),
