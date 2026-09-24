@@ -401,6 +401,10 @@ fn append_cost_line(lines: &mut Vec<String>, cost: &RuntimeCostReport) {
         lines.push("      cost unavailable".to_string());
         return;
     }
+    if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        lines.push(format!("      estimated cost=~${estimate:.4} (tokens × list price)"));
+        return;
+    }
     let cost_label = if cost.is_complete() {
         "cost"
     } else {

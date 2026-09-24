@@ -20,6 +20,7 @@ fn confirmed(mut finding: Finding) -> Finding {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding
 }
@@ -33,6 +34,7 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
         rationale: "human reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding

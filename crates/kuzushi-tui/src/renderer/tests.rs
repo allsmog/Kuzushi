@@ -1842,6 +1842,7 @@ fn module_run_findings_preview_uses_projected_finding_rows() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     *app.findings_mut() = vec![
         triaged,
@@ -7457,6 +7458,7 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
         rationale: "Operator confirmed the source-to-sink path.".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     let mut app = ShellApp::new(V2Config::default(), None);

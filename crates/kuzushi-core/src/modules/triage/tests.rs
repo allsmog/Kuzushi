@@ -812,6 +812,7 @@ mod tests {
                     rationale: "reachable sink".to_string(),
                     cost_usd: 0.01,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
             )
             .unwrap();
@@ -844,6 +845,7 @@ mod tests {
                     rationale: "reachable sink".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: false,
+                    estimated_cost_usd: None,
                 },
             )
             .unwrap();
@@ -867,6 +869,35 @@ mod tests {
     }
 
     #[test]
+    fn estimated_unmetered_spend_is_labelled_and_enforces_the_cap() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd_exact: false,
+                    estimated_cost_usd: Some(0.25),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert!(response.get("costUsd").is_none(), "an estimate is never billed spend");
+        assert_eq!(response["estimatedCostUsd"], json!(0.25));
+        assert_eq!(response["providerSpendUnresolved"], json!(true));
+        let warnings = response["warnings"].to_string();
+        assert!(warnings.contains("estimated at ~$0.2500"), "{warnings}");
+        assert!(!triage_cost_cap_reached(Some(1.0), stats.cost_report()));
+        assert!(triage_cost_cap_reached(Some(0.25), stats.cost_report()));
+    }
+
+    #[test]
     fn triage_response_preserves_explicit_reported_zero() {
         let (input, config, stage1) = one_finding_triage_context();
         let mut stats = TriageRunStats::default();
@@ -881,6 +912,7 @@ mod tests {
                     rationale: "reachable sink".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
             )
             .unwrap();
@@ -1003,6 +1035,7 @@ mod tests {
                     rationale: "reachable sink".to_string(),
                     cost_usd: 0.01,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
             )
             .unwrap();
@@ -1142,6 +1175,7 @@ mod tests {
             rationale: "confirmed once".to_string(),
             cost_usd: 0.01,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         }
     }
 
@@ -1183,6 +1217,7 @@ mod tests {
                 rationale: format!("vote {}", *calls),
                 cost_usd: 0.01,
                 cost_usd_exact: true,
+                estimated_cost_usd: None,
             })
         }
     }
@@ -1357,6 +1392,7 @@ mod tests {
                 rationale: format!("vote {}", *calls),
                 cost_usd: 0.01,
                 cost_usd_exact: true,
+                estimated_cost_usd: None,
             })
         }
     }

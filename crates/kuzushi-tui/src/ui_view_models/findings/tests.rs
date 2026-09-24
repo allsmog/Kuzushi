@@ -102,6 +102,7 @@ fn findings_model_projects_counts_rows_and_selection() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     high.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
     let medium = Finding::new_tool(
@@ -284,6 +285,7 @@ fn findings_model_applies_active_filter_to_visible_rows() {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     *app.findings_mut() = vec![open, confirmed];
 
@@ -346,6 +348,7 @@ fn findings_model_counts_reviewed_by_durable_identity() {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     let mut rerun = Finding::new_tool(
         "semgrep",
@@ -395,6 +398,7 @@ fn selected_finding_detail_uses_durable_identity_review_decision() {
         rationale: "operator confirmed this identity".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     reviewed.triaged_by = Some(TriageAuthor::Human);
 
@@ -1227,6 +1231,7 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     *app.findings_mut() = vec![finding];

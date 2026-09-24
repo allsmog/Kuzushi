@@ -72,6 +72,7 @@ mod tests {
             rationale: "confirmed".to_string(),
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
         let refreshed = cache.sorted_indices(&findings, 2);
 

@@ -14,10 +14,17 @@ pub struct RuntimeCost(f64);
 /// record). `IncompleteObserved` means a provider call may have spent money but
 /// did not report a complete total. Keeping those states separate prevents an
 /// absent legacy receipt from being presented as an observed zero-dollar call.
+///
+/// An incomplete report may also carry `unmetered_estimate`: a locally priced
+/// estimate (tokens × list price) covering every call that reported no charge.
+/// It is never folded into `observed`; it only lets budgets and displays use a
+/// labelled `~$` total instead of treating all unmetered spend as unbounded.
+/// One unmetered call without an estimate makes the whole estimate unknown.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RuntimeCostReport {
     observed: RuntimeCost,
     state: RuntimeCostState,
+    unmetered_estimate: Option<RuntimeCost>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,23 +47,24 @@ enum RuntimeCostCompleteness {
 struct RuntimeCostWire {
     observed_usd: f64,
     completeness: RuntimeCostCompleteness,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    estimated_unmetered_usd: Option<f64>,
 }
 
 impl RuntimeCostReport {
     pub const UNAVAILABLE: Self = Self {
         observed: RuntimeCost::ZERO,
         state: RuntimeCostState::Unavailable,
+        unmetered_estimate: None,
     };
 
-    pub const INCOMPLETE_ZERO: Self = Self {
-        observed: RuntimeCost::ZERO,
-        state: RuntimeCostState::IncompleteObserved,
-    };
+    pub const INCOMPLETE_ZERO: Self = Self::incomplete(RuntimeCost::ZERO);
 
     pub const fn known(cost: RuntimeCost) -> Self {
         Self {
             observed: cost,
             state: RuntimeCostState::Exact,
+            unmetered_estimate: None,
         }
     }
 
@@ -64,6 +72,19 @@ impl RuntimeCostReport {
         Self {
             observed,
             state: RuntimeCostState::IncompleteObserved,
+            unmetered_estimate: None,
+        }
+    }
+
+    /// Attach the local estimate for the unmetered part of an incomplete
+    /// report. Exact and unavailable reports are returned unchanged.
+    pub const fn with_unmetered_estimate(self, estimate: Option<RuntimeCost>) -> Self {
+        match self.state {
+            RuntimeCostState::IncompleteObserved => Self {
+                unmetered_estimate: estimate,
+                ..self
+            },
+            _ => self,
         }
     }
 
@@ -79,23 +100,64 @@ impl RuntimeCostReport {
     }
 
     pub fn checked_add(self, other: Self, context: &str) -> Result<Self> {
-        if self.is_exact_zero() {
-            return Ok(other);
-        }
-        if other.is_exact_zero() {
-            return Ok(self);
-        }
-        if self.is_unavailable() && other.is_unavailable() {
-            return Ok(Self::UNAVAILABLE);
+        if let Some(sum) = self.trivial_sum(other) {
+            return Ok(sum);
         }
         let observed = self.observed.checked_add(other.observed, context)?;
-        Ok(if self.is_unavailable() || other.is_unavailable() {
-            Self::incomplete(observed)
-        } else if self.is_complete() && other.is_complete() {
-            Self::known(observed)
-        } else {
-            Self::incomplete(observed)
-        })
+        if self.is_complete() && other.is_complete() {
+            return Ok(Self::known(observed));
+        }
+        let estimate = self.summed_unmetered_estimate(other, context)?;
+        Ok(Self::incomplete(observed).with_unmetered_estimate(estimate))
+    }
+
+    /// Sums that need no arithmetic: an exact zero is the identity, and two
+    /// absent receipts stay absent.
+    fn trivial_sum(self, other: Self) -> Option<Self> {
+        if self.is_exact_zero() {
+            return Some(other);
+        }
+        if other.is_exact_zero() {
+            return Some(self);
+        }
+        (self.is_unavailable() && other.is_unavailable()).then_some(Self::UNAVAILABLE)
+    }
+
+    /// Both sides must account for their unmetered spend: an exact side adds
+    /// nothing, an estimated side adds its estimate, anything else is unknown.
+    fn summed_unmetered_estimate(self, other: Self, context: &str) -> Result<Option<RuntimeCost>> {
+        match (self.unmetered_estimate_part(), other.unmetered_estimate_part()) {
+            (Some(left), Some(right)) => left.checked_add(right, context).map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    fn unmetered_estimate_part(self) -> Option<RuntimeCost> {
+        match self.state {
+            RuntimeCostState::Exact => Some(RuntimeCost::ZERO),
+            RuntimeCostState::IncompleteObserved => self.unmetered_estimate,
+            RuntimeCostState::Unavailable => None,
+        }
+    }
+
+    /// Exact spend, or observed spend plus the unmetered estimate. `None`
+    /// when some unmetered spend has no estimate; budgets must fail closed.
+    pub fn estimated_total_usd(self) -> Option<f64> {
+        let part = self.unmetered_estimate_part()?;
+        Some(self.observed.usd() + part.usd())
+    }
+
+    /// The labelled local estimate for the unmetered part, if every unmetered
+    /// call was priced. Exact reports have nothing unmetered and return `None`.
+    pub fn unmetered_estimate_usd(self) -> Option<f64> {
+        self.is_estimated()
+            .then(|| self.unmetered_estimate.map(RuntimeCost::usd))
+            .flatten()
+    }
+
+    /// True when the total is available only because of a local estimate.
+    pub fn is_estimated(self) -> bool {
+        self.state == RuntimeCostState::IncompleteObserved && self.unmetered_estimate.is_some()
     }
 
     pub fn observed_usd(self) -> f64 {
@@ -154,6 +216,7 @@ impl From<RuntimeCostReport> for RuntimeCostWire {
         Self {
             observed_usd: report.observed_usd(),
             completeness,
+            estimated_unmetered_usd: report.unmetered_estimate.map(RuntimeCost::usd),
         }
     }
 }
@@ -164,7 +227,11 @@ impl RuntimeCostWire {
         match self.completeness {
             RuntimeCostCompleteness::Exact => Ok(RuntimeCostReport::known(observed)),
             RuntimeCostCompleteness::IncompleteObserved => {
-                Ok(RuntimeCostReport::incomplete(observed))
+                let estimate = self
+                    .estimated_unmetered_usd
+                    .map(|usd| RuntimeCost::from_usd(usd, "persisted runtime cost estimate"))
+                    .transpose()?;
+                Ok(RuntimeCostReport::incomplete(observed).with_unmetered_estimate(estimate))
             }
             RuntimeCostCompleteness::Unavailable => {
                 anyhow::ensure!(
@@ -217,11 +284,14 @@ impl RuntimeCost {
 
 pub fn triage_cost_report(outcome: &crate::findings::TriageOutcome) -> Result<RuntimeCostReport> {
     let observed = RuntimeCost::from_usd(outcome.cost_usd, "triage outcome cost")?;
-    Ok(if outcome.cost_usd_exact {
-        RuntimeCostReport::known(observed)
-    } else {
-        RuntimeCostReport::incomplete(observed)
-    })
+    if outcome.cost_usd_exact {
+        return Ok(RuntimeCostReport::known(observed));
+    }
+    let estimate = outcome
+        .estimated_cost_usd
+        .map(|usd| RuntimeCost::from_usd(usd, "triage outcome estimated cost"))
+        .transpose()?;
+    Ok(RuntimeCostReport::incomplete(observed).with_unmetered_estimate(estimate))
 }
 
 #[cfg(test)]
@@ -312,6 +382,67 @@ mod tests {
                 .unwrap(),
             RuntimeCostReport::UNAVAILABLE
         );
+    }
+
+    fn usd(value: f64) -> RuntimeCost {
+        RuntimeCost::from_usd(value, "cost").unwrap()
+    }
+
+    #[test]
+    fn estimate_totals_only_when_every_unmetered_part_is_estimated() {
+        let exact = RuntimeCostReport::known(usd(0.25));
+        let estimated = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(usd(0.5)));
+        let unknown = RuntimeCostReport::INCOMPLETE_ZERO;
+
+        let sum = exact.checked_add(estimated, "sum").unwrap();
+        assert_eq!(sum.exact_usd(), None);
+        assert!(sum.is_estimated());
+        assert_eq!(sum.estimated_total_usd(), Some(0.75));
+        assert_eq!(sum.observed_usd(), 0.25, "the estimate never becomes spend");
+
+        let with_unknown = sum.checked_add(unknown, "sum").unwrap();
+        assert!(!with_unknown.is_estimated());
+        assert_eq!(with_unknown.estimated_total_usd(), None);
+        let with_unavailable = estimated
+            .checked_add(RuntimeCostReport::UNAVAILABLE, "sum")
+            .unwrap();
+        assert_eq!(with_unavailable.estimated_total_usd(), None);
+        assert_eq!(exact.estimated_total_usd(), Some(0.25));
+        assert!(!exact.is_estimated());
+    }
+
+    #[test]
+    fn estimates_attach_only_to_incomplete_reports_and_round_trip() {
+        let exact = RuntimeCostReport::known(usd(0.25));
+        assert_eq!(exact.with_unmetered_estimate(Some(usd(1.0))), exact);
+        assert_eq!(
+            RuntimeCostReport::UNAVAILABLE.with_unmetered_estimate(Some(usd(1.0))),
+            RuntimeCostReport::UNAVAILABLE
+        );
+
+        let estimated = RuntimeCostReport::incomplete(usd(0.1)).with_unmetered_estimate(Some(usd(0.2)));
+        let wire = serde_json::to_value(estimated).unwrap();
+        assert_eq!(wire["estimatedUnmeteredUsd"], 0.2);
+        let back: RuntimeCostReport = serde_json::from_value(wire).unwrap();
+        assert_eq!(back, estimated);
+
+        let legacy = serde_json::json!({"observedUsd": 0.1, "completeness": "incomplete_observed"});
+        let legacy: RuntimeCostReport = serde_json::from_value(legacy).unwrap();
+        assert!(!legacy.is_estimated());
+        let exact_wire = serde_json::to_value(exact).unwrap();
+        assert!(exact_wire.get("estimatedUnmeteredUsd").is_none());
+    }
+
+    #[test]
+    fn triage_report_carries_the_outcome_estimate() {
+        let estimated = crate::findings::TriageOutcome {
+            cost_usd_exact: false,
+            estimated_cost_usd: Some(0.02),
+            ..Default::default()
+        };
+        let report = triage_cost_report(&estimated).unwrap();
+        assert_eq!(report.estimated_total_usd(), Some(0.02));
+        assert_eq!(report.exact_usd(), None);
     }
 
     #[test]

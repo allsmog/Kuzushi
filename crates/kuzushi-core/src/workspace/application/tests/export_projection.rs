@@ -122,6 +122,7 @@ fn export_record_labels_automated_reasoning_without_calling_it_observed_evidence
         rationale: "automated review needs operator validation".to_string(),
         cost_usd: 0.01,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Auto);
 
@@ -284,6 +285,7 @@ fn reviewed_source_linked_finding() -> Finding {
         rationale: "operator reviewed source-linked evidence".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding.static_proof_state = Some(StaticProofState::SourceSinkLinked);

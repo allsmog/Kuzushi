@@ -58,7 +58,9 @@ pub(in crate::modules) fn triage_cost_cap_reached(
     cost_cap_usd: Option<f64>,
     cost: crate::runtime::RuntimeCostReport,
 ) -> bool {
-    cost_cap_usd.is_some_and(|cap| !cost.is_complete() || cost.observed_usd() >= cap)
+    // Unmetered spend counts at its labelled estimate; spend with no estimate
+    // at all is unbounded, so the cap fails closed.
+    cost_cap_usd.is_some_and(|cap| cost.estimated_total_usd().is_none_or(|spent| spent >= cap))
 }
 
 pub(in crate::modules) fn call_triage_runtime(
@@ -427,11 +429,8 @@ fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> V
     if stats.cost_cap_hit {
         warnings.push(cost_cap_warning(stats));
     }
-    if !stats.cost_report().is_complete() {
-        warnings.push(format!(
-            "Provider spend is unresolved; observed subtotal is ${:.4}.",
-            stats.cost_report().observed_usd()
-        ));
+    if let Some(warning) = unresolved_spend_warning(stats.cost_report()) {
+        warnings.push(warning);
     }
     if !missing_fingerprints.is_empty() {
         warnings.push(format!(
@@ -440,6 +439,21 @@ fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> V
         ));
     }
     warnings
+}
+
+fn unresolved_spend_warning(cost: crate::runtime::RuntimeCostReport) -> Option<String> {
+    if cost.is_complete() {
+        return None;
+    }
+    Some(match cost.estimated_total_usd() {
+        Some(estimate) => format!(
+            "Provider reported no charge; spend is estimated at ~${estimate:.4} from token usage and list prices."
+        ),
+        None => format!(
+            "Provider spend is unresolved; observed subtotal is ${:.4}.",
+            cost.observed_usd()
+        ),
+    })
 }
 
 fn triage_failure_warnings(stats: &TriageRunStats) -> Vec<String> {
@@ -470,7 +484,7 @@ fn triage_failure_warning(stats: &TriageRunStats) -> String {
 }
 
 fn cost_cap_warning(stats: &TriageRunStats) -> String {
-    if stats.cost_report().is_complete() {
+    if stats.cost_report().estimated_total_usd().is_some() {
         return format!(
             "Cost cap hit; {} finding(s) remain unevaluated.",
             stats.pending_after_cap

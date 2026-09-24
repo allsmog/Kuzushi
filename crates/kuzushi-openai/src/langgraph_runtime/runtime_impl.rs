@@ -356,7 +356,7 @@ pub(super) fn bridge_prompt_cache(response: &BridgeResponse) -> Option<PromptCac
 }
 
 pub(super) fn estimated_bridge_cost(response: &BridgeResponse, model: &str) -> Option<f64> {
-    if response.cost_usd.is_some() {
+    if response.cost_usd.is_some() || !every_call_reported_tokens(response) {
         return None;
     }
     crate::anthropic_oauth::estimate_cost_usd_with_cache(
@@ -365,6 +365,16 @@ pub(super) fn estimated_bridge_cost(response: &BridgeResponse, model: &str) -> O
         clamp_token_count_u32(response.output_tokens?),
         bridge_prompt_cache(response),
     )
+}
+
+/// A token total that misses some calls would under-price the estimate, so a
+/// partially reported aggregate has no estimate at all.
+fn every_call_reported_tokens(response: &BridgeResponse) -> bool {
+    let Some(total_calls) = response.model_calls else {
+        return true;
+    };
+    response.input_reported_calls == Some(total_calls)
+        && response.output_reported_calls == Some(total_calls)
 }
 
 fn bridge_model_usage(response: &BridgeResponse) -> Result<ModelTokenUsage> {
@@ -699,6 +709,7 @@ fn text_triage_outcome(
 fn apply_call_cost(outcome: &mut TriageOutcome, call_cost: RuntimeCostReport) {
     outcome.cost_usd = call_cost.observed_usd();
     outcome.cost_usd_exact = call_cost.is_complete();
+    outcome.estimated_cost_usd = call_cost.unmetered_estimate_usd();
 }
 
 fn strip_whole_json_fence(text: &str) -> &str {

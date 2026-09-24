@@ -1640,6 +1640,7 @@ mod tests {
                     rationale: "operator confirmed source-to-sink evidence".to_string(),
                     cost_usd: 0.125,
                     cost_usd_exact: false,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Human,
             )
@@ -2851,6 +2852,7 @@ mod tests {
             rationale: "model signal did not match reachable code".to_string(),
             cost_usd: 0.12,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         };
 
         let decision = ReviewDecision::from_triage(&triage, Some(TriageAuthor::Human));
@@ -3352,6 +3354,7 @@ mod tests {
             rationale: "source and sink are linked".to_string(),
             cost_usd: 0.02,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
         let mut verification = crate::findings::test_support::empirically_verified(4);
         verification.harness_path = Some("/tmp/harness.js".to_string());
@@ -3642,6 +3645,7 @@ mod tests {
             rationale: "source reaches sink".to_string(),
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
 
         let mut before_triage = confirmed.clone();
@@ -3700,6 +3704,7 @@ mod tests {
             rationale: "reviewed source-linked evidence".to_string(),
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
         finding.triaged_by = Some(TriageAuthor::Human);
         finding.evidence.push(FindingEvidence {
@@ -4476,6 +4481,7 @@ mod tests {
             rationale: "synthetic".to_string(),
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         };
         let result = store.record_auto_triage(stale_id, &outcome);
         let err = match result {
@@ -4519,6 +4525,7 @@ mod tests {
                     rationale: "ok".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
             )
             .expect("triage insert must succeed when finding exists");

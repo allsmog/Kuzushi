@@ -11871,6 +11871,7 @@ fn next_command_opens_phase_picker_at_derived_phase() {
         rationale: "confirmed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     app.engagement.clear_phase();
     run_command(&mut app, ShellCommand::Next);
@@ -22706,6 +22707,7 @@ fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
             rationale: "reviewed".to_string(),
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
     };
     let mut entry = Finding::new_semgrep(
@@ -23649,6 +23651,7 @@ fn backlog_preset_filters_untriaged_and_keeps_severity_first_order() {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     let untriaged_low = Finding::new_tool(
         "fixture",

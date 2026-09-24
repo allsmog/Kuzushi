@@ -19,6 +19,17 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Claude calls that report tokens but no charge (the LangGraph bridge and
+  OAuth paths) are now priced locally from token usage and a versioned list
+  price table. The estimate is carried beside observed spend, labelled `~$X
+  (estimated)` and `estimatedCostUsd`, and never becomes `costUsd`. Triage
+  cost caps and the shell session budget enforce against it instead of
+  halting after the first unmetered call. Any unmetered call without an
+  estimate still fails closed. The price table now matches current list
+  prices (Haiku 4.5 is $1/$5 per MTok, Opus 4.5+ is $5/$25) and prices only
+  exact model ids. Persisted cost reports gain an optional
+  `estimatedUnmeteredUsd` field that older binaries reject.
+
 - A RESULT READY card key never becomes composer text in Navigate mode (#172).
   A stale-frame re-press of the key that just resolved a card used to fall
   through to prompt typing. Five presses of `u` applied "Use map" once and

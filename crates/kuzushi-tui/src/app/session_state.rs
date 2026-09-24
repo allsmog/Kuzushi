@@ -218,6 +218,16 @@ impl SessionState {
         self.cost_accounting_error.as_deref()
     }
 
+    /// Spend a budget can be enforced against: exact spend, or exact spend plus
+    /// the labelled estimate for unmetered calls. `None` (an accounting error
+    /// or unmetered spend with no estimate) fails the budget closed.
+    pub(crate) fn budget_spend_usd(&self) -> Option<f64> {
+        if self.cost_accounting_error.is_some() {
+            return None;
+        }
+        self.session_cost.estimated_total_usd()
+    }
+
     pub(crate) fn cost_accounting_is_complete(&self) -> bool {
         self.cost_accounting_error.is_none() && self.session_cost.is_complete()
     }

@@ -40,19 +40,15 @@ pub(crate) enum CostTone {
 pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
     let session = app.session();
     let budget = session.session_budget_usd();
-    let session_cost = session.session_cost_usd();
+    let budget_spend = session.budget_spend_usd();
+    let session_cost = budget_spend.unwrap_or_else(|| session.session_cost_usd());
     let last_tool = session.last_tool_cost_usd();
     let (session_text, last_tool_text) = cost_texts(app);
     let budget_text = budget_text(session.session_budget_usd());
     let hard_ceiling_text = hard_ceiling_text(app.config().operator.spend_hard_ceiling_usd);
     CostModel {
         budget_rows: budget.map_or_else(Vec::new, |cap| {
-            cost_budget_rows(
-                session_cost,
-                last_tool,
-                cap,
-                session.cost_accounting_is_complete(),
-            )
+            cost_budget_rows(session_cost, last_tool, cap, budget_spend.is_some())
         }),
         spend_rows: cost_spend_rows(
             session_text.clone(),
@@ -61,7 +57,7 @@ pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
             hard_ceiling_text,
         ),
         auth_spend_cells: [session_text, last_tool_text],
-        budget_status: budget_status(session_cost, budget, session.cost_accounting_is_complete()),
+        budget_status: budget_status(session_cost, budget, budget_spend.is_some()),
     }
 }
 

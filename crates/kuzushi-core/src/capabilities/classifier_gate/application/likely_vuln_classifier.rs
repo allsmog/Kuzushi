@@ -127,6 +127,7 @@ impl<'a> LikelyVulnClassifier<'a> {
             first_link: None,
             cost_usd: cost.observed_usd(),
             cost_usd_exact: cost.is_complete(),
+            estimated_cost_usd: cost.unmetered_estimate_usd(),
         }
     }
 

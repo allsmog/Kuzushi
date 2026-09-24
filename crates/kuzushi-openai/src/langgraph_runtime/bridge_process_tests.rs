@@ -167,6 +167,39 @@ fn known_claude_usage_gets_an_observed_cost_when_provider_omits_cost() {
 }
 
 #[test]
+fn partially_reported_multi_call_usage_has_no_estimate() {
+    let partial: BridgeResponse = serde_json::from_value(json!({
+        "ok": true,
+        "input_tokens": 1_000,
+        "output_tokens": 500,
+        "model_calls": 3,
+        "input_reported_calls": 2,
+        "output_reported_calls": 3,
+        "cost_reported_calls": 0,
+        "cost_usd_exact": false,
+    }))
+    .unwrap();
+    assert_eq!(
+        estimated_bridge_cost(&partial, "anthropic:claude-haiku-4-5"),
+        None
+    );
+
+    let complete: BridgeResponse = serde_json::from_value(json!({
+        "ok": true,
+        "input_tokens": 1_000,
+        "output_tokens": 500,
+        "model_calls": 3,
+        "input_reported_calls": 3,
+        "output_reported_calls": 3,
+        "cost_reported_calls": 0,
+        "cost_usd_exact": false,
+    }))
+    .unwrap();
+    let estimate = estimated_bridge_cost(&complete, "anthropic:claude-haiku-4-5").unwrap();
+    assert!((estimate - 0.0035).abs() < 1e-12, "{estimate}");
+}
+
+#[test]
 fn bridge_cache_counters_reach_the_response_and_discount_the_estimate() {
     let response: BridgeResponse = serde_json::from_value(json!({
         "ok": true,

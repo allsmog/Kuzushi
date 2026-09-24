@@ -337,6 +337,7 @@ fn workbench_list_view_with_two_findings() {
         rationale: "concatenated input".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     let untriaged = Finding::new_tool(
         "codeql",
@@ -442,6 +443,7 @@ fn module_run_view_with_findings_and_active_scan() {
         rationale: "input concatenated".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     app.set_findings(vec![finding]);
     app.set_scan_panel(Some(kuzushi_tui::ScanPanelState {

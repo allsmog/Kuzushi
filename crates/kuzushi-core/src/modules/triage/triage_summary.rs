@@ -51,6 +51,12 @@ fn append_classification_errors(summary: &mut String, stats: &TriageRunStats) {
 
 fn append_cost_summary(summary: &mut String, stats: &TriageRunStats) {
     let cost = stats.cost_report();
+    if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        summary.push_str(&format!(
+            "\n      estimated cost=~${estimate:.4} (tokens × list price; provider reported no charge)"
+        ));
+        return;
+    }
     let label = if cost.is_complete() {
         "cost"
     } else {

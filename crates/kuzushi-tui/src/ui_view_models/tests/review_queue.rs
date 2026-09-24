@@ -30,6 +30,7 @@ fn confirmed(mut finding: Finding) -> Finding {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding
 }
@@ -43,6 +44,7 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
         rationale: "human reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
@@ -182,6 +184,7 @@ fn occurrence_ratio_is_metadata_only_for_a_tied_review_result() {
         rationale: "equal votes remain tied".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     let sparse = review_row_with_occurrence(tied.clone(), 1);
     let repeated = review_row_with_occurrence(tied, 3);
@@ -443,6 +446,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
         rationale: "runtime confirmed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     confirmed.verification = Some(crate::test_support::test_empirical_verification(3));
     let needs_high = finding("needs-high", Severity::High, 1);
@@ -942,6 +946,7 @@ fn human_rejected(mut finding: Finding) -> Finding {
         rationale: "operator rejected prior occurrence".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding

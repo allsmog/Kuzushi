@@ -24,11 +24,16 @@ fn apply_cost_fields(value: &mut Value, cost: crate::runtime::RuntimeCostReport)
     let Some(object) = value.as_object_mut() else {
         return;
     };
+    object.remove("estimatedCostUsd");
     if cost.is_unavailable() {
         object.remove("costUsd");
         object.remove("observedCostUsd");
         object.remove("providerSpendUnresolved");
         return;
+    }
+    if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        // A labelled local estimate, never billed spend: `costUsd` stays absent.
+        object.insert("estimatedCostUsd".to_string(), json!(estimate));
     }
     if let Some(exact) = cost.exact_usd() {
         object.insert("costUsd".to_string(), json!(exact));

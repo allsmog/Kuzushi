@@ -2279,6 +2279,7 @@ OUT
             rationale: "test".to_string(),
             cost_usd: 0.0123,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         };
         store.record_auto_triage(finding_id, &outcome).unwrap();
 

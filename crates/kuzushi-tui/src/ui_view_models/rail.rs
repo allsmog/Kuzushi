@@ -154,10 +154,8 @@ fn findings_section(app: &ShellApp, width: usize) -> Option<RailSection> {
 /// metering is labelled a lower bound.
 fn cost_section(app: &ShellApp) -> RailSection {
     let session = app.session();
-    let report = session.session_cost_report();
-    let metered = report.is_complete() && session.cost_accounting_error().is_none();
     let rows = match session.session_budget_usd() {
-        Some(budget) if budget > 0.0 => budget_rows(report.observed_usd(), budget, metered),
+        Some(budget) if budget > 0.0 => budget_rows(budget_spend(app), budget),
         _ => vec![
             Line::styled(unbudgeted_spend_label(app), theme::muted()),
             Line::styled("budget not enforced".to_string(), theme::subtle()),
@@ -184,14 +182,45 @@ fn unbudgeted_spend_label(app: &ShellApp) -> String {
     spent
 }
 
-fn budget_rows(observed: f64, budget: f64, metered: bool) -> Vec<Line<'static>> {
+/// How firmly the rail may state spend against a budget.
+enum BudgetSpend {
+    Metered(f64),
+    Estimated(f64),
+    LowerBound(f64),
+}
+
+fn budget_spend(app: &ShellApp) -> BudgetSpend {
+    let session = app.session();
+    let report = session.session_cost_report();
+    match session.budget_spend_usd() {
+        Some(spent) if report.is_estimated() => BudgetSpend::Estimated(spent),
+        Some(spent) => BudgetSpend::Metered(spent),
+        None => BudgetSpend::LowerBound(report.observed_usd()),
+    }
+}
+
+impl BudgetSpend {
+    fn bound_and_usd(&self) -> (&'static str, f64) {
+        match *self {
+            Self::Metered(usd) => ("", usd),
+            Self::Estimated(usd) => ("~", usd),
+            Self::LowerBound(usd) => (">=", usd),
+        }
+    }
+
+    fn share(&self, percent: u64) -> String {
+        match self {
+            Self::Metered(_) => format!("{percent}% of budget"),
+            Self::Estimated(_) => format!("~{percent}% · estimated"),
+            Self::LowerBound(_) => format!(">={percent}% · calls unmetered"),
+        }
+    }
+}
+
+fn budget_rows(spend: BudgetSpend, budget: f64) -> Vec<Line<'static>> {
+    let (bound, observed) = spend.bound_and_usd();
     let percent = ((observed / budget) * 100.0).round() as u64;
-    let bound = if metered { "" } else { ">=" };
-    let share = if metered {
-        format!("{percent}% of budget")
-    } else {
-        format!(">={percent}% · calls unmetered")
-    };
+    let share = spend.share(percent);
     let style = if percent >= 80 {
         theme::warn()
     } else {
@@ -281,12 +310,30 @@ mod tests {
 
     #[test]
     fn a_budget_share_over_unmetered_calls_is_a_lower_bound() {
-        let unmetered = budget_rows(1.0, 10.0, false);
+        let unmetered = budget_rows(BudgetSpend::LowerBound(1.0), 10.0);
         assert_eq!(unmetered[0].to_string(), ">=$1.00 of $10.00");
         assert_eq!(unmetered[1].to_string(), ">=10% · calls unmetered");
-        let metered = budget_rows(1.0, 10.0, true);
+        let metered = budget_rows(BudgetSpend::Metered(1.0), 10.0);
         assert_eq!(metered[0].to_string(), "$1.00 of $10.00");
         assert_eq!(metered[1].to_string(), "10% of budget");
+        let estimated = budget_rows(BudgetSpend::Estimated(1.0), 10.0);
+        assert_eq!(estimated[0].to_string(), "~$1.00 of $10.00");
+        assert_eq!(estimated[1].to_string(), "~10% · estimated");
+    }
+
+    #[test]
+    fn an_estimated_session_is_labelled_and_enforces_its_budget() {
+        use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
+        let estimate = RuntimeCost::from_usd(0.5, "cost").unwrap();
+        let report = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(estimate));
+        assert_eq!(
+            crate::ui_view_models::format_runtime_cost(report, None),
+            "~$0.50 (estimated)"
+        );
+        assert_eq!(
+            crate::ui_view_models::format_runtime_cost(RuntimeCostReport::INCOMPLETE_ZERO, None),
+            ">=$0.00 (metering incomplete)"
+        );
     }
 
     #[test]

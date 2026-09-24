@@ -33,34 +33,37 @@ impl ShellApp {
         else {
             return;
         };
-        if !self.session().cost_accounting_is_complete() {
-            self.halt_for_unreliable_cost(limit);
-        } else if self.session().session_cost_usd() >= limit {
-            self.halt_at_cost_limit(limit);
+        match self.session().budget_spend_usd() {
+            None => self.halt_for_unreliable_cost(limit),
+            Some(spent) if spent >= limit => self.halt_at_cost_limit(limit, spent),
+            Some(_) => {}
         }
     }
 
     fn halt_for_unreliable_cost(&mut self, limit: f64) {
-        self.set_budget_halt(limit);
+        self.set_budget_halt(limit, self.session().session_cost_usd());
         self.log(
             "budget",
             "session spend is incomplete or invalid; budget is halted until accounting is resolved",
         );
     }
 
-    fn halt_at_cost_limit(&mut self, limit: f64) {
-        self.set_budget_halt(limit);
+    fn halt_at_cost_limit(&mut self, limit: f64, spent: f64) {
+        self.set_budget_halt(limit, spent);
+        let estimated = if self.session().session_cost_report().is_estimated() {
+            "~"
+        } else {
+            ""
+        };
         self.log(
             "budget",
             format!(
-                "session cost ${:.4} reached cap ${limit:.4}; c=continue · a=abort",
-                self.session().session_cost_usd()
+                "session cost {estimated}${spent:.4} reached cap ${limit:.4}; c=continue · a=abort"
             ),
         );
     }
 
-    fn set_budget_halt(&mut self, limit_usd: f64) {
-        let spent_usd = self.session().session_cost_usd();
+    fn set_budget_halt(&mut self, limit_usd: f64, spent_usd: f64) {
         self.advisory_mut().budget_halt = Some(BudgetHalt {
             limit_usd,
             spent_usd,
@@ -68,7 +71,7 @@ impl ShellApp {
     }
 
     pub(crate) fn continue_past_budget(&mut self) {
-        if !self.session().cost_accounting_is_complete() {
+        if self.session().budget_spend_usd().is_none() {
             self.set_error_notice(
                 "cost",
                 "cannot continue past the budget while runtime spend is incomplete or invalid",

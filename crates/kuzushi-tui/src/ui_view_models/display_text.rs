@@ -79,11 +79,21 @@ pub(crate) fn format_runtime_cost(
     if report.is_unavailable() {
         return "cost not recorded".to_string();
     }
-    let formatted = format_session_cost(report.observed_usd());
+    recorded_cost_text(report)
+}
+
+/// Exact spend as-is, a labelled `~` estimate for unmetered calls, or a `>=`
+/// lower bound when some unmetered spend has no estimate.
+fn recorded_cost_text(report: kuzushi_core::runtime::RuntimeCostReport) -> String {
     if report.is_complete() {
-        formatted
-    } else {
-        format!(">={formatted} (metering incomplete)")
+        return format_session_cost(report.observed_usd());
+    }
+    match report.estimated_total_usd() {
+        Some(total) => format!("~{} (estimated)", format_session_cost(total)),
+        None => format!(
+            ">={} (metering incomplete)",
+            format_session_cost(report.observed_usd())
+        ),
     }
 }
 

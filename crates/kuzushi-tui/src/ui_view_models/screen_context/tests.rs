@@ -31,6 +31,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         rationale: "needs human review".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.static_proof_state = Some(StaticProofState::SourceSinkLinked);
     finding.verification = Some(PersistedVerification {

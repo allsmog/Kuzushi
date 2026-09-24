@@ -134,6 +134,7 @@ pub(crate) fn text_triage_outcome(
 fn apply_call_cost(outcome: &mut TriageOutcome, call_cost: RuntimeCostReport) {
     outcome.cost_usd = call_cost.observed_usd();
     outcome.cost_usd_exact = call_cost.is_complete();
+    outcome.estimated_cost_usd = call_cost.unmetered_estimate_usd();
 }
 
 pub(crate) fn build_triage_prompt(request: &TriageRequest) -> Result<String> {
