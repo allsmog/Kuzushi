@@ -16,10 +16,11 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 
           ┌ MAP · RESULT READY ──────────────────────────────────────────────────────────────────────────────┐
           │MAP returned partial evidence. Review it and choose a recovery action.                            │
-          │receipt · completed · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 0 artifact(s) · 0...     │
-          │Outcome · completed · scenario completed                                                          │
-          │3 run ledger cell(s) omitted from the result card · inspect replay                                │
-          │8 timeline cell(s) omitted from the result card · inspect replay                                  │
+          │receipt · completed · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 7 artifact(s) · 0...     │
+          │Result · Run SAST scan (sast:scan) · completed · scenario completed                               │
+          │artifacts: tool input=input.json, run metadata=run.json, run events=events.jsonl, semantic...     │
+          │12 run ledger cell(s) omitted from the result card · inspect replay                               │
+          │17 timeline cell(s) omitted from the result card · inspect replay                                 │
           │target revision was not recorded for this attempt                                                 │
           │next: phase result ledger is degraded; repair it before selecting this result                     │
           │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
@@ -35,8 +36,7 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 
 
 
-
 shell route · 1 result ready · workbench · notify:unavailable · focus unknown · Map 1/5 · ⛭ autonomy:fix...   0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Esc prompt   Ctrl+C exit
+ Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
 ◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

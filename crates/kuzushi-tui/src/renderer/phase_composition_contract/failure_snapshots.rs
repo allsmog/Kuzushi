@@ -176,7 +176,7 @@ fn app_bound_to_scenario_attempt(
 
 fn persist_scenario_attempt(scenario: &FailureScenario, target: &Path) -> String {
     let run_id = format!("run-{}", scenario.slug);
-    persist_scenario_lifecycle(target, &run_id, scenario.outcome);
+    persist_scenario_run(target, &run_id, scenario.outcome);
     let attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new().to_string();
     let mut completed = PhaseAttemptCompleted::new(
         scenario.phase,
@@ -194,6 +194,33 @@ fn persist_scenario_attempt(scenario: &FailureScenario, target: &Path) -> String
         corrupt_ledger_tail(target);
     }
     attempt_id
+}
+
+/// A selectable (completed or partial) attempt is only reusable when its run
+/// carries an authenticatable source identity, exactly as a real scan run
+/// records one in its result. Terminal outcomes stay unselectable whatever
+/// their provenance, so they keep the bare lifecycle fixture.
+fn persist_scenario_run(target: &Path, run_id: &str, outcome: PhaseAttemptOutcome) {
+    match outcome {
+        PhaseAttemptOutcome::Completed | PhaseAttemptOutcome::Partial => {
+            persist_indexed_scenario_run(target, run_id, outcome)
+        }
+        _ => persist_scenario_lifecycle(target, run_id, outcome),
+    }
+}
+
+fn persist_indexed_scenario_run(target: &Path, run_id: &str, outcome: PhaseAttemptOutcome) {
+    let status = scenario_status(outcome).label();
+    let mut output = serde_json::json!({
+        "ok": true,
+        "status": status,
+        "summary": format!("scenario {status}"),
+        "data": {"count": 0}
+    });
+    if outcome == PhaseAttemptOutcome::Partial {
+        output["warnings"] = serde_json::json!(["scenario engine incomplete"]);
+    }
+    crate::test_support::record_indexed_run(target, run_id, "sast:scan", output);
 }
 
 fn persist_scenario_lifecycle(target: &Path, run_id: &str, outcome: PhaseAttemptOutcome) {
@@ -352,4 +379,34 @@ fn failure_card_rendering_is_deterministic() {
         "two renders of the same scenario diverged — nondeterministic \
          content (timestamps, generated ids) leaked into the frame"
     );
+}
+
+/// The partial card exists to show the acknowledgement choice. A fixture run
+/// without an authenticatable source identity is demoted to "run again"
+/// instead, so the snapshot would silently stop covering that decision.
+#[test]
+fn partial_failure_card_offers_acknowledgement_over_an_authenticated_run() {
+    let (width, height) = FAILURE_SNAPSHOT_SIZE;
+    let partial = SCENARIOS
+        .iter()
+        .find(|scenario| scenario.slug == "result_partial")
+        .expect("partial failure scenario");
+    let text = render_failure_card(partial, width, height);
+    assert!(text.contains("Use scan  RECOMMENDED"), "{text}");
+    assert!(text.contains("u Acknowledge & use partial"), "{text}");
+    assert!(
+        !text.contains("recorded source identity is unavailable"),
+        "{text}"
+    );
+}
+
+/// Footer hints and the card's single-key dispatch read the same resolved
+/// phase-result keymap, so every result action stays discoverable.
+#[test]
+fn failure_card_footer_advertises_its_result_keys() {
+    let (width, height) = FAILURE_SNAPSHOT_SIZE;
+    let text = render_failure_card(&SCENARIOS[0], width, height);
+    for hint in ["o Open", "r Run again", "d Discard"] {
+        assert!(text.contains(hint), "footer lost {hint:?}\n{text}");
+    }
 }

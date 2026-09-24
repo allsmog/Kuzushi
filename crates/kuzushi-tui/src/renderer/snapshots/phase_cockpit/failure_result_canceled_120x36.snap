@@ -38,5 +38,5 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
 shell route · 1 result ready · workbench · notify:unavailable · focus unknown · Map 1/5 · ⛭ autonomy:fix...   0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Esc prompt   Ctrl+C exit
+ Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
 ▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

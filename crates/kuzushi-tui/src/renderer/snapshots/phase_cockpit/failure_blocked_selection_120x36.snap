@@ -16,10 +16,13 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN returned partial evidence. Review it and choose a recovery action.                           │
-          │receipt · partial · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 0 artifact(s) · 0...       │
-          │Outcome · partial · scenario partial                                                              │
-          │3 run ledger cell(s) omitted from the result card · inspect replay                                │
-          │8 timeline cell(s) omitted from the result card · inspect replay                                  │
+          │receipt · partial · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 8 artifact(s) · 0...       │
+          │Result · Run SAST scan (sast:scan) · partial · scenario partial                                   │
+          │⚠ scenario engine incomplete                                                                      │
+          │artifacts: tool input=input.json, run metadata=run.json, run events=events.jsonl, semantic...     │
+          │Disclosure · result detail exceeds the display bound · omitted=1 · inspect...                     │
+          │13 run ledger cell(s) omitted from the result card · inspect replay                               │
+          │18 timeline cell(s) omitted from the result card · inspect replay                                 │
           │target revision was not recorded for this attempt                                                 │
           │next: live run settlement is not healthy and durable; inspect the run before continuing           │
           │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
@@ -33,10 +36,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
 
 
-
-
-
 shell route · 1 partial result · workbench · notify:unavailable · focus unknown · Map 1/5 · ⛭...              0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Esc prompt   Ctrl+C exit
+ Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
 ▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
