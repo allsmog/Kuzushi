@@ -635,18 +635,39 @@ fn asset_count(doc: &serde_json::Value) -> Option<usize> {
     array_len(doc.get("assets")).or_else(|| node_count(doc))
 }
 
+/// Actors the model names: its own `actors` table when it has one, else the
+/// distinct `threats[].actor` values, else the DFD's actor/external-entity
+/// nodes. A model that names none of these has not modeled actors, which is
+/// `unknown`, not a measured zero.
 fn actor_count(doc: &serde_json::Value) -> Option<usize> {
+    array_len(doc.get("actors"))
+        .or_else(|| distinct_threat_actor_count(doc))
+        .or_else(|| dfd_actor_node_count(doc))
+}
+
+fn distinct_threat_actor_count(doc: &serde_json::Value) -> Option<usize> {
+    let actors = doc
+        .get("threats")?
+        .as_array()?
+        .iter()
+        .filter_map(|threat| threat.get("actor").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|actor| !actor.is_empty())
+        .collect::<std::collections::BTreeSet<_>>();
+    (!actors.is_empty()).then_some(actors.len())
+}
+
+fn dfd_actor_node_count(doc: &serde_json::Value) -> Option<usize> {
     let nodes = doc.pointer("/dfd/nodes")?.as_array()?;
-    Some(
-        nodes
-            .iter()
-            .filter(|node| {
-                node.get("type")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|kind| kind == "external-entity" || kind == "actor")
-            })
-            .count(),
-    )
+    let count = nodes
+        .iter()
+        .filter(|node| {
+            node.get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind == "external-entity" || kind == "actor")
+        })
+        .count();
+    (count > 0).then_some(count)
 }
 
 fn array_len(value: Option<&serde_json::Value>) -> Option<usize> {
@@ -706,6 +727,34 @@ fn evidence_limitations(doc: &serde_json::Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actors_come_from_the_model_before_any_fallback() {
+        let threats = serde_json::json!({
+            "threats": [
+                {"actor": "adjacent_network"},
+                {"actor": "adjacent_network"},
+                {"actor": "remote_attacker"}
+            ],
+            "dfd": {"nodes": [{"type": "process"}]}
+        });
+        assert_eq!(actor_count(&threats), Some(2));
+
+        let table = serde_json::json!({"actors": [{}, {}, {}], "threats": [{"actor": "a"}]});
+        assert_eq!(actor_count(&table), Some(3));
+
+        let dfd = serde_json::json!({"dfd": {"nodes": [{"type": "external-entity"}]}});
+        assert_eq!(actor_count(&dfd), Some(1));
+    }
+
+    #[test]
+    fn a_model_that_names_no_actor_reports_unknown_not_zero() {
+        let doc = serde_json::json!({
+            "threats": [{"title": "no actor field"}],
+            "dfd": {"nodes": [{"type": "process"}]}
+        });
+        assert_eq!(count_label(actor_count(&doc), "actor"), "unknown");
+    }
     use crate::ThreatPatch;
     use serde_json::json;
 
