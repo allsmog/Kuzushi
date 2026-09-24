@@ -19,6 +19,62 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A RESULT READY card key never becomes composer text in Navigate mode (#172).
+  A stale-frame re-press of the key that just resolved a card used to fall
+  through to prompt typing. Five presses of `u` applied "Use map" once and
+  left `uuuu` in the composer on the next page. That repeat is now absorbed
+  with a notice. A card key pressed off the Workbench opens the pending card
+  instead of applying it unseen, and resolving a card drops a draft made only
+  of card letters. While a warning holds Esc, the footer says
+  `Esc dismiss notice`.
+- Setup states the selected target's path once, ahead of its facts, and no
+  longer reports the shell's own bookkeeping files (indexes, locks, history)
+  as "prior Kuzushi" work on a fresh target (#172).
+- Map's PROJECT CONTEXT card renders every receipt row, where the old
+  eight-row cap dropped rows silently. When the card has spare height, long
+  summaries wrap instead of being cut with an ellipsis (#172 F5).
+- A scan no longer merges distinct findings. dep-hygiene, cargo-audit,
+  secret-scan and Terraform IaC findings now carry a discriminating identity
+  input, so 15 different vulnerable packages in one `package.json` are 15
+  findings, not one with `corroboration_count: 15`. The headless `sast:scan`
+  count uses the same identity fold as the ledger, SARIF and `--fail-on`, and
+  reports `observationsCount` beside it. On OWASP Juice Shop the headless
+  count went from 67 to 130 and now matches the ledger. See RELEASING.md,
+  "Structural producer identity migration".
+- Every finding-persistence path now commits a typed `FindingDelta`. Before,
+  a Scan result card could read `findings +0` after 73 new findings. A run
+  that still records no delta is shown as `findings unmeasured`, never as a
+  measured zero.
+- `verify:finding`, `patch:finding` and `variant:hunt` gate on the effective
+  review decision that Review and Prove display. A human-confirmed finding
+  without automated triage can be verified, and a human rejection overrides
+  a cached automated true positive. They previously refused with "Run
+  triage:run first" right after Prove advertised `verify`.
+- CodeQL results without a usable physical location are disclosed in
+  `scan_errors` instead of vanishing (#290). Scan-time static-evidence
+  indexing keeps the grounded results rather than failing the whole scan.
+- Recon imports report parsed rows that name no usable host (#292), and
+  campaign coverage and trend state an unreadable ledger as unmeasured
+  (#291). Triage verdicts propagate across generations only on an exact
+  producer fingerprint (#275).
+- Threat-model grounding discloses its denominator and cap
+  (`grounding: 40 of 70 surfaces (cap 40 · ≤2 rows/file)`) and records it
+  in `coverage.grounding`.
+- `threats summary` counts the actors a model names (its `actors` table, then
+  the distinct `threats[].actor` values, then the DFD actor nodes) and
+  reports `unknown`, not `0`, when none are named.
+- The context rail no longer shows unmetered spend as a measured `$0.00`.
+  Subscription and OAuth calls read `>=$X (metering incomplete)`, and a
+  budget share over them is marked as a lower bound.
+- The entry-point browser title names the rows a clipped list hides
+  (`+N above` / `+N below`). The auth picker no longer says a provider
+  "needs credentials" when an OAuth connection is stored. The catalog hint
+  says `press e`, because `Esc, then e` closed the catalog. Review decisions
+  and the export receipt show RFC 3339 UTC instead of raw epoch seconds.
+- The DevEx harness writes valid provenance JSON (its sed escaper had been
+  split by a stray newline), and `nav-mode` waits for a settled Navigate
+  footer before a page key is sent.
+
 - The campaign folds no longer present a findings ledger they could not read
   as an empty one. `campaign:status` folded its review decisions with
   `list_all_review_decisions().ok().unwrap_or_default()`, so an unopenable
