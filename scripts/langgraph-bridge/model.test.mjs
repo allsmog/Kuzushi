@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { BridgePublicError } from "./errors.mjs";
 import {
   bridgeQueryResult,
@@ -12,6 +12,8 @@ import {
   openAiCredentialFromRefreshResponse,
   promptCacheSplit,
   spendForStop,
+  TOOL_RESULT_MAX_CHARS,
+  toolMessageForOutput,
   usageFromMessages,
 } from "./model.mjs";
 import { oauthModelForRequest, openAiOauthHeaders } from "./oauth-models.mjs";
@@ -547,4 +549,32 @@ test("mixed receipts, missing tokens, or malformed rates stay unknown", () => {
   const priced = usageFromMessages([unmeteredCall(10, 10)]);
   assert.equal(spendForStop(priced, { ...HAIKU_RATES, outputUsdPerMtok: -1 }), undefined);
   assert.equal(spendForStop(priced, undefined), undefined);
+});
+
+test("oversized tool results are cut with a disclosed, actionable note", () => {
+  const call = { id: "call-1", name: "read_source" };
+  const small = toolMessageForOutput(call, "short");
+  assert.equal(small.content, "short");
+
+  const big = toolMessageForOutput(call, "x".repeat(TOOL_RESULT_MAX_CHARS + 500));
+  assert.ok(big.content.startsWith("x".repeat(TOOL_RESULT_MAX_CHARS)));
+  assert.match(big.content, /truncated: showed 24000 of 24500 characters; narrow/);
+
+  const mcp = new ToolMessage({
+    tool_call_id: "call-2",
+    content: [
+      { type: "text", text: "a".repeat(TOOL_RESULT_MAX_CHARS - 10) },
+      { type: "text", text: "b".repeat(100) },
+    ],
+  });
+  const bounded = toolMessageForOutput(call, mcp);
+  assert.equal(bounded.content[0].text.length, TOOL_RESULT_MAX_CHARS - 10);
+  assert.match(bounded.content[1].text, /^b{10}\n\[tool output truncated: showed 10 of 100/);
+});
+
+test("a declared turn budget replaces the default turn limit", () => {
+  const turns = Array.from({ length: 12 }, () => unmeteredCall(10, 10));
+  assert.equal(modelContinuationDecision(turns, undefined), "model_turn_limit");
+  assert.equal(modelContinuationDecision(turns, undefined, 20), "continue");
+  assert.throws(() => modelContinuationDecision(turns, undefined, 0), /positive safe integer/);
 });

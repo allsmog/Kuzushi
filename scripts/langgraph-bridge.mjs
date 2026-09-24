@@ -245,7 +245,8 @@ function queryStopReason(messages, request) {
   const options = request.runtimeOptions ?? request.runtime_options ?? {};
   const stop = options.observedSpendStopUsd ?? options.observed_spend_stop_usd;
   const rates = request.spendEstimateRates ?? request.spend_estimate_rates;
-  const decision = modelContinuationDecision(messages, stop, undefined, rates);
+  const turns = options.maxModelTurns ?? options.max_model_turns;
+  const decision = modelContinuationDecision(messages, stop, turns ?? undefined, rates);
   return decision === "continue" ? undefined : decision;
 }
 

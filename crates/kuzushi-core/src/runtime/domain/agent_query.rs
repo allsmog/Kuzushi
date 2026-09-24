@@ -136,6 +136,10 @@ pub struct AgentRuntimeOptions {
     /// prevent the turn that crosses the threshold from spending money.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_spend_stop_usd: Option<f64>,
+    /// Model turns an agentic query may take before the bridge stops it
+    /// (`model_turn_limit`). `None` keeps the bridge default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_model_turns: Option<u32>,
 }
 
 impl AgentRuntimeOptions {
@@ -145,6 +149,7 @@ impl AgentRuntimeOptions {
             && self.bridge_verbose.is_none()
             && self.bridge_log_path.is_none()
             && self.observed_spend_stop_usd.is_none()
+            && self.max_model_turns.is_none()
     }
 }
 

@@ -146,3 +146,13 @@ test("arbitrary errors cannot inject even canonical model-unavailable guidance",
   error.detail = MODEL_UNAVAILABLE_DETAIL;
   assert.equal(bridgeErrorResponse(error).detail, undefined);
 });
+
+test("context overflow keeps only the canonical detail, never the provider body", () => {
+  const error = new Error('400 {"error":{"message":"prompt is too long: 503809 tokens > 200000 maximum PRIVATE"}}');
+  error.name = "ContextOverflowError";
+  error.status = 400;
+  const response = bridgeErrorResponse(error);
+  assert.equal(response.errorClass, "provider_rejected");
+  assert.match(response.detail, /exceeded the model's context window/);
+  assert.doesNotMatch(JSON.stringify(response), /PRIVATE|503809/);
+});

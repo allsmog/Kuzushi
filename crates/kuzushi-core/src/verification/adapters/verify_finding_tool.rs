@@ -317,11 +317,12 @@ fn verify_agent_query_request(
             crate::proof::whitebox_policy::try_whitebox_static_policy_for_target(workspace_root)?,
         );
     }
-    if let Some(timeout_ms) = input.mcp_tool_timeout_ms {
-        let runtime_options = crate::runtime::AgentRuntimeOptions {
-            mcp_tool_timeout_ms: Some(timeout_ms),
-            ..Default::default()
-        };
+    let runtime_options = crate::runtime::AgentRuntimeOptions {
+        mcp_tool_timeout_ms: input.mcp_tool_timeout_ms,
+        max_model_turns: input.max_model_turns,
+        ..Default::default()
+    };
+    if !runtime_options.is_empty() {
         request = request.with_runtime_options(runtime_options);
     }
     Ok(request)
@@ -720,6 +721,7 @@ mod tests {
             passes: 1,
             mcps: true,
             mcp_tool_timeout_ms: Some(12_345),
+            max_model_turns: None,
             gate_model: None,
             escalation_model: None,
         };
@@ -812,6 +814,7 @@ mod tests {
             passes: 1,
             mcps: false,
             mcp_tool_timeout_ms: None,
+            max_model_turns: None,
             gate_model: None,
             escalation_model: None,
         };

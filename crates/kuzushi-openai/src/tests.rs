@@ -1120,6 +1120,7 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
                         bridge_verbose: Some(true),
                         bridge_log_path: Some("bridge.log".to_string()),
                         observed_spend_stop_usd: None,
+                        max_model_turns: Some(20),
                     }),
             )
             .unwrap();
@@ -1143,6 +1144,10 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
         assert_eq!(
             payload["runtimeOptions"]["bridgeLogPath"],
             serde_json::json!("bridge.log")
+        );
+        assert_eq!(
+            payload["runtimeOptions"]["maxModelTurns"],
+            serde_json::json!(20)
         );
     }
 

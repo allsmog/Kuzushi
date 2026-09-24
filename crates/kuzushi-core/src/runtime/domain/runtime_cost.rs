@@ -412,6 +412,25 @@ mod tests {
     }
 
     #[test]
+    fn long_float_estimates_survive_a_persisted_round_trip_exactly() {
+        // Run items are hash-checked by re-serializing what was read, so a
+        // 17-digit estimate must parse back to the identical f64.
+        let estimate = 0.1025612_f64 + 1e-17;
+        let summed = usd(0.1)
+            .checked_add(usd(estimate - 0.1), "sum")
+            .unwrap()
+            .usd();
+        let report = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(usd(summed)));
+        let text = serde_json::to_string(&report).unwrap();
+        let back: RuntimeCostReport = serde_json::from_str(&text).unwrap();
+        assert_eq!(serde_json::to_string(&back).unwrap(), text);
+        for literal in ["0.10256119999999999", "0.20925020000000003"] {
+            let value: f64 = serde_json::from_str(literal).unwrap();
+            assert_eq!(serde_json::to_string(&value).unwrap(), literal);
+        }
+    }
+
+    #[test]
     fn estimates_attach_only_to_incomplete_reports_and_round_trip() {
         let exact = RuntimeCostReport::known(usd(0.25));
         assert_eq!(exact.with_unmetered_estimate(Some(usd(1.0))), exact);

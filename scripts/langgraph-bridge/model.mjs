@@ -701,11 +701,46 @@ export function isAiMessage(message) {
   );
 }
 
+// One tool result must not crowd out the investigation: every result is
+// re-sent on each later turn, so an unbounded read (a whole generated file, a
+// repository-wide query) overflowed a 200k-token context within a few turns.
+// The cut is disclosed to the model so it can narrow the next call.
+export const TOOL_RESULT_MAX_CHARS = 24_000;
+
 export function toolMessageForOutput(call, output) {
-  if (output instanceof ToolMessage || output?._getType?.() === "tool") return output;
+  if (output instanceof ToolMessage || output?._getType?.() === "tool") {
+    return boundedToolMessage(output);
+  }
   const content = typeof output === "string" ? output : JSON.stringify(output ?? null);
   return new ToolMessage({
     tool_call_id: call.id ?? call.name,
-    content,
+    content: boundedToolText(content),
   });
+}
+
+function boundedToolMessage(message) {
+  if (typeof message.content === "string") {
+    message.content = boundedToolText(message.content);
+  } else if (Array.isArray(message.content)) {
+    message.content = boundedToolBlocks(message.content);
+  }
+  return message;
+}
+
+function boundedToolBlocks(blocks) {
+  let remaining = TOOL_RESULT_MAX_CHARS;
+  return blocks.map((block) => {
+    if (block?.type !== "text" || typeof block.text !== "string") return block;
+    const text = boundedToolText(block.text, Math.max(remaining, 0));
+    remaining -= block.text.length;
+    return { ...block, text };
+  });
+}
+
+export function boundedToolText(text, limit = TOOL_RESULT_MAX_CHARS) {
+  if (text.length <= limit) return text;
+  return (
+    `${text.slice(0, limit)}\n[tool output truncated: showed ${limit} of ${text.length} ` +
+    "characters; narrow the query, path, or line range to see the rest]"
+  );
 }

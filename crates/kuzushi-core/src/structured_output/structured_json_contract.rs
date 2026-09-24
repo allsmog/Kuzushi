@@ -91,6 +91,8 @@ enum FailureReason {
     ModelCall,
     ResponseRejected,
     Truncated,
+    /// The bridge stopped the investigation for a known, allowlisted reason.
+    Stopped(&'static str),
     InvalidAfterRepair,
 }
 
@@ -101,11 +103,49 @@ impl FailureReason {
             Self::ModelCall => Some("model call failed"),
             Self::ResponseRejected => Some("model response could not be accepted"),
             Self::Truncated => Some("model response stopped before the JSON completed"),
+            Self::Stopped(reason) => Some(reason),
             Self::InvalidAfterRepair => {
                 Some("model output still violated the schema after one repair attempt")
             }
         }
     }
+}
+
+/// Name why the bridge stopped, from its fixed stop-reason vocabulary only.
+fn truncation_reason(stop_reason: Option<&str>) -> FailureReason {
+    const REASONS: [(&str, &str); 7] = [
+        (
+            "model_turn_limit",
+            "the investigation hit its model-turn limit before answering",
+        ),
+        (
+            "forced_conclusion",
+            "the tool budget ran out; a forced conclusion is not accepted as a verdict",
+        ),
+        ("mcp_tool_timeout", "an MCP code-analysis tool timed out"),
+        (
+            "observed_spend_exhausted",
+            "the observed spend stop was reached",
+        ),
+        (
+            "observed_spend_incomplete",
+            "spend could not be measured under the spend stop",
+        ),
+        (
+            "max_tokens",
+            "the output-token limit was reached before the JSON completed",
+        ),
+        (
+            "length",
+            "the output-token limit was reached before the JSON completed",
+        ),
+    ];
+    REASONS
+        .iter()
+        .find(|(known, _)| Some(*known) == stop_reason)
+        .map_or(FailureReason::Truncated, |(_, label)| {
+            FailureReason::Stopped(label)
+        })
 }
 
 /// A repair the contract declined to send; no provider call was made, so the
@@ -341,7 +381,8 @@ fn reject_truncated_response(
     let error = truncation_error(contract, response, &cause, material)
         .context("Could not render bounded structured-output truncation evidence")
         .map_err(|error| observed_failure(error, cost, FailureReason::Truncated))?;
-    Err(observed_failure(error, cost, FailureReason::Truncated))
+    let reason = truncation_reason(response.stop_reason.as_deref());
+    Err(observed_failure(error, cost, reason))
 }
 
 fn parse_repaired_response<T>(
@@ -361,11 +402,8 @@ fn parse_repaired_response<T>(
         let error = truncation_error(contract, &repair_response, &initial_error, &repair_material)
             .context("Could not render bounded structured-output truncation evidence")
             .map_err(|error| observed_failure(error, total_cost, FailureReason::Truncated))?;
-        return Err(observed_failure(
-            error,
-            total_cost,
-            FailureReason::Truncated,
-        ));
+        let reason = truncation_reason(repair_response.stop_reason.as_deref());
+        return Err(observed_failure(error, total_cost, reason));
     }
     match parse_and_validate_measured(&repair_response, contract, validate) {
         Ok(value) => Ok(CostedStructuredJson::from_cost_report(value, total_cost)),
@@ -543,6 +581,31 @@ mod structured_output_error_message_tests {
         assert_eq!(
             error.to_string(),
             "structured output failed: model call failed"
+        );
+    }
+
+    #[test]
+    fn a_known_bridge_stop_is_named_and_an_unknown_one_is_not_echoed() {
+        let stopped = |stop: &str| {
+            let response = AgentQueryResponse {
+                truncated: true,
+                stop_reason: Some(stop.to_string()),
+                ..Default::default()
+            };
+            let contract = StructuredJsonContract::new("verify:finding", "Verdict", Value::Null);
+            parse_or_repair_required_structured_json(response, contract, Ok, |_, _| {
+                panic!("truncation never repairs")
+            })
+            .unwrap_err()
+            .to_string()
+        };
+        assert_eq!(
+            stopped("model_turn_limit"),
+            "structured output failed: the investigation hit its model-turn limit before answering"
+        );
+        assert_eq!(
+            stopped("PRIVATE_SENTINEL"),
+            "structured output failed: model response stopped before the JSON completed"
         );
     }
 

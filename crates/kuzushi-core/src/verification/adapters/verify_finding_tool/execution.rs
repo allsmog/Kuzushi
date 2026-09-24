@@ -380,6 +380,7 @@ mod tests {
             passes,
             mcps: false,
             mcp_tool_timeout_ms: None,
+            max_model_turns: None,
             gate_model: None,
             escalation_model: None,
         }

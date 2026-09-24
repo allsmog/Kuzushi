@@ -13,6 +13,9 @@ pub(in crate::verification::adapters) struct VerifyFindingInput {
     pub(in crate::verification::adapters) passes: u32,
     pub(in crate::verification::adapters) mcps: bool,
     pub(in crate::verification::adapters) mcp_tool_timeout_ms: Option<u64>,
+    /// Model-turn budget for each agentic verifier pass; `None` keeps the
+    /// bridge default.
+    pub(in crate::verification::adapters) max_model_turns: Option<u32>,
     /// Optional cheap-tier plausibility gate: one pass with this model runs
     /// first, and only its REJECTION is trusted — it can kill obvious noise
     /// for a fraction of the cost, but an exploitable verdict always
@@ -53,6 +56,7 @@ impl VerifyFindingInput {
         let passes = parse_verify_passes(input)?;
         let mcps = parse_verify_mcps(input)?;
         let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
+        let max_model_turns = parse_max_model_turns(input)?;
         let gate_model = parse_gate_model(input)?;
         let escalation_model = parse_escalation_model(input)?;
 
@@ -62,6 +66,7 @@ impl VerifyFindingInput {
             passes,
             mcps,
             mcp_tool_timeout_ms,
+            max_model_turns,
             gate_model,
             escalation_model,
         })
@@ -140,6 +145,26 @@ fn parse_mcp_tool_timeout_ms(input: &Value) -> Result<Option<u64>> {
     }
 }
 
+/// Beyond this an investigation's re-sent transcript outgrows small context
+/// windows long before it concludes.
+const MAX_VERIFY_MODEL_TURNS: u64 = 40;
+
+fn parse_max_model_turns(input: &Value) -> Result<Option<u32>> {
+    let raw = input
+        .get("maxModelTurns")
+        .or_else(|| input.get("max_model_turns"));
+    let Some(value) = raw.filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let turns = value
+        .as_u64()
+        .filter(|turns| (1..=MAX_VERIFY_MODEL_TURNS).contains(turns))
+        .with_context(|| {
+            format!("verify:finding maxModelTurns must be an integer from 1 to {MAX_VERIFY_MODEL_TURNS}")
+        })?;
+    Ok(Some(turns as u32))
+}
+
 const VERIFY_HEADER: &str =
     "You are Kuzushi's independent exploitability verifier. You did not discover this finding and \
 must not assume it is real. Your job is adversarial falsification: try to disprove the claim \
@@ -205,4 +230,23 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod max_model_turns_tests {
+    use super::*;
+
+    #[test]
+    fn a_declared_turn_budget_is_bounded_and_absent_keeps_the_default() {
+        let parse = |value: Value| parse_max_model_turns(&json!({ "maxModelTurns": value }));
+        assert_eq!(parse(json!(24)).unwrap(), Some(24));
+        assert_eq!(parse_max_model_turns(&json!({})).unwrap(), None);
+        assert_eq!(
+            parse_max_model_turns(&json!({"max_model_turns": 5})).unwrap(),
+            Some(5)
+        );
+        for invalid in [json!(0), json!(41), json!("12"), json!(-1)] {
+            assert!(parse(invalid).is_err());
+        }
+    }
 }

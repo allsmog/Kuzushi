@@ -19,6 +19,22 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Run lifecycles no longer degrade on long float costs. A 17-digit estimate
+  such as `0.10256119999999999` did not parse back to the identical f64, so
+  the re-serialized run item failed its hash check and later reads found "no
+  typed terminal outcome". serde_json now parses floats exactly
+  (`float_roundtrip`).
+- Agent tool results are capped at 24,000 characters, and the cut is shown to
+  the model so it can narrow the query. Unbounded reads made a verify
+  transcript reach 503,809 tokens against a 200,000-token window. A provider
+  context-overflow rejection now carries a canonical operator detail
+  instead of a bare HTTP 400.
+- Structured-output truncation names the bridge's stop from a fixed
+  vocabulary (model-turn limit, forced conclusion, MCP timeout, spend stop,
+  output limit), and `verify:finding` declares `maxModelTurns` (default 12,
+  1–40) so a deeper investigation is an explicit operator choice. A forced
+  conclusion is still never accepted as a verdict.
+
 - Verify with MCP tools no longer stops after the first Claude call. The
   bridge's observed-spend stop treated every Anthropic call as unpriceable
   and ended the agent loop with `observed_spend_incomplete`, which surfaced
