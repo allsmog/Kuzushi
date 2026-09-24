@@ -471,3 +471,106 @@ fn phase_rerun_action_overrides_are_narrowly_scoped() {
     assert!(phase_rerun_action_overrides(Some(Refine), "context:build").is_empty());
     assert!(phase_rerun_action_overrides(Some(Regenerate), "context:build").is_empty());
 }
+
+// ── Navigate never types a result-card key (issue #172 key-dispatch race) ──
+
+#[test]
+fn repeated_card_key_after_resolution_is_absorbed_not_typed() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+
+    for _ in 0..5 {
+        assert!(fixture.press('u').handled);
+    }
+
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert_eq!(
+        fixture.app.input(),
+        "",
+        "stale re-presses must not become a draft"
+    );
+    assert_eq!(fixture.app.input_mode(), InputMode::Navigate);
+    let notice = fixture.notice_message().unwrap_or_default();
+    assert!(notice.contains("already resolved"), "{notice}");
+}
+
+#[test]
+fn another_key_ends_the_resolved_key_echo_window() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture.press('u');
+    assert_eq!(fixture.app.editor().resolved_result_key(), Some('u'));
+
+    fixture
+        .app
+        .reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert_eq!(fixture.app.editor().resolved_result_key(), None);
+}
+
+#[test]
+fn stray_card_letters_from_an_earlier_race_are_dropped_on_resolution() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture.app.editor_mut().set_input("uu");
+
+    fixture.press('u');
+
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert_eq!(fixture.app.input(), "");
+}
+
+#[test]
+fn a_real_draft_survives_result_resolution() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture.app.editor_mut().set_input("scan src/");
+
+    fixture.press('u');
+
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert_eq!(fixture.app.input(), "scan src/");
+}
+
+#[test]
+fn card_key_off_the_workbench_reveals_the_card_without_applying_it() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture.app.set_shell_view(ShellView::Activity);
+    fixture.app.set_input_mode(InputMode::Navigate);
+
+    assert!(fixture.press('u').handled);
+
+    assert_eq!(fixture.app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&fixture.app),
+        WorkbenchPage::Map
+    );
+    assert!(
+        fixture.attempt_is_unresolved(WorkflowPhase::Map),
+        "an unseen card must not be resolved by the key that reveals it"
+    );
+    assert_eq!(fixture.app.input(), "");
+    assert_eq!(fixture.app.input_mode(), InputMode::Navigate);
+    let notice = fixture.notice_message().unwrap_or_default();
+    assert!(notice.contains("press u again"), "{notice}");
+
+    fixture.press('u');
+    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+}
+
+#[test]
+fn footer_esc_names_notice_dismissal_while_a_warning_holds_escape() {
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    fixture.press('u');
+    fixture.app.set_warn_notice("run", "partial receipt");
+
+    let bindings = crate::ui_view_models::footer_keybindings(&fixture.app);
+
+    assert!(
+        bindings
+            .iter()
+            .any(|binding| binding.key == "Esc" && binding.label == "dismiss notice"),
+        "{bindings:?}"
+    );
+    fixture
+        .app
+        .reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(fixture.app.input_mode(), InputMode::Navigate);
+    assert!(fixture.notice_message().is_none());
+}

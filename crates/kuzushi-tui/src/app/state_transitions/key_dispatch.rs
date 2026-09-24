@@ -27,6 +27,7 @@ impl ShellApp {
     }
 
     fn reduce_key_without_recording(&mut self, key: KeyEvent) -> InputUpdate {
+        self.expire_resolved_result_key(key);
         if let Some(update) = self.reduce_owned_key(key) {
             return update;
         }
@@ -85,14 +86,19 @@ impl ShellApp {
     }
 
     fn reduce_phase_result_or_shell_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if let Some(update) = self.reduce_configured_phase_result_key(key) {
-            return Some(update);
-        }
-        if let Some(update) = self.reduce_default_phase_result_key(key) {
+        if let Some(update) = self.reduce_on_screen_phase_result_key(key) {
             return Some(update);
         }
 
         self.reduce_configured_shell_or_mode_cycle(key)
+    }
+
+    fn reduce_on_screen_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let update = self
+            .reduce_configured_phase_result_key(key)
+            .or_else(|| self.reduce_default_phase_result_key(key))?;
+        self.settle_claimed_phase_result_key(key);
+        Some(update)
     }
 
     fn reduce_configured_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
@@ -819,6 +825,9 @@ impl ShellApp {
     fn reduce_navigate_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> InputUpdate {
         let update = self.handle_empty_input_view_key(key, modifiers);
         if update.handled {
+            return update;
+        }
+        if let Some(update) = self.reduce_unclaimed_phase_result_key(key) {
             return update;
         }
         if modifiers.plain {

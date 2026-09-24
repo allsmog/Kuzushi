@@ -54,6 +54,9 @@ pub(crate) struct EditorState {
     next_paste_id: u64,
     completion_cycle: Option<CompletionCycle>,
     input_mode: InputMode,
+    /// Result-card key that just resolved a RESULT READY card. A repeat of
+    /// that exact key (a stale-frame re-press) is absorbed instead of typed.
+    resolved_result_key: Option<char>,
     history_search: Option<HistorySearch>,
     revision: u64,
     completion_preview: RefCell<Option<CompletionPreviewMemo>>,
@@ -76,6 +79,7 @@ impl Default for EditorState {
             next_paste_id: 0,
             completion_cycle: None,
             input_mode: InputMode::Prompt,
+            resolved_result_key: None,
             history_search: None,
             revision: 0,
             completion_preview: RefCell::new(None),
@@ -129,6 +133,14 @@ impl EditorState {
             self.input_mode = mode;
             self.touch_completion_preview();
         }
+    }
+
+    pub(crate) fn resolved_result_key(&self) -> Option<char> {
+        self.resolved_result_key
+    }
+
+    pub(crate) fn set_resolved_result_key(&mut self, key: Option<char>) {
+        self.resolved_result_key = key;
     }
 
     pub(crate) fn history_search(&self) -> Option<&HistorySearch> {
