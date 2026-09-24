@@ -5,6 +5,7 @@ use serde::Serialize;
 mod batch_occurrence;
 mod cross_tool_clusters;
 mod effective_review_state;
+mod finding_review_gate;
 mod generic_tool_findings;
 mod identity_audit;
 mod identity_fold_projection;
@@ -28,6 +29,10 @@ pub use cross_tool_clusters::{
 pub use effective_review_state::{
     decision_is_review_actionable, finding_is_review_actionable, review_decision_history_for,
     review_verdict_is_actionable, EffectiveReviewDecision, EffectiveReviewStateIndex,
+};
+pub(crate) use finding_review_gate::{
+    load_finding_review_gate, FindingReviewGate,
+    ReviewConfirmation, MISSING_CONFIRMATION_GUIDANCE,
 };
 pub(crate) use generic_tool_findings::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,

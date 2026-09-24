@@ -1,4 +1,8 @@
 use super::*;
+use crate::findings::{FindingReviewGate, ReviewConfirmation, ReviewDecision};
+
+#[cfg(test)]
+mod review_gate_tests;
 
 pub fn run_variant_hunt(
     input: Value,
@@ -46,6 +50,7 @@ struct VariantHuntRun<'a> {
     fingerprint: String,
     target: PathBuf,
     finding: Finding,
+    confirmation: ReviewConfirmation,
     runtime: &'a dyn AgentRuntime,
     model: String,
     max_findings: usize,
@@ -76,6 +81,7 @@ fn prepare_variant_hunt_run<'a>(
         fingerprint,
         target: subject.target,
         finding: subject.finding,
+        confirmation: subject.confirmation,
         runtime: execution.runtime,
         model: execution.model,
         max_findings: execution.max_findings,
@@ -88,6 +94,7 @@ fn prepare_variant_hunt_run<'a>(
 struct VariantHuntSubject {
     target: PathBuf,
     finding: Finding,
+    confirmation: ReviewConfirmation,
 }
 
 enum VariantHuntSubjectResolution {
@@ -102,31 +109,28 @@ fn resolve_variant_hunt_subject(
 ) -> Result<VariantHuntSubjectResolution> {
     let target = resolve_tool_target(input, ctx)?;
     let workspace = require_variant_hunt_workspace(ctx)?;
-    let finding = match lookup_variant_hunt_finding(ctx, fingerprint)? {
-        Some(finding) => finding,
-        None => {
-            return Ok(VariantHuntSubjectResolution::Response(
-                missing_variant_hunt_finding_response(workspace, fingerprint),
-            ));
-        }
+    let store = variant_hunt_store(ctx)?;
+    let Some(finding) = store.get_finding_by_reference(fingerprint)? else {
+        return Ok(VariantHuntSubjectResolution::Response(
+            missing_variant_hunt_finding_response(workspace, fingerprint),
+        ));
     };
-    if let Some(response) = variant_hunt_subject_rejection(fingerprint, &finding) {
-        return Ok(VariantHuntSubjectResolution::Response(response));
-    }
-    Ok(VariantHuntSubjectResolution::Found(VariantHuntSubject {
-        target,
-        finding,
-    }))
+    let gate = crate::findings::load_finding_review_gate(store, &finding)?;
+    Ok(match variant_hunt_confirmation(fingerprint, gate) {
+        Ok(confirmation) => VariantHuntSubjectResolution::Found(VariantHuntSubject {
+            target,
+            finding,
+            confirmation,
+        }),
+        Err(response) => VariantHuntSubjectResolution::Response(response),
+    })
 }
 
-fn lookup_variant_hunt_finding(
-    ctx: &ToolExecutionContext<'_>,
-    fingerprint: &str,
-) -> Result<Option<Finding>> {
-    let store = ctx
-        .findings_store
-        .context("variant:hunt requires the active workspace findings store")?;
-    store.get_finding_by_reference(fingerprint)
+fn variant_hunt_store<'a>(
+    ctx: &'a ToolExecutionContext<'_>,
+) -> Result<&'a crate::findings::FindingStore> {
+    ctx.findings_store
+        .context("variant:hunt requires the active workspace findings store")
 }
 
 fn missing_variant_hunt_finding_response(
@@ -208,7 +212,12 @@ fn query_variant_hunt_json(
     run: &VariantHuntRun<'_>,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<CostedStructuredJson<Value>> {
-    let prompt = build_variant_hunt_prompt(&run.finding, run.include_vendored, &run.vendor_paths);
+    let prompt = build_variant_hunt_prompt(
+        &run.finding,
+        &run.confirmation,
+        run.include_vendored,
+        &run.vendor_paths,
+    );
     let _llm_scope = begin_variant_hunt_scope(ctx);
     let raw = query_required_structured_json_with_cost(
         run.runtime,
@@ -300,32 +309,54 @@ fn visible_vendor_paths(run: &VariantHuntRun<'_>) -> Vec<String> {
     }
 }
 
-fn variant_hunt_subject_rejection(fingerprint: &str, finding: &Finding) -> Option<Value> {
-    let Some(triage) = finding.triage.as_ref() else {
-        let output = format!(
-                "variant:hunt expects a confirmed TP; finding \"{}\" has no triage verdict. Run triage:run first.",
-                fingerprint
-            );
-        return Some(crate::module_result::failed_output_result(
-            "variant:hunt finding is not confirmed",
-            output,
-            json!({ "fingerprint": fingerprint, "reason": "missing-triage" }),
-        ));
-    };
-    (triage.verdict != TriageVerdict::TruePositive).then(|| {
-        let output = format!(
-                "variant:hunt expects a confirmed TP; finding \"{}\" has verdict \"{}\".",
-                fingerprint,
-                triage.verdict.as_str()
-            );
-        crate::module_result::failed_output_result(
-            "variant:hunt finding is not confirmed",
-            output,
-            json!({
-                "fingerprint": fingerprint,
-                "reason": "non-true-positive",
-                "verdict": triage.verdict.as_str(),
-            }),
-        )
-    })
+/// Variant hunting generalizes a confirmed vulnerability, so only a finding
+/// whose review decision in force confirms it qualifies; a human verdict
+/// outranks cached automated triage either way.
+fn variant_hunt_confirmation(
+    fingerprint: &str,
+    gate: FindingReviewGate,
+) -> std::result::Result<ReviewConfirmation, Value> {
+    match gate {
+        FindingReviewGate::Confirmed(confirmation) => Ok(confirmation),
+        FindingReviewGate::Unreviewed => Err(unreviewed_variant_subject_response(fingerprint)),
+        FindingReviewGate::ReviewerDismissed(decision)
+        | FindingReviewGate::Unconfirmed(decision) => {
+            Err(unconfirmed_variant_subject_response(fingerprint, &decision))
+        }
+    }
+}
+
+fn unreviewed_variant_subject_response(fingerprint: &str) -> Value {
+    let output = format!(
+        "variant:hunt expects a confirmed TP; finding \"{fingerprint}\" has no triage verdict and no confirming review decision. {}",
+        crate::findings::MISSING_CONFIRMATION_GUIDANCE
+    );
+    crate::module_result::failed_output_result(
+        "variant:hunt finding is not confirmed",
+        output,
+        json!({ "fingerprint": fingerprint, "reason": "missing-triage" }),
+    )
+}
+
+fn unconfirmed_variant_subject_response(fingerprint: &str, decision: &ReviewDecision) -> Value {
+    let output = format!(
+        "variant:hunt expects a confirmed TP; finding \"{fingerprint}\" has review decision \"{}\" by {}.",
+        decision.verdict.as_str(),
+        decision.author.as_str(),
+    );
+    let verdict = decision
+        .verdict
+        .to_triage_verdict()
+        .map_or(decision.verdict.as_str(), TriageVerdict::as_str);
+    crate::module_result::failed_output_result(
+        "variant:hunt finding is not confirmed",
+        output,
+        json!({
+            "fingerprint": fingerprint,
+            "reason": "non-true-positive",
+            "verdict": verdict,
+            "reviewDecision": decision.verdict.as_str(),
+            "reviewAuthor": decision.author.as_str(),
+        }),
+    )
 }

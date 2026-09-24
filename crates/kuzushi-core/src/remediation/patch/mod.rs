@@ -1,6 +1,7 @@
 pub(crate) use super::patch_process_adapter::PatchProcessControl as PatchCommandControl;
 use crate::findings::{
-    Finding, PatchAttempt, PatchProvenance, PatchResult, PatchStatus, TriageOutcome, TriageVerdict,
+    Finding, FindingReviewGate, PatchAttempt, PatchProvenance, PatchResult, PatchStatus,
+    ReviewConfirmation,
 };
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, RuntimeCost, RuntimeCostReport};

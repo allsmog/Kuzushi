@@ -1,4 +1,5 @@
 use super::*;
+use crate::findings::ReviewConfirmation;
 
 pub(crate) fn build_variant_lift_prompt(finding: &Finding) -> String {
     let finding_json = serde_json::to_string_pretty(finding).unwrap_or_else(|_| "{}".to_string());
@@ -13,36 +14,53 @@ pub(crate) fn build_variant_lift_prompt(finding: &Finding) -> String {
     .join("\n")
 }
 
-pub(crate) fn build_variant_hunt_prompt(
-    finding: &Finding,
-    include_vendored: bool,
-    vendor_paths: &[String],
-) -> String {
-    let triage = finding
-        .triage
-        .as_ref()
-        .map(|triage| {
+/// The evidence that confirmed the finding, headed by its real source so a
+/// reviewer's decision is never presented to the model as automated triage.
+fn confirmation_assessment(confirmation: &ReviewConfirmation) -> (&'static str, String) {
+    match confirmation {
+        ReviewConfirmation::AutomatedTriage(triage) => (
+            "Triage assessment:",
             format!(
                 "Verdict: {}\nConfidence: {:.2}\nRationale: {}",
                 triage.verdict.as_str(),
                 triage.confidence,
                 triage.rationale
-            )
-        })
-        .unwrap_or_else(|| "Verdict: none".to_string());
-    let vendor_scope = if include_vendored {
-        format!(
-            "Extend search scope to vendored and third-party code under: {}.",
-            vendor_paths
-                .iter()
-                .map(|path| format!("{path}/"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    } else {
-        "Restrict search to first-party source; skip vendored and third-party directories."
-            .to_string()
-    };
+            ),
+        ),
+        ReviewConfirmation::ReviewDecision(decision) => (
+            "Review decision:",
+            format!(
+                "Verdict: {}\nAuthor: {}\nConfidence: {:.2}\nRationale: {}",
+                decision.verdict.as_str(),
+                decision.author.as_str(),
+                decision.confidence,
+                decision.rationale
+            ),
+        ),
+    }
+}
+
+fn variant_hunt_vendor_scope(include_vendored: bool, vendor_paths: &[String]) -> String {
+    if !include_vendored {
+        return "Restrict search to first-party source; skip vendored and third-party directories."
+            .to_string();
+    }
+    let paths = vendor_paths
+        .iter()
+        .map(|path| format!("{path}/"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("Extend search scope to vendored and third-party code under: {paths}.")
+}
+
+pub(crate) fn build_variant_hunt_prompt(
+    finding: &Finding,
+    confirmation: &ReviewConfirmation,
+    include_vendored: bool,
+    vendor_paths: &[String],
+) -> String {
+    let (assessment_heading, assessment) = confirmation_assessment(confirmation);
+    let vendor_scope = variant_hunt_vendor_scope(include_vendored, vendor_paths);
     [
         "A confirmed vulnerability has been found. Search for other locations with the same vulnerability pattern.",
         "",
@@ -57,8 +75,8 @@ pub(crate) fn build_variant_hunt_prompt(
             finding.message
         ),
         "",
-        "Triage assessment:",
-        &triage,
+        assessment_heading,
+        &assessment,
         "",
         "Methodology:",
         "1. Read the original vulnerable code and extract source, sink, and missing guard.",

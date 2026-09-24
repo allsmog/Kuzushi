@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod candidate_tests;
+
 pub fn run_patch_finding(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
@@ -118,7 +121,7 @@ fn emit_patch_progress(
 
 struct ConfirmedPatchFinding {
     finding: Finding,
-    triage: TriageOutcome,
+    confirmation: ReviewConfirmation,
 }
 
 enum PatchCandidateLookup {
@@ -135,20 +138,31 @@ fn confirmed_patch_candidate(
             super::patch_refusal_response::missing_patch_finding_response(&input.fingerprint),
         ));
     };
-    let Some(triage) = finding.triage.clone() else {
-        return Ok(PatchCandidateLookup::Refused(
-            super::patch_refusal_response::untriaged_patch_finding_response(&finding.fingerprint),
-        ));
+    let gate = crate::findings::load_finding_review_gate(store, &finding)?;
+    Ok(patch_candidate_for_gate(finding, gate))
+}
+
+/// Only a finding whose review decision in force confirms it is patched; a
+/// human verdict outranks cached automated triage either way.
+fn patch_candidate_for_gate(finding: Finding, gate: FindingReviewGate) -> PatchCandidateLookup {
+    use super::patch_refusal_response::{
+        unconfirmed_patch_finding_response, untriaged_patch_finding_response,
     };
-    if triage.verdict != TriageVerdict::TruePositive {
-        return Ok(PatchCandidateLookup::Refused(
-            super::patch_refusal_response::unconfirmed_patch_finding_response(&finding.fingerprint),
-        ));
+    match gate {
+        FindingReviewGate::Confirmed(confirmation) => {
+            PatchCandidateLookup::Ready(ConfirmedPatchFinding {
+                finding,
+                confirmation,
+            })
+        }
+        FindingReviewGate::Unreviewed => {
+            PatchCandidateLookup::Refused(untriaged_patch_finding_response(&finding.fingerprint))
+        }
+        FindingReviewGate::ReviewerDismissed(decision)
+        | FindingReviewGate::Unconfirmed(decision) => PatchCandidateLookup::Refused(
+            unconfirmed_patch_finding_response(&finding.fingerprint, &decision),
+        ),
     }
-    Ok(PatchCandidateLookup::Ready(ConfirmedPatchFinding {
-        finding,
-        triage,
-    }))
 }
 
 struct PatchExecution<'a> {
@@ -464,7 +478,7 @@ fn synthesize_patch_in_checkout(
         worktree,
         &execution.repo_name,
         &candidate.finding,
-        &candidate.triage,
+        &candidate.confirmation,
         history,
         execution.style,
         &system_prompt,

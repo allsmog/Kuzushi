@@ -10,6 +10,9 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 mod execution;
+mod review_gate;
+
+use review_gate::verify_review_gate_refusal;
 
 pub(crate) struct VerifyFindingToolRequest<'a> {
     pub(crate) input: Value,
@@ -332,19 +335,6 @@ fn missing_finding_response(fingerprint: &str) -> Value {
         json!({
             "fingerprint": fingerprint,
             "reason": "missing-finding",
-        }),
-    )
-}
-
-fn untriaged_finding_response(fingerprint: &str) -> Value {
-    let output =
-        format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
-    crate::module_result::failed_output_result(
-        "verify:finding failed",
-        output,
-        json!({
-            "fingerprint": fingerprint,
-            "reason": "missing-triage",
         }),
     )
 }

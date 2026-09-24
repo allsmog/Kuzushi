@@ -327,12 +327,12 @@ pub(crate) fn synthesize_patch(
     repo_root: &Path,
     repo_name: &str,
     finding: &Finding,
-    triage: &TriageOutcome,
+    confirmation: &ReviewConfirmation,
     history: &[PatchAttempt],
     style: PatchStyle,
     system_prompt: &str,
 ) -> Result<PatchSynthesis> {
-    let prompt = build_patch_prompt(repo_root, repo_name, finding, triage, history, style)?;
+    let prompt = build_patch_prompt(repo_root, repo_name, finding, confirmation, history, style)?;
     let costed = query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(

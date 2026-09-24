@@ -24,8 +24,9 @@ pub(super) fn run(request: VerifyFindingToolRequest<'_>) -> Result<Value> {
     else {
         return Ok(missing_finding_response(&input.fingerprint));
     };
-    if finding.triage.is_none() {
-        return Ok(untriaged_finding_response(&finding.fingerprint));
+    let review_gate = crate::findings::load_finding_review_gate(request.store, &finding)?;
+    if let Some(response) = verify_review_gate_refusal(&finding, &review_gate) {
+        return Ok(response);
     }
 
     let source_identity = capture_source_identity(request.workspace_root);
