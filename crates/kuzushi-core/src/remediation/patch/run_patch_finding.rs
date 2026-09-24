@@ -472,7 +472,7 @@ fn synthesize_patch_in_checkout(
     };
     let system_prompt =
         resolve_patch_system_prompt(execution.prompt_override.as_deref(), worktree)?;
-    let synthesis = synthesize_patch(
+    let mut synthesis = synthesize_patch(
         execution.runtime,
         &execution.model,
         worktree,
@@ -484,6 +484,9 @@ fn synthesize_patch_in_checkout(
         &system_prompt,
     )?;
     drop(attempt_scope);
+    // This checkout is the exact source commit, so hunks are re-anchored here
+    // once and every later stage sees the same canonical diff.
+    synthesis.diff = super::reanchor_hunks::reanchor_hunks_in_checkout(worktree, &synthesis.diff);
     Ok(synthesis)
 }
 

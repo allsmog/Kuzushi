@@ -19,6 +19,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Model-written patch hunks are re-anchored against the exact source
+  checkout during synthesis. A hunk with zero or one-sided context
+  (`@@ -21,1 +21,1 @@`) is treated by `git apply` as anchored to the end of
+  the file, so a correct mid-file edit was rejected ("patch does not
+  apply") even with every removed line correct. Each hunk whose old block
+  matches the source exactly once is re-emitted with real context and exact
+  line numbers. Ambiguous, unmatched, new-file, or no-newline hunks pass
+  through unchanged. On Juice Shop the hardcoded RSA key patch went from
+  three `APPLY_FAILED` attempts to `SOUND` on the first.
+
 - Run lifecycles no longer degrade on long float costs. A 17-digit estimate
   such as `0.10256119999999999` did not parse back to the identical f64, so
   the re-serialized run item failed its hash check and later reads found "no
