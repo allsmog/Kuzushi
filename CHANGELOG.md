@@ -19,6 +19,14 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Shell planner rows no longer say "needs model — run /model first" when a
+  model is configured but the task's input cannot be prepared (for example
+  `patch:finding` without a fingerprint). The row names the missing input.
+  The patch view labels its build/test commands as `VALIDATION · N
+  check(s)` rather than "TESTS · added", the Fix page shows its `updated`
+  time as RFC 3339, and the Report header says "current findings" so it no
+  longer reads as disagreeing with a completeness-all export.
+
 - Model-written patch hunks are re-anchored against the exact source
   checkout during synthesis. A hunk with zero or one-sided context
   (`@@ -21,1 +21,1 @@`) is treated by `git apply` as anchored to the end of

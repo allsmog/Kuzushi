@@ -838,6 +838,7 @@ fn planning_row_label(app: &ShellApp, row: &PlanningTaskRow) -> String {
 fn planning_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
     blocked_row_note(row, outcome)
         .or_else(|| cached_row_note(row, outcome))
+        .or_else(|| unresolved_input_note(app, row))
         .or_else(|| model_readiness_note(app, row))
         .unwrap_or_else(|| outcome_row_note(app, row, outcome))
 }
@@ -874,6 +875,21 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
         return Some(format!("{cached} — rebuild needs {cli}"));
     }
     (outcome == RowOutcome::Reuse).then(|| format!("{cached} · Space runs fresh"))
+}
+
+/// A task whose input cannot be prepared has no model to check yet; naming
+/// the input problem keeps it from reading as "needs model" when one is set.
+fn unresolved_input_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
+    let error = app.resolved_input_for_planning_task(row.id).err()?;
+    Some(unresolved_input_message(row.tool_name, &error.to_string()))
+}
+
+/// The row already names its tool, so the reason drops that prefix.
+fn unresolved_input_message(tool: &str, error: &str) -> String {
+    let first_line = error.lines().next().unwrap_or_default();
+    let reason = first_line.split("; ").next().unwrap_or(first_line).trim();
+    let reason = reason.strip_prefix(tool).map_or(reason, str::trim_start);
+    format!("needs input — {reason}")
 }
 
 fn model_readiness_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
@@ -1938,6 +1954,17 @@ mod tests {
 
         assert_eq!(enter_summary_text(plan, display_width(&full) + 1), full);
         assert_ne!(enter_summary_text(plan, display_width(&full)), full);
+    }
+
+    #[test]
+    fn unresolved_input_names_the_first_reason_only() {
+        assert_eq!(
+            unresolved_input_message(
+                "patch:finding",
+                "patch:finding requires a fingerprint; open a finding first\ndetail"
+            ),
+            "needs input — requires a fingerprint"
+        );
     }
 
     #[test]

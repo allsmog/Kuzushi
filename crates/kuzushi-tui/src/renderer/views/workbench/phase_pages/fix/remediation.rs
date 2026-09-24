@@ -105,7 +105,11 @@ fn lifecycle_lines(model: &RemediationLifecycleModel, width: usize) -> Vec<Line<
     append_receipt_identity(&mut lines, model, width);
     append_touched_paths(&mut lines, &model.touched_paths, width);
     append_optional_detail(&mut lines, "outcome", model.detail.as_deref(), width);
-    append_optional_detail(&mut lines, "updated", model.updated_at.as_deref(), width);
+    let updated = model
+        .updated_at
+        .as_deref()
+        .map(crate::ui_view_models::recorded_timestamp_label);
+    append_optional_detail(&mut lines, "updated", updated.as_deref(), width);
     append_optional_detail(&mut lines, "error", model.load_error.as_deref(), width);
     if let Some(command) = model.reverify_command.as_deref() {
         lines.push(reverify_line(model, command, width));

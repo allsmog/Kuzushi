@@ -92,8 +92,10 @@ fn push_tests_lines(lines: &mut Vec<Line<'static>>, patch: &PatchReviewModel, wi
     if patch.tests.is_empty() {
         return;
     }
+    // These rows are the validation commands that ran, not tests the patch
+    // added, so the header must not claim authorship.
     lines.push(divider(
-        &format!("TESTS · added · {}", patch.tests.len()),
+        &format!("VALIDATION · {} check(s)", patch.tests.len()),
         width,
     ));
     for test in &patch.tests {

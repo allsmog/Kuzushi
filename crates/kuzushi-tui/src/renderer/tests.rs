@@ -5858,7 +5858,7 @@ fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
     // All four sections.
     assert!(rendered.contains("RATIONALE"));
     assert!(rendered.contains("DIFF"));
-    assert!(rendered.contains("TESTS"));
+    assert!(rendered.contains("VALIDATION · "));
     assert!(rendered.contains("GUARDRAIL"));
     // Rationale + side-effect.
     assert!(rendered.contains("sqlx::query!()"));
