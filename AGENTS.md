@@ -536,7 +536,9 @@ is expected to behave identically and should be filed as a parity bug.
 - **Prompt/Navigate modes are interactive-only.** Prompt mode owns printable
   input and submission. `Esc` on an empty prompt enters Navigate mode (with a
   draft, `Esc` first clears it), where view bindings operate without editing
-  the prompt; `Esc` returns to Prompt mode. Runtime dispatch
+  the prompt; `Esc` returns to Prompt mode. In Navigate, a RESULT READY card
+  key pressed off the Workbench opens the card instead of typing, and a repeat
+  of the key that just resolved a card is absorbed, never typed. Runtime dispatch
   and rendered hints consume the same resolved keymap, including question and
   phase-result cards. A typed attention broker projects approvals, questions,
   credential gates, partial acknowledgements, and unresolved results into the
