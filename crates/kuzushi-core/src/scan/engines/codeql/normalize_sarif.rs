@@ -54,8 +54,7 @@ pub(in crate::scan) fn normalize_codeql_sarif_with_diagnostics(
     raw: &str,
     repo_name: &str,
 ) -> Result<CodeqlNormalizationOutcome> {
-    let report: CodeqlSarifOutput =
-        serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")?;
+    let report = parse_codeql_sarif(raw)?;
     let mut outcome = normalize_codeql_report(&report);
     sort_codeql_findings(&mut outcome.findings);
     let _ = repo_name;
@@ -122,6 +121,35 @@ fn bounded_codeql_rule_id(rule_id: Option<&str>) -> String {
     bounded
 }
 
+/// Indexes a scan's SARIF documents as one unit: every document is
+/// preflighted before the first write, so a later ungroundable document
+/// cannot leave evidence from earlier documents behind a failed scan.
+pub fn index_codeql_sarif_documents_as_static_evidence(
+    store: &StaticEvidenceStore,
+    repo_root: impl AsRef<Path>,
+    documents: &[String],
+) -> Result<Vec<StaticEvidenceIndexReport>> {
+    for raw in documents {
+        preflight_codeql_static_evidence(&parse_codeql_sarif(raw)?)?;
+    }
+    documents
+        .iter()
+        .map(|raw| index_codeql_sarif_as_static_evidence(store, repo_root.as_ref(), raw))
+        .collect()
+}
+
+fn parse_codeql_sarif(raw: &str) -> Result<CodeqlSarifOutput> {
+    serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")
+}
+
+fn preflight_codeql_static_evidence(report: &CodeqlSarifOutput) -> Result<()> {
+    let preflight = normalize_codeql_report(report);
+    if let Some(error) = preflight.scan_errors.first() {
+        anyhow::bail!("Could not index CodeQL static evidence: {error}");
+    }
+    Ok(())
+}
+
 /// Index a CodeQL SARIF document, refusing it outright when any result cannot
 /// be grounded. Public callers get no silently partial static-evidence copy.
 pub fn index_codeql_sarif_as_static_evidence(
@@ -130,26 +158,28 @@ pub fn index_codeql_sarif_as_static_evidence(
     raw: &str,
 ) -> Result<StaticEvidenceIndexReport> {
     let report = parse_codeql_sarif(raw)?;
-    if let Some(error) = normalize_codeql_report(&report).scan_errors.first() {
-        anyhow::bail!("Could not index CodeQL static evidence: {error}");
-    }
+    preflight_codeql_static_evidence(&report)?;
     index_codeql_report(store, repo_root.as_ref(), &report)
 }
 
-/// Index every grounded result of a SARIF document whose omissions the scan
-/// engine already disclosed through `scan_errors`. One location-less result
-/// must not discard the evidence for its grounded siblings; the omission count
-/// is carried on the returned report instead.
-pub(crate) fn index_grounded_codeql_sarif_as_static_evidence(
+/// Index a scan's SARIF documents after the scan engine has already disclosed
+/// their omissions through `scan_errors`. Every document parses before the
+/// first write; each report then carries its grounded results and the count
+/// of location-less ones (`resultsOmitted`), so one ungroundable result does
+/// not discard the evidence for its grounded siblings.
+pub(crate) fn index_grounded_codeql_sarif_documents_as_static_evidence(
     store: &StaticEvidenceStore,
     repo_root: impl AsRef<Path>,
-    raw: &str,
-) -> Result<StaticEvidenceIndexReport> {
-    index_codeql_report(store, repo_root.as_ref(), &parse_codeql_sarif(raw)?)
-}
-
-fn parse_codeql_sarif(raw: &str) -> Result<CodeqlSarifOutput> {
-    serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")
+    documents: &[String],
+) -> Result<Vec<StaticEvidenceIndexReport>> {
+    let reports = documents
+        .iter()
+        .map(|raw| parse_codeql_sarif(raw))
+        .collect::<Result<Vec<_>>>()?;
+    reports
+        .iter()
+        .map(|report| index_codeql_report(store, repo_root.as_ref(), report))
+        .collect()
 }
 
 fn index_codeql_report(
@@ -253,13 +283,77 @@ mod tests {
         assert!(error.to_string().contains("lost.rule"));
     }
 
+    const GROUNDED_SARIF: &str = r#"{
+      "runs": [{
+        "tool": {"driver": {"rules": [{"id": "good.rule"}]}},
+        "results": [{
+          "ruleId": "good.rule",
+          "message": {"text": "grounded result"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": "src/lib.rs"},
+              "region": {"startLine": 7}
+            }
+          }]
+        }]
+      }]
+    }"#;
+
+    #[test]
+    fn document_collection_with_one_ungroundable_document_writes_no_evidence() {
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let documents = vec![GROUNDED_SARIF.to_string(), MIXED_SARIF.to_string()];
+
+        let error =
+            index_codeql_sarif_documents_as_static_evidence(&store, ".", &documents).unwrap_err();
+
+        assert!(error.to_string().contains("lost.rule"), "{error}");
+        let grounded = normalize_codeql_sarif(GROUNDED_SARIF, "repo").unwrap();
+        let nodes = store
+            .list_nodes_for_finding(&grounded[0].fingerprint)
+            .unwrap();
+        assert!(nodes.is_empty(), "earlier document leaked evidence: {nodes:?}");
+    }
+
+    #[test]
+    fn document_collection_indexes_every_groundable_document() {
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let documents = vec![GROUNDED_SARIF.to_string()];
+
+        let reports =
+            index_codeql_sarif_documents_as_static_evidence(&store, ".", &documents).unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].findings_indexed, 1);
+    }
+
     #[test]
     fn scan_indexing_keeps_grounded_results_and_counts_the_omission() {
         let store = StaticEvidenceStore::open_in_memory().unwrap();
-        let report =
-            index_grounded_codeql_sarif_as_static_evidence(&store, ".", MIXED_SARIF).unwrap();
+        let documents = vec![GROUNDED_SARIF.to_string(), MIXED_SARIF.to_string()];
 
-        assert_eq!(report.findings_indexed, 1);
-        assert_eq!(report.results_omitted, 1);
+        let reports =
+            index_grounded_codeql_sarif_documents_as_static_evidence(&store, ".", &documents)
+                .unwrap();
+
+        assert_eq!(reports[0].findings_indexed, 1);
+        assert_eq!(reports[1].findings_indexed, 1);
+        assert_eq!(reports[1].results_omitted, 1);
+    }
+
+    #[test]
+    fn scan_indexing_parses_every_document_before_writing() {
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let documents = vec![GROUNDED_SARIF.to_string(), "not json".to_string()];
+
+        assert!(
+            index_grounded_codeql_sarif_documents_as_static_evidence(&store, ".", &documents)
+                .is_err()
+        );
+        let grounded = normalize_codeql_sarif(GROUNDED_SARIF, "repo").unwrap();
+        assert!(store
+            .list_nodes_for_finding(&grounded[0].fingerprint)
+            .unwrap()
+            .is_empty());
     }
 }

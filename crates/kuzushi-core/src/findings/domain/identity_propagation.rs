@@ -18,6 +18,17 @@ pub fn auto_triage_propagation_basis(
     if source_basis.is_strong() && candidate_basis.is_strong() {
         return Some(conservative_basis(source_basis, candidate_basis));
     }
+    weak_generation_basis(source, candidate, source_basis, candidate_basis)
+}
+
+/// The basis for a pair that is not strong on both sides: shared fallback
+/// evidence, or an allocator-recorded exact-fingerprint rescue.
+fn weak_generation_basis(
+    source: &Finding,
+    candidate: &Finding,
+    source_basis: FindingIdentityBasis,
+    candidate_basis: FindingIdentityBasis,
+) -> Option<FindingIdentityBasis> {
     // Preserve the weakest independently sufficient evidence first. If the
     // two observations already share the line/source-sensitive fallback
     // evidence, that is what authorized propagation even when a later
@@ -32,12 +43,9 @@ pub fn auto_triage_propagation_basis(
     // generation when no weaker fallback evidence already authorizes it.
     // Fingerprint equality by itself must not invent a stronger receipt for
     // two rows whose persisted basis is still only file fallback.
-    if has_exact_fingerprint_basis(source_basis, candidate_basis)
-        && same_nonempty_fingerprint(source, candidate)
-    {
-        return Some(FindingIdentityBasis::ExactProducerFingerprint);
-    }
-    None
+    (has_exact_fingerprint_basis(source_basis, candidate_basis)
+        && same_nonempty_fingerprint(source, candidate))
+    .then_some(FindingIdentityBasis::ExactProducerFingerprint)
 }
 
 fn conservative_basis(

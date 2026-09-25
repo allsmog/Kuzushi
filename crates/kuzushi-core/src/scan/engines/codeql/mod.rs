@@ -19,7 +19,10 @@ pub(in crate::scan) use merge_detected_language_output::*;
 pub use model::CodeqlScanner;
 pub(crate) use model::{DEFAULT_CODEQL_SCAN_TIMEOUT_MS, MAX_CODEQL_SCAN_TIMEOUT_MS};
 pub(in crate::scan) use normalize_result_to_finding::*;
-pub(crate) use normalize_sarif::index_grounded_codeql_sarif_as_static_evidence;
+pub(crate) use normalize_sarif::index_grounded_codeql_sarif_documents_as_static_evidence;
 pub(in crate::scan) use normalize_sarif::normalize_codeql_sarif_with_diagnostics;
-pub use normalize_sarif::{index_codeql_sarif_as_static_evidence, normalize_codeql_sarif};
+pub use normalize_sarif::{
+    index_codeql_sarif_as_static_evidence, index_codeql_sarif_documents_as_static_evidence,
+    normalize_codeql_sarif,
+};
 pub(in crate::scan) use physical_location::*;

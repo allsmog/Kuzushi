@@ -69,9 +69,12 @@ fn index_codeql_static_evidence(
     let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
     let mut combined =
         crate::static_evidence::StaticEvidenceIndexReport::new(evidence_store.db_path());
-    for sarif in sarif_documents {
-        let report =
-            index_grounded_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
+    let reports = index_grounded_codeql_sarif_documents_as_static_evidence(
+        &evidence_store,
+        workspace.root(),
+        sarif_documents,
+    )?;
+    for report in reports {
         append_static_evidence_report(&mut combined, report);
     }
     Ok(combined)
