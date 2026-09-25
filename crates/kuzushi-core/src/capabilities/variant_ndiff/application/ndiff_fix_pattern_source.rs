@@ -14,11 +14,11 @@ pub(crate) enum NdiffFixPatternSourceResolution {
 pub(crate) fn resolve_ndiff_fix_pattern_source(
     input: &Value,
 ) -> Result<NdiffFixPatternSourceResolution> {
-    if let Some(response) = invalid_ndiff_record_response(input) {
-        return Ok(NdiffFixPatternSourceResolution::Rejected(response));
-    }
+    let mut source = match checked_initial_source(input) {
+        Ok(source) => source,
+        Err(response) => return Ok(NdiffFixPatternSourceResolution::Rejected(response)),
+    };
     let id = ndiff_fix_pattern_id(input);
-    let mut source = initial_ndiff_fix_pattern_source(input);
     if source.patch_text.trim().is_empty() {
         if let Some(response) = resolve_missing_ndiff_patch_source(input, &id, &mut source)? {
             return Ok(NdiffFixPatternSourceResolution::Rejected(response));
@@ -30,6 +30,13 @@ pub(crate) fn resolve_ndiff_fix_pattern_source(
         ));
     }
     Ok(NdiffFixPatternSourceResolution::Ready(source))
+}
+
+fn checked_initial_source(input: &Value) -> std::result::Result<NdiffFixPatternSource, Value> {
+    match invalid_ndiff_record_response(input) {
+        Some(response) => Err(response),
+        None => Ok(initial_ndiff_fix_pattern_source(input)),
+    }
 }
 
 fn resolve_missing_ndiff_patch_source(
