@@ -830,14 +830,27 @@ impl ShellApp {
         if let Some(update) = self.reduce_unclaimed_phase_result_key(key) {
             return update;
         }
-        if modifiers.plain {
-            if let KeyCode::Char(ch) = key.code {
-                self.enter_prompt_mode();
-                self.insert_printable_key(ch);
-                return InputUpdate::handled();
-            }
+        if let Some(update) = self.type_printable_navigate_key(key, modifiers) {
+            return update;
         }
         InputUpdate::handled_if(self.handle_unhandled_navigation_key(key, modifiers))
+    }
+
+    /// An unclaimed plain printable key in Navigate starts typing a prompt.
+    fn type_printable_navigate_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> Option<InputUpdate> {
+        let KeyCode::Char(ch) = key.code else {
+            return None;
+        };
+        if !modifiers.plain {
+            return None;
+        }
+        self.enter_prompt_mode();
+        self.insert_printable_key(ch);
+        Some(InputUpdate::handled())
     }
 
     fn record_operator_interaction(&mut self) {

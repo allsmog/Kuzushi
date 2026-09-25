@@ -349,6 +349,10 @@ fn auth_intro_text(app: &ShellApp, provider: &str, recovery: bool) -> String {
     if oauth_ready {
         return stored_oauth_intro(&provider, recovery);
     }
+    missing_credentials_intro(&provider, recovery)
+}
+
+fn missing_credentials_intro(provider: &str, recovery: bool) -> String {
     if recovery {
         return format!(
             "Provider {provider} needs credentials to resume the preserved Scan. Choose a compatible method below."
