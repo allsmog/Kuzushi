@@ -230,6 +230,7 @@ struct EngineRun<T> {
     report: Option<T>,
     outcome: crate::run_artifacts::ScanEngineStageOutcome,
     skip_reason: Option<String>,
+    not_applicable: bool,
 }
 
 impl<T> EngineRun<T> {
@@ -241,6 +242,7 @@ impl<T> EngineRun<T> {
                 .get("summary")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            not_applicable: output.pointer("/data/notApplicable") == Some(&Value::Bool(true)),
         }
     }
 }
@@ -251,6 +253,9 @@ impl SastPipelineReports {
         self.engine_outcomes.insert(engine, run.outcome);
         if let Some(reason) = run.skip_reason {
             self.engine_skip_reasons.insert(engine, reason);
+        }
+        if run.not_applicable {
+            self.engines_not_applicable.insert(engine);
         }
         run.report
     }
@@ -300,6 +305,7 @@ impl SastSubtoolDispatch<'_> {
             report: Some(report),
             outcome,
             skip_reason: None,
+            not_applicable: false,
         })
     }
 

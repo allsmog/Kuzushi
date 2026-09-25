@@ -1021,7 +1021,7 @@ fn scan_engine_outcome_detail(outcome: ScanEngineStageOutcome) -> Option<String>
 }
 
 fn scan_stage_outcome(reports: &SastPipelineReports) -> SastPhaseStageOutcome {
-    use ScanEngineStageOutcome::{Failed, Partial, Skipped};
+    use ScanEngineStageOutcome::Failed;
     if reports
         .engine_outcomes
         .values()
@@ -1031,8 +1031,8 @@ fn scan_stage_outcome(reports: &SastPipelineReports) -> SastPhaseStageOutcome {
     }
     if reports
         .engine_outcomes
-        .values()
-        .any(|outcome| matches!(outcome, Partial | Skipped))
+        .iter()
+        .any(|(engine, outcome)| reports.engine_degrades_scan(engine, *outcome))
     {
         SastPhaseStageOutcome::Partial
     } else {
@@ -1268,12 +1268,10 @@ fn sast_scan_result_envelope(
 }
 
 fn sast_scan_has_partial_engine(reports: &SastPipelineReports) -> bool {
-    reports.engine_outcomes.values().any(|outcome| {
-        matches!(
-            outcome,
-            ScanEngineStageOutcome::Partial | ScanEngineStageOutcome::Skipped
-        )
-    })
+    reports
+        .engine_outcomes
+        .iter()
+        .any(|(engine, outcome)| reports.engine_degrades_scan(engine, *outcome))
 }
 
 fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
@@ -1535,6 +1533,29 @@ mod scan_result_outcome_tests {
         assert_eq!(status, crate::run_lifecycle::RunItemStatus::Interrupted);
     }
 
+    #[test]
+    fn an_inapplicable_engine_skip_keeps_the_scan_complete() {
+        let mut reports = reports_with_outcomes(&[
+            ("agentic", ScanEngineStageOutcome::Complete),
+            ("systems-hunt", ScanEngineStageOutcome::Skipped),
+        ]);
+        reports.engines_not_applicable.insert("systems-hunt");
+
+        assert!(!sast_scan_has_partial_engine(&reports));
+        assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Completed);
+    }
+
+    #[test]
+    fn any_other_engine_skip_still_makes_the_scan_partial() {
+        let reports = reports_with_outcomes(&[
+            ("agentic", ScanEngineStageOutcome::Complete),
+            ("systems-hunt", ScanEngineStageOutcome::Skipped),
+        ]);
+
+        assert!(sast_scan_has_partial_engine(&reports));
+        assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Partial);
+    }
+
     fn reports_with_outcomes(
         outcomes: &[(&'static str, ScanEngineStageOutcome)],
     ) -> SastPipelineReports {
@@ -1548,6 +1569,7 @@ mod scan_result_outcome_tests {
             engine_outcomes: outcomes.iter().copied().collect::<BTreeMap<_, _>>(),
             skipped_engines: Vec::new(),
             engine_skip_reasons: Default::default(),
+            engines_not_applicable: Default::default(),
         }
     }
 }

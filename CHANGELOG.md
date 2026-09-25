@@ -19,6 +19,10 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A scan no longer ends partial (exit 1) just because a requested engine
+  does not apply to the target, for example systems-hunt on TypeScript. That
+  skip stays a visible warning. Skips for any other reason still leave the
+  scan partial.
 - `threat-intel:research` and `threat-intel:harvest` can now extract fix
   patterns. `ndiff:extract-fix-pattern` reads its declared `record` option as
   an already-fetched advisory and uses that advisory's primary patch
