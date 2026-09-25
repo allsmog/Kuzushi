@@ -67,11 +67,11 @@ impl CodeqlScanner {
         let sarif = database.run_verified(|db_path| {
             self.run_codeql_analysis(binary, db_path, &suite, cancel)
         })?;
-        let findings = normalize_codeql_sarif(&sarif, repo_name)?;
+        let normalized = normalize_codeql_sarif_with_diagnostics(&sarif, repo_name)?;
         Ok(ScanEngineOutput {
-            findings,
+            findings: normalized.findings,
             codeql_sarif_documents: vec![sarif],
-            scan_errors: Vec::new(),
+            scan_errors: normalized.scan_errors,
         })
     }
 }

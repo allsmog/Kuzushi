@@ -11,7 +11,8 @@ use crate::license_scan::{scan_licenses_with_options, LicenseScanOptions};
 use crate::runtime::AgentRuntime;
 use crate::sbom_scan::scan_sbom;
 use crate::scan::{
-    index_codeql_sarif_as_static_evidence, scan_exploit_chains_with_runtime, CodeqlPersistedRun,
+    index_codeql_sarif_documents_as_static_evidence, scan_exploit_chains_with_runtime,
+    CodeqlPersistedRun,
     CodeqlScanReport, CodeqlScanner, ExploitChainReport, ExploitChainScanner, GovulncheckScanner,
     ScanEngine, ScanEngineOutput, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
