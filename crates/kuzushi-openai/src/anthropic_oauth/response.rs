@@ -76,14 +76,6 @@ const MODEL_RATES: &[(&str, ModelRates)] = &[
             cache_read: 0.25,
         },
     ),
-    (
-        "claude-orchid-5-1",
-        ModelRates {
-            input: 10.0,
-            output: 50.0,
-            cache_read: 0.25,
-        },
-    ),
     ("claude-fable-5", rates(10.0, 50.0)),
     (
         "claude-opus-5-5",

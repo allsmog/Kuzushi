@@ -134,7 +134,7 @@ pub(crate) fn missing_target_failure_is_actionable() {
 #[test]
 pub(crate) fn repeated_secret_occurrences_get_line_independent_distinct_locators() {
     let temp = tempfile::tempdir().unwrap();
-    let key = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH";
+    let key = concat!("OPENAI_API_KEY=sk-", "proj-abcdefghijklmnopqrstuvwxyzABCDEFGH");
     let scan = |text: String| {
         fs::write(temp.path().join("keys.txt"), text).unwrap();
         SecretScanScanner

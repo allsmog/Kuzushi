@@ -117,7 +117,7 @@ fn same_issue_observed_twice_corroborates_one_identity() {
 #[test]
 fn repeated_secret_occurrences_keep_one_identity_each() {
     let tmp = tempfile::tempdir().unwrap();
-    let key = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH";
+    let key = concat!("OPENAI_API_KEY=sk-", "proj-abcdefghijklmnopqrstuvwxyzABCDEFGH");
     std::fs::write(tmp.path().join("keys.txt"), format!("{key}\nlogin();\n{key}\n")).unwrap();
     let store = open_store(tmp.path());
     persist_scan(&store, tmp.path(), "run-secrets", &SecretScanScanner);
