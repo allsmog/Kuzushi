@@ -19,6 +19,15 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Finding-scoped tools accept the `F-0001` aliases that `kuzushi findings`
+  prints, as their `fingerprint` option already advertised. This covers
+  `triage:run`, `variant:lift-pattern`, `variant:hunt`, `trace:expand`,
+  `verify:exploit`, `deep-audit:run` and `classifier-gate:score`.
+  Previously each one answered "no finding" for an alias.
+- `variant:hunt` and `ndiff:hunt-variants` report their real spend instead of
+  a hard-coded `$0.0000`. Shared run receipts show a labelled
+  `~$X estimated (metering incomplete)` whenever a token-based estimate
+  exists, and `trace:expand` now keeps that estimate.
 - `x-ray:run` summarizes its verdict with the justification prose rather than
   the `### Justification` sub-heading. When provider spend is unmetered, its
   cost line reads `~$X estimated (provider spend unresolved)` or

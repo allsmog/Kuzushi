@@ -97,7 +97,10 @@ pub fn cost_label(cost: RuntimeCostReport) -> String {
     if cost.is_complete() {
         return format!("${:.4} exact", cost.observed_usd());
     }
-    format!(">=${:.4} (metering incomplete)", cost.observed_usd())
+    match cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        Some(estimate) => format!("~${estimate:.4} estimated (metering incomplete)"),
+        None => format!(">=${:.4} (metering incomplete)", cost.observed_usd()),
+    }
 }
 
 #[cfg(test)]
@@ -117,6 +120,11 @@ mod cost_tests {
             (
                 RuntimeCostReport::known(RuntimeCost::from_usd(0.25, "test").unwrap()),
                 "$0.2500 exact",
+            ),
+            (
+                RuntimeCostReport::INCOMPLETE_ZERO
+                    .with_unmetered_estimate(Some(RuntimeCost::from_usd(0.1, "test").unwrap())),
+                "~$0.1000 estimated (metering incomplete)",
             ),
         ] {
             assert_eq!(cost_label(cost), expected);

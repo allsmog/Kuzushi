@@ -317,7 +317,7 @@ fn classifier_finding(input: &Value, store: &FindingStore) -> Result<crate::find
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: findingFingerprint is required"))?;
     store
-        .get_finding_by_reference(fingerprint)?
+        .get_finding_by_operator_reference(fingerprint)?
         .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: no finding for {fingerprint:?}"))
 }
 

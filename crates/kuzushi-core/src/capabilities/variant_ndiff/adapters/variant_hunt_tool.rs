@@ -110,7 +110,7 @@ fn resolve_variant_hunt_subject(
     let target = resolve_tool_target(input, ctx)?;
     let workspace = require_variant_hunt_workspace(ctx)?;
     let store = variant_hunt_store(ctx)?;
-    let Some(finding) = store.get_finding_by_reference(fingerprint)? else {
+    let Some(finding) = store.get_finding_by_operator_reference(fingerprint)? else {
         return Ok(VariantHuntSubjectResolution::Response(
             missing_variant_hunt_finding_response(workspace, fingerprint),
         ));
@@ -281,6 +281,7 @@ fn variant_hunt_response(
         findings.len(),
         run.include_vendored,
         findings.as_slice(),
+        cost,
     );
     let summary = format!(
         "variant:hunt completed with {} variant{}",

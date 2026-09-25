@@ -173,6 +173,7 @@ fn ndiff_hunt_response(
         findings.len(),
         run.include_vendored,
         &findings,
+        cost,
     );
     let summary = format!(
         "ndiff:hunt-variants completed with {} finding{}",

@@ -30,6 +30,7 @@ pub(crate) fn render_variant_hunt_output(
     count: usize,
     include_vendored: bool,
     findings: &[Finding],
+    cost: crate::runtime::RuntimeCostReport,
 ) -> String {
     let mut lines = vec![
         format!(
@@ -45,7 +46,7 @@ pub(crate) fn render_variant_hunt_output(
                 "repo only"
             }
         ),
-        "  Cost:           $0.0000".to_string(),
+        format!("  Cost:           {}", crate::run_lifecycle::cost_label(cost)),
     ];
     if !findings.is_empty() {
         lines.push(String::new());
@@ -68,6 +69,7 @@ pub(crate) fn render_ndiff_hunt_output(
     count: usize,
     include_vendored: bool,
     findings: &[Finding],
+    cost: crate::runtime::RuntimeCostReport,
 ) -> String {
     let mut lines = vec![
         format!("ndiff:hunt-variants complete ({advisory_id})"),
@@ -80,7 +82,7 @@ pub(crate) fn render_ndiff_hunt_output(
                 "repo only"
             }
         ),
-        "  Cost:       $0.0000".to_string(),
+        format!("  Cost:       {}", crate::run_lifecycle::cost_label(cost)),
     ];
     if !findings.is_empty() {
         lines.push(String::new());

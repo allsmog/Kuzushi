@@ -605,6 +605,21 @@ mod tests {
     }
 
     #[test]
+    fn a_stable_finding_alias_selects_its_finding() {
+        let finding = finding_with(Severity::High, "semgrep", "referenced by alias");
+        let fingerprint = finding.fingerprint.clone();
+        let store = store_with_scan_findings(&[("scan-z", finding)]);
+        let input =
+            TriageRunInput::from_tool_input(&json!({"fingerprint": "F-0001"}), Path::new("."))
+                .unwrap();
+
+        let (selected, missing) = select_triage_findings(&store, &input).unwrap();
+
+        assert!(missing.is_empty());
+        assert_eq!(selected[0].fingerprint, fingerprint);
+    }
+
+    #[test]
     fn distinct_identity_findings_each_get_their_own_triage_call() {
         let sqli = Finding::new_tool(
             "semgrep",

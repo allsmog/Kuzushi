@@ -475,10 +475,11 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
 
+        // The stable alias `kuzushi findings` prints resolves like a fingerprint.
         let lift = registry
             .execute_tool_with_runtime(
                 "variant:lift-pattern",
-                json!({"fingerprint": fingerprint}),
+                json!({"fingerprint": "F-0001"}),
                 &ctx,
                 Some(&runtime),
             )

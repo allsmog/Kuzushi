@@ -26,7 +26,7 @@ pub(in crate::modules) fn run_trace_expand(
     let runtime = runtime.context("trace:expand requires an agent runtime")?;
 
     let request = trace_expansion_request_from_input(&input)?;
-    let Some(finding) = store.get_finding_by_fingerprint(&request.finding_fingerprint)? else {
+    let Some(finding) = store.get_finding_by_operator_reference(&request.finding_fingerprint)? else {
         return Ok(serde_json::json!({
             "ok": false,
             "output": format!(
@@ -75,11 +75,14 @@ fn trace_expansion_output(
 fn expansion_cost(outcome: &TraceExpansionOutcome) -> Result<crate::runtime::RuntimeCostReport> {
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
     let observed = RuntimeCost::from_usd(outcome.cost_usd, "trace expansion cost")?;
-    Ok(if outcome.cost_usd_exact {
-        RuntimeCostReport::known(observed)
-    } else {
-        RuntimeCostReport::incomplete(observed)
-    })
+    if outcome.cost_usd_exact {
+        return Ok(RuntimeCostReport::known(observed));
+    }
+    let estimate = outcome
+        .estimated_cost_usd
+        .map(|usd| RuntimeCost::from_usd(usd, "trace expansion estimated cost"))
+        .transpose()?;
+    Ok(RuntimeCostReport::incomplete(observed).with_unmetered_estimate(estimate))
 }
 
 fn trace_expansion_request_from_input(input: &Value) -> Result<TraceExpansionRequest> {
@@ -112,4 +115,33 @@ fn trace_expansion_request_from_input(input: &Value) -> Result<TraceExpansionReq
         })
         .unwrap_or_default();
     Ok(request)
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+    use crate::capabilities::trace_expansion::TraceExpansionResult;
+
+    fn outcome(exact: bool, estimate: Option<f64>) -> TraceExpansionOutcome {
+        TraceExpansionOutcome {
+            result: TraceExpansionResult {
+                version: 1,
+                finding_fingerprint: "fp".to_string(),
+                steps: Vec::new(),
+                evidence_deltas: Vec::new(),
+                open_questions: Vec::new(),
+            },
+            cost_usd: 0.0,
+            cost_usd_exact: exact,
+            estimated_cost_usd: estimate,
+        }
+    }
+
+    #[test]
+    fn unmetered_expansion_spend_keeps_its_token_estimate() {
+        let cost = expansion_cost(&outcome(false, Some(0.02))).unwrap();
+        assert!(!cost.is_complete());
+        assert_eq!(cost.unmetered_estimate_usd(), Some(0.02));
+        assert!(expansion_cost(&outcome(true, None)).unwrap().is_complete());
+    }
 }

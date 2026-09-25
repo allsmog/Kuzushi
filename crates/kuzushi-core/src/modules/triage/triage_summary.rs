@@ -136,7 +136,7 @@ fn select_referenced_triage_findings(
 ) -> Result<Vec<String>> {
     let mut missing = Vec::new();
     for reference in references {
-        match store.get_finding_by_reference(reference)? {
+        match store.get_finding_by_operator_reference(reference)? {
             Some(finding)
                 if store.finding_is_relevant(&finding)?
                     && finding_matches_triage_scope(&finding, scan_id) =>
