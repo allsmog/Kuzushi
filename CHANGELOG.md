@@ -19,6 +19,12 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `threat-intel:research` and `threat-intel:harvest` can now extract fix
+  patterns. `ndiff:extract-fix-pattern` reads its declared `record` option as
+  an already-fetched advisory and uses that advisory's primary patch
+  reference. Previously every harvested advisory was skipped with "requires
+  id, patchText, or patchUrl". A malformed `record` is refused rather than
+  ignored.
 - Json-typed tool options accept JSON object or array text from
   `--option key=value`, shell `set` and stored options, so
   `ndiff:hunt-variants --option pattern='{…}'` works. Other text passes

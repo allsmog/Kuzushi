@@ -14,6 +14,9 @@ pub(crate) enum NdiffFixPatternSourceResolution {
 pub(crate) fn resolve_ndiff_fix_pattern_source(
     input: &Value,
 ) -> Result<NdiffFixPatternSourceResolution> {
+    if let Some(response) = invalid_ndiff_record_response(input) {
+        return Ok(NdiffFixPatternSourceResolution::Rejected(response));
+    }
     let id = ndiff_fix_pattern_id(input);
     let mut source = initial_ndiff_fix_pattern_source(input);
     if source.patch_text.trim().is_empty() {
@@ -71,12 +74,34 @@ pub(crate) fn ndiff_fix_pattern_id(input: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// A caller that already fetched the advisory (`threat-intel:harvest` after
+/// `ndiff:fetch-cve`) passes it as `record`; its primary patch reference
+/// stands in for an explicit `patchUrl`.
 pub(crate) fn initial_ndiff_fix_pattern_source(input: &Value) -> NdiffFixPatternSource {
-    NdiffFixPatternSource {
+    let mut source = NdiffFixPatternSource {
         record: None,
         patch_text: string_field(input, &["patchText", "patch_text"]).unwrap_or_default(),
         patch_url: string_field(input, &["patchUrl", "patch_url"]).unwrap_or_default(),
+    };
+    if let Some(record) = input_advisory_record(input) {
+        apply_found_ndiff_advisory(&mut source, record);
     }
+    source
+}
+
+/// A `record` that is present but not an advisory record is refused rather
+/// than ignored.
+fn invalid_ndiff_record_response(input: &Value) -> Option<Value> {
+    let error = serde_json::from_value::<CveRecord>(input.get("record")?.clone()).err()?;
+    Some(crate::module_result::failed_output_result(
+        "ndiff:extract-fix-pattern rejected input",
+        format!("ndiff:extract-fix-pattern record is not an advisory record: {error}"),
+        json!({ "reason": "invalid-record" }),
+    ))
+}
+
+fn input_advisory_record(input: &Value) -> Option<CveRecord> {
+    serde_json::from_value(input.get("record")?.clone()).ok()
 }
 
 pub(crate) fn string_field(input: &Value, keys: &[&str]) -> Option<String> {
@@ -92,7 +117,7 @@ pub(crate) fn missing_ndiff_fix_pattern_source(
     if id.is_none() && source.patch_url.trim().is_empty() {
         return Some(crate::module_result::failed_output_result(
             "ndiff:extract-fix-pattern rejected input",
-            "ndiff:extract-fix-pattern requires at least one of: id, patchText, or patchUrl.",
+            "ndiff:extract-fix-pattern requires at least one of: id, a record with a patch reference, patchText, or patchUrl.",
             json!({ "reason": "missing-source" }),
         ));
     }

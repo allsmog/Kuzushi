@@ -659,6 +659,30 @@ mod tests {
     }
 
     #[test]
+    fn an_already_fetched_record_supplies_the_patch_reference() {
+        let input = json!({"record": {
+            "id": "GHSA-demo",
+            "description": "demo",
+            "source": "osv",
+            "patches": [{"url": "https://github.com/o/r/commit/abc", "kind": "commit"}]
+        }});
+
+        let source = crate::capabilities::variant_ndiff::application::initial_ndiff_fix_pattern_source(&input);
+
+        assert_eq!(source.patch_url, "https://github.com/o/r/commit/abc");
+        assert_eq!(source.record.map(|record| record.id), Some("GHSA-demo".to_string()));
+
+        let rejected = crate::capabilities::variant_ndiff::application::resolve_ndiff_fix_pattern_source(
+            &json!({"record": {"id": "GHSA-demo"}}),
+        )
+        .unwrap();
+        assert!(matches!(
+            rejected,
+            crate::capabilities::variant_ndiff::application::NdiffFixPatternSourceResolution::Rejected(_)
+        ));
+    }
+
+    #[test]
     fn registry_dispatches_ndiff_extract_and_hunt_through_runtime() {
         let temp = tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
