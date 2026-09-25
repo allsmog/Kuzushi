@@ -217,6 +217,7 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
         | "threat-model:models"
         | "threat-model:activate"
         | "threat-model:revisions"
+        | "threat-model:diff"
         | "threat-model:restore"
         | "threat-model:adopt"
         | "threat-model:methodologies"

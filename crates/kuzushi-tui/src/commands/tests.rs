@@ -211,6 +211,28 @@ mod tests {
             ShellCommand::ThreatModelRestore("tmr_1234567890abcdef1234567890abcdef".to_string())
         );
         assert_eq!(
+            parse_command("/threats diff"),
+            ShellCommand::ThreatModelInspectDiff
+        );
+        assert_eq!(
+            parse_command("/threats diff tm_1234567890abcdef1234567890abcdef tmr_1234567890abcdef1234567890abcdef"),
+            ShellCommand::ThreatModelDiff {
+                from: "tm_1234567890abcdef1234567890abcdef".to_string(),
+                to: "tmr_1234567890abcdef1234567890abcdef".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_command("threats diff tmr_a tmr_b"),
+            ShellCommand::ThreatModelDiff {
+                from: "tmr_a".to_string(),
+                to: "tmr_b".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_command("/threats diff tmr_a"),
+            ShellCommand::Unknown("/threats diff [<from> <to>]".to_string())
+        );
+        assert_eq!(
             parse_command("/threats activate"),
             ShellCommand::Unknown("/threats activate <model-id>[@<revision-id>]".to_string())
         );
@@ -1082,6 +1104,7 @@ mod tests {
             "threat-apply",
             "threat-editor",
             "threat-model-activate",
+            "threat-model-diff",
             "threat-model-inspect-diff",
             "threat-model-restore",
             "threat-model-revisions",
@@ -1249,6 +1272,7 @@ mod tests {
             ShellCommand::ThreatModelInspectDiff => "threat-model-inspect-diff",
             ShellCommand::ThreatModelActivate { .. } => "threat-model-activate",
             ShellCommand::ThreatModelRevisions(_) => "threat-model-revisions",
+            ShellCommand::ThreatModelDiff { .. } => "threat-model-diff",
             ShellCommand::ThreatModelRestore(_) => "threat-model-restore",
             ShellCommand::ThreatVersions => "threat-versions",
             ShellCommand::ThreatVersionUse(_) => "threat-version-use",

@@ -6,6 +6,7 @@ pub(crate) use document_schema::*;
 pub(crate) use dread::*;
 pub(crate) use evidence_anchors::*;
 pub(in crate::capabilities::threat_model) use normalization::*;
+pub(crate) use revision_diff::*;
 pub(crate) use persistence_validation::{
     validate_legacy_threat_model, validate_persisted_threat_model,
 };
@@ -22,6 +23,7 @@ mod dread;
 mod evidence_anchors;
 mod normalization;
 mod persistence_validation;
+mod revision_diff;
 mod security_context_links;
 mod stage_selection;
 mod tool_contract;

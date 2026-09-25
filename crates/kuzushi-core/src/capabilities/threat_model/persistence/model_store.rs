@@ -43,7 +43,8 @@ pub use diff::inspect_threat_model_mirror_diff;
 use mirror_commit::*;
 pub use query::{
     load_active_threat_model, load_build_threat_model, load_scope_threat_model,
-    load_threat_model_manifest, load_threat_model_revision, resolve_unique_build_lineage,
+    load_threat_model_by_selector, load_threat_model_manifest, load_threat_model_revision,
+    resolve_unique_build_lineage,
 };
 pub(crate) use read_lease::{
     acquire_exact_threat_model_read_lease, acquire_threat_model_read_lease, ThreatModelReadLease,

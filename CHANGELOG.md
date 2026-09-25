@@ -26,6 +26,16 @@ Notable changes to Kuzushi. Release procedure lives in
   refine after triage and reports it under `data.threatModelFeedback`. On Juice
   Shop, one refine attached 9 of 10 new findings and wrote 9 patterns, and the
   next CWE-89 hunt plan carried the `routes/login.ts` pattern keywords.
+- `threat-model:diff` compares two threat-model permutations. Its required
+  `from` and `to` options each take a revision id (`tmr_…`) or a lineage id
+  (`tm_…`, meaning that lineage's head revision), so two revisions of one
+  lineage and two competing lineages are compared the same way. The result
+  lists threats added, removed, and changed (keyed by `stableId`, else `id`,
+  naming the changed fields), DFD node/flow/trust-boundary deltas, entry-point
+  coverage on both sides, and whether the methodology changed. An id that does
+  not resolve is an error naming what was tried, never a substitute revision.
+  In the shell, `threats diff <from> <to>` runs the same tool; bare `threats
+  diff` still inspects compatibility-mirror edits.
 
 **Fixed:**
 

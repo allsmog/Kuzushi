@@ -562,6 +562,9 @@ longer matches HEAD, and `threats use <n>` re-verifies after every
 restore), `threat-model:methodologies`; the immutable-lineage verbs
 `threat-model:models` (list lineages and their head revisions),
 `threat-model:revisions` (list one lineage's immutable revisions),
+`threat-model:diff` (compare two revisions, or lineage heads, by
+`from`/`to`: threats added/removed/changed keyed by `stableId`, DFD
+node/flow/boundary deltas, entry-point coverage, and methodology),
 `threat-model:activate` (point the active head at an existing revision
 without minting content), `threat-model:restore` (re-commit historical
 content as a new revision and activate it), and `threat-model:adopt`

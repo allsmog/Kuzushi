@@ -697,6 +697,10 @@ impl ShellApp {
                 Some("threat-model:revisions".to_string()),
                 Some(serde_json::json!({"modelId": model_id}).to_string()),
             )),
+            ShellCommand::ThreatModelDiff { from, to } => Some(self.reduce_run_tool(
+                Some("threat-model:diff".to_string()),
+                Some(serde_json::json!({"from": from, "to": to}).to_string()),
+            )),
             ShellCommand::ThreatModelRestore(revision_id) => Some(self.reduce_run_tool(
                 Some("threat-model:restore".to_string()),
                 Some(serde_json::json!({"revisionId": revision_id}).to_string()),

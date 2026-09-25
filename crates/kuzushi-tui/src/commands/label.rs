@@ -123,6 +123,11 @@ pub enum ShellCommand {
         revision_id: Option<String>,
     },
     ThreatModelRevisions(String),
+    /// Compare two revisions or lineage heads (`tm_…`/`tmr_…` selectors).
+    ThreatModelDiff {
+        from: String,
+        to: String,
+    },
     ThreatModelRestore(String),
     ThreatVersions,
     ThreatVersionUse(i64),

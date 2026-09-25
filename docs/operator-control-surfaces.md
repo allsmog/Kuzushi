@@ -270,8 +270,11 @@ truth.
   evidence).
 - `threats models` lists immutable lineages; `threats activate
   <model-id>[@<revision-id>]` changes only the active pointer; `threats
-  revisions <model-id>` lists content history; and `threats restore
-  <revision-id>` creates a revision from historical content. A divergent
+  revisions <model-id>` lists content history; `threats diff <from> <to>`
+  runs `threat-model:diff` over two revision ids (`tmr_…`) or lineage heads
+  (`tm_…`), while bare `threats diff` still inspects mirror edits; and
+  `threats restore <revision-id>` creates a revision from historical
+  content. A divergent
   hand-edited compatibility mirror blocks activation until the operator
   explicitly adopts or discards it.
 - `scan batch [--prior-run <run-id>]` opens the repeated-scan configurator.

@@ -94,7 +94,7 @@ pub(crate) fn adopt_threat_model_mirror_adapter(
     )
 }
 
-fn workspace_root<'a>(
+pub(super) fn workspace_root<'a>(
     ctx: &'a ToolExecutionContext<'_>,
     tool: &str,
 ) -> Result<&'a Path> {

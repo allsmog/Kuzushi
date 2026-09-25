@@ -15,7 +15,7 @@ pub use model_store::{
     activate_threat_model, adopt_threat_model_mirror_edits, commit_threat_model_revision,
     inspect_threat_model_mirror_diff, list_model_revisions, list_threat_model_heads,
     load_active_threat_model, load_build_threat_model, load_scope_threat_model,
-    load_threat_model_manifest, load_threat_model_revision, open_writable_threat_model_store,
+    load_threat_model_by_selector, load_threat_model_manifest, load_threat_model_revision, open_writable_threat_model_store,
     resolve_unique_build_lineage, restore_threat_model_revision, threat_model_manifest_path,
     threat_model_object_path, threat_model_store_path, ActivationSource, ActiveThreatModel,
     MirrorAction, ScopeRef, ThreatModelActivation, ThreatModelCommit, ThreatModelCommitResult,
