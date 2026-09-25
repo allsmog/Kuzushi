@@ -317,15 +317,14 @@ fn verify_agent_query_request(
             crate::proof::whitebox_policy::try_whitebox_static_policy_for_target(workspace_root)?,
         );
     }
-    let runtime_options = crate::runtime::AgentRuntimeOptions {
-        mcp_tool_timeout_ms: input.mcp_tool_timeout_ms,
-        max_model_turns: input.max_model_turns,
-        ..Default::default()
-    };
-    if !runtime_options.is_empty() {
+    if let Some(timeout_ms) = input.mcp_tool_timeout_ms {
+        let runtime_options = crate::runtime::AgentRuntimeOptions {
+            mcp_tool_timeout_ms: Some(timeout_ms),
+            ..Default::default()
+        };
         request = request.with_runtime_options(runtime_options);
     }
-    Ok(request)
+    Ok(request.with_max_model_turns(input.max_model_turns))
 }
 
 fn missing_finding_response(fingerprint: &str) -> Value {

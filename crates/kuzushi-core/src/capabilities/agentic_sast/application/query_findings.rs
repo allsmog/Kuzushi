@@ -40,6 +40,7 @@ fn agentic_sast_query_request(
     )
     .with_stage(stage)
     .with_tool_policy(run.tool_policy.clone())
+    .with_max_model_turns(run.options.max_model_turns)
 }
 
 fn normalize_and_filter_agentic_sast_findings(

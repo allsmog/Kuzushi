@@ -29,6 +29,6 @@ mod tests;
 
 pub(crate) use adapters::*;
 pub(crate) use application::*;
-pub(crate) use domain::AgenticSastInput;
+pub(crate) use domain::{AgenticSastInput, DEFAULT_AGENTIC_MODEL_TURNS};
 pub use domain::{AgenticSastPersistedRun, AgenticSastReport};
 pub(crate) use persistence::*;

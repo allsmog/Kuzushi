@@ -180,7 +180,8 @@ fn fill_agentic_sast_report(
 ) -> Result<()> {
     if selected.run_agentic {
         reports.engine_ids.push("agentic");
-        let (report, outcome) = dispatch.report_from_data("agentic-sast:scan")?;
+        let input = agentic_scoped_input(dispatch.input);
+        let (report, outcome) = dispatch.report_from_input("agentic-sast:scan", &input)?;
         reports.engine_outcomes.insert("agentic", outcome);
         reports.agentic = Some(report);
     }
@@ -245,7 +246,18 @@ impl SastSubtoolDispatch<'_> {
     where
         T: serde::de::DeserializeOwned,
     {
-        let output = self.checkpointed_engine_output(tool_name, self.input)?;
+        self.report_from_input(tool_name, self.input)
+    }
+
+    fn report_from_input<T>(
+        &self,
+        tool_name: &str,
+        input: &Value,
+    ) -> Result<(T, crate::run_artifacts::ScanEngineStageOutcome)>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let output = self.checkpointed_engine_output(tool_name, input)?;
         let data = output
             .get("data")
             .cloned()
@@ -445,6 +457,44 @@ fn scan_engine_outcome(output: &Value) -> crate::run_artifacts::ScanEngineStageO
     }
 }
 
+/// The scan's `paths` scope becomes agentic SAST's include patterns (each
+/// path and everything below it), unless the operator set patterns directly.
+/// Without this the engine's descriptor filter dropped `paths` and a scoped
+/// scan hunted — and paid for — the whole repository.
+fn agentic_scoped_input(input: &Value) -> Value {
+    let mut scoped = input.clone();
+    let explicit = ["includePatterns", "include_patterns"]
+        .iter()
+        .any(|key| input.get(key).is_some());
+    let paths = scan_scope_paths(input);
+    if let (false, Some(object), false) = (explicit, scoped.as_object_mut(), paths.is_empty()) {
+        object.insert("includePatterns".to_string(), json!(scope_patterns(&paths)));
+    }
+    scoped
+}
+
+fn scan_scope_paths(input: &Value) -> Vec<String> {
+    ["paths", "includePaths", "include_paths"]
+        .iter()
+        .find_map(|key| input.get(key).and_then(Value::as_array))
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|path| path.trim().trim_end_matches('/').to_string())
+                .filter(|path| !path.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn scope_patterns(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .flat_map(|path| [path.clone(), format!("{path}/*")])
+        .collect()
+}
+
 fn descriptor_filtered_input(
     registry: &ModuleRegistry,
     tool_name: &str,
@@ -549,6 +599,25 @@ fn findings_count_excluding_review_candidates(
 #[cfg(test)]
 mod canonical_report_cost_tests {
     use super::*;
+
+    #[test]
+    fn scan_paths_scope_the_agentic_inventory_unless_patterns_are_explicit() {
+        let scoped = agentic_scoped_input(&json!({"paths": ["routes/", "lib/insecurity.ts"]}));
+        assert_eq!(
+            scoped["includePatterns"],
+            json!(["routes", "routes/*", "lib/insecurity.ts", "lib/insecurity.ts/*"])
+        );
+        assert!(crate::capabilities::agentic_sast::agentic_path_allowed(
+            "routes/login.ts",
+            &serde_json::from_value::<Vec<String>>(scoped["includePatterns"].clone()).unwrap(),
+            &[],
+        ));
+
+        let explicit = json!({"paths": ["routes"], "includePatterns": ["lib/*"]});
+        assert_eq!(agentic_scoped_input(&explicit), explicit);
+        let unscoped = json!({"mode": "standard"});
+        assert_eq!(agentic_scoped_input(&unscoped), unscoped);
+    }
 
     #[test]
     fn normalized_incomplete_subtool_reports_rehydrate_observed_cost() {

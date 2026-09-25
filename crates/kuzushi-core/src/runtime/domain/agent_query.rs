@@ -97,6 +97,17 @@ impl AgentQueryRequest {
         self
     }
 
+    /// Merge a declared turn budget into the runtime options; `None` leaves
+    /// the request (and the bridge default) untouched.
+    pub fn with_max_model_turns(mut self, turns: Option<u32>) -> Self {
+        if let Some(turns) = turns {
+            let mut options = self.runtime_options.take().unwrap_or_default();
+            options.max_model_turns = Some(turns);
+            self.runtime_options = Some(options);
+        }
+        self
+    }
+
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
         self
@@ -142,7 +153,34 @@ pub struct AgentRuntimeOptions {
     pub max_model_turns: Option<u32>,
 }
 
+/// Beyond this an investigation's re-sent transcript outgrows small context
+/// windows long before it concludes.
+pub const MAX_AGENT_MODEL_TURNS: u64 = 40;
+
 impl AgentRuntimeOptions {
+    /// The declared `maxModelTurns` option of an agentic tool, bounded to
+    /// 1..=[`MAX_AGENT_MODEL_TURNS`]. Absent keeps the bridge default.
+    pub fn max_model_turns_from_input(
+        input: &serde_json::Value,
+        tool: &str,
+    ) -> anyhow::Result<Option<u32>> {
+        let raw = input
+            .get("maxModelTurns")
+            .or_else(|| input.get("max_model_turns"));
+        let Some(value) = raw.filter(|value| !value.is_null()) else {
+            return Ok(None);
+        };
+        let turns = value
+            .as_u64()
+            .filter(|turns| (1..=MAX_AGENT_MODEL_TURNS).contains(turns))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{tool} maxModelTurns must be an integer from 1 to {MAX_AGENT_MODEL_TURNS}"
+                )
+            })?;
+        Ok(Some(turns as u32))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.mcp_environment.is_empty()
             && self.mcp_tool_timeout_ms.is_none()

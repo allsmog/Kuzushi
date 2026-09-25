@@ -56,7 +56,8 @@ impl VerifyFindingInput {
         let passes = parse_verify_passes(input)?;
         let mcps = parse_verify_mcps(input)?;
         let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
-        let max_model_turns = parse_max_model_turns(input)?;
+        let max_model_turns =
+            crate::runtime::AgentRuntimeOptions::max_model_turns_from_input(input, "verify:finding")?;
         let gate_model = parse_gate_model(input)?;
         let escalation_model = parse_escalation_model(input)?;
 
@@ -145,26 +146,6 @@ fn parse_mcp_tool_timeout_ms(input: &Value) -> Result<Option<u64>> {
     }
 }
 
-/// Beyond this an investigation's re-sent transcript outgrows small context
-/// windows long before it concludes.
-const MAX_VERIFY_MODEL_TURNS: u64 = 40;
-
-fn parse_max_model_turns(input: &Value) -> Result<Option<u32>> {
-    let raw = input
-        .get("maxModelTurns")
-        .or_else(|| input.get("max_model_turns"));
-    let Some(value) = raw.filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-    let turns = value
-        .as_u64()
-        .filter(|turns| (1..=MAX_VERIFY_MODEL_TURNS).contains(turns))
-        .with_context(|| {
-            format!("verify:finding maxModelTurns must be an integer from 1 to {MAX_VERIFY_MODEL_TURNS}")
-        })?;
-    Ok(Some(turns as u32))
-}
-
 const VERIFY_HEADER: &str =
     "You are Kuzushi's independent exploitability verifier. You did not discover this finding and \
 must not assume it is real. Your job is adversarial falsification: try to disprove the claim \
@@ -234,19 +215,23 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
 
 #[cfg(test)]
 mod max_model_turns_tests {
-    use super::*;
+    use crate::runtime::AgentRuntimeOptions;
+    use serde_json::{json, Value};
 
     #[test]
     fn a_declared_turn_budget_is_bounded_and_absent_keeps_the_default() {
-        let parse = |value: Value| parse_max_model_turns(&json!({ "maxModelTurns": value }));
+        let parse = |value: Value| {
+            AgentRuntimeOptions::max_model_turns_from_input(&json!({ "maxModelTurns": value }), "t")
+        };
         assert_eq!(parse(json!(24)).unwrap(), Some(24));
-        assert_eq!(parse_max_model_turns(&json!({})).unwrap(), None);
-        assert_eq!(
-            parse_max_model_turns(&json!({"max_model_turns": 5})).unwrap(),
-            Some(5)
-        );
+        let none = AgentRuntimeOptions::max_model_turns_from_input(&json!({}), "t");
+        assert_eq!(none.unwrap(), None);
+        let alias =
+            AgentRuntimeOptions::max_model_turns_from_input(&json!({"max_model_turns": 5}), "t");
+        assert_eq!(alias.unwrap(), Some(5));
         for invalid in [json!(0), json!(41), json!("12"), json!(-1)] {
-            assert!(parse(invalid).is_err());
+            let error = parse(invalid).unwrap_err().to_string();
+            assert!(error.contains("t maxModelTurns"), "{error}");
         }
     }
 }

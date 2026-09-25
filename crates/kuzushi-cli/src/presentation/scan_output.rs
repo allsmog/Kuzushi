@@ -108,7 +108,10 @@ pub(crate) fn scan_json_output(
         "target": data.get("target").cloned(),
         "findingsCount": data.get("findingsCount").cloned(),
         "observationsCount": data.get("observationsCount").cloned(),
-        "costUsd": scan_cost_usd(result),
+        "costUsd": scan_exact_cost_usd(result),
+        "observedCostUsd": result.get("observedCostUsd").cloned(),
+        "estimatedCostUsd": result.get("estimatedCostUsd").cloned(),
+        "providerSpendUnresolved": scan_spend_unresolved(result),
         "db": workspace.findings_db_path(),
         "mode": data.get("mode").cloned(),
         "whiteboxStatic": data.get("whiteboxStatic").cloned(),
@@ -136,6 +139,34 @@ pub(crate) fn scan_findings_count(data: &serde_json::Value) -> u64 {
     data.get("findingsCount")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0)
+}
+
+/// True when the envelope says some provider spend has no receipt; the stage
+/// `costUsd` subtotals are then lower bounds, never the scan's exact cost.
+pub(crate) fn scan_spend_unresolved(result: &serde_json::Value) -> bool {
+    result
+        .get("providerSpendUnresolved")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// `costUsd` only when it is exact; `null` when spend is unresolved.
+fn scan_exact_cost_usd(result: &serde_json::Value) -> Option<f64> {
+    (!scan_spend_unresolved(result)).then(|| scan_cost_usd(result))
+}
+
+/// One-line spend label: exact, a labelled estimate, or a lower bound.
+pub(crate) fn scan_cost_label(result: &serde_json::Value) -> String {
+    if !scan_spend_unresolved(result) {
+        return format!("${:.4}", scan_cost_usd(result));
+    }
+    match result
+        .get("estimatedCostUsd")
+        .and_then(serde_json::Value::as_f64)
+    {
+        Some(estimate) => format!("~${estimate:.4} estimated"),
+        None => format!(">=${:.4} (spend unresolved)", scan_cost_usd(result)),
+    }
 }
 
 pub(crate) fn scan_cost_usd(result: &serde_json::Value) -> f64 {
@@ -223,6 +254,28 @@ mod tests {
             }
         });
         assert!((scan_cost_usd(&envelope) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unresolved_spend_is_never_reported_as_an_exact_cost() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let envelope = json!({
+            "ok": true,
+            "observedCostUsd": 0.0,
+            "providerSpendUnresolved": true,
+            "data": { "runId": "scan-unresolved", "agentic": { "costUsd": 0.0 } }
+        });
+        let data = scan_result_data(&envelope);
+        let output = scan_json_output(&workspace, &envelope, &data);
+
+        assert!(output["costUsd"].is_null(), "{output}");
+        assert_eq!(output["providerSpendUnresolved"], json!(true));
+        assert_eq!(scan_cost_label(&envelope), ">=$0.0000 (spend unresolved)");
+        let mut estimated = envelope.clone();
+        estimated["estimatedCostUsd"] = json!(0.28);
+        assert_eq!(scan_cost_label(&estimated), "~$0.2800 estimated");
+        assert_eq!(scan_cost_label(&json!({"costUsd": 0.5})), "$0.5000");
     }
 
     #[test]

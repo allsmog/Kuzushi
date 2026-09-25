@@ -19,6 +19,24 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `kuzushi scan --paths` now scopes the agentic SAST engine. The umbrella's
+  descriptor filter used to drop `paths`, so a scoped scan hunted (and paid
+  for) the whole repository; the scope now becomes the engine's include
+  patterns unless they are set explicitly. On Juice Shop `routes/`, the
+  engine went from 0 findings to 8 real ones: SQL injection in login and
+  search, `eval` and template injection, SSRF, zip path traversal, and two
+  NoSQL injections.
+- Agentic SAST declares `maxModelTurns` (default 20). The bridge tells the
+  model when two turns remain, so it can finish with its own answer; the
+  stop and the refusal of forced conclusions are unchanged. On Anthropic the
+  opening prompt of an agent loop is cache-marked, because every turn
+  re-sends it: the same hunt dropped from about $1.80 to about $0.43. A
+  truncation's remediation now names the setting that applies (turn budget,
+  MCP timeout, spend, or output tokens).
+- The scan JSON and `--ci` summary no longer print an exact `costUsd` when
+  provider spend is unresolved. `costUsd` is null, with `observedCostUsd`,
+  `providerSpendUnresolved`, and `estimatedCostUsd` alongside it.
+
 - Shell planner rows no longer say "needs model — run /model first" when a
   model is configured but the task's input cannot be prepared (for example
   `patch:finding` without a fingerprint). The row names the missing input.

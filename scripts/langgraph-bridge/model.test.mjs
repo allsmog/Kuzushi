@@ -7,6 +7,7 @@ import {
   credentialForRequest,
   humanMessageForRequest,
   isTruncatedStopReason,
+  loopOpeningMessageForRequest,
   modelContinuationDecision,
   openAiAccountIdFromJwt,
   openAiCredentialFromRefreshResponse,
@@ -14,6 +15,7 @@ import {
   spendForStop,
   TOOL_RESULT_MAX_CHARS,
   toolMessageForOutput,
+  turnBudgetNotice,
   usageFromMessages,
 } from "./model.mjs";
 import { oauthModelForRequest, openAiOauthHeaders } from "./oauth-models.mjs";
@@ -577,4 +579,31 @@ test("a declared turn budget replaces the default turn limit", () => {
   assert.equal(modelContinuationDecision(turns, undefined), "model_turn_limit");
   assert.equal(modelContinuationDecision(turns, undefined, 20), "continue");
   assert.throws(() => modelContinuationDecision(turns, undefined, 0), /positive safe integer/);
+});
+
+test("the model is told its turn budget only in the last turns", () => {
+  const turns = (n) => Array.from({ length: n }, () => unmeteredCall(10, 10));
+  assert.equal(turnBudgetNotice(turns(9), 12), undefined);
+  assert.match(turnBudgetNotice(turns(10), 12).content, /2 model turn\(s\) remain/);
+  assert.match(turnBudgetNotice(turns(11), 12).content, /1 model turn\(s\) remain/);
+  assert.equal(turnBudgetNotice(turns(12), 12), undefined, "no notice once the stop applies");
+  assert.match(turnBudgetNotice(turns(10)).content, /2 model turn/, "defaults to the bridge limit");
+});
+
+test("an anthropic agent loop caches its whole opening prompt", () => {
+  const anthropic = loopOpeningMessageForRequest({
+    model: "anthropic:claude-haiku-4-5",
+    prompt: "inventory",
+  });
+  assert.deepEqual(anthropic.content, [
+    { type: "text", text: "inventory", cache_control: { type: "ephemeral" } },
+  ]);
+  const other = loopOpeningMessageForRequest({ model: "openai:gpt-5.5", prompt: "inventory" });
+  assert.equal(other.content, "inventory");
+  const split = loopOpeningMessageForRequest({
+    model: "anthropic:claude-haiku-4-5",
+    prompt: "shared tail",
+    cacheablePromptPrefix: "shared ",
+  });
+  assert.equal(split.content[0].text, "shared ", "a declared prefix keeps its own boundary");
 });

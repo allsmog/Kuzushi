@@ -415,6 +415,33 @@ export function humanMessageForRequest(request) {
   return new HumanMessage({ content });
 }
 
+// An agent loop re-sends its opening prompt on every model turn, so on
+// Anthropic the whole prompt is cache-marked (when the caller declared no
+// narrower prefix): later turns read it at cache-read rates instead of
+// paying full input price for the same bytes each time.
+export function loopOpeningMessageForRequest(request) {
+  const prompt = String(request?.prompt ?? "");
+  const cacheWholePrompt =
+    !promptCacheSplit(request) && providerForRequest(request) === "anthropic" && prompt.trim();
+  if (!cacheWholePrompt) return humanMessageForRequest(request);
+  return new HumanMessage({ content: [cacheableTextBlock(prompt)] });
+}
+
+// How many model turns remain for this request, counting the turn about to be
+// taken. Near the end the model is told, so it can finish with its own answer
+// instead of being stopped mid-investigation; the stop itself is unchanged.
+export const TURN_BUDGET_NOTICE_TURNS = 2;
+
+export function turnBudgetNotice(messages, maxModelTurns = DEFAULT_MAX_MODEL_TURNS) {
+  const remaining = maxModelTurns - usageFromMessages(messages).modelCalls;
+  if (remaining > TURN_BUDGET_NOTICE_TURNS || remaining < 1) return undefined;
+  return new HumanMessage(
+    `Turn budget: ${remaining} model turn(s) remain, including this one. ` +
+      "Stop exploring and return your final answer in the required format now, " +
+      "unless one more tool call is essential to it.",
+  );
+}
+
 function providerForRequest(request) {
   try {
     return parseModelSpec(request.model)[0];

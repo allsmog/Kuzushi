@@ -637,6 +637,9 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
     options.extend(agentic_sast_filter_options());
     options.extend(agentic_sast_chunk_options());
     options.extend(agentic_sast_auto_triage_options());
+    options.push(max_model_turns_option(
+        crate::capabilities::agentic_sast::DEFAULT_AGENTIC_MODEL_TURNS,
+    ));
     options.push(model_option());
     options
 }
