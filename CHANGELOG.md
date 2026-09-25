@@ -19,6 +19,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A `targetSubdir` taint-iris-next hunt builds cpg-rs graphs only for the
+  languages present under its scan root. On a mixed-language repository, a
+  TypeScript-only subtree used to fail the JavaScript build and drop to the
+  heuristic linker. On Juice Shop `routes/` the hunt now yields 4 dataflow
+  paths instead of 0.
+- Tool results that report unresolved provider spend now carry the token
+  estimate. The dispatch boundary tallies every model call it traces and
+  fills in `estimatedCostUsd` when an engine reported only an observed
+  floor. It skips the fill whenever the tally saw less than the tool itself
+  observed.
+- `triage:dedupe` and `triage:chain-hunt` list the groups and chains they
+  propose, not only counts.
 - Finding-scoped tools accept the `F-0001` aliases that `kuzushi findings`
   prints, as their `fingerprint` option already advertised. This covers
   `triage:run`, `variant:lift-pattern`, `variant:hunt`, `trace:expand`,

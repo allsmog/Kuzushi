@@ -36,7 +36,7 @@ pub(crate) struct CpgrsStep {
 /// prebuild step. Returns `Ok(None)` when no plan language has a cpg-rs
 /// frontend, so callers fall back to the heuristic linker.
 pub(crate) fn run_cpgrs_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<CpgrsFlow>>> {
-    let languages = cpgrs_plan_languages(&plan.languages);
+    let languages = scoped_cpgrs_languages(plan);
     if languages.is_empty() {
         return Ok(None);
     }
@@ -45,6 +45,18 @@ pub(crate) fn run_cpgrs_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<Cpg
         flows.extend(run_cpgrs_language_flows(plan, lang)?);
     }
     Ok(Some(flows))
+}
+
+/// Plan languages are detected over the whole repository; a `targetSubdir`
+/// hunt builds only those with source files inside its scan root, so a
+/// JavaScript-free subtree of a mixed repo does not abort its TypeScript
+/// graph.
+fn scoped_cpgrs_languages(plan: &TaintIrisNextPlan) -> Vec<&'static str> {
+    let present = kuzushi_cpg::detect_buildable_languages(&plan.scan_root);
+    cpgrs_plan_languages(&plan.languages)
+        .into_iter()
+        .filter(|lang| present.contains(lang))
+        .collect()
 }
 
 /// Plan languages that have a cpg-rs frontend, deduped, detection order kept.
@@ -413,6 +425,24 @@ mod tests {
         assert!(!flow.steps.is_empty());
         // The implicit build must have persisted the artifact for reuse.
         assert!(kuzushi_cpg::has_artifacts(temp.path()));
+    }
+
+    #[test]
+    fn plan_languages_absent_from_the_scan_root_are_not_built() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("users.ts"),
+            "function list(req, res) {\n  const id = req.query.id;\n  db.query(\"SELECT \" + id);\n}\n",
+        )
+        .unwrap();
+        let plan = cpgrs_test_plan(
+            temp.path().to_path_buf(),
+            vec!["javascript".to_string(), "typescript".to_string()],
+        );
+
+        let flows = run_cpgrs_flows(&plan).unwrap().expect("typescript is present");
+
+        assert!(!flows.is_empty(), "the typescript graph must still run");
     }
 
     #[test]
