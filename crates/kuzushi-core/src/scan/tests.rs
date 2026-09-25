@@ -1192,7 +1192,24 @@ printf '{"results":[]}'
             "{output}"
         );
         assert!(
-            output.contains("  CodeQL could not analyze every detected language:\n  ! go: missing db"),
+            output.contains(
+                "  CodeQL coverage is incomplete (languages not analyzed or SARIF results omitted):\n  ! go: missing db"
+            ),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn codeql_report_does_not_label_a_normalization_omission_as_a_language_failure() {
+        let omission =
+            "CodeQL SARIF omitted 1 result without a usable physical location; sample rules: lost.rule";
+        let report = CodeqlScanReport::new("/repo", vec![codeql_scan_error_finding()], None)
+            .with_scan_errors(vec![omission.to_string()]);
+        let output = report.output();
+
+        assert!(!output.contains("could not analyze"), "{output}");
+        assert!(
+            output.contains(&format!("  CodeQL coverage is incomplete (languages not analyzed or SARIF results omitted):\n  ! {omission}")),
             "{output}"
         );
     }

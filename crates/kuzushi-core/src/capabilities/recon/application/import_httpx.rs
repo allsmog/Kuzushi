@@ -4,7 +4,8 @@ const TOOL: &str = "recon:import-httpx";
 
 /// Import an httpx JSONL probe dump (`httpx -json -o out.jsonl`) into
 /// the recon store as `ReconHost` + `ReconService` rows. Out-of-scope
-/// hosts (per `.kuzushi/scope.toml`) are skipped with a counter.
+/// hosts (per `.kuzushi/scope.toml`) and parsed rows without a usable host
+/// are accounted separately in the import summary.
 pub(crate) fn run_recon_import_httpx(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -34,6 +35,7 @@ fn ingest_httpx_line(
     let entry: Value = serde_json::from_str(trimmed)
         .with_context(|| format!("httpx JSONL line {} is not valid JSON", lineno + 1))?;
     let Some(host) = httpx_host(&entry) else {
+        context.skip_unusable_host();
         return Ok(());
     };
     if !context.admit_host(&host) {
@@ -177,6 +179,7 @@ fn append_httpx_import_summary(
 ) -> Result<()> {
     let imported = context.hosts.len();
     let skipped = context.skipped_out_of_scope;
+    let skipped_unusable = context.skipped_unusable;
     context.notes.push(context.store.create_note(
         &context.workspace_id,
         None,
@@ -187,7 +190,8 @@ fn append_httpx_import_summary(
             "records": record_count,
             "imported": imported,
             "skippedOutOfScope": skipped,
-            "ignored": record_count.saturating_sub(imported + skipped),
+            "skippedUnusable": skipped_unusable,
+            "ignored": skipped_unusable,
         }),
     )?);
     Ok(())

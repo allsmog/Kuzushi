@@ -18,7 +18,34 @@ pub fn auto_triage_propagation_basis(
     if source_basis.is_strong() && candidate_basis.is_strong() {
         return Some(conservative_basis(source_basis, candidate_basis));
     }
-    shared_fallback_evidence(source, candidate).then_some(FindingIdentityBasis::FileFallback)
+    weak_generation_basis(source, candidate, source_basis, candidate_basis)
+}
+
+/// The basis for a pair that is not strong on both sides: shared fallback
+/// evidence, or an allocator-recorded exact-fingerprint rescue.
+fn weak_generation_basis(
+    source: &Finding,
+    candidate: &Finding,
+    source_basis: FindingIdentityBasis,
+    candidate_basis: FindingIdentityBasis,
+) -> Option<FindingIdentityBasis> {
+    // Preserve the weakest independently sufficient evidence first. If the
+    // two observations already share the line/source-sensitive fallback
+    // evidence, that is what authorized propagation even when a later
+    // observation also carries an allocator-granted exact-fingerprint basis.
+    if shared_fallback_evidence(source, candidate) {
+        return Some(FindingIdentityBasis::FileFallback);
+    }
+    // A finding can be minted with only the file-fallback basis on its first
+    // observation, then rediscovered with the exact same producer fingerprint.
+    // The identity allocator records the later observation with the exact
+    // fingerprint basis; only that recorded strong basis may rescue a weak
+    // generation when no weaker fallback evidence already authorizes it.
+    // Fingerprint equality by itself must not invent a stronger receipt for
+    // two rows whose persisted basis is still only file fallback.
+    (has_exact_fingerprint_basis(source_basis, candidate_basis)
+        && same_nonempty_fingerprint(source, candidate))
+    .then_some(FindingIdentityBasis::ExactProducerFingerprint)
 }
 
 fn conservative_basis(
@@ -48,6 +75,18 @@ fn same_identity(source: &Finding, candidate: &Finding) -> bool {
 
 fn chain_kind_differs(source: &Finding, candidate: &Finding) -> bool {
     is_attack_chain_finding(source) != is_attack_chain_finding(candidate)
+}
+
+fn has_exact_fingerprint_basis(
+    source: FindingIdentityBasis,
+    candidate: FindingIdentityBasis,
+) -> bool {
+    matches!(source, FindingIdentityBasis::ExactProducerFingerprint)
+        || matches!(candidate, FindingIdentityBasis::ExactProducerFingerprint)
+}
+
+fn same_nonempty_fingerprint(source: &Finding, candidate: &Finding) -> bool {
+    !source.fingerprint.trim().is_empty() && source.fingerprint == candidate.fingerprint
 }
 
 fn shared_fallback_evidence(source: &Finding, candidate: &Finding) -> bool {
@@ -112,6 +151,84 @@ mod tests {
             auto_triage_propagation_basis(&exact, &dedup),
             Some(FindingIdentityBasis::CrossRunDedupKey)
         );
+    }
+
+    #[test]
+    fn matching_fingerprint_does_not_overstate_an_existing_strong_basis() {
+        let mut exact = finding(1, FindingIdentityBasis::ExactProducerFingerprint);
+        let mut locator = finding(2, FindingIdentityBasis::SourceLocator);
+        exact.fingerprint = "fp-same-producer".to_string();
+        locator.fingerprint = exact.fingerprint.clone();
+
+        assert_eq!(
+            auto_triage_propagation_basis(&exact, &locator),
+            Some(FindingIdentityBasis::SourceLocator)
+        );
+    }
+
+    #[test]
+    fn matching_fingerprint_upgrades_a_weak_first_generation() {
+        let mut source = finding(1, FindingIdentityBasis::FileFallback);
+        let mut candidate = finding(2, FindingIdentityBasis::ExactProducerFingerprint);
+        source.fingerprint = "fp-same-producer".to_string();
+        candidate.fingerprint = source.fingerprint.clone();
+
+        assert_eq!(
+            auto_triage_propagation_basis(&source, &candidate),
+            Some(FindingIdentityBasis::ExactProducerFingerprint)
+        );
+        assert_eq!(
+            auto_triage_propagation_basis(&candidate, &source),
+            Some(FindingIdentityBasis::ExactProducerFingerprint)
+        );
+    }
+
+    #[test]
+    fn matching_fingerprint_keeps_fallback_when_fallback_evidence_already_authorizes() {
+        let mut source = finding(1, FindingIdentityBasis::FileFallback);
+        let mut candidate = finding(2, FindingIdentityBasis::ExactProducerFingerprint);
+        source.fingerprint = "fp-same-producer".to_string();
+        candidate.fingerprint = source.fingerprint.clone();
+        source.dedup_key = Some("line-sensitive-key".to_string());
+        candidate.dedup_key = source.dedup_key.clone();
+
+        assert_eq!(
+            auto_triage_propagation_basis(&source, &candidate),
+            Some(FindingIdentityBasis::FileFallback)
+        );
+        assert_eq!(
+            auto_triage_propagation_basis(&candidate, &source),
+            Some(FindingIdentityBasis::FileFallback)
+        );
+    }
+
+    #[test]
+    fn matching_fingerprint_never_crosses_the_durable_identity_boundary() {
+        let mut source = finding(1, FindingIdentityBasis::FileFallback);
+        let mut candidate = finding(2, FindingIdentityBasis::ExactProducerFingerprint);
+        source.fingerprint = "fp-same-producer".to_string();
+        candidate.fingerprint = source.fingerprint.clone();
+        candidate.identity_id = Some("fi_other".to_string());
+
+        assert_eq!(auto_triage_propagation_basis(&source, &candidate), None);
+    }
+
+    #[test]
+    fn matching_fingerprint_does_not_upgrade_two_fallback_generations() {
+        let mut source = finding(1, FindingIdentityBasis::FileFallback);
+        let mut candidate = finding(2, FindingIdentityBasis::FileFallback);
+        source.fingerprint = "fp-same-producer".to_string();
+        candidate.fingerprint = source.fingerprint.clone();
+
+        assert_eq!(auto_triage_propagation_basis(&source, &candidate), None);
+    }
+
+    #[test]
+    fn empty_fingerprint_never_upgrades_a_weak_generation() {
+        let source = finding(1, FindingIdentityBasis::FileFallback);
+        let candidate = finding(2, FindingIdentityBasis::ExactProducerFingerprint);
+
+        assert_eq!(auto_triage_propagation_basis(&source, &candidate), None);
     }
 
     #[test]
