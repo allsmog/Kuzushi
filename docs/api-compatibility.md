@@ -71,10 +71,12 @@ noise:
 ## Shell phase commands
 
 The canonical in-shell phase verbs are `map`, `scan`, `review`, `prove`, and
-`fix`. Each zero-argument verb opens only that phase's planning picker; it does
-not start a full pipeline. The longer `phase <phase>` spelling remains a
-compatibility route, including its temporary `hunt` and `confirm` input
-aliases.
+`fix`. Each zero-argument verb opens that phase's durable Workbench page once
+the engagement has completed or passed the phase, and otherwise that phase's
+planning picker; it never starts a full pipeline. `plan <phase>` always opens
+the planning picker, including for a completed phase. The longer
+`phase <phase>` spelling remains a compatibility route to the planner,
+including its temporary `hunt` and `confirm` input aliases.
 
 The guided Map → Scan workflow moved from `scan [target]` to `full [target]`;
 `pipeline [target]` is an equivalent alias. `scan <target>` is rejected with a

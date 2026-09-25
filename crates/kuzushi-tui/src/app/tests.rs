@@ -2982,6 +2982,7 @@ fn command_effect_reducer_routes_stateful_command_families() {
         ShellCommand::Keymap,
         ShellCommand::UpdateAvailable,
         ShellCommand::Phase(WorkflowPhase::Prove),
+        ShellCommand::PhasePlanner(WorkflowPhase::Map),
         ShellCommand::Prompts,
         ShellCommand::Prompt("mutate triage \"focus authz\"".to_string()),
         ShellCommand::ProjectModel,
@@ -4325,6 +4326,10 @@ fn effect_routed_command_fixtures() -> Vec<(&'static str, ShellCommand)> {
         ("keymap", ShellCommand::Keymap),
         ("update-available", ShellCommand::UpdateAvailable),
         ("phase", ShellCommand::Phase(WorkflowPhase::Prove)),
+        (
+            "phase-planner",
+            ShellCommand::PhasePlanner(WorkflowPhase::Map),
+        ),
         ("prompts", ShellCommand::Prompts),
         (
             "prompt",
@@ -20043,6 +20048,66 @@ fn map_command_bar_hints(app: &ShellApp) -> String {
         .map(|hint| format!("{} {}", hint.verb, hint.label))
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+pub(crate) fn app_past_map(target: &Path) -> ShellApp {
+    seed_ready_map_target(target, "map-verb");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.to_path_buf()));
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
+    app.set_shell_view(ShellView::Catalog);
+    app
+}
+
+/// A completed phase's verb is a request to look at it: `map` opens the Map
+/// page (as Shift+Tab would) rather than a planner titled "engagement is in
+/// Scan". The page names `plan map` as the explicit way back to the planner.
+#[test]
+fn completed_phase_verb_opens_its_durable_page_with_a_planner_hint() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_past_map(target.path());
+    assert!(app.phase_verb_opens_page(WorkflowPhase::Map));
+
+    run_command(&mut app, parse_command("map"));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Map));
+    assert!(!app.has_running_work());
+    let hints = map_command_bar_hints(&app);
+    assert!(hints.contains("plan map open Map planner"), "{hints}");
+}
+
+#[test]
+fn unreached_phase_verb_and_plan_verb_keep_opening_the_planner() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_past_map(target.path());
+    assert!(!app.phase_verb_opens_page(WorkflowPhase::Scan));
+
+    run_command(&mut app, parse_command("scan"));
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+
+    app.set_shell_view(ShellView::Catalog);
+    run_command(&mut app, parse_command("plan map"));
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(app
+        .engagement
+        .planning_picker()
+        .tasks()
+        .iter()
+        .all(|row| row.id.phase() == WorkflowPhase::Map));
+}
+
+#[test]
+fn unreached_phase_page_offers_no_planner_hint() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_past_map(target.path());
+    app.set_workbench_page(WorkbenchPage::Scan);
+
+    let hints = map_command_bar_hints(&app);
+    assert!(!hints.contains("plan scan"), "{hints}");
 }
 
 #[test]

@@ -181,10 +181,14 @@ pub enum ShellCommand {
     /// `next fresh` — explicit fresh-pass affordance: reset planner drafts
     /// and reopen the Map planner for this revision.
     NextFresh,
-    /// Open a specific engagement phase picker without changing workspace-
-    /// derived `next` semantics. Emitted by the direct phase verbs and
-    /// `phase <name>`.
+    /// Direct phase verb (`map`, `scan`, `review`, `prove`, `fix`). Opens the
+    /// durable Workbench page once the engagement has completed or passed the
+    /// phase; otherwise opens that phase's planner. Never changes
+    /// workspace-derived `next` semantics.
     Phase(WorkflowPhase),
+    /// Always open a specific phase planner, whatever the journey progress.
+    /// Emitted by `plan <phase>` and `phase <phase>`.
+    PhasePlanner(WorkflowPhase),
     /// Read (`None`) or set the operator autonomy posture — the always-visible
     /// authorization ceiling the dispatch gate enforces.
     Autonomy(Option<AutonomyPosture>),

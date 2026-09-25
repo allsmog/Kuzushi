@@ -456,10 +456,8 @@ impl ShellApp {
                 self.show_options(tool.clone(), *filter);
                 Some(Vec::new())
             }
-            ShellCommand::Phase(phase) => {
-                self.open_requested_phase_picker(*phase);
-                Some(Vec::new())
-            }
+            ShellCommand::Phase(phase) => Some(self.reduce_phase_verb(*phase)),
+            ShellCommand::PhasePlanner(phase) => Some(self.reduce_phase_planner(*phase)),
             ShellCommand::Autonomy(posture) => {
                 self.reduce_autonomy_command(*posture);
                 Some(Vec::new())

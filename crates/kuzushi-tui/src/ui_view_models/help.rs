@@ -146,15 +146,19 @@ fn plain_help_command_rows(row: HelpCommandRow) -> Vec<String> {
     rows
 }
 
+/// Plain sessions render durable pages but refuse interactive planners, so
+/// the direct phase verbs work only for a completed or passed phase.
 fn plain_workflow_guidance(command: &str) -> Option<&'static str> {
-    matches!(
-        command,
-        "map" | "scan" | "review" | "prove" | "fix" | "phase <map|scan|review|prove|fix>"
-            | "full [target]"
-    )
-    .then_some(
-        "interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`",
-    )
+    match command {
+        "map" | "scan" | "review" | "prove" | "fix" => Some(
+            "opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`",
+        ),
+        "phase <map|scan|review|prove|fix>" | "plan <map|scan|review|prove|fix>"
+        | "full [target]" => Some(
+            "interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`",
+        ),
+        _ => None,
+    }
 }
 
 pub(crate) fn quickstart_model(app: &ShellApp) -> QuickstartModel {

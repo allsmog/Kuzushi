@@ -44,9 +44,11 @@ setup - review target, Map plan, model/credentials, prompt, and budget readiness
 next [fresh] - continue the engagement (alias: continue) — open the derived phase's picker; `next fresh` restarts the
 pass at the Map planner
   aliases / examples: next, /next
-map - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+map - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /map, /ma
-scan - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+scan - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /scan, /sc
 scan batch - configure repeated logical scan trials, optionally costed from a prior run
   aliases / examples: /scan batch, scan batch --prior-run <runId>
@@ -54,15 +56,21 @@ batch <id> - open one scan batch's occurrence results and gate receipt
   aliases / examples: /batch <id>
 batch clear - clear the active scan-batch results scope
   aliases / examples: /batch clear
-review - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+review - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /review, /rv
-prove - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+prove - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /prove, /pr
-fix - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+fix - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /fix, /fx
 phase <map|scan|review|prove|fix> - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target
 <target> run sast:scan`
   aliases / examples: phase map, phase scan, phase review, phase prove, phase fix, phase hunt, phase confirm
+plan <map|scan|review|prove|fix> - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target
+<target> run sast:scan`
+  aliases / examples: /plan <map|scan|review|prove|fix>, plan map, plan fix
 autonomy [recon|scan|review|prove|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling
   aliases / examples: autonomy, /autonomy, posture, /posture
 logs - scrollable full-screen transcript

@@ -80,6 +80,23 @@ impl PhaseCockpitModel {
             PhaseCockpitBody::Map(_) | PhaseCockpitBody::Scan(_) => None,
         }
     }
+
+    /// Fix page whose selected finding has neither a patch draft nor a
+    /// remediation lifecycle record: the next remediation step is a draft.
+    pub(crate) fn selected_finding_awaits_patch_draft(&self) -> bool {
+        match &self.body {
+            PhaseCockpitBody::Fix(model) => model.awaits_patch_draft(),
+            _ => false,
+        }
+    }
+}
+
+impl FixPhaseModel {
+    fn awaits_patch_draft(&self) -> bool {
+        self.finding.is_some()
+            && self.patch.is_none()
+            && self.remediation.stage == RemediationLifecycleStage::NotDrafted
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

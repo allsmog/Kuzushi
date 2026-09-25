@@ -41,6 +41,50 @@ fn interactive_workflow_commands_are_rejected_in_plain_mode() {
 }
 
 #[test]
+fn explicit_planner_verbs_are_rejected_in_plain_mode() {
+    for command in ["plan map", "/plan fix", "phase review"] {
+        let target = tempfile::tempdir().unwrap();
+        let mut app = crate::app::tests::app_past_map(target.path());
+
+        let report = execute_plain_scripted_session(&mut app, &[command], 80);
+
+        assert_eq!(report.outcome, PlainCommandOutcome::Rejected, "{command}");
+        assert!(
+            report.output.contains("interactive TUI workflow"),
+            "{}",
+            report.output
+        );
+    }
+}
+
+/// A completed phase's verb opens its durable page, which plain output
+/// renders like any other Workbench page instead of refusing it.
+#[test]
+fn completed_phase_verb_renders_its_page_in_plain_mode() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = crate::app::tests::app_past_map(target.path());
+
+    let report = execute_plain_scripted_session(&mut app, &["map"], 120);
+
+    assert_ne!(
+        report.outcome,
+        PlainCommandOutcome::Rejected,
+        "{}",
+        report.output
+    );
+    assert!(
+        !report.output.contains("interactive TUI workflow"),
+        "{}",
+        report.output
+    );
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        app.router.workbench().page(),
+        Some(crate::app::WorkbenchPage::Map)
+    );
+}
+
+#[test]
 fn full_aliases_with_explicit_target_are_rejected_in_plain_mode() {
     let target = tempfile::tempdir().unwrap();
     for verb in ["full", "/full", "pipeline", "/pipeline"] {

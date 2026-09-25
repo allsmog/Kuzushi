@@ -279,6 +279,27 @@ Notable changes to Kuzushi. Release procedure lives in
   split by a stray newline), and `nav-mode` waits for a settled Navigate
   footer before a page key is sent.
 
+- Typing a phase verb for a phase the engagement has already completed or
+  passed now opens that phase's Workbench page instead of its planner. On an
+  engagement in Review, `map` used to open "planning MAP · engagement is in
+  Review — Enter runs MAP steps" when the operator only wanted to look at the
+  accepted Map; it now lands on the Map page exactly as Shift+Tab would, and
+  the page's hint row offers `plan map`. A phase the journey has not reached
+  yet still opens its planner, and the new `plan <phase>` verb (like the
+  longer `phase <phase>`) always does. Plain scripted sessions render the page
+  for a completed phase and keep refusing planner-bound verbs.
+- The Fix page hint row now says how to start remediation for the selected
+  finding. When that finding has no patch draft or remediation record, the
+  hint reads `patch F-0001 draft a patch` (with the selected alias) instead of
+  a generic "patch displayed", so the review-gated Fix page no longer hides
+  that `patch <alias>` works from any page.
+- An idle shell no longer keeps showing a stale findings count after another
+  process writes the same target's ledger. A headless `kuzushi run` could
+  commit findings into the store's WAL — which the workspace watcher ignores —
+  and the shell kept showing 176 findings while the ledger held 187. On the
+  existing idle tick, at most every two seconds, the shell now stats the
+  store's main and WAL files and reloads findings when that identity moved and
+  the store's projection watermark differs from the one it last read.
 - The campaign folds no longer present a findings ledger they could not read
   as an empty one. `campaign:status` folded its review decisions with
   `list_all_review_decisions().ok().unwrap_or_default()`, so an unopenable

@@ -302,6 +302,10 @@ truth.
   prerequisite instead of rerouting work.
 - `findings` and `open <id>` open Review, `next` (`continue`) invokes the
   current phase planner, and `report` opens the dedicated export exit.
+- A phase verb (`map`, `scan`, `review`, `prove`, `fix`) opens that phase's
+  Workbench page once the phase is complete or passed, whose hint row then
+  offers `plan <phase>`; a phase not yet reached opens its planner.
+  `plan <phase>` always opens the planner.
 - `activity` opens Run Focus. Foreground Run Focus owns input in Navigate mode
   and identifies its origin, for example `RUN FOCUS · SCAN`;
   `s` accepts only a valid `run <tool> …` steer command and `b` backgrounds

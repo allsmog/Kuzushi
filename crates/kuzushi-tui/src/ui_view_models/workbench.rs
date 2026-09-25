@@ -136,6 +136,17 @@ fn review_page_hint(label: &'static str) -> WorkbenchHint {
     }
 }
 
+/// What the command bar knows about the page's selected finding.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SelectedFindingHints<'a> {
+    pub(crate) has_detail: bool,
+    /// Operator reference (alias, else fingerprint) of the selected finding.
+    pub(crate) reference: Option<&'a str>,
+    /// Fix only: the selected finding has no patch draft or remediation
+    /// record yet, so `patch <alias>` drafts one rather than redoing one.
+    pub(crate) awaiting_patch_draft: bool,
+}
+
 const fn hint(verb: &'static str, label: &'static str) -> WorkbenchHint {
     WorkbenchHint {
         verb: Cow::Borrowed(verb),
@@ -146,17 +157,17 @@ const fn hint(verb: &'static str, label: &'static str) -> WorkbenchHint {
 fn workbench_chrome_model_with_journey(
     app: &ShellApp,
     page: WorkbenchPage,
-    detail: Option<&FindingDetailModel>,
+    phase: &PhaseCockpitModel,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchChromeModel {
+    let detail = phase.selected_finding_detail();
     let reference = detail.map(finding_operator_reference);
-    workbench_chrome_model_for_selection_with_journey(
-        app,
-        page,
-        detail.is_some(),
-        reference.as_deref(),
-        journey,
-    )
+    let selection = SelectedFindingHints {
+        has_detail: detail.is_some(),
+        reference: reference.as_deref(),
+        awaiting_patch_draft: phase.selected_finding_awaits_patch_draft(),
+    };
+    workbench_chrome_model_for_selection_with_journey(app, page, selection, journey)
 }
 
 /// Operator surfaces speak in aliases (`F-0001`); the raw fingerprint is
@@ -171,35 +182,26 @@ fn finding_operator_reference(detail: &FindingDetailModel) -> String {
 fn workbench_chrome_model_for_selection_with_journey(
     app: &ShellApp,
     page: WorkbenchPage,
-    has_detail: bool,
-    finding_reference: Option<&str>,
+    selection: SelectedFindingHints<'_>,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchChromeModel {
     let state = workbench_state(app, journey);
     let mode = active_review_queue_mode(app);
     let report_cta = report_cta(state, super::visible_findings_len(app), mode);
-    chrome_model(
-        app,
-        page,
-        report_cta,
-        has_detail,
-        finding_reference,
-        journey,
-    )
+    chrome_model(app, page, report_cta, selection, journey)
 }
 
 fn chrome_model(
     app: &ShellApp,
     page: WorkbenchPage,
     report_cta: Option<WorkbenchHint>,
-    has_detail: bool,
-    finding_reference: Option<&str>,
+    selection: SelectedFindingHints<'_>,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchChromeModel {
     WorkbenchChromeModel {
         page,
         top_bar: top_bar_model(app, page, journey),
-        command_bar_hints: command_bar_hints(app, page, report_cta, has_detail, finding_reference),
+        command_bar_hints: command_bar_hints(app, page, report_cta, selection),
         zoom: app.router.workbench().zoom().surface(),
     }
 }
@@ -292,12 +294,7 @@ where
     let journey = build_journey(app);
     let page = active_workbench_page_with_journey(app, journey.as_ref());
     let phase = phase_cockpit_model_for_phase_with_journey(app, page.phase(), journey.as_ref());
-    let chrome = workbench_chrome_model_with_journey(
-        app,
-        page,
-        phase.selected_finding_detail(),
-        journey.as_ref(),
-    );
+    let chrome = workbench_chrome_model_with_journey(app, page, &phase, journey.as_ref());
     WorkbenchPresentationSnapshot {
         page,
         phase,
@@ -309,30 +306,44 @@ fn command_bar_hints(
     app: &ShellApp,
     page: WorkbenchPage,
     report_cta: Option<WorkbenchHint>,
-    has_detail: bool,
-    finding_reference: Option<&str>,
+    selection: SelectedFindingHints<'_>,
 ) -> Vec<WorkbenchHint> {
     let mut hints = page_command_bar_hints(app, page);
-    customize_phase_hints(&mut hints, app, page, finding_reference);
-    if page == WorkbenchPage::Prove && !has_detail {
+    customize_phase_hints(&mut hints, app, page, selection);
+    if page == WorkbenchPage::Prove && !selection.has_detail {
         hints[0] = review_page_hint("choose a finding in Review");
     }
     append_report_hint(&mut hints, report_cta);
+    append_phase_planner_hint(&mut hints, app, page);
     hints
+}
+
+/// A completed or passed phase's verb opens this page, so the page itself
+/// names the explicit way back into its planner. It is appended last so a
+/// narrow hint row drops it before the page's own actions or Report.
+fn append_phase_planner_hint(hints: &mut Vec<WorkbenchHint>, app: &ShellApp, page: WorkbenchPage) {
+    let phase = page.phase();
+    if !super::phase_verb_opens_page(app, phase) {
+        return;
+    }
+    hints.push(WorkbenchHint {
+        verb: Cow::Owned(format!("plan {}", phase.word())),
+        label: Cow::Owned(format!("open {} planner", phase.title())),
+    });
 }
 
 fn customize_phase_hints(
     hints: &mut [WorkbenchHint],
     app: &ShellApp,
     page: WorkbenchPage,
-    finding_reference: Option<&str>,
+    selection: SelectedFindingHints<'_>,
 ) {
     match page {
         WorkbenchPage::Fix if app.engagement.pending_patch().is_some() => {
             expose_pending_patch_actions(hints);
         }
         WorkbenchPage::Fix => {
-            replace_patch_hint(hints, finding_reference);
+            replace_patch_hint(hints, selection);
             replace_reverify_hint(hints, app);
         }
         WorkbenchPage::Review => replace_review_decision_hint(hints, app),
@@ -422,8 +433,11 @@ fn append_report_hint(hints: &mut Vec<WorkbenchHint>, report_cta: Option<Workben
     }
 }
 
-fn replace_patch_hint(hints: &mut [WorkbenchHint], finding_reference: Option<&str>) {
-    let Some(reference) = finding_reference else {
+/// `patch <alias>` works from any page. When the selected finding has no
+/// draft yet the hint says so, since the review-gated journey may not have
+/// reached Fix.
+fn replace_patch_hint(hints: &mut [WorkbenchHint], selection: SelectedFindingHints<'_>) {
+    let Some(reference) = selection.reference else {
         return;
     };
     let Some(hint) = hints
@@ -433,6 +447,9 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], finding_reference: Option<&st
         return;
     };
     hint.verb = Cow::Owned(format!("patch {reference}"));
+    if selection.awaiting_patch_draft {
+        hint.label = Cow::Borrowed("draft a patch");
+    }
 }
 
 /// `Tab` cycles the Map projection, and `z` zooms the selected projection,
@@ -574,6 +591,41 @@ mod tests {
         ShellApp::new(V2Config::default(), None)
     }
 
+    fn no_selection() -> SelectedFindingHints<'static> {
+        SelectedFindingHints::default()
+    }
+
+    fn selected(reference: &str, awaiting_patch_draft: bool) -> SelectedFindingHints<'_> {
+        SelectedFindingHints {
+            has_detail: true,
+            reference: Some(reference),
+            awaiting_patch_draft,
+        }
+    }
+
+    fn fix_patch_hint(selection: SelectedFindingHints<'_>) -> WorkbenchHint {
+        command_bar_hints(&app(), WorkbenchPage::Fix, None, selection)
+            .into_iter()
+            .next()
+            .expect("fix hint row")
+    }
+
+    #[test]
+    fn undrafted_fix_selection_offers_to_draft_a_patch_by_alias() {
+        assert_eq!(
+            fix_patch_hint(selected("F-0001", true)),
+            WorkbenchHint {
+                verb: Cow::Borrowed("patch F-0001"),
+                label: Cow::Borrowed("draft a patch"),
+            }
+        );
+        assert_eq!(
+            fix_patch_hint(selected("F-0001", false)).label,
+            "patch displayed"
+        );
+        assert_eq!(fix_patch_hint(no_selection()).verb, "run patch:finding");
+    }
+
     #[test]
     fn reverify_control_names_the_active_input_mode_contract() {
         let mut app = app();
@@ -605,7 +657,7 @@ mod tests {
         let app = ShellApp::new(config, None);
 
         assert_eq!(workbench_reverify_control_hint(&app), "ctrl+x then v");
-        let hints = command_bar_hints(&app, WorkbenchPage::Fix, None, false, None);
+        let hints = command_bar_hints(&app, WorkbenchPage::Fix, None, no_selection());
         assert!(hints.iter().any(|hint| {
             hint.verb == "ctrl+x then v" && hint.label == "reverify applied patch"
         }));
@@ -615,19 +667,19 @@ mod tests {
     fn phase_hints_externalize_review_decisions_and_prior_runs() {
         let prompt_app = app();
 
-        let review = command_bar_hints(&prompt_app, WorkbenchPage::Review, None, false, None);
+        let review = command_bar_hints(&prompt_app, WorkbenchPage::Review, None, no_selection());
         assert!(review
             .iter()
             .any(|hint| { hint.verb == "Esc then B" && hint.label == "review decision backlog" }));
 
         let mut navigate = app();
         navigate.set_input_mode(crate::InputMode::Navigate);
-        let review = command_bar_hints(&navigate, WorkbenchPage::Review, None, false, None);
+        let review = command_bar_hints(&navigate, WorkbenchPage::Review, None, no_selection());
         assert!(review
             .iter()
             .any(|hint| hint.verb == "B" && hint.label == "review decision backlog"));
 
-        let map = command_bar_hints(&prompt_app, WorkbenchPage::Map, None, false, None);
+        let map = command_bar_hints(&prompt_app, WorkbenchPage::Map, None, no_selection());
         assert!(map
             .iter()
             .any(|hint| hint.verb == "jobs" && hint.label == "inspect Map runs"));
@@ -638,7 +690,7 @@ mod tests {
     /// has no finding to choose.
     #[test]
     fn detail_free_prove_hint_names_the_review_page_key() {
-        let hints = command_bar_hints(&app(), WorkbenchPage::Prove, None, false, None);
+        let hints = command_bar_hints(&app(), WorkbenchPage::Prove, None, no_selection());
 
         assert_eq!(
             hints[0],
@@ -664,7 +716,7 @@ mod tests {
             staged_at: None,
         });
 
-        let hints = command_bar_hints(&app, WorkbenchPage::Fix, None, true, Some("F-0001"));
+        let hints = command_bar_hints(&app, WorkbenchPage::Fix, None, selected("F-0001", false));
 
         assert!(hints
             .iter()

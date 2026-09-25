@@ -411,9 +411,13 @@ is expected to behave identically and should be filed as a parity bug.
   partial Scan attempts additionally require acknowledgement. Clean Scan,
   all-rejected Review, and no-proof-backed Prove branches may truthfully offer
   Report. `workbench` routes to the derived page; `findings` and `open <id>`
-  route to Review; `next` runs the current phase planner; `report` opens the
+  route to Review; `next` runs the current phase planner; a phase verb opens
+  its durable page once that phase is complete or passed (the page's hint row
+  offers `plan <phase>`) and its planner otherwise; `report` opens the
   dedicated Report exit. Journey/autonomy chrome is hidden until `Start Map`
-  commits the engagement.
+  commits the engagement. While idle, the shell stats the findings store at
+  most every two seconds and reloads findings when another process (for
+  example headless `kuzushi run`) moved the store's projection watermark.
 - **Autonomy dial chip + `Ctrl+↑`/`Ctrl+↓` chord** — shell-only chrome over a
   *shared* gate. The always-visible `⛭ <glyph> <rung>` posture chip
   (`ui_view_models/journey.rs::autonomy_footer_segment`, beside the phase chip,
@@ -703,8 +707,10 @@ second TypeScript router. Common verbs include:
 - Context/KB: `context <verb>`, `workspace <verb>`, `kb`, `attach`, `detach`,
   `reparse`.
 - Workflow: `setup`, `workbench`, `next` (`continue`), the exact phase verbs
-  `map`, `scan`, `review`, `prove`, and `fix`, `findings`, `open <id>`, `report`,
-  and `activity` (`/a`, `/progress`, presented as Run Focus).
+  `map`, `scan`, `review`, `prove`, and `fix` (the durable page once that phase
+  is complete or passed, else its planner), `plan <phase>` (always the
+  planner), `findings`, `open <id>`, `report`, and `activity` (`/a`,
+  `/progress`, presented as Run Focus).
 - Evidence/utilities: `since <ref>`, `show aliases`, `show runs`,
   `replay <runId>`, `trace <runId>`, `jobs`, `scene`, and `viz`.
 - Auth/config/model/session: `auth`, `provider`, `backend`, `model`, `cost`,

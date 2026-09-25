@@ -700,11 +700,11 @@ mod tests {
         assert_eq!(parse_command("?"), ShellCommand::Help(None));
         assert_eq!(
             parse_command("phase confirm"),
-            ShellCommand::Phase(WorkflowPhase::Prove)
+            ShellCommand::PhasePlanner(WorkflowPhase::Prove)
         );
         assert_eq!(
             parse_command("/phase fix"),
-            ShellCommand::Phase(WorkflowPhase::Fix)
+            ShellCommand::PhasePlanner(WorkflowPhase::Fix)
         );
         assert_eq!(
             parse_command("help scan"),
@@ -750,6 +750,26 @@ mod tests {
                 ShellCommand::Phase(phase)
             );
         }
+    }
+
+    #[test]
+    fn plan_with_a_phase_word_opens_that_planner_and_prose_stays_a_goal() {
+        for (input, phase) in [
+            ("plan map", WorkflowPhase::Map),
+            ("/plan fix", WorkflowPhase::Fix),
+            ("plan Review", WorkflowPhase::Review),
+            ("plan confirm", WorkflowPhase::Prove),
+        ] {
+            assert_eq!(parse_command(input), ShellCommand::PhasePlanner(phase));
+        }
+        assert_eq!(
+            parse_command("plan map authz drift"),
+            ShellCommand::Plan("map authz drift".to_string())
+        );
+        assert_eq!(
+            parse_command("plan"),
+            ShellCommand::Unknown("plan".to_string())
+        );
     }
 
     #[test]
@@ -1061,6 +1081,7 @@ mod tests {
             "patch",
             "permissions",
             "phase",
+            "phase-planner",
             "plan",
             "plan-apply",
             "plan-discard",
@@ -1304,6 +1325,7 @@ mod tests {
             ShellCommand::Next => "next",
             ShellCommand::NextFresh => "next-fresh",
             ShellCommand::Phase(_) => "phase",
+            ShellCommand::PhasePlanner(_) => "phase-planner",
             ShellCommand::Autonomy(_) => "autonomy",
             ShellCommand::Logs => "logs",
             ShellCommand::Target(_) => "target",

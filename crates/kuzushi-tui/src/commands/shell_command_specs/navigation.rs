@@ -103,13 +103,13 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "map",
         aliases: &["/map", "/ma"],
         category: ShellCommandCategory::Navigation,
-        description: "open the Map phase planner",
+        description: "open the Map page once map is complete or passed; otherwise its planner",
     },
     ShellCommandSpec {
         command: "scan",
         aliases: &["/scan", "/sc"],
         category: ShellCommandCategory::Navigation,
-        description: "open the Scan phase planner",
+        description: "open the Scan page once scan is complete or passed; otherwise its planner",
     },
     ShellCommandSpec {
         command: "scan batch",
@@ -133,19 +133,19 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "review",
         aliases: &["/review", "/rv"],
         category: ShellCommandCategory::Navigation,
-        description: "open the Review phase planner",
+        description: "open the Review page once review is complete or passed; otherwise its planner",
     },
     ShellCommandSpec {
         command: "prove",
         aliases: &["/prove", "/pr"],
         category: ShellCommandCategory::Navigation,
-        description: "open the Prove phase planner",
+        description: "open the Prove page once prove is complete or passed; otherwise its planner",
     },
     ShellCommandSpec {
         command: "fix",
         aliases: &["/fix", "/fx"],
         category: ShellCommandCategory::Navigation,
-        description: "open the Fix phase planner",
+        description: "open the Fix page once fix is complete or passed; otherwise its planner",
     },
     ShellCommandSpec {
         command: "phase <map|scan|review|prove|fix>",
@@ -161,6 +161,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         ],
         category: ShellCommandCategory::Navigation,
         description: "open a specific engagement phase picker",
+    },
+    ShellCommandSpec {
+        command: "plan <map|scan|review|prove|fix>",
+        aliases: &["/plan <map|scan|review|prove|fix>", "plan map", "plan fix"],
+        category: ShellCommandCategory::Navigation,
+        description: "always open that phase's planner, even when the phase is complete",
     },
     ShellCommandSpec {
         command: "autonomy [recon|scan|review|prove|fix]",

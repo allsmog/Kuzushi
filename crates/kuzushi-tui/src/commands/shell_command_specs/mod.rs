@@ -89,9 +89,11 @@ fn parse_routed_command(trimmed: &str) -> ShellCommand {
         .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string()))
 }
 
-/// The five workflow names are zero-argument shortcuts for their exact phase
-/// planners. `review` with arguments remains the human-decision command, while
-/// `scan` with a target receives a dedicated migration error downstream.
+/// The five workflow names are zero-argument phase shortcuts: the router opens
+/// the durable page once the phase is complete or passed, else its planner
+/// (`plan <phase>` always opens the planner). `review` with arguments remains
+/// the human-decision command, while `scan` with a target receives a dedicated
+/// migration error downstream.
 const DIRECT_PHASE_COMMANDS: [(&str, WorkflowPhase); 10] = [
     ("map", WorkflowPhase::Map),
     ("ma", WorkflowPhase::Map),

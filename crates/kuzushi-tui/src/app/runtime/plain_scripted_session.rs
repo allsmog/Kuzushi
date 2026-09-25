@@ -207,7 +207,7 @@ fn submit_plain_scripted_command(
     command: &str,
     terminal_before: Option<&PlainTerminalSnapshot>,
 ) -> PlainSubmission {
-    if let Some(workflow) = plain_interactive_workflow(command) {
+    if let Some(workflow) = plain_interactive_workflow(app, command) {
         return reject_plain_workflow_command(app, &workflow);
     }
     let submission = submit_plain_line(app, command);
@@ -216,12 +216,17 @@ fn submit_plain_scripted_command(
 
 /// Queue commands are reparsed by the reducer, so inspect their payloads here
 /// too. Otherwise `queue scan` would bypass the plain-mode boundary and open an
-/// interactive picker while reporting a successful scripted command.
-fn plain_interactive_workflow(command: &str) -> Option<String> {
+/// interactive picker while reporting a successful scripted command. A phase
+/// verb for a completed or passed phase opens its durable page, which plain
+/// output renders, so only planner-bound phase verbs are rejected.
+fn plain_interactive_workflow(app: &ShellApp, command: &str) -> Option<String> {
     let mut pending = command.trim().to_string();
     loop {
         match crate::commands::parse_command(&pending) {
-            ShellCommand::Phase(phase) => return Some(phase.word().to_string()),
+            ShellCommand::Phase(phase) if app.phase_verb_opens_page(phase) => return None,
+            ShellCommand::Phase(phase) | ShellCommand::PhasePlanner(phase) => {
+                return Some(phase.word().to_string())
+            }
             ShellCommand::Full(_) | ShellCommand::Scan(_) => {
                 return Some(command_head(&pending).to_string())
             }
