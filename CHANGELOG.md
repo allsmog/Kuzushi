@@ -19,6 +19,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `recon:import` for amass and httpx now says how many parsed rows it dropped
+  because they named no usable host. An amass line without a non-empty `name`,
+  or an httpx line with no `host`, `input`, or parseable `url`, was skipped
+  without a trace, so a dump that was partly or wholly unusable read the same
+  as one that imported cleanly. Those rows are now counted when they are
+  dropped and named beside the scope refusals on the output line
+  (`recon:import amass imported 1 note from amass.jsonl · 1 out-of-scope, 2
+  without a usable host skipped`). The tool result's `data` carries
+  `skippedUnusable`, and the import note records it together with the amass
+  `records` total. The httpx note's `ignored` field used to be derived by
+  subtraction; it is now that same count.
+
 - The entry-point browser no longer reports a real catalog's own numbers as
   unknown before a threat model exists. Every count on its `RECEIPT` line was
   read only out of the threat-model document's `entryPointCatalog` provenance

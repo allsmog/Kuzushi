@@ -40,18 +40,15 @@ impl ReconReport {
 
     /// The line a verb outside the three scan verbs above completes with. For a
     /// `recon:import` adapter that is what it put in the recon store and what
-    /// the scope gate refused on the way. The generic "completed for <path>"
-    /// line this replaces said the same thing whether a dump imported whole or
-    /// `.kuzushi/scope.toml` denied every entry in it, so a partial import read
-    /// as a complete one — the disclosure the HAR and Burp importers already
-    /// make. A tool name this cannot place keeps the old wording.
+    /// the scope gate or parser refused on the way. A tool name this cannot
+    /// place keeps the old wording.
     fn completion_output(&self) -> String {
         let Some(source) = self.tool.strip_prefix("recon:import-") else {
             return format!("{} completed for {}", self.tool, self.target);
         };
-        let skipped = self
-            .skipped_out_of_scope
-            .and_then(|count| crate::findings::import::capture_skip_phrase(count, 0))
+        let out_of_scope = self.skipped_out_of_scope.unwrap_or_default();
+        let unusable = self.skipped_unusable().unwrap_or_default();
+        let skipped = recon_import_skip_phrase(out_of_scope, unusable)
             .map(|phrase| format!(" · {phrase}"))
             .unwrap_or_default();
         format!(
@@ -59,6 +56,20 @@ impl ReconReport {
             self.imported_rows(),
             self.target
         )
+    }
+
+    /// Parsed JSONL importers persist one summary note using the report's tool
+    /// id. Read the unusable-row count from that note rather than inventing a
+    /// second counter that can drift from the persisted import receipt. Older
+    /// reports and import formats without such a receipt remain `None`.
+    fn skipped_unusable(&self) -> Option<usize> {
+        self.notes
+            .iter()
+            .rev()
+            .find(|note| note.ntype == self.tool)
+            .and_then(|note| note.data.get("skippedUnusable"))
+            .and_then(Value::as_u64)
+            .and_then(|count| usize::try_from(count).ok())
     }
 
     /// The rows an import landed, named in a stable order and only when it
@@ -82,8 +93,27 @@ impl ReconReport {
 
     pub(crate) fn to_tool_json(&self) -> Value {
         let output = self.output();
-        crate::module_result::completed_output_result(output.clone(), output, json!(self))
+        let mut data = json!(self);
+        if let (Some(object), Some(unusable)) = (data.as_object_mut(), self.skipped_unusable()) {
+            object.insert("skippedUnusable".to_string(), json!(unusable));
+        }
+        crate::module_result::completed_output_result(output.clone(), output, data)
     }
+}
+
+/// Say why a native recon JSONL import did not persist parsed records. Scope
+/// refusals and records without an addressable host are distinct operator
+/// facts, so keep both in stable order and remain silent only for a complete
+/// import.
+fn recon_import_skip_phrase(out_of_scope: usize, unusable: usize) -> Option<String> {
+    let mut reasons = Vec::new();
+    if out_of_scope > 0 {
+        reasons.push(format!("{out_of_scope} out-of-scope"));
+    }
+    if unusable > 0 {
+        reasons.push(format!("{unusable} without a usable host"));
+    }
+    (!reasons.is_empty()).then(|| format!("{} skipped", reasons.join(", ")))
 }
 
 pub fn execute_recon_tool(
@@ -258,4 +288,65 @@ fn recon_target_field(input: &Value) -> Option<&str> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capabilities::recon::domain::{ReconNote, ReconPersisted};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn native_recon_skip_phrase_names_each_drop_class() {
+        assert_eq!(recon_import_skip_phrase(0, 0), None);
+        assert_eq!(
+            recon_import_skip_phrase(2, 0).as_deref(),
+            Some("2 out-of-scope skipped")
+        );
+        assert_eq!(
+            recon_import_skip_phrase(0, 3).as_deref(),
+            Some("3 without a usable host skipped")
+        );
+        assert_eq!(
+            recon_import_skip_phrase(2, 3).as_deref(),
+            Some("2 out-of-scope, 3 without a usable host skipped")
+        );
+    }
+
+    #[test]
+    fn parsed_unusable_rows_reach_output_and_machine_data() {
+        let report = ReconReport {
+            tool: "recon:import-amass".to_string(),
+            target: "/tmp/amass.jsonl".to_string(),
+            hosts: Vec::new(),
+            services: Vec::new(),
+            notes: vec![ReconNote {
+                id: "note-1".to_string(),
+                workspace_id: "workspace-1".to_string(),
+                host_id: None,
+                service_id: None,
+                ntype: "recon:import-amass".to_string(),
+                data: json!({
+                    "records": 3,
+                    "count": 0,
+                    "skippedOutOfScope": 1,
+                    "skippedUnusable": 2,
+                }),
+            }],
+            persisted: ReconPersisted {
+                workspace_id: "workspace-1".to_string(),
+                db: "/tmp/findings.sqlite3".to_string(),
+                host_count: 0,
+                service_count: 0,
+            },
+            skipped_out_of_scope: Some(1),
+            subdomains: Vec::new(),
+            fingerprint: BTreeMap::new(),
+        };
+
+        let output = report.output();
+        assert!(output.contains("1 out-of-scope, 2 without a usable host skipped"));
+        let result = report.to_tool_json();
+        assert_eq!(result["data"]["skippedUnusable"], 2);
+    }
 }
