@@ -85,13 +85,8 @@ fn write_x_ray_artifact(repo_root: &Path, file_name: &str, content: &str) -> Res
 }
 
 pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
-    let cost_label = if data.cost_usd_exact {
-        "Cost"
-    } else {
-        "Observed cost"
-    };
     format!(
-        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  {cost_label}:         ${}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
+        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  Cost:         {}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
         data.repo_name,
         data.target,
         data.runtime_mode,
@@ -103,12 +98,21 @@ pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
         },
         data.entry_point_counts.total,
         data.invariant_counts.total,
-        format!("{:.4}", data.cost_usd),
+        x_ray_cost_label(data),
         data.artifact_paths.x_ray,
         data.artifact_paths.entry_points,
         data.artifact_paths.invariants,
         data.artifact_paths.architecture_svg,
     )
+}
+
+/// An unresolved provider spend is a lower bound, never an exact `$0`.
+fn x_ray_cost_label(data: &XRayReportData) -> String {
+    match (data.cost_usd_exact, data.estimated_cost_usd) {
+        (true, _) => format!("${:.4}", data.cost_usd),
+        (false, Some(estimate)) => format!("~${estimate:.4} estimated (provider spend unresolved)"),
+        (false, None) => format!(">=${:.4} (provider spend unresolved)", data.cost_usd),
+    }
 }
 
 pub(crate) fn render_x_ray_read_summary(data: &XRayReportData) -> String {
@@ -149,6 +153,7 @@ pub fn read_x_ray_report_artifacts(
         invariant_counts: parse_invariant_counts(&markdown.invariants),
         cost_usd,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     })
 }
 

@@ -19,6 +19,10 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `x-ray:run` summarizes its verdict with the justification prose rather than
+  the `### Justification` sub-heading. When provider spend is unmetered, its
+  cost line reads `~$X estimated (provider spend unresolved)` or
+  `>=$X (provider spend unresolved)` instead of a bare `$0.0000`.
 - Offense review no longer fails when a threat cites a directory (for
   example `routes`). The directory's direct files stand in for it, within
   the existing file budget. On Juice Shop the engine produced 20 findings
