@@ -22,6 +22,10 @@ pub struct TrendMetrics {
     pub campaign_spend_usd: f64,
     /// True when the observed spend is only a lower bound.
     pub provider_spend_unresolved: bool,
+    /// True when the review-decision ledger could not be read. The decision
+    /// counts are then zero for that reason alone, so nothing may be derived
+    /// from them and no consumer may present them as a measurement.
+    pub decisions_unreadable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -31,13 +35,19 @@ pub struct WorkspaceCampaignSpend {
 }
 
 impl TrendMetrics {
+    /// True when the decision counts came from a ledger the fold could read.
+    /// A rate over counts that stand for an unread ledger would be fiction.
+    fn decisions_counted(&self) -> bool {
+        !self.decisions_unreadable
+    }
+
     pub fn fp_rate(&self) -> Option<f64> {
-        (self.decided_findings > 0)
+        (self.decisions_counted() && self.decided_findings > 0)
             .then(|| self.rejected_false_positives as f64 / self.decided_findings as f64)
     }
 
     pub fn cost_per_confirmed_usd(&self) -> Option<f64> {
-        (self.confirmed_findings > 0)
+        (self.decisions_counted() && self.confirmed_findings > 0)
             .then(|| self.campaign_spend_usd / self.confirmed_findings as f64)
     }
 
@@ -46,12 +56,19 @@ impl TrendMetrics {
     /// `TREND  FP rate 25% (1/4) · 2 confirmed · $32.26 spent · $16.13/confirmed`.
     pub fn strip_label(&self) -> String {
         format!(
-            "TREND  FP rate {} · {} confirmed · {} · {}",
+            "TREND  FP rate {} · {} · {} · {}",
             self.fp_rate_label(),
-            self.confirmed_findings,
+            self.confirmed_label(),
             self.spend_label(),
             self.cost_per_confirmed_label(),
         )
+    }
+
+    fn confirmed_label(&self) -> String {
+        if self.decisions_unreadable {
+            return "confirmed unknown".to_string();
+        }
+        format!("{} confirmed", self.confirmed_findings)
     }
 
     fn spend_label(&self) -> String {
@@ -69,6 +86,7 @@ impl TrendMetrics {
                 self.rejected_false_positives,
                 self.decided_findings
             ),
+            None if self.decisions_unreadable => "— (decisions unreadable)".to_string(),
             None => "— (no decisions)".to_string(),
         }
     }
@@ -93,6 +111,32 @@ pub fn trend_metrics(records: &[ReviewDecisionRecord], campaign_spend_usd: f64) 
             provider_spend_unresolved: false,
         },
     )
+}
+
+/// The review-decision ledger as the fold received it. A read failure is a
+/// distinct state from an empty ledger: "nobody has decided anything yet" is
+/// a finding about the engagement, and a database nobody could open is not.
+#[derive(Debug, Clone, Copy)]
+pub enum DecisionLedger<'a> {
+    Read(&'a [ReviewDecisionRecord]),
+    Unreadable,
+}
+
+/// Fold whatever the caller managed to read. An unreadable ledger keeps the
+/// spend it could observe and carries its own counts as unreadable.
+pub fn trend_metrics_from_ledger(
+    ledger: DecisionLedger<'_>,
+    spend: WorkspaceCampaignSpend,
+) -> TrendMetrics {
+    match ledger {
+        DecisionLedger::Read(records) => trend_metrics_with_spend(records, spend),
+        DecisionLedger::Unreadable => TrendMetrics {
+            campaign_spend_usd: spend.observed_usd,
+            provider_spend_unresolved: spend.provider_spend_unresolved,
+            decisions_unreadable: true,
+            ..TrendMetrics::default()
+        },
+    }
 }
 
 pub fn trend_metrics_with_spend(
@@ -193,6 +237,7 @@ pub fn trend_json(metrics: &TrendMetrics) -> serde_json::Value {
         "fpRate": metrics.fp_rate(),
         "campaignSpendUsd": metrics.campaign_spend_usd,
         "providerSpendUnresolved": metrics.provider_spend_unresolved,
+        "decisionsUnreadable": metrics.decisions_unreadable,
         "costPerConfirmedUsd": metrics.cost_per_confirmed_usd(),
     })
 }
@@ -268,6 +313,42 @@ mod tests {
             metrics.strip_label(),
             "TREND  FP rate 25% (1/4) · 2 confirmed · $32.26 spent · $16.13/confirmed"
         );
+    }
+
+    #[test]
+    fn an_unreadable_decision_ledger_never_renders_as_a_decided_nothing() {
+        let metrics = trend_metrics_from_ledger(
+            DecisionLedger::Unreadable,
+            WorkspaceCampaignSpend {
+                observed_usd: 5.0,
+                provider_spend_unresolved: false,
+            },
+        );
+
+        assert!(metrics.decisions_unreadable);
+        assert_eq!(metrics.fp_rate(), None);
+        assert_eq!(metrics.cost_per_confirmed_usd(), None);
+        assert_eq!(
+            metrics.strip_label(),
+            "TREND  FP rate — (decisions unreadable) · confirmed unknown · $5.00 spent · —/confirmed"
+        );
+        assert_eq!(trend_json(&metrics)["decisionsUnreadable"], true);
+        // The spend it did observe survives the unreadable ledger.
+        assert_eq!(trend_json(&metrics)["campaignSpendUsd"], 5.0);
+        // An empty ledger is a different answer and must read as one.
+        assert_ne!(trend_metrics(&[], 5.0).strip_label(), metrics.strip_label());
+    }
+
+    #[test]
+    fn a_ledger_that_was_read_is_never_marked_unreadable() {
+        let metrics = trend_metrics_from_ledger(
+            DecisionLedger::Read(&[record(1, 1, ReviewDecisionVerdict::Confirmed)]),
+            WorkspaceCampaignSpend::default(),
+        );
+
+        assert!(!metrics.decisions_unreadable);
+        assert_eq!(metrics.confirmed_findings, 1);
+        assert_eq!(trend_json(&metrics)["decisionsUnreadable"], false);
     }
 
     #[test]

@@ -793,6 +793,28 @@ fn snapshot_joins_dispatcher_budget_and_run_finding_counts() {
 }
 
 #[test]
+fn coverage_without_a_findings_store_states_that_it_counted_nothing() {
+    let temp = tempdir().unwrap();
+    write_shard_manifest(temp.path());
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+
+    let result = execute_campaign_coverage(&json!({}), &ctx).unwrap();
+
+    assert_eq!(result["data"]["findingLedger"], "no-store");
+    let output = result["output"].as_str().unwrap();
+    assert!(output.contains("shard finding counts are NOT measured"), "{output}");
+}
+
+#[test]
 fn status_reports_workspace_trend_with_spend_even_without_a_findings_store() {
     let temp = tempdir().unwrap();
     write_shard_manifest(temp.path());
@@ -812,6 +834,8 @@ fn status_reports_workspace_trend_with_spend_even_without_a_findings_store() {
     for trend in [&single["data"]["trend"], &all["data"]["trend"]] {
         assert_eq!(trend["campaignSpendUsd"], 5.0);
         assert_eq!(trend["decidedFindings"], 0);
+        // No store is no database to have failed, so the zero stands.
+        assert_eq!(trend["decisionsUnreadable"], false);
         assert_eq!(trend["fpRate"], serde_json::Value::Null);
         assert_eq!(trend["costPerConfirmedUsd"], serde_json::Value::Null);
     }

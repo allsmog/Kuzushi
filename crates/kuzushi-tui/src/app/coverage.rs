@@ -4,7 +4,7 @@
 
 use super::*;
 use kuzushi_core::capabilities::campaign::coverage::{
-    confirmed_finding_ids_from_decisions, coverage_finding, coverage_report,
+    coverage_findings_from_review_state, coverage_report,
 };
 
 impl ShellApp {
@@ -21,12 +21,8 @@ impl ShellApp {
             deck.notice = Some("select a target to fold coverage".to_string());
             return;
         };
-        let confirmed = confirmed_finding_ids_from_decisions(self.review_decisions());
-        let findings = self
-            .findings()
-            .iter()
-            .map(|finding| coverage_finding(finding, &confirmed))
-            .collect::<Vec<_>>();
+        let findings =
+            coverage_findings_from_review_state(self.findings(), self.review_decisions());
         let deck = self.router.coverage_mut();
         match coverage_report(&target, &findings) {
             Ok(report) => {

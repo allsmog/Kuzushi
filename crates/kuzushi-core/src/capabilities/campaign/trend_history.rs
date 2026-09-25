@@ -52,7 +52,15 @@ pub fn trend_history_path(root: &Path) -> PathBuf {
 /// Append the current trend as a snapshot line unless it is identical to
 /// the last recorded one (a status poll loop must not grow the file).
 /// Returns whether a line was appended.
+///
+/// Metrics whose decision ledger could not be read are never recorded: the
+/// zeros they carry stand for an unread database, and a history line cannot
+/// say that. Persisting them would turn one failed read into a permanent
+/// dip in every sparkline drawn afterwards.
 pub fn record_trend_snapshot(root: &Path, metrics: &TrendMetrics) -> Result<bool> {
+    if metrics.decisions_unreadable {
+        return Ok(false);
+    }
     let snapshot = TrendSnapshot {
         ts_ms: now_ms(),
         decided_findings: metrics.decided_findings,
@@ -194,7 +202,23 @@ mod tests {
             confirmed_findings: confirmed,
             campaign_spend_usd: spend,
             provider_spend_unresolved: false,
+            decisions_unreadable: false,
         }
+    }
+
+    #[test]
+    fn an_unreadable_ledger_is_refused_so_it_cannot_dip_the_sparkline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let unreadable = TrendMetrics {
+            decisions_unreadable: true,
+            ..metrics(0, 0, 0, 10.0)
+        };
+
+        assert!(!record_trend_snapshot(tmp.path(), &unreadable).unwrap());
+        assert!(!trend_history_path(tmp.path()).exists());
+        // A workspace that genuinely has no decisions yet still records.
+        assert!(record_trend_snapshot(tmp.path(), &metrics(0, 0, 0, 10.0)).unwrap());
+        assert_eq!(load_trend_history(tmp.path(), TREND_HISTORY_LIMIT).len(), 1);
     }
 
     #[test]
