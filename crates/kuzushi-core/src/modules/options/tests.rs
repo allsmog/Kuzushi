@@ -14,6 +14,19 @@ mod tests {
     }
 
     #[test]
+    fn json_options_parse_structured_text_and_keep_other_values() {
+        let spec = opt("payload", OptionType::Json, "structured option");
+
+        let parse = |value| coerce_option_value(&spec, value).unwrap();
+
+        assert_eq!(parse(json!(r#"{"sink": "exec"}"#)), json!({"sink": "exec"}));
+        assert_eq!(parse(json!(" [1, 2] ")), json!([1, 2]));
+        assert_eq!(parse(json!("CVE-2024-1")), json!("CVE-2024-1"));
+        assert_eq!(parse(json!("42")), json!("42"));
+        assert_eq!(parse(json!({"nested": true})), json!({"nested": true}));
+    }
+
+    #[test]
     fn validates_and_coerces_declared_tool_options() {
         let descriptor = tool_with_options(
             "test:demo",

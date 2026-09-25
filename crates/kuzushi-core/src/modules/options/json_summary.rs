@@ -150,7 +150,20 @@ pub fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
         OptionType::Int => coerce_int_option(spec, value),
         OptionType::Float => coerce_float_option(value),
         OptionType::Enum => coerce_enum_option(spec, value),
-        OptionType::Json => Ok(value),
+        OptionType::Json => Ok(coerce_json_option(value)),
+    }
+}
+
+/// Operator surfaces (`--option key=value`, shell `set`, stored options)
+/// deliver every value as text. A json option given the text of an object
+/// or array means that structure; any other value passes through unchanged.
+fn coerce_json_option(value: Value) -> Value {
+    let Value::String(text) = &value else {
+        return value;
+    };
+    match serde_json::from_str::<Value>(text.trim()) {
+        Ok(parsed @ (Value::Object(_) | Value::Array(_))) => parsed,
+        _ => value,
     }
 }
 

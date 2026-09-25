@@ -19,6 +19,10 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Json-typed tool options accept JSON object or array text from
+  `--option key=value`, shell `set` and stored options, so
+  `ndiff:hunt-variants --option pattern='{…}'` works. Other text passes
+  through unchanged.
 - Staged threat-model builds no longer fail after paying for every stage when
   the model leaves `targetElementIds` off a gap-fill threat. Such a threat now
   inherits the DFD links of the entry points it cites, marked
