@@ -19,6 +19,13 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `kuzushi scan --paths <dir>` with exactly one directory now scopes
+  taint-iris-next through its `targetSubdir`. Before, the engine read
+  evidence from the whole repository (Juice Shop's challenge snippets and
+  frontend) even for a `routes/` scan. Other scopes stay repository-wide
+  rather than guessing a subdirectory. CPG builds no longer print the
+  upstream library's timing line on the scan's stderr.
+
 - `kuzushi scan --paths` now scopes the agentic SAST engine. The umbrella's
   descriptor filter used to drop `paths`, so a scoped scan hunted (and paid
   for) the whole repository; the scope now becomes the engine's include

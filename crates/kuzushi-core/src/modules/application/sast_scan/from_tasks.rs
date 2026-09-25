@@ -275,7 +275,7 @@ impl SastSubtoolDispatch<'_> {
     )> {
         let tool_name = "taint-iris-next:hunt";
         let output =
-            self.checkpointed_engine_output(tool_name, &taint_iris_next_hunt_input(self.input))?;
+            self.checkpointed_engine_output(tool_name, &self.taint_iris_next_scoped_input())?;
         let outcome = scan_engine_outcome(&output);
         Ok((taint_iris_next_report_from_tool_output(&output)?, outcome))
     }
@@ -284,6 +284,20 @@ impl SastSubtoolDispatch<'_> {
     /// prior failed sast:scan run is reused from its checkpointed output.
     /// Its findings already live in the findings store — reusing the report
     /// never re-ingests them.
+    /// taint-iris-next scopes by one `targetSubdir`: a scan scoped to exactly
+    /// one directory passes it through; any other scope leaves the hunt
+    /// repository-wide rather than guessing a subdirectory.
+    fn taint_iris_next_scoped_input(&self) -> Value {
+        let mut input = taint_iris_next_hunt_input(self.input);
+        let root = self.ctx.workspace.map(|workspace| workspace.root());
+        if let Some(subdir) = single_scope_directory(self.input, root) {
+            if let Some(object) = input.as_object_mut() {
+                object.entry("targetSubdir").or_insert(json!(subdir));
+            }
+        }
+        input
+    }
+
     fn checkpointed_engine_output(&self, tool_name: &str, input: &Value) -> Result<Value> {
         let stage_id = format!("engine:{tool_name}");
         let checkpoints = crate::run_artifacts::active_stage_checkpoints();
@@ -488,6 +502,14 @@ fn scan_scope_paths(input: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn single_scope_directory(input: &Value, root: Option<&std::path::Path>) -> Option<String> {
+    let explicit = ["targetSubdir", "target_subdir"]
+        .iter()
+        .any(|key| input.get(key).is_some());
+    let [path] = scan_scope_paths(input).try_into().ok()?;
+    (!explicit && root?.join(&path).is_dir()).then_some(path)
+}
+
 fn scope_patterns(paths: &[String]) -> Vec<String> {
     paths
         .iter()
@@ -617,6 +639,20 @@ mod canonical_report_cost_tests {
         assert_eq!(agentic_scoped_input(&explicit), explicit);
         let unscoped = json!({"mode": "standard"});
         assert_eq!(agentic_scoped_input(&unscoped), unscoped);
+    }
+
+    #[test]
+    fn only_a_single_existing_directory_scopes_taint_iris_next() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("routes")).unwrap();
+        std::fs::write(root.path().join("server.ts"), "").unwrap();
+        let single = |paths: Value| single_scope_directory(&json!({ "paths": paths }), Some(root.path()));
+
+        assert_eq!(single(json!(["routes/"])).as_deref(), Some("routes"));
+        assert_eq!(single(json!(["server.ts"])), None, "a file is not a subdirectory");
+        assert_eq!(single(json!(["routes", "lib"])), None, "several paths stay repo-wide");
+        let explicit = json!({"paths": ["routes"], "targetSubdir": "lib"});
+        assert_eq!(single_scope_directory(&explicit, Some(root.path())), None);
     }
 
     #[test]
