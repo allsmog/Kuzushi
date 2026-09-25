@@ -24,9 +24,9 @@ export const releaseCrossBuilds = Object.freeze([
 ]);
 
 /**
- * The owner's self-hosted Apple silicon runner. Every darwin leg defaults to it
- * because hosted macOS minutes bill at 10x, and `hosted: true` sends the same
- * legs back to the hosted images named in `releasePlatforms`.
+ * The owner's self-hosted Apple silicon runner. Every darwin leg stays eligible
+ * for it, but releases default to the hosted images named in `releasePlatforms`;
+ * `hosted: false` (or `KUZUSHI_RELEASE_SELF_HOSTED=true`) opts one run in.
  */
 export const selfHostedMacLabels = Object.freeze(["self-hosted", "macOS", "ARM64", "kuzushi-mac"]);
 
@@ -68,7 +68,7 @@ export function candidateWorkflowFailures(source) {
 
 /**
  * The published smoke installs from the registry, so it holds no credential.
- * Its darwin legs still default to the self-hosted runner and its darwin-x64
+ * Its darwin legs stay eligible for the self-hosted runner and its darwin-x64
  * leg still has to prove it translated rather than smoked the host payload.
  */
 export function publishedSmokeWorkflowFailures(source) {
