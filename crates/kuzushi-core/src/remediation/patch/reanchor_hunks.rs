@@ -22,16 +22,26 @@ pub(crate) fn reanchor_hunks_in_checkout(checkout: &Path, diff: &str) -> String 
     reanchor_hunks(diff, &|path| read_checkout_file(checkout, path))
 }
 
+/// The same ceiling `apply_reviewed_patch` enforces on a touched file.
+const MAX_REANCHOR_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+
+/// Read a checkout file named by the model's diff: confined beneath the
+/// checkout, never through a symlink, and only when it fits the ceiling.
 fn read_checkout_file(checkout: &Path, relative: &str) -> Option<String> {
     let relative = Path::new(relative);
     let confined = relative.is_relative()
         && relative
             .components()
             .all(|part| matches!(part, std::path::Component::Normal(_)));
-    let path = checkout.join(relative);
-    let regular = std::fs::symlink_metadata(&path).ok()?.file_type().is_file();
-    (confined && regular)
-        .then(|| std::fs::read_to_string(&path).ok())
+    confined
+        .then(|| {
+            crate::bounded_file::read_utf8_text_within(
+                checkout,
+                &checkout.join(relative),
+                MAX_REANCHOR_SOURCE_BYTES,
+            )
+            .ok()
+        })
         .flatten()
 }
 
