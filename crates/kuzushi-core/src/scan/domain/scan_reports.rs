@@ -127,8 +127,10 @@ pub struct CodeqlScanReport {
     pub persisted: Option<CodeqlPersistedRun>,
     #[serde(rename = "reportSarif", skip_serializing_if = "Option::is_none")]
     pub report_sarif: Option<Value>,
-    /// Detected languages CodeQL could not analyze. Non-empty means the run
-    /// completed with incomplete coverage, and the report says so.
+    /// Detected languages CodeQL could not analyze, and SARIF results a
+    /// completed analysis produced but normalization could not represent.
+    /// Non-empty means the run completed with incomplete coverage, and the
+    /// report says so.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub scan_errors: Vec<String>,
 }
@@ -212,12 +214,18 @@ pub struct CodeqlPersistedRun {
     pub static_evidence: Option<StaticEvidenceIndexReport>,
 }
 
+/// Covers both gap kinds: a detected language whose analysis failed, and a
+/// completed analysis whose SARIF results could not be represented. Each
+/// entry names its own cause.
+const CODEQL_COVERAGE_GAP_HEADER: &str =
+    "  CodeQL coverage is incomplete (languages not analyzed or SARIF results omitted):";
+
 fn codeql_output_lines(report: &CodeqlScanReport) -> Vec<String> {
     let mut lines = vec![codeql_summary_line(report)];
     append_codeql_persisted_run(&mut lines, report.persisted.as_ref());
     append_scan_errors(
         &mut lines,
-        "  CodeQL could not analyze every detected language:",
+        CODEQL_COVERAGE_GAP_HEADER,
         &report.scan_errors,
     );
     append_codeql_top_findings(&mut lines, &report.findings);
