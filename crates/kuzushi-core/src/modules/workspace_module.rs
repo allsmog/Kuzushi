@@ -345,6 +345,15 @@ fn sast_triage_options() -> Vec<OptionSpec> {
         )
         .inline_or_workspace_file()
         .advanced(),
+        opt(
+            "threatModelFeedback",
+            OptionType::Enum,
+            "After triage, fold confirmed findings back into the active threat model: off, or refine (runs threat-model:build mode=refine, which records variant patterns later scans hunt).",
+        )
+        .aliases(&["threat_model_feedback"])
+        .choices(&["off", "refine"])
+        .default(json!("off"))
+        .advanced(),
     ]
 }
 

@@ -26,6 +26,8 @@ pub(in crate::modules) struct SastScanRequests {
     pub(in crate::modules) verify_when: SastVerifyWhen,
     pub(in crate::modules) verify_max: Option<usize>,
     pub(in crate::modules) verify_votes: Option<usize>,
+    /// Refine the active threat model with confirmed findings after triage.
+    pub(in crate::modules) threat_model_feedback: bool,
 }
 
 impl SastScanRequests {
@@ -37,6 +39,10 @@ impl SastScanRequests {
         let verify_when = SastVerifyWhen::from_input(input)?;
         let verify_max = optional_usize_input(input, &["verifyMax", "verify_max"])?;
         let verify_votes = optional_usize_input(input, &["verifyVotes", "verify_votes"])?;
+        let threat_model_feedback = input
+            .get("threatModelFeedback")
+            .and_then(Value::as_str)
+            .is_some_and(|mode| mode == "refine");
         Ok(Self {
             verify,
             auto_patch,
@@ -44,6 +50,7 @@ impl SastScanRequests {
             verify_when,
             verify_max,
             verify_votes,
+            threat_model_feedback,
         })
     }
 
@@ -128,6 +135,16 @@ pub(in crate::modules) struct WhiteboxArtifacts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_refine_requests_threat_model_feedback() {
+        let refine = SastScanRequests::from_input(&json!({"threatModelFeedback": "refine"})).unwrap();
+        let off = SastScanRequests::from_input(&json!({"threatModelFeedback": "off"})).unwrap();
+
+        assert!(refine.threat_model_feedback);
+        assert!(!off.threat_model_feedback);
+        assert!(!SastScanRequests::from_input(&json!({})).unwrap().threat_model_feedback);
+    }
 
     #[test]
     fn verify_controls_parse_aliases() {

@@ -1,6 +1,6 @@
 use super::*;
 use crate::attack_surface::{AttackSurface, AttackSurfaceKind, AttackSurfaceRisk};
-use crate::findings::{Finding, FindingListFilter, ProofConfidence};
+use crate::findings::{Finding, FindingListFilter, FindingStore, ProofConfidence};
 
 #[cfg(test)]
 mod rust_test_scope_tests;
@@ -75,6 +75,12 @@ pub(crate) struct ConfirmedFindingRow {
     pub(crate) file_path: String,
     pub(crate) start_line: u32,
     pub(crate) severity: &'static str,
+    /// CWE named by the finding's title, rule, category, or message.
+    pub(crate) cwe: Option<String>,
+    /// Code the detector recorded as evidence (sink evidence first), as it
+    /// was when the finding was made; later edits such as an applied patch
+    /// do not rewrite it.
+    pub(crate) evidence_snippet: Option<String>,
 }
 
 pub(crate) const MAX_CONFIRMED_FINDING_ROWS: usize = 25;
@@ -652,8 +658,16 @@ fn confirmed_finding_rows(
     input: &BuildInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Vec<ConfirmedFindingRow>> {
-    let Some(store) = ctx.findings_store else {
-        return Ok(Vec::new());
+    let opened;
+    let store = match ctx.findings_store {
+        Some(store) => store,
+        None => match open_existing_findings_store(input)? {
+            Some(store) => {
+                opened = store;
+                &opened
+            }
+            None => return Ok(Vec::new()),
+        },
     };
     // Confirmed = runtime-exploited; Likely = statically-supported
     // (code-cited / source-sink / statically-confirmed). Both are legitimate
@@ -667,13 +681,53 @@ fn confirmed_finding_rows(
     let report = store
         .list_findings_filtered(&filter)
         .context("threat-model grounding: confirmed-findings query failed")?;
-    Ok(report
-        .findings
+    let mut findings = report.findings;
+    append_review_confirmed(store, &mut findings)?;
+    Ok(findings
         .into_iter()
         .filter(|finding| finding_belongs_to_analysis_root(input, finding))
         .take(MAX_CONFIRMED_FINDING_ROWS)
         .map(confirmed_row)
         .collect())
+}
+
+/// Modes hand the optional store only to tools that require one, so a
+/// headless or shell build opens the workspace's existing ledger itself, the
+/// same way modes open it for tools that require it. A workspace with no
+/// findings database has nothing to cite and gets none created.
+fn open_existing_findings_store(input: &BuildInput) -> Result<Option<FindingStore>> {
+    let workspace = crate::workspace::WorkspaceTarget::new(input.workspace_root())?;
+    let path = workspace.findings_db_path();
+    if !path.is_file() {
+        return Ok(None);
+    }
+    FindingStore::open(&path)
+        .map(Some)
+        .context("threat-model grounding: could not open the findings ledger")
+}
+
+/// Findings a triage verdict or review decision confirmed, even when no
+/// proof has raised their confidence band yet: the same decision in force
+/// that authorizes verify, patch, and variant hunting. Proof-banded rows
+/// come first and are not repeated.
+fn append_review_confirmed(store: &FindingStore, findings: &mut Vec<Finding>) -> Result<()> {
+    let relevant = store
+        .list_relevant_findings()
+        .context("threat-model grounding: relevant-findings query failed")?;
+    let decisions = store.list_review_decisions_for_findings(&relevant)?;
+    let index = crate::findings::EffectiveReviewStateIndex::from_findings_and_decisions(
+        &relevant, &decisions,
+    );
+    let mut seen: BTreeSet<String> = findings.iter().map(|f| f.fingerprint.clone()).collect();
+    for finding in relevant {
+        let decision = index.effective_decision_for(&finding);
+        let gate = crate::findings::FindingReviewGate::from_effective(&finding, decision.as_ref());
+        let confirmed = matches!(gate, crate::findings::FindingReviewGate::Confirmed(_));
+        if confirmed && seen.insert(finding.fingerprint.clone()) {
+            findings.push(finding);
+        }
+    }
+    Ok(())
 }
 
 fn finding_belongs_to_analysis_root(input: &BuildInput, finding: &Finding) -> bool {
@@ -685,13 +739,31 @@ fn finding_belongs_to_analysis_root(input: &BuildInput, finding: &Finding) -> bo
 }
 
 fn confirmed_row(finding: Finding) -> ConfirmedFindingRow {
+    let cwe = super::super::domain::cwe_from_texts(&[
+        &finding.title,
+        &finding.rule_id,
+        finding.category.as_deref().unwrap_or_default(),
+        &finding.message,
+    ]);
+    let evidence_snippet = detection_snippet(&finding.evidence);
     ConfirmedFindingRow {
+        cwe,
+        evidence_snippet,
         fingerprint: finding.fingerprint,
         title: finding.title,
         file_path: finding.file_path,
         start_line: finding.start_line,
         severity: finding.severity.as_str(),
     }
+}
+
+/// Sink evidence first, then any evidence with a snippet.
+fn detection_snippet(evidence: &[crate::findings::FindingEvidence]) -> Option<String> {
+    let with_snippet = || evidence.iter().filter(|row| !row.snippet.trim().is_empty());
+    with_snippet()
+        .find(|row| row.kind.to_ascii_lowercase().contains("sink"))
+        .or_else(|| with_snippet().next())
+        .map(|row| row.snippet.clone())
 }
 
 pub(crate) fn attack_surface_section(surfaces: &[AttackSurface]) -> String {
@@ -1242,6 +1314,8 @@ mod tests {
             file_path: "src/codec.c".to_string(),
             start_line: 42,
             severity: "high",
+            cwe: None,
+            evidence_snippet: None,
         }];
         let section = confirmed_findings_section(&rows);
         assert!(section.contains("fp3_abc123"));

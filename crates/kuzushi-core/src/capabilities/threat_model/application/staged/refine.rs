@@ -24,7 +24,7 @@ pub(crate) fn refine_threat_model(
     let (mut generated, source_bundle, delta) = load_refine_evidence(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     emit_refine_delta(ctx, verb, &delta);
-    let attach = attach_new_evidence(&mut generated.document, &delta.new_findings);
+    let attach = attach_repository_evidence(&mut generated.document, &delta, &input);
     let (coverage, gap_method) =
         cover_changed_surfaces(runtime, ctx, verb, &input, &delta, &mut generated)?;
     let closer = close_open_questions(runtime, ctx, verb, &input, &delta, &mut generated)?;
@@ -50,6 +50,18 @@ pub(crate) fn refine_threat_model(
         &coverage,
         parked,
     )
+}
+
+/// Attach the delta's new findings, reading each one's vulnerable line from
+/// the workspace for its variant pattern.
+fn attach_repository_evidence(
+    document: &mut Value,
+    delta: &RefineDelta,
+    input: &BuildInput,
+) -> EvidenceAttachment {
+    attach_new_evidence(document, &delta.new_findings, &|finding| {
+        finding_source_line(input.workspace_root(), finding)
+    })
 }
 
 fn load_refine_state(
@@ -236,22 +248,44 @@ fn evidence_ref(entry: &Value) -> Option<String> {
 pub(crate) struct EvidenceAttachment {
     pub(crate) attached: usize,
     pub(crate) likelihood_raised: usize,
+    /// Findings compacted onto their threat as a variant pattern.
+    pub(crate) variant_patterns: usize,
     pub(crate) unmatched: Vec<ConfirmedFindingRow>,
 }
 
+/// Reads a finding's vulnerable line for its variant pattern; `None` when
+/// the file is outside the workspace, unreadable, or shorter than the line.
+pub(crate) type FindingLineReader<'a> = dyn Fn(&ConfirmedFindingRow) -> Option<String> + 'a;
+
+/// The finding's own source line, read within the workspace and bounded.
+fn finding_source_line(root: &std::path::Path, finding: &ConfirmedFindingRow) -> Option<String> {
+    const MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+    let text = crate::bounded_file::read_source_text_prefix_within(
+        root,
+        &root.join(&finding.file_path),
+        MAX_SOURCE_BYTES,
+    )
+    .ok()??;
+    let index = usize::try_from(finding.start_line.checked_sub(1)?).ok()?;
+    text.lines().nth(index).map(str::to_string)
+}
+
 /// Deterministic evidence attach: a new finding lands on the first threat
-/// whose affectedFiles / surface text covers its file.
+/// whose affectedFiles / surface text covers its file, together with a
+/// variant pattern built from its source line.
 pub(crate) fn attach_new_evidence(
     document: &mut Value,
     new_findings: &[ConfirmedFindingRow],
+    read_line: &FindingLineReader<'_>,
 ) -> EvidenceAttachment {
     let mut attachment = EvidenceAttachment {
         attached: 0,
         likelihood_raised: 0,
+        variant_patterns: 0,
         unmatched: Vec::new(),
     };
     for finding in new_findings {
-        if attach_finding(document, finding, &mut attachment) {
+        if attach_finding(document, finding, read_line, &mut attachment) {
             attachment.attached += 1;
         } else {
             attachment.unmatched.push(clone_row(finding));
@@ -267,12 +301,15 @@ fn clone_row(row: &ConfirmedFindingRow) -> ConfirmedFindingRow {
         file_path: row.file_path.clone(),
         start_line: row.start_line,
         severity: row.severity,
+        cwe: row.cwe.clone(),
+        evidence_snippet: row.evidence_snippet.clone(),
     }
 }
 
 fn attach_finding(
     document: &mut Value,
     finding: &ConfirmedFindingRow,
+    read_line: &FindingLineReader<'_>,
     attachment: &mut EvidenceAttachment,
 ) -> bool {
     let Some(threats) = document.get_mut("threats").and_then(Value::as_array_mut) else {
@@ -288,7 +325,43 @@ fn attach_finding(
     if bump_threat_likelihood(threat) {
         attachment.likelihood_raised += 1;
     }
+    let pattern = finding_variant_pattern(finding, threat_single_cwe(threat), read_line);
+    if record_variant_pattern(threat, pattern) {
+        attachment.variant_patterns += 1;
+    }
     true
+}
+
+/// Detection-time evidence first; the current source line only when the
+/// detector recorded no snippet. A finding without its own CWE inherits the
+/// threat's when the threat names exactly one.
+fn finding_variant_pattern(
+    finding: &ConfirmedFindingRow,
+    threat_cwe: Option<String>,
+    read_line: &FindingLineReader<'_>,
+) -> Value {
+    let code = finding
+        .evidence_snippet
+        .clone()
+        .or_else(|| read_line(finding));
+    let cwe = finding.cwe.clone().or(threat_cwe);
+    variant_pattern_json(&VariantPatternSeed {
+        fingerprint: &finding.fingerprint,
+        title: &finding.title,
+        file_path: &finding.file_path,
+        start_line: finding.start_line,
+        cwe: cwe.as_deref(),
+        code_line: code.as_deref(),
+    })
+}
+
+fn threat_single_cwe(threat: &Value) -> Option<String> {
+    let cwes = threat.get("relatedCWEs").or_else(|| threat.get("relatedCwe"))?;
+    match cwes {
+        Value::String(cwe) => Some(cwe.clone()),
+        Value::Array(values) if values.len() == 1 => values[0].as_str().map(str::to_string),
+        _ => None,
+    }
 }
 
 fn threat_covers_file(threat: &Value, file_path: &str) -> bool {
@@ -482,6 +555,7 @@ fn stamp_refine_delta_provenance(
                 "newFindings": delta.new_findings.len(),
                 "attachedEvidence": attach.attached,
                 "likelihoodRaised": attach.likelihood_raised,
+                "variantPatterns": attach.variant_patterns,
                 "unmatchedFindings": attach.unmatched.len(),
                 "changedSurfaces": delta.changed_surfaces.len(),
                 "entryPointCatalogChanged": delta.entry_point_catalog_changed,
@@ -564,6 +638,8 @@ mod tests {
             file_path: file.to_string(),
             start_line: 7,
             severity: "high",
+            cwe: Some("CWE-787".to_string()),
+            evidence_snippet: None,
         }
     }
 
@@ -580,7 +656,8 @@ mod tests {
                 ]
             }]
         });
-        let attach = attach_new_evidence(&mut document, &[row("fp3_new", "src/auth.ts")]);
+        let read_line = |_: &ConfirmedFindingRow| Some("  memcpy(dst, src, len);".to_string());
+        let attach = attach_new_evidence(&mut document, &[row("fp3_new", "src/auth.ts")], &read_line);
         assert_eq!(attach.attached, 1);
         assert_eq!(
             attach.likelihood_raised, 1,
@@ -591,12 +668,19 @@ mod tests {
         assert_eq!(threat["likelihood"], json!("likely"));
         assert_eq!(threat["evidence"][2]["ref"], json!("fp3_new"));
         assert_eq!(threat["evidence"][2]["addedBy"], json!("refine"));
+        assert_eq!(attach.variant_patterns, 1);
+        let pattern = &threat["variantPatterns"][0];
+        assert_eq!(pattern["findingRef"], json!("fp3_new"));
+        assert_eq!(pattern["cwe"], json!("CWE-787"));
+        assert_eq!(pattern["location"], json!("src/auth.ts:7"));
+        assert_eq!(pattern["code"], json!("memcpy(dst, src, len);"));
+        assert_eq!(pattern["keywords"], json!(["memcpy"]));
     }
 
     #[test]
     fn finding_without_covering_threat_is_unmatched_and_becomes_an_open_question() {
         let mut document = json!({"threats": [{"id": "T-1", "affectedFiles": []}]});
-        let attach = attach_new_evidence(&mut document, &[row("fp3_lost", "src/other.rs")]);
+        let attach = attach_new_evidence(&mut document, &[row("fp3_lost", "src/other.rs")], &|_| None);
         assert_eq!(attach.attached, 0);
         assert_eq!(attach.unmatched.len(), 1);
         record_unmatched_findings(&mut document, &attach.unmatched);
@@ -694,6 +778,7 @@ mod tests {
         let attach = EvidenceAttachment {
             attached: 0,
             likelihood_raised: 0,
+            variant_patterns: 0,
             unmatched: Vec::new(),
         };
         let closer = QuestionCloserOutcome::skipped("none-needed", 0);

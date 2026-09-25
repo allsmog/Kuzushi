@@ -16,9 +16,27 @@ Notable changes to Kuzushi. Release procedure lives in
   push reaches `main`. The gate stays trust-on-owner and advisory — `git push
   --no-verify` bypasses it — but it is now auditable. See
   [docs/quality/local-verify-receipt.md](./docs/quality/local-verify-receipt.md).
+- Confirmed findings now feed later scans. `threat-model:build mode=refine`
+  records a grounded `variantPatterns[]` entry on the threat each confirmed
+  finding realizes. The entry holds the CWE, the location, the proven call-site
+  line, and that line's distinctive identifiers. taint-iris-next seeds the
+  matching CWE's structural queries from these entries, and the agentic-SAST
+  threat-model digest asks the agent to look for siblings of each call site. The
+  new `sast:scan` option `threatModelFeedback=refine` (default `off`) runs the
+  refine after triage and reports it under `data.threatModelFeedback`. On Juice
+  Shop, one refine attached 9 of 10 new findings and wrote 9 patterns, and the
+  next CWE-89 hunt plan carried the `routes/login.ts` pattern keywords.
 
 **Fixed:**
 
+- A headless or shell `threat-model:build mode=refine` now reads the findings
+  ledger. Before, `kuzushi run` handed the tool no findings store, so refine
+  reported `newFindings 0` no matter what triage had confirmed.
+- `taint-iris-next` applies `cweFocus` before the `maxCwes`/`maxCatalogEntries`
+  cap. Before, `cweFocus=CWE-89 maxCwes=1` on Juice Shop kept only the
+  top-ranked CWE-79 entry and then filtered it out. That replaced the real
+  CWE-89 entry (score 88, with Sequelize sinks) with a synthesised entry
+  (score 50) whose sinks came from unrelated attack-surface text.
 - The CPG MCP server queries every buildable language, not only languages
   with a persisted graph. On Juice Shop a persisted client-side JavaScript
   graph hid the whole TypeScript server, so `cpg.taint_paths` found no

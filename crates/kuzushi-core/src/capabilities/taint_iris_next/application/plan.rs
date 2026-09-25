@@ -228,8 +228,19 @@ fn initial_taint_iris_next_catalog(
     planning: &TaintIrisNextPlanningContext,
 ) -> Vec<TaintIrisNextRankedCatalogEntry> {
     let ranked = ranked_taint_iris_next_catalog(repo_root, options, planning);
-    let catalog = limited_taint_iris_next_catalog(ranked, options.caps.max_catalog_entries);
-    filter_taint_iris_next_catalog_by_cwe_focus(catalog, &options.cwe_focus)
+    focused_limited_taint_iris_next_catalog(ranked, &options.cwe_focus, options.caps.max_catalog_entries)
+}
+
+/// Apply the CWE focus before the entry cap, so a focused CWE that ranks
+/// below the cap keeps its real catalog entry instead of being cut and then
+/// replaced by a synthesised focus entry.
+fn focused_limited_taint_iris_next_catalog(
+    ranked: Vec<TaintIrisNextRankedCatalogEntry>,
+    cwe_focus: &[String],
+    max_entries: usize,
+) -> Vec<TaintIrisNextRankedCatalogEntry> {
+    let focused = filter_taint_iris_next_catalog_by_cwe_focus(ranked, cwe_focus);
+    limited_taint_iris_next_catalog(focused, max_entries)
 }
 
 fn ranked_taint_iris_next_catalog(
@@ -316,12 +327,13 @@ fn finalize_taint_iris_next_catalog(
 ) -> Vec<TaintIrisNextRankedCatalogEntry> {
     let catalog = boost_catalog_with_discovered_signals(catalog, discovered_signals);
     let catalog = boost_catalog_with_attack_surface_hints(catalog, &planning.attack_surface_hints);
-    supplement_catalog_with_phantom_focus_entries(
+    let catalog = supplement_catalog_with_phantom_focus_entries(
         catalog,
         &planning.attack_surface_hints,
         discovered_signals,
         &options.cwe_focus,
-    )
+    );
+    seed_catalog_with_variant_patterns(catalog, planning.threat_model.value.as_ref())
 }
 
 fn configure_taint_iris_next_backend(
@@ -986,6 +998,18 @@ mod phantom_focus_entry_tests {
 
     fn no_signals() -> DiscoveredSignals {
         DiscoveredSignals::default()
+    }
+
+    #[test]
+    fn cwe_focus_selects_before_the_entry_cap() {
+        let ranked = vec![entry("CWE-79", 95), entry("CWE-89", 88), entry("CWE-22", 70)];
+
+        let catalog =
+            focused_limited_taint_iris_next_catalog(ranked, &["cwe-89".to_string()], 1);
+
+        assert_eq!(catalog.len(), 1);
+        assert_eq!(catalog[0].cwe, "CWE-89");
+        assert_eq!(catalog[0].score, 88);
     }
 
     fn discovery_signal(name: &str, cwe: &str) -> DiscoveredSignal {

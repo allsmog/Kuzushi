@@ -138,26 +138,41 @@ pub(crate) fn threat_model_scan_context(target: &Path) -> Result<Option<String>>
 }
 
 pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
-    let mut sections = Vec::new();
-    let threats = threat_lines(document);
-    if !threats.is_empty() {
-        sections.push(format!("Modeled threats:\n{}", threats.join("\n")));
-    }
-    let entry_points = attack_surface_lines(document, "entryPoints", entry_point_line);
-    if !entry_points.is_empty() {
-        sections.push(format!(
-            "Attack-surface entry points:\n{}",
-            entry_points.join("\n")
-        ));
-    }
-    let sinks = attack_surface_lines(document, "externalSinks", external_sink_line);
-    if !sinks.is_empty() {
-        sections.push(format!("External sinks:\n{}", sinks.join("\n")));
-    }
-    if sections.is_empty() {
-        return None;
-    }
-    Some(sections.join("\n\n"))
+    let sections: Vec<String> = [
+        ("Modeled threats", threat_lines(document)),
+        (
+            "Attack-surface entry points",
+            attack_surface_lines(document, "entryPoints", entry_point_line),
+        ),
+        (
+            "External sinks",
+            attack_surface_lines(document, "externalSinks", external_sink_line),
+        ),
+        (
+            "Confirmed-finding variant patterns (hunt for siblings of these proven call sites)",
+            variant_pattern_lines(document),
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, lines)| !lines.is_empty())
+    .map(|(heading, lines)| format!("{heading}:\n{}", lines.join("\n")))
+    .collect();
+    (!sections.is_empty()).then(|| sections.join("\n\n"))
+}
+
+fn variant_pattern_lines(document: &Value) -> Vec<String> {
+    crate::capabilities::threat_model::threat_variant_patterns(document)
+        .into_iter()
+        .take(MAX_DIGEST_ENTRIES)
+        .map(variant_pattern_line)
+        .collect()
+}
+
+fn variant_pattern_line(pattern: &Value) -> String {
+    let text = |field: &str| pattern.get(field).and_then(Value::as_str).unwrap_or("");
+    let cwe = pattern.get("cwe").and_then(Value::as_str).unwrap_or("unclassified");
+    let code: String = text("code").chars().take(MAX_DIGEST_FIELD_CHARS).collect();
+    format!("- {cwe} at {} · {} · `{code}`", text("location"), text("title"))
 }
 
 fn threat_lines(document: &Value) -> Vec<String> {
@@ -276,6 +291,27 @@ mod tests {
         ));
         assert!(digest.contains("- HandleRequest (rpc) — execd_server.cpp:42"));
         assert!(digest.contains("- execve [exec]"));
+    }
+
+    #[test]
+    fn digest_lists_confirmed_variant_patterns_to_hunt() {
+        let document = json!({"threats": [{
+            "id": "T-1",
+            "title": "SQL injection",
+            "variantPatterns": [{
+                "cwe": "CWE-89",
+                "location": "routes/search.ts:23",
+                "title": "SQL Injection via Product Search",
+                "code": "models.sequelize.query(`SELECT ... ${criteria}`)"
+            }]
+        }]});
+
+        let digest = render_threat_model_digest(&document).unwrap();
+
+        assert!(digest.contains("Confirmed-finding variant patterns"), "{digest}");
+        assert!(digest.contains(
+            "- CWE-89 at routes/search.ts:23 · SQL Injection via Product Search · `models.sequelize.query(`SELECT ... ${criteria}`)`"
+        ), "{digest}");
     }
 
     #[test]

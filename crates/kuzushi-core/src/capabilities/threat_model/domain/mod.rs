@@ -12,6 +12,7 @@ pub(crate) use persistence_validation::{
 pub(crate) use security_context_links::require_complete_security_context_links;
 pub use security_context_links::{security_context_link_report, SecurityContextLinkReport};
 pub(crate) use stage_selection::*;
+pub(crate) use variant_patterns::*;
 pub use tool_contract::*;
 
 mod dfd_types;
@@ -24,3 +25,4 @@ mod persistence_validation;
 mod security_context_links;
 mod stage_selection;
 mod tool_contract;
+mod variant_patterns;

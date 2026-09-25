@@ -1213,7 +1213,8 @@ fn sast_scan_result(parts: SastScanResultParts<'_>) -> Result<Value> {
         .find(|line| !line.trim().is_empty())
         .unwrap_or("sast:scan completed")
         .to_string();
-    let warnings = sast_scan_warnings(parts.reports);
+    let mut warnings = sast_scan_warnings(parts.reports);
+    warnings.extend(threat_model_feedback_warning(parts.post_processing));
     let partial = sast_scan_has_partial_engine(parts.reports);
     let data = sast_scan_data(parts)?;
     let mut result = sast_scan_result_envelope(summary, output, warnings, data, partial);
@@ -1303,6 +1304,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
         "triage": triage_json(parts.post_processing),
         "verification": verification_json(parts.post_processing),
         "patch": patch_json(parts.post_processing),
+        "threatModelFeedback": threat_model_feedback_json(parts.post_processing),
         "artifacts": sast_artifacts_json(parts.artifacts, paths),
     }))
 }
@@ -1322,6 +1324,7 @@ fn sast_cost_report(
         .verification_results
         .iter()
         .chain(post_processing.patch_results.iter())
+        .chain(costed_feedback(post_processing))
     {
         total = total.checked_add(tool_output_cost_report(output)?, "SAST post-process cost")?;
     }
@@ -1380,6 +1383,33 @@ fn sast_run_ids_json(run_ids: SastRunIds) -> Value {
         "carlini": run_ids.carlini,
         "taintIrisNext": run_ids.taint_iris_next,
         "systemsHunt": run_ids.systems_hunt,
+    })
+}
+
+/// The feedback output only when it carries a cost claim: a refusal
+/// synthesized by the scan made no model call and has none.
+fn costed_feedback(post_processing: &SastPostProcessing) -> Option<&Value> {
+    post_processing
+        .threat_model_feedback
+        .as_ref()
+        .filter(|output| output.get("costUsd").is_some() || output.get("observedCostUsd").is_some())
+}
+
+fn threat_model_feedback_json(post_processing: &SastPostProcessing) -> Option<Value> {
+    let output = post_processing.threat_model_feedback.as_ref()?;
+    Some(json!({
+        "status": output.get("status").cloned().unwrap_or(Value::Null),
+        "summary": output.get("summary").cloned().unwrap_or(Value::Null),
+        "refineDelta": output.pointer("/data/document/provenance/refineDelta").cloned(),
+    }))
+}
+
+fn threat_model_feedback_warning(post_processing: &SastPostProcessing) -> Option<Value> {
+    let output = post_processing.threat_model_feedback.as_ref()?;
+    let status = output.get("status").and_then(Value::as_str).unwrap_or("unknown");
+    (status != "completed").then(|| {
+        let summary = output.get("summary").and_then(Value::as_str).unwrap_or(status);
+        json!(format!("threat-model feedback did not complete: {summary}"))
     })
 }
 
@@ -1554,6 +1584,44 @@ mod scan_result_outcome_tests {
 
         assert!(sast_scan_has_partial_engine(&reports));
         assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Partial);
+    }
+
+    fn post_processing_with_feedback(feedback: Option<Value>) -> SastPostProcessing {
+        SastPostProcessing {
+            triage: None,
+            verification_results: Vec::new(),
+            patch_results: Vec::new(),
+            threat_model_feedback: feedback,
+        }
+    }
+
+    #[test]
+    fn a_completed_refine_reports_its_delta_without_a_warning() {
+        let processed = post_processing_with_feedback(Some(json!({
+            "status": "completed",
+            "summary": "threat-model:build complete",
+            "data": {"document": {"provenance": {"refineDelta": {"variantPatterns": 2}}}},
+        })));
+
+        assert!(threat_model_feedback_warning(&processed).is_none());
+        let data = threat_model_feedback_json(&processed).unwrap();
+        assert_eq!(data["refineDelta"]["variantPatterns"], 2);
+        assert!(threat_model_feedback_json(&post_processing_with_feedback(None)).is_none());
+    }
+
+    #[test]
+    fn a_refused_refine_is_a_visible_warning_without_a_cost_claim() {
+        let processed = post_processing_with_feedback(Some(json!({
+            "ok": false,
+            "status": "failed",
+            "summary": "threat-model refine failed: run a full build first",
+        })));
+
+        assert_eq!(
+            threat_model_feedback_warning(&processed).unwrap(),
+            "threat-model feedback did not complete: threat-model refine failed: run a full build first"
+        );
+        assert!(costed_feedback(&processed).is_none());
     }
 
     fn reports_with_outcomes(
