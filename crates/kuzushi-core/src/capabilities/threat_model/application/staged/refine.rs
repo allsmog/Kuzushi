@@ -65,8 +65,7 @@ fn load_refine_state(
     let generated = GeneratedThreatModel {
         document: normalize_document(selected.document, &input.methodology)?,
         bridge_findings: None,
-        cost_usd: 0.0,
-        cost_usd_exact: true,
+        cost: crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
     };
     Ok((generated, source_bundle))
 }
@@ -339,10 +338,7 @@ fn cover_changed_surfaces(
     if report.invariant_satisfied() {
         return Ok((report, "none-needed"));
     }
-    if input
-        .budget_usd
-        .is_some_and(|budget| generated.cost_usd >= budget)
-    {
+    if super::pipeline::staged_budget_exhausted(input, generated.cost) {
         return Ok((report, "budget-exhausted"));
     }
     run_refine_gap_fill(
@@ -378,12 +374,9 @@ fn run_refine_gap_fill(
         &mut generated.document,
         code_evidence,
     )?;
-    generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
-        [generated.cost_usd, outcome.cost_usd],
-        "refine gap-fill cost",
-    )?
-    .usd();
-    generated.cost_usd_exact &= outcome.cost_usd_exact;
+    generated.cost = generated
+        .cost
+        .checked_add(outcome.cost, "refine gap-fill cost")?;
     Ok(())
 }
 
@@ -405,10 +398,7 @@ fn close_open_questions(
     if open.is_empty() {
         return Ok(QuestionCloserOutcome::skipped("none-needed", 0));
     }
-    if input
-        .budget_usd
-        .is_some_and(|budget| generated.cost_usd >= budget)
-    {
+    if super::pipeline::staged_budget_exhausted(input, generated.cost) {
         return Ok(QuestionCloserOutcome::skipped(
             "budget-exhausted",
             open.len(),
@@ -423,12 +413,9 @@ fn close_open_questions(
         &mut generated.document,
         &delta.code_evidence,
     )?;
-    generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
-        [generated.cost_usd, outcome.cost_usd],
-        "refine question-closer cost",
-    )?
-    .usd();
-    generated.cost_usd_exact &= outcome.cost_usd_exact;
+    generated.cost = generated
+        .cost
+        .checked_add(outcome.cost, "refine question-closer cost")?;
     Ok(outcome)
 }
 

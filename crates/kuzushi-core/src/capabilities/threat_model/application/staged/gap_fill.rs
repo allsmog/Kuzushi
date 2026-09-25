@@ -6,8 +6,7 @@ pub(crate) struct GapFillOutcome {
     pub(crate) added_threats: usize,
     pub(crate) added_deprioritized: usize,
     pub(crate) added_entry_points: usize,
-    pub(crate) cost_usd: f64,
-    pub(crate) cost_usd_exact: bool,
+    pub(crate) cost: crate::runtime::RuntimeCostReport,
 }
 
 /// Stage G: one bounded STRIDE pass over ONLY the uncovered entry points.
@@ -24,14 +23,8 @@ pub(crate) fn run_gap_fill(
 ) -> Result<GapFillOutcome> {
     let prompt = code_evidence.append_to(gap_fill_prompt(input, gaps, document));
     let costed = query_gap_fill(runtime, ctx, input, verb, gaps.len(), prompt)?;
-    let outcome = merge_gap_fill(
-        document,
-        &costed.value,
-        gaps,
-        costed.cost_usd,
-        costed.cost_usd_exact,
-    );
-    Ok(outcome)
+    let cost = costed.cost_report()?;
+    Ok(merge_gap_fill(document, &costed.value, gaps, cost))
 }
 
 fn query_gap_fill(
@@ -207,8 +200,7 @@ fn merge_gap_fill(
     document: &mut Value,
     response: &Value,
     gaps: &[CoverageGap],
-    cost_usd: f64,
-    cost_usd_exact: bool,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> GapFillOutcome {
     let allowed = gaps_by_id(gaps);
     let threats = sanitized_gap_threats(response, &allowed);
@@ -223,8 +215,7 @@ fn merge_gap_fill(
         added_threats,
         added_deprioritized,
         added_entry_points,
-        cost_usd,
-        cost_usd_exact,
+        cost,
     }
 }
 
@@ -235,6 +226,7 @@ fn gaps_by_id<'a>(gaps: &'a [CoverageGap]) -> BTreeMap<&'a str, &'a CoverageGap>
 }
 
 fn sanitized_gap_threats(response: &Value, allowed: &BTreeMap<&str, &CoverageGap>) -> Vec<Value> {
+    let links = entry_point_links(response);
     response
         .get("threats")
         .and_then(Value::as_array)
@@ -242,6 +234,7 @@ fn sanitized_gap_threats(response: &Value, allowed: &BTreeMap<&str, &CoverageGap
         .unwrap_or_default()
         .into_iter()
         .filter(|threat| threat_ids_are_allowed(threat, allowed))
+        .filter_map(|threat| with_target_elements(threat, &links))
         .map(|mut threat| {
             threat["evidence"] = json!([]);
             threat["gapFill"] = json!(true);
@@ -250,6 +243,46 @@ fn sanitized_gap_threats(response: &Value, allowed: &BTreeMap<&str, &CoverageGap
             }
             threat
         })
+        .collect()
+}
+
+/// The model's own DFD links for each entry-point row it returned.
+fn entry_point_links(response: &Value) -> BTreeMap<String, Vec<String>> {
+    response_rows(response, "entryPoints")
+        .filter_map(|row| {
+            let id = row.get("id")?.as_str()?.to_string();
+            Some((id, string_array(row.get("targetElementIds"))))
+        })
+        .collect()
+}
+
+/// A threat that omitted `targetElementIds` inherits the links of the entry
+/// points it cites, marked as derived. One that still has none is dropped:
+/// its surface stays an honest coverage gap instead of failing the build.
+fn with_target_elements(mut threat: Value, links: &BTreeMap<String, Vec<String>>) -> Option<Value> {
+    if !string_array(threat.get("targetElementIds")).is_empty() {
+        return Some(threat);
+    }
+    let derived = string_array(threat.get("entryPointIds"))
+        .iter()
+        .flat_map(|id| links.get(id).cloned().unwrap_or_default())
+        .collect::<std::collections::BTreeSet<_>>();
+    if derived.is_empty() {
+        return None;
+    }
+    threat["targetElementIds"] = json!(derived);
+    threat["targetElementIdsSource"] = json!("entryPoints");
+    Some(threat)
+}
+
+fn string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
         .collect()
 }
 
@@ -393,7 +426,7 @@ mod tests {
             gap("AS-admin", "GET /admin/debug", "src/admin.rs"),
             gap("AS-health", "GET /health", "src/health.rs"),
         ];
-        let outcome = merge_gap_fill(&mut document, &response, &gaps, 0.1, true);
+        let outcome = merge_gap_fill(&mut document, &response, &gaps, crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::from_usd(0.1, "test").unwrap()));
         assert_eq!(outcome.added_threats, 1);
         assert_eq!(outcome.added_deprioritized, 1);
         assert_eq!(outcome.added_entry_points, 1);
@@ -411,6 +444,41 @@ mod tests {
     }
 
     #[test]
+    fn unlinked_gap_threats_inherit_their_entry_point_links_or_are_dropped() {
+        let mut document = json!({"threats": [], "deprioritized": []});
+        let response = json!({
+            "threats": [
+                {"id": "T-LINKED", "entryPointIds": ["AS-admin"]},
+                {"id": "T-ORPHAN", "entryPointIds": ["AS-health"]}
+            ],
+            "deprioritized": [],
+            "entryPoints": [{
+                "id": "AS-admin",
+                "targetElementIds": ["web", "flow-admin"],
+                "name": "GET /admin/debug",
+                "path": "src/admin.rs"
+            }]
+        });
+        let gaps = vec![
+            gap("AS-admin", "GET /admin/debug", "src/admin.rs"),
+            gap("AS-health", "GET /health", "src/health.rs"),
+        ];
+
+        let outcome = merge_gap_fill(
+            &mut document,
+            &response,
+            &gaps,
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        );
+
+        assert_eq!(outcome.added_threats, 1, "the unlinkable threat is dropped");
+        let linked = &document["threats"][0];
+        assert_eq!(linked["id"], json!("T-LINKED"));
+        assert_eq!(linked["targetElementIds"], json!(["flow-admin", "web"]));
+        assert_eq!(linked["targetElementIdsSource"], json!("entryPoints"));
+    }
+
+    #[test]
     fn gap_fill_does_not_duplicate_an_existing_stable_entry_point() {
         let mut document = json!({
             "attackSurface": {"entryPoints": [{"id": "AS-admin", "name": "existing"}]}
@@ -422,7 +490,7 @@ mod tests {
         });
 
         let gaps = vec![gap("AS-admin", "GET /admin/debug", "src/admin.rs")];
-        let outcome = merge_gap_fill(&mut document, &response, &gaps, 0.0, true);
+        let outcome = merge_gap_fill(&mut document, &response, &gaps, crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO));
 
         assert_eq!(outcome.added_entry_points, 0);
         assert_eq!(
@@ -443,7 +511,7 @@ mod tests {
         let mut document = json!({});
         let response = json!({
             "threats": [
-                {"id": "T-valid", "entryPointIds": ["AS-admin"], "surface": "forged"},
+                {"id": "T-valid", "targetElementIds": ["web"], "entryPointIds": ["AS-admin"], "surface": "forged"},
                 {"id": "T-invented", "entryPointIds": ["AS-invented"]}
             ],
             "deprioritized": [
@@ -456,7 +524,7 @@ mod tests {
         });
         let gaps = vec![gap("AS-admin", "GET /admin/debug", "src/admin.rs")];
 
-        let outcome = merge_gap_fill(&mut document, &response, &gaps, 0.0, true);
+        let outcome = merge_gap_fill(&mut document, &response, &gaps, crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO));
 
         assert_eq!(outcome.added_threats, 1);
         assert_eq!(outcome.added_deprioritized, 0);

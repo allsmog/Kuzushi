@@ -558,7 +558,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert!(output.contains(&target));
         assert!(output.contains("partial — inadequate evidence"));
         assert!(output.contains("previous model preserved"));
-        assert!(output.contains("Cost:     >=$0.0000 (incomplete)"));
+        assert!(output.contains("Cost:     >=$0.0000 (metering incomplete)"));
         assert!(!output.contains("threat-model:build complete"));
         let lifecycle = crate::run_lifecycle::read_run_items(workspace.root(), run_id)
             .unwrap()

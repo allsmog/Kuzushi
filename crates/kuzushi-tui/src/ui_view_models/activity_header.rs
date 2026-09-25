@@ -98,7 +98,16 @@ fn activity_cost_label(session: &ActivitySession) -> String {
         Err(_) => "cost accounting error".to_string(),
         Ok(cost) if cost.is_unavailable() => "cost not recorded".to_string(),
         Ok(cost) if cost.is_complete() => format!("cost ${:.4}", cost.observed_usd()),
-        Ok(cost) => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
+        Ok(cost) => incomplete_cost_label(cost),
+    }
+}
+
+/// Unmetered spend shows its labelled token estimate when every call was
+/// priced; otherwise only the observed floor is claimed.
+fn incomplete_cost_label(cost: kuzushi_core::runtime::RuntimeCostReport) -> String {
+    match cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        Some(estimate) => format!("cost ~${estimate:.4} estimated"),
+        None => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
     }
 }
 
@@ -481,6 +490,20 @@ mod tests {
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
         assert!(model.detailed_title.contains("cost >=$0.0000 (incomplete)"));
+    }
+
+    #[test]
+    fn activity_header_shows_the_estimate_for_priced_unmetered_spend() {
+        use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
+        let mut session = ActivitySession::new("tool-estimated");
+        session.settle_runtime_cost(
+            RuntimeCostReport::INCOMPLETE_ZERO
+                .with_unmetered_estimate(Some(RuntimeCost::from_usd(0.45, "test").unwrap())),
+        );
+
+        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
+
+        assert!(model.detailed_title.contains("cost ~$0.4500 estimated"));
     }
 
     #[test]

@@ -8,8 +8,7 @@ const MAX_PROMPT_THREATS: usize = 40;
 pub(crate) struct QuestionCloserOutcome {
     pub(crate) questions_closed: usize,
     pub(crate) questions_open: usize,
-    pub(crate) cost_usd: f64,
-    pub(crate) cost_usd_exact: bool,
+    pub(crate) cost: crate::runtime::RuntimeCostReport,
     pub(crate) method: &'static str,
 }
 
@@ -18,8 +17,7 @@ impl QuestionCloserOutcome {
         Self {
             questions_closed: 0,
             questions_open,
-            cost_usd: 0.0,
-            cost_usd_exact: true,
+            cost: crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
             method,
         }
     }
@@ -54,8 +52,7 @@ pub(crate) fn run_question_closer(
     Ok(QuestionCloserOutcome {
         questions_closed,
         questions_open: open_question_texts(document).len(),
-        cost_usd: costed.cost_usd,
-        cost_usd_exact: costed.cost_usd_exact,
+        cost: costed.cost_report()?,
         method: "structured-llm",
     })
 }

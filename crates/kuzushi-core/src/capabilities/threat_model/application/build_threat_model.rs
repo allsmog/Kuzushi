@@ -767,8 +767,7 @@ fn emit_artifact_write(
 pub(crate) struct GeneratedThreatModel {
     pub(crate) document: Value,
     pub(crate) bridge_findings: Option<Vec<Value>>,
-    pub(crate) cost_usd: f64,
-    pub(crate) cost_usd_exact: bool,
+    pub(crate) cost: crate::runtime::RuntimeCostReport,
 }
 
 fn generate_threat_model_document(
@@ -785,9 +784,9 @@ fn generate_threat_model_document(
     let synthesis_stage = stage_scope(&checkpoints, "synthesis");
     let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
     complete_stage(synthesis_stage, Vec::new());
+    let cost = costed.cost_report()?;
     let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
-    generated.cost_usd = costed.cost_usd;
-    generated.cost_usd_exact = costed.cost_usd_exact;
+    generated.cost = cost;
     emit_validation_done(ctx, verb);
     Ok(generated)
 }
@@ -875,8 +874,7 @@ pub(crate) fn normalize_threat_model_raw(
     Ok(GeneratedThreatModel {
         document,
         bridge_findings,
-        cost_usd: 0.0,
-        cost_usd_exact: true,
+        cost: crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
     })
 }
 
@@ -1070,13 +1068,7 @@ fn honesty_partial_envelope(
 fn generated_threat_model_cost(
     generated: &GeneratedThreatModel,
 ) -> Result<crate::runtime::RuntimeCostReport> {
-    let observed =
-        crate::runtime::RuntimeCost::from_usd(generated.cost_usd, "threat-model generated cost")?;
-    Ok(if generated.cost_usd_exact {
-        crate::runtime::RuntimeCostReport::known(observed)
-    } else {
-        crate::runtime::RuntimeCostReport::incomplete(observed)
-    })
+    Ok(generated.cost)
 }
 
 fn threat_model_result_data(

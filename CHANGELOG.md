@@ -19,6 +19,17 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Staged threat-model builds no longer fail after paying for every stage when
+  the model leaves `targetElementIds` off a gap-fill threat. Such a threat now
+  inherits the DFD links of the entry points it cites, marked
+  `targetElementIdsSource: "entryPoints"`. A threat with nothing to inherit is
+  dropped and its surface stays an honest gap. On Juice Shop the staged
+  pipeline now accounts for 40 of 40 grounded surfaces.
+- `threat-model:build` `budgetUsd` is enforced even when the provider does not
+  report spend. The staged, gap-fill, refine and question-closer checks read
+  the labelled token estimate, fail closed on unpriced unmetered spend, and
+  settle the workspace spend ledger to the estimate. The build summary and
+  the Run Focus header show `~$X estimated` rather than `>=$0.0000`.
 - A `targetSubdir` taint-iris-next hunt builds cpg-rs graphs only for the
   languages present under its scan root. On a mixed-language repository, a
   TypeScript-only subtree used to fail the JavaScript build and drop to the
