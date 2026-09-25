@@ -78,6 +78,17 @@ fn option_spec_for_input_key<'a>(tool: &'a ToolDescriptor, name: &str) -> Option
         .find(|spec| spec.matches_name_or_alias(name))
 }
 
+/// Refuse an operator-supplied option name the tool does not declare, with
+/// the same message and suggestion as unknown `--input` keys. `--option`
+/// values land in the option store, whose unknown keys the prepare boundary
+/// otherwise ignores (a stored `setg` value may target other tools).
+pub fn ensure_declared_tool_option(tool: &ToolDescriptor, name: &str) -> Result<()> {
+    match option_spec_for_input_key(tool, name) {
+        Some(_) => Ok(()),
+        None => anyhow::bail!("{}", unknown_tool_option_message(tool, name)),
+    }
+}
+
 fn reject_unknown_tool_options(tool: &ToolDescriptor, object: &Map<String, Value>) -> Result<()> {
     if let Some(name) = object.keys().next() {
         anyhow::bail!("{}", unknown_tool_option_message(tool, name));

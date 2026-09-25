@@ -5,25 +5,46 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::time::Duration;
 
-pub(crate) async fn mcp_command(command: McpCommand) -> Result<()> {
+pub(crate) async fn mcp_command(command: McpCommand, target: Option<PathBuf>) -> Result<()> {
     match command {
-        McpCommand::Serve { backend } => serve_mcp_backend(backend),
-        McpCommand::Health { backend } => health_mcp_backend(backend),
+        McpCommand::Serve { backend } => serve_mcp_backend(backend, target.as_deref()),
+        McpCommand::Health { backend } => health_mcp_backend(backend, target.as_deref()),
     }
 }
 
-pub(crate) fn serve_mcp_backend(backend: McpBackend) -> Result<()> {
+/// A global `--target` grants the server that root, the same read capability
+/// the agent bridge passes, so `kuzushi --target <repo> mcp health cpg`
+/// reports that repository instead of "unresolved".
+fn grant_target_read_root(command: &mut Command, target: Option<&Path>) -> Result<()> {
+    if let Some(target) = target {
+        command.env(
+            kuzushi_mcp_common::MCP_READ_ROOTS_ENV,
+            target_read_roots_json(target)?,
+        );
+    }
+    Ok(())
+}
+
+fn target_read_roots_json(target: &Path) -> Result<String> {
+    let root = std::fs::canonicalize(target)
+        .with_context(|| format!("MCP target {} does not exist", target.display()))?;
+    Ok(serde_json::to_string(&[root])?)
+}
+
+pub(crate) fn serve_mcp_backend(backend: McpBackend, target: Option<&Path>) -> Result<()> {
     let binary = resolve_mcp_binary(backend.binary());
     let mut command = Command::new(&binary);
+    grant_target_read_root(&mut command, target)?;
     let (child, process_group) = spawn_guarded_mcp(&mut command)
         .with_context(|| mcp_spawn_error(&binary.display().to_string()))?;
     let status = wait_for_mcp_child(register_mcp_child(child, process_group)?)?;
     exit_with_mcp_status(status, &binary);
 }
 
-pub(crate) fn health_mcp_backend(backend: McpBackend) -> Result<()> {
+pub(crate) fn health_mcp_backend(backend: McpBackend, target: Option<&Path>) -> Result<()> {
     let binary = resolve_mcp_binary(backend.binary());
     let mut command = Command::new(&binary);
+    grant_target_read_root(&mut command, target)?;
     command
         .arg("--health")
         .stdout(Stdio::piped())
@@ -152,6 +173,20 @@ fn sibling_mcp_binary(executable: &Path, binary_name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_global_target_becomes_the_servers_single_read_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = std::fs::canonicalize(temp.path()).unwrap();
+
+        let json = target_read_roots_json(temp.path()).unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<Vec<PathBuf>>(&json).unwrap(),
+            vec![canonical]
+        );
+        assert!(target_read_roots_json(&temp.path().join("missing")).is_err());
+    }
 
     #[test]
     fn pipe_reader_preserves_the_complete_byte_stream() {

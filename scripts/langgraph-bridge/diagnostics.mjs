@@ -25,8 +25,11 @@ const STOP_CLASSES = new Map([
   ["content_filter", "filtered"],
 ]);
 
-export function debugDumpBridgeCall(kind, request, tools, systemPrompt, response) {
-  const metadata = bridgeDiagnosticMetadata(kind, request, tools, systemPrompt, response);
+export function debugDumpBridgeCall(kind, request, tools, systemPrompt, response, transcript) {
+  const metadata = {
+    ...bridgeDiagnosticMetadata(kind, request, tools, systemPrompt, response),
+    transcriptToolCalls: transcriptToolCalls(transcript),
+  };
   const options = request?.runtimeOptions ?? request?.runtime_options ?? {};
   appendDiagnostic(options.bridgeLogPath ?? options.bridge_log_path, metadata);
   writeVerboseDiagnostic(options.bridgeVerbose ?? options.bridge_verbose, metadata);
@@ -54,7 +57,32 @@ export function bridgeDiagnosticMetadata(kind, request, tools, systemPrompt, res
     responseLen: responseTextLength(response),
     stopClass: stopClass(response?.response_metadata?.finish_reason),
     responseToolCount: Array.isArray(response?.tool_calls) ? response.tool_calls.length : 0,
+    responseToolNames: responseToolNames(response),
   };
+}
+
+const MAX_DIAGNOSTIC_TOOL_NAMES = 16;
+
+// Per-tool call counts across an agent loop's whole transcript: the final
+// message alone hides every earlier tool-calling turn. Names only.
+export function transcriptToolCalls(messages) {
+  const counts = {};
+  for (const message of Array.isArray(messages) ? messages : []) {
+    for (const name of responseToolNames(message)) {
+      counts[name] = (counts[name] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+// Tool names are registry identifiers (for example `cpg.taint_paths`), never
+// prompt or response content, so they stay within the metadata-only contract.
+function responseToolNames(response) {
+  if (!Array.isArray(response?.tool_calls)) return [];
+  return response.tool_calls
+    .map((call) => String(call?.name ?? "").slice(0, 80))
+    .filter(Boolean)
+    .slice(0, MAX_DIAGNOSTIC_TOOL_NAMES);
 }
 
 function appendDiagnostic(file, metadata) {

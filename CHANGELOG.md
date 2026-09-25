@@ -19,6 +19,27 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The CPG MCP server queries every buildable language, not only languages
+  with a persisted graph. On Juice Shop a persisted client-side JavaScript
+  graph hid the whole TypeScript server, so `cpg.taint_paths` found no
+  sources or sinks. It now reports `routes/search.ts` `req.query` →
+  `sequelize.query`. A language whose implicit build fails is skipped and
+  named on stderr; the call fails only when no language loads.
+- `kuzushi --target <repo> mcp health|serve <backend>` grants the server
+  that repository as its read root. Before, `mcp health cpg` always reported
+  `targetRoot: unresolved`.
+- `kuzushi run --option key=value` refuses an option the tool does not
+  declare, with the same "Did you mean" message as an unknown `--input` key.
+  Before, the value was dropped silently.
+- A taint-iris-next agent answer that needs structured-output repair is no
+  longer thrown away just because the provider reported no charge. The
+  repair's spend stop now uses the labelled estimate and fails closed only
+  when spend is neither metered nor priced.
+- Bridge debug diagnostics now name the tools each call used and count them
+  across the whole agent transcript (names only, no content), so MCP use can
+  be audited. Live on Juice Shop, taint-iris-next's agent called
+  `cpg_taint_paths`, `tree_sitter_query`/`node_at`, `threat_model_get`,
+  `context_get`, `entry_points_list`, `x_ray_summary` and `findings_query`.
 - `patch:reverify` reports the spend of the detector it replays. Before, its
   result carried no cost, so a re-verification that made model calls read
   "cost not recorded". It now shows the observed floor plus the token

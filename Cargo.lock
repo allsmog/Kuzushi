@@ -1913,6 +1913,7 @@ dependencies = [
  "clap",
  "kuzushi-core",
  "kuzushi-cpg",
+ "kuzushi-mcp-common",
  "kuzushi-mcp-treesitter",
  "kuzushi-openai",
  "kuzushi-tui",

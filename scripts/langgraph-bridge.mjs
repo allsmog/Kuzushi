@@ -63,12 +63,12 @@ async function runQueryGraph(request) {
       const completion = await runQueryGraphToConclusion(graph, request, system, progress);
       const { messages } = completion;
       const message = messages.at(-1);
-      debugDumpBridgeCall("query", request, tools, system, message);
+      debugDumpBridgeCall("query", request, tools, system, message, messages);
       return queryResultFromMessages(messages, request, completion.stopReason);
     } catch (error) {
       if (!isMcpToolTimeoutError(error)) throw error;
       const message = progress.messages.at(-1);
-      debugDumpBridgeCall("query", request, tools, system, message);
+      debugDumpBridgeCall("query", request, tools, system, message, progress.messages);
       return interruptedQueryResult(progress.messages, "mcp_tool_timeout");
     }
   }, mcp.close);

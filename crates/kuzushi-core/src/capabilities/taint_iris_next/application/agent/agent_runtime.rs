@@ -170,14 +170,16 @@ fn remaining_observed_spend(
     let Some(stop_usd) = stop_usd else {
         return Ok(None);
     };
-    if !spent.is_complete() {
+    // Unmetered but priced spend counts at its labelled estimate; spend that
+    // is neither metered nor priced cannot prove it is under the stop.
+    let Some(spent_usd) = spent.estimated_total_usd() else {
         return Err(spend_stop_error(
-            "observed spend receipt is incomplete",
+            "observed spend receipt is incomplete and unpriced",
             spent,
             raw_text,
         ));
-    }
-    let remaining = stop_usd - spent.observed_usd();
+    };
+    let remaining = stop_usd - spent_usd;
     if remaining <= 0.0 {
         return Err(spend_stop_error(
             "observed spend stop is exhausted",
@@ -345,6 +347,22 @@ mod observed_spend_tests {
             .to_string()
             .contains("incomplete"));
         assert!(remaining_observed_spend(Some(0.25), exhausted, "raw")
+            .unwrap_err()
+            .error
+            .to_string()
+            .contains("exhausted"));
+    }
+
+    #[test]
+    fn priced_unmetered_spend_repairs_within_the_estimated_remainder() {
+        let estimated = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(
+            RuntimeCost::from_usd(0.40, "test estimated spend").unwrap(),
+        ));
+
+        let remaining = remaining_observed_spend(Some(1.0), estimated, "raw").unwrap();
+
+        assert!((remaining.unwrap() - 0.60).abs() < 1e-9);
+        assert!(remaining_observed_spend(Some(0.30), estimated, "raw")
             .unwrap_err()
             .error
             .to_string()
