@@ -57,6 +57,7 @@ pub(in crate::modules) fn run_sast_post_processing(
     store: &crate::findings::FindingStore,
     run_ids: &SastRunIds,
     artifacts: &SastRunArtifacts,
+    threat_model_lease: &ScanThreatModelLease,
 ) -> Result<SastPostProcessing> {
     let (triage, verification_results, patch_results) = run_sast_triage_and_proof(
         registry,
@@ -76,6 +77,7 @@ pub(in crate::modules) fn run_sast_post_processing(
         ctx,
         runtime,
         option_store,
+        threat_model_lease,
     );
     Ok(SastPostProcessing {
         triage,
@@ -124,8 +126,10 @@ fn run_sast_triage_and_proof(
 }
 
 /// Refine the active threat model with the findings triage just confirmed.
-/// A refusal (for example no model exists yet) becomes a disclosed result
-/// rather than failing a scan whose findings are already persisted.
+/// The scan is done reading its bound revision by now, and the refine commits
+/// a new one, so the scan's shared lease is released first. A refusal (for
+/// example no model exists yet) becomes a disclosed result rather than
+/// failing a scan whose findings are already persisted.
 fn run_optional_threat_model_feedback(
     registry: &ModuleRegistry,
     requests: &SastScanRequests,
@@ -133,10 +137,12 @@ fn run_optional_threat_model_feedback(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     option_store: &crate::options::ToolOptionStore,
+    threat_model_lease: &ScanThreatModelLease,
 ) -> Option<Value> {
     if !(requests.threat_model_feedback && triage_ran) {
         return None;
     }
+    threat_model_lease.release();
     let refine = json!({ "mode": "refine" });
     let output =
         dispatch_sast_subtool(registry, "threat-model:build", refine, ctx, runtime, option_store);

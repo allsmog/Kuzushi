@@ -19,8 +19,9 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         input,
         primary_run_id,
         whitebox_static,
-        _threat_model_lease,
+        threat_model_lease,
     } = prepare_sast_scan(registry, input, ctx, workspace)?;
+    let threat_model_lease = ScanThreatModelLease::new(threat_model_lease);
     let store = sast_store(ctx)?;
     ensure_sast_run_started(registry, workspace, &primary_run_id, &input, ctx)?;
     let fallback_trace = fallback_sast_trace(ctx, workspace, &primary_run_id)?;
@@ -34,6 +35,7 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         store,
         primary_run_id.clone(),
         whitebox_static,
+        &threat_model_lease,
     );
     result
         .map_err(|error| started_sast_scan_error(workspace, &primary_run_id, error, ctx, &run_ctx))
@@ -60,7 +62,7 @@ struct PreparedSastScan {
     input: Value,
     primary_run_id: String,
     whitebox_static: Option<WhiteboxStaticPolicy>,
-    _threat_model_lease: Option<crate::capabilities::threat_model::ThreatModelReadLease>,
+    threat_model_lease: Option<crate::capabilities::threat_model::ThreatModelReadLease>,
 }
 
 fn prepare_sast_scan(
@@ -85,7 +87,7 @@ fn prepare_sast_scan(
         input,
         primary_run_id,
         whitebox_static,
-        _threat_model_lease: threat_model_lease,
+        threat_model_lease,
     })
 }
 
@@ -268,6 +270,7 @@ fn run_started_sast_scan(
     store: &FindingStore,
     primary_run_id: String,
     whitebox_static: Option<WhiteboxStaticPolicy>,
+    threat_model_lease: &ScanThreatModelLease,
 ) -> Result<Value> {
     let requests = SastScanRequests::from_input(&input)?;
     let options = sast_scan_options(&input, whitebox_static.is_some())?;
@@ -284,6 +287,7 @@ fn run_started_sast_scan(
         options: &options,
         primary_run_id: &primary_run_id,
         whitebox_static: whitebox_static.is_some(),
+        threat_model_lease,
     })?;
     let findings_count = executed.tally.distinct;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
@@ -569,6 +573,7 @@ struct SastScanExecutionInput<'a> {
     options: &'a ScanRunOptions,
     primary_run_id: &'a str,
     whitebox_static: bool,
+    threat_model_lease: &'a ScanThreatModelLease,
 }
 
 impl SastScanExecutionInput<'_> {
@@ -712,6 +717,7 @@ impl SastScanExecutionInput<'_> {
             self.store,
             run_ids,
             artifacts,
+            self.threat_model_lease,
         )
     }
 

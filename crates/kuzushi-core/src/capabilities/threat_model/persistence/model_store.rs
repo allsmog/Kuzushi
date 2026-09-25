@@ -49,6 +49,8 @@ pub use query::{
 pub(crate) use read_lease::{
     acquire_exact_threat_model_read_lease, acquire_threat_model_read_lease, ThreatModelReadLease,
 };
+#[cfg(test)]
+pub(crate) use read_lease::threat_model_store_accepts_commits;
 use recovery::*;
 use revision::*;
 use storage::*;

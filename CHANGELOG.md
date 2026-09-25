@@ -23,7 +23,9 @@ Notable changes to Kuzushi. Release procedure lives in
   matching CWE's structural queries from these entries, and the agentic-SAST
   threat-model digest asks the agent to look for siblings of each call site. The
   new `sast:scan` option `threatModelFeedback=refine` (default `off`) runs the
-  refine after triage and reports it under `data.threatModelFeedback`. On Juice
+  refine after triage and reports it under `data.threatModelFeedback`. The
+  scan releases its shared lease on the bound model revision before that
+  refine commits, so the refine does not wait on the scan's own lock. On Juice
   Shop, one refine attached 9 of 10 new findings and wrote 9 patterns, and the
   next CWE-89 hunt plan carried the `routes/login.ts` pattern keywords.
 - `threat-model:diff` compares two threat-model permutations. Its required

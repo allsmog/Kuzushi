@@ -4,6 +4,8 @@ pub(crate) use model_store::{
     acquire_exact_threat_model_read_lease, acquire_threat_model_read_lease,
     apply_threat_model_patch_to_active, ThreatModelReadLease,
 };
+#[cfg(test)]
+pub(crate) use model_store::threat_model_store_accepts_commits;
 pub(crate) use store::*;
 
 mod model_store;
