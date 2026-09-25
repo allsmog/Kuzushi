@@ -84,7 +84,7 @@ const APPROVED_FIXTURE_HASHES = new Map([
   ],
   [
     "crates/kuzushi-core/src/modules/application/sast_scan/run_sast_scan.rs",
-    "2ba247dc30d613e20e2672102baf57027faabac7e022bbc8836dc7bfff6fd240",
+    "76c20f7c54a98f848ba7685fad6850afbea803a7f2342588cd14ec3681fa912a",
   ],
   [
     "crates/kuzushi-core/src/run_lifecycle/tests.rs",
@@ -92,7 +92,7 @@ const APPROVED_FIXTURE_HASHES = new Map([
   ],
   [
     "crates/kuzushi-core/src/scan/engines/secret_scan/applies_size_binary_and_severity_filters.rs",
-    "a1eab9b5fd96c66e46ce859878072877d34c1ea068aa21401382de2bf4502c63",
+    "561b4c1765f7d7f4455f6f9fa30447dc759a805d69c6f8071fdd8f547aeec670",
   ],
   [
     "crates/kuzushi-core/src/scan/engines/secret_scan/cancellation_stops_native_scan.rs",
