@@ -19,6 +19,14 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `patch:reverify` reports the spend of the detector it replays. Before, its
+  result carried no cost, so a re-verification that made model calls read
+  "cost not recorded". It now shows the observed floor plus the token
+  estimate.
+- `patch apply` without a Fix selection now says how to create one: draft it
+  in the shell with `patch <finding>`, then press `u` on its RESULT READY
+  card. Before, it told the operator to press `u` on Fix, which does nothing
+  when no Fix result card exists.
 - A scan no longer ends partial (exit 1) just because a requested engine
   does not apply to the target, for example systems-hunt on TypeScript. That
   skip stays a visible warning. Skips for any other reason still leave the

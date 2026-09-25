@@ -225,7 +225,13 @@ fn execute_detector(
             Ok(output) => output,
             Err(error) => return record_dispatch_error(&mut request, receipt, ctx, error),
         };
-    finish_detector_output(request, detector, output, receipt, ctx)
+    // The detector's spend is the reverification's spend; a malformed claim
+    // reads as unrecorded rather than failing an already-settled outcome.
+    let cost = crate::run_artifacts::tool_run_output_cost_report(&output)
+        .unwrap_or(crate::runtime::RuntimeCostReport::UNAVAILABLE);
+    let mut result = finish_detector_output(request, detector, output, receipt, ctx)?;
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
 }
 
 #[cfg(test)]
