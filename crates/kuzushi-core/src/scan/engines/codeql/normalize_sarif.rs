@@ -54,8 +54,7 @@ pub(in crate::scan) fn normalize_codeql_sarif_with_diagnostics(
     raw: &str,
     repo_name: &str,
 ) -> Result<CodeqlNormalizationOutcome> {
-    let report: CodeqlSarifOutput =
-        serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")?;
+    let report = parse_codeql_sarif(raw)?;
     let mut outcome = normalize_codeql_report(&report);
     sort_codeql_findings(&mut outcome.findings);
     let _ = repo_name;
@@ -122,17 +121,42 @@ fn bounded_codeql_rule_id(rule_id: Option<&str>) -> String {
     bounded
 }
 
+/// Indexes a scan's SARIF documents as one unit: every document is
+/// preflighted before the first write, so a later ungroundable document
+/// cannot leave evidence from earlier documents behind a failed scan.
+pub fn index_codeql_sarif_documents_as_static_evidence(
+    store: &StaticEvidenceStore,
+    repo_root: impl AsRef<Path>,
+    documents: &[String],
+) -> Result<Vec<StaticEvidenceIndexReport>> {
+    for raw in documents {
+        preflight_codeql_static_evidence(&parse_codeql_sarif(raw)?)?;
+    }
+    documents
+        .iter()
+        .map(|raw| index_codeql_sarif_as_static_evidence(store, repo_root.as_ref(), raw))
+        .collect()
+}
+
+fn parse_codeql_sarif(raw: &str) -> Result<CodeqlSarifOutput> {
+    serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")
+}
+
+fn preflight_codeql_static_evidence(report: &CodeqlSarifOutput) -> Result<()> {
+    let preflight = normalize_codeql_report(report);
+    if let Some(error) = preflight.scan_errors.first() {
+        anyhow::bail!("Could not index CodeQL static evidence: {error}");
+    }
+    Ok(())
+}
+
 pub fn index_codeql_sarif_as_static_evidence(
     store: &StaticEvidenceStore,
     repo_root: impl AsRef<Path>,
     raw: &str,
 ) -> Result<StaticEvidenceIndexReport> {
-    let report: CodeqlSarifOutput =
-        serde_json::from_str(raw).context("Could not parse CodeQL SARIF output")?;
-    let preflight = normalize_codeql_report(&report);
-    if let Some(error) = preflight.scan_errors.first() {
-        anyhow::bail!("Could not index CodeQL static evidence: {error}");
-    }
+    let report = parse_codeql_sarif(raw)?;
+    preflight_codeql_static_evidence(&report)?;
 
     let mut index_report = StaticEvidenceIndexReport::new(store.db_path());
     let repo_root = repo_root.as_ref();
@@ -223,5 +247,49 @@ mod tests {
             .to_string()
             .contains("Could not index CodeQL static evidence"));
         assert!(error.to_string().contains("lost.rule"));
+    }
+
+    const GROUNDED_SARIF: &str = r#"{
+      "runs": [{
+        "tool": {"driver": {"rules": [{"id": "good.rule"}]}},
+        "results": [{
+          "ruleId": "good.rule",
+          "message": {"text": "grounded result"},
+          "locations": [{
+            "physicalLocation": {
+              "artifactLocation": {"uri": "src/lib.rs"},
+              "region": {"startLine": 7}
+            }
+          }]
+        }]
+      }]
+    }"#;
+
+    #[test]
+    fn document_collection_with_one_ungroundable_document_writes_no_evidence() {
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let documents = vec![GROUNDED_SARIF.to_string(), MIXED_SARIF.to_string()];
+
+        let error =
+            index_codeql_sarif_documents_as_static_evidence(&store, ".", &documents).unwrap_err();
+
+        assert!(error.to_string().contains("lost.rule"), "{error}");
+        let grounded = normalize_codeql_sarif(GROUNDED_SARIF, "repo").unwrap();
+        let nodes = store
+            .list_nodes_for_finding(&grounded[0].fingerprint)
+            .unwrap();
+        assert!(nodes.is_empty(), "earlier document leaked evidence: {nodes:?}");
+    }
+
+    #[test]
+    fn document_collection_indexes_every_groundable_document() {
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let documents = vec![GROUNDED_SARIF.to_string()];
+
+        let reports =
+            index_codeql_sarif_documents_as_static_evidence(&store, ".", &documents).unwrap();
+
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].findings_indexed, 1);
     }
 }

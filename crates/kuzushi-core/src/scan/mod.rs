@@ -51,7 +51,8 @@ pub use domain::{
 #[cfg(test)]
 pub(in crate::scan) use engines::codeql::*;
 pub use engines::codeql::{
-    index_codeql_sarif_as_static_evidence, normalize_codeql_sarif, CodeqlScanner,
+    index_codeql_sarif_as_static_evidence, index_codeql_sarif_documents_as_static_evidence,
+    normalize_codeql_sarif, CodeqlScanner,
 };
 pub use engines::exploit_chain::{
     scan_exploit_chains, scan_exploit_chains_with_runtime, ExploitChainReport, ExploitChainScanner,
