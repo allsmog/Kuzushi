@@ -1235,11 +1235,21 @@ fn sast_scan_warnings(reports: &SastPipelineReports) -> Vec<Value> {
                 ScanEngineStageOutcome::Partial => {
                     Some(json!(format!("{engine} returned a usable partial result")))
                 }
-                ScanEngineStageOutcome::Skipped => Some(json!(format!("{engine} was skipped"))),
+                ScanEngineStageOutcome::Skipped => Some(json!(skipped_engine_warning(
+                    engine,
+                    reports.engine_skip_reasons.get(engine)
+                ))),
                 ScanEngineStageOutcome::Complete | ScanEngineStageOutcome::Failed => None,
             }),
     );
     warnings
+}
+
+fn skipped_engine_warning(engine: &str, reason: Option<&String>) -> String {
+    match reason {
+        Some(reason) => format!("{engine} was skipped: {reason}"),
+        None => format!("{engine} was skipped"),
+    }
 }
 
 fn sast_scan_result_envelope(
@@ -1537,6 +1547,7 @@ mod scan_result_outcome_tests {
             engine_ids: outcomes.iter().map(|(engine, _)| *engine).collect(),
             engine_outcomes: outcomes.iter().copied().collect::<BTreeMap<_, _>>(),
             skipped_engines: Vec::new(),
+            engine_skip_reasons: Default::default(),
         }
     }
 }

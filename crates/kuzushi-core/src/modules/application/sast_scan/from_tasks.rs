@@ -179,11 +179,9 @@ fn fill_agentic_sast_report(
     dispatch: &SastSubtoolDispatch<'_>,
 ) -> Result<()> {
     if selected.run_agentic {
-        reports.engine_ids.push("agentic");
         let input = agentic_scoped_input(dispatch.input);
-        let (report, outcome) = dispatch.report_from_input("agentic-sast:scan", &input)?;
-        reports.engine_outcomes.insert("agentic", outcome);
-        reports.agentic = Some(report);
+        let run = dispatch.report_from_input("agentic-sast:scan", &input)?;
+        reports.agentic = reports.record_engine("agentic", run);
     }
     Ok(())
 }
@@ -194,10 +192,8 @@ fn fill_offense_review_report(
     dispatch: &SastSubtoolDispatch<'_>,
 ) -> Result<()> {
     if selected.run_carlini {
-        reports.engine_ids.push("offense-review");
-        let (report, outcome) = dispatch.report_from_data("offense-review:threat-hunt")?;
-        reports.engine_outcomes.insert("offense-review", outcome);
-        reports.carlini = Some(report);
+        let run = dispatch.report_from_data("offense-review:threat-hunt")?;
+        reports.carlini = reports.record_engine("offense-review", run);
     }
     Ok(())
 }
@@ -222,12 +218,42 @@ fn fill_systems_hunt_report(
     dispatch: &SastSubtoolDispatch<'_>,
 ) -> Result<()> {
     if selected.run_systems_hunt {
-        reports.engine_ids.push("systems-hunt");
-        let (report, outcome) = dispatch.report_from_data("systems-hunt:systems-hunt")?;
-        reports.engine_outcomes.insert("systems-hunt", outcome);
-        reports.systems_hunt = Some(report);
+        let run = dispatch.report_from_data("systems-hunt:systems-hunt")?;
+        reports.systems_hunt = reports.record_engine("systems-hunt", run);
     }
     Ok(())
+}
+
+/// One dispatched engine: its parsed report (absent when it skipped), its
+/// outcome, and the engine's own reason for a skip.
+struct EngineRun<T> {
+    report: Option<T>,
+    outcome: crate::run_artifacts::ScanEngineStageOutcome,
+    skip_reason: Option<String>,
+}
+
+impl<T> EngineRun<T> {
+    fn skipped(output: &Value) -> Self {
+        Self {
+            report: None,
+            outcome: crate::run_artifacts::ScanEngineStageOutcome::Skipped,
+            skip_reason: output
+                .get("summary")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        }
+    }
+}
+
+impl SastPipelineReports {
+    fn record_engine<T>(&mut self, engine: &'static str, run: EngineRun<T>) -> Option<T> {
+        self.engine_ids.push(engine);
+        self.engine_outcomes.insert(engine, run.outcome);
+        if let Some(reason) = run.skip_reason {
+            self.engine_skip_reasons.insert(engine, reason);
+        }
+        run.report
+    }
 }
 
 struct SastSubtoolDispatch<'a> {
@@ -242,29 +268,39 @@ impl SastSubtoolDispatch<'_> {
     fn report_from_data<T>(
         &self,
         tool_name: &str,
-    ) -> Result<(T, crate::run_artifacts::ScanEngineStageOutcome)>
+    ) -> Result<EngineRun<T>>
     where
         T: serde::de::DeserializeOwned,
     {
         self.report_from_input(tool_name, self.input)
     }
 
+    /// An engine that reports `skipped` (it does not apply to this target)
+    /// has no report to parse; its outcome is still recorded.
     fn report_from_input<T>(
         &self,
         tool_name: &str,
         input: &Value,
-    ) -> Result<(T, crate::run_artifacts::ScanEngineStageOutcome)>
+    ) -> Result<EngineRun<T>>
     where
         T: serde::de::DeserializeOwned,
     {
         let output = self.checkpointed_engine_output(tool_name, input)?;
+        let outcome = scan_engine_outcome(&output);
+        if outcome == crate::run_artifacts::ScanEngineStageOutcome::Skipped {
+            return Ok(EngineRun::skipped(&output));
+        }
         let data = output
             .get("data")
             .cloned()
             .with_context(|| format!("{tool_name} output did not include data"))?;
         let report = serde_json::from_value(data)
             .with_context(|| format!("{tool_name} returned invalid report data"))?;
-        Ok((report, scan_engine_outcome(&output)))
+        Ok(EngineRun {
+            report: Some(report),
+            outcome,
+            skip_reason: None,
+        })
     }
 
     fn taint_iris_next_report(

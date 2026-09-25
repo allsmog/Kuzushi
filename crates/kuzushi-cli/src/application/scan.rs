@@ -362,17 +362,35 @@ fn scan_semantic_error(result: &serde_json::Value) -> Option<anyhow::Error> {
     if !matches!(status, ToolResultStatus::Partial | ToolResultStatus::Failed) {
         return None;
     }
-    let message = result
-        .get("errors")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|errors| errors.first())
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| result.get("summary").and_then(serde_json::Value::as_str))
-        .unwrap_or(match status {
-            ToolResultStatus::Partial => "scan returned status=partial",
-            _ => "scan returned status=failed",
+    if let Some(error) = first_message(result, "errors") {
+        return Some(anyhow::anyhow!(error.to_string()));
+    }
+    // A partial scan's summary still reads "completed", so its first warning
+    // (for example the engine that was skipped, and why) says what fell short.
+    let partial_reason = (status == ToolResultStatus::Partial)
+        .then(|| first_message(result, "warnings"))
+        .flatten();
+    let message = partial_reason
+        .map(|warning| format!("scan partial: {warning}"))
+        .or_else(|| {
+            result
+                .get("summary")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| {
+            let label = if status == ToolResultStatus::Partial {
+                "partial"
+            } else {
+                "failed"
+            };
+            format!("scan returned status={label}")
         });
-    Some(anyhow::anyhow!(message.to_string()))
+    Some(anyhow::anyhow!(message))
+}
+
+fn first_message<'a>(result: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    result.get(key)?.as_array()?.first()?.as_str()
 }
 
 fn scan_trace(workspace: &WorkspaceTarget, run_id: &str) -> Result<TraceHandle> {

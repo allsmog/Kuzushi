@@ -19,6 +19,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Offense review no longer fails when a threat cites a directory (for
+  example `routes`). The directory's direct files stand in for it, within
+  the existing file budget. On Juice Shop the engine produced 20 findings
+  across 4 actors.
+- `systems-hunt` reports `skipped` with its reason on a target that has no
+  C/C++/Rust/Go/Zig production source, instead of failing the scan. The
+  scan umbrella records a skipped engine's reason, its warning names it
+  ("systems-hunt was skipped: … does not apply …"), and a partial scan's CLI
+  error leads with that warning rather than a "completed" summary.
+
 - `kuzushi scan --paths <dir>` with exactly one directory now scopes
   taint-iris-next through its `targetSubdir`. Before, the engine read
   evidence from the whole repository (Juice Shop's challenge snippets and

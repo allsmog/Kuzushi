@@ -100,6 +100,7 @@ fn initial_sast_pipeline_reports(
         engine_ids: selected.engine_ids.clone(),
         engine_outcomes,
         skipped_engines: selected.skipped_engines.clone(),
+        engine_skip_reasons: Default::default(),
     }
 }
 
