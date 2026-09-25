@@ -2,7 +2,10 @@
 //!
 //! Threats are matched by `stableId`, falling back to the display `id` only
 //! when a threat carries no `stableId`. Threats with neither are counted as
-//! unkeyed rather than guessed at. DFD elements are matched by `id`.
+//! unkeyed rather than guessed at. Independent builds (model permutations)
+//! mint fresh `stableId`s, so threats left unmatched on both sides are then
+//! paired by an identical display `id` and counted as re-keyed. DFD elements
+//! are matched by `id`.
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -44,6 +47,8 @@ pub struct ThreatSetDiff {
     pub added: Vec<ThreatSummary>,
     pub removed: Vec<ThreatSummary>,
     pub changed: Vec<ThreatFieldChange>,
+    /// Threats whose key changed but whose display `id` paired them.
+    pub rekeyed: usize,
     pub unkeyed: UnkeyedThreatCounts,
 }
 
@@ -158,10 +163,14 @@ impl<'a> KeyedThreats<'a> {
 fn diff_threats(from: &Value, to: &Value) -> ThreatSetDiff {
     let before = keyed_threats(from);
     let after = keyed_threats(to);
+    let rekeys = display_id_rekeys(&before, &after);
+    let mut changed = changed_threats(&before, &after);
+    changed.extend(rekeys.iter().filter_map(ThreatRekey::change));
     ThreatSetDiff {
-        added: missing_from(&after, &before),
-        removed: missing_from(&before, &after),
-        changed: changed_threats(&before, &after),
+        added: missing_from(&after, &before, &rekeys.iter().map(|r| r.to_key.clone()).collect()),
+        removed: missing_from(&before, &after, &rekeys.iter().map(|r| r.from_key.clone()).collect()),
+        changed,
+        rekeyed: rekeys.len(),
         unkeyed: UnkeyedThreatCounts {
             from: before.unkeyed,
             to: after.unkeyed,
@@ -192,11 +201,70 @@ fn threat_key(threat: &Value) -> Option<String> {
     non_empty_text(threat, "stableId").or_else(|| non_empty_text(threat, "id"))
 }
 
-fn missing_from(source: &KeyedThreats<'_>, other: &KeyedThreats<'_>) -> Vec<ThreatSummary> {
+/// A threat unmatched by key on both sides, paired by its display `id`.
+struct ThreatRekey<'a> {
+    from_key: String,
+    to_key: String,
+    before: &'a Value,
+    after: &'a Value,
+}
+
+impl ThreatRekey<'_> {
+    fn change(&self) -> Option<ThreatFieldChange> {
+        threat_change(&self.to_key, self.before, self.after)
+    }
+}
+
+fn display_id_rekeys<'a>(
+    before: &KeyedThreats<'a>,
+    after: &KeyedThreats<'a>,
+) -> Vec<ThreatRekey<'a>> {
+    let unmatched_before = unmatched_by_unique_display_id(before, after);
+    let mut unmatched_after = unmatched_by_unique_display_id(after, before);
+    unmatched_before
+        .into_iter()
+        .filter_map(|(id, (from_key, threat))| {
+            let (to_key, paired) = unmatched_after.remove(&id)?;
+            Some(ThreatRekey { from_key, to_key, before: threat, after: paired })
+        })
+        .collect()
+}
+
+/// Unmatched threats by display `id`, keeping only ids that name exactly one
+/// threat on this side: a shared id cannot pair threats unambiguously.
+fn unmatched_by_unique_display_id<'a>(
+    source: &KeyedThreats<'a>,
+    other: &KeyedThreats<'a>,
+) -> BTreeMap<String, (String, &'a Value)> {
+    let mut id_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for (_, threat) in &source.rows {
+        if let Some(id) = non_empty_text(threat, "id") {
+            *id_counts.entry(id).or_default() += 1;
+        }
+    }
+    unmatched_rows(source, other)
+        .filter_map(|(key, threat)| Some((non_empty_text(threat, "id")?, (key.clone(), *threat))))
+        .filter(|(id, _)| id_counts.get(id) == Some(&1))
+        .collect()
+}
+
+fn unmatched_rows<'s, 'a>(
+    source: &'s KeyedThreats<'a>,
+    other: &'s KeyedThreats<'a>,
+) -> impl Iterator<Item = &'s (String, &'a Value)> {
     source
         .rows
         .iter()
         .filter(|(key, _)| !other.index.contains_key(key))
+}
+
+fn missing_from(
+    source: &KeyedThreats<'_>,
+    other: &KeyedThreats<'_>,
+    paired: &BTreeSet<String>,
+) -> Vec<ThreatSummary> {
+    unmatched_rows(source, other)
+        .filter(|(key, _)| !paired.contains(key))
         .map(|(key, threat)| ThreatSummary {
             key: key.clone(),
             title: non_empty_text(threat, "title"),
@@ -379,6 +447,46 @@ mod tests {
         assert_eq!(threats.changed[0].key, "T9");
         assert_eq!(threats.changed[0].fields, vec!["title"]);
         assert_eq!(threats.unkeyed, UnkeyedThreatCounts { from: 1, to: 0 });
+    }
+
+    #[test]
+    fn a_shared_display_id_never_pairs_threats() {
+        let first = threat("tm-a", "SQLi", "high");
+        let second = threat("tm-b", "XSS", "high");
+        let fresh = threat("tm-c", "SSRF", "high");
+
+        let threats = diff_threat_model_documents(
+            &document(json!([first, second]), &[]),
+            &document(json!([fresh]), &[]),
+        )
+        .threats;
+
+        assert_eq!(threats.rekeyed, 0);
+        assert_eq!(threats.removed.len(), 2);
+        assert_eq!(threats.added.len(), 1);
+    }
+
+    #[test]
+    fn permutations_with_fresh_stable_ids_pair_by_display_id() {
+        let mut login = threat("tm-1111", "SQLi in login", "critical");
+        login["id"] = json!("TH-001");
+        let mut relogin = threat("tm-2222", "SQL injection in login", "critical");
+        relogin["id"] = json!("TH-001");
+        let mut other = threat("tm-3333", "SSRF", "high");
+        other["id"] = json!("TH-002");
+
+        let threats = diff_threat_model_documents(
+            &document(json!([login]), &[]),
+            &document(json!([relogin, other]), &[]),
+        )
+        .threats;
+
+        assert_eq!(threats.rekeyed, 1);
+        assert!(threats.removed.is_empty(), "{threats:?}");
+        assert_eq!(threats.added.len(), 1);
+        assert_eq!(threats.added[0].key, "tm-3333");
+        assert_eq!(threats.changed[0].key, "tm-2222");
+        assert_eq!(threats.changed[0].fields, vec!["title"]);
     }
 
     #[test]

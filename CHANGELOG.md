@@ -32,7 +32,11 @@ Notable changes to Kuzushi. Release procedure lives in
   lineage and two competing lineages are compared the same way. The result
   lists threats added, removed, and changed (keyed by `stableId`, else `id`,
   naming the changed fields), DFD node/flow/trust-boundary deltas, entry-point
-  coverage on both sides, and whether the methodology changed. An id that does
+  coverage on both sides, and whether the methodology changed. Independent
+  builds mint fresh `stableId`s, so threats unmatched on both sides pair by a
+  display `id` that is unique on each side and count as re-keyed. On Juice
+  Shop, the single-pipeline build (11 threats) against the staged build (20)
+  reads +9 added, 11 re-keyed, instead of +20 added and -11 removed. An id that does
   not resolve is an error naming what was tried, never a substitute revision.
   In the shell, `threats diff <from> <to>` runs the same tool; bare `threats
   diff` still inspects compatibility-mirror edits.

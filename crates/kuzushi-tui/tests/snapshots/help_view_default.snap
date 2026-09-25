@@ -242,6 +242,8 @@ threats models - list immutable threat-model lineages and their active head
   aliases / examples: /threats models
 threats diff - inspect compatibility-mirror edits against the active immutable revision
   aliases / examples: /threats diff, threats inspect diff
+threats diff <from> <to> - compare two revisions (tmr_…) or lineage heads (tm_…) via threat-model:diff
+  aliases / examples: /threats diff <from> <to>
 threats activate <model-id>[@<revision-id>] - activate a model head or exact immutable revision
   aliases / examples: /threats activate <model-id>
 threats revisions <model-id> - list immutable revisions in one threat-model lineage

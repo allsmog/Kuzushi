@@ -92,12 +92,13 @@ fn threat_count_line(
     threats: &ThreatSetDiff,
 ) -> String {
     format!(
-        "threats: {} -> {} (+{} added, -{} removed, ~{} changed, {} unkeyed)",
+        "threats: {} -> {} (+{} added, -{} removed, ~{} changed, {} re-keyed, {} unkeyed)",
         document_threat_count(&from.document),
         document_threat_count(&to.document),
         threats.added.len(),
         threats.removed.len(),
         threats.changed.len(),
+        threats.rekeyed,
         threats.unkeyed.from + threats.unkeyed.to,
     )
 }
