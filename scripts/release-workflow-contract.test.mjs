@@ -82,14 +82,15 @@ test("a cross-built slug must be produced by its own target and artifact", () =>
   }
 });
 
-test("both darwin legs default to the self-hosted runner behind one hosted escape hatch", () => {
+test("both darwin legs stay eligible for the self-hosted runner behind one opt-in", () => {
   assert.deepEqual(publishedSmokeWorkflowFailures(publishedSmoke), []);
   for (const job of ["native-binaries", "local-tarball-smoke"]) {
     assert.ok(jobSource(candidate, job).includes(selfHostedMatrixRunsOn), job);
   }
   assert.ok(jobSource(publishedSmoke, "published-install").includes(selfHostedMatrixRunsOn));
-  // A tag push carries no inputs, so the publisher reaches the hatch by variable.
-  assert.match(publisher, /hosted: \$\{\{ vars\.KUZUSHI_RELEASE_HOSTED == 'true' \}\}/);
+  // A tag push carries no inputs, so the publisher opts into the Mac by variable
+  // and runs on hosted macOS otherwise.
+  assert.match(publisher, /hosted: \$\{\{ vars\.KUZUSHI_RELEASE_SELF_HOSTED != 'true' \}\}/);
 
   const alwaysHosted = candidate.replace(selfHostedMatrixRunsOn, "runs-on: ${{ matrix.os }}");
   assert.match(
