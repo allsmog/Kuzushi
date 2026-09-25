@@ -19,6 +19,12 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- CI runs on GitHub-hosted runners by default. Pull-request CI and the Full
+  CI sweep use `ubuntu-latest` (the quick gate is about four billed Linux
+  minutes per run), and release darwin legs use hosted macOS. The owner's
+  self-hosted Mac is now opt-in: dispatch with `self_hosted: true`, or set
+  `KUZUSHI_RELEASE_SELF_HOSTED=true` for one release. Before, every routine job
+  waited on that runner and queued indefinitely whenever it was offline.
 - The campaign folds no longer present a findings ledger they could not read
   as an empty one. `campaign:status` folded its review decisions with
   `list_all_review_decisions().ok().unwrap_or_default()`, so an unopenable

@@ -19,8 +19,8 @@ on:
         required: false
         type: boolean
         default: false
-      hosted:
-        description: Run on GitHub-hosted ubuntu-latest instead of the self-hosted Mac
+      self_hosted:
+        description: Run on the owner's self-hosted Mac instead of GitHub-hosted ubuntu-latest
         required: false
         type: boolean
         default: false
@@ -36,8 +36,8 @@ on:
         required: false
         type: boolean
         default: false
-      hosted:
-        description: Run on GitHub-hosted ubuntu-latest instead of the self-hosted Mac
+      self_hosted:
+        description: Run on the owner's self-hosted Mac instead of GitHub-hosted ubuntu-latest
         required: false
         type: boolean
         default: false
@@ -59,12 +59,12 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
 
-# Every job below except `windows-compile` runs by default on the owner's
-# ephemeral self-hosted Apple-Silicon runner (labels `self-hosted, macOS,
-# ARM64, kuzushi-mac`), so a full sweep costs no hosted minutes. Passing
-# `hosted: true` flips exactly those jobs back to `ubuntu-latest` for a caller
-# that must not depend on that machine being online -- release-candidate.yml
-# can request it when the Mac is off. Both branches of the expression are JSON
+# Every job below except `windows-compile` runs by default on GitHub-hosted
+# `ubuntu-latest`, so a full sweep never waits on a machine being online.
+# Passing `self_hosted: true` moves exactly those jobs onto the owner's
+# ephemeral Apple-Silicon runner (labels `self-hosted, macOS, ARM64,
+# kuzushi-mac`); release-candidate.yml requests it only when a release opts
+# its darwin legs into that runner. Both branches of the expression are JSON
 # arrays so `runs-on` has one type either way.
 #
 # macOS and `ubuntu-latest` produce different `cargo` target directories, so
@@ -75,7 +75,7 @@ jobs:
   # Fail fast before starting the expensive cross-platform fan-out.
   quality-gauntlet:
     name: quality-gauntlet
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -91,15 +91,14 @@ jobs:
           inherit-toolchain: true
           cache: true
       - run: pnpm install --frozen-lockfile
-      # The Docker path only exists for `hosted: true`, because the
-      # GitHub-hosted ubuntu image is the only runner here with a daemon
-      # running. The self-hosted Mac has none, so it lints with the native
-      # binary at the same pinned version.
+      # The Docker path runs on the default GitHub-hosted ubuntu image, the only
+      # runner here with a daemon running. The opt-in self-hosted Mac has none,
+      # so it lints with the native binary at the same pinned version.
       - name: Lint GitHub Actions workflows (hosted, Docker)
-        if: ${{ inputs.hosted }}
+        if: ${{ !inputs.self_hosted }}
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       - name: Lint GitHub Actions workflows (native binary)
-        if: ${{ !inputs.hosted }}
+        if: ${{ inputs.self_hosted }}
         env:
           ACTIONLINT_VERSION: "1.7.12"
         run: bash scripts/runner/lint-workflows.sh
@@ -113,7 +112,7 @@ jobs:
   rust-core:
     name: rust-core
     needs: quality-gauntlet
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -140,7 +139,7 @@ jobs:
   cargo-deny:
     name: cargo-deny
     needs: quality-gauntlet
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -151,7 +150,7 @@ jobs:
   rust-cli:
     name: rust-cli
     needs: quality-gauntlet
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 60
     # The native payload is host-specific, so the artifact carries the host
     # slug rather than a hardcoded `linux-x64`. Consumers read this output
@@ -200,7 +199,7 @@ jobs:
   coverage:
     name: coverage
     needs: quality-gauntlet
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -245,7 +244,7 @@ jobs:
     name: mutation
     if: ${{ inputs.deep == true }}
     needs: quality-gauntlet
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -284,7 +283,7 @@ jobs:
   node22-compat:
     name: node22-compat
     needs: rust-cli
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -305,7 +304,7 @@ jobs:
   verify-pack:
     name: verify-pack
     needs: rust-cli
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -325,7 +324,7 @@ jobs:
   e2e:
     name: e2e
     needs: rust-cli
-    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

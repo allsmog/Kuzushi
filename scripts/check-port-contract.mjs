@@ -154,9 +154,10 @@ const fullCiRequirements = [
   // self-hosted Mac would download an artifact that was never uploaded.
   "nativePlatformSlug",
   "needs.rust-cli.outputs.native-artifact",
-  // Routine jobs default to the owner's self-hosted Mac; only the Windows
-  // compile stays pinned to a hosted image. RELEASING.md's visibility gate
-  // requires removing the runner before the repository becomes public.
+  // Routine jobs default to hosted ubuntu and opt into the owner's
+  // self-hosted Mac by `self_hosted: true`; only the Windows compile is
+  // pinned to a hosted image. RELEASING.md's visibility gate requires
+  // removing the runner before the repository becomes public.
   '"self-hosted","macOS","ARM64","kuzushi-mac"',
   "runs-on: windows-latest",
   "KUZUSHI_CRAP_RISK_BASE_REF",

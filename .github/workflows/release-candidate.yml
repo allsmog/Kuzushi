@@ -16,10 +16,10 @@ on:
         required: true
         type: string
       hosted:
-        description: Build and smoke the darwin legs on GitHub-hosted macOS runners
+        description: Build and smoke the darwin legs on GitHub-hosted macOS runners (false uses the self-hosted Mac)
         required: false
         type: boolean
-        default: false
+        default: true
   workflow_call:
     inputs:
       expected_version:
@@ -35,10 +35,10 @@ on:
         required: true
         type: string
       hosted:
-        description: Build and smoke the darwin legs on GitHub-hosted macOS runners
+        description: Build and smoke the darwin legs on GitHub-hosted macOS runners (false uses the self-hosted Mac)
         required: false
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   group: release-candidate-${{ github.ref }}
@@ -111,9 +111,9 @@ jobs:
       # A release candidate is the one tree that always earns the mutation
       # sweep, which no longer runs on the monthly Full CI cron.
       deep: true
-      # The hosted escape hatch must cover the full-CI sweep too, or forcing
-      # hosted release legs would still leave ci-full queued on the Mac runner.
-      hosted: ${{ inputs.hosted }}
+      # The full-CI sweep follows the darwin legs: it joins the self-hosted Mac
+      # only when this release opted into it, and otherwise stays hosted.
+      self_hosted: ${{ !inputs.hosted }}
     permissions:
       contents: read
 
@@ -141,10 +141,10 @@ jobs:
             slug: win32-x64
     name: native-${{ matrix.slug }}
     # Both darwin payloads are produced by the one Apple silicon row, so that
-    # row is the whole macOS bill. It runs on the owner's self-hosted Apple
-    # silicon runner by default and costs nothing; `hosted: true` sends it back
-    # to the 10x-billed `macos-14` image. Every other row stays GitHub-hosted,
-    # and no job that holds a credential or write permission is ever eligible.
+    # row is the whole macOS bill. It runs on the hosted `macos-14` image by
+    # default; `hosted: false` moves it onto the owner's self-hosted Apple
+    # silicon runner. Every other row stays GitHub-hosted, and no job that
+    # holds a credential or write permission is ever eligible.
     runs-on: ${{ fromJSON(matrix.self_hosted && !inputs.hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || format('["{0}"]', matrix.os)) }}
     timeout-minutes: 90
     steps:

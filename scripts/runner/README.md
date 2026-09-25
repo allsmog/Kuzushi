@@ -1,9 +1,9 @@
 # Self-hosted CI runner (owner's Mac)
 
-Routine Kuzushi CI runs on one ephemeral self-hosted GitHub Actions runner on
-the repository owner's Apple-Silicon Mac, so a pull request costs no hosted
-minutes. `windows-compile` stays on `windows-latest`, and any caller can pass
-`hosted: true` to put the rest back on `ubuntu-latest`.
+Routine Kuzushi CI runs on GitHub-hosted `ubuntu-latest`. This runner on the
+repository owner's Apple-Silicon Mac is opt-in: a dispatched run passes
+`self_hosted: true`, and a release sets `KUZUSHI_RELEASE_SELF_HOSTED=true`.
+`windows-compile` always stays on `windows-latest`.
 
 Runner labels: `self-hosted`, `macOS`, `ARM64`, `kuzushi-mac`. The workflows
 select on the full set, so a stray runner carrying only the built-in labels
@@ -78,14 +78,14 @@ code as the runner user. Mitigations, in the order they matter:
 
 What is *not* mitigated: a job can read anything `_ghrunner` can read — which
 includes that PAT file — can use the network, and can consume the machine's CPU
-and disk. Treat a suspicious dependency bump as a reason to run that PR with
-`hosted: true` rather than to trust the sandbox. There is no sandbox here.
+and disk. Treat a suspicious dependency bump as a reason to keep that PR on the
+default hosted runner rather than to trust the sandbox. There is no sandbox here.
 
 **Coverage honesty.** The patch-validation sandbox uses bubblewrap and
 AppArmor, which are Linux-only. On this runner the composite action installs
 nothing, `SandboxBackend::detect_backend` resolves to `Plain`, and the
 repository-execution tests pass without exercising isolation. `rust-cli`
-records that in the job summary. Only a Linux run (`hosted: true`) proves that
+records that in the job summary. Only a Linux run (the hosted default) proves that
 path.
 
 ## 1. Create the PAT

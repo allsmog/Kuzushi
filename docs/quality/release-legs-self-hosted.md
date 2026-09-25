@@ -1,9 +1,11 @@
 # Release legs on the self-hosted Mac
 
 GitHub bills hosted macOS runners at 10x the Linux rate, and a Kuzushi release
-touches five macOS legs. All five now default to the owner's self-hosted
-Apple-Silicon runner (labels `self-hosted, macOS, ARM64, kuzushi-mac`, the same
-runner routine CI uses), so a release costs no hosted macOS minutes at all.
+touches five macOS legs. All five default to hosted macOS images, because
+keeping the owner's Apple-Silicon runner online between releases cost more than
+an occasional hosted release. Each leg stays eligible for that runner (labels
+`self-hosted, macOS, ARM64, kuzushi-mac`), and one repository variable opts a
+release into it.
 
 This file covers the release legs only. The runner itself — its daemon, its
 labels, and its ephemeral workspace policy — is documented in
@@ -11,7 +13,7 @@ labels, and its ephemeral workspace policy — is documented in
 
 ## What moved
 
-| Workflow | Job | Slug | Hosted image | Default runner |
+| Workflow | Job | Slug | Hosted image (default) | Opt-in runner |
 | --- | --- | --- | --- | --- |
 | `release-candidate.yml` | `native-binaries` | `darwin-arm64` + cross-built `darwin-x64` | `macos-14` | self-hosted |
 | `release-candidate.yml` | `local-tarball-smoke` | `darwin-arm64` | `macos-14` | self-hosted |
@@ -36,22 +38,23 @@ runs-on: ${{ fromJSON(matrix.self_hosted && !inputs.hosted && '["self-hosted","m
 
 Rows without the key fall through to their hosted `matrix.os` unchanged, so the
 Linux and Windows legs are untouched. The `hosted` boolean input (default
-`false`) on both `release-candidate.yml` and `published-release-smoke.yml` sends
-every darwin row back to the hosted image named in `matrix.os`.
+`true`) on both `release-candidate.yml` and `published-release-smoke.yml` keeps
+every darwin row on the hosted image named in `matrix.os`; `hosted: false` moves
+them onto the self-hosted runner.
 
-## The escape hatch
+## Opting a release into the Mac
 
-`release.yml` is tag-triggered and carries no inputs, so the hatch is a
+`release.yml` is tag-triggered and carries no inputs, so the opt-in is a
 repository variable:
 
 ```
-gh variable set KUZUSHI_RELEASE_HOSTED --body true    # next release runs hosted
-gh variable delete KUZUSHI_RELEASE_HOSTED             # back to self-hosted
+gh variable set KUZUSHI_RELEASE_SELF_HOSTED --body true    # next release uses the Mac
+gh variable delete KUZUSHI_RELEASE_SELF_HOSTED             # back to hosted macOS
 ```
 
-`release.yml` forwards `hosted: ${{ vars.KUZUSHI_RELEASE_HOSTED == 'true' }}` to
-both the candidate and the published smoke, so one variable moves the whole
-release. Use it when the Mac is offline, mid-upgrade, or under investigation.
+`release.yml` forwards `hosted: ${{ vars.KUZUSHI_RELEASE_SELF_HOSTED != 'true' }}`
+to both the candidate and the published smoke, so one variable moves the whole
+release. Bring the runner online first, or the darwin legs queue until it is.
 `workflow_dispatch` on either workflow also exposes `hosted` directly.
 
 ## Owner prerequisites (one time, on the Mac)
