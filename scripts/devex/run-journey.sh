@@ -440,25 +440,33 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
   # footer does not render its mode segment for several seconds (observed
   # >3s on a 442k-file monorepo), so give convergence the same order of
   # patience as the page waits (30s) while still failing honestly.
-  local tries=0 tail3
+  # A key sent just before (e.g. `keys: Escape`) may not have rendered yet,
+  # so one read of a stale Navigate footer is not convergence: the footer
+  # must hold across two identical footer captures 0.5s apart. Otherwise the next
+  # page digit lands in Prompt mode and is typed (seen on a loaded host).
+  local tries=0 frame settled
   while (( tries++ <= 60 )); do
-    tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
-    if devex_footer_is_navigate "$tail3"; then
+    frame=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    sleep 0.5
+    settled=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    if [ "$frame" = "$settled" ] && devex_footer_is_navigate "$settled"; then
       report step "nav-mode (converged)"
       return 0
     fi
-    tmux send-keys -t "$SESSION" Escape
-    sleep 0.5
+    [ "$frame" = "$settled" ] && tmux send-keys -t "$SESSION" Escape
   done
   fail "nav-mode — Navigate footer never rendered"
 }
 
 # Dispose of a completed phase-result card by its own advertised key.
-# Those keys (app/phase_results.rs) are Navigate-mode only, and a single blind
-# press races a lagging event loop: the shell can be back in Prompt by the time
-# the key lands, where it is simply typed into the composer. Converge on
-# Navigate, press, and re-check the status footer's "result ready" chip — the
-# same poll-press-recheck shape d_submit and d_nav_mode already use.
+# Those keys (app/phase_results.rs) are Navigate-mode only; Prompt mode types
+# them. Converge on Navigate, press, and re-check the status footer's "result
+# ready" chip — the same poll-press-recheck shape d_submit and d_nav_mode use.
+# A re-press read from a lagging frame is safe: Navigate absorbs a repeat of
+# the key that just resolved the card, and a card key off the Workbench only
+# reveals the card (state_transitions/phase_result_navigate.rs), so neither
+# can leak into the composer. A footer reading "Esc dismiss notice" is not
+# Navigate-ready; the Escape sent below dismisses that notice first.
 d_phase_result() { # <card key, e.g. n>
   ensure_session
   local key=$1 tries=0 tail3
@@ -518,10 +526,6 @@ prepare_snapshot() { # <label>
   PENDING_SNAP="$JDIR/$PENDING_SNAP_NAME.txt"
   PENDING_ANSI="$JDIR/$PENDING_SNAP_NAME.ansi"
   PENDING_META="$JDIR/$PENDING_SNAP_NAME.provenance.json"
-}
-
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g; s//\\r/g'
 }
 
 canonical_file_path() {

@@ -59,6 +59,10 @@ pub struct TriageOutcome {
     /// this from `AgentQueryResponse::checked_cost_report`.
     #[serde(default = "default_cost_usd_exact", skip_serializing_if = "is_true")]
     pub cost_usd_exact: bool,
+    /// Local tokens × list-price estimate for the unmetered part of an
+    /// inexact `cost_usd`. Never actual spend; `None` means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_usd: Option<f64>,
 }
 
 impl TriageOutcome {
@@ -105,6 +109,7 @@ impl Default for TriageOutcome {
             first_link: None,
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         }
     }
 }

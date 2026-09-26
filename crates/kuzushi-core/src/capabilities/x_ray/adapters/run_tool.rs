@@ -53,10 +53,16 @@ pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result
         render_x_ray_read_summary(&data),
         json!(data),
         &data,
+        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
     )
 }
 
-fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Result<Value> {
+fn x_ray_response(
+    output: String,
+    data: Value,
+    report: &XRayReportData,
+    cost: crate::runtime::RuntimeCostReport,
+) -> Result<Value> {
     let mut result =
         crate::module_result::completed_output_result(output.clone(), output, data);
     result["artifacts"] = json!([
@@ -65,12 +71,6 @@ fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Resul
         { "label": "invariants", "path": report.artifact_paths.invariants },
         { "label": "architecture", "path": report.artifact_paths.architecture_svg },
     ]);
-    let observed = crate::runtime::RuntimeCost::from_usd(report.cost_usd, "x-ray report cost")?;
-    let cost = if report.cost_usd_exact {
-        crate::runtime::RuntimeCostReport::known(observed)
-    } else {
-        crate::runtime::RuntimeCostReport::incomplete(observed)
-    };
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
 }
@@ -92,10 +92,14 @@ fn finish_x_ray_run(
     )?;
     let mut data = data;
     data.cost_usd_exact = cost.is_complete();
+    data.estimated_cost_usd = cost
+        .is_estimated()
+        .then(|| cost.estimated_total_usd())
+        .flatten();
     emit_x_ray_done(ctx);
     let mut data_json = json!(data);
     data_json["kbContext"] = json!(&input.kb_context);
-    x_ray_response(render_x_ray_run_summary(&data), data_json, &data)
+    x_ray_response(render_x_ray_run_summary(&data), data_json, &data, cost)
 }
 
 fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Option<crate::run_lifecycle::RunItemId> {

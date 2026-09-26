@@ -129,6 +129,21 @@ pub struct FindingDeltaSummary {
     pub finding_id_samples: Vec<SafeText>,
 }
 
+/// Watermark prefix a phase receipt records when at least one referenced run
+/// committed no typed finding delta: its counts are then not a measurement.
+pub const UNOBSERVED_FINDING_WATERMARK_PREFIX: &str = "unavailable:";
+
+impl FindingDeltaSummary {
+    /// True when every contributing run committed a typed finding delta, so
+    /// the counts measure the store change rather than an absent observation.
+    pub fn is_fully_observed(&self) -> bool {
+        !self
+            .store_watermark
+            .as_str()
+            .starts_with(UNOBSERVED_FINDING_WATERMARK_PREFIX)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelUsage {

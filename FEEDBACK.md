@@ -1,5 +1,48 @@
 # Kuzushi TUI dogfood feedback
 
+## Status sweep — 2026-09-24 (branch `claude/zen-edison-qdvr5r`, verified on OWASP Juice Shop)
+
+Every numbered item below was re-checked against current code. Resolved by this
+sweep (see CHANGELOG "Unreleased · Fixed" for detail):
+
+- **A1-3 / #172 result-card keys**: Navigate never types a card key. Repeats are
+  absorbed, keys pressed off the Workbench open the card, stray card-letter
+  drafts are dropped, and the footer says `Esc dismiss notice` while a notice
+  holds Esc. Literal `\n` in cards has a regression test and does not reproduce.
+- **A1-8(i)**: the catalog hint is `press e for expert engines`.
+- **A3-14**: the auth picker leads with a stored Anthropic or Copilot OAuth
+  connection.
+- **A3-18**: `actors` counts the model's actors, or reports `unknown`.
+- **A3-19**: the rail shows unmetered spend as `>=$X (metering incomplete)`.
+- **A3-20**: grounding discloses `K of N surfaces (cap C · ≤2 rows/file)` and
+  records `coverage.grounding`.
+- **A3-21**: the entry-point list title says `+N above` / `+N below`.
+- Found in the Juice Shop run and fixed:
+  - result-card `findings +0` after 73 new findings (typed deltas, and
+    `findings unmeasured` when a run records none)
+  - scan over-merging distinct dependency, IaC and secret findings (67 → 130)
+  - Prove refusing human-confirmed findings
+  - Setup counting bookkeeping as prior work
+  - raw epoch timestamps
+  - two DevEx harness defects
+
+Already fixed before this sweep (verified, no change): A1-2a, A1-4, A1-5(c/d/e),
+the 429 doubling, A1-7 (except mid-word label truncation), A1-8 stories/tabs/IDs/
+summary/STRIDE/PASTA, A1-9, A1-10, A1-12, A2-1, A2-3, A2-4, A2-5, A2-7, A2-8,
+A2-10 (`artifacts.json` dedupes run-relative paths), A2-11, A2-12, A2-13, A3-16,
+A3-23, and A3-24's partial result (a violated coverage invariant already
+returns `status: partial`).
+
+Still open: A1-2b (no ETA, repeated cost wording), A1-6 (`run <tool> {}`
+remains the escape hatch by design), A1-7 mid-word DFD label truncation,
+A1-11(a) (raw bridge errors withheld by policy), A1-13 facet chips,
+A2-2 (needs a live check at 120x36), A2-6 (the OAuth credential choice
+switches the model with a notice but no consent step), A3-15 (bound keys still
+fire as hotkeys in Navigate), A3-17 (phase chip flip, path-dependent),
+A3-22 (OAuth completeness classification), A3-24(b/c) (no validation failure
+for heavy drops, no single-pipeline gap fill), and the threat-intel Bazel
+fallback.
+
 ## Audit 1 — monorepo / edge-gateway walkthrough
 
 Date: 2026-07-22

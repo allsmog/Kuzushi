@@ -16,7 +16,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN was canceled. Open the run or try again.                                                     │
-          │receipt · canceled · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 0 artifact(s) · 0...      │
+          │receipt · canceled · 1 run(s) · cost not recorded · findings unmeasured · 0 artifact(s) · 0...    │
           │Outcome · canceled · scenario canceled                                                            │
           │3 run ledger cell(s) omitted from the result card · inspect replay                                │
           │8 timeline cell(s) omitted from the result card · inspect replay                                  │
@@ -38,5 +38,5 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
 shell route · 1 result ready · workbench · notify:unavailable · focus unknown · Map 1/5 · ⛭ autonomy:fix...   0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Esc prompt   Ctrl+C exit
+ Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
 ▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

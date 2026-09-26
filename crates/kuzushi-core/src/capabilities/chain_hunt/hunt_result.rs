@@ -36,9 +36,21 @@ pub(super) fn chain_hunt_result(
         "persistedRunId": persisted.map(|run| run.run_id),
     });
     apply_hunt_cost(&mut data, hunted);
-    let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
+    let output = chain_hunt_output(&summary, &hunted.value.chains);
+    let mut result = crate::module_result::completed_output_result(summary, output, data);
     apply_hunt_cost(&mut result, hunted);
     result
+}
+
+/// The summary plus each chain's title and member count.
+fn chain_hunt_output(summary: &str, chains: &[ModelChain]) -> String {
+    let lines = chains.iter().map(|chain| {
+        format!("  - {} ({} findings)", chain.title, chain.members.len())
+    });
+    std::iter::once(summary.to_string())
+        .chain(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn chain_json(chain: &ModelChain) -> Value {
@@ -56,5 +68,34 @@ fn chain_json(chain: &ModelChain) -> Value {
 fn apply_hunt_cost(target: &mut Value, hunted: &CostedStructuredJson<HuntedChains>) {
     if let Ok(cost) = hunted.cost_report() {
         crate::module_result::apply_runtime_cost_report(target, cost);
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn the_output_names_each_composed_chain() {
+        let member = |fingerprint: &str| super::super::MemberRef {
+            fingerprint: fingerprint.to_string(),
+            title: "t".to_string(),
+            file_path: "a.ts".to_string(),
+            start_line: 1,
+            severity: crate::findings::Severity::High,
+        };
+        let chain = ModelChain {
+            title: "Leaked key enables SQL injection".to_string(),
+            members: vec![member("a"), member("b")],
+            attack_path: Vec::new(),
+            cumulative_impact: String::new(),
+            why_this_chain_matters: String::new(),
+            detection_difficulty: String::new(),
+        };
+
+        assert_eq!(
+            chain_hunt_output("summary", &[chain]),
+            "summary\n  - Leaked key enables SQL injection (2 findings)"
+        );
     }
 }

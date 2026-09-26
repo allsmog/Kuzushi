@@ -23,9 +23,10 @@ fn real_descriptor_unit_examples_are_absent_from_catalog_and_prompt_grounding() 
     assert!(source.contains("serde_normalizes_legacy_phase_aliases"));
     let (target, catalog) = catalog_from_source(source);
     assert_eq!(catalog.total, 0, "{:#?}", catalog.entry_points);
-    let (selected, count) = prompt_grounding_surfaces(target.path(), 30, Some(&catalog)).unwrap();
-    assert_eq!(count, 0);
+    let selected = prompt_grounding_surfaces(target.path(), 30, Some(&catalog)).unwrap();
+    assert_eq!(selected.catalog_selected, 0);
     assert!(!selected
+        .surfaces
         .iter()
         .any(|row| row.kind == AttackSurfaceKind::DeserializationPoint));
     let snapshot =
@@ -43,7 +44,11 @@ fn parse_request(input: &str) { serde_json::from_str::<String>(input); }
 "#,
     );
     assert_eq!(catalog.total, 1);
-    let (selected, count) = prompt_grounding_surfaces(target.path(), 30, Some(&catalog)).unwrap();
+    let SelectedSurfaces {
+        surfaces: selected,
+        catalog_selected: count,
+        ..
+    } = prompt_grounding_surfaces(target.path(), 30, Some(&catalog)).unwrap();
     assert_eq!(count, 1);
     assert_eq!(selected.len(), 1);
     assert_eq!(selected[0].id, catalog.entry_points[0].surface.id);

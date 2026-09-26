@@ -61,13 +61,7 @@ pub(in crate::modules) fn run_code_scan(
         Ok(outcome) => outcome,
         Err(error) => return Ok(failed_tool_output("android-apk:code-scan", &target, error)),
     };
-    let persisted = persist_tool_findings(
-        ctx.finding_run_id(),
-        &target,
-        &outcome.findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = persist_tool_findings(ctx, &target, &outcome.findings)?;
     emit_step(
         ctx,
         "done",

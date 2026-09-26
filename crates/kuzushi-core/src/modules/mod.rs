@@ -151,7 +151,7 @@ pub use dynamic_loader::{
     approve_dynamic_module, default_dynamic_lockfile_path, inspect_dynamic_module,
     revoke_dynamic_module, DynamicModuleInspection, DynamicModuleLoadOptions,
 };
-pub use options::coerce_option_value;
+pub use options::{coerce_option_value, ensure_declared_tool_option};
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
     agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace, tool_execution_model,

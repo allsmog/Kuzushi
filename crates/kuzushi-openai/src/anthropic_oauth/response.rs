@@ -45,11 +45,64 @@ pub(crate) fn estimate_cost_usd(model: &str, input_tokens: u32, output_tokens: u
     estimate_cost_usd_with_cache(model, input_tokens, output_tokens, None)
 }
 
-/// Cache reads bill at a tenth of the input rate and cache writes at 1.25x
-/// (Anthropic list pricing). `input_tokens` excludes cached tokens, so the
-/// three input buckets add rather than overlap.
-const CACHE_READ_INPUT_RATE: f64 = 0.1;
+/// Cache writes (5-minute TTL) bill at 1.25x the input rate. `input_tokens`
+/// excludes cached tokens, so the three input buckets add rather than overlap.
 const CACHE_CREATION_INPUT_RATE: f64 = 1.25;
+
+/// Anthropic first-party list prices in USD per million tokens.
+struct ModelRates {
+    input: f64,
+    output: f64,
+    cache_read: f64,
+}
+
+const fn rates(input: f64, output: f64) -> ModelRates {
+    // Cache reads bill at a tenth of the input rate unless a model says otherwise.
+    ModelRates {
+        input,
+        output,
+        cache_read: input / 10.0,
+    }
+}
+
+/// Exact model ids only: a guessed family rate would present a wrong number as
+/// an estimate, so an unlisted model has no estimate at all.
+const MODEL_RATES: &[(&str, ModelRates)] = &[
+    (
+        "claude-fable-5-1",
+        ModelRates {
+            input: 10.0,
+            output: 50.0,
+            cache_read: 0.25,
+        },
+    ),
+    ("claude-fable-5", rates(10.0, 50.0)),
+    (
+        "claude-opus-5-5",
+        ModelRates {
+            input: 4.0,
+            output: 20.0,
+            cache_read: 0.20,
+        },
+    ),
+    ("claude-opus-5", rates(5.0, 25.0)),
+    ("claude-opus-4-8", rates(5.0, 25.0)),
+    ("claude-opus-4-7", rates(5.0, 25.0)),
+    ("claude-opus-4-6", rates(5.0, 25.0)),
+    ("claude-opus-4-5", rates(5.0, 25.0)),
+    ("claude-opus-4-1", rates(15.0, 75.0)),
+    ("claude-opus-4-0", rates(15.0, 75.0)),
+    ("claude-opus-4", rates(15.0, 75.0)),
+    ("claude-sonnet-5", rates(2.0, 10.0)),
+    ("claude-sonnet-4-6", rates(3.0, 15.0)),
+    ("claude-sonnet-4-5", rates(3.0, 15.0)),
+    ("claude-sonnet-4-0", rates(3.0, 15.0)),
+    ("claude-sonnet-4", rates(3.0, 15.0)),
+    ("claude-3-7-sonnet", rates(3.0, 15.0)),
+    ("claude-haiku-4-5", rates(1.0, 5.0)),
+    ("claude-3-5-haiku", rates(0.8, 4.0)),
+    ("claude-3-haiku", rates(0.25, 1.25)),
+];
 
 pub(crate) fn estimate_cost_usd_with_cache(
     model: &str,
@@ -57,25 +110,53 @@ pub(crate) fn estimate_cost_usd_with_cache(
     output_tokens: u32,
     prompt_cache: Option<PromptCacheUsage>,
 ) -> Option<f64> {
-    let model = model.to_ascii_lowercase();
-    let (in_per_1k, out_per_1k) = token_prices_per_1k(&model)?;
+    let rates = model_rates(model)?;
     let cache = prompt_cache.unwrap_or_default();
-    let input_units = f64::from(input_tokens)
-        + f64::from(cache.read_input_tokens) * CACHE_READ_INPUT_RATE
-        + f64::from(cache.creation_input_tokens) * CACHE_CREATION_INPUT_RATE;
-    Some(input_units / 1000.0 * in_per_1k + f64::from(output_tokens) / 1000.0 * out_per_1k)
+    let input_usd = f64::from(input_tokens) * rates.input
+        + f64::from(cache.read_input_tokens) * rates.cache_read
+        + f64::from(cache.creation_input_tokens) * rates.input * CACHE_CREATION_INPUT_RATE;
+    Some((input_usd + f64::from(output_tokens) * rates.output) / 1_000_000.0)
 }
 
-fn token_prices_per_1k(model: &str) -> Option<(f64, f64)> {
-    if model.contains("opus") {
-        Some((15.0e-3, 75.0e-3))
-    } else if model.contains("sonnet") {
-        Some((3.0e-3, 15.0e-3))
-    } else if model.contains("haiku") {
-        Some((0.8e-3, 4.0e-3))
-    } else {
-        None
+/// Per-million-token list prices a spend stop may use to estimate unmetered
+/// calls. Wire names are the bridge's camelCase keys.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SpendEstimateRates {
+    pub(crate) input_usd_per_mtok: f64,
+    pub(crate) output_usd_per_mtok: f64,
+    pub(crate) cache_read_usd_per_mtok: f64,
+    pub(crate) cache_creation_usd_per_mtok: f64,
+}
+
+pub(crate) fn spend_estimate_rates(model: &str) -> Option<SpendEstimateRates> {
+    model_rates(model).map(|rates| SpendEstimateRates {
+        input_usd_per_mtok: rates.input,
+        output_usd_per_mtok: rates.output,
+        cache_read_usd_per_mtok: rates.cache_read,
+        cache_creation_usd_per_mtok: rates.input * CACHE_CREATION_INPUT_RATE,
+    })
+}
+
+fn model_rates(model: &str) -> Option<&'static ModelRates> {
+    let id = canonical_model_id(model);
+    MODEL_RATES
+        .iter()
+        .find(|(known, _)| *known == id)
+        .map(|(_, rates)| rates)
+}
+
+/// `anthropic:claude-haiku-4-5-20251001` → `claude-haiku-4-5`.
+fn canonical_model_id(model: &str) -> String {
+    let id = strip_provider_prefix(model.trim()).to_ascii_lowercase();
+    match id.rsplit_once('-') {
+        Some((base, date)) if is_snapshot_date(date) => base.to_string(),
+        _ => id,
     }
+}
+
+fn is_snapshot_date(segment: &str) -> bool {
+    segment.len() == 8 && segment.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(crate) fn anthropic_model_for_tier(tier: ModelTier, configured: &str) -> String {

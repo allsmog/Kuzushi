@@ -219,19 +219,10 @@ fn threat_model_metric_lines(
             finding_count,
             findings_suppressed_suffix(input.emit_findings)
         ),
-        format!("  Cost:     {}", threat_model_cost_label(cost)),
+        format!("  Cost:     {}", crate::run_lifecycle::cost_label(cost)),
     ]
 }
 
-fn threat_model_cost_label(cost: crate::runtime::RuntimeCostReport) -> String {
-    if cost.is_unavailable() {
-        return "unavailable".to_string();
-    }
-    match cost.exact_usd() {
-        Some(exact) => format!("${exact:.4}"),
-        None => format!(">=${:.4} (incomplete)", cost.observed_usd()),
-    }
-}
 
 fn findings_suppressed_suffix(emit_findings: bool) -> &'static str {
     if emit_findings {

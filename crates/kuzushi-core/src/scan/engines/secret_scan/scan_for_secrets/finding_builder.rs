@@ -7,11 +7,32 @@ pub(super) fn append_secret_hits(
     max_findings: usize,
     findings: &mut Vec<SecretScanFinding>,
 ) {
+    let mut occurrences = SecretOccurrences::default();
     for hit in detect_secrets_in_text(text) {
-        findings.push(secret_finding_from_hit(root, rel_path, text, &hit));
+        let locator = occurrences.locator_for(&hit);
+        findings.push(secret_finding_from_hit(root, rel_path, text, &hit, locator));
         if findings.len() >= max_findings {
             break;
         }
+    }
+}
+
+/// Numbers repeated occurrences of one secret value within a file. The same
+/// token pasted on five identical test lines is five places to rotate, so each
+/// occurrence needs its own identity, yet the key must not depend on line
+/// numbers or carry the secret itself.
+#[derive(Default)]
+struct SecretOccurrences {
+    seen: BTreeMap<(&'static str, u64), usize>,
+}
+
+impl SecretOccurrences {
+    fn locator_for(&mut self, hit: &SecretHit) -> String {
+        let value_hash = fnv1a64(hit.matched.as_bytes());
+        let ordinal = self.seen.entry((hit.detector.id, value_hash)).or_default();
+        let locator = format!("secret:{}:{value_hash:016x}#{ordinal}", hit.detector.id);
+        *ordinal += 1;
+        locator
     }
 }
 
@@ -20,6 +41,7 @@ fn secret_finding_from_hit(
     rel_path: &str,
     text: &str,
     hit: &SecretHit,
+    locator: String,
 ) -> SecretScanFinding {
     let location = locate_match(text, hit.index);
     let fingerprint = fingerprint_for(root, hit.detector.id, rel_path, location.line, &hit.matched);
@@ -46,6 +68,7 @@ fn secret_finding_from_hit(
         impact: severity_risk_label(severity),
         cwe: vec![hit.detector.cwe.to_string()],
         score: severity_score(severity),
+        locator: Some(locator),
     }
 }
 

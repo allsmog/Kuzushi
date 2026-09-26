@@ -707,6 +707,7 @@ fn legacy_restarted_result_card_requires_typed_run_evidence() {
         elapsed_secs: 19,
         cost: "$0.4200".to_string(),
         changed_findings: 4,
+        finding_delta_observed: None,
         changed_artifacts: vec!["result.json".to_string(), "items.jsonl".to_string()],
         interaction_count: 2,
         rerun_specification: Some("run semgrep:scan".to_string()),
@@ -769,6 +770,7 @@ fn phase_result_card_retains_canonical_keys_until_rendering() {
             run_count: 1,
             artifact_count: 0,
             changed_findings: 0,
+            finding_delta_observed: None,
             cost: None,
             revision_recorded: true,
             receipt_recorded: true,
@@ -798,6 +800,7 @@ fn compact_result_summary_keeps_known_cost_and_marks_unknown_accounting() {
         run_count: 2,
         artifact_count: 15,
         changed_findings: 0,
+        finding_delta_observed: Some(true),
         cost: Some("$0.4200".to_string()),
         revision_recorded: true,
         receipt_recorded: true,
@@ -807,6 +810,54 @@ fn compact_result_summary_keeps_known_cost_and_marks_unknown_accounting() {
 
     summary.cost = Some("cost not recorded".to_string());
     assert!(compact_result_summary(&summary).contains("⚠ cost not recorded"));
+}
+
+#[test]
+fn compact_result_summary_says_unmeasured_instead_of_a_fake_plus_zero() {
+    // Juice Shop: secret-scan + semgrep persisted 73 findings but committed
+    // no typed finding delta; the card must not claim a measured `+0`.
+    let mut summary = crate::PhaseResultCompactSummary {
+        phase: WorkflowPhase::Scan,
+        outcome: PhaseAttemptOutcome::Completed,
+        run_count: 2,
+        artifact_count: 14,
+        changed_findings: 0,
+        finding_delta_observed: Some(false),
+        cost: None,
+        revision_recorded: true,
+        receipt_recorded: true,
+    };
+
+    let rendered = compact_result_summary(&summary);
+    assert!(rendered.ends_with("findings unmeasured"), "{rendered}");
+    assert!(!rendered.contains("findings +0"), "{rendered}");
+
+    summary.finding_delta_observed = Some(true);
+    summary.changed_findings = 73;
+    assert!(compact_result_summary(&summary).ends_with("findings +73"));
+}
+
+#[test]
+fn a_map_card_makes_no_finding_claim_it_cannot_measure() {
+    // Map tools never persist findings; "findings unmeasured" on a Map card
+    // (seen on Juice Shop) would suggest an unknown where there is none.
+    let mut summary = crate::PhaseResultCompactSummary {
+        phase: WorkflowPhase::Map,
+        outcome: PhaseAttemptOutcome::Completed,
+        run_count: 3,
+        artifact_count: 16,
+        changed_findings: 0,
+        finding_delta_observed: Some(false),
+        cost: None,
+        revision_recorded: true,
+        receipt_recorded: true,
+    };
+    let rendered = compact_result_summary(&summary);
+    assert!(!rendered.contains("findings"), "{rendered}");
+    assert!(rendered.ends_with("16 artifact(s)"), "{rendered}");
+
+    summary.finding_delta_observed = Some(true);
+    assert!(compact_result_summary(&summary).ends_with("findings +0"));
 }
 
 #[test]
@@ -824,6 +875,7 @@ fn card_model_drops_the_detail_row_that_duplicates_the_trailing_next() {
             run_count: 1,
             artifact_count: 0,
             changed_findings: 0,
+            finding_delta_observed: None,
             cost: None,
             revision_recorded: true,
             receipt_recorded: true,

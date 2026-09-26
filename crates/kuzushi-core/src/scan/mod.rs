@@ -50,6 +50,7 @@ pub use domain::{
 };
 #[cfg(test)]
 pub(in crate::scan) use engines::codeql::*;
+pub(crate) use engines::codeql::index_grounded_codeql_sarif_documents_as_static_evidence;
 pub use engines::codeql::{
     index_codeql_sarif_as_static_evidence, index_codeql_sarif_documents_as_static_evidence,
     normalize_codeql_sarif, CodeqlScanner,

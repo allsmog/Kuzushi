@@ -558,7 +558,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert!(output.contains(&target));
         assert!(output.contains("partial — inadequate evidence"));
         assert!(output.contains("previous model preserved"));
-        assert!(output.contains("Cost:     >=$0.0000 (incomplete)"));
+        assert!(output.contains("Cost:     >=$0.0000 (metering incomplete)"));
         assert!(!output.contains("threat-model:build complete"));
         let lifecycle = crate::run_lifecycle::read_run_items(workspace.root(), run_id)
             .unwrap()
@@ -942,7 +942,10 @@ pub fn accepts_scope(scope: &str) -> bool {
         let error = run_randori_pasta_with_runtime(temp.path(), &runtime).unwrap_err();
         let err = format!("{error:#}");
 
-        assert_eq!(error.to_string(), "structured output failed");
+        assert_eq!(
+            error.to_string(),
+            "structured output failed: model output still violated the schema after one repair attempt"
+        );
         assert!(err.contains("randori:pasta"), "{err}");
         assert!(err.contains("ThreatModelDocument"), "{err}");
         assert!(

@@ -61,7 +61,7 @@ fn variant_lift_subject<'a>(
     let store = ctx
         .findings_store
         .context("variant:lift-pattern requires the active workspace findings store")?;
-    let Some(finding) = store.get_finding_by_reference(fingerprint)? else {
+    let Some(finding) = store.get_finding_by_operator_reference(fingerprint)? else {
         return Ok(VariantLiftSubject::Rejected(missing_variant_lift_finding_response(
             workspace,
             fingerprint,
@@ -157,7 +157,8 @@ fn variant_lift_output(finding: &Finding, object: &Map<String, Value>) -> String
 }
 
 fn variant_lift_field(label: &str, value: Option<String>) -> String {
-    format!("  {label}:        {}", value.unwrap_or_default())
+    let label = format!("{label}:");
+    format!("  {label:<15}{}", value.unwrap_or_default())
 }
 
 fn variant_lift_response(

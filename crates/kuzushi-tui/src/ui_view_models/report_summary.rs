@@ -8,7 +8,7 @@ pub(crate) fn report_review_summary(app: &ShellApp) -> String {
     };
     let progress = reality.progress;
     format!(
-        "{} findings · {} reviewed · {} actionable · {} proof-backed",
+        "{} current findings · {} reviewed · {} actionable · {} proof-backed",
         progress.finding_total,
         progress.reviewed_findings,
         progress.confirmed_findings,

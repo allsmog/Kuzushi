@@ -15,13 +15,7 @@ pub(in crate::modules) fn run_fileprovider_scan(
         Ok(scan) => scan,
         Err(error) => return Ok(fileprovider_failed_output(&target, error)),
     };
-    let persisted = persist_tool_findings(
-        ctx.finding_run_id(),
-        &target,
-        &scan.findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = persist_tool_findings(ctx, &target, &scan.findings)?;
     emit_fileprovider_step(
         ctx,
         "done",

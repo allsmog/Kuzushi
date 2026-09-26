@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
+use terraform_block_path::TerraformBlockPath;
 mod analyze_dockerfile;
 mod analyze_github_actions;
 mod analyze_terraform;
@@ -17,6 +18,7 @@ mod iac_scan_options;
 mod output;
 mod scan_accumulator;
 mod scanner;
+mod terraform_block_path;
 #[cfg(test)]
 mod tests;
 

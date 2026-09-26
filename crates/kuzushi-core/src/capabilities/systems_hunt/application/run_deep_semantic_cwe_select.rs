@@ -262,6 +262,7 @@ fn collect_deep_semantic_hunt_findings(
         value: normalized_deep_semantic_hunt(input, run, raw.value)?,
         cost_usd: raw.cost_usd,
         cost_usd_exact: raw.cost_usd_exact,
+        estimated_cost_usd: raw.estimated_cost_usd,
     })
 }
 
@@ -391,6 +392,7 @@ pub(crate) fn selected_deep_semantic_cwes(
             value: cwes,
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         },
         None => fallback_deep_semantic_cwes(input, ctx, runtime)?,
     };
@@ -402,6 +404,7 @@ pub(crate) fn selected_deep_semantic_cwes(
             .collect(),
         cost_usd: cwes.cost_usd,
         cost_usd_exact: cwes.cost_usd_exact,
+        estimated_cost_usd: cwes.estimated_cost_usd,
     })
 }
 
@@ -422,5 +425,6 @@ pub(crate) fn fallback_deep_semantic_cwes(
         value: output.cwes,
         cost_usd: output.cost_usd,
         cost_usd_exact: output.cost_usd_exact,
+        estimated_cost_usd: None,
     })
 }

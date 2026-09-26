@@ -7,7 +7,7 @@
 //! wide terminal shows the state and the next action the model already knows.
 
 use super::{ProjectModel, ProjectModelOrigin, ProjectModelRow};
-use crate::renderer::shared::text::{display_width, fit};
+use crate::renderer::shared::text::{display_width, fit, wrap_text};
 
 /// The one-column rule drawn between cells. Plain output folds it (and the
 /// action marker) to ASCII in `sanitize_for_plain_output`, so both surfaces
@@ -26,6 +26,9 @@ const COLLAPSED_FIXED_COLUMNS: usize = 3;
 /// `glyph` + space, two ` │ ` rules, and the ` │ ▸ ` action rule.
 const WIDE_FIXED_COLUMNS: usize = 13;
 const ACTION_MARKER: &str = "▸ ";
+/// A wrapped summary keeps at most this many lines; the last one is fitted
+/// with an ellipsis so one verbose row cannot crowd out its siblings.
+const MAX_SUMMARY_LINES: usize = 3;
 
 /// Which column a rendered segment belongs to, so each surface can style it
 /// without re-deriving the text.
@@ -51,6 +54,10 @@ pub(crate) struct ProjectContextRow {
     pub(crate) section: String,
     pub(crate) state: String,
     pub(crate) summary: String,
+    /// The summary word-wrapped to the summary column, each line padded to it.
+    /// Surfaces with vertical room render these instead of the one fitted
+    /// `summary` line, so the text is not cut short by an ellipsis.
+    pub(crate) summary_lines: Vec<String>,
     /// `None` in the collapsed layout, where there is no room for the column.
     pub(crate) action: Option<String>,
 }
@@ -69,6 +76,24 @@ pub(crate) struct ProjectContextTable {
 impl ProjectContextRow {
     /// The ordered, already-fitted segments of this row.
     pub(crate) fn segments(&self) -> Vec<ProjectContextSegment> {
+        self.segments_with_summary(&self.summary)
+    }
+
+    /// The row with its summary wrapped: the first line carries every cell,
+    /// continuation lines carry only the rest of the summary, aligned under it.
+    pub(crate) fn wrapped_segments(&self) -> Vec<Vec<ProjectContextSegment>> {
+        let (first, rest) = self
+            .summary_lines
+            .split_first()
+            .map_or((self.summary.as_str(), &[][..]), |(first, rest)| {
+                (first.as_str(), rest)
+            });
+        std::iter::once(self.segments_with_summary(first))
+            .chain(rest.iter().map(|chunk| self.continuation_segments(chunk)))
+            .collect()
+    }
+
+    fn segments_with_summary(&self, summary: &str) -> Vec<ProjectContextSegment> {
         let mut segments = vec![
             segment(
                 ProjectContextCell::Origin,
@@ -78,16 +103,38 @@ impl ProjectContextRow {
         ];
         let Some(action) = self.action.as_deref() else {
             segments.push(segment(ProjectContextCell::Rule, " ".to_string()));
-            segments.push(segment(ProjectContextCell::Summary, self.summary.clone()));
+            segments.push(segment(ProjectContextCell::Summary, summary.to_string()));
             return segments;
         };
         segments.extend([
             rule_segment(""),
             segment(ProjectContextCell::State, self.state.clone()),
             rule_segment(""),
-            segment(ProjectContextCell::Summary, self.summary.clone()),
+            segment(ProjectContextCell::Summary, summary.to_string()),
             rule_segment(ACTION_MARKER),
             segment(ProjectContextCell::Action, action.to_string()),
+        ]);
+        segments
+    }
+
+    fn continuation_segments(&self, chunk: &str) -> Vec<ProjectContextSegment> {
+        let origin = blank_like(&format!("{} ", self.origin.glyph()));
+        let mut segments = vec![
+            segment(ProjectContextCell::Origin, origin),
+            segment(ProjectContextCell::Section, blank_like(&self.section)),
+        ];
+        let Some(action) = self.action.as_deref() else {
+            segments.push(segment(ProjectContextCell::Rule, " ".to_string()));
+            segments.push(segment(ProjectContextCell::Summary, chunk.to_string()));
+            return segments;
+        };
+        segments.extend([
+            rule_segment(""),
+            segment(ProjectContextCell::State, blank_like(&self.state)),
+            rule_segment(""),
+            segment(ProjectContextCell::Summary, chunk.to_string()),
+            rule_segment(&blank_like(ACTION_MARKER)),
+            segment(ProjectContextCell::Action, blank_like(action)),
         ]);
         segments
     }
@@ -167,6 +214,7 @@ fn context_row(row: &ProjectModelRow, widths: ColumnWidths) -> ProjectContextRow
         section: pad(row.section, widths.section),
         state: pad(row.state, widths.state),
         summary: pad(&row.summary, widths.summary),
+        summary_lines: wrapped_summary(&row.summary, widths.summary),
         action: (widths.action > 0).then(|| pad(row.action, widths.action)),
     }
 }
@@ -180,6 +228,22 @@ fn pad(value: &str, width: usize) -> String {
     let fitted = fit(value, width);
     let padding = width.saturating_sub(display_width(&fitted));
     format!("{fitted}{}", " ".repeat(padding))
+}
+
+fn wrapped_summary(summary: &str, width: usize) -> Vec<String> {
+    let lines = wrap_text(summary, width);
+    if lines.len() <= MAX_SUMMARY_LINES {
+        return lines.iter().map(|line| pad(line, width)).collect();
+    }
+    let (kept, overflow) = lines.split_at(MAX_SUMMARY_LINES - 1);
+    kept.iter()
+        .map(|line| pad(line, width))
+        .chain(std::iter::once(pad(&overflow.join(" "), width)))
+        .collect()
+}
+
+fn blank_like(text: &str) -> String {
+    " ".repeat(display_width(text))
 }
 
 fn segment(cell: ProjectContextCell, text: String) -> ProjectContextSegment {

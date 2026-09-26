@@ -1115,7 +1115,7 @@ impl ShellApp {
         })]
     }
 
-    fn findings_projection_is_current(&self, target: &std::path::Path) -> bool {
+    pub(crate) fn findings_projection_is_current(&self, target: &std::path::Path) -> bool {
         let Some(read_watermark) = self.findings_read_watermark() else {
             return false;
         };

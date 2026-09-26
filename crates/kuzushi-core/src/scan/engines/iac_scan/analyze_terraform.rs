@@ -2,22 +2,40 @@ use super::*;
 
 pub(crate) fn analyze_terraform(target: &Path, path: &Path, raw: &str) -> Vec<IacScanFinding> {
     let mut findings = Vec::new();
+    let mut blocks = TerraformBlockPath::default();
 
     for (index, line) in raw.lines().enumerate() {
-        let line_no = line_no(index);
         let trimmed = strip_hash_comment(line).trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let lower = trimmed.to_ascii_lowercase();
-        for detector in TERRAFORM_LINE_DETECTORS {
-            if detector.matches(&lower) {
-                findings.push(detector.finding(target, path, line_no, trimmed));
-            }
-        }
+        let locator = blocks.locator_for(trimmed);
+        blocks.advance(trimmed);
+        let statement = TerraformStatement {
+            line_no: line_no(index),
+            text: trimmed,
+            locator,
+        };
+        findings.extend(statement_findings(target, path, &statement));
     }
 
     findings
+}
+
+struct TerraformStatement<'a> {
+    line_no: u32,
+    text: &'a str,
+    locator: Option<String>,
+}
+
+fn statement_findings(
+    target: &Path,
+    path: &Path,
+    statement: &TerraformStatement<'_>,
+) -> Vec<IacScanFinding> {
+    let lower = statement.text.to_ascii_lowercase();
+    TERRAFORM_LINE_DETECTORS
+        .iter()
+        .filter(|detector| !lower.is_empty() && detector.matches(&lower))
+        .map(|detector| detector.finding(target, path, statement))
+        .collect()
 }
 
 struct TerraformLineDetector {
@@ -32,17 +50,26 @@ impl TerraformLineDetector {
         matches_any(line, self.any) && matches_all(line, self.all)
     }
 
-    fn finding(&self, target: &Path, path: &Path, line_no: u32, trimmed: &str) -> IacScanFinding {
-        IacScanFinding::new(
+    fn finding(
+        &self,
+        target: &Path,
+        path: &Path,
+        statement: &TerraformStatement<'_>,
+    ) -> IacScanFinding {
+        let finding = IacScanFinding::new(
             target,
             path,
-            line_no,
+            statement.line_no,
             IacScanKind::Terraform,
             self.rule_id,
             Severity::High,
             self.title,
-            trimmed,
-        )
+            statement.text,
+        );
+        match &statement.locator {
+            Some(locator) => finding.with_structural_locator(locator.clone()),
+            None => finding,
+        }
     }
 }
 

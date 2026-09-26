@@ -16,9 +16,296 @@ Notable changes to Kuzushi. Release procedure lives in
   push reaches `main`. The gate stays trust-on-owner and advisory — `git push
   --no-verify` bypasses it — but it is now auditable. See
   [docs/quality/local-verify-receipt.md](./docs/quality/local-verify-receipt.md).
+- Confirmed findings now feed later scans. `threat-model:build mode=refine`
+  records a grounded `variantPatterns[]` entry on the threat each confirmed
+  finding realizes. The entry holds the CWE, the location, the proven call-site
+  line, and that line's distinctive identifiers. taint-iris-next seeds the
+  matching CWE's structural queries from these entries, and the agentic-SAST
+  threat-model digest asks the agent to look for siblings of each call site. The
+  new `sast:scan` option `threatModelFeedback=refine` (default `off`) runs the
+  refine after triage and reports it under `data.threatModelFeedback`. The
+  scan releases its shared lease on the bound model revision before that
+  refine commits, so the refine does not wait on the scan's own lock. On Juice
+  Shop, one refine attached 9 of 10 new findings and wrote 9 patterns, and the
+  next CWE-89 hunt plan carried the `routes/login.ts` pattern keywords.
+- `threat-model:diff` compares two threat-model permutations. Its required
+  `from` and `to` options each take a revision id (`tmr_…`) or a lineage id
+  (`tm_…`, meaning that lineage's head revision), so two revisions of one
+  lineage and two competing lineages are compared the same way. The result
+  lists threats added, removed, and changed (keyed by `stableId`, else `id`,
+  naming the changed fields), DFD node/flow/trust-boundary deltas, entry-point
+  coverage on both sides, and whether the methodology changed. Independent
+  builds mint fresh `stableId`s, so threats unmatched on both sides pair by a
+  display `id` that is unique on each side and count as re-keyed. On Juice
+  Shop, the single-pipeline build (11 threats) against the staged build (20)
+  reads +9 added, 11 re-keyed, instead of +20 added and -11 removed. An id that does
+  not resolve is an error naming what was tried, never a substitute revision.
+  In the shell, `threats diff <from> <to>` runs the same tool; bare `threats
+  diff` still inspects compatibility-mirror edits.
 
 **Fixed:**
 
+- A headless or shell `threat-model:build mode=refine` now reads the findings
+  ledger. Before, `kuzushi run` handed the tool no findings store, so refine
+  reported `newFindings 0` no matter what triage had confirmed.
+- `taint-iris-next` applies `cweFocus` before the `maxCwes`/`maxCatalogEntries`
+  cap. Before, `cweFocus=CWE-89 maxCwes=1` on Juice Shop kept only the
+  top-ranked CWE-79 entry and then filtered it out. That replaced the real
+  CWE-89 entry (score 88, with Sequelize sinks) with a synthesised entry
+  (score 50) whose sinks came from unrelated attack-surface text.
+- The CPG MCP server queries every buildable language, not only languages
+  with a persisted graph. On Juice Shop a persisted client-side JavaScript
+  graph hid the whole TypeScript server, so `cpg.taint_paths` found no
+  sources or sinks. It now reports `routes/search.ts` `req.query` →
+  `sequelize.query`. A language whose implicit build fails is skipped and
+  named on stderr; the call fails only when no language loads.
+- `kuzushi --target <repo> mcp health|serve <backend>` grants the server
+  that repository as its read root. Before, `mcp health cpg` always reported
+  `targetRoot: unresolved`.
+- `kuzushi run --option key=value` refuses an option the tool does not
+  declare, with the same "Did you mean" message as an unknown `--input` key.
+  Before, the value was dropped silently.
+- A taint-iris-next agent answer that needs structured-output repair is no
+  longer thrown away just because the provider reported no charge. The
+  repair's spend stop now uses the labelled estimate and fails closed only
+  when spend is neither metered nor priced.
+- Bridge debug diagnostics now name the tools each call used and count them
+  across the whole agent transcript (names only, no content), so MCP use can
+  be audited. Live on Juice Shop, taint-iris-next's agent called
+  `cpg_taint_paths`, `tree_sitter_query`/`node_at`, `threat_model_get`,
+  `context_get`, `entry_points_list`, `x_ray_summary` and `findings_query`.
+- `patch:reverify` reports the spend of the detector it replays. Before, its
+  result carried no cost, so a re-verification that made model calls read
+  "cost not recorded". It now shows the observed floor plus the token
+  estimate.
+- `patch apply` without a Fix selection now says how to create one: draft it
+  in the shell with `patch <finding>`, then press `u` on its RESULT READY
+  card. Before, it told the operator to press `u` on Fix, which does nothing
+  when no Fix result card exists.
+- A scan no longer ends partial (exit 1) just because a requested engine
+  does not apply to the target, for example systems-hunt on TypeScript. That
+  skip stays a visible warning. Skips for any other reason still leave the
+  scan partial.
+- `threat-intel:research` and `threat-intel:harvest` can now extract fix
+  patterns. `ndiff:extract-fix-pattern` reads its declared `record` option as
+  an already-fetched advisory and uses that advisory's primary patch
+  reference. Previously every harvested advisory was skipped with "requires
+  id, patchText, or patchUrl". A malformed `record` is refused rather than
+  ignored.
+- Json-typed tool options accept JSON object or array text from
+  `--option key=value`, shell `set` and stored options, so
+  `ndiff:hunt-variants --option pattern='{…}'` works. Other text passes
+  through unchanged.
+- Staged threat-model builds no longer fail after paying for every stage when
+  the model leaves `targetElementIds` off a gap-fill threat. Such a threat now
+  inherits the DFD links of the entry points it cites, marked
+  `targetElementIdsSource: "entryPoints"`. A threat with nothing to inherit is
+  dropped and its surface stays an honest gap. On Juice Shop the staged
+  pipeline now accounts for 40 of 40 grounded surfaces.
+- `threat-model:build` `budgetUsd` is enforced even when the provider does not
+  report spend. The staged, gap-fill, refine and question-closer checks read
+  the labelled token estimate, fail closed on unpriced unmetered spend, and
+  settle the workspace spend ledger to the estimate. The build summary and
+  the Run Focus header show `~$X estimated` rather than `>=$0.0000`.
+- A `targetSubdir` taint-iris-next hunt builds cpg-rs graphs only for the
+  languages present under its scan root. On a mixed-language repository, a
+  TypeScript-only subtree used to fail the JavaScript build and drop to the
+  heuristic linker. On Juice Shop `routes/` the hunt now yields 4 dataflow
+  paths instead of 0.
+- Tool results that report unresolved provider spend now carry the token
+  estimate. The dispatch boundary tallies every model call it traces and
+  fills in `estimatedCostUsd` when an engine reported only an observed
+  floor. It skips the fill whenever the tally saw less than the tool itself
+  observed.
+- `triage:dedupe` and `triage:chain-hunt` list the groups and chains they
+  propose, not only counts.
+- Finding-scoped tools accept the `F-0001` aliases that `kuzushi findings`
+  prints, as their `fingerprint` option already advertised. This covers
+  `triage:run`, `variant:lift-pattern`, `variant:hunt`, `trace:expand`,
+  `verify:exploit`, `deep-audit:run` and `classifier-gate:score`.
+  Previously each one answered "no finding" for an alias.
+- `variant:hunt` and `ndiff:hunt-variants` report their real spend instead of
+  a hard-coded `$0.0000`. Shared run receipts show a labelled
+  `~$X estimated (metering incomplete)` whenever a token-based estimate
+  exists, and `trace:expand` now keeps that estimate.
+- `x-ray:run` summarizes its verdict with the justification prose rather than
+  the `### Justification` sub-heading. When provider spend is unmetered, its
+  cost line reads `~$X estimated (provider spend unresolved)` or
+  `>=$X (provider spend unresolved)` instead of a bare `$0.0000`.
+- Offense review no longer fails when a threat cites a directory (for
+  example `routes`). The directory's direct files stand in for it, within
+  the existing file budget. On Juice Shop the engine produced 20 findings
+  across 4 actors.
+- `systems-hunt` reports `skipped` with its reason on a target that has no
+  C/C++/Rust/Go/Zig production source, instead of failing the scan. The
+  scan umbrella records a skipped engine's reason, its warning names it
+  ("systems-hunt was skipped: … does not apply …"), and a partial scan's CLI
+  error leads with that warning rather than a "completed" summary.
+
+- `kuzushi scan --paths <dir>` with exactly one directory now scopes
+  taint-iris-next through its `targetSubdir`. Before, the engine read
+  evidence from the whole repository (Juice Shop's challenge snippets and
+  frontend) even for a `routes/` scan. Other scopes stay repository-wide
+  rather than guessing a subdirectory. CPG builds no longer print the
+  upstream library's timing line on the scan's stderr.
+
+- `kuzushi scan --paths` now scopes the agentic SAST engine. The umbrella's
+  descriptor filter used to drop `paths`, so a scoped scan hunted (and paid
+  for) the whole repository; the scope now becomes the engine's include
+  patterns unless they are set explicitly. On Juice Shop `routes/`, the
+  engine went from 0 findings to 8 real ones: SQL injection in login and
+  search, `eval` and template injection, SSRF, zip path traversal, and two
+  NoSQL injections.
+- Agentic SAST declares `maxModelTurns` (default 20). The bridge tells the
+  model when two turns remain, so it can finish with its own answer; the
+  stop and the refusal of forced conclusions are unchanged. On Anthropic the
+  opening prompt of an agent loop is cache-marked, because every turn
+  re-sends it: the same hunt dropped from about $1.80 to about $0.43. A
+  truncation's remediation now names the setting that applies (turn budget,
+  MCP timeout, spend, or output tokens).
+- The scan JSON and `--ci` summary no longer print an exact `costUsd` when
+  provider spend is unresolved. `costUsd` is null, with `observedCostUsd`,
+  `providerSpendUnresolved`, and `estimatedCostUsd` alongside it.
+
+- Shell planner rows no longer say "needs model — run /model first" when a
+  model is configured but the task's input cannot be prepared (for example
+  `patch:finding` without a fingerprint). The row names the missing input.
+  The patch view labels its build/test commands as `VALIDATION · N
+  check(s)` rather than "TESTS · added", the Fix page shows its `updated`
+  time as RFC 3339, and the Report header says "current findings" so it no
+  longer reads as disagreeing with a completeness-all export.
+
+- Model-written patch hunks are re-anchored against the exact source
+  checkout during synthesis. A hunk with zero or one-sided context
+  (`@@ -21,1 +21,1 @@`) is treated by `git apply` as anchored to the end of
+  the file, so a correct mid-file edit was rejected ("patch does not
+  apply") even with every removed line correct. Each hunk whose old block
+  matches the source exactly once is re-emitted with real context and exact
+  line numbers. Ambiguous, unmatched, new-file, or no-newline hunks pass
+  through unchanged. On Juice Shop the hardcoded RSA key patch went from
+  three `APPLY_FAILED` attempts to `SOUND` on the first.
+
+- Run lifecycles no longer degrade on long float costs. A 17-digit estimate
+  such as `0.10256119999999999` did not parse back to the identical f64, so
+  the re-serialized run item failed its hash check and later reads found "no
+  typed terminal outcome". serde_json now parses floats exactly
+  (`float_roundtrip`).
+- Agent tool results are capped at 24,000 characters, and the cut is shown to
+  the model so it can narrow the query. Unbounded reads made a verify
+  transcript reach 503,809 tokens against a 200,000-token window. A provider
+  context-overflow rejection now carries a canonical operator detail
+  instead of a bare HTTP 400.
+- Structured-output truncation names the bridge's stop from a fixed
+  vocabulary (model-turn limit, forced conclusion, MCP timeout, spend stop,
+  output limit), and `verify:finding` declares `maxModelTurns` (default 12,
+  1–40) so a deeper investigation is an explicit operator choice. A forced
+  conclusion is still never accepted as a verdict.
+
+- Verify with MCP tools no longer stops after the first Claude call. The
+  bridge's observed-spend stop treated every Anthropic call as unpriceable
+  and ended the agent loop with `observed_spend_incomplete`, which surfaced
+  as "structured output failed". Kuzushi now sends its list-price rates with
+  spend-stopped bridge requests, and the stop enforces tokens × rates (cache
+  buckets priced apart from LangChain's inclusive input total). Mixed
+  receipts, missing token counts, or unknown models still stop fail-closed.
+  A structured-output repair now accepts estimated spend too.
+- "structured output failed" now names an allowlisted cause: the typed
+  runtime failure (for example the missing MCP sidecar), a refused repair,
+  truncation, or an output still invalid after one repair. Raw provider text
+  still never reaches the message. A failed tool keeps the cost its model
+  calls observed instead of reporting it as unavailable.
+- `patch:finding` refusals for a missing detector binding now say which run
+  last observed the finding (for example a `sast:scan` umbrella run) and
+  which detector to re-run on its own.
+
+- Claude calls that report tokens but no charge (the LangGraph bridge and
+  OAuth paths) are now priced locally from token usage and a versioned list
+  price table. The estimate is carried beside observed spend, labelled `~$X
+  (estimated)` and `estimatedCostUsd`, and never becomes `costUsd`. Triage
+  cost caps and the shell session budget enforce against it instead of
+  halting after the first unmetered call. Any unmetered call without an
+  estimate still fails closed. The price table now matches current list
+  prices (Haiku 4.5 is $1/$5 per MTok, Opus 4.5+ is $5/$25) and prices only
+  exact model ids. Persisted cost reports gain an optional
+  `estimatedUnmeteredUsd` field that older binaries reject.
+
+- A RESULT READY card key never becomes composer text in Navigate mode (#172).
+  A stale-frame re-press of the key that just resolved a card used to fall
+  through to prompt typing. Five presses of `u` applied "Use map" once and
+  left `uuuu` in the composer on the next page. That repeat is now absorbed
+  with a notice. A card key pressed off the Workbench opens the pending card
+  instead of applying it unseen, and resolving a card drops a draft made only
+  of card letters. While a warning holds Esc, the footer says
+  `Esc dismiss notice`.
+- Setup states the selected target's path once, ahead of its facts, and no
+  longer reports the shell's own bookkeeping files (indexes, locks, history)
+  as "prior Kuzushi" work on a fresh target (#172).
+- Map's PROJECT CONTEXT card renders every receipt row, where the old
+  eight-row cap dropped rows silently. When the card has spare height, long
+  summaries wrap instead of being cut with an ellipsis (#172 F5).
+- A scan no longer merges distinct findings. dep-hygiene, cargo-audit,
+  secret-scan and Terraform IaC findings now carry a discriminating identity
+  input, so 15 different vulnerable packages in one `package.json` are 15
+  findings, not one with `corroboration_count: 15`. The headless `sast:scan`
+  count uses the same identity fold as the ledger, SARIF and `--fail-on`, and
+  reports `observationsCount` beside it. On OWASP Juice Shop the headless
+  count went from 67 to 130 and now matches the ledger. See RELEASING.md,
+  "Structural producer identity migration".
+- Every finding-persistence path now commits a typed `FindingDelta`. Before,
+  a Scan result card could read `findings +0` after 73 new findings. A run
+  that still records no delta is shown as `findings unmeasured`, never as a
+  measured zero.
+- `verify:finding`, `patch:finding` and `variant:hunt` gate on the effective
+  review decision that Review and Prove display. A human-confirmed finding
+  without automated triage can be verified, and a human rejection overrides
+  a cached automated true positive. They previously refused with "Run
+  triage:run first" right after Prove advertised `verify`.
+- CodeQL results without a usable physical location are disclosed in
+  `scan_errors` instead of vanishing (#290). Scan-time static-evidence
+  indexing keeps the grounded results rather than failing the whole scan.
+- Recon imports report parsed rows that name no usable host (#292), and
+  campaign coverage and trend state an unreadable ledger as unmeasured
+  (#291). Triage verdicts propagate across generations only on an exact
+  producer fingerprint (#275).
+- Threat-model grounding discloses its denominator and cap
+  (`grounding: 40 of 70 surfaces (cap 40 · ≤2 rows/file)`) and records it
+  in `coverage.grounding`.
+- `threats summary` counts the actors a model names (its `actors` table, then
+  the distinct `threats[].actor` values, then the DFD actor nodes) and
+  reports `unknown`, not `0`, when none are named.
+- The context rail no longer shows unmetered spend as a measured `$0.00`.
+  Subscription and OAuth calls read `>=$X (metering incomplete)`, and a
+  budget share over them is marked as a lower bound.
+- The entry-point browser title names the rows a clipped list hides
+  (`+N above` / `+N below`). The auth picker no longer says a provider
+  "needs credentials" when an OAuth connection is stored. The catalog hint
+  says `press e`, because `Esc, then e` closed the catalog. Review decisions
+  and the export receipt show RFC 3339 UTC instead of raw epoch seconds.
+- The DevEx harness writes valid provenance JSON (its sed escaper had been
+  split by a stray newline), and `nav-mode` waits for a settled Navigate
+  footer before a page key is sent.
+
+- Typing a phase verb for a phase the engagement has already completed or
+  passed now opens that phase's Workbench page instead of its planner. On an
+  engagement in Review, `map` used to open "planning MAP · engagement is in
+  Review — Enter runs MAP steps" when the operator only wanted to look at the
+  accepted Map; it now lands on the Map page exactly as Shift+Tab would, and
+  the page's hint row offers `plan map`. A phase the journey has not reached
+  yet still opens its planner, and the new `plan <phase>` verb (like the
+  longer `phase <phase>`) always does. Plain scripted sessions render the page
+  for a completed phase and keep refusing planner-bound verbs.
+- The Fix page hint row now says how to start remediation for the selected
+  finding. When that finding has no patch draft or remediation record, the
+  hint reads `patch F-0001 draft a patch` (with the selected alias) instead of
+  a generic "patch displayed", so the review-gated Fix page no longer hides
+  that `patch <alias>` works from any page.
+- An idle shell no longer keeps showing a stale findings count after another
+  process writes the same target's ledger. A headless `kuzushi run` could
+  commit findings into the store's WAL — which the workspace watcher ignores —
+  and the shell kept showing 176 findings while the ledger held 187. On the
+  existing idle tick, at most every two seconds, the shell now stats the
+  store's main and WAL files and reloads findings when that identity moved and
+  the store's projection watermark differs from the one it last read.
 - `recon:http-fingerprint` no longer leaves the program scope by following a
   redirect, and no longer files the response under an endpoint that only
   pointed at it. The fetch ran `curl -i -L`, so the dispatch gate weighed the
@@ -64,8 +351,9 @@ Notable changes to Kuzushi. Release procedure lives in
   degraded read beside its counts and reports `findingLedger` in its result
   data. An unreadable decision read leaves the confirmed counts resting on
   embedded triage verdicts that carry no review reversal, so it is disclosed
-  as unmeasured rather than as a bound in either direction. An absent findings store still folds over an empty ledger, as it
-  always has — there is no database to have failed.
+  as unmeasured rather than as a bound in either direction. An absent findings
+  store still folds over an empty ledger, as it always has — there is no
+  database to have failed.
 
 - `recon:import` for amass and httpx now says how many parsed rows it dropped
   because they named no usable host. An amass line without a non-empty `name`,

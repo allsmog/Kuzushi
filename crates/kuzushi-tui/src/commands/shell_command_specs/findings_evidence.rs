@@ -234,6 +234,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "inspect compatibility-mirror edits against the active immutable revision",
     },
     ShellCommandSpec {
+        command: "threats diff <from> <to>",
+        aliases: &["/threats diff <from> <to>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "compare two revisions (tmr_…) or lineage heads (tm_…) via threat-model:diff",
+    },
+    ShellCommandSpec {
         command: "threats activate <model-id>[@<revision-id>]",
         aliases: &["/threats activate <model-id>"],
         category: ShellCommandCategory::FindingsEvidence,

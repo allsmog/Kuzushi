@@ -255,6 +255,9 @@ fn is_global_chord(key: &str) -> bool {
 
 fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     let binding = match app.input_mode() {
+        // A warning/error notice takes the next Esc before any mode flip, so
+        // the footer must not promise the flip that press will not perform.
+        _ if app.notice_captures_escape() => bind("Esc", "dismiss notice"),
         crate::InputMode::Prompt => bind("Esc", prompt_navigate_label(app)),
         crate::InputMode::Navigate => bind("Esc", "prompt"),
     };

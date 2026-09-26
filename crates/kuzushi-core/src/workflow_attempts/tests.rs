@@ -32,6 +32,7 @@ fn receipt() -> PhaseAttemptReceipt {
         elapsed_secs: 17,
         cost: "$0.1250".to_string(),
         changed_findings: 3,
+        finding_delta_observed: None,
         changed_artifacts: vec!["result.json".to_string(), "items.jsonl".to_string()],
         interaction_count: 1,
         rerun_specification: Some("run semgrep:scan".to_string()),
@@ -264,6 +265,7 @@ fn contradictory_receipt() -> PhaseAttemptReceipt {
         elapsed_secs: 17,
         cost: "$99.0000".to_string(),
         changed_findings: 99,
+        finding_delta_observed: None,
         changed_artifacts: vec!["transient-guessed.json".to_string()],
         interaction_count: 99,
         rerun_specification: Some("preserve compatibility-only rerun input".to_string()),
@@ -465,6 +467,7 @@ fn workflow_v2_legacy_projection_uses_typed_receipt_truth() {
     assert_eq!(receipt.run_count, 1);
     assert_eq!(receipt.cost, "$0.2500 exact");
     assert_eq!(receipt.changed_findings, 4);
+    assert_eq!(receipt.finding_delta_observed, Some(true));
     assert_eq!(receipt.interaction_count, 1);
     assert!(receipt
         .changed_artifacts
@@ -1208,6 +1211,7 @@ fn oversized_receipt() -> PhaseAttemptReceipt {
         elapsed_secs: 1,
         cost: "c".repeat(1_000),
         changed_findings: 0,
+        finding_delta_observed: None,
         changed_artifacts: (0..100)
             .map(|index| format!("artifact-{index}-{}", "x".repeat(2_000)))
             .collect(),

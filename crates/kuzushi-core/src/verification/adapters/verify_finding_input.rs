@@ -13,6 +13,9 @@ pub(in crate::verification::adapters) struct VerifyFindingInput {
     pub(in crate::verification::adapters) passes: u32,
     pub(in crate::verification::adapters) mcps: bool,
     pub(in crate::verification::adapters) mcp_tool_timeout_ms: Option<u64>,
+    /// Model-turn budget for each agentic verifier pass; `None` keeps the
+    /// bridge default.
+    pub(in crate::verification::adapters) max_model_turns: Option<u32>,
     /// Optional cheap-tier plausibility gate: one pass with this model runs
     /// first, and only its REJECTION is trusted — it can kill obvious noise
     /// for a fraction of the cost, but an exploitable verdict always
@@ -53,6 +56,8 @@ impl VerifyFindingInput {
         let passes = parse_verify_passes(input)?;
         let mcps = parse_verify_mcps(input)?;
         let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
+        let max_model_turns =
+            crate::runtime::AgentRuntimeOptions::max_model_turns_from_input(input, "verify:finding")?;
         let gate_model = parse_gate_model(input)?;
         let escalation_model = parse_escalation_model(input)?;
 
@@ -62,6 +67,7 @@ impl VerifyFindingInput {
             passes,
             mcps,
             mcp_tool_timeout_ms,
+            max_model_turns,
             gate_model,
             escalation_model,
         })
@@ -205,4 +211,27 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod max_model_turns_tests {
+    use crate::runtime::AgentRuntimeOptions;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn a_declared_turn_budget_is_bounded_and_absent_keeps_the_default() {
+        let parse = |value: Value| {
+            AgentRuntimeOptions::max_model_turns_from_input(&json!({ "maxModelTurns": value }), "t")
+        };
+        assert_eq!(parse(json!(24)).unwrap(), Some(24));
+        let none = AgentRuntimeOptions::max_model_turns_from_input(&json!({}), "t");
+        assert_eq!(none.unwrap(), None);
+        let alias =
+            AgentRuntimeOptions::max_model_turns_from_input(&json!({"max_model_turns": 5}), "t");
+        assert_eq!(alias.unwrap(), Some(5));
+        for invalid in [json!(0), json!(41), json!("12"), json!(-1)] {
+            let error = parse(invalid).unwrap_err().to_string();
+            assert!(error.contains("t maxModelTurns"), "{error}");
+        }
+    }
 }

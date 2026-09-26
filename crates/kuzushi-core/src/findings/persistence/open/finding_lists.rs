@@ -13,6 +13,39 @@ impl FindingStore {
         self.v3_findings_for_scan_id(scan_id)
     }
 
+    /// The shared run-scoped definition of "a finding": one row per safe
+    /// identity-fold key. Strong identities corroborate across the runs, while
+    /// weak file-fallback identities stay distinct unless their exact source
+    /// evidence matches, so two different issues are never counted as one.
+    pub fn list_distinct_findings_for_scan_ids<S: AsRef<str>>(
+        &self,
+        run_ids: &[S],
+    ) -> Result<Vec<Finding>> {
+        let mut findings = Vec::new();
+        for run_id in run_ids {
+            findings.extend(self.list_findings_for_scan_id(run_id.as_ref())?);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        findings.retain(|finding| {
+            seen.insert(crate::findings::finding_projection_key(
+                finding,
+                IdentityFoldPolicy::Safe,
+            ))
+        });
+        Ok(findings)
+    }
+
+    /// Raw producer observations recorded by these runs, before same-issue
+    /// corroboration folds them into findings.
+    pub fn count_finding_observations_for_scan_ids<S: AsRef<str>>(
+        &self,
+        run_ids: &[S],
+    ) -> Result<usize> {
+        run_ids.iter().try_fold(0, |total, run_id| {
+            Ok(total + self.v3_observation_count_for_scan_id(run_id.as_ref())?)
+        })
+    }
+
     /// Full-ledger fetch. Presentation lists clamp to
     /// `FindingListFilter::MAX_LIMIT`, but two consumers must see every
     /// finding: exports (which stamp completeness into metadata) and alias

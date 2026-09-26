@@ -39,7 +39,7 @@ pub(crate) fn parse_threat_command(args: &[&str]) -> ShellCommand {
         Some("apply") => ShellCommand::ThreatApply,
         Some("reject") | Some("discard") => ShellCommand::ThreatReject,
         Some("models") => ShellCommand::ThreatModels,
-        Some("diff") => ShellCommand::ThreatModelInspectDiff,
+        Some("diff") => threat_model_diff_command(&args[1..]),
         Some("inspect") if args.get(1).copied() == Some("diff") => {
             ShellCommand::ThreatModelInspectDiff
         }
@@ -73,6 +73,19 @@ fn split_threat_model_selector(selector: &str) -> (&str, Option<&str>) {
         .map_or((selector, None), |(model_id, revision_id)| {
             (model_id, Some(revision_id))
         })
+}
+
+/// Bare `threats diff` keeps inspecting mirror edits; two selectors compare
+/// revisions or lineage heads through the headless `threat-model:diff` tool.
+fn threat_model_diff_command(selectors: &[&str]) -> ShellCommand {
+    match selectors {
+        [] => ShellCommand::ThreatModelInspectDiff,
+        [from, to] => ShellCommand::ThreatModelDiff {
+            from: (*from).to_string(),
+            to: (*to).to_string(),
+        },
+        _ => ShellCommand::Unknown("/threats diff [<from> <to>]".to_string()),
+    }
 }
 
 fn threat_model_revisions_command(args: &[&str]) -> ShellCommand {

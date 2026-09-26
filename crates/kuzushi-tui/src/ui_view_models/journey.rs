@@ -803,6 +803,29 @@ fn phase_state(
     }
 }
 
+/// Whether the engagement has completed or moved past `phase`. A direct phase
+/// verb then opens the durable Workbench page instead of that phase's planner;
+/// a phase the journey has not reached yet keeps the planner, since that is
+/// how its work starts.
+pub(crate) fn phase_complete_or_passed(
+    phase: WorkflowPhase,
+    destination: JourneyDestination,
+) -> bool {
+    match destination {
+        JourneyDestination::Phase(current) => phase < current,
+        JourneyDestination::Report(reason) => {
+            report_phase_state(phase, reason) == JourneyPhaseState::Done
+        }
+    }
+}
+
+/// [`phase_complete_or_passed`] over the app's cached reality projection;
+/// false without a target.
+pub(crate) fn phase_verb_opens_page(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    journey_reality_projection(app)
+        .is_some_and(|reality| phase_complete_or_passed(phase, reality.destination))
+}
+
 fn report_phase_state(phase: WorkflowPhase, reason: ReportReason) -> JourneyPhaseState {
     let last_applicable = match reason {
         ReportReason::CleanScan => WorkflowPhase::Scan,
@@ -1047,6 +1070,24 @@ mod tests {
             remediation_projection_complete: true,
             legacy_inferred: false,
         }
+    }
+
+    #[test]
+    fn phase_complete_or_passed_opens_pages_only_behind_the_journey() {
+        let review = JourneyDestination::Phase(WorkflowPhase::Review);
+        assert!(phase_complete_or_passed(WorkflowPhase::Map, review));
+        assert!(phase_complete_or_passed(WorkflowPhase::Scan, review));
+        assert!(!phase_complete_or_passed(WorkflowPhase::Review, review));
+        assert!(!phase_complete_or_passed(WorkflowPhase::Fix, review));
+
+        let clean = JourneyDestination::Report(ReportReason::CleanScan);
+        assert!(phase_complete_or_passed(WorkflowPhase::Scan, clean));
+        assert!(!phase_complete_or_passed(WorkflowPhase::Review, clean));
+
+        let remediated = JourneyDestination::Report(ReportReason::RemediationComplete);
+        assert!(WorkflowPhase::ORDER
+            .iter()
+            .all(|phase| phase_complete_or_passed(*phase, remediated)));
     }
 
     #[test]

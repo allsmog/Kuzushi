@@ -17,6 +17,7 @@ import {
   humanMessageForRequest,
   interruptedQueryResult,
   isAiMessage,
+  loopOpeningMessageForRequest,
   maybeParseJson,
   messageText,
   modelContinuationDecision,
@@ -24,6 +25,7 @@ import {
   parseModelSpec,
   systemMessageForRequest,
   toolMessageForOutput,
+  turnBudgetNotice,
   usageFromMessage,
 } from "./langgraph-bridge/model.mjs";
 import { messagesForNextStep } from "./langgraph-bridge/next-step-messages.mjs";
@@ -61,12 +63,12 @@ async function runQueryGraph(request) {
       const completion = await runQueryGraphToConclusion(graph, request, system, progress);
       const { messages } = completion;
       const message = messages.at(-1);
-      debugDumpBridgeCall("query", request, tools, system, message);
+      debugDumpBridgeCall("query", request, tools, system, message, messages);
       return queryResultFromMessages(messages, request, completion.stopReason);
     } catch (error) {
       if (!isMcpToolTimeoutError(error)) throw error;
       const message = progress.messages.at(-1);
-      debugDumpBridgeCall("query", request, tools, system, message);
+      debugDumpBridgeCall("query", request, tools, system, message, progress.messages);
       return interruptedQueryResult(progress.messages, "mcp_tool_timeout");
     }
   }, mcp.close);
@@ -83,7 +85,7 @@ const FORCED_CONCLUSION_PROMPT =
   "you could not confirm.";
 
 async function runQueryGraphToConclusion(graph, request, system, progress) {
-  const state = { messages: [humanMessageForRequest(request)] };
+  const state = { messages: [loopOpeningMessageForRequest(request)] };
   try {
     const result = await graph.invoke(state, {
       recursionLimit: QUERY_GRAPH_RECURSION_LIMIT,
@@ -148,9 +150,11 @@ const QUOTA_WINDOW_WAIT_MS = 65_000;
 
 function callModelNode(model, request, system, progress) {
   return async (state) => {
+    const notice = turnBudgetNotice(state.messages, requestMaxModelTurns(request));
     const response = await invokeThroughQuotaWindows(model, [
       systemMessageForRequest(request, system),
       ...state.messages,
+      ...(notice ? [notice] : []),
     ], request);
     progress.messages = [...state.messages, response];
     return { messages: [response] };
@@ -239,12 +243,18 @@ function queryResultFromMessages(messages, request, completionStopReason) {
   return bridgeQueryResult(messages, stopReason);
 }
 
+function requestMaxModelTurns(request) {
+  const options = request.runtimeOptions ?? request.runtime_options ?? {};
+  return options.maxModelTurns ?? options.max_model_turns ?? undefined;
+}
+
 function queryStopReason(messages, request) {
   const last = messages.at(-1);
   if (!isAiMessage(last) || !last.tool_calls?.length) return undefined;
   const options = request.runtimeOptions ?? request.runtime_options ?? {};
   const stop = options.observedSpendStopUsd ?? options.observed_spend_stop_usd;
-  const decision = modelContinuationDecision(messages, stop);
+  const rates = request.spendEstimateRates ?? request.spend_estimate_rates;
+  const decision = modelContinuationDecision(messages, stop, requestMaxModelTurns(request), rates);
   return decision === "continue" ? undefined : decision;
 }
 

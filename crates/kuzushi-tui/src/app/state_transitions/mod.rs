@@ -57,6 +57,7 @@ mod map_text_keys;
 mod operator_question_keys;
 mod page_scroll;
 mod pending_plan_keys;
+mod phase_result_navigate;
 mod picker_keys;
 mod planning_option_keys;
 mod prereq_prompt_keys;

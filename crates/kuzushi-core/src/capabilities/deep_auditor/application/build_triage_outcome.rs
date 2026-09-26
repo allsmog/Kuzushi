@@ -31,6 +31,8 @@ pub(crate) fn build_triage_outcome(
             .map(str::to_string),
         cost_usd: outcome.cost_usd,
         cost_usd_exact: outcome.cost_usd_exact,
+        // Tool-loop steps carry no per-call token estimate yet.
+        estimated_cost_usd: None,
     }
 }
 

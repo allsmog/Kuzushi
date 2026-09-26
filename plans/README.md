@@ -60,9 +60,8 @@ After the focused checks in every plan, the reviewer runs:
 cargo fmt --all -- --check
 cargo check --offline --workspace
 cargo clippy --offline --workspace --all-targets -- -D warnings
-pnpm typecheck:all
 pnpm test
-pnpm codegen:check
+pnpm verify:quick:summary
 pnpm quality:architecture
 pnpm quality:model-safety
 pnpm quality:crap-risk

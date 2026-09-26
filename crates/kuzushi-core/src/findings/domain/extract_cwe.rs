@@ -88,6 +88,29 @@ impl Finding {
         self
     }
 
+    /// Re-derive the producer fingerprint so issues that share tool, rule,
+    /// and file (the `new_tool` fingerprint scope) stay distinct rows. The
+    /// durable identity is unchanged: it still comes from the cited source.
+    pub fn with_fingerprint_discriminator(mut self, discriminator: &str) -> Self {
+        self.fingerprint = crate::identity::discriminated_fingerprint_for_tool(
+            &self.tool,
+            &self.rule_id,
+            &self.file_path,
+            discriminator,
+        );
+        self
+    }
+
+    /// Name the structural element the issue belongs to (a dependency in a
+    /// manifest, an IaC block address). The locator separates the producer
+    /// fingerprint and, when qualified, mints a line-independent
+    /// source-locator identity so rescans corroborate instead of splitting.
+    pub fn with_structural_locator(self, locator: impl Into<String>) -> Self {
+        let locator = locator.into();
+        self.with_fingerprint_discriminator(&locator)
+            .with_symbol_locator(locator)
+    }
+
     pub fn with_rule_version(mut self, version: impl Into<String>) -> Self {
         self.rule_version = Some(version.into());
         self

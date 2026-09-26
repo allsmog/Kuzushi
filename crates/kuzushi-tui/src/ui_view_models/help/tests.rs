@@ -53,6 +53,17 @@ fn plain_help_model_projects_plain_rows() {
         .iter()
         .flat_map(|category| category.rows.iter())
         .any(|row| row.starts_with("full [target] - interactive TUI only")));
+    let rows = model
+        .categories
+        .iter()
+        .flat_map(|category| category.rows.iter())
+        .collect::<Vec<_>>();
+    assert!(rows
+        .iter()
+        .any(|row| row.starts_with("plan <map|scan|review|prove|fix> - interactive TUI only")));
+    assert!(rows
+        .iter()
+        .any(|row| row.starts_with("map - opens a completed phase's page")));
 }
 
 #[test]

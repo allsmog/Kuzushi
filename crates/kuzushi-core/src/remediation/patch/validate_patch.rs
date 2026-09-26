@@ -198,6 +198,7 @@ mod tests {
         if git_is_unavailable() {
             return;
         }
+        crate::remediation::patch_process_adapter::require_patch_validation_sandbox();
         let control = unattended_patch_control();
         let (temp, worktree) = disposable_worktree_fixture(control);
         let repo = temp.path();

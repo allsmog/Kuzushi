@@ -1145,6 +1145,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
                 rationale: "source and sink are linked".to_string(),
                 cost_usd: 0.01,
                 cost_usd_exact: true,
+                estimated_cost_usd: None,
             },
         )
         .unwrap();

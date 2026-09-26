@@ -107,8 +107,12 @@ fn cargo_audit_finding(entry: &Value) -> Result<Finding> {
     let severity = severity_from_cvss(advisory.get("cvss").and_then(Value::as_str));
     let message = format!("{id}: {package_name}@{version} — {title}");
 
+    // One advisory can affect several locked versions; the locked package
+    // names which instance of the advisory this finding is.
+    let locator = format!("Cargo.lock#{package_name}@{version}");
     Ok(
         Finding::new_tool("cargo-audit", id, "Cargo.lock", 1, None, severity, message)
+            .with_structural_locator(locator)
             .with_static_proof_state(StaticProofState::SignalOnly),
     )
 }

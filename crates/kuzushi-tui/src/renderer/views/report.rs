@@ -188,7 +188,10 @@ fn append_report_receipt(
     lines.push(divider(title, width));
     lines.push(detail("format", receipt.format.as_str()));
     lines.push(detail("completeness", receipt.completeness.as_str()));
-    lines.push(detail("timestamp", &receipt.timestamp));
+    lines.push(detail(
+        "timestamp",
+        &crate::ui_view_models::recorded_timestamp_label(&receipt.timestamp),
+    ));
     if let Some(count) = receipt.count {
         lines.push(detail("findings", &count.to_string()));
     }

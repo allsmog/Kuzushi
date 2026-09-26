@@ -62,6 +62,29 @@ pub fn stable_fingerprint_for_tool(
     _title: &str,
     _message: &str,
 ) -> String {
+    tool_fingerprint(tool, rule_id, file_path, None)
+}
+
+/// Producer fingerprint for tools whose rule and file alone do not name one
+/// issue, such as two dependencies in one manifest or two blocks in one IaC
+/// file. The discriminator is producer-owned structure (or an exact
+/// statement position) and never producer prose, so rewording a message still
+/// cannot split an issue while distinct issues no longer share one row.
+pub fn discriminated_fingerprint_for_tool(
+    tool: &str,
+    rule_id: &str,
+    file_path: &str,
+    discriminator: &str,
+) -> String {
+    tool_fingerprint(tool, rule_id, file_path, Some(discriminator))
+}
+
+fn tool_fingerprint(
+    tool: &str,
+    rule_id: &str,
+    file_path: &str,
+    disambiguator: Option<&str>,
+) -> String {
     let identity_hint = normalize_finding_text(rule_id);
     compute_stable_fp_v3(StableFindingInput {
         tool_family: tool,
@@ -73,7 +96,7 @@ pub fn stable_fingerprint_for_tool(
         ast_locus_hash: None,
         normalized_snippet: &identity_hint,
         local_context_hash: None,
-        disambiguator: None,
+        disambiguator,
     })
 }
 
@@ -163,6 +186,35 @@ mod tests {
 
         assert_eq!(first, second);
         assert!(first.starts_with("fp3_"));
+    }
+
+    #[test]
+    fn discriminated_fingerprint_separates_issues_sharing_rule_and_file() {
+        let base = stable_fingerprint_for_tool("dep-hygiene", "dep-hygiene/package-json", "package.json", "", "");
+        let first = discriminated_fingerprint_for_tool(
+            "dep-hygiene",
+            "dep-hygiene/package-json",
+            "package.json",
+            "package.json#left-pad",
+        );
+        let second = discriminated_fingerprint_for_tool(
+            "dep-hygiene",
+            "dep-hygiene/package-json",
+            "package.json",
+            "package.json#right-pad",
+        );
+
+        assert_ne!(first, second);
+        assert_ne!(first, base);
+        assert_eq!(
+            first,
+            discriminated_fingerprint_for_tool(
+                "dep-hygiene",
+                "dep-hygiene/package-json",
+                "package.json",
+                "package.json#left-pad",
+            )
+        );
     }
 
     #[test]

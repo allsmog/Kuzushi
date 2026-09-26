@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI › help · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
+ KUZUSHI › help · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -44,19 +44,33 @@ setup - review target, Map plan, model/credentials, prompt, and budget readiness
 next [fresh] - continue the engagement (alias: continue) — open the derived phase's picker; `next fresh` restarts the
 pass at the Map planner
   aliases / examples: next, /next
-map - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+map - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /map, /ma
-scan - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+scan - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /scan, /sc
-review - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+scan batch - configure repeated logical scan trials, optionally costed from a prior run
+  aliases / examples: /scan batch, scan batch --prior-run <runId>
+batch <id> - open one scan batch's occurrence results and gate receipt
+  aliases / examples: /batch <id>
+batch clear - clear the active scan-batch results scope
+  aliases / examples: /batch clear
+review - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /review, /rv
-prove - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+prove - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /prove, /pr
-fix - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+fix - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`
   aliases / examples: /fix, /fx
 phase <map|scan|review|prove|fix> - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target
 <target> run sast:scan`
   aliases / examples: phase map, phase scan, phase review, phase prove, phase fix, phase hunt, phase confirm
+plan <map|scan|review|prove|fix> - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target
+<target> run sast:scan`
+  aliases / examples: /plan <map|scan|review|prove|fix>, plan map, plan fix
 autonomy [recon|scan|review|prove|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling
   aliases / examples: autonomy, /autonomy, posture, /posture
 logs - scrollable full-screen transcript
@@ -65,18 +79,22 @@ background - drop to Workbench, keep the job running (Ctrl+C still cancels)
   aliases / examples: /background, bg, /bg
 
 RUN / SCAN — dispatch tools and scans
+answers - read complete Ask answers and reply beside the workspace (Ctrl+T)
+  aliases / examples: /answers, chat
 demo - run a 90-second offline fixture scan; no key, model, or external scanner
   aliases / examples: /demo
 full [target] - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run
 sast:scan`
   aliases / examples: full ., /full [target], pipeline [target], /pipeline [target]
-run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
-  aliases / examples: run ., /run <tool> [json], run . [json]
+run <tool> [key=value ...] - run a tool with key=value options; run . uses the focused module
+  aliases / examples: run ., /run <tool> [key=value ...], run . [key=value ...]
 recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path> - import an external reconnaissance export through the
 registered recon tool
   aliases / examples: recon import <format> <path>, /recon:import <format> <path>
-ask <question> - explicit agent question (stays on the current view)
+ask [--whole-model] <question> - ask inline with bounded screen context; --whole-model attaches the map
   aliases / examples: /ask <question>, ?text
+ask cancel - cancel only the active Ask and preserve a concurrent run
+  aliases / examples: /ask cancel
 queue <tool|verb> - queue a command to run after the current one finishes
   aliases / examples: /queue <tool>, queue run <tool>
 
@@ -180,6 +198,8 @@ jobs - live + recent run registry
   aliases / examples: /jobs, jobs list
 campaign [id] - campaign deck: planned job matrix + dispatcher queue state
   aliases / examples: /campaign, campaigns
+batch <id>|clear - open a scan-batch occurrence report and retain or clear its Review scope
+  aliases / examples: /batch <id>
 coverage - coverage matrix: shards x threat sources with campaign progress + finding counts
   aliases / examples: /coverage
 jobs -k <runId> - cancel a running job or drop a pending one
@@ -212,12 +232,24 @@ threats edit - open the editable threat model view
   aliases / examples: /threats edit
 threats regen - Haiku-driven threat-model patch; review then /threats apply
   aliases / examples: /threats regen
-threats ask <question> - ask the agent about the current threat model
+threats ask [--whole-model] <question> - ask the agent about the current threat model
   aliases / examples: /threats ask <question>
 threats apply - apply the pending threat-model patch
   aliases / examples: /threats apply
 threats reject - discard the pending threat-model patch
   aliases / examples: /threats reject
+threats models - list immutable threat-model lineages and their active head
+  aliases / examples: /threats models
+threats diff - inspect compatibility-mirror edits against the active immutable revision
+  aliases / examples: /threats diff, threats inspect diff
+threats diff <from> <to> - compare two revisions (tmr_…) or lineage heads (tm_…) via threat-model:diff
+  aliases / examples: /threats diff <from> <to>
+threats activate <model-id>[@<revision-id>] - activate a model head or exact immutable revision
+  aliases / examples: /threats activate <model-id>
+threats revisions <model-id> - list immutable revisions in one threat-model lineage
+  aliases / examples: /threats revisions <model-id>
+threats restore <revision-id> - append a new revision from historical model content
+  aliases / examples: /threats restore <revision-id>
 threats versions - list stored threat-model versions from the index ledger
   aliases / examples: /threats versions, threats history
 threats use <n> - make a stored threat-model version the live model

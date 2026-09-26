@@ -37,8 +37,8 @@ pub(super) fn dedupe_result(
         "verdictsRecorded": report.verdicts_recorded,
     });
     crate::module_result::apply_runtime_cost_report(&mut data, cost);
-    let mut result =
-        crate::module_result::completed_output_result(summary.clone(), summary, data);
+    let output = dedupe_output(&summary, &confirmed.groups);
+    let mut result = crate::module_result::completed_output_result(summary, output, data);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
@@ -65,6 +65,28 @@ fn dedupe_summary(
     )
 }
 
+/// The summary plus one line per group, so a dry run shows what it would
+/// link rather than only counting it.
+fn dedupe_output(summary: &str, groups: &[DuplicateGroup]) -> String {
+    let lines = groups.iter().map(|group| {
+        format!(
+            "  - {} ({} duplicate(s) of {}, confidence {:.2})",
+            group.root_cause_summary,
+            group.duplicate_fingerprints.len(),
+            short_fingerprint(&group.canonical_fingerprint),
+            group.confidence,
+        )
+    });
+    std::iter::once(summary.to_string())
+        .chain(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn short_fingerprint(fingerprint: &str) -> &str {
+    fingerprint.get(..12).unwrap_or(fingerprint)
+}
+
 fn group_json(group: &DuplicateGroup) -> Value {
     json!({
         "canonicalFingerprint": group.canonical_fingerprint,
@@ -72,4 +94,26 @@ fn group_json(group: &DuplicateGroup) -> Value {
         "rootCauseSummary": group.root_cause_summary,
         "confidence": group.confidence,
     })
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn the_output_lists_each_proposed_group_under_the_summary() {
+        let group = DuplicateGroup {
+            canonical_fingerprint: "fp3_7d29d78f31efa2e0".to_string(),
+            duplicate_fingerprints: vec!["fp3_c251".to_string()],
+            root_cause_summary: "SQL injection in the login route".to_string(),
+            confidence: 0.95,
+        };
+
+        let output = dedupe_output("summary", &[group]);
+
+        assert_eq!(
+            output,
+            "summary\n  - SQL injection in the login route (1 duplicate(s) of fp3_7d29d78f, confidence 0.95)"
+        );
+    }
 }

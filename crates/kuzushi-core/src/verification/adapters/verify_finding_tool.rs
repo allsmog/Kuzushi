@@ -10,6 +10,9 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 mod execution;
+mod review_gate;
+
+use review_gate::verify_review_gate_refusal;
 
 pub(crate) struct VerifyFindingToolRequest<'a> {
     pub(crate) input: Value,
@@ -321,7 +324,7 @@ fn verify_agent_query_request(
         };
         request = request.with_runtime_options(runtime_options);
     }
-    Ok(request)
+    Ok(request.with_max_model_turns(input.max_model_turns))
 }
 
 fn missing_finding_response(fingerprint: &str) -> Value {
@@ -332,19 +335,6 @@ fn missing_finding_response(fingerprint: &str) -> Value {
         json!({
             "fingerprint": fingerprint,
             "reason": "missing-finding",
-        }),
-    )
-}
-
-fn untriaged_finding_response(fingerprint: &str) -> Value {
-    let output =
-        format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
-    crate::module_result::failed_output_result(
-        "verify:finding failed",
-        output,
-        json!({
-            "fingerprint": fingerprint,
-            "reason": "missing-triage",
         }),
     )
 }
@@ -409,6 +399,10 @@ fn append_vector_line(lines: &mut Vec<String>, result: &Value) {
 fn append_cost_line(lines: &mut Vec<String>, cost: &RuntimeCostReport) {
     if cost.is_unavailable() {
         lines.push("      cost unavailable".to_string());
+        return;
+    }
+    if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        lines.push(format!("      estimated cost=~${estimate:.4} (tokens × list price)"));
         return;
     }
     let cost_label = if cost.is_complete() {
@@ -726,6 +720,7 @@ mod tests {
             passes: 1,
             mcps: true,
             mcp_tool_timeout_ms: Some(12_345),
+            max_model_turns: None,
             gate_model: None,
             escalation_model: None,
         };
@@ -818,6 +813,7 @@ mod tests {
             passes: 1,
             mcps: false,
             mcp_tool_timeout_ms: None,
+            max_model_turns: None,
             gate_model: None,
             escalation_model: None,
         };

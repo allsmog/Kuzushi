@@ -1842,6 +1842,7 @@ fn module_run_findings_preview_uses_projected_finding_rows() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     *app.findings_mut() = vec![
         triaged,
@@ -5650,6 +5651,9 @@ fn compact_trace_page_down_reaches_steps() {
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    // Paging is clamped to the app's measured viewport, as the live event
+    // loop keeps it in step with the terminal.
+    app.set_viewport(crate::TerminalViewport::new(60, 20));
     app.set_target(Some(tmp.path().to_path_buf()));
     seed_compact_scroll_findings(&mut app);
     app.router.trace_mut().open(run_id);
@@ -5854,7 +5858,7 @@ fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
     // All four sections.
     assert!(rendered.contains("RATIONALE"));
     assert!(rendered.contains("DIFF"));
-    assert!(rendered.contains("TESTS"));
+    assert!(rendered.contains("VALIDATION · "));
     assert!(rendered.contains("GUARDRAIL"));
     // Rationale + side-effect.
     assert!(rendered.contains("sqlx::query!()"));
@@ -7454,6 +7458,7 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
         rationale: "Operator confirmed the source-to-sink path.".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     let mut app = ShellApp::new(V2Config::default(), None);

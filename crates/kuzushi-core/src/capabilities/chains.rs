@@ -424,13 +424,7 @@ fn persist_chain_findings_when_enabled(
         .workspace
         .context("findings:chains: persistFindings requires an active workspace target")?;
     let findings: Vec<Finding> = report.chains.iter().map(chain_candidate_finding).collect();
-    let persisted = crate::findings::persist_tool_findings(
-        ctx.finding_run_id(),
-        workspace.root(),
-        &findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = crate::findings::persist_tool_findings(ctx, workspace.root(), &findings)?;
     if let Some(object) = report_json.as_object_mut() {
         object.insert(
             "persistedRunId".to_string(),

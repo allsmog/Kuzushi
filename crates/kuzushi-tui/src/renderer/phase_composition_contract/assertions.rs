@@ -127,7 +127,10 @@ impl PhaseCompositionContract {
         match self.phase {
             kuzushi_core::WorkflowPhase::Map => &["Viewing Map", "SYSTEM SUMMARY"],
             kuzushi_core::WorkflowPhase::Scan => &["Viewing Scan", "complete", "scan-phase"],
-            kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "[●●●]", "s1"],
+            // Compact Review reads as finding cards: identity and proof first.
+            // The plain truth atom keeps guarding the source count, which a
+            // card shows only when the viewport leaves it a row.
+            kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "F-0001", "[●●●]"],
             kuzushi_core::WorkflowPhase::Prove => &["F-0001", "STATUS", "NEXT", "[●●●]"],
             kuzushi_core::WorkflowPhase::Fix => {
                 &["REMEDIATION", "Staged", "patch apply", "patch reject"]
@@ -161,8 +164,17 @@ fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static
     }
 }
 
+/// Every spelling of the runtime-verified proof tier: the meter glyphs, their
+/// ASCII fallback, and the words compact finding cards use.
+const RUNTIME_PROOF_SPELLINGS: [&str; 3] = ["[●●●]", "[***]", "runtime verified"];
+
 fn contains_contract_atom(text: &str, atom: &str) -> bool {
-    text.contains(atom) || (atom == "[●●●]" && text.contains("[***]"))
+    if RUNTIME_PROOF_SPELLINGS.contains(&atom) {
+        return RUNTIME_PROOF_SPELLINGS
+            .iter()
+            .any(|spelling| text.contains(spelling));
+    }
+    text.contains(atom)
 }
 
 fn collapse_whitespace(text: &str) -> String {
@@ -202,25 +214,41 @@ fn assert_one_accent_region(buffer: &Buffer, profile: TerminalProfile, phase: &s
     );
 }
 
+/// Counts 4-connected regions, so one selected finding card spanning several
+/// rows is one selection band while two separate bands still count twice.
 fn style_region_count(buffer: &Buffer, matches: impl Fn(&ratatui::buffer::Cell) -> bool) -> usize {
-    (0..buffer.area.height)
-        .map(|y| row_region_count(buffer, y, &matches))
-        .sum()
-}
-
-fn row_region_count(
-    buffer: &Buffer,
-    y: u16,
-    matches: &impl Fn(&ratatui::buffer::Cell) -> bool,
-) -> usize {
-    let mut inside = false;
+    let mut unvisited = matching_cells(buffer, &matches);
     let mut regions = 0;
-    for x in 0..buffer.area.width {
-        let matched = matches(&buffer[(x, y)]);
-        regions += usize::from(matched && !inside);
-        inside = matched;
+    while let Some(&start) = unvisited.iter().next() {
+        remove_connected_region(&mut unvisited, start);
+        regions += 1;
     }
     regions
+}
+
+fn matching_cells(
+    buffer: &Buffer,
+    matches: &impl Fn(&ratatui::buffer::Cell) -> bool,
+) -> std::collections::BTreeSet<(u16, u16)> {
+    let area = buffer.area;
+    (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|&cell| matches(&buffer[cell]))
+        .collect()
+}
+
+fn remove_connected_region(cells: &mut std::collections::BTreeSet<(u16, u16)>, start: (u16, u16)) {
+    let mut pending = vec![start];
+    while let Some((x, y)) = pending.pop() {
+        if cells.remove(&(x, y)) {
+            pending.extend([
+                (x.wrapping_sub(1), y),
+                (x.wrapping_add(1), y),
+                (x, y.wrapping_sub(1)),
+                (x, y.wrapping_add(1)),
+            ]);
+        }
+    }
 }
 
 fn assert_profile_colors(buffer: &Buffer, profile: TerminalProfile) {
@@ -261,4 +289,44 @@ fn is_cinematic_background(color: Color) -> bool {
         color,
         Color::Rgb(5, 10, 12) | Color::Rgb(7, 14, 17) | Color::Rgb(20, 43, 39)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    fn reversed_rows(rows: &[(u16, std::ops::Range<u16>)]) -> Buffer {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 4));
+        for (y, columns) in rows {
+            for x in columns.clone() {
+                buffer[(x, *y)].modifier = Modifier::REVERSED;
+            }
+        }
+        buffer
+    }
+
+    fn reversed_regions(buffer: &Buffer) -> usize {
+        style_region_count(buffer, |cell| cell.modifier.contains(Modifier::REVERSED))
+    }
+
+    #[test]
+    fn a_multi_row_selected_card_is_one_selection_region() {
+        let card = reversed_rows(&[(1, 0..8), (2, 0..5)]);
+        assert_eq!(reversed_regions(&card), 1);
+    }
+
+    #[test]
+    fn separate_selection_bands_still_count_separately() {
+        let bands = reversed_rows(&[(0, 0..3), (0, 5..8), (2, 0..3)]);
+        assert_eq!(reversed_regions(&bands), 3);
+    }
+
+    #[test]
+    fn runtime_proof_atom_accepts_each_rendered_spelling() {
+        for text in ["[●●●] s1", "[***] s1", "F-0001 C runtime verified"] {
+            assert!(contains_contract_atom(text, "[●●●]"), "{text}");
+        }
+        assert!(!contains_contract_atom("F-0001 C static evidence", "[●●●]"));
+    }
 }

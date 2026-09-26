@@ -111,9 +111,14 @@ pub(crate) fn apply_runtime_messages_with_outcome(
     let maintenance_changed = app.run_background_maintenance();
     let watcher = apply_watcher_messages_with_outcome(app, watcher);
     let tick_changed = update_and_execute_effects(app, Msg::Tick(now));
+    let store_changed = app.refresh_findings_after_external_store_write(now);
     let jobs = app.drain_job_events_with_outcome();
     RuntimeMessageOutcome {
-        changed: maintenance_changed || watcher.changed || tick_changed || jobs.changed,
+        changed: maintenance_changed
+            || watcher.changed
+            || tick_changed
+            || store_changed
+            || jobs.changed,
         work_tail_may_remain: watcher.tail_may_remain || jobs.time_slice_exhausted,
     }
 }

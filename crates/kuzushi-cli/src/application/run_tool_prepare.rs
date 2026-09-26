@@ -324,10 +324,25 @@ impl CliToolRunSetup {
         input: &serde_json::Value,
         options: &[String],
     ) -> Result<ToolOptionStore> {
-        run_option_store(self.workspace.as_ref(), &self.tool, options).map_err(|error| {
-            let message = error.to_string();
-            error_with_persistence(error, self.record_prepare_failure(input, &message))
-        })
+        self.declared_option_overrides(options)
+            .and_then(|()| run_option_store(self.workspace.as_ref(), &self.tool, options))
+            .map_err(|error| {
+                let message = error.to_string();
+                error_with_persistence(error, self.record_prepare_failure(input, &message))
+            })
+    }
+
+    /// `--option` names must be declared by the tool, exactly as `--input`
+    /// keys are; a typo is refused instead of silently dropped.
+    fn declared_option_overrides(&self, options: &[String]) -> Result<()> {
+        let Some(tool) = self.registry.resolve_tool(&self.tool) else {
+            return Ok(());
+        };
+        for option in options {
+            let (name, _) = super::run_tool::parse_option_override(option)?;
+            kuzushi_core::modules::ensure_declared_tool_option(tool, &name)?;
+        }
+        Ok(())
     }
 
     fn prepare_input(
@@ -835,6 +850,27 @@ export default {
 
         assert!(error.contains("--option target"), "{error}");
         assert!(error.contains("conflicts with cwd"), "{error}");
+    }
+
+    #[test]
+    fn an_undeclared_option_override_is_refused_like_an_unknown_input_key() {
+        let workspace = tempfile::tempdir().unwrap();
+
+        let error = prepare_cli_tool_run(
+            "secret-scan:scan".to_string(),
+            "{}".to_string(),
+            vec!["definitelyNotAnOption=1".to_string()],
+            None,
+            Some(workspace.path().to_path_buf()),
+            Vec::new(),
+            None,
+        )
+        .err()
+        .expect("an undeclared --option must fail")
+        .to_string();
+
+        assert!(error.contains("received unknown option"), "{error}");
+        assert!(error.contains("definitelyNotAnOption"), "{error}");
     }
 
     #[test]

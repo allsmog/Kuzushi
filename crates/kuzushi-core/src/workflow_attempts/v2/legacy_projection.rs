@@ -31,6 +31,7 @@ fn empty_legacy_receipt() -> PhaseAttemptReceipt {
         elapsed_secs: 0,
         cost: "cost not recorded (legacy attempt)".to_string(),
         changed_findings: 0,
+        finding_delta_observed: None,
         changed_artifacts: Vec::new(),
         interaction_count: 0,
         rerun_specification: None,
@@ -43,6 +44,7 @@ struct LegacyReceiptProjection {
     run_count: usize,
     cost: String,
     changed_findings: u64,
+    finding_delta_observed: bool,
     changed_artifacts: Vec<String>,
     interaction_count: usize,
     actions: Vec<PhaseResultAction>,
@@ -54,6 +56,7 @@ impl LegacyReceiptProjection {
         receipt.run_count = self.run_count;
         receipt.cost = self.cost;
         receipt.changed_findings = self.changed_findings;
+        receipt.finding_delta_observed = Some(self.finding_delta_observed);
         receipt.changed_artifacts = self.changed_artifacts;
         receipt.interaction_count = self.interaction_count;
         receipt.actions = self.actions;
@@ -83,6 +86,7 @@ fn build_legacy_projection(
         run_count: run_ids.len(),
         cost: crate::run_lifecycle::cost_label(*cost),
         changed_findings: finding_delta_total(finding_delta)?,
+        finding_delta_observed: finding_delta.is_fully_observed(),
         changed_artifacts: referenced_artifact_paths(target, run_ids, artifact_ids)?,
         interaction_count: usize::try_from(*interaction_count)
             .context("phase interaction count does not fit the compatibility receipt")?,

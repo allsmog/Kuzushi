@@ -84,7 +84,7 @@ fn parse_next_command(first: Option<&str>, original: &str) -> ShellCommand {
 fn parse_phase_command(first: Option<&str>, original: &str) -> ShellCommand {
     first
         .and_then(WorkflowPhase::parse)
-        .map(ShellCommand::Phase)
+        .map(ShellCommand::PhasePlanner)
         .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
 }
 

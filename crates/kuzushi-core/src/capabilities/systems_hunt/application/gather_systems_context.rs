@@ -18,6 +18,7 @@ pub(crate) fn gather_systems_context(
             codeql_available: codeql_db_path.is_some(),
             codeql_db_path: codeql_db_path.map(|path| path.display().to_string()),
             bash_probing_used: false,
+            systems_source_files: inventory.len(),
         },
     })
 }

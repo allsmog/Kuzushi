@@ -56,13 +56,7 @@ pub(in crate::modules) fn run_manifest_scan(
         Ok(scan) => scan,
         Err(error) => return Ok(manifest_scan_failed_output(&target, error)),
     };
-    let persisted = persist_tool_findings(
-        ctx.finding_run_id(),
-        &target,
-        &scan.findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = persist_tool_findings(ctx, &target, &scan.findings)?;
     emit_manifest_scan_step(
         ctx,
         "done",

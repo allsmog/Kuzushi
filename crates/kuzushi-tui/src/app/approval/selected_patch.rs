@@ -12,6 +12,10 @@ pub(crate) struct DurablePatchSelection {
     pub(crate) patch: PendingPatch,
 }
 
+/// Only a shell-drafted Fix attempt produces a selectable result card; a
+/// headless `kuzushi run patch:finding` draft does not.
+const NO_FIX_SELECTION_GUIDANCE: &str = "no durable Fix selection; draft one here with `patch <finding>`, then press `u` on its RESULT READY card to Select patch";
+
 pub(crate) fn load_durable_fix_selection(target: &Path) -> Result<DurablePatchSelection> {
     let workspace = WorkspaceTarget::new(target)?;
     let snapshot = PhaseTargetSnapshot::capture(workspace.root());
@@ -24,7 +28,7 @@ pub(crate) fn load_durable_fix_selection(target: &Path) -> Result<DurablePatchSe
     );
     let record = ledger
         .selected_for(WorkflowPhase::Fix, &snapshot)
-        .context("no durable Fix selection; open Fix and press `u` to Select patch")?;
+        .context(NO_FIX_SELECTION_GUIDANCE)?;
     validate_selected_disposition(record)?;
     let patch = validate_fix_attempt_candidate(&workspace, record)?;
     Ok(DurablePatchSelection {

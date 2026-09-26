@@ -5,26 +5,39 @@ pub(in crate::modules) fn findings_for_sast_runs(
     store: &FindingStore,
     run_ids: &SastRunIds,
 ) -> Result<Vec<Finding>> {
-    let mut findings = Vec::new();
-    let mut seen = BTreeSet::new();
-    for run_id in run_ids.all() {
-        for finding in store.list_findings_for_scan_id(run_id)? {
-            if seen.insert(finding_dedupe_key(&finding)) {
-                findings.push(finding);
-            }
-        }
-    }
-    Ok(findings)
+    store.list_distinct_findings_for_scan_ids(&run_ids.all())
 }
 
-fn finding_dedupe_key(finding: &Finding) -> String {
-    finding
-        .identity_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(&finding.fingerprint)
-        .to_string()
+/// Distinct findings next to the raw producer observations they fold, so a
+/// run summary never presents a corroborated count as the observation count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::modules) struct SastFindingTally {
+    pub distinct: usize,
+    pub observations: usize,
+}
+
+impl SastFindingTally {
+    pub(in crate::modules) fn for_runs(
+        store: &FindingStore,
+        run_ids: &SastRunIds,
+        distinct: usize,
+    ) -> Result<Self> {
+        let observations = store.count_finding_observations_for_scan_ids(&run_ids.all())?;
+        Ok(Self {
+            distinct,
+            observations,
+        })
+    }
+
+    pub(in crate::modules) fn label(self) -> String {
+        if self.observations > self.distinct {
+            return format!(
+                "{} distinct finding(s) from {} observation(s)",
+                self.distinct, self.observations
+            );
+        }
+        format!("{} finding(s)", self.distinct)
+    }
 }
 
 pub(in crate::modules) fn write_sast_scan_input(
@@ -142,6 +155,24 @@ fn optional_enrichment<T>(label: &str, result: Result<T>, warnings: &mut Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tally_label_names_observations_only_when_corroboration_folded_them() {
+        let equal = SastFindingTally {
+            distinct: 3,
+            observations: 3,
+        };
+        let folded = SastFindingTally {
+            distinct: 67,
+            observations: 130,
+        };
+
+        assert_eq!(equal.label(), "3 finding(s)");
+        assert_eq!(
+            folded.label(),
+            "67 distinct finding(s) from 130 observation(s)"
+        );
+    }
 
     #[test]
     fn optional_enrichment_records_degraded_state_without_failing() {

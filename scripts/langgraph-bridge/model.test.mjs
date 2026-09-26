@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { BridgePublicError } from "./errors.mjs";
 import {
   bridgeQueryResult,
   credentialForRequest,
   humanMessageForRequest,
   isTruncatedStopReason,
+  loopOpeningMessageForRequest,
+  modelContinuationDecision,
   openAiAccountIdFromJwt,
   openAiCredentialFromRefreshResponse,
   promptCacheSplit,
+  spendForStop,
+  TOOL_RESULT_MAX_CHARS,
+  toolMessageForOutput,
+  turnBudgetNotice,
   usageFromMessages,
 } from "./model.mjs";
 import { oauthModelForRequest, openAiOauthHeaders } from "./oauth-models.mjs";
@@ -496,4 +502,108 @@ test("Anthropic OAuth passes prompt-cache usage through to the message usage", a
     output_tokens: 3,
     cache_read_input_tokens: 900,
   });
+});
+
+const HAIKU_RATES = {
+  inputUsdPerMtok: 1,
+  outputUsdPerMtok: 5,
+  cacheReadUsdPerMtok: 0.1,
+  cacheCreationUsdPerMtok: 1.25,
+};
+
+function unmeteredCall(input, output, details) {
+  return new AIMessage({
+    content: "",
+    tool_calls: [{ name: "read_source", args: {}, id: "call-1" }],
+    usage_metadata: {
+      input_tokens: input,
+      output_tokens: output,
+      total_tokens: input + output,
+      ...(details ? { input_token_details: details } : {}),
+    },
+  });
+}
+
+test("unmetered calls continue under a spend stop when list prices estimate them", () => {
+  const messages = [unmeteredCall(100_000, 2_000)];
+  assert.equal(modelContinuationDecision(messages, 1, undefined, HAIKU_RATES), "continue");
+  assert.equal(modelContinuationDecision(messages, 0.1, undefined, HAIKU_RATES), "observed_spend_exhausted");
+  assert.equal(modelContinuationDecision(messages, 1), "observed_spend_incomplete");
+});
+
+test("the stop estimate prices cache buckets apart from the inclusive input total", () => {
+  const usage = usageFromMessages([
+    unmeteredCall(13_000, 500, { cache_read: 10_000, cache_creation: 2_000 }),
+  ]);
+  // 1k uncached ($0.001) + 10k reads ($0.001) + 2k writes ($0.0025) + 500 out ($0.0025).
+  assert.ok(Math.abs(spendForStop(usage, HAIKU_RATES) - 0.007) < 1e-12);
+});
+
+test("mixed receipts, missing tokens, or malformed rates stay unknown", () => {
+  const metered = new AIMessage({
+    content: "",
+    usage_metadata: { input_tokens: 10, output_tokens: 10, total_tokens: 20, cost_usd: 0.01 },
+  });
+  const mixed = usageFromMessages([metered, unmeteredCall(10, 10)]);
+  assert.equal(spendForStop(mixed, HAIKU_RATES), undefined);
+  const tokenless = usageFromMessages([new AIMessage("no usage")]);
+  assert.equal(spendForStop(tokenless, HAIKU_RATES), undefined);
+  const priced = usageFromMessages([unmeteredCall(10, 10)]);
+  assert.equal(spendForStop(priced, { ...HAIKU_RATES, outputUsdPerMtok: -1 }), undefined);
+  assert.equal(spendForStop(priced, undefined), undefined);
+});
+
+test("oversized tool results are cut with a disclosed, actionable note", () => {
+  const call = { id: "call-1", name: "read_source" };
+  const small = toolMessageForOutput(call, "short");
+  assert.equal(small.content, "short");
+
+  const big = toolMessageForOutput(call, "x".repeat(TOOL_RESULT_MAX_CHARS + 500));
+  assert.ok(big.content.startsWith("x".repeat(TOOL_RESULT_MAX_CHARS)));
+  assert.match(big.content, /truncated: showed 24000 of 24500 characters; narrow/);
+
+  const mcp = new ToolMessage({
+    tool_call_id: "call-2",
+    content: [
+      { type: "text", text: "a".repeat(TOOL_RESULT_MAX_CHARS - 10) },
+      { type: "text", text: "b".repeat(100) },
+    ],
+  });
+  const bounded = toolMessageForOutput(call, mcp);
+  assert.equal(bounded.content[0].text.length, TOOL_RESULT_MAX_CHARS - 10);
+  assert.match(bounded.content[1].text, /^b{10}\n\[tool output truncated: showed 10 of 100/);
+});
+
+test("a declared turn budget replaces the default turn limit", () => {
+  const turns = Array.from({ length: 12 }, () => unmeteredCall(10, 10));
+  assert.equal(modelContinuationDecision(turns, undefined), "model_turn_limit");
+  assert.equal(modelContinuationDecision(turns, undefined, 20), "continue");
+  assert.throws(() => modelContinuationDecision(turns, undefined, 0), /positive safe integer/);
+});
+
+test("the model is told its turn budget only in the last turns", () => {
+  const turns = (n) => Array.from({ length: n }, () => unmeteredCall(10, 10));
+  assert.equal(turnBudgetNotice(turns(9), 12), undefined);
+  assert.match(turnBudgetNotice(turns(10), 12).content, /2 model turn\(s\) remain/);
+  assert.match(turnBudgetNotice(turns(11), 12).content, /1 model turn\(s\) remain/);
+  assert.equal(turnBudgetNotice(turns(12), 12), undefined, "no notice once the stop applies");
+  assert.match(turnBudgetNotice(turns(10)).content, /2 model turn/, "defaults to the bridge limit");
+});
+
+test("an anthropic agent loop caches its whole opening prompt", () => {
+  const anthropic = loopOpeningMessageForRequest({
+    model: "anthropic:claude-haiku-4-5",
+    prompt: "inventory",
+  });
+  assert.deepEqual(anthropic.content, [
+    { type: "text", text: "inventory", cache_control: { type: "ephemeral" } },
+  ]);
+  const other = loopOpeningMessageForRequest({ model: "openai:gpt-5.5", prompt: "inventory" });
+  assert.equal(other.content, "inventory");
+  const split = loopOpeningMessageForRequest({
+    model: "anthropic:claude-haiku-4-5",
+    prompt: "shared tail",
+    cacheablePromptPrefix: "shared ",
+  });
+  assert.equal(split.content[0].text, "shared ", "a declared prefix keeps its own boundary");
 });

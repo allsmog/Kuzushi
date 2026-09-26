@@ -2,20 +2,20 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 307
 ---
-KUZUSHI shell route · view:options[sast:scan] · target:none · model:unconfigured · context not built · cost:$0.00...
+ KUZUSHI › options[sast:scan] · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan
 view: options
 
 option            value...    default    req    type   aliases           description
-mode              -           standard   no     enum   preset            Analysis mode or preset. Choices:...
-taskMode          -           auto       no     enum   task_mode         Task-selection mode. Choices: auto|manual.
-tasks             -           -          no     list   taskIds, task...  Manual task allowlist. Use /tasks to edit.
-disabledTasks     -           -          no     list   disabled_tasks    Auto-mode task denylist. Use /tasks to edit.
-severity          -           -          no     list   -                 Optional severity filter: critical, high...
-paths             -           -          no     list   includePaths...   Optional workspace-relative path roots to scan.
-triage            -           false      no     bool   aiTriage...       Run model-backed triage after static scanners.
+mode              -           standard   no     ch...  preset            Analysis mode or preset. Choices:...
+taskMode          -           auto       no     ch...  task_mode         Task-selection mode. Choices: auto|manual.
+tasks             -           -          no     co...  taskIds, task...  Manual task allowlist. Use /tasks to edit.
+disabledTasks     -           -          no     co...  disabled_tasks    Auto-mode task denylist. Use /tasks to edit.
+severity          -           -          no     co...  -                 Optional severity filter: critical, high...
+paths             -           -          no     co...  includePaths...   Optional workspace-relative path roots to scan.
+triage            -           no         no     ye...  aiTriage...       Run model-backed triage after static scanners.
 
-set is session-only (lost on exit); setg is persistent for this tool.
+set <key> <value> · session only, lost on exit · setg saves it
 Next: set <key> <value>, setg <key> <value>, show advanced, show missing

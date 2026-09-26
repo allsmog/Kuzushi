@@ -1,32 +1,46 @@
+use crate::findings::ReviewDecision;
 use serde_json::{json, Value};
 
 pub(super) fn missing_patch_finding_response(fingerprint: &str) -> Value {
     let output = format!("[-] No finding with fingerprint '{fingerprint}'.");
-    refused_patch_response(fingerprint, "missing-finding", output)
+    refused_patch_response(output, refusal_data(fingerprint, "missing-finding"))
 }
 
 pub(super) fn untriaged_patch_finding_response(fingerprint: &str) -> Value {
-    let output =
-        format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
-    refused_patch_response(fingerprint, "missing-triage", output)
-}
-
-pub(super) fn unconfirmed_patch_finding_response(fingerprint: &str) -> Value {
     let output = format!(
-        "[-] Finding '{fingerprint}' is not confirmed true_positive; patch:finding only patches confirmed findings."
+        "[-] Finding '{fingerprint}' has no triage verdict and no confirming review decision. {}",
+        crate::findings::MISSING_CONFIRMATION_GUIDANCE
     );
-    refused_patch_response(fingerprint, "not-confirmed-true-positive", output)
+    refused_patch_response(output, refusal_data(fingerprint, "missing-triage"))
 }
 
-fn refused_patch_response(fingerprint: &str, reason: &str, output: String) -> Value {
-    crate::module_result::failed_output_result(
-        "patch:finding failed",
-        output,
-        json!({
-            "fingerprint": fingerprint,
-            "reason": reason,
-        }),
-    )
+pub(super) fn unconfirmed_patch_finding_response(
+    fingerprint: &str,
+    decision: &ReviewDecision,
+) -> Value {
+    let output = format!(
+        "[-] Finding '{fingerprint}' is not confirmed true_positive (review decision in force: {verdict} by {author}); patch:finding only patches confirmed findings.",
+        verdict = decision.verdict.as_str(),
+        author = decision.author.as_str(),
+    );
+    let data = json!({
+        "fingerprint": fingerprint,
+        "reason": "not-confirmed-true-positive",
+        "reviewDecision": decision.verdict.as_str(),
+        "reviewAuthor": decision.author.as_str(),
+    });
+    refused_patch_response(output, data)
+}
+
+fn refusal_data(fingerprint: &str, reason: &str) -> Value {
+    json!({
+        "fingerprint": fingerprint,
+        "reason": reason,
+    })
+}
+
+fn refused_patch_response(output: String, data: Value) -> Value {
+    crate::module_result::failed_output_result("patch:finding failed", output, data)
 }
 
 #[cfg(test)]

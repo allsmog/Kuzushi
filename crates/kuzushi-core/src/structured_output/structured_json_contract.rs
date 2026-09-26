@@ -46,6 +46,8 @@ pub(crate) struct CostedStructuredJson<T> {
     /// as the complete provider cost.
     pub(crate) cost_usd: f64,
     pub(crate) cost_usd_exact: bool,
+    /// Labelled local estimate for the unmetered part of an inexact cost.
+    pub(crate) estimated_cost_usd: Option<f64>,
 }
 
 impl<T> CostedStructuredJson<T> {
@@ -54,16 +56,20 @@ impl<T> CostedStructuredJson<T> {
             value,
             cost_usd: cost.observed_usd(),
             cost_usd_exact: cost.is_complete(),
+            estimated_cost_usd: cost.unmetered_estimate_usd(),
         }
     }
 
     pub(crate) fn cost_report(&self) -> Result<RuntimeCostReport> {
         let observed = RuntimeCost::from_usd(self.cost_usd, "structured-output observed cost")?;
-        Ok(if self.cost_usd_exact {
-            RuntimeCostReport::known(observed)
-        } else {
-            RuntimeCostReport::incomplete(observed)
-        })
+        if self.cost_usd_exact {
+            return Ok(RuntimeCostReport::known(observed));
+        }
+        let estimate = self
+            .estimated_cost_usd
+            .map(|usd| RuntimeCost::from_usd(usd, "structured-output estimated cost"))
+            .transpose()?;
+        Ok(RuntimeCostReport::incomplete(observed).with_unmetered_estimate(estimate))
     }
 }
 
@@ -74,11 +80,109 @@ impl<T> CostedStructuredJson<T> {
 pub(crate) struct StructuredOutputError {
     source: anyhow::Error,
     cost: RuntimeCostReport,
+    reason: FailureReason,
 }
+
+/// Which step failed, as an allowlisted operator label. Raw model or provider
+/// text stays in the error chain for `{:#}` evidence, never in the message.
+#[derive(Debug, Clone, Copy)]
+enum FailureReason {
+    Unspecified,
+    ModelCall,
+    ResponseRejected,
+    Truncated,
+    /// The bridge stopped the investigation for a known, allowlisted reason.
+    Stopped(&'static str),
+    InvalidAfterRepair,
+}
+
+impl FailureReason {
+    fn label(self) -> Option<&'static str> {
+        match self {
+            Self::Unspecified => None,
+            Self::ModelCall => Some("model call failed"),
+            Self::ResponseRejected => Some("model response could not be accepted"),
+            Self::Truncated => Some("model response stopped before the JSON completed"),
+            Self::Stopped(reason) => Some(reason),
+            Self::InvalidAfterRepair => {
+                Some("model output still violated the schema after one repair attempt")
+            }
+        }
+    }
+}
+
+/// Name why the bridge stopped, from its fixed stop-reason vocabulary only.
+fn truncation_reason(stop_reason: Option<&str>) -> FailureReason {
+    const REASONS: [(&str, &str); 7] = [
+        (
+            "model_turn_limit",
+            "the investigation hit its model-turn limit before answering",
+        ),
+        (
+            "forced_conclusion",
+            "the tool budget ran out; a forced conclusion is not accepted as a verdict",
+        ),
+        ("mcp_tool_timeout", "an MCP code-analysis tool timed out"),
+        (
+            "observed_spend_exhausted",
+            "the observed spend stop was reached",
+        ),
+        (
+            "observed_spend_incomplete",
+            "spend could not be measured under the spend stop",
+        ),
+        (
+            "max_tokens",
+            "the output-token limit was reached before the JSON completed",
+        ),
+        (
+            "length",
+            "the output-token limit was reached before the JSON completed",
+        ),
+    ];
+    REASONS
+        .iter()
+        .find(|(known, _)| Some(*known) == stop_reason)
+        .map_or(FailureReason::Truncated, |(_, label)| {
+            FailureReason::Stopped(label)
+        })
+}
+
+/// A repair the contract declined to send; no provider call was made, so the
+/// initial call's cost stands unchanged.
+#[derive(Debug)]
+struct RepairRefused(&'static str);
+
+impl fmt::Display for RepairRefused {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "repair refused: {}", self.0)
+    }
+}
+
+impl std::error::Error for RepairRefused {}
 
 impl StructuredOutputError {
     pub(crate) fn from_source_and_cost(source: anyhow::Error, cost: RuntimeCostReport) -> Self {
-        Self { source, cost }
+        Self {
+            source,
+            cost,
+            reason: FailureReason::Unspecified,
+        }
+    }
+
+    /// The most specific cause that is safe to show: a declined repair, a
+    /// typed runtime failure, or the failed step.
+    fn safe_cause(&self) -> Option<String> {
+        if let Some(refusal) = chain_find::<RepairRefused>(&self.source) {
+            return Some(refusal.to_string());
+        }
+        if let Some(inner) = chain_find::<StructuredOutputError>(&self.source) {
+            return inner.safe_cause();
+        }
+        if let Some(metadata) = crate::runtime::runtime_failure_metadata(&self.source) {
+            return Some(runtime_failure_text(&metadata));
+        }
+        self.reason.label().map(str::to_string)
     }
 
     pub(crate) fn cost_report(&self) -> RuntimeCostReport {
@@ -86,9 +190,28 @@ impl StructuredOutputError {
     }
 }
 
+/// Raw provider text never reaches the message, but an allowlisted cause
+/// does: "structured output failed" alone hid an unavailable MCP sidecar, a
+/// refused repair, or a rejected request behind one parsing symptom.
 impl fmt::Display for StructuredOutputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("structured output failed")
+        formatter.write_str("structured output failed")?;
+        match self.safe_cause() {
+            Some(cause) => write!(formatter, ": {cause}"),
+            None => Ok(()),
+        }
+    }
+}
+
+fn chain_find<E: std::error::Error + 'static>(error: &anyhow::Error) -> Option<&E> {
+    error.chain().find_map(|source| source.downcast_ref::<E>())
+}
+
+fn runtime_failure_text(metadata: &crate::runtime::RuntimeFailureMetadata) -> String {
+    let message = format!("{} ({})", metadata.public_message(), metadata.error_class);
+    match &metadata.detail {
+        Some(detail) => format!("{message} {detail}"),
+        None => message,
     }
 }
 
@@ -142,16 +265,18 @@ fn remaining_repair_spend_stop(
     let Some(stop) = stop else {
         return Ok(None);
     };
-    let spent = response.checked_cost_report()?;
-    anyhow::ensure!(
-        spent.is_complete(),
-        "structured-output repair refused: observed spend receipt is incomplete"
-    );
-    let remaining = stop - spent.observed_usd();
-    anyhow::ensure!(
-        remaining > 0.0,
-        "structured-output repair refused: observed spend stop is exhausted"
-    );
+    // Unmetered spend counts at its labelled estimate; with no estimate the
+    // remaining budget is unknown and the repair is refused.
+    let spent = response
+        .checked_cost_report()?
+        .estimated_total_usd()
+        .ok_or(RepairRefused(
+            "the initial call has neither a spend receipt nor an estimate",
+        ))?;
+    let remaining = stop - spent;
+    if remaining <= 0.0 {
+        return Err(RepairRefused("the observed spend stop is exhausted").into());
+    }
     Ok(Some(remaining))
 }
 
@@ -230,9 +355,9 @@ fn repair_structured_json_response<T>(
     initial_error: anyhow::Error,
 ) -> Result<CostedStructuredJson<T>> {
     let repair_prompt = build_repair_prompt(contract, &initial_material, &initial_error)
-        .map_err(|error| observed_failure(error, initial_cost))?;
+        .map_err(|error| observed_failure(error, initial_cost, FailureReason::ResponseRejected))?;
     let repair_response = repair(repair_prompt, contract.runtime_contract())
-        .map_err(|error| unresolved_provider_failure(error, initial_cost))?;
+        .map_err(|error| repair_call_failure(error, initial_cost))?;
     parse_repaired_response(
         contract,
         validate,
@@ -255,8 +380,9 @@ fn reject_truncated_response(
     let cause = anyhow::anyhow!("response stopped before natural structured-output completion");
     let error = truncation_error(contract, response, &cause, material)
         .context("Could not render bounded structured-output truncation evidence")
-        .map_err(|error| observed_failure(error, cost))?;
-    Err(observed_failure(error, cost))
+        .map_err(|error| observed_failure(error, cost, FailureReason::Truncated))?;
+    let reason = truncation_reason(response.stop_reason.as_deref());
+    Err(observed_failure(error, cost, reason))
 }
 
 fn parse_repaired_response<T>(
@@ -275,8 +401,9 @@ fn parse_repaired_response<T>(
     if repair_response.truncated {
         let error = truncation_error(contract, &repair_response, &initial_error, &repair_material)
             .context("Could not render bounded structured-output truncation evidence")
-            .map_err(|error| observed_failure(error, total_cost))?;
-        return Err(observed_failure(error, total_cost));
+            .map_err(|error| observed_failure(error, total_cost, FailureReason::Truncated))?;
+        let reason = truncation_reason(repair_response.stop_reason.as_deref());
+        return Err(observed_failure(error, total_cost, reason));
     }
     match parse_and_validate_measured(&repair_response, contract, validate) {
         Ok(value) => Ok(CostedStructuredJson::from_cost_report(value, total_cost)),
@@ -289,8 +416,8 @@ fn parse_repaired_response<T>(
                 &repair_material,
             )
             .context("Could not render bounded structured-output repair evidence")
-            .map_err(|error| observed_failure(error, total_cost))?;
-            Err(observed_failure(error, total_cost))
+            .map_err(|error| observed_failure(error, total_cost, INVALID))?;
+            Err(observed_failure(error, total_cost, INVALID))
         }
     }
 }
@@ -300,10 +427,10 @@ fn checked_response_material(
     observed_cost: RuntimeCostReport,
 ) -> Result<ResponseMaterial> {
     let material = ResponseMaterial::from_response(response)
-        .map_err(|error| observed_failure(error, observed_cost))?;
+        .map_err(|error| observed_failure(error, observed_cost, FailureReason::ResponseRejected))?;
     material
         .ensure_within_budget()
-        .map_err(|error| observed_failure(error, observed_cost))?;
+        .map_err(|error| observed_failure(error, observed_cost, FailureReason::ResponseRejected))?;
     Ok(material)
 }
 
@@ -371,14 +498,31 @@ fn unresolved_provider_failure(
     StructuredOutputError {
         source,
         cost: observed_cost.mark_incomplete(),
+        reason: FailureReason::ModelCall,
     }
     .into()
 }
 
-fn observed_failure(source: anyhow::Error, observed_cost: RuntimeCostReport) -> anyhow::Error {
+/// A declined repair made no call, so the initial cost stands; any other
+/// repair failure may have spent without a receipt.
+fn repair_call_failure(error: anyhow::Error, initial_cost: RuntimeCostReport) -> anyhow::Error {
+    if chain_find::<RepairRefused>(&error).is_some() {
+        return observed_failure(error, initial_cost, FailureReason::ModelCall);
+    }
+    unresolved_provider_failure(error, initial_cost)
+}
+
+const INVALID: FailureReason = FailureReason::InvalidAfterRepair;
+
+fn observed_failure(
+    source: anyhow::Error,
+    observed_cost: RuntimeCostReport,
+    reason: FailureReason,
+) -> anyhow::Error {
     StructuredOutputError {
         source,
         cost: observed_cost,
+        reason,
     }
     .into()
 }
@@ -407,4 +551,101 @@ fn structured_json_value_measured(
                 contract.tool_name, contract.schema_name
             )
         })
+}
+
+#[cfg(test)]
+mod structured_output_error_message_tests {
+    use super::*;
+    use crate::runtime::{RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata};
+
+    #[test]
+    fn a_typed_runtime_cause_is_named_and_raw_text_is_not() {
+        let metadata = RuntimeFailureMetadata::new(RuntimeFailureClass::McpUnavailable, None, None);
+        let source = anyhow::Error::new(RuntimeFailure::new(metadata))
+            .context("raw-provider-sentinel body text");
+        let error = unknown_provider_failure(source);
+
+        let message = error.to_string();
+        assert!(
+            message.starts_with("structured output failed: Restore the missing"),
+            "{message}"
+        );
+        assert!(message.contains("(mcp_unavailable)"), "{message}");
+        assert!(message.contains("cargo build --workspace"), "{message}");
+        assert!(!message.contains("raw-provider-sentinel"), "{message}");
+    }
+
+    #[test]
+    fn an_untyped_cause_names_only_the_failed_step() {
+        let error = unknown_provider_failure(anyhow::anyhow!("raw-provider-sentinel"));
+        assert_eq!(
+            error.to_string(),
+            "structured output failed: model call failed"
+        );
+    }
+
+    #[test]
+    fn a_known_bridge_stop_is_named_and_an_unknown_one_is_not_echoed() {
+        let stopped = |stop: &str| {
+            let response = AgentQueryResponse {
+                truncated: true,
+                stop_reason: Some(stop.to_string()),
+                ..Default::default()
+            };
+            let contract = StructuredJsonContract::new("verify:finding", "Verdict", Value::Null);
+            parse_or_repair_required_structured_json(response, contract, Ok, |_, _| {
+                panic!("truncation never repairs")
+            })
+            .unwrap_err()
+            .to_string()
+        };
+        assert_eq!(
+            stopped("model_turn_limit"),
+            "structured output failed: the investigation hit its model-turn limit before answering"
+        );
+        assert_eq!(
+            stopped("PRIVATE_SENTINEL"),
+            "structured output failed: model response stopped before the JSON completed"
+        );
+    }
+
+    #[test]
+    fn a_refused_repair_keeps_the_initial_estimate_and_says_why() {
+        let estimate = crate::runtime::RuntimeCost::from_usd(0.2, "cost").unwrap();
+        let initial = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(estimate));
+        let refused = anyhow::Error::from(RepairRefused("the observed spend stop is exhausted"));
+
+        let error = repair_call_failure(refused, initial);
+
+        assert_eq!(
+            error.to_string(),
+            "structured output failed: repair refused: the observed spend stop is exhausted"
+        );
+        let cost = error
+            .downcast_ref::<StructuredOutputError>()
+            .unwrap()
+            .cost_report();
+        assert_eq!(cost.estimated_total_usd(), Some(0.2));
+    }
+
+    #[test]
+    fn estimated_initial_spend_leaves_repair_budget() {
+        let request = AgentQueryRequest::new("anthropic:claude-haiku-4-5", ".", "s", "p")
+            .with_runtime_options(crate::runtime::AgentRuntimeOptions {
+                observed_spend_stop_usd: Some(1.0),
+                ..Default::default()
+            });
+        let estimated = AgentQueryResponse {
+            estimated_cost_usd: Some(0.25),
+            ..Default::default()
+        };
+        let remaining = remaining_repair_spend_stop(&request, &estimated).unwrap();
+        assert_eq!(remaining, Some(0.75));
+
+        let unpriced = AgentQueryResponse::default();
+        let error = remaining_repair_spend_stop(&request, &unpriced).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("neither a spend receipt nor an estimate"));
+    }
 }

@@ -1091,18 +1091,27 @@ fn fake_ask_bridge(dir: &PathBuf) -> PathBuf {
         &binary,
         r#"#!/bin/sh
 request="$(cat)"
+# JSON member order is not part of the bridge protocol (the runtime encodes
+# requests through a key-sorted serde_json::Value), so match the request type
+# and the question independently.
 case "$request" in
   *'"type":"next-step-preflight"'*)
     printf '%s' '{"ok":true}'
-    ;;
-  *'"type":"next-step"'*'What should I run first?'*)
-    printf '%s' '{"ok":true,"step":"final","text":"Run context build, then next","costUsd":0.034}'
-    ;;
-  *)
-    printf '%s' '{"ok":false,"error":"unexpected ask request"}'
-    exit 1
+    exit 0
     ;;
 esac
+case "$request" in
+  *'"type":"next-step"'*)
+    case "$request" in
+      *'What should I run first?'*)
+        printf '%s' '{"ok":true,"step":"final","text":"Run context build, then next","costUsd":0.034}'
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+printf '%s' '{"ok":false,"error":"unexpected ask request"}'
+exit 1
 "#,
     )
     .unwrap();
@@ -1416,6 +1425,33 @@ JSON
     permissions.set_mode(0o755);
     fs::set_permissions(&binary, permissions).unwrap();
     binary
+}
+
+/// Stands in for bubblewrap so patch validation does not depend on the host.
+/// Validation refuses to run repository commands without an isolating
+/// sandbox; this shell test covers bridge dispatch and persistence, while the
+/// sandbox policy itself is covered in kuzushi-core. The shim records every
+/// invocation and runs the command after `--` inside the validation checkout.
+#[cfg(target_os = "linux")]
+fn fake_bwrap_on_path(dir: &Path) -> (PathBuf, EnvVarGuard) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = dir.join("sandbox-bin");
+    fs::create_dir_all(&bin).unwrap();
+    let calls = dir.join("bwrap-calls.log");
+    let shim = bin.join("bwrap");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != \"--\" ]; do shift; done\n\
+         shift\nexec \"$@\"\n",
+        calls.display()
+    );
+    fs::write(&shim, script).unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&inherited)))
+        .unwrap();
+    (calls, EnvVarGuard::set("PATH", path.to_str().unwrap()))
 }
 
 #[cfg(unix)]
@@ -2946,6 +2982,7 @@ fn command_effect_reducer_routes_stateful_command_families() {
         ShellCommand::Keymap,
         ShellCommand::UpdateAvailable,
         ShellCommand::Phase(WorkflowPhase::Prove),
+        ShellCommand::PhasePlanner(WorkflowPhase::Map),
         ShellCommand::Prompts,
         ShellCommand::Prompt("mutate triage \"focus authz\"".to_string()),
         ShellCommand::ProjectModel,
@@ -4289,6 +4326,10 @@ fn effect_routed_command_fixtures() -> Vec<(&'static str, ShellCommand)> {
         ("keymap", ShellCommand::Keymap),
         ("update-available", ShellCommand::UpdateAvailable),
         ("phase", ShellCommand::Phase(WorkflowPhase::Prove)),
+        (
+            "phase-planner",
+            ShellCommand::PhasePlanner(WorkflowPhase::Map),
+        ),
         ("prompts", ShellCommand::Prompts),
         (
             "prompt",
@@ -10593,6 +10634,8 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         .unwrap();
     let bridge_tmp = tempfile::tempdir().unwrap();
     let bridge = fake_patch_bridge(&bridge_tmp.path().to_path_buf());
+    #[cfg(target_os = "linux")]
+    let (sandbox_calls, _sandbox_path) = fake_bwrap_on_path(bridge_tmp.path());
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
@@ -10642,6 +10685,18 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         .unwrap();
     assert_eq!(patch_results.len(), 1);
     assert_eq!(patch_results[0].status.as_str(), "SOUND");
+    #[cfg(target_os = "linux")]
+    assert_validation_commands_ran_sandboxed(&sandbox_calls, 2);
+}
+
+#[cfg(target_os = "linux")]
+fn assert_validation_commands_ran_sandboxed(calls: &Path, expected: usize) {
+    let calls = fs::read_to_string(calls).unwrap_or_default();
+    let sandboxed = calls
+        .lines()
+        .filter(|call| call.contains("--unshare-all"))
+        .count();
+    assert_eq!(sandboxed, expected, "sandbox invocations: {calls}");
 }
 
 #[cfg(unix)]
@@ -11821,6 +11876,7 @@ fn next_command_opens_phase_picker_at_derived_phase() {
         rationale: "confirmed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     app.engagement.clear_phase();
     run_command(&mut app, ShellCommand::Next);
@@ -19994,6 +20050,66 @@ fn map_command_bar_hints(app: &ShellApp) -> String {
         .join(" · ")
 }
 
+pub(crate) fn app_past_map(target: &Path) -> ShellApp {
+    seed_ready_map_target(target, "map-verb");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.to_path_buf()));
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
+    app.set_shell_view(ShellView::Catalog);
+    app
+}
+
+/// A completed phase's verb is a request to look at it: `map` opens the Map
+/// page (as Shift+Tab would) rather than a planner titled "engagement is in
+/// Scan". The page names `plan map` as the explicit way back to the planner.
+#[test]
+fn completed_phase_verb_opens_its_durable_page_with_a_planner_hint() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_past_map(target.path());
+    assert!(app.phase_verb_opens_page(WorkflowPhase::Map));
+
+    run_command(&mut app, parse_command("map"));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Map));
+    assert!(!app.has_running_work());
+    let hints = map_command_bar_hints(&app);
+    assert!(hints.contains("plan map open Map planner"), "{hints}");
+}
+
+#[test]
+fn unreached_phase_verb_and_plan_verb_keep_opening_the_planner() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_past_map(target.path());
+    assert!(!app.phase_verb_opens_page(WorkflowPhase::Scan));
+
+    run_command(&mut app, parse_command("scan"));
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+
+    app.set_shell_view(ShellView::Catalog);
+    run_command(&mut app, parse_command("plan map"));
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(app
+        .engagement
+        .planning_picker()
+        .tasks()
+        .iter()
+        .all(|row| row.id.phase() == WorkflowPhase::Map));
+}
+
+#[test]
+fn unreached_phase_page_offers_no_planner_hint() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_past_map(target.path());
+    app.set_workbench_page(WorkbenchPage::Scan);
+
+    let hints = map_command_bar_hints(&app);
+    assert!(!hints.contains("plan scan"), "{hints}");
+}
+
 #[test]
 fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
     use crate::scene3d::VizPage;
@@ -22656,6 +22772,7 @@ fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
             rationale: "reviewed".to_string(),
             cost_usd: 0.0,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         });
     };
     let mut entry = Finding::new_semgrep(
@@ -23599,6 +23716,7 @@ fn backlog_preset_filters_untriaged_and_keeps_severity_first_order() {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     let untriaged_low = Finding::new_tool(
         "fixture",

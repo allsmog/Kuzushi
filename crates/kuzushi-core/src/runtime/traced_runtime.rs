@@ -11,6 +11,10 @@ pub use metadata::{
 pub struct TracedRuntime<'a> {
     inner: &'a dyn AgentRuntime,
     trace: TraceHandle,
+    /// Every model call's cost report, summed. Engines that reduce spend to
+    /// an `(observed, exact)` pair lose the token estimate; the dispatch
+    /// boundary recovers it from here.
+    spend: std::sync::Mutex<crate::runtime::RuntimeCostReport>,
 }
 
 #[derive(Clone, Copy)]
@@ -21,7 +25,29 @@ struct ModelCallLifecycle {
 
 impl<'a> TracedRuntime<'a> {
     pub fn new(inner: &'a dyn AgentRuntime, trace: TraceHandle) -> Self {
-        Self { inner, trace }
+        Self {
+            inner,
+            trace,
+            spend: std::sync::Mutex::new(crate::runtime::RuntimeCostReport::known(
+                crate::runtime::RuntimeCost::ZERO,
+            )),
+        }
+    }
+
+    /// Spend of every model call made through this runtime so far.
+    pub fn observed_spend(&self) -> crate::runtime::RuntimeCostReport {
+        self.spend
+            .lock()
+            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| *spend)
+    }
+
+    /// An arithmetic failure keeps the observed floor but drops the estimate.
+    fn tally_call_cost(&self, cost: crate::runtime::RuntimeCostReport) {
+        if let Ok(mut spend) = self.spend.lock() {
+            *spend = spend
+                .checked_add(cost, "traced runtime spend")
+                .unwrap_or_else(|_| spend.mark_incomplete());
+        }
     }
 
     fn record_model_call_start(
@@ -182,6 +208,7 @@ impl<'a> TracedRuntime<'a> {
         error_class: Option<&'static str>,
         failure: Option<crate::runtime::RuntimeFailureMetadata>,
     ) -> Result<()> {
+        self.tally_call_cost(cost);
         let Some(observation) = self.trace.run_observation() else {
             return Ok(());
         };

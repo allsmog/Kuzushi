@@ -1,4 +1,5 @@
 use super::*;
+use crate::findings::{TriageOutcome, TriageVerdict};
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
@@ -126,6 +127,7 @@ fn synthesize_for_test(runtime: &ScriptedPatchRuntime) -> Result<PatchSynthesis>
         rationale: "confirmed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     };
     synthesize_patch(
         runtime,
@@ -133,7 +135,7 @@ fn synthesize_for_test(runtime: &ScriptedPatchRuntime) -> Result<PatchSynthesis>
         target.path(),
         "repo",
         &finding,
-        &triage,
+        &ReviewConfirmation::AutomatedTriage(triage),
         &[],
         PatchStyle::Minimal,
         "system",

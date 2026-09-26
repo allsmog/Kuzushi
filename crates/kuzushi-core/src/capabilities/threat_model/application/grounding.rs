@@ -1,6 +1,6 @@
 use super::*;
 use crate::attack_surface::{AttackSurface, AttackSurfaceKind, AttackSurfaceRisk};
-use crate::findings::{Finding, FindingListFilter, ProofConfidence};
+use crate::findings::{Finding, FindingListFilter, FindingStore, ProofConfidence};
 
 #[cfg(test)]
 mod rust_test_scope_tests;
@@ -11,6 +11,62 @@ pub(crate) struct PromptGrounding {
     pub(crate) surfaces: Vec<AttackSurface>,
     pub(crate) confirmed_findings: Vec<ConfirmedFindingRow>,
     pub(crate) entry_point_catalog: crate::capabilities::entry_points::EntryPointCatalogGrounding,
+    pub(crate) selection: GroundingSelection,
+}
+
+/// How many ground-truth surfaces the prompt was shown out of how many were
+/// discovered, and the bound that decided it. A bounded selection must be
+/// disclosed, or "40 surfaces" reads as the whole attack surface.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct GroundingSelection {
+    pub(crate) selected: usize,
+    pub(crate) available: usize,
+    pub(crate) limit: usize,
+}
+
+impl GroundingSelection {
+    pub(crate) fn dropped(&self) -> usize {
+        self.available.saturating_sub(self.selected)
+    }
+
+    /// `40 of 70 surfaces (cap 40 · ≤2 rows/file)`; the bound is named only
+    /// when it actually left discovered surfaces out of the prompt.
+    pub(crate) fn surfaces_label(&self) -> String {
+        let counts = format!("{} of {} surfaces", self.selected, self.available);
+        if self.dropped() == 0 {
+            return counts;
+        }
+        format!(
+            "{counts} (cap {} · ≤{MAX_GROUNDING_ROWS_PER_FILE} rows/file)",
+            self.limit
+        )
+    }
+
+    fn coverage_json(&self) -> Value {
+        json!({
+            "surfacesAvailable": self.available,
+            "surfacesSelected": self.selected,
+            "limit": self.limit,
+            "maxRowsPerFile": MAX_GROUNDING_ROWS_PER_FILE,
+        })
+    }
+}
+
+/// Record the grounding denominator next to the measured coverage, so the
+/// persisted `coverage` block states what the model was never shown.
+pub(crate) fn stamp_grounding_selection(document: &mut Value, selection: &GroundingSelection) {
+    let Some(root) = document.as_object_mut() else {
+        return;
+    };
+    object_field(root, "coverage").insert("grounding".to_string(), selection.coverage_json());
+}
+
+/// Surfaces chosen for the prompt plus the distinct candidate count they
+/// were chosen from.
+struct SelectedSurfaces {
+    surfaces: Vec<AttackSurface>,
+    catalog_selected: usize,
+    available: usize,
 }
 
 pub(crate) struct ConfirmedFindingRow {
@@ -19,6 +75,12 @@ pub(crate) struct ConfirmedFindingRow {
     pub(crate) file_path: String,
     pub(crate) start_line: u32,
     pub(crate) severity: &'static str,
+    /// CWE named by the finding's title, rule, category, or message.
+    pub(crate) cwe: Option<String>,
+    /// Code the detector recorded as evidence (sink evidence first), as it
+    /// was when the finding was made; later edits such as an applied patch
+    /// do not rewrite it.
+    pub(crate) evidence_snippet: Option<String>,
 }
 
 pub(crate) const MAX_CONFIRMED_FINDING_ROWS: usize = 25;
@@ -34,19 +96,23 @@ pub(crate) fn load_prompt_grounding(
         load_entry_point_catalog(input)?
     };
     let catalog_rows = (!scoped).then_some(catalog.catalog.as_ref()).flatten();
-    let (mut surfaces, records_selected) =
+    let selected =
         prompt_grounding_surfaces(input.analysis_root(), input.max_elements, catalog_rows)?;
+    let mut surfaces = selected.surfaces;
     rebase_grounding_surfaces(input, &mut surfaces);
-    let entry_point_catalog = catalog_grounding(
-        &catalog,
-        records_selected,
-        input.max_elements.max(1),
-        surfaces.len(),
-    );
+    let limit = input.max_elements.max(1);
+    let entry_point_catalog =
+        catalog_grounding(&catalog, selected.catalog_selected, limit, surfaces.len());
+    let selection = GroundingSelection {
+        selected: surfaces.len(),
+        available: selected.available,
+        limit,
+    };
     Ok(PromptGrounding {
         surfaces,
         confirmed_findings: confirmed_finding_rows(input, ctx)?,
         entry_point_catalog,
+        selection,
     })
 }
 
@@ -132,9 +198,14 @@ fn prompt_grounding_surfaces(
     target: &Path,
     max_elements: usize,
     catalog: Option<&crate::capabilities::entry_points::EntryPointCatalog>,
-) -> Result<(Vec<AttackSurface>, usize)> {
+) -> Result<SelectedSurfaces> {
     let Some(catalog) = catalog else {
-        return Ok((grounding_surfaces(target, max_elements)?, 0));
+        let (surfaces, available) = counted_grounding_surfaces(target, max_elements)?;
+        return Ok(SelectedSurfaces {
+            surfaces,
+            catalog_selected: 0,
+            available,
+        });
     };
     let limit = max_elements.max(1);
     let catalog_limit = catalog_selection_limit(limit, catalog.total);
@@ -146,16 +217,29 @@ fn catalog_grounding_surfaces(
     limit: usize,
     catalog: &crate::capabilities::entry_points::EntryPointCatalog,
     catalog_limit: usize,
-) -> Result<(Vec<AttackSurface>, usize)> {
-    let catalog_rows = catalog
+) -> Result<SelectedSurfaces> {
+    let catalog_rows: Vec<AttackSurface> = catalog
         .entry_points
         .iter()
         .map(|entry| entry.surface.clone())
         .collect();
+    let catalog_available = distinct_surface_count(&catalog_rows);
     let mut selected = stratified_top_surfaces(catalog_rows, catalog_limit);
-    let selected_catalog = selected.len();
-    fill_non_catalog_surfaces(target, limit, catalog, &mut selected)?;
-    Ok((selected, selected_catalog))
+    let catalog_selected = selected.len();
+    let noncatalog_available = fill_non_catalog_surfaces(target, limit, catalog, &mut selected)?;
+    Ok(SelectedSurfaces {
+        surfaces: selected,
+        catalog_selected,
+        available: catalog_available + noncatalog_available,
+    })
+}
+
+fn distinct_surface_count<'a>(surfaces: impl IntoIterator<Item = &'a AttackSurface>) -> usize {
+    surfaces
+        .into_iter()
+        .map(|surface| surface.id.as_str())
+        .collect::<BTreeSet<_>>()
+        .len()
 }
 
 fn catalog_selection_limit(limit: usize, catalog_total: usize) -> usize {
@@ -174,7 +258,7 @@ fn fill_non_catalog_surfaces(
     limit: usize,
     catalog: &crate::capabilities::entry_points::EntryPointCatalog,
     selected: &mut Vec<AttackSurface>,
-) -> Result<()> {
+) -> Result<usize> {
     let catalog_ids = catalog
         .entry_points
         .iter()
@@ -185,8 +269,9 @@ fn fill_non_catalog_surfaces(
         .surfaces;
     candidates.extend(infra_surface_rows(target));
     candidates.retain(|surface| !catalog_ids.contains(surface.id.as_str()));
+    let available = distinct_surface_count(&candidates);
     append_unique_surfaces(selected, stratified_top_surfaces(candidates, limit), limit);
-    Ok(())
+    Ok(available)
 }
 
 fn append_unique_surfaces(
@@ -318,9 +403,23 @@ fn linked_catalog_entry_points(document: &Value, catalog_ids: &BTreeSet<String>)
 /// shared by prompt grounding and document verification, so coverage is
 /// always measured against the same ground truth the build saw.
 pub(crate) fn grounding_surfaces(target: &Path, max_elements: usize) -> Result<Vec<AttackSurface>> {
-    let mut surfaces = top_ranked_surfaces(target, max_elements)?;
-    surfaces.extend(infra_surface_rows(target));
-    Ok(surfaces)
+    Ok(counted_grounding_surfaces(target, max_elements)?.0)
+}
+
+/// Context-free grounding surfaces plus the distinct discovered-candidate
+/// count they were selected from.
+fn counted_grounding_surfaces(
+    target: &Path,
+    max_elements: usize,
+) -> Result<(Vec<AttackSurface>, usize)> {
+    let candidates = crate::attack_surface::build_attack_surface_map(target)
+        .context("threat-model grounding: attack-surface map failed")?
+        .surfaces;
+    let infra = infra_surface_rows(target);
+    let available = distinct_surface_count(candidates.iter().chain(&infra));
+    let mut surfaces = stratified_top_surfaces(candidates, max_elements.max(1));
+    surfaces.extend(infra);
+    Ok((surfaces, available))
 }
 
 const MAX_INFRA_SURFACE_ROWS: usize = 24;
@@ -465,12 +564,6 @@ fn infra_row(kind: AttackSurfaceKind, path: &str, title: String) -> AttackSurfac
     }
 }
 
-fn top_ranked_surfaces(target: &Path, max_elements: usize) -> Result<Vec<AttackSurface>> {
-    let map = crate::attack_surface::build_attack_surface_map(target)
-        .context("threat-model grounding: attack-surface map failed")?;
-    Ok(stratified_top_surfaces(map.surfaces, max_elements.max(1)))
-}
-
 /// Maximum grounding rows drawn from one file, so a single hot spot cannot
 /// occupy the whole evidence budget.
 const MAX_GROUNDING_ROWS_PER_FILE: usize = 2;
@@ -565,8 +658,16 @@ fn confirmed_finding_rows(
     input: &BuildInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Vec<ConfirmedFindingRow>> {
-    let Some(store) = ctx.findings_store else {
-        return Ok(Vec::new());
+    let opened;
+    let store = match ctx.findings_store {
+        Some(store) => store,
+        None => match open_existing_findings_store(input)? {
+            Some(store) => {
+                opened = store;
+                &opened
+            }
+            None => return Ok(Vec::new()),
+        },
     };
     // Confirmed = runtime-exploited; Likely = statically-supported
     // (code-cited / source-sink / statically-confirmed). Both are legitimate
@@ -580,13 +681,53 @@ fn confirmed_finding_rows(
     let report = store
         .list_findings_filtered(&filter)
         .context("threat-model grounding: confirmed-findings query failed")?;
-    Ok(report
-        .findings
+    let mut findings = report.findings;
+    append_review_confirmed(store, &mut findings)?;
+    Ok(findings
         .into_iter()
         .filter(|finding| finding_belongs_to_analysis_root(input, finding))
         .take(MAX_CONFIRMED_FINDING_ROWS)
         .map(confirmed_row)
         .collect())
+}
+
+/// Modes hand the optional store only to tools that require one, so a
+/// headless or shell build opens the workspace's existing ledger itself, the
+/// same way modes open it for tools that require it. A workspace with no
+/// findings database has nothing to cite and gets none created.
+fn open_existing_findings_store(input: &BuildInput) -> Result<Option<FindingStore>> {
+    let workspace = crate::workspace::WorkspaceTarget::new(input.workspace_root())?;
+    let path = workspace.findings_db_path();
+    if !path.is_file() {
+        return Ok(None);
+    }
+    FindingStore::open(&path)
+        .map(Some)
+        .context("threat-model grounding: could not open the findings ledger")
+}
+
+/// Findings a triage verdict or review decision confirmed, even when no
+/// proof has raised their confidence band yet: the same decision in force
+/// that authorizes verify, patch, and variant hunting. Proof-banded rows
+/// come first and are not repeated.
+fn append_review_confirmed(store: &FindingStore, findings: &mut Vec<Finding>) -> Result<()> {
+    let relevant = store
+        .list_relevant_findings()
+        .context("threat-model grounding: relevant-findings query failed")?;
+    let decisions = store.list_review_decisions_for_findings(&relevant)?;
+    let index = crate::findings::EffectiveReviewStateIndex::from_findings_and_decisions(
+        &relevant, &decisions,
+    );
+    let mut seen: BTreeSet<String> = findings.iter().map(|f| f.fingerprint.clone()).collect();
+    for finding in relevant {
+        let decision = index.effective_decision_for(&finding);
+        let gate = crate::findings::FindingReviewGate::from_effective(&finding, decision.as_ref());
+        let confirmed = matches!(gate, crate::findings::FindingReviewGate::Confirmed(_));
+        if confirmed && seen.insert(finding.fingerprint.clone()) {
+            findings.push(finding);
+        }
+    }
+    Ok(())
 }
 
 fn finding_belongs_to_analysis_root(input: &BuildInput, finding: &Finding) -> bool {
@@ -598,13 +739,31 @@ fn finding_belongs_to_analysis_root(input: &BuildInput, finding: &Finding) -> bo
 }
 
 fn confirmed_row(finding: Finding) -> ConfirmedFindingRow {
+    let cwe = super::super::domain::cwe_from_texts(&[
+        &finding.title,
+        &finding.rule_id,
+        finding.category.as_deref().unwrap_or_default(),
+        &finding.message,
+    ]);
+    let evidence_snippet = detection_snippet(&finding.evidence);
     ConfirmedFindingRow {
+        cwe,
+        evidence_snippet,
         fingerprint: finding.fingerprint,
         title: finding.title,
         file_path: finding.file_path,
         start_line: finding.start_line,
         severity: finding.severity.as_str(),
     }
+}
+
+/// Sink evidence first, then any evidence with a snippet.
+fn detection_snippet(evidence: &[crate::findings::FindingEvidence]) -> Option<String> {
+    let with_snippet = || evidence.iter().filter(|row| !row.snippet.trim().is_empty());
+    with_snippet()
+        .find(|row| row.kind.to_ascii_lowercase().contains("sink"))
+        .or_else(|| with_snippet().next())
+        .map(|row| row.snippet.clone())
 }
 
 pub(crate) fn attack_surface_section(surfaces: &[AttackSurface]) -> String {
@@ -814,6 +973,64 @@ mod tests {
     }
 
     #[test]
+    fn grounding_label_discloses_the_denominator_and_names_the_cap_only_when_it_dropped_rows() {
+        let capped = GroundingSelection {
+            selected: 40,
+            available: 70,
+            limit: 40,
+        };
+        assert_eq!(capped.dropped(), 30);
+        assert_eq!(
+            capped.surfaces_label(),
+            "40 of 70 surfaces (cap 40 · ≤2 rows/file)"
+        );
+        let complete = GroundingSelection {
+            selected: 12,
+            available: 12,
+            limit: 40,
+        };
+        assert_eq!(complete.dropped(), 0);
+        assert_eq!(complete.surfaces_label(), "12 of 12 surfaces");
+    }
+
+    #[test]
+    fn grounding_selection_is_stamped_additively_into_coverage() {
+        let mut document = json!({"coverage": {"entryPointsConsidered": 40}});
+        let selection = GroundingSelection {
+            selected: 40,
+            available: 70,
+            limit: 40,
+        };
+
+        stamp_grounding_selection(&mut document, &selection);
+
+        assert_eq!(document["coverage"]["entryPointsConsidered"], json!(40));
+        assert_eq!(
+            document["coverage"]["grounding"],
+            json!({
+                "surfacesAvailable": 70,
+                "surfacesSelected": 40,
+                "limit": 40,
+                "maxRowsPerFile": MAX_GROUNDING_ROWS_PER_FILE,
+            })
+        );
+    }
+
+    #[test]
+    fn uncataloged_grounding_counts_every_discovered_surface_before_the_cap() {
+        let target = tempfile::tempdir().unwrap();
+        for name in ["Dockerfile", "Cargo.lock", "go.sum"] {
+            std::fs::write(target.path().join(name), "x").unwrap();
+        }
+
+        let selected = prompt_grounding_surfaces(target.path(), 1, None).unwrap();
+
+        assert_eq!(selected.catalog_selected, 0);
+        assert_eq!(selected.available, 3);
+        assert_eq!(selected.surfaces.len(), 3, "infra rows are never capped");
+    }
+
+    #[test]
     fn stratified_selection_caps_rows_per_file() {
         let surfaces: Vec<AttackSurface> = (0..8)
             .map(|index| {
@@ -847,10 +1064,14 @@ mod tests {
             surface_row("four", AttackSurfaceKind::CliEntrypoint, "src/four.rs", 60),
         ]);
 
-        let (selected, catalog_selected) =
-            prompt_grounding_surfaces(target.path(), 4, Some(&catalog)).unwrap();
+        let SelectedSurfaces {
+            surfaces: selected,
+            catalog_selected,
+            available,
+        } = prompt_grounding_surfaces(target.path(), 4, Some(&catalog)).unwrap();
 
         assert_eq!(catalog_selected, 3);
+        assert_eq!(available, 5, "four catalog rows plus the Dockerfile row");
         assert_eq!(selected.len(), 4);
         assert!(selected.iter().any(|surface| surface.path == "Dockerfile"));
         assert_eq!(
@@ -1093,6 +1314,8 @@ mod tests {
             file_path: "src/codec.c".to_string(),
             start_line: 42,
             severity: "high",
+            cwe: None,
+            evidence_snippet: None,
         }];
         let section = confirmed_findings_section(&rows);
         assert!(section.contains("fp3_abc123"));

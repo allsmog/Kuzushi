@@ -30,10 +30,15 @@ verified; the saved result and recorded spend remain available. These fields
 come from the Rust adapter, not the model. Existing phase acceptance checks
 authenticate the snapshot and require it to match the current source.
 
-Agentic SAST and the offensive threat hunt emit typed finding deltas after the
-finding store commits. Counts distinguish newly added fingerprints from existing
+Agentic SAST, the offensive threat hunt, and every built-in that persists
+through the shared tool-findings path (native scanners such as `secret-scan`,
+`dep-hygiene`, `semgrep`, `codeql`, IaC, APK, chains, and plugin adapters) emit
+typed finding deltas after the finding store commits, including a zero delta
+for a clean run. Counts distinguish newly added fingerprints from existing
 fingerprints seen again. A phase can infer a clean Scan from zero deltas only
-when every referenced run supplied a finding observation. Older runs without
+when every referenced run supplied a finding observation; otherwise the phase
+receipt's watermark records the gap and the shell labels the count
+`findings unmeasured` (or `partly unmeasured`) instead of a measured `+0`. Older runs without
 source receipts remain inspectable and require a new run before acceptance on
 an unversioned or dirty target; their historical records are not rewritten.
 
@@ -192,6 +197,31 @@ are 2 MiB per source file and 16 MiB total after inventory collection. Oversized
 binary, non-UTF-8, and budget-omitted code is disclosed. Rust code uses the test-scope
 projection described above. Target drift or an incomplete inventory stops the
 build with recovery guidance.
+
+### Confirmed findings as threat-model variant patterns
+
+`threat-model:build mode=refine` reads the workspace findings ledger, including
+when the calling mode supplied no findings store. It attaches each newly
+confirmed finding (an automated true positive, or a `confirmed`/`to_fix` review
+decision) to the threat that covers its file, and it records a bounded
+`variantPatterns[]` entry on that threat. The entry is deterministic and
+grounded in the repository: `findingRef`, `title`, `cwe` (from the finding, or
+the threat's single related CWE), `location`, the first call-site line (taken
+from the finding's detection evidence, or else read from the file; imports and
+function declarations never count as call sites), and that line's distinctive
+identifiers as `keywords`. A threat keeps at most eight patterns, one per
+finding. The revision records `provenance.refineDelta.variantPatterns`.
+
+Later scans use the active model's patterns. taint-iris-next adds each pattern's
+leading keywords to the matching CWE's structural queries and cites the source
+location as a ranking reason. The agentic-SAST threat-model digest lists the
+patterns as proven call sites whose siblings the agent should look for.
+
+`sast:scan` exposes `threatModelFeedback=off|refine` (default `off`). With
+`refine`, the scan dispatches `threat-model:build mode=refine` after triage,
+through the shared registry and with the configured model. The scan reports the
+outcome under `data.threatModelFeedback`. A refused refine, for example when no
+model exists yet, becomes a scan warning and does not fail the scan.
 
 An explicit `sources` list remains authoritative. Use `sources=none` to omit
 source artifacts, or the prior `context,threat-model` list to retain its older

@@ -314,8 +314,12 @@ mod tests {
     #[test]
     fn cost_estimate_uses_haiku_rates_for_haiku_models() {
         let cost = estimate_cost_usd("claude-haiku-4-5-20251001", 1000, 1000).unwrap();
-        // Haiku: $0.0008/k in + $0.004/k out × 1k each.
-        assert!((cost - (0.0008 + 0.004)).abs() < 1e-9);
+        // Haiku 4.5: $1/MTok in + $5/MTok out × 1k each.
+        assert!((cost - (0.001 + 0.005)).abs() < 1e-9);
+        let prefixed = estimate_cost_usd("anthropic:claude-haiku-4-5", 1000, 1000).unwrap();
+        assert!((prefixed - cost).abs() < 1e-12);
+        let legacy = estimate_cost_usd("claude-3-5-haiku-20241022", 1000, 1000).unwrap();
+        assert!((legacy - (0.0008 + 0.004)).abs() < 1e-9);
     }
 
     #[test]
@@ -327,12 +331,20 @@ mod tests {
     #[test]
     fn cost_estimate_uses_opus_rates_for_opus_models() {
         let cost = estimate_cost_usd("claude-opus-4-7", 1000, 1000).unwrap();
-        assert!((cost - (0.015 + 0.075)).abs() < 1e-9);
+        assert!((cost - (0.005 + 0.025)).abs() < 1e-9);
+        let legacy = estimate_cost_usd("claude-opus-4-1-20250805", 1000, 1000).unwrap();
+        assert!((legacy - (0.015 + 0.075)).abs() < 1e-9);
     }
 
     #[test]
     fn cost_estimate_is_unavailable_for_unknown_models() {
         assert_eq!(estimate_cost_usd("some-future-model", 1000, 1000), None);
+        // A family name alone is not a price: an unlisted version has no estimate.
+        assert_eq!(estimate_cost_usd("claude-haiku-9", 1000, 1000), None);
+        assert_eq!(
+            estimate_cost_usd("claude-opus-4-5-preview", 1000, 1000),
+            None
+        );
     }
 
     #[test]
@@ -356,6 +368,18 @@ mod tests {
             estimate_cost_usd_with_cache("claude-sonnet-4-6", 1000, 0, None),
             estimate_cost_usd("claude-sonnet-4-6", 1000, 0)
         );
+    }
+
+    #[test]
+    fn cost_estimate_uses_model_specific_cache_read_rates() {
+        let cache = PromptCacheUsage {
+            read_input_tokens: 1_000_000,
+            creation_input_tokens: 0,
+        };
+        let fable = estimate_cost_usd_with_cache("claude-fable-5-1", 0, 0, Some(cache)).unwrap();
+        assert!((fable - 0.25).abs() < 1e-9, "{fable}");
+        let haiku = estimate_cost_usd_with_cache("claude-haiku-4-5", 0, 0, Some(cache)).unwrap();
+        assert!((haiku - 0.10).abs() < 1e-9, "{haiku}");
     }
 
     #[test]

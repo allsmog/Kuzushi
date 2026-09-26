@@ -7,6 +7,10 @@ pub struct SystemsContextMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub codeql_db_path: Option<String>,
     pub bash_probing_used: bool,
+    /// Production systems-language source files considered (C/C++/Rust/Go/
+    /// Zig). Zero means the engine does not apply to this target at all.
+    #[serde(default)]
+    pub systems_source_files: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

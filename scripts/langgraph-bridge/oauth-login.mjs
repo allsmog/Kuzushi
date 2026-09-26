@@ -31,6 +31,9 @@ export const OAUTH_PROVIDERS = {
     tokenUrl: "https://platform.claude.com/v1/oauth/token",
     scope: "user:profile user:inference user:sessions:claude_code user:mcp_servers",
     tokenRequestFormat: "json",
+    // Claude's paste-code exchange rejects a request without the `state` that
+    // was issued with the authorize URL (HTTP 400).
+    tokenRequestIncludesState: true,
     redirectUri: "https://console.anthropic.com/oauth/code/callback",
     extraAuthorizeParams: { code: "true" },
     flow: "paste-code",
@@ -135,10 +138,11 @@ function nonEmpty(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function tokenExchangeBody(cfg, { code, verifier, redirectUri }) {
+export function tokenExchangeBody(cfg, { code, state, verifier, redirectUri }) {
   const fields = {
     grant_type: "authorization_code",
     code,
+    ...(cfg.tokenRequestIncludesState && state ? { state } : {}),
     redirect_uri: redirectUri,
     client_id: cfg.clientId,
     code_verifier: verifier,
@@ -160,8 +164,28 @@ function jsonHeaders() {
 export async function exchangeAuthorizationCode(cfg, params) {
   const { headers, body } = tokenExchangeBody(cfg, params);
   const response = await fetch(cfg.tokenUrl, { method: "POST", headers, body });
-  if (!response.ok) throw providerHttpError(response.status);
+  if (!response.ok) throw oauthTokenHttpError(response.status, await response.text().catch(() => ""));
   return parseProviderTokenJson(await response.text());
+}
+
+// The RFC 6749 `error` code (invalid_grant, invalid_request, …) is a fixed
+// vocabulary, never a secret; name it so a rejected login is diagnosable.
+// Nothing else from the provider body is echoed.
+export function oauthTokenHttpError(status, bodyText) {
+  const error = providerHttpError(status);
+  const code = oauthErrorCode(bodyText);
+  if (code) error.message = error.message.replace(/\)\.$/, `: ${code}).`);
+  return error;
+}
+
+function oauthErrorCode(bodyText) {
+  try {
+    const code = JSON.parse(String(bodyText).slice(0, 16_384))?.error;
+    const value = typeof code === "string" ? code : code?.type;
+    return typeof value === "string" && /^[a-z_]{1,64}$/.test(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseProviderTokenJson(text) {
@@ -228,8 +252,12 @@ async function runPasteCodeFlow(cfg) {
   const pasted = await promptLine("Paste the authorization code shown after you approve access: ");
   const parsed = parsePastedCode(pasted);
   if (!parsed) throw new Error("no authorization code was provided");
+  if (parsed.state && parsed.state !== state) {
+    throw new Error("authorization state does not match this login; restart the login");
+  }
   const token = await exchangeAuthorizationCode(cfg, {
     code: parsed.code,
+    state,
     verifier,
     redirectUri: cfg.redirectUri,
   });

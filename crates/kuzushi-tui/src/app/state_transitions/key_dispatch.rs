@@ -27,6 +27,7 @@ impl ShellApp {
     }
 
     fn reduce_key_without_recording(&mut self, key: KeyEvent) -> InputUpdate {
+        self.expire_resolved_result_key(key);
         if let Some(update) = self.reduce_owned_key(key) {
             return update;
         }
@@ -85,14 +86,19 @@ impl ShellApp {
     }
 
     fn reduce_phase_result_or_shell_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if let Some(update) = self.reduce_configured_phase_result_key(key) {
-            return Some(update);
-        }
-        if let Some(update) = self.reduce_default_phase_result_key(key) {
+        if let Some(update) = self.reduce_on_screen_phase_result_key(key) {
             return Some(update);
         }
 
         self.reduce_configured_shell_or_mode_cycle(key)
+    }
+
+    fn reduce_on_screen_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let update = self
+            .reduce_configured_phase_result_key(key)
+            .or_else(|| self.reduce_default_phase_result_key(key))?;
+        self.settle_claimed_phase_result_key(key);
+        Some(update)
     }
 
     fn reduce_configured_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
@@ -821,14 +827,30 @@ impl ShellApp {
         if update.handled {
             return update;
         }
-        if modifiers.plain {
-            if let KeyCode::Char(ch) = key.code {
-                self.enter_prompt_mode();
-                self.insert_printable_key(ch);
-                return InputUpdate::handled();
-            }
+        if let Some(update) = self.reduce_unclaimed_phase_result_key(key) {
+            return update;
+        }
+        if let Some(update) = self.type_printable_navigate_key(key, modifiers) {
+            return update;
         }
         InputUpdate::handled_if(self.handle_unhandled_navigation_key(key, modifiers))
+    }
+
+    /// An unclaimed plain printable key in Navigate starts typing a prompt.
+    fn type_printable_navigate_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> Option<InputUpdate> {
+        let KeyCode::Char(ch) = key.code else {
+            return None;
+        };
+        if !modifiers.plain {
+            return None;
+        }
+        self.enter_prompt_mode();
+        self.insert_printable_key(ch);
+        Some(InputUpdate::handled())
     }
 
     fn record_operator_interaction(&mut self) {
@@ -2506,6 +2528,7 @@ mod tests {
             elapsed_secs: 1,
             cost: "$0.0000".to_string(),
             changed_findings: 0,
+            finding_delta_observed: None,
             changed_artifacts: Vec::new(),
             interaction_count: 0,
             rerun_specification: None,
@@ -2999,6 +3022,7 @@ mod tests {
             elapsed_secs: 1,
             cost: "cost unavailable".to_string(),
             changed_findings: 0,
+            finding_delta_observed: None,
             changed_artifacts: Vec::new(),
             interaction_count: 0,
             rerun_specification: None,

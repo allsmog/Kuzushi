@@ -8,6 +8,7 @@ const ADAPTIVE_THINKING_DETAIL: &str =
 const OPENAI_OAUTH_DETAIL: &str =
     "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.";
 const MODEL_UNAVAILABLE_DETAIL: &str = "The selected model is unavailable for this provider or account. Choose an available model explicitly.";
+const CONTEXT_OVERFLOW_DETAIL: &str = "The request exceeded the model's context window. Narrow the investigation or choose a model with a larger window.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -268,11 +269,32 @@ const SAFE_DETAILS: &[(RuntimeFailureClass, &[&str], &str)] = &[
         &["the selected model is unavailable for this provider or account. choose an available model explicitly."],
         MODEL_UNAVAILABLE_DETAIL,
     ),
+    (
+        RuntimeFailureClass::ProviderRejected,
+        &["exceeded the model's context window"],
+        CONTEXT_OVERFLOW_DETAIL,
+    ),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_overflow_detail_is_canonical_for_rejections_only() {
+        let metadata = RuntimeFailureMetadata::new(
+            RuntimeFailureClass::ProviderRejected,
+            Some(400),
+            Some(CONTEXT_OVERFLOW_DETAIL),
+        );
+        assert_eq!(metadata.detail.as_deref(), Some(CONTEXT_OVERFLOW_DETAIL));
+        let other = RuntimeFailureMetadata::new(
+            RuntimeFailureClass::Timeout,
+            None,
+            Some(CONTEXT_OVERFLOW_DETAIL),
+        );
+        assert_eq!(other.detail, None);
+    }
 
     #[test]
     fn metadata_keeps_only_allowlisted_canonical_detail() {

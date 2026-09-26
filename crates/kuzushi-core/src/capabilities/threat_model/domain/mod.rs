@@ -6,12 +6,14 @@ pub(crate) use document_schema::*;
 pub(crate) use dread::*;
 pub(crate) use evidence_anchors::*;
 pub(in crate::capabilities::threat_model) use normalization::*;
+pub(crate) use revision_diff::*;
 pub(crate) use persistence_validation::{
     validate_legacy_threat_model, validate_persisted_threat_model,
 };
 pub(crate) use security_context_links::require_complete_security_context_links;
 pub use security_context_links::{security_context_link_report, SecurityContextLinkReport};
 pub(crate) use stage_selection::*;
+pub(crate) use variant_patterns::*;
 pub use tool_contract::*;
 
 mod dfd_types;
@@ -21,6 +23,8 @@ mod dread;
 mod evidence_anchors;
 mod normalization;
 mod persistence_validation;
+mod revision_diff;
 mod security_context_links;
 mod stage_selection;
 mod tool_contract;
+mod variant_patterns;

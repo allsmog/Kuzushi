@@ -28,32 +28,50 @@ fn setup_readiness_lines(
     width: usize,
     compact: bool,
 ) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    for (index, row) in rows.iter().enumerate() {
-        lines.push(setup_row_line(
-            row,
-            index == app.router.setup().cursor(),
-            width,
-            compact,
-        ));
-        if !compact && row.id == crate::app::SetupRowId::Target {
-            lines.extend(setup_target_fact_lines(app, width));
-        }
-        lines.extend(setup_selected_row_detail(app, row, index, width, compact));
+    let cursor = app.router.setup().cursor();
+    rows.iter()
+        .enumerate()
+        .flat_map(|(index, row)| setup_row_lines(app, row, index == cursor, width, compact))
+        .collect()
+}
+
+/// One readiness row plus what explains it. The Target facts block already
+/// leads with the target path, so the selected-row detail — which for Target
+/// is that same path — is only shown when no facts block rendered.
+fn setup_row_lines(
+    app: &ShellApp,
+    row: &SetupReadinessRow,
+    selected: bool,
+    width: usize,
+    compact: bool,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![setup_row_line(row, selected, width, compact)];
+    let facts = setup_row_fact_lines(app, row, width, compact);
+    let explained_by_facts = !facts.is_empty();
+    lines.extend(facts);
+    if selected && !explained_by_facts {
+        lines.extend(setup_selected_row_detail(row, width, compact));
     }
     lines
 }
 
-fn setup_selected_row_detail(
+fn setup_row_fact_lines(
     app: &ShellApp,
     row: &SetupReadinessRow,
-    index: usize,
     width: usize,
     compact: bool,
 ) -> Vec<Line<'static>> {
-    if index != app.router.setup().cursor() {
+    if compact || row.id != crate::app::SetupRowId::Target {
         return Vec::new();
     }
+    setup_target_fact_lines(app, &row.detail, width)
+}
+
+fn setup_selected_row_detail(
+    row: &SetupReadinessRow,
+    width: usize,
+    compact: bool,
+) -> Vec<Line<'static>> {
     let prefix = if compact { "    why · " } else { "    " };
     let limit = if compact { 2 } else { usize::MAX };
     let detail = compact_setup_detail(row, compact);
@@ -71,15 +89,16 @@ fn compact_setup_detail(row: &SetupReadinessRow, compact: bool) -> String {
     row.detail.clone()
 }
 
-fn setup_target_fact_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
-    if app.active_target_facts_loading() {
-        return vec![muted("    Inspecting active target...")];
-    }
-    let Some(facts) = app.active_target_facts() else {
+fn setup_target_fact_lines(app: &ShellApp, path: &str, width: usize) -> Vec<Line<'static>> {
+    let facts = if app.active_target_facts_loading() {
+        vec!["Inspecting active target...".to_string()]
+    } else if let Some(facts) = app.active_target_facts() {
+        crate::ui_view_models::target_fact_detail_lines(facts).to_vec()
+    } else {
         return Vec::new();
     };
-    crate::ui_view_models::target_fact_detail_lines(facts)
-        .into_iter()
+    std::iter::once(path.to_string())
+        .chain(facts)
         .map(|line| muted(&fit(&format!("    {line}"), width)))
         .collect()
 }
@@ -529,6 +548,45 @@ mod tests {
 
     #[test]
     fn setup_renders_generation_checked_active_target_facts() {
+        let (_target, app) = setup_app_with_resolved_target_facts();
+
+        let text = setup_text(&app, 120);
+
+        assert!(text.contains("languages: Rust"), "{text}");
+        assert!(text.contains("build: Bazel, Cargo"), "{text}");
+        assert!(text.contains("prior Kuzushi:"), "{text}");
+    }
+
+    #[test]
+    fn selected_target_states_its_path_once_ahead_of_its_facts() {
+        let (target, mut app) = setup_app_with_resolved_target_facts();
+        let target_index = crate::app::SetupRowId::ALL
+            .iter()
+            .position(|row| *row == crate::app::SetupRowId::Target)
+            .unwrap();
+        app.router.setup_mut().set_cursor(target_index);
+        let path = target.path().display().to_string();
+
+        for width in [120, 160] {
+            let text = setup_text(&app, width);
+            assert_eq!(text.matches(path.as_str()).count(), 1, "{width}: {text}");
+            let path_at = text.find(path.as_str()).unwrap();
+            assert!(
+                path_at < text.find("languages:").unwrap(),
+                "{width}: {text}"
+            );
+        }
+    }
+
+    fn setup_text(app: &ShellApp, width: u16) -> String {
+        setup_lines(app, Rect::new(0, 0, width, 36))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn setup_app_with_resolved_target_facts() -> (tempfile::TempDir, ShellApp) {
         let target = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(target.path().join("src")).unwrap();
         std::fs::write(
@@ -551,15 +609,6 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         app.open_setup();
-
-        let text = setup_lines(&app, Rect::new(0, 0, 120, 36))
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(text.contains("languages: Rust"), "{text}");
-        assert!(text.contains("build: Bazel, Cargo"), "{text}");
-        assert!(text.contains("prior Kuzushi:"), "{text}");
+        (target, app)
     }
 }

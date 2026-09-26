@@ -1,5 +1,6 @@
 use super::*;
-use crate::capabilities::chrome_rce::{run_review_trigger, run_scan, ChromeRcePersistence};
+use crate::capabilities::chrome_rce::{run_review_trigger, run_scan};
+use crate::findings::ToolFindingsSink;
 
 pub(in crate::modules) fn module() -> BuiltinModule {
     builtin_module(
@@ -75,7 +76,7 @@ pub(in crate::modules) fn scan(input: Value, ctx: &ToolExecutionContext<'_>) -> 
             )
             .emit();
     }
-    let result = run_scan(&target, chrome_rce_persistence(ctx));
+    let result = run_scan(&target, ToolFindingsSink::for_context(ctx));
     if let (Some(trace), Ok(output)) = (ctx.trace, &result) {
         let count = output
             .pointer("/data/count")
@@ -103,7 +104,7 @@ pub(in crate::modules) fn review_trigger(
             .step("tool", "review-trigger", "chrome-rce:review-trigger start")
             .emit();
     }
-    let result = run_review_trigger(&target, diff_base.as_deref(), chrome_rce_persistence(ctx));
+    let result = run_review_trigger(&target, diff_base.as_deref(), ToolFindingsSink::for_context(ctx));
     if let (Some(trace), Ok(output)) = (ctx.trace, &result) {
         let count = output
             .pointer("/data/count")
@@ -118,12 +119,4 @@ pub(in crate::modules) fn review_trigger(
             .emit();
     }
     result
-}
-
-fn chrome_rce_persistence<'ctx>(ctx: &ToolExecutionContext<'ctx>) -> ChromeRcePersistence<'ctx> {
-    ChromeRcePersistence {
-        finding_run_id: ctx.finding_run_id(),
-        workspace: ctx.workspace,
-        findings_store: ctx.findings_store,
-    }
 }

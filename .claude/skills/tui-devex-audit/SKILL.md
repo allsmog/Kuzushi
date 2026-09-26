@@ -1,6 +1,6 @@
 ---
 name: tui-devex-audit
-description: Run the tmux-driven TUI DevEx audit journeys (J1-J17) and judge the captured screens against the signifier-state-intent invariant. Use when asked to audit the Kuzushi TUI's developer experience, re-run a DevEx journey, or verify a TUI fix didn't regress an audited journey. Args: journey ids (e.g. "J1 J8"), "all", or empty for J1 only.
+description: Run the tmux-driven TUI DevEx audit journeys (J1-J54; `run-journey.sh --list` prints the catalog) and judge the captured screens against the signifier-state-intent invariant. Use when asked to audit the Kuzushi TUI's developer experience, re-run a DevEx journey, or verify a TUI fix didn't regress an audited journey. Args: journey ids (e.g. "J1 J8"), "all", or empty for J1 only.
 ---
 
 # TUI DevEx audit

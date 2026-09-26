@@ -270,8 +270,11 @@ truth.
   evidence).
 - `threats models` lists immutable lineages; `threats activate
   <model-id>[@<revision-id>]` changes only the active pointer; `threats
-  revisions <model-id>` lists content history; and `threats restore
-  <revision-id>` creates a revision from historical content. A divergent
+  revisions <model-id>` lists content history; `threats diff <from> <to>`
+  runs `threat-model:diff` over two revision ids (`tmr_…`) or lineage heads
+  (`tm_…`), while bare `threats diff` still inspects mirror edits; and
+  `threats restore <revision-id>` creates a revision from historical
+  content. A divergent
   hand-edited compatibility mirror blocks activation until the operator
   explicitly adopts or discards it.
 - `scan batch [--prior-run <run-id>]` opens the repeated-scan configurator.
@@ -299,6 +302,10 @@ truth.
   prerequisite instead of rerouting work.
 - `findings` and `open <id>` open Review, `next` (`continue`) invokes the
   current phase planner, and `report` opens the dedicated export exit.
+- A phase verb (`map`, `scan`, `review`, `prove`, `fix`) opens that phase's
+  Workbench page once the phase is complete or passed, whose hint row then
+  offers `plan <phase>`; a phase not yet reached opens its planner.
+  `plan <phase>` always opens the planner.
 - `activity` opens Run Focus. Foreground Run Focus owns input in Navigate mode
   and identifies its origin, for example `RUN FOCUS · SCAN`;
   `s` accepts only a valid `run <tool> …` steer command and `b` backgrounds

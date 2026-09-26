@@ -629,7 +629,9 @@ fn collect_triage_votes(
         collect_additional_votes(runtime, config, input, finding, first.outcome)?;
     let mut outcome = consensus_outcome(votes);
     if !failed_vote_summaries.is_empty() {
+        // A failed vote may have spent without a receipt or an estimate.
         outcome.cost_usd_exact = false;
+        outcome.estimated_cost_usd = None;
         outcome.rationale = format!(
             "{} ({} vote call(s) failed)",
             outcome.rationale,

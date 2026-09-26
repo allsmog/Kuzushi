@@ -298,6 +298,7 @@ impl RunFocusReceipt {
             elapsed_secs: self.elapsed_secs,
             cost: self.cost.clone(),
             changed_findings: self.changed_findings,
+            finding_delta_observed: None,
             changed_artifacts: self.changed_artifacts.clone(),
             interaction_count: self.interaction_count,
             rerun_specification: self.rerun_specification.clone(),

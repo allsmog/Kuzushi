@@ -20,6 +20,10 @@ pub struct XRayReportData {
     /// provider calls did not report an exact monetary charge.
     #[serde(default)]
     pub cost_usd_exact: bool,
+    /// Labelled local estimate of the whole run when some provider spend was
+    /// unmetered; never folded into `cost_usd`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -25,13 +25,7 @@ pub(in crate::modules) fn run_native_libs_scan(
             ));
         }
     };
-    let persisted = persist_tool_findings(
-        ctx.finding_run_id(),
-        &target,
-        &outcome.findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = persist_tool_findings(ctx, &target, &outcome.findings)?;
     emit_step(
         ctx,
         "done",

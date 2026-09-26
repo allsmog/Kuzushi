@@ -320,3 +320,28 @@ fn reduced_motion_freezes_live_pulse_but_keeps_elapsed_redraws_due() {
         "elapsed redraws must not restart animation"
     );
 }
+
+/// FEEDBACK item 3/8: result cards once printed literal `\n` escapes. A detail
+/// line carrying real newlines must render as separate rows, never as an
+/// escape sequence.
+#[test]
+fn result_detail_newlines_render_as_rows_not_escapes() {
+    let rows = wrapped_result_row(
+        "  ",
+        "first line of the receipt\nsecond line of the receipt",
+        80,
+        PhaseResultRenderStyle {
+            prefix: theme::muted(),
+            text: theme::muted(),
+        },
+        PhaseResultRenderSource::default(),
+    );
+
+    let text = rows
+        .iter()
+        .map(|row| row.line.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(text.len(), 2, "{text:?}");
+    assert!(text.iter().all(|line| !line.contains("\\n")), "{text:?}");
+    assert!(text[1].contains("second line"), "{text:?}");
+}

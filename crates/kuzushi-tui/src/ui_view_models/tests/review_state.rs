@@ -29,6 +29,7 @@ fn review_state_separates_terminal_decisions_from_needs_review() {
         rationale: "accepted by owner".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
 
     assert_eq!(review_decision_label(&finding), "accepted_risk");
@@ -74,6 +75,7 @@ fn effective_review_index_uses_loaded_durable_identity_decision() {
         rationale: "operator confirmed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     reviewed.triaged_by = Some(TriageAuthor::Human);
 
@@ -216,6 +218,7 @@ fn carried_rejected_decision_conflicts_with_new_scanner_signal() {
         rationale: "operator rejected prior occurrence".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     reviewed.triaged_by = Some(TriageAuthor::Human);
 
@@ -253,6 +256,7 @@ fn carried_rejected_decision_does_not_conflict_with_rejected_scanner_signal() {
         rationale: "operator rejected prior occurrence".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
 
     let mut rerun = finding("demo.rerun", 18, "same durable finding rejected again");

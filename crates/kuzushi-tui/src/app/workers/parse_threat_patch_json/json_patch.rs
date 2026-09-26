@@ -62,6 +62,7 @@ fn unsupported_items(items: &[serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn merge_json(target: &mut serde_json::Value, patch: &serde_json::Value) {
     use serde_json::Value;
     match patch {
@@ -74,6 +75,7 @@ pub(crate) fn merge_json(target: &mut serde_json::Value, patch: &serde_json::Val
     }
 }
 
+#[cfg(test)]
 fn merge_json_object(
     target: &mut serde_json::Value,
     patch_map: &serde_json::Map<String, serde_json::Value>,
@@ -88,6 +90,7 @@ fn merge_json_object(
     }
 }
 
+#[cfg(test)]
 fn merge_json_field(
     target_map: &mut serde_json::Map<String, serde_json::Value>,
     key: &str,

@@ -24,6 +24,7 @@ fn reviewed(mut finding: Finding) -> Finding {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     });
     finding
 }

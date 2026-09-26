@@ -22,6 +22,7 @@ mod source_sink_discovery;
 mod structural_queries;
 mod syntactic_narrowing;
 mod target_partition;
+mod variant_pattern_seeds;
 
 pub(in crate::capabilities::taint_iris_next) use agent::*;
 pub(crate) use artifact_paths::*;
@@ -45,3 +46,4 @@ pub(crate) use source_sink_discovery::*;
 pub(crate) use structural_queries::*;
 pub(crate) use syntactic_narrowing::*;
 pub(crate) use target_partition::*;
+pub(crate) use variant_pattern_seeds::*;

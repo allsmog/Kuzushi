@@ -38,6 +38,13 @@ pub(crate) fn acquire_exact_threat_model_read_lease(
     Ok(lease)
 }
 
+/// Whether a revision commit could take the store's exclusive lock right now.
+#[cfg(test)]
+pub(crate) fn threat_model_store_accepts_commits(root: &Path) -> Result<bool> {
+    let path = threat_model_store_path(root).join(STORE_LOCK);
+    Ok(crate::file_lock::ExclusiveFileLock::try_acquire(&path)?.is_some())
+}
+
 fn threat_model_ref_label(model_ref: Option<&ThreatModelRef>) -> String {
     model_ref
         .map(|value| {

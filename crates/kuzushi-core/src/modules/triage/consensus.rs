@@ -13,6 +13,7 @@ pub(in crate::modules) fn consensus_outcome(mut votes: Vec<TriageOutcome>) -> Tr
     }
     let total = votes.len();
     let (cost_usd, cost_usd_exact) = summed_vote_cost(&votes);
+    let estimated_cost_usd = summed_vote_estimate(&votes);
     let tally = vote_tally(&votes);
     let outcome = match majority_verdict(&tally, total) {
         Some(verdict) => majority_outcome(&votes, verdict, total),
@@ -21,6 +22,7 @@ pub(in crate::modules) fn consensus_outcome(mut votes: Vec<TriageOutcome>) -> Tr
     TriageOutcome {
         cost_usd,
         cost_usd_exact,
+        estimated_cost_usd,
         ..outcome
     }
 }
@@ -29,6 +31,19 @@ fn summed_vote_cost(votes: &[TriageOutcome]) -> (f64, bool) {
     let cost = votes.iter().map(|vote| vote.cost_usd).sum();
     let exact = votes.iter().all(|vote| vote.cost_usd_exact);
     (cost, exact)
+}
+
+/// Estimate for the unmetered votes; unknown as soon as one unmetered vote
+/// has no estimate, and absent when every vote was metered exactly.
+fn summed_vote_estimate(votes: &[TriageOutcome]) -> Option<f64> {
+    if votes.iter().all(|vote| vote.cost_usd_exact) {
+        return None;
+    }
+    votes
+        .iter()
+        .filter(|vote| !vote.cost_usd_exact)
+        .map(|vote| vote.estimated_cost_usd)
+        .sum()
 }
 
 fn vote_tally(votes: &[TriageOutcome]) -> Vec<(TriageVerdict, usize)> {
@@ -66,6 +81,7 @@ fn majority_outcome(votes: &[TriageOutcome], verdict: TriageVerdict, total: usiz
         first_link: winners[0].first_link.clone(),
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     }
 }
 
@@ -85,6 +101,7 @@ fn split_outcome(votes: &[TriageOutcome], total: usize) -> TriageOutcome {
         first_link: None,
         cost_usd: 0.0,
         cost_usd_exact: true,
+        estimated_cost_usd: None,
     }
 }
 
@@ -99,6 +116,7 @@ mod tests {
             rationale: format!("{} rationale", verdict.as_str()),
             cost_usd: cost,
             cost_usd_exact: true,
+            estimated_cost_usd: None,
         }
     }
 
@@ -151,5 +169,20 @@ mod tests {
         let outcome =
             consensus_outcome(vec![vote(TriageVerdict::TruePositive, 0.9, 0.01), second]);
         assert!(!outcome.cost_usd_exact);
+        assert_eq!(outcome.estimated_cost_usd, None, "unestimated vote → unknown");
+    }
+
+    #[test]
+    fn unmetered_vote_estimates_sum_and_exact_votes_add_nothing() {
+        let mut first = vote(TriageVerdict::TruePositive, 0.9, 0.0);
+        first.cost_usd_exact = false;
+        first.estimated_cost_usd = Some(0.02);
+        let mut second = first.clone();
+        second.estimated_cost_usd = Some(0.03);
+        let exact = vote(TriageVerdict::TruePositive, 0.9, 0.01);
+        let outcome = consensus_outcome(vec![first, second, exact]);
+        assert!(!outcome.cost_usd_exact);
+        assert!((outcome.cost_usd - 0.01).abs() < 1e-9);
+        assert!((outcome.estimated_cost_usd.unwrap() - 0.05).abs() < 1e-9);
     }
 }

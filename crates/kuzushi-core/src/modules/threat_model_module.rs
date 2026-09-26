@@ -35,6 +35,7 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
         threat_model_models_tool(),
         threat_model_activate_tool(),
         threat_model_revisions_tool(),
+        threat_model_diff_tool(),
         threat_model_restore_tool(),
         threat_model_adopt_tool(),
         tool(
@@ -88,6 +89,31 @@ fn threat_model_revisions_tool() -> ToolDescriptor {
         vec![
             target_option(),
             opt("modelId", OptionType::String, "Threat-model lineage id.").required(),
+        ],
+    )
+    .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+}
+
+fn threat_model_diff_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:diff",
+        "Compare two immutable threat-model revisions or lineage heads: threats \
+         added/removed/changed (keyed by stableId, else id), DFD node/flow/\
+         boundary deltas, entry-point coverage, and methodology.",
+        vec![
+            target_option(),
+            opt(
+                "from",
+                OptionType::String,
+                "Baseline: a revision id (tmr_…) or a lineage id (tm_…), which selects that lineage's head revision.",
+            )
+            .required(),
+            opt(
+                "to",
+                OptionType::String,
+                "Comparison: a revision id (tmr_…) or a lineage id (tm_…), which selects that lineage's head revision.",
+            )
+            .required(),
         ],
     )
     .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))

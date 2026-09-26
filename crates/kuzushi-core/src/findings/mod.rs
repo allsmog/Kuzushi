@@ -38,8 +38,10 @@ pub use application::{
     IDENTITY_AUDIT_EVIDENCE_SCHEMA_VERSION,
 };
 pub(crate) use application::{
-    emit_persisted_finding_delta, normalize_agent_json_findings, persist_tool_findings,
-    render_generic_findings_output, GenericPersistedRun,
+    commit_observed_findings, emit_finding_delta, emit_persisted_finding_delta,
+    load_finding_review_gate, normalize_agent_json_findings, persist_tool_findings,
+    persist_tool_findings_to, render_generic_findings_output, FindingReviewGate,
+    GenericPersistedRun, ReviewConfirmation, ToolFindingsSink, MISSING_CONFIRMATION_GUIDANCE,
 };
 #[cfg(test)]
 pub(crate) use domain::test_verified_receipt;

@@ -5,6 +5,7 @@ use serde::Serialize;
 mod batch_occurrence;
 mod cross_tool_clusters;
 mod effective_review_state;
+mod finding_review_gate;
 mod generic_tool_findings;
 mod identity_audit;
 mod identity_fold_projection;
@@ -14,7 +15,9 @@ mod review_decision_conflict;
 mod reviewed_refutation;
 mod run_delta;
 mod scan_comparison;
-pub(crate) use run_delta::emit_persisted_finding_delta;
+pub(crate) use run_delta::{
+    commit_observed_findings, emit_finding_delta, emit_persisted_finding_delta,
+};
 
 pub use batch_occurrence::{
     derive_batch_gate_binding, derive_batch_occurrence_report,
@@ -29,9 +32,13 @@ pub use effective_review_state::{
     decision_is_review_actionable, finding_is_review_actionable, review_decision_history_for,
     review_verdict_is_actionable, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
+pub(crate) use finding_review_gate::{
+    load_finding_review_gate, FindingReviewGate,
+    ReviewConfirmation, MISSING_CONFIRMATION_GUIDANCE,
+};
 pub(crate) use generic_tool_findings::{
-    normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
-    GenericPersistedRun,
+    normalize_agent_json_findings, persist_tool_findings, persist_tool_findings_to,
+    render_generic_findings_output, GenericPersistedRun, ToolFindingsSink,
 };
 pub use identity_audit::{
     audit_finding_identities, FindingIdentityAuditGroup, FindingIdentityAuditIssueKind,

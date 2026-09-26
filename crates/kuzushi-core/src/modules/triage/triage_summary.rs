@@ -51,6 +51,12 @@ fn append_classification_errors(summary: &mut String, stats: &TriageRunStats) {
 
 fn append_cost_summary(summary: &mut String, stats: &TriageRunStats) {
     let cost = stats.cost_report();
+    if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        summary.push_str(&format!(
+            "\n      estimated cost=~${estimate:.4} (tokens × list price; provider reported no charge)"
+        ));
+        return;
+    }
     let label = if cost.is_complete() {
         "cost"
     } else {
@@ -130,7 +136,7 @@ fn select_referenced_triage_findings(
 ) -> Result<Vec<String>> {
     let mut missing = Vec::new();
     for reference in references {
-        match store.get_finding_by_reference(reference)? {
+        match store.get_finding_by_operator_reference(reference)? {
             Some(finding)
                 if store.finding_is_relevant(&finding)?
                     && finding_matches_triage_scope(&finding, scan_id) =>

@@ -105,6 +105,26 @@ struct CostedSystemsHuntRaw {
     cost_usd_exact: bool,
 }
 
+/// The target has no production C/C++/Rust/Go/Zig source, so a
+/// memory-safety hunt does not apply. The tool reports this as `skipped`
+/// rather than failing a scan that simply selected every engine.
+#[derive(Debug)]
+pub(crate) struct SystemsHuntNotApplicable {
+    pub(crate) target: String,
+}
+
+impl std::fmt::Display for SystemsHuntNotApplicable {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "systems-hunt does not apply: no C/C++/Rust/Go/Zig production source under {}",
+            self.target
+        )
+    }
+}
+
+impl std::error::Error for SystemsHuntNotApplicable {}
+
 fn ensure_systems_hunt_surfaces(
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
@@ -115,6 +135,12 @@ fn ensure_systems_hunt_surfaces(
         return Ok(());
     }
     emit_systems_hunt_refused(ctx);
+    if context.metadata.systems_source_files == 0 {
+        return Err(SystemsHuntNotApplicable {
+            target: target.display().to_string(),
+        }
+        .into());
+    }
     anyhow::bail!(
         "systems-hunt: no memory-safety surfaces detected under {}. \
          gather_systems_context yielded 0 surfaces from max_files={} \

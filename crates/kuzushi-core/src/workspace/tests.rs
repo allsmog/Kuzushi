@@ -1406,6 +1406,7 @@ mod tests {
                     rationale: "model believes this is a false positive".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Auto,
             )
@@ -1446,6 +1447,7 @@ mod tests {
                     rationale: "reviewed source-linked evidence".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Human,
             )
@@ -1591,6 +1593,7 @@ mod tests {
                     rationale: "operator confirmed evidence".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Human,
             )
@@ -1606,6 +1609,7 @@ mod tests {
                     rationale: "more evidence required".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
             )
             .unwrap();
@@ -1669,6 +1673,7 @@ mod tests {
                         rationale: "operator confirmed the evidence".to_string(),
                         cost_usd: 0.0,
                         cost_usd_exact: true,
+                        estimated_cost_usd: None,
                     },
                     TriageAuthor::Human,
                 )
@@ -1778,6 +1783,7 @@ mod tests {
                     rationale: "operator confirmed the durable finding".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Human,
             )
@@ -1855,6 +1861,7 @@ mod tests {
                     rationale: "operator rejected prior occurrence".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Human,
             )
@@ -2306,6 +2313,7 @@ mod tests {
                     rationale: "operator confirmed".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
             )
             .unwrap();
@@ -2409,6 +2417,7 @@ mod tests {
                     rationale: "human confirmed this is real".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Human,
             )
@@ -2427,6 +2436,7 @@ mod tests {
                     rationale: "auto re-triage thinks this is fp".to_string(),
                     cost_usd: 0.0,
                     cost_usd_exact: true,
+                    estimated_cost_usd: None,
                 },
                 TriageAuthor::Auto,
             )

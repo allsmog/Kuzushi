@@ -13,13 +13,25 @@ pub(crate) fn parse_joined_arg_command(
         "find" => ShellCommand::Tools(tools_query(&rest)),
         "favorite" | "fav" => required_joined_arg(rest, original, ShellCommand::FavoriteTool),
         "prompt" => empty_joined_arg(rest, ShellCommand::Prompts, ShellCommand::Prompt),
-        "plan" => required_joined_arg(rest, original, ShellCommand::Plan),
+        "plan" => parse_plan_command(args, rest, original),
         "ask" => return Some(parse_ask_command(args, original, false)),
         "attach" => empty_joined_arg(rest, ShellCommand::FilePicker, ShellCommand::Attach),
         "load" => ShellCommand::Load((!rest.trim().is_empty()).then_some(rest)),
         _ => return None,
     };
     Some(command)
+}
+
+/// `plan <phase>` opens that phase's planner explicitly; any other text is a
+/// goal for the natural-language planner.
+fn parse_plan_command(args: &[&str], rest: String, original: &str) -> ShellCommand {
+    let phase = match args {
+        [word] => WorkflowPhase::parse(word),
+        _ => None,
+    };
+    phase
+        .map(ShellCommand::PhasePlanner)
+        .unwrap_or_else(|| required_joined_arg(rest, original, ShellCommand::Plan))
 }
 
 /// Translate the `tools` argument into a `ToolQuery` string. A leading `--fav`

@@ -1,9 +1,9 @@
 ---
 source: crates/kuzushi-tui/tests/snapshots.rs
 ---
- KUZUSHI › threats:scope · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
+ KUZUSHI › threats:scope · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS
+1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS  MODELS
 
  -- SCOPE --------------------------------------------------------------------------------------------------------------
    select a target before loading threat-model artifacts

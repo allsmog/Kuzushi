@@ -72,6 +72,8 @@ const ADAPTIVE_THINKING_DETAIL =
   "temperature is incompatible with adaptive thinking; omit the pinned temperature";
 const MODEL_UNAVAILABLE_DETAIL =
   "The selected model is unavailable for this provider or account. Choose an available model explicitly.";
+export const CONTEXT_OVERFLOW_DETAIL =
+  "The request exceeded the model's context window. Narrow the investigation or choose a model with a larger window.";
 
 function unavailableModelDetail(errorClass, payload) {
   if (errorClass !== "provider_rejected") return undefined;
@@ -89,11 +91,19 @@ export function bridgeErrorDetail(error, errorClass) {
   if (error instanceof BridgePublicError && errorClass === "provider_rejected") {
     return error.detail === MODEL_UNAVAILABLE_DETAIL ? MODEL_UNAVAILABLE_DETAIL : undefined;
   }
+  if (errorClass === "provider_rejected" && isContextOverflow(error)) return CONTEXT_OVERFLOW_DETAIL;
   if (errorClass !== "sdk_client_validation") return undefined;
   const message = boundedLower(error?.message);
   return message.includes("temperature") && message.includes("thinking")
     ? ADAPTIVE_THINKING_DETAIL
     : undefined;
+}
+
+// LangChain names the provider's "prompt is too long" rejection; match only
+// that name or the provider's fixed phrase, never echo the body.
+function isContextOverflow(error) {
+  const name = boundedLower(error?.name);
+  return name === "contextoverflowerror" || boundedLower(error?.message).includes("prompt is too long");
 }
 
 const RETRY_AFTER_MAX_SECONDS = 300;

@@ -76,6 +76,10 @@ pub struct IacScanFinding {
     pub message: String,
     pub evidence: String,
     pub manifest_kind: IacScanKind,
+    /// Line-independent structural address (for example a Terraform block
+    /// path) when the analyzer can name one; absent for line-scoped rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<String>,
 }
 
 impl IacScanFinding {
@@ -93,18 +97,13 @@ impl IacScanFinding {
         let file_path = relative_display(target, absolute_path);
         let message = message.into();
         let evidence = evidence.into();
-        let core = Finding::new_tool(
-            "iac-scan",
-            rule_id.clone(),
-            file_path.clone(),
-            start_line,
-            Some(start_line),
-            severity,
-            format!("{message}\nEvidence: {evidence}"),
-        );
+        // Several findings of one rule can share a file (six public-ingress
+        // blocks in one networking.tf), so the exact line separates them
+        // unless a structural locator replaces it below.
+        let fingerprint = iac_fingerprint(&rule_id, &file_path, &format!("line:{start_line}"));
 
         Self {
-            fingerprint: core.fingerprint,
+            fingerprint,
             rule_id,
             file_path,
             start_line,
@@ -112,7 +111,16 @@ impl IacScanFinding {
             message,
             evidence,
             manifest_kind,
+            locator: None,
         }
+    }
+
+    /// Key the finding by a line-independent structural address instead of
+    /// its line, so edits elsewhere in the file keep its identity.
+    pub(crate) fn with_structural_locator(mut self, locator: String) -> Self {
+        self.fingerprint = iac_fingerprint(&self.rule_id, &self.file_path, &locator);
+        self.locator = Some(locator);
+        self
     }
 
     pub fn to_core_finding(&self) -> Finding {
@@ -126,8 +134,13 @@ impl IacScanFinding {
             format!("{}\nEvidence: {}", self.message, self.evidence),
         );
         finding.fingerprint = self.fingerprint.clone();
+        finding.symbol_locator = self.locator.clone();
         finding.title = self.message.clone();
         finding.set_static_proof_state(StaticProofState::SignalOnly);
         finding
     }
+}
+
+fn iac_fingerprint(rule_id: &str, file_path: &str, discriminator: &str) -> String {
+    crate::identity::discriminated_fingerprint_for_tool("iac-scan", rule_id, file_path, discriminator)
 }

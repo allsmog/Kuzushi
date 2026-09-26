@@ -37,6 +37,25 @@ mod tests {
     }
 
     #[test]
+    fn a_turn_limit_truncation_recommends_the_turn_budget_not_output_tokens() {
+        let response = AgentQueryResponse {
+            text: "Let me read one more file".to_string(),
+            truncated: true,
+            stop_reason: Some("model_turn_limit".to_string()),
+            ..Default::default()
+        };
+        let contract = StructuredJsonContract::new("agentic-sast:scan", "Findings", Value::Null);
+        let result: Result<Value> =
+            parse_or_repair_required_structured_json(response, contract, Ok, |_, _| {
+                panic!("truncation never repairs")
+            });
+
+        let message = format!("{:#}", result.unwrap_err());
+        assert!(message.contains("maxModelTurns"), "{message}");
+        assert!(!message.contains("maxOutputTokens"), "{message}");
+    }
+
+    #[test]
     fn valid_structured_json_is_refused_when_completion_was_forced() {
         let response = AgentQueryResponse {
             text: "{\"verdict\":\"confirmed\"}".to_string(),

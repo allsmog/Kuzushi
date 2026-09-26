@@ -161,7 +161,7 @@ pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextSt
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
 pub(crate) use display_text::{
     active_project_scope_label, compact_target_path, format_runtime_cost, format_session_cost,
-    scoped_target_path_label, workspace_artifact_path_label,
+    recorded_timestamp_label, scoped_target_path_label, workspace_artifact_path_label,
 };
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_search::{finding_facet_values, FindingSearch};
@@ -201,9 +201,9 @@ pub(crate) use jobs_registry::{
 pub(crate) use journey::{
     attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
     finding_ledger_counts, journey_destination_after_selection, journey_footer_segment,
-    journey_model, journey_phase_segment, journey_reality_projection, CheckpointDrift,
-    JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState, JourneyPhaseStatus,
-    JourneyPhaseTone, JourneyRealityProjection, ReportReason,
+    journey_model, journey_phase_segment, journey_reality_projection, phase_verb_opens_page,
+    CheckpointDrift, JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState,
+    JourneyPhaseStatus, JourneyPhaseTone, JourneyRealityProjection, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};
@@ -241,7 +241,7 @@ pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    map_gallery_is_primary, map_status_card_rows, phase_cockpit_model_for_phase,
+    map_context_fit, map_gallery_is_primary, phase_cockpit_model_for_phase,
     phase_presentation_plan, phase_surface_specs, AttentionMode, ChainArtifactsModel,
     ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
     EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
@@ -250,7 +250,7 @@ pub(crate) use phase_cockpit::{
     ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
     RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
     ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
-    TraceEvidenceModel, TraceHopModel, MAP_CONTEXT_ROW_LIMIT,
+    TraceEvidenceModel, TraceHopModel,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{
@@ -263,8 +263,8 @@ pub(crate) use prereq_prompt::{
 };
 pub(crate) use project_model::{
     project_context_columns, project_model, project_revision_label, ProjectContextCell,
-    ProjectContextRow, ProjectContextTable, ProjectModel, ProjectModelOrigin, ProjectModelRow,
-    CONTEXT_COLUMN_RULE,
+    ProjectContextRow, ProjectContextSegment, ProjectContextTable, ProjectModel,
+    ProjectModelOrigin, ProjectModelRow, CONTEXT_COLUMN_RULE,
 };
 pub(crate) use prompt::{
     navigation_prompt_label, prompt_model, prompt_text, workbench_prompt_mode,

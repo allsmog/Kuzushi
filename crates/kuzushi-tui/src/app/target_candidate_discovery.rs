@@ -135,7 +135,8 @@ fn inspect_target_candidate(path: PathBuf) -> TargetCandidateFacts {
     let build_systems = detected_build_systems(&path, inventory.as_ref());
     let (file_count, file_count_capped) = bounded_file_count(&path, TARGET_FACT_FILE_BUDGET);
     let nested_scopes = detected_nested_scopes(&path);
-    let (prior_artifact_count, _) = bounded_file_count(&path.join(".kuzushi"), 5_000);
+    let (prior_artifact_count, _) =
+        bounded_file_count_matching(&path.join(".kuzushi"), 5_000, is_prior_artifact_file);
     let prior_artifacts = prior_artifact_categories(&path);
     TargetCandidateFacts {
         repository_kind: repository_kind(&git, &profile),
@@ -257,9 +258,11 @@ fn repository_kind(
         .to_string()
 }
 
+/// Categories of real prior analysis. The findings index exists as soon as a
+/// shell opens the target, so "findings" is claimed only when it holds one.
 fn prior_artifact_categories(path: &std::path::Path) -> Vec<String> {
     let state = path.join(".kuzushi");
-    [
+    let mut categories = [
         ("context", state.join("context-snapshot.json")),
         (
             "threat model",
@@ -267,15 +270,47 @@ fn prior_artifact_categories(path: &std::path::Path) -> Vec<String> {
         ),
         ("project model", state.join("v3/project-model")),
         ("runs", state.join("v3/runs")),
-        ("findings", state.join("v3/index.sqlite3")),
     ]
     .into_iter()
     .filter(|(_, artifact)| artifact.exists())
     .map(|(label, _)| label.to_string())
-    .collect()
+    .collect::<Vec<_>>();
+    if findings_index_holds_findings(&state.join("v3/index.sqlite3")) {
+        categories.push("findings".to_string());
+    }
+    categories
+}
+
+fn findings_index_holds_findings(index: &std::path::Path) -> bool {
+    index.exists()
+        && kuzushi_core::FindingStore::open_read_only(index)
+            .and_then(|store| store.list_findings(1))
+            .is_ok_and(|findings| !findings.is_empty())
+}
+
+/// Shell bookkeeping every session creates on open (projection indexes, their
+/// SQLite sidecars, lock files, prompt history, the state `.gitignore`). None
+/// of it is prior analysis, so it must not make a fresh target read as worked.
+fn is_prior_artifact_file(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return true;
+    };
+    let bookkeeping = matches!(name, ".gitignore" | "shell-history.txt")
+        || name.starts_with("index.sqlite3")
+        || name.starts_with("run-history.index.sqlite3")
+        || (name.starts_with('.') && name.ends_with(".lock"));
+    !bookkeeping
 }
 
 fn bounded_file_count(root: &std::path::Path, limit: usize) -> (usize, bool) {
+    bounded_file_count_matching(root, limit, |_| true)
+}
+
+fn bounded_file_count_matching(
+    root: &std::path::Path,
+    limit: usize,
+    counts: fn(&std::path::Path) -> bool,
+) -> (usize, bool) {
     let mut count = 0;
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
@@ -284,7 +319,7 @@ fn bounded_file_count(root: &std::path::Path, limit: usize) -> (usize, bool) {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if count_fact_entry(entry, path, &mut stack, &mut count, limit) {
+            if count_fact_entry(entry, path, &mut stack, (&mut count, limit), counts) {
                 return (count, true);
             }
         }
@@ -296,8 +331,8 @@ fn count_fact_entry(
     entry: std::fs::DirEntry,
     path: PathBuf,
     stack: &mut Vec<PathBuf>,
-    count: &mut usize,
-    limit: usize,
+    (count, limit): (&mut usize, usize),
+    counts: fn(&std::path::Path) -> bool,
 ) -> bool {
     let Ok(file_type) = entry.file_type() else {
         return false;
@@ -309,6 +344,9 @@ fn count_fact_entry(
         if should_descend_for_facts(&path) {
             stack.push(path);
         }
+        return false;
+    }
+    if !counts(&path) {
         return false;
     }
     *count += 1;
@@ -487,6 +525,26 @@ mod tests {
             .any(|scope| scope == "crates/demo"));
         assert!(facts.prior_artifact_count > 0);
         assert!(facts.prior_artifacts.contains(&"runs".to_string()));
+    }
+
+    #[test]
+    fn shell_bookkeeping_alone_is_not_prior_kuzushi_work() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("app.rs"), "fn main() {}\n").unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        drop(kuzushi_core::FindingStore::open(&workspace.findings_db_path()).unwrap());
+        let v3 = target.path().join(".kuzushi/v3");
+        std::fs::write(v3.join("shell-history.txt"), "setup\n").unwrap();
+        std::fs::write(v3.join(".strategy-ledger.lock"), "").unwrap();
+
+        let facts = inspect_target_candidate(target.path().to_path_buf());
+
+        assert!(
+            facts.prior_artifacts.is_empty(),
+            "{:?}",
+            facts.prior_artifacts
+        );
+        assert_eq!(facts.prior_artifact_count, 0);
     }
 
     #[test]

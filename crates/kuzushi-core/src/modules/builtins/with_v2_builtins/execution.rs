@@ -551,8 +551,12 @@ impl ModuleRegistry {
         let executor = self.executors.get(name).with_context(|| {
             format!("registered tool or DAG node {name:?} has no Rust executor mapping")
         })?;
-        executor(self, name, input, ctx, runtime)
-            .map(|output| normalize_tool_output_contract(name, output))
+        let mut output = executor(self, name, input, ctx, runtime)
+            .map(|output| normalize_tool_output_contract(name, output))?;
+        if let Some(traced) = traced_runtime.as_ref() {
+            crate::module_result::backfill_estimated_cost(&mut output, traced.observed_spend());
+        }
+        Ok(output)
     }
 
     /// Record a recents entry at the shared dispatch boundary so scan, shell,

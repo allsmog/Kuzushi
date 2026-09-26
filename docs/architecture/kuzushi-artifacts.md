@@ -95,10 +95,16 @@ before engine dispatch and reports it as `data.runId`. Engine-native run ids
 remain available under `data.runIds` for provenance and findings lookup.
 
 Finding counts, `--fail-on`, and scan-scoped SARIF operate on the union of the
-parent and every nested child id. They de-duplicate by durable `identityId`
-when present and fall back to the observation fingerprint only when identity
-is unavailable. Consequently `data.findingsCount` is the length of the same
-de-duplicated `data.coreFindings` set, rather than a sum of per-engine counts.
+parent and every nested child id. They share the safe identity fold: a strong
+durable `identityId` (exact producer fingerprint, cross-run dedup key, or
+structural source locator) counts once, while a weak `file_fallback` identity
+counts once per distinct source signature or dedup key, and a finding without
+identity falls back to its observation fingerprint. Consequently
+`data.findingsCount` is the length of the same de-duplicated
+`data.coreFindings` set, rather than a sum of per-engine counts, and
+`data.observationsCount` reports the raw producer observations those findings
+fold. The run summary line says `N distinct finding(s) from M observation(s)`
+whenever corroboration makes the two differ.
 
 ### Run lifecycle vocabulary
 

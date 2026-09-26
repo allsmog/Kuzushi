@@ -246,7 +246,7 @@ fn build_and_save(
         ));
     }
     let excludes = build_excludes(lang);
-    let project = cpg_cli::build_project_filtered(&scan_root.to_string_lossy(), lang, &excludes)?;
+    let project = build_project_quietly(scan_root, lang, &excludes)?;
     if let Some(parent) = cpg_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
@@ -255,6 +255,24 @@ fn build_and_save(
         .cpg
         .save(&cpg_path.to_string_lossy())
         .map_err(|error| format!("cannot save {}: {error}", cpg_path.display()))?;
+    Ok(project)
+}
+
+/// `cpg_cli::build_project_filtered` without its build-timing `eprintln!`:
+/// that line leaked onto the stderr of `kuzushi scan`/`run` as unlabelled
+/// noise. Same sources, same frontend, same passes.
+fn build_project_quietly(
+    scan_root: &Path,
+    lang: &str,
+    excludes: &[&str],
+) -> Result<Project, String> {
+    let (mut project, extensions) = cpg_cli::make_project(lang)?;
+    let sources = cpg_cli::collect_sources_filtered(scan_root, extensions, excludes)?;
+    let refs: Vec<(&str, &str)> = sources
+        .iter()
+        .map(|(path, source)| (path.as_str(), source.as_str()))
+        .collect();
+    project.build(&refs);
     Ok(project)
 }
 

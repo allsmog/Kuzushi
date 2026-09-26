@@ -362,4 +362,34 @@ authorization: Default::default(),
             .and_then(Value::as_array)
             .is_some_and(Vec::is_empty));
     }
+
+    #[test]
+    fn verdict_summary_is_the_prose_not_its_sub_heading() {
+        let markdown = "# Report\n\n## X-Ray Verdict\n\n**EXPOSED**\n\n### Justification\n\nThe service trusts every caller.\n";
+        let verdict = super::super::domain::parse_verdict(markdown);
+        assert_eq!(verdict.tier.as_deref(), Some("EXPOSED"));
+        assert_eq!(verdict.summary, "The service trusts every caller.");
+    }
+
+    #[test]
+    fn unresolved_x_ray_spend_is_labelled_a_lower_bound() {
+        let data = |exact: bool| -> super::super::XRayReportData {
+            serde_json::from_value(json!({
+                "target": "/t", "repoName": "t", "runtimeMode": "agent",
+                "artifactPaths": {"xRay": "a", "entryPoints": "b", "invariants": "c", "architectureSvg": "d"},
+                "verdict": {"summary": ""},
+                "entryPointCounts": {"permissionless": 0, "roleGated": 0, "adminOnly": 0, "total": 0},
+                "invariantCounts": {"global": 0, "integration": 0, "crossChain": 0, "economic": 0, "total": 0},
+                "costUsd": 0.25, "costUsdExact": exact
+            }))
+            .unwrap()
+        };
+        assert!(super::super::application::render_x_ray_run_summary(&data(true)).contains("Cost:         $0.2500\n"));
+        assert!(super::super::application::render_x_ray_run_summary(&data(false))
+            .contains("Cost:         >=$0.2500 (provider spend unresolved)"));
+        let mut estimated = data(false);
+        estimated.estimated_cost_usd = Some(0.4);
+        assert!(super::super::application::render_x_ray_run_summary(&estimated)
+            .contains("Cost:         ~$0.4000 estimated (provider spend unresolved)"));
+    }
 }

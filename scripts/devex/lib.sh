@@ -111,6 +111,19 @@ devex_file_contains_any() { # <file> <literal-a[ || literal-b ...]>
   done
 }
 
+json_escape() { # <text> — JSON string body, quotes excluded
+  # Bash expansion rather than a sed program: a literal carriage return inside
+  # a sed script does not survive editors/formatters, and GNU sed then rejects
+  # the split command ("unterminated `s' command") on every provenance write.
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\t'/\\t}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\n'/\\n}
+  printf '%s' "$s"
+}
+
 devex_footer_is_navigate() { # <last-three-lines>
   case $1 in
     *'Esc dismiss'*) return 1;;

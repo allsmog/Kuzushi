@@ -44,7 +44,15 @@ impl DepHygieneFinding {
             self.severity.to_core_severity(),
             message,
         )
+        .with_structural_locator(self.dependency_locator())
         .with_static_proof_state(StaticProofState::SignalOnly)
+    }
+
+    /// Every finding is reported at line 1 under one rule per manifest kind,
+    /// so the declared package is what names the issue. Without it, every
+    /// risky specifier in a manifest collapses into one finding.
+    fn dependency_locator(&self) -> String {
+        format!("{}#{}", self.manifest, self.package_name)
     }
 }
 

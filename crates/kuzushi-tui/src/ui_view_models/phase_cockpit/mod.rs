@@ -40,7 +40,7 @@ pub(crate) use layout::{
     PhasePresentationPlan, PhaseSurfaceId, PlannedPhaseSurface, SurfaceInteraction, SurfaceState,
 };
 use map::map_phase_model;
-pub(crate) use map::{map_gallery_is_primary, map_status_card_rows, MAP_CONTEXT_ROW_LIMIT};
+pub(crate) use map::{map_context_fit, map_gallery_is_primary, MapContextFit};
 use phase_bodies::{fix_phase_model, review_phase_model};
 use scan::scan_phase_model;
 
@@ -79,6 +79,23 @@ impl PhaseCockpitModel {
             PhaseCockpitBody::Fix(model) => model.finding.as_ref(),
             PhaseCockpitBody::Map(_) | PhaseCockpitBody::Scan(_) => None,
         }
+    }
+
+    /// Fix page whose selected finding has neither a patch draft nor a
+    /// remediation lifecycle record: the next remediation step is a draft.
+    pub(crate) fn selected_finding_awaits_patch_draft(&self) -> bool {
+        match &self.body {
+            PhaseCockpitBody::Fix(model) => model.awaits_patch_draft(),
+            _ => false,
+        }
+    }
+}
+
+impl FixPhaseModel {
+    fn awaits_patch_draft(&self) -> bool {
+        self.finding.is_some()
+            && self.patch.is_none()
+            && self.remediation.stage == RemediationLifecycleStage::NotDrafted
     }
 }
 
@@ -693,8 +710,8 @@ fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String 
     parts.extend([
         format!("{} run(s)", summary.run_count),
         format!("{} artifact(s)", summary.artifact_count),
-        format!("findings +{}", summary.changed_findings),
     ]);
+    parts.extend(summary.findings_segment());
     parts.join(" · ")
 }
 

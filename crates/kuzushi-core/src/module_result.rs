@@ -20,15 +20,51 @@ pub(crate) fn apply_runtime_cost_report(
     }
 }
 
+/// Fill a missing labelled estimate from the runtime's per-call tally. Only a
+/// result that already reports unresolved spend gains one, and only when the
+/// tally covers at least the spend the result observed; otherwise some calls
+/// bypassed the tally and the estimate would understate.
+pub(crate) fn backfill_estimated_cost(
+    result: &mut Value,
+    spend: crate::runtime::RuntimeCostReport,
+) {
+    let Some(estimate) = spend.estimated_total_usd().filter(|_| spend.is_estimated()) else {
+        return;
+    };
+    backfill_estimate_field(result, estimate);
+    if let Some(data) = result.get_mut("data") {
+        backfill_estimate_field(data, estimate);
+    }
+}
+
+fn backfill_estimate_field(value: &mut Value, estimate: f64) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    let unresolved = object.get("providerSpendUnresolved") == Some(&Value::Bool(true));
+    let observed = object
+        .get("observedCostUsd")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if unresolved && !object.contains_key("estimatedCostUsd") && estimate >= observed {
+        object.insert("estimatedCostUsd".to_string(), json!(estimate));
+    }
+}
+
 fn apply_cost_fields(value: &mut Value, cost: crate::runtime::RuntimeCostReport) {
     let Some(object) = value.as_object_mut() else {
         return;
     };
+    object.remove("estimatedCostUsd");
     if cost.is_unavailable() {
         object.remove("costUsd");
         object.remove("observedCostUsd");
         object.remove("providerSpendUnresolved");
         return;
+    }
+    if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
+        // A labelled local estimate, never billed spend: `costUsd` stays absent.
+        object.insert("estimatedCostUsd".to_string(), json!(estimate));
     }
     if let Some(exact) = cost.exact_usd() {
         object.insert("costUsd".to_string(), json!(exact));
@@ -508,5 +544,33 @@ mod tests {
         assert!(output["artifacts"].as_array().unwrap().is_empty());
         assert!(output["warnings"].as_array().unwrap().is_empty());
         assert!(output["errors"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unresolved_results_gain_the_runtime_tally_estimate_once() {
+        use crate::runtime::{RuntimeCost, RuntimeCostReport};
+        let tally = RuntimeCostReport::incomplete(RuntimeCost::ZERO)
+            .with_unmetered_estimate(Some(RuntimeCost::from_usd(0.3, "test").unwrap()));
+        let mut unresolved = json!({
+            "providerSpendUnresolved": true,
+            "observedCostUsd": 0.0,
+            "data": {"providerSpendUnresolved": true}
+        });
+        backfill_estimated_cost(&mut unresolved, tally);
+        assert_eq!(unresolved["estimatedCostUsd"], json!(0.3));
+        assert_eq!(unresolved["data"]["estimatedCostUsd"], json!(0.3));
+
+        let mut own_estimate = json!({"providerSpendUnresolved": true, "estimatedCostUsd": 0.1});
+        backfill_estimated_cost(&mut own_estimate, tally);
+        assert_eq!(own_estimate["estimatedCostUsd"], json!(0.1));
+
+        let mut exact = json!({"costUsd": 0.2});
+        backfill_estimated_cost(&mut exact, tally);
+        assert!(exact.get("estimatedCostUsd").is_none());
+
+        // The tally saw less than the result observed: calls bypassed it.
+        let mut undercounted = json!({"providerSpendUnresolved": true, "observedCostUsd": 0.5});
+        backfill_estimated_cost(&mut undercounted, tally);
+        assert!(undercounted.get("estimatedCostUsd").is_none());
     }
 }

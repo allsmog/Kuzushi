@@ -1,20 +1,12 @@
 use super::collect_findings::collect_findings;
 use crate::capabilities::chrome_rce::adapters::changed_files;
 use crate::capabilities::chrome_rce::domain::hot_path_finding;
-use crate::findings::{persist_tool_findings, Finding, FindingStore};
-use crate::workspace::WorkspaceTarget;
+use crate::findings::{persist_tool_findings_to, Finding, ToolFindingsSink};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
 
-#[derive(Clone)]
-pub(crate) struct ChromeRcePersistence<'a> {
-    pub(crate) finding_run_id: String,
-    pub(crate) workspace: Option<&'a WorkspaceTarget>,
-    pub(crate) findings_store: Option<&'a FindingStore>,
-}
-
-pub(crate) fn run_scan(target: &Path, persistence: ChromeRcePersistence<'_>) -> Result<Value> {
+pub(crate) fn run_scan(target: &Path, persistence: ToolFindingsSink<'_>) -> Result<Value> {
     require_scan_target(target)?;
     let findings = scan_target(target)?;
     let persisted = persist_chrome_rce_findings(target, &findings, persistence)?;
@@ -40,15 +32,9 @@ fn scan_target(target: &Path) -> Result<Vec<Finding>> {
 fn persist_chrome_rce_findings(
     target: &Path,
     findings: &[Finding],
-    persistence: ChromeRcePersistence<'_>,
+    persistence: ToolFindingsSink<'_>,
 ) -> Result<Option<crate::findings::GenericPersistedRun>> {
-    persist_tool_findings(
-        persistence.finding_run_id,
-        target,
-        findings,
-        persistence.workspace,
-        persistence.findings_store,
-    )
+    persist_tool_findings_to(persistence, target, findings)
 }
 
 fn scan_response(target: &Path, findings: Vec<Finding>, persisted: impl serde::Serialize) -> Value {
@@ -73,7 +59,7 @@ fn scan_response(target: &Path, findings: Vec<Finding>, persisted: impl serde::S
 pub(crate) fn run_review_trigger(
     target: &Path,
     diff_base: Option<&str>,
-    persistence: ChromeRcePersistence<'_>,
+    persistence: ToolFindingsSink<'_>,
 ) -> Result<Value> {
     let Some(diff_base) = diff_base else {
         return Ok(skipped_review_response(target));
@@ -84,7 +70,7 @@ pub(crate) fn run_review_trigger(
 fn review_trigger_with_diff_base(
     target: &Path,
     diff_base: &str,
-    persistence: ChromeRcePersistence<'_>,
+    persistence: ToolFindingsSink<'_>,
 ) -> Result<Value> {
     let changed = changed_files(target, diff_base)?;
     let findings = hot_path_findings(&changed);

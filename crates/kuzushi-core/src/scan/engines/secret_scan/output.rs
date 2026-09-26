@@ -100,6 +100,10 @@ pub struct SecretScanFinding {
     pub impact: String,
     pub cwe: Vec<String>,
     pub score: u32,
+    /// Line-independent occurrence key (`secret:<detector>:<value hash>#<n>`)
+    /// that keeps repeated copies of one secret in a file distinct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<String>,
 }
 
 impl SecretScanFinding {
@@ -114,6 +118,7 @@ impl SecretScanFinding {
             format!("{}\n{}", self.message, self.evidence),
         );
         finding.fingerprint = self.fingerprint.clone();
+        finding.symbol_locator = self.locator.clone();
         finding.title = self.message.clone();
         finding.set_static_proof_state(StaticProofState::SignalOnly);
         finding

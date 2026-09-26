@@ -41,6 +41,7 @@ pub(super) use background_tool_worker::ThreatPatchEvent;
 pub(super) use background_tool_worker::ToolEvent;
 #[cfg(test)]
 pub(super) use parse_plan_json::parse_plan_json;
+#[cfg(test)]
 pub(super) use parse_threat_patch_json::merge_json;
 pub(super) use parse_threat_patch_json::parse_threat_patch_json;
 pub(super) use parse_threat_patch_json::scan_worker;

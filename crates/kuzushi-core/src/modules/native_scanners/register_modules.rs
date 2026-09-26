@@ -386,13 +386,7 @@ fn persist_exploit_chain_findings(
     report: &ExploitChainReport,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
-    persist_tool_findings(
-        ctx.finding_run_id(),
-        target,
-        &report.findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )
+    persist_tool_findings(ctx, target, &report.findings)
 }
 
 #[cfg(test)]

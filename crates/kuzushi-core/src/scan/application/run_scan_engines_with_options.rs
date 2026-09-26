@@ -319,7 +319,7 @@ fn index_scan_static_evidence(
 
     let evidence_store = StaticEvidenceStore::open(workspace)?;
     index_semgrep_findings_as_static_evidence(&evidence_store, workspace.root(), &output.findings)?;
-    index_codeql_sarif_documents_as_static_evidence(
+    index_grounded_codeql_sarif_documents_as_static_evidence(
         &evidence_store,
         workspace.root(),
         &output.codeql_sarif_documents,

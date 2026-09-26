@@ -19,8 +19,9 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         input,
         primary_run_id,
         whitebox_static,
-        _threat_model_lease,
+        threat_model_lease,
     } = prepare_sast_scan(registry, input, ctx, workspace)?;
+    let threat_model_lease = ScanThreatModelLease::new(threat_model_lease);
     let store = sast_store(ctx)?;
     ensure_sast_run_started(registry, workspace, &primary_run_id, &input, ctx)?;
     let fallback_trace = fallback_sast_trace(ctx, workspace, &primary_run_id)?;
@@ -34,6 +35,7 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         store,
         primary_run_id.clone(),
         whitebox_static,
+        &threat_model_lease,
     );
     result
         .map_err(|error| started_sast_scan_error(workspace, &primary_run_id, error, ctx, &run_ctx))
@@ -60,7 +62,7 @@ struct PreparedSastScan {
     input: Value,
     primary_run_id: String,
     whitebox_static: Option<WhiteboxStaticPolicy>,
-    _threat_model_lease: Option<crate::capabilities::threat_model::ThreatModelReadLease>,
+    threat_model_lease: Option<crate::capabilities::threat_model::ThreatModelReadLease>,
 }
 
 fn prepare_sast_scan(
@@ -85,7 +87,7 @@ fn prepare_sast_scan(
         input,
         primary_run_id,
         whitebox_static,
-        _threat_model_lease: threat_model_lease,
+        threat_model_lease,
     })
 }
 
@@ -268,6 +270,7 @@ fn run_started_sast_scan(
     store: &FindingStore,
     primary_run_id: String,
     whitebox_static: Option<WhiteboxStaticPolicy>,
+    threat_model_lease: &ScanThreatModelLease,
 ) -> Result<Value> {
     let requests = SastScanRequests::from_input(&input)?;
     let options = sast_scan_options(&input, whitebox_static.is_some())?;
@@ -284,8 +287,9 @@ fn run_started_sast_scan(
         options: &options,
         primary_run_id: &primary_run_id,
         whitebox_static: whitebox_static.is_some(),
+        threat_model_lease,
     })?;
-    let findings_count = executed.findings_count;
+    let findings_count = executed.tally.distinct;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
     persist_sast_scan_result(
         ctx,
@@ -569,6 +573,7 @@ struct SastScanExecutionInput<'a> {
     options: &'a ScanRunOptions,
     primary_run_id: &'a str,
     whitebox_static: bool,
+    threat_model_lease: &'a ScanThreatModelLease,
 }
 
 impl SastScanExecutionInput<'_> {
@@ -712,20 +717,21 @@ impl SastScanExecutionInput<'_> {
             self.store,
             run_ids,
             artifacts,
+            self.threat_model_lease,
         )
     }
 
     fn output_lines(
         &self,
         primary_run_id: &str,
-        findings_count: usize,
+        tally: SastFindingTally,
         reports: &SastPipelineReports,
         whitebox_artifacts: &WhiteboxArtifacts,
         post_processing: &SastPostProcessing,
     ) -> Vec<String> {
         sast_output_lines(
             primary_run_id,
-            findings_count,
+            tally,
             self.workspace,
             reports,
             self.whitebox_static,
@@ -741,7 +747,7 @@ struct ExecutedSastScan {
     run_ids: SastRunIds,
     artifacts: SastRunArtifacts,
     reports: SastPipelineReports,
-    findings_count: usize,
+    tally: SastFindingTally,
     core_findings: Vec<crate::findings::Finding>,
     whitebox_artifacts: WhiteboxArtifacts,
     post_processing: SastPostProcessing,
@@ -777,10 +783,10 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         baseline.target_snapshot,
     )?;
     let post_processing = input.post_processing(&run_ids, &artifacts)?;
-    let findings_count = core_findings.len();
+    let tally = SastFindingTally::for_runs(input.store, &run_ids, core_findings.len())?;
     let lines = input.output_lines(
         primary_run_id.as_str(),
-        findings_count,
+        tally,
         &reports,
         &whitebox_artifacts,
         &post_processing,
@@ -790,7 +796,7 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         run_ids,
         artifacts,
         reports,
-        findings_count,
+        tally,
         core_findings,
         whitebox_artifacts,
         post_processing,
@@ -1021,7 +1027,7 @@ fn scan_engine_outcome_detail(outcome: ScanEngineStageOutcome) -> Option<String>
 }
 
 fn scan_stage_outcome(reports: &SastPipelineReports) -> SastPhaseStageOutcome {
-    use ScanEngineStageOutcome::{Failed, Partial, Skipped};
+    use ScanEngineStageOutcome::Failed;
     if reports
         .engine_outcomes
         .values()
@@ -1031,8 +1037,8 @@ fn scan_stage_outcome(reports: &SastPipelineReports) -> SastPhaseStageOutcome {
     }
     if reports
         .engine_outcomes
-        .values()
-        .any(|outcome| matches!(outcome, Partial | Skipped))
+        .iter()
+        .any(|(engine, outcome)| reports.engine_degrades_scan(engine, *outcome))
     {
         SastPhaseStageOutcome::Partial
     } else {
@@ -1135,7 +1141,7 @@ impl ExecutedSastScan {
             run_ids,
             artifacts,
             reports,
-            findings_count,
+            tally,
             core_findings,
             whitebox_artifacts,
             post_processing,
@@ -1147,7 +1153,7 @@ impl ExecutedSastScan {
             workspace,
             reports: &reports,
             whitebox_static,
-            findings_count,
+            tally,
             core_findings,
             whitebox_artifacts,
             post_processing: &post_processing,
@@ -1197,7 +1203,7 @@ struct SastScanResultParts<'a> {
     workspace: &'a crate::workspace::WorkspaceTarget,
     reports: &'a SastPipelineReports,
     whitebox_static: Option<&'a WhiteboxStaticPolicy>,
-    findings_count: usize,
+    tally: SastFindingTally,
     core_findings: Vec<crate::findings::Finding>,
     whitebox_artifacts: WhiteboxArtifacts,
     post_processing: &'a SastPostProcessing,
@@ -1213,7 +1219,8 @@ fn sast_scan_result(parts: SastScanResultParts<'_>) -> Result<Value> {
         .find(|line| !line.trim().is_empty())
         .unwrap_or("sast:scan completed")
         .to_string();
-    let warnings = sast_scan_warnings(parts.reports);
+    let mut warnings = sast_scan_warnings(parts.reports);
+    warnings.extend(threat_model_feedback_warning(parts.post_processing));
     let partial = sast_scan_has_partial_engine(parts.reports);
     let data = sast_scan_data(parts)?;
     let mut result = sast_scan_result_envelope(summary, output, warnings, data, partial);
@@ -1235,11 +1242,21 @@ fn sast_scan_warnings(reports: &SastPipelineReports) -> Vec<Value> {
                 ScanEngineStageOutcome::Partial => {
                     Some(json!(format!("{engine} returned a usable partial result")))
                 }
-                ScanEngineStageOutcome::Skipped => Some(json!(format!("{engine} was skipped"))),
+                ScanEngineStageOutcome::Skipped => Some(json!(skipped_engine_warning(
+                    engine,
+                    reports.engine_skip_reasons.get(engine)
+                ))),
                 ScanEngineStageOutcome::Complete | ScanEngineStageOutcome::Failed => None,
             }),
     );
     warnings
+}
+
+fn skipped_engine_warning(engine: &str, reason: Option<&String>) -> String {
+    match reason {
+        Some(reason) => format!("{engine} was skipped: {reason}"),
+        None => format!("{engine} was skipped"),
+    }
 }
 
 fn sast_scan_result_envelope(
@@ -1258,12 +1275,10 @@ fn sast_scan_result_envelope(
 }
 
 fn sast_scan_has_partial_engine(reports: &SastPipelineReports) -> bool {
-    reports.engine_outcomes.values().any(|outcome| {
-        matches!(
-            outcome,
-            ScanEngineStageOutcome::Partial | ScanEngineStageOutcome::Skipped
-        )
-    })
+    reports
+        .engine_outcomes
+        .iter()
+        .any(|(engine, outcome)| reports.engine_degrades_scan(engine, *outcome))
 }
 
 fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
@@ -1276,7 +1291,8 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
         "target": parts.workspace.root().display().to_string(),
         "mode": whitebox_mode_label(parts.whitebox_static),
         "whiteboxStatic": parts.whitebox_static.map(|policy| policy.to_json()),
-        "findingsCount": parts.findings_count,
+        "findingsCount": parts.tally.distinct,
+        "observationsCount": parts.tally.observations,
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
@@ -1294,6 +1310,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
         "triage": triage_json(parts.post_processing),
         "verification": verification_json(parts.post_processing),
         "patch": patch_json(parts.post_processing),
+        "threatModelFeedback": threat_model_feedback_json(parts.post_processing),
         "artifacts": sast_artifacts_json(parts.artifacts, paths),
     }))
 }
@@ -1313,6 +1330,7 @@ fn sast_cost_report(
         .verification_results
         .iter()
         .chain(post_processing.patch_results.iter())
+        .chain(costed_feedback(post_processing))
     {
         total = total.checked_add(tool_output_cost_report(output)?, "SAST post-process cost")?;
     }
@@ -1371,6 +1389,33 @@ fn sast_run_ids_json(run_ids: SastRunIds) -> Value {
         "carlini": run_ids.carlini,
         "taintIrisNext": run_ids.taint_iris_next,
         "systemsHunt": run_ids.systems_hunt,
+    })
+}
+
+/// The feedback output only when it carries a cost claim: a refusal
+/// synthesized by the scan made no model call and has none.
+fn costed_feedback(post_processing: &SastPostProcessing) -> Option<&Value> {
+    post_processing
+        .threat_model_feedback
+        .as_ref()
+        .filter(|output| output.get("costUsd").is_some() || output.get("observedCostUsd").is_some())
+}
+
+fn threat_model_feedback_json(post_processing: &SastPostProcessing) -> Option<Value> {
+    let output = post_processing.threat_model_feedback.as_ref()?;
+    Some(json!({
+        "status": output.get("status").cloned().unwrap_or(Value::Null),
+        "summary": output.get("summary").cloned().unwrap_or(Value::Null),
+        "refineDelta": output.pointer("/data/document/provenance/refineDelta").cloned(),
+    }))
+}
+
+fn threat_model_feedback_warning(post_processing: &SastPostProcessing) -> Option<Value> {
+    let output = post_processing.threat_model_feedback.as_ref()?;
+    let status = output.get("status").and_then(Value::as_str).unwrap_or("unknown");
+    (status != "completed").then(|| {
+        let summary = output.get("summary").and_then(Value::as_str).unwrap_or(status);
+        json!(format!("threat-model feedback did not complete: {summary}"))
     })
 }
 
@@ -1524,6 +1569,67 @@ mod scan_result_outcome_tests {
         assert_eq!(status, crate::run_lifecycle::RunItemStatus::Interrupted);
     }
 
+    #[test]
+    fn an_inapplicable_engine_skip_keeps_the_scan_complete() {
+        let mut reports = reports_with_outcomes(&[
+            ("agentic", ScanEngineStageOutcome::Complete),
+            ("systems-hunt", ScanEngineStageOutcome::Skipped),
+        ]);
+        reports.engines_not_applicable.insert("systems-hunt");
+
+        assert!(!sast_scan_has_partial_engine(&reports));
+        assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Completed);
+    }
+
+    #[test]
+    fn any_other_engine_skip_still_makes_the_scan_partial() {
+        let reports = reports_with_outcomes(&[
+            ("agentic", ScanEngineStageOutcome::Complete),
+            ("systems-hunt", ScanEngineStageOutcome::Skipped),
+        ]);
+
+        assert!(sast_scan_has_partial_engine(&reports));
+        assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Partial);
+    }
+
+    fn post_processing_with_feedback(feedback: Option<Value>) -> SastPostProcessing {
+        SastPostProcessing {
+            triage: None,
+            verification_results: Vec::new(),
+            patch_results: Vec::new(),
+            threat_model_feedback: feedback,
+        }
+    }
+
+    #[test]
+    fn a_completed_refine_reports_its_delta_without_a_warning() {
+        let processed = post_processing_with_feedback(Some(json!({
+            "status": "completed",
+            "summary": "threat-model:build complete",
+            "data": {"document": {"provenance": {"refineDelta": {"variantPatterns": 2}}}},
+        })));
+
+        assert!(threat_model_feedback_warning(&processed).is_none());
+        let data = threat_model_feedback_json(&processed).unwrap();
+        assert_eq!(data["refineDelta"]["variantPatterns"], 2);
+        assert!(threat_model_feedback_json(&post_processing_with_feedback(None)).is_none());
+    }
+
+    #[test]
+    fn a_refused_refine_is_a_visible_warning_without_a_cost_claim() {
+        let processed = post_processing_with_feedback(Some(json!({
+            "ok": false,
+            "status": "failed",
+            "summary": "threat-model refine failed: run a full build first",
+        })));
+
+        assert_eq!(
+            threat_model_feedback_warning(&processed).unwrap(),
+            "threat-model feedback did not complete: threat-model refine failed: run a full build first"
+        );
+        assert!(costed_feedback(&processed).is_none());
+    }
+
     fn reports_with_outcomes(
         outcomes: &[(&'static str, ScanEngineStageOutcome)],
     ) -> SastPipelineReports {
@@ -1536,6 +1642,8 @@ mod scan_result_outcome_tests {
             engine_ids: outcomes.iter().map(|(engine, _)| *engine).collect(),
             engine_outcomes: outcomes.iter().copied().collect::<BTreeMap<_, _>>(),
             skipped_engines: Vec::new(),
+            engine_skip_reasons: Default::default(),
+            engines_not_applicable: Default::default(),
         }
     }
 }

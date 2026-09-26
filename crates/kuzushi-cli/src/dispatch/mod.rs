@@ -453,7 +453,7 @@ async fn dispatch_non_scan_command(
         Command::Campaign { command } => {
             crate::application::campaign_run::campaign_command(command, default_target).await
         }
-        Command::Mcp { command } => mcp_command(command).await,
+        Command::Mcp { command } => mcp_command(command, default_target).await,
         Command::Demo { json } => crate::application::demo::demo_command(json).await,
         Command::Shell { .. } | Command::Scan(_) | Command::Investigate(_) => {
             unreachable!("handled before dispatch")

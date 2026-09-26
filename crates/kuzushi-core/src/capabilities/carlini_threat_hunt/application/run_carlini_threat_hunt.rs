@@ -173,18 +173,38 @@ fn collect_threat_focused_inventory(
 ) -> Result<Vec<(String, String)>> {
     let mut files = Vec::new();
     let mut seen = BTreeSet::new();
-    for relative in threat_affected_file_paths(hunts) {
+    let affected = threat_affected_file_paths(hunts)
+        .into_iter()
+        .flat_map(|relative| expand_affected_path(target, relative))
+        .filter(|relative| seen.insert(relative.clone()));
+    for relative in affected {
         if files.len() >= max_files {
             break;
         }
-        if !seen.insert(relative.clone()) {
-            continue;
-        }
-        if let Some(snippet) = read_threat_focused_snippet(target, &relative, max_bytes_per_file)? {
-            files.push(snippet);
-        }
+        files.extend(read_threat_focused_snippet(target, &relative, max_bytes_per_file)?);
     }
     Ok(files)
+}
+
+/// A threat may cite a directory (`routes`) rather than a file. Its direct
+/// regular files stand in for it, in name order and confined to the target;
+/// the caller's file budget still bounds how many are read.
+fn expand_affected_path(target: &Path, relative: PathBuf) -> Vec<PathBuf> {
+    let is_dir = std::fs::symlink_metadata(target.join(&relative))
+        .is_ok_and(|metadata| metadata.is_dir());
+    if !is_dir {
+        return vec![relative];
+    }
+    let Ok(entries) = crate::bounded_file::read_dir_within(target, &target.join(&relative)) else {
+        return Vec::new();
+    };
+    let mut files = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| relative.join(entry.file_name()))
+        .collect::<Vec<_>>();
+    files.sort();
+    files
 }
 
 fn threat_affected_file_paths(hunts: &[ActorHunt]) -> Vec<PathBuf> {
@@ -585,4 +605,32 @@ pub(crate) fn require_carlini_runtime(
 
 pub(crate) fn require_carlini_model(options: &CarliniInput) -> Result<String> {
     crate::runtime::resolve_explicit_model("carlini-threat-hunt:run", options.model.clone(), None)
+}
+
+#[cfg(test)]
+mod affected_path_tests {
+    use super::*;
+
+    #[test]
+    fn a_cited_directory_expands_to_its_direct_files_in_order() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(target.path().join("routes/nested")).unwrap();
+        std::fs::write(target.path().join("routes/b.ts"), "b").unwrap();
+        std::fs::write(target.path().join("routes/a.ts"), "a").unwrap();
+        std::fs::write(target.path().join("routes/nested/c.ts"), "c").unwrap();
+
+        assert_eq!(
+            expand_affected_path(target.path(), PathBuf::from("routes")),
+            vec![PathBuf::from("routes/a.ts"), PathBuf::from("routes/b.ts")]
+        );
+        assert_eq!(
+            expand_affected_path(target.path(), PathBuf::from("routes/a.ts")),
+            vec![PathBuf::from("routes/a.ts")]
+        );
+        assert_eq!(
+            expand_affected_path(target.path(), PathBuf::from("missing.ts")),
+            vec![PathBuf::from("missing.ts")],
+            "a missing file stays a skipped read, not an error"
+        );
+    }
 }

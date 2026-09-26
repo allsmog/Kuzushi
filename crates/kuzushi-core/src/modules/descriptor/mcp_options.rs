@@ -43,6 +43,20 @@ pub(in crate::modules) fn mcp_tool_timeout_ms_option() -> OptionSpec {
     .advanced()
 }
 
+/// Bounds how long an agentic investigation may keep calling tools. A run
+/// that reaches it fails with `model_turn_limit`; a forced verdict from an
+/// unfinished investigation is never accepted in its place.
+pub(in crate::modules) fn max_model_turns_option(default: u32) -> OptionSpec {
+    opt(
+        "maxModelTurns",
+        OptionType::Int,
+        "Model turns an agentic investigation may take (1-40) before it stops without an answer.",
+    )
+    .aliases(&["max_model_turns"])
+    .default(json!(default))
+    .advanced()
+}
+
 pub(in crate::modules) fn bridge_verbose_option() -> OptionSpec {
     opt(
         "bridgeVerbose",

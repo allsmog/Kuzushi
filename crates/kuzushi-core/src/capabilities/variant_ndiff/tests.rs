@@ -475,10 +475,11 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
 
+        // The stable alias `kuzushi findings` prints resolves like a fingerprint.
         let lift = registry
             .execute_tool_with_runtime(
                 "variant:lift-pattern",
-                json!({"fingerprint": fingerprint}),
+                json!({"fingerprint": "F-0001"}),
                 &ctx,
                 Some(&runtime),
             )
@@ -655,6 +656,30 @@ mod tests {
                 .and_then(Value::as_str),
             Some("https://github.com/o/r/commit/abc1234")
         );
+    }
+
+    #[test]
+    fn an_already_fetched_record_supplies_the_patch_reference() {
+        let input = json!({"record": {
+            "id": "GHSA-demo",
+            "description": "demo",
+            "source": "osv",
+            "patches": [{"url": "https://github.com/o/r/commit/abc", "kind": "commit"}]
+        }});
+
+        let source = crate::capabilities::variant_ndiff::application::initial_ndiff_fix_pattern_source(&input);
+
+        assert_eq!(source.patch_url, "https://github.com/o/r/commit/abc");
+        assert_eq!(source.record.map(|record| record.id), Some("GHSA-demo".to_string()));
+
+        let rejected = crate::capabilities::variant_ndiff::application::resolve_ndiff_fix_pattern_source(
+            &json!({"record": {"id": "GHSA-demo"}}),
+        )
+        .unwrap();
+        assert!(matches!(
+            rejected,
+            crate::capabilities::variant_ndiff::application::NdiffFixPatternSourceResolution::Rejected(_)
+        ));
     }
 
     #[test]

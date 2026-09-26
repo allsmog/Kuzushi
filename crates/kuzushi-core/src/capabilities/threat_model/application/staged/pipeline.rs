@@ -212,9 +212,9 @@ fn run_synthesis(
     let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt);
     settle_stage_budget(spend, ticket, &costed)?;
     let costed = costed?;
+    let cost = costed.cost_report()?;
     let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
-    generated.cost_usd = costed.cost_usd;
-    generated.cost_usd_exact = costed.cost_usd_exact;
+    generated.cost = cost;
     Ok(generated)
 }
 
@@ -253,7 +253,7 @@ fn resolve_coverage(
             artifact: json!({"ran": false, "reason": "no gaps"}),
         });
     }
-    if budget_exhausted(input, generated.cost_usd) {
+    if staged_budget_exhausted(input, generated.cost) {
         return Ok(GapFillResolution {
             report,
             method: "budget-exhausted",
@@ -319,13 +319,10 @@ fn record_gap_fill_cost(
     generated: &mut GeneratedThreatModel,
     outcome: &GapFillOutcome,
 ) -> Result<()> {
-    settle_gap_fill_cost(spend, ticket, outcome.cost_usd)?;
-    generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
-        [generated.cost_usd, outcome.cost_usd],
-        "staged threat-model cost",
-    )?
-    .usd();
-    generated.cost_usd_exact &= outcome.cost_usd_exact;
+    settle_gap_fill_cost(spend, ticket, ledger_usd(outcome.cost))?;
+    generated.cost = generated
+        .cost
+        .checked_add(outcome.cost, "staged threat-model cost")?;
     Ok(())
 }
 
@@ -449,6 +446,7 @@ fn stamp_staged_document(
         gap_fill.method,
         parked,
     );
+    stamp_grounding_selection(&mut generated.document, &dossier.grounding.selection);
     stamp_entry_point_catalog_receipt(
         &mut generated.document,
         &dossier.grounding.entry_point_catalog,
@@ -503,8 +501,8 @@ fn emit_research(ctx: &ToolExecutionContext<'_>, verb: &str, dossier: &ResearchD
                 "tool",
                 verb,
                 format!(
-                    "research: {} surfaces · {} vuln commits · {} confirmed findings",
-                    dossier.grounding.surfaces.len(),
+                    "research: {} · {} vuln commits · {} confirmed findings",
+                    dossier.grounding.selection.surfaces_label(),
                     dossier.vuln_commits.len(),
                     dossier.grounding.confirmed_findings.len()
                 ),
@@ -513,8 +511,26 @@ fn emit_research(ctx: &ToolExecutionContext<'_>, verb: &str, dossier: &ResearchD
     }
 }
 
-fn budget_exhausted(input: &BuildInput, spent_usd: f64) -> bool {
-    input.budget_usd.is_some_and(|budget| spent_usd >= budget)
+/// A set `budgetUsd` is checked against the labelled estimate when some
+/// spend was unmetered; unmetered spend with no price fails closed.
+pub(crate) fn staged_budget_exhausted(
+    input: &BuildInput,
+    spent: crate::runtime::RuntimeCostReport,
+) -> bool {
+    budget_exhausted(input.budget_usd, spent)
+}
+
+fn budget_exhausted(budget_usd: Option<f64>, spent: crate::runtime::RuntimeCostReport) -> bool {
+    let Some(budget) = budget_usd else {
+        return false;
+    };
+    spent.estimated_total_usd().is_none_or(|usd| usd >= budget)
+}
+
+/// The workspace spend ledger settles to the estimate when the provider
+/// reported no charge, so unmetered calls still count toward its ceiling.
+fn ledger_usd(cost: crate::runtime::RuntimeCostReport) -> f64 {
+    cost.estimated_total_usd().unwrap_or(cost.observed_usd())
 }
 
 /// Workspace spend-ledger protection (hard ceiling + operator caps), same
@@ -545,9 +561,9 @@ fn settle_stage_budget(
     ticket: Option<SpendTicket>,
     costed: &Result<crate::structured_output::CostedStructuredJson<Value>>,
 ) -> Result<()> {
-    let actual = match costed {
-        Ok(costed) => costed.cost_usd,
-        Err(_) => 0.0,
+    let actual = match costed.as_ref().map(|costed| costed.cost_report()) {
+        Ok(Ok(cost)) => ledger_usd(cost),
+        _ => 0.0,
     };
     settle_gap_fill_cost(spend, ticket, actual)
 }
@@ -576,6 +592,22 @@ fn is_spend_cap_exhausted(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unmetered_spend_counts_its_estimate_against_the_budget() {
+        use crate::runtime::{RuntimeCost, RuntimeCostReport};
+        let usd = |value| RuntimeCost::from_usd(value, "test").unwrap();
+        let estimated = |value| {
+            RuntimeCostReport::incomplete(RuntimeCost::ZERO).with_unmetered_estimate(Some(usd(value)))
+        };
+
+        assert!(!budget_exhausted(None, RuntimeCostReport::INCOMPLETE_ZERO));
+        assert!(!budget_exhausted(Some(1.0), estimated(0.4)));
+        assert!(budget_exhausted(Some(1.0), estimated(1.2)));
+        assert!(budget_exhausted(Some(1.0), RuntimeCostReport::known(usd(1.0))));
+        // Unmetered spend with no price cannot prove it is under budget.
+        assert!(budget_exhausted(Some(1.0), RuntimeCostReport::INCOMPLETE_ZERO));
+    }
 
     fn catalog_grounding() -> crate::capabilities::entry_points::EntryPointCatalogGrounding {
         crate::capabilities::entry_points::EntryPointCatalogGrounding {
@@ -616,6 +648,7 @@ mod tests {
                 surfaces: Vec::new(),
                 confirmed_findings: Vec::new(),
                 entry_point_catalog: catalog_grounding(),
+                selection: GroundingSelection::default(),
             },
             vuln_commits: Vec::new(),
             history_mined: false,
@@ -630,8 +663,7 @@ mod tests {
                 "attackSurface": {"entryPoints": [{"id": "AS-one"}]},
             }),
             bridge_findings: None,
-            cost_usd: 0.0,
-            cost_usd_exact: true,
+            cost: crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
         };
         let gap_fill = GapFillResolution {
             report: CoverageReport {

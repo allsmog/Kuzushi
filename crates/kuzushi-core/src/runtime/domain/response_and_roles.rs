@@ -355,15 +355,17 @@ impl AgentQueryResponse {
 
     pub fn checked_cost_report(&self) -> anyhow::Result<super::RuntimeCostReport> {
         let cost = super::RuntimeCost::from_usd(self.cost_usd, "agent query response cost")?;
-        if let Some(estimate) = self.estimated_cost_usd {
-            super::RuntimeCost::from_usd(estimate, "agent query response estimated cost")?;
-        }
+        let estimate = self
+            .estimated_cost_usd
+            .map(|usd| super::RuntimeCost::from_usd(usd, "agent query response estimated cost"))
+            .transpose()?;
         if self.cost_usd_reported {
             return Ok(super::RuntimeCostReport::known(cost));
         }
         // A provider response proves that a call happened. Preserve any
-        // reported subtotal while refusing to present it as exact.
-        Ok(super::RuntimeCostReport::incomplete(cost))
+        // reported subtotal while refusing to present it as exact; the local
+        // estimate rides alongside, labelled, never as spend.
+        Ok(super::RuntimeCostReport::incomplete(cost).with_unmetered_estimate(estimate))
     }
 }
 

@@ -901,6 +901,49 @@ SafePkg = "1, < 2"
     }
 
     #[test]
+    fn distinct_packages_in_one_manifest_keep_distinct_finding_identities() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("package.json"),
+            r#"{"dependencies":{"clarinet":"^0.12.6","z85":"^0.0.2"}}"#,
+        )
+        .unwrap();
+        let findings = DepHygieneScanner
+            .scan(tmp.path(), &ScanCancellation::default())
+            .unwrap();
+
+        assert_eq!(findings.len(), 2);
+        assert_ne!(findings[0].fingerprint, findings[1].fingerprint);
+        let locators = findings
+            .iter()
+            .map(|finding| finding.symbol_locator.clone().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            locators,
+            ["package.json#clarinet", "package.json#z85"]
+                .map(String::from)
+                .into()
+        );
+    }
+
+    #[test]
+    fn rescanning_the_same_dependency_reproduces_its_fingerprint() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("package.json"),
+            r#"{"dependencies":{"clarinet":"^0.12.6"}}"#,
+        )
+        .unwrap();
+        let scan = || {
+            DepHygieneScanner
+                .scan(tmp.path(), &ScanCancellation::default())
+                .unwrap()
+        };
+
+        assert_eq!(scan()[0].fingerprint, scan()[0].fingerprint);
+    }
+
+    #[test]
     fn missing_target_error_is_actionable() {
         let tmp = tempfile::tempdir().unwrap();
         let err = check_dependency_hygiene(&tmp.path().join("missing"))
@@ -986,6 +1029,22 @@ SafePkg = "1, < 2"
         let fake_finding = &by_rule["RUSTSEC-2099-0001"];
         assert_eq!(fake_finding.severity, Severity::Critical);
         assert!(fake_finding.message.contains("fakecrate@1.0.0"));
+    }
+
+    #[test]
+    fn cargo_audit_advisory_on_two_locked_versions_keeps_two_findings() {
+        let fixture = CARGO_AUDIT_FIXTURE.replace(
+            r#""id": "RUSTSEC-2099-0001""#,
+            r#""id": "RUSTSEC-2020-0071""#,
+        );
+        let findings = parse_cargo_audit_output(&fixture).unwrap();
+
+        assert_eq!(findings[0].rule_id, findings[1].rule_id);
+        assert_ne!(findings[0].fingerprint, findings[1].fingerprint);
+        assert_eq!(
+            findings[1].symbol_locator.as_deref(),
+            Some("Cargo.lock#fakecrate@1.0.0")
+        );
     }
 
     #[test]

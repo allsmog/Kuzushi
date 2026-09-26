@@ -905,6 +905,7 @@ mod tests {
                 codeql_available: false,
                 codeql_db_path: None,
                 bash_probing_used: false,
+                systems_source_files: 1,
             },
         }
     }

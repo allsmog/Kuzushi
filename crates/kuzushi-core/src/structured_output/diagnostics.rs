@@ -76,12 +76,11 @@ pub(super) fn truncation_error(
     );
     let failure = bounded_error(initial_error, MAX_ERROR_EXCERPT_BYTES)?;
     let raw = material.render(MAX_RAW_RESPONSE_EXCERPT_BYTES);
+    let remediation = truncation_remediation(&stop_reason);
     let message = format!(
-        "{tool} response was truncated by the per-call output-token cap \
+        "{tool} response stopped before its JSON completed \
          (stopReason: {stop_reason:?}); the partial JSON cannot satisfy \
-         contract `{schema}`. Remediation: raise `AgentQueryRequest::max_output_tokens` \
-         (or set `maxOutputTokens` in the tool input), reduce the requested output \
-         size such as `maxFindings`, or shorten the prompt. \
+         contract `{schema}`. Remediation: {remediation} \
          Initial parse/validation failure (bounded evidence):\n{failure}\n\
          Partial response (bounded evidence; source was truncated):\n{raw}"
     );
@@ -90,6 +89,26 @@ pub(super) fn truncation_error(
         "structured-output truncation diagnostic",
         MAX_STRUCTURED_DIAGNOSTIC_BYTES,
     )))
+}
+
+/// The fix for a truncation depends on what stopped the response.
+fn truncation_remediation(stop_reason: &str) -> &'static str {
+    match stop_reason {
+        "model_turn_limit" => {
+            "raise the tool's `maxModelTurns` (1-40) or narrow the investigation scope."
+        }
+        "forced_conclusion" => {
+            "narrow the investigation; a forced conclusion is never accepted as an answer."
+        }
+        "mcp_tool_timeout" => "raise `mcpToolTimeoutMs` or disable `mcps` for this run.",
+        "observed_spend_exhausted" | "observed_spend_incomplete" => {
+            "raise the spend budget, or choose a model whose spend can be priced."
+        }
+        _ => {
+            "raise `maxOutputTokens` in the tool input, reduce the requested output size \
+             such as `maxFindings`, or shorten the prompt."
+        }
+    }
 }
 
 fn bounded_error(error: &anyhow::Error, limit: usize) -> Result<String> {

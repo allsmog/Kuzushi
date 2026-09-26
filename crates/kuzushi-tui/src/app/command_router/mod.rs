@@ -13,6 +13,7 @@ mod compact_help_summary;
 mod handle_command;
 mod handle_review_decision_command;
 mod handle_scene_command;
+mod phase_verb_routing;
 use self::threats::threat_view_label;
 use self::{runtime_backend_label, ShellApp, ShellView};
 use crate::commands::{parse_command, shell_command_specs, shell_help_examples, ShellCommand};

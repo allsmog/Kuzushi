@@ -3,19 +3,17 @@ use super::structured_output::{findings_schema, require_json_object};
 use crate::capabilities::agentic_sast::collect_agentic_repo_inventory;
 use crate::capabilities::prompt_armor::domain::output_dir;
 use crate::findings::{
-    normalize_agent_json_findings, persist_tool_findings, Finding, FindingStore,
+    normalize_agent_json_findings, persist_tool_findings_to, Finding, ToolFindingsSink,
 };
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{
     query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
 };
-use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct PromptArmorRuntimeInput<'a> {
-    pub(crate) finding_run_id: String,
     pub(crate) tool_name: &'a str,
     pub(crate) command: &'a str,
     pub(crate) input: &'a Value,
@@ -23,8 +21,7 @@ pub(crate) struct PromptArmorRuntimeInput<'a> {
     pub(crate) plugin_root: &'a Path,
     pub(crate) model: String,
     pub(crate) runtime: &'a dyn AgentRuntime,
-    pub(crate) workspace: Option<&'a WorkspaceTarget>,
-    pub(crate) findings_store: Option<&'a FindingStore>,
+    pub(crate) findings_sink: ToolFindingsSink<'a>,
 }
 
 pub(crate) fn run_runtime_tool(request: PromptArmorRuntimeInput<'_>) -> Result<Value> {
@@ -62,13 +59,8 @@ fn runtime_tool_response(
     output_dir: PathBuf,
 ) -> Result<Value> {
     let findings = normalize_agent_json_findings(raw, request.target, "prompt-armor", 100)?;
-    let persisted = persist_tool_findings(
-        request.finding_run_id.clone(),
-        request.target,
-        &findings,
-        request.workspace,
-        request.findings_store,
-    )?;
+    let persisted =
+        persist_tool_findings_to(request.findings_sink.clone(), request.target, &findings)?;
     Ok(runtime_success_response(RuntimeSuccess {
         request,
         output_dir,

@@ -329,7 +329,7 @@ fn prepare_scan_findings_export(
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = findings_for_run_ids(&store, run_ids)?;
+    let all_findings = store.list_distinct_findings_for_scan_ids(run_ids)?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);
@@ -361,23 +361,6 @@ fn attach_remediation_records(
             .map(Into::into);
     }
     Ok(())
-}
-
-fn findings_for_run_ids(store: &FindingStore, run_ids: &[String]) -> Result<Vec<Finding>> {
-    let mut findings = Vec::new();
-    let mut fingerprints = BTreeSet::new();
-    for run_id in run_ids {
-        for finding in store.list_findings_for_scan_id(run_id)? {
-            if fingerprints.insert(finding_dedupe_key(&finding)) {
-                findings.push(finding);
-            }
-        }
-    }
-    Ok(findings)
-}
-
-fn finding_dedupe_key(finding: &Finding) -> String {
-    crate::findings::finding_projection_key(finding, crate::findings::IdentityFoldPolicy::Safe)
 }
 
 fn scan_run_export_contexts(

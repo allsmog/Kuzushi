@@ -150,13 +150,7 @@ fn persist_shinsa_findings(
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
-    persist_tool_findings(
-        ctx.finding_run_id(),
-        &run.target,
-        findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )
+    persist_tool_findings(ctx, &run.target, findings)
 }
 
 fn write_shinsa_assessment_artifacts(

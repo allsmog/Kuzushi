@@ -24,8 +24,11 @@ fn record_phase_result_presentation_call() {
 }
 
 mod continuation;
+#[path = "phase_results/finding_delta_label.rs"]
+mod finding_delta_label;
 #[path = "phase_results/typed_receipt.rs"]
 mod typed_receipt;
+use finding_delta_label::finding_delta_label;
 use typed_receipt::TypedReceiptResolution;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,9 +63,33 @@ pub(crate) struct PhaseResultCompactSummary {
     pub(crate) run_count: usize,
     pub(crate) artifact_count: usize,
     pub(crate) changed_findings: u64,
+    /// See `PhaseAttemptReceipt::finding_delta_observed`.
+    pub(crate) finding_delta_observed: Option<bool>,
     pub(crate) cost: Option<String>,
     pub(crate) revision_recorded: bool,
     pub(crate) receipt_recorded: bool,
+}
+
+impl PhaseResultCompactSummary {
+    /// `findings +N`, or `findings unmeasured` when no typed finding delta
+    /// backs the count.
+    pub(crate) fn findings_label(&self) -> String {
+        finding_delta_label(
+            &format!("+{}", self.changed_findings),
+            self.changed_findings,
+            self.finding_delta_observed,
+        )
+    }
+
+    /// The card's findings segment, or `None` for a Map attempt that touched
+    /// no findings: Map tools never persist findings, so "unmeasured" there
+    /// would suggest an unknown where the phase makes no finding claim.
+    pub(crate) fn findings_segment(&self) -> Option<String> {
+        let unmeasured_map = self.phase == WorkflowPhase::Map
+            && self.changed_findings == 0
+            && self.finding_delta_observed != Some(true);
+        (!unmeasured_map).then(|| self.findings_label())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -697,6 +724,7 @@ fn phase_result_compact_summary(
         run_count: receipt.map_or(completed.run_refs.len(), |receipt| receipt.run_count),
         artifact_count: receipt.map_or(0, |receipt| receipt.changed_artifacts.len()),
         changed_findings: receipt.map_or(0, |receipt| receipt.changed_findings),
+        finding_delta_observed: receipt.and_then(|receipt| receipt.finding_delta_observed),
         cost: receipt.map(|receipt| receipt.cost.clone()),
         revision_recorded: completed.target_snapshot.revision.is_some(),
         receipt_recorded: receipt.is_some(),
@@ -741,11 +769,15 @@ fn legacy_result_receipt_line(
     };
     let cost = durable_receipt_cost_label(&receipt.cost);
     format!(
-        "{outcome} · {} run{} · {}s · {cost} · {} finding delta · {} artifact delta · {} interaction(s)",
+        "{outcome} · {} run{} · {}s · {cost} · {} · {} artifact delta · {} interaction(s)",
         receipt.run_count,
         if receipt.run_count == 1 { "" } else { "s" },
         receipt.elapsed_secs,
-        receipt.changed_findings,
+        finding_delta_label(
+            &format!("+{}", receipt.changed_findings),
+            receipt.changed_findings,
+            receipt.finding_delta_observed,
+        ),
         receipt.changed_artifacts.len(),
         receipt.interaction_count
     )
@@ -1129,6 +1161,7 @@ mod tests {
             elapsed_secs: 2,
             cost: ">=$0.0000 (incomplete)".to_string(),
             changed_findings: 0,
+            finding_delta_observed: None,
             changed_artifacts: vec!["result.json".to_string()],
             interaction_count: 0,
             rerun_specification: None,
@@ -2090,6 +2123,7 @@ mod tests {
             elapsed_secs: 0,
             cost: "typed receipt pending".to_string(),
             changed_findings: 0,
+            finding_delta_observed: None,
             changed_artifacts: Vec::new(),
             interaction_count: 0,
             rerun_specification: None,
@@ -2151,6 +2185,7 @@ mod tests {
             elapsed_secs: 99,
             cost: "wrong transient cost".to_string(),
             changed_findings: 99,
+            finding_delta_observed: None,
             changed_artifacts: Vec::new(),
             interaction_count: 99,
             rerun_specification: None,

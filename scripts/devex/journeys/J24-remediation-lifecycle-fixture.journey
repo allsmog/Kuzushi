@@ -52,9 +52,9 @@ wait: 1
 submit: decision confirmed fixture credential confirmed for the lifecycle audit
 wait: 1
 # On a confirmed finding, drafting first crosses the explicit authorization
-# gate (descriptor-declared repository-execute effect), then refuses with
-# the specific missing prerequisite: patching requires a TRIAGE verdict,
-# not just a review decision.
+# gate (descriptor-declared repository-execute effect). The operator's
+# confirmed review decision satisfies the patch gate (no triage verdict is
+# required), so the refusal moves on to the missing model runtime.
 submit: run patch:finding {"fingerprint":"F-0001"}
 wait-for: 20 CONFIRM · descriptor-declared effect
 snap: patch-authorization-gate
@@ -64,8 +64,8 @@ wait-for: 30 run receipt
 wait: 1
 nav-mode:
 keys: 5
-wait-live-snap: 10 Viewing Fix | patch-refusal-untriaged
-expect: has no triage verdict
+wait-live-snap: 10 Viewing Fix | patch-refusal-no-runtime
+expect: patch:finding requires
 # Discard the refused attempt (evidence stays on disk) so the remediation
 # triptych is visible again for the lifecycle-state audit below.
 keys: d

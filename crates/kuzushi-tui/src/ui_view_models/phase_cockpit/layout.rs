@@ -187,7 +187,7 @@ pub(crate) fn phase_presentation_plan(
         } else {
             area
         };
-    let composition = screen_composition(body, density, &visible);
+    let composition = screen_composition(body, density, &visible, planned_area);
     let surfaces = composition
         .solve(planned_area)
         .into_iter()
@@ -211,6 +211,7 @@ fn screen_composition(
     body: &PhaseCockpitBody,
     density: LayoutDensity,
     visible: &[&PhaseSurfaceSpec],
+    area: Rect,
 ) -> Composition {
     let columns = || Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
     if let Some(composition) =
@@ -218,7 +219,7 @@ fn screen_composition(
     {
         return composition;
     }
-    if let Some(composition) = sparse_map_status_composition(body, density, visible) {
+    if let Some(composition) = sparse_map_status_composition(body, density, visible, area) {
         return composition;
     }
     if !matches!(density, LayoutDensity::Dense | LayoutDensity::MasterDetail) {
@@ -273,6 +274,7 @@ fn sparse_map_status_composition(
     body: &PhaseCockpitBody,
     density: LayoutDensity,
     visible: &[&PhaseSurfaceSpec],
+    area: Rect,
 ) -> Option<Composition> {
     let PhaseCockpitBody::Map(model) = body else {
         return None;
@@ -281,9 +283,11 @@ fn sparse_map_status_composition(
     if density != LayoutDensity::Sparse || spec.id != PhaseSurfaceId::MapReadiness {
         return None;
     }
+    let (content_width, available_rows) = super::composition::status_card_content_box(area);
     Some(Composition::StatusCard {
         surface: spec.id,
-        content_rows: super::map::map_status_card_rows(model),
+        content_rows: super::map::map_context_fit(model, content_width, available_rows)
+            .content_rows,
     })
 }
 

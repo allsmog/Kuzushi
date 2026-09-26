@@ -21,7 +21,13 @@ impl AgenticSastInput {
             .or(optional_nonempty_string(input, "huntFocus")?)
             .or(optional_nonempty_string(input, "hunt_focus")?);
 
+        let max_model_turns = crate::runtime::AgentRuntimeOptions::max_model_turns_from_input(
+            input,
+            "agentic-sast:scan",
+        )?
+        .or(Some(DEFAULT_AGENTIC_MODEL_TURNS));
         Ok(Self {
+            max_model_turns,
             max_findings,
             passes,
             max_inventory_files,

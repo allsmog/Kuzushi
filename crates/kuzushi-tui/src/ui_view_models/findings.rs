@@ -467,7 +467,7 @@ fn apply_decision_history(
                 .actor
                 .clone()
                 .unwrap_or_else(|| record.decision.author.as_str().to_string()),
-            created_at: record.created_at.clone(),
+            created_at: super::recorded_timestamp_label(&record.created_at),
             rationale: record.decision.rationale.clone(),
         })
         .collect();

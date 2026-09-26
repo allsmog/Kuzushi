@@ -370,13 +370,8 @@ fn resolve_dismiss_target(
     store: &crate::findings::FindingStore,
     reference: &str,
 ) -> Result<crate::findings::Finding> {
-    if let Some(finding) = store.get_finding_by_reference(reference)? {
-        return Ok(finding);
-    }
-    // Aliases are positional over the sorted whole ledger; a clamped list
-    // misresolves them once the ledger passes the presentation limit.
-    let all = store.list_all_findings()?;
-    crate::findings::resolve_finding_alias(&all, reference)
+    store
+        .get_finding_by_operator_reference(reference)?
         .with_context(|| format!("no finding found for {reference:?}"))
 }
 
@@ -535,13 +530,7 @@ fn store_dep_hygiene_findings(
         .iter()
         .map(|finding| finding.to_core_finding(target))
         .collect::<Vec<_>>();
-    let persisted = crate::findings::persist_tool_findings(
-        ctx.finding_run_id(),
-        target,
-        &findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = crate::findings::persist_tool_findings(ctx, target, &findings)?;
     let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
         core_findings,
@@ -559,13 +548,7 @@ fn store_secret_scan_findings(
         .iter()
         .map(|finding| finding.to_core_finding())
         .collect::<Vec<_>>();
-    let persisted = crate::findings::persist_tool_findings(
-        ctx.finding_run_id(),
-        target,
-        &findings,
-        ctx.workspace,
-        ctx.findings_store,
-    )?;
+    let persisted = crate::findings::persist_tool_findings(ctx, target, &findings)?;
     let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
         core_findings,

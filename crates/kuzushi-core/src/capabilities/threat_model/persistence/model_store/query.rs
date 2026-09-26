@@ -36,6 +36,54 @@ pub fn load_threat_model_revision(
     active_document(root, model_ref)
 }
 
+/// Resolves an operator selector to one immutable revision: `tmr_…` names an
+/// exact revision and `tm_…` names a lineage, which selects its head revision.
+/// Anything else, or an id absent from the manifest, is an explicit error.
+pub fn load_threat_model_by_selector(root: &Path, selector: &str) -> Result<ActiveThreatModel> {
+    let manifest = load_threat_model_manifest(root)?.context("threat-model manifest is missing")?;
+    let model_ref = resolve_selector_ref(&manifest, selector.trim())?;
+    active_document(root, model_ref)
+}
+
+fn resolve_selector_ref(manifest: &ThreatModelManifest, selector: &str) -> Result<ThreatModelRef> {
+    if selector.starts_with("tmr_") {
+        return resolve_revision_selector(manifest, selector);
+    }
+    if selector.starts_with("tm_") {
+        return resolve_lineage_selector(manifest, selector);
+    }
+    anyhow::bail!(
+        "{selector:?} is neither a threat-model lineage id (tm_…) nor a revision id (tmr_…)"
+    )
+}
+
+fn resolve_revision_selector(
+    manifest: &ThreatModelManifest,
+    selector: &str,
+) -> Result<ThreatModelRef> {
+    let revision_id = ThreatModelRevisionId::parse(selector)?;
+    let (model, _) = find_revision_owner(manifest, &revision_id).with_context(|| {
+        format!(
+            "looked up as a revision id across {} lineage(s)",
+            manifest.models.len()
+        )
+    })?;
+    ref_for_revision(model, &revision_id)
+}
+
+fn resolve_lineage_selector(
+    manifest: &ThreatModelManifest,
+    selector: &str,
+) -> Result<ThreatModelRef> {
+    let model_id = ThreatModelId::parse(selector)?;
+    resolve_manifest_ref(manifest, &model_id, None).with_context(|| {
+        format!(
+            "looked up as a lineage id (head revision) among {} lineage(s)",
+            manifest.models.len()
+        )
+    })
+}
+
 pub fn load_scope_threat_model(root: &Path, scope: &ScopeRef) -> Result<Option<ActiveThreatModel>> {
     let Some(manifest) = load_threat_model_manifest(root)? else {
         return Ok(None);
@@ -290,6 +338,83 @@ mod unique_lineage_tests {
             created_at: "2026-08-27T00:00:00Z".to_string(),
             head_revision: ThreatModelRevisionId::new(),
             revisions: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod selector_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn selector_resolves_revision_ids_and_lineage_heads() {
+        let root = tempfile::tempdir().unwrap();
+        let first = commit(root.path(), "a", None);
+        let head = commit(root.path(), "b", Some(first.model_id.clone()));
+
+        let exact = load_threat_model_by_selector(root.path(), first.revision_id.as_str()).unwrap();
+        let lineage = load_threat_model_by_selector(root.path(), first.model_id.as_str()).unwrap();
+
+        assert_eq!(exact.model_ref, first);
+        assert_eq!(lineage.model_ref, head);
+        assert_eq!(lineage.document["threats"][0]["id"], json!("b"));
+    }
+
+    #[test]
+    fn selector_errors_name_what_was_tried() {
+        let root = tempfile::tempdir().unwrap();
+        commit(root.path(), "a", None);
+        let missing_revision = ThreatModelRevisionId::new();
+        let missing_model = ThreatModelId::new();
+
+        let revision_error = error(root.path(), missing_revision.as_str());
+        let lineage_error = error(root.path(), missing_model.as_str());
+        let malformed_error = error(root.path(), "latest");
+
+        assert!(revision_error.contains("as a revision id across 1 lineage"), "{revision_error}");
+        assert!(revision_error.contains(missing_revision.as_str()), "{revision_error}");
+        assert!(lineage_error.contains("as a lineage id (head revision)"), "{lineage_error}");
+        assert!(malformed_error.contains("neither a threat-model lineage id"), "{malformed_error}");
+    }
+
+    fn commit(root: &Path, threat: &str, model_id: Option<ThreatModelId>) -> ThreatModelRef {
+        commit_threat_model_revision(root, &document(threat), request(model_id))
+            .unwrap()
+            .model_ref
+    }
+
+    fn error(root: &Path, selector: &str) -> String {
+        format!("{:#}", load_threat_model_by_selector(root, selector).unwrap_err())
+    }
+
+    fn document(threat: &str) -> Value {
+        json!({
+            "version": "2.0",
+            "methodology": "stride",
+            "dfd": {"nodes": [{"id": "app"}], "flows": [], "trustBoundaries": []},
+            "threats": [{"id": threat, "targetElementIds": ["app"]}],
+            "summary": {"text": threat}
+        })
+    }
+
+    fn request(model_id: Option<ThreatModelId>) -> ThreatModelCommit {
+        ThreatModelCommit {
+            model_id,
+            new_model: false,
+            label: "Root".to_string(),
+            scope: ScopeRef {
+                scope_id: "root".to_string(),
+                rel_path: PathBuf::from("."),
+                project_model_sha256: format!("sha256:{}", "1".repeat(64)),
+                target_revision: "test".to_string(),
+            },
+            methodology: "stride".to_string(),
+            source: ThreatModelRevisionSource::Build,
+            source_revision_id: None,
+            run_id: None,
+            activate: Some(true),
+            actor: "test".to_string(),
         }
     }
 }

@@ -32,18 +32,19 @@ fn target_root_from_artifact_env() -> Option<PathBuf> {
     target.is_dir().then(|| target.to_path_buf())
 }
 
-/// Languages a query runs against: the persisted current-shape graphs when
-/// any exist, else the buildable languages detected from source (which the
-/// implicit build then materialises).
+/// Languages a query runs against: every persisted current-shape graph plus
+/// every buildable language detected from source, which the implicit build
+/// then materialises. A persisted graph must not hide the rest of the
+/// repository: Juice Shop's persisted client-side JavaScript graph used to
+/// shadow its entire TypeScript server.
 pub fn query_languages(root: &Path) -> Vec<String> {
-    let persisted = kuzushi_cpg::artifact_langs(root);
-    if !persisted.is_empty() {
-        return persisted;
+    let mut languages = kuzushi_cpg::artifact_langs(root);
+    for detected in kuzushi_cpg::detect_buildable_languages(root) {
+        if !languages.iter().any(|language| language == detected) {
+            languages.push(detected.to_string());
+        }
     }
-    kuzushi_cpg::detect_buildable_languages(root)
-        .into_iter()
-        .map(str::to_string)
-        .collect()
+    languages
 }
 
 /// Load-or-build every queryable language project for the target, then run
@@ -62,16 +63,39 @@ where
             root.display(),
             kuzushi_cpg::supported_languages().join(", ")
         );
-        let mut projects = Vec::new();
-        for lang in languages {
-            let (project, _report) = kuzushi_cpg::ensure_project(&root, &lang)
-                .map_err(|error| anyhow::anyhow!("cpg-rs {lang} graph unavailable: {error}"))?;
-            projects.push((lang, project));
-        }
+        let projects = load_language_projects(&root, languages)?;
         f(&root, &projects)
     })
     .await
     .context("cpg engine task panicked")?
+}
+
+/// Load or build each language. One language that cannot build (for example
+/// detected sources that the build excludes) is reported on stderr and
+/// skipped; the call fails only when no language loads.
+fn load_language_projects(root: &Path, languages: Vec<String>) -> Result<Vec<(String, Project)>> {
+    let mut projects = Vec::new();
+    let mut failures = Vec::new();
+    for lang in languages {
+        match kuzushi_cpg::ensure_project(root, &lang) {
+            Ok((project, _report)) => projects.push((lang, project)),
+            Err(error) => failures.push(format!("{lang}: {error}")),
+        }
+    }
+    report_skipped_languages(&projects, &failures)?;
+    Ok(projects)
+}
+
+fn report_skipped_languages(projects: &[(String, Project)], failures: &[String]) -> Result<()> {
+    anyhow::ensure!(
+        !projects.is_empty(),
+        "cpg-rs graph unavailable: {}",
+        failures.join("; ")
+    );
+    for failure in failures {
+        eprintln!("kuzushi-mcp-cpg: skipped language graph ({failure})");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -79,12 +103,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn query_languages_prefers_persisted_graphs() {
+    fn query_languages_add_detected_languages_to_persisted_graphs() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("main.go"), "package main\n").unwrap();
         // No artifacts yet: detection reports go.
         assert_eq!(query_languages(temp.path()), vec!["go".to_string()]);
-        // A persisted python graph wins over detection.
+        // A persisted python graph joins detection; it does not hide go.
         let dir = kuzushi_cpg::artifact_dir(temp.path());
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -92,6 +116,9 @@ mod tests {
             b"x",
         )
         .unwrap();
-        assert_eq!(query_languages(temp.path()), vec!["python".to_string()]);
+        assert_eq!(
+            query_languages(temp.path()),
+            vec!["python".to_string(), "go".to_string()]
+        );
     }
 }

@@ -114,7 +114,7 @@ fn verified_result_cell(
 
 fn result_disclosure(omitted_count: u64, run_id: Option<&RunId>) -> Option<RunCellDisclosureV1> {
     (omitted_count > 0).then(|| RunCellDisclosureV1 {
-        reason: SafeText::operator_visible("bounded result detail omitted"),
+        reason: SafeText::operator_visible("result detail exceeds the display bound"),
         omitted_count: Some(omitted_count),
         inspect_action: run_id
             .cloned()

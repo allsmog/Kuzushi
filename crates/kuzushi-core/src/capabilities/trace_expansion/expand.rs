@@ -29,6 +29,9 @@ pub struct TraceExpansionOutcome {
     pub result: TraceExpansionResult,
     pub cost_usd: f64,
     pub cost_usd_exact: bool,
+    /// Labelled token-based estimate for unmetered spend; never folded into
+    /// `cost_usd`.
+    pub estimated_cost_usd: Option<f64>,
 }
 
 impl From<CostedStructuredJson<TraceExpansionResult>> for TraceExpansionOutcome {
@@ -37,6 +40,7 @@ impl From<CostedStructuredJson<TraceExpansionResult>> for TraceExpansionOutcome 
             result: costed.value,
             cost_usd: costed.cost_usd,
             cost_usd_exact: costed.cost_usd_exact,
+            estimated_cost_usd: costed.estimated_cost_usd,
         }
     }
 }

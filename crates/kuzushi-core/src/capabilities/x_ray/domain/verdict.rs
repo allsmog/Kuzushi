@@ -4,7 +4,7 @@ pub(crate) fn parse_verdict(markdown: &str) -> XRayVerdict {
     let section =
         extract_heading_section(markdown, "x-ray verdict").unwrap_or_else(|| markdown.to_string());
     let tier = find_verdict_tier(&section);
-    let cleaned = clean_verdict_tiers(&section);
+    let cleaned = without_headings(&clean_verdict_tiers(&section));
     let summary = first_meaningful_line(&cleaned)
         .or_else(|| first_meaningful_line(markdown))
         .unwrap_or_default();
@@ -39,6 +39,15 @@ pub(crate) fn clean_verdict_tiers(text: &str) -> String {
                 .collect::<Vec<_>>()
                 .join(" ")
         })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Sub-headings such as `### Justification` label the verdict prose; they
+/// are never the summary itself.
+fn without_headings(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
         .collect::<Vec<_>>()
         .join("\n")
 }

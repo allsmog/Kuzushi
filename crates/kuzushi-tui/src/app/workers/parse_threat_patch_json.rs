@@ -1,7 +1,9 @@
 use super::*;
 
 mod json_patch;
-pub(crate) use json_patch::{merge_json, parse_threat_patch_json};
+#[cfg(test)]
+pub(crate) use json_patch::merge_json;
+pub(crate) use json_patch::parse_threat_patch_json;
 
 pub(crate) fn scan_worker(
     target: PathBuf,

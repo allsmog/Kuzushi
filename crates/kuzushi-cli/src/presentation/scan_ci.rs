@@ -1,5 +1,5 @@
 use super::safe_text::sanitize_for_log_line;
-use super::scan_output::{scan_cost_usd, scan_findings_count};
+use super::scan_output::{scan_cost_label, scan_findings_count};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -49,9 +49,9 @@ pub(crate) fn emit_scan_ci_success(
             started,
             "summary",
             &format!(
-                "{} finding(s) · ${:.4} · {}",
+                "{} finding(s) · {} · {}",
                 scan_findings_count(data),
-                scan_cost_usd(result),
+                scan_cost_label(result),
                 format_duration(elapsed)
             )
         )

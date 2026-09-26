@@ -128,11 +128,8 @@ fn render_entry_list(buf: &mut Buffer, area: Rect, model: &EntryPointBreakdown, 
         .render(area, buf);
         return;
     }
-    let title = format!(
-        " ENTRY POINTS · {}/{} ",
-        selection.saturating_add(1),
-        model.entries.len()
-    );
+    let window = entry_list_window(model, selection, area.height.saturating_sub(2) as usize);
+    let title = entry_list_title(model, selection, window);
     let block = bordered_block(&title, area.width, theme::heading());
     let inner = block.inner(area);
     block.render(area, buf);
@@ -155,6 +152,52 @@ struct EntryListSection<'a> {
     row_start: usize,
 }
 
+/// The display rows (section headers plus entries) a viewport of `visible`
+/// rows shows around the selection, and how many rows it leaves out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EntryListWindow {
+    start: usize,
+    end: usize,
+    total: usize,
+}
+
+fn entry_list_window(
+    model: &EntryPointBreakdown,
+    selection: usize,
+    visible: usize,
+) -> EntryListWindow {
+    let sections = entry_list_sections(model);
+    let total = model.entries.len().saturating_add(sections.len());
+    let selected_row = selected_display_row(&sections, selection);
+    let start = viewport_start(total, visible, selected_row);
+    EntryListWindow {
+        start,
+        end: start.saturating_add(visible).min(total),
+        total,
+    }
+}
+
+/// The list title names the selection and, when the viewport clips the list,
+/// how many rows sit above and below it — a hidden row is never silent.
+fn entry_list_title(
+    model: &EntryPointBreakdown,
+    selection: usize,
+    window: EntryListWindow,
+) -> String {
+    let mut parts = vec![format!(
+        "ENTRY POINTS · {}/{}",
+        selection.saturating_add(1),
+        model.entries.len()
+    )];
+    if window.start > 0 {
+        parts.push(format!("+{} above", window.start));
+    }
+    if window.end < window.total {
+        parts.push(format!("+{} below", window.total - window.end));
+    }
+    format!(" {} ", parts.join(" · "))
+}
+
 fn visible_entry_list_lines(
     model: &EntryPointBreakdown,
     selection: usize,
@@ -162,10 +205,8 @@ fn visible_entry_list_lines(
     visible: usize,
 ) -> Vec<Line<'static>> {
     let sections = entry_list_sections(model);
-    let total = model.entries.len().saturating_add(sections.len());
-    let selected_row = selected_display_row(&sections, selection);
-    let start = viewport_start(total, visible, selected_row);
-    (start..start.saturating_add(visible).min(total))
+    let window = entry_list_window(model, selection, visible);
+    (window.start..window.end)
         .filter_map(|row| display_row_line(model, &sections, row, selection, width))
         .collect()
 }
@@ -383,6 +424,33 @@ mod tests {
         EntryPointArtifactStatus, EntryPointComposition, EntryPointCounts, EntryPointDisposition,
         EntryPointFreshness, EntryPointGroup, EntryPointReceipt, EntryPointTarget,
     };
+
+    #[test]
+    fn a_clipped_entry_list_names_the_rows_it_hides() {
+        let model = sample_model();
+        let total = model.entries.len() + model.dispositions.len();
+        assert!(total > 1, "fixture needs more than one display row");
+
+        let clipped = entry_list_window(&model, 0, 1);
+        let above = clipped.start;
+        let below = clipped.total - clipped.end;
+        assert_eq!(above + below, total - 1, "one visible row hides the rest");
+        let title = entry_list_title(&model, 0, clipped);
+        for (count, side) in [(above, "above"), (below, "below")] {
+            assert_eq!(
+                title.contains(&format!("+{count} {side}")),
+                count > 0,
+                "{title}"
+            );
+        }
+
+        let whole = entry_list_window(&model, 0, total);
+        let title = entry_list_title(&model, 0, whole);
+        assert!(
+            !title.contains("below") && !title.contains("above"),
+            "{title}"
+        );
+    }
 
     #[test]
     fn browser_keeps_selection_and_detail_visible_across_width_classes() {

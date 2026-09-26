@@ -50,6 +50,7 @@ fn verify_finding_options() -> Vec<OptionSpec> {
         escalation_model_option(),
         mcps_option(),
         mcp_tool_timeout_ms_option(),
+        max_model_turns_option(12),
     ]
 }
 

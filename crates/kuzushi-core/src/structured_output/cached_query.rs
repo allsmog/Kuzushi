@@ -34,19 +34,8 @@ pub(crate) fn query_cached_structured_json_with_cost<T>(
             &contract.schema,
         )
     });
-    if let (Some(cache), Some(key)) = (cache, &key) {
-        if let Some(entry) = cache.get(key) {
-            if let Ok(value) = validate(entry.value) {
-                return Ok(CachedStructuredJson {
-                    costed: CostedStructuredJson {
-                        value,
-                        cost_usd: 0.0,
-                        cost_usd_exact: true,
-                    },
-                    from_cache: true,
-                });
-            }
-        }
+    if let Some(hit) = cached_hit(cache, key.as_ref(), &validate) {
+        return Ok(hit);
     }
 
     let raw = RefCell::new(None);
@@ -64,6 +53,25 @@ pub(crate) fn query_cached_structured_json_with_cost<T>(
     Ok(CachedStructuredJson {
         costed,
         from_cache: false,
+    })
+}
+
+/// A stored value the current `validate` still accepts replays for free.
+fn cached_hit<T>(
+    cache: Option<&SemanticCache>,
+    key: Option<&crate::identity::Blake3Hash>,
+    validate: &impl Fn(Value) -> Result<T>,
+) -> Option<CachedStructuredJson<T>> {
+    let entry = cache?.get(key?)?;
+    let value = validate(entry.value).ok()?;
+    Some(CachedStructuredJson {
+        costed: CostedStructuredJson {
+            value,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+            estimated_cost_usd: None,
+        },
+        from_cache: true,
     })
 }
 

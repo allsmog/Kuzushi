@@ -415,6 +415,33 @@ export function humanMessageForRequest(request) {
   return new HumanMessage({ content });
 }
 
+// An agent loop re-sends its opening prompt on every model turn, so on
+// Anthropic the whole prompt is cache-marked (when the caller declared no
+// narrower prefix): later turns read it at cache-read rates instead of
+// paying full input price for the same bytes each time.
+export function loopOpeningMessageForRequest(request) {
+  const prompt = String(request?.prompt ?? "");
+  const cacheWholePrompt =
+    !promptCacheSplit(request) && providerForRequest(request) === "anthropic" && prompt.trim();
+  if (!cacheWholePrompt) return humanMessageForRequest(request);
+  return new HumanMessage({ content: [cacheableTextBlock(prompt)] });
+}
+
+// How many model turns remain for this request, counting the turn about to be
+// taken. Near the end the model is told, so it can finish with its own answer
+// instead of being stopped mid-investigation; the stop itself is unchanged.
+export const TURN_BUDGET_NOTICE_TURNS = 2;
+
+export function turnBudgetNotice(messages, maxModelTurns = DEFAULT_MAX_MODEL_TURNS) {
+  const remaining = maxModelTurns - usageFromMessages(messages).modelCalls;
+  if (remaining > TURN_BUDGET_NOTICE_TURNS || remaining < 1) return undefined;
+  return new HumanMessage(
+    `Turn budget: ${remaining} model turn(s) remain, including this one. ` +
+      "Stop exploring and return your final answer in the required format now, " +
+      "unless one more tool call is essential to it.",
+  );
+}
+
 function providerForRequest(request) {
   try {
     return parseModelSpec(request.model)[0];
@@ -564,13 +591,14 @@ export function modelContinuationDecision(
   messages,
   observedSpendStopUsd,
   maxModelTurns = DEFAULT_MAX_MODEL_TURNS,
+  estimateRates = undefined,
 ) {
   const usage = usageFromMessages(messages);
   validateMaxModelTurns(maxModelTurns);
   if (usage.modelCalls >= maxModelTurns) return "model_turn_limit";
   const stop = observedSpendStop(observedSpendStopUsd);
   if (stop === undefined) return "continue";
-  return observedSpendDecision(usage, stop);
+  return observedSpendDecision(usage, stop, estimateRates);
 }
 
 function validateMaxModelTurns(maxModelTurns) {
@@ -588,9 +616,51 @@ function observedSpendStop(raw) {
   return stop;
 }
 
-function observedSpendDecision(usage, stop) {
-  if (usage.costReportedCalls !== usage.modelCalls) return "observed_spend_incomplete";
-  return usage.costUsd >= stop ? "observed_spend_exhausted" : "continue";
+function observedSpendDecision(usage, stop, estimateRates) {
+  const spent = spendForStop(usage, estimateRates);
+  if (spent === undefined) return "observed_spend_incomplete";
+  return spent >= stop ? "observed_spend_exhausted" : "continue";
+}
+
+// Exact provider cost when every call reported one. When no call reported a
+// charge, the Rust caller's list prices (the one price table) estimate it from
+// tokens. Mixed receipts, missing token counts, or no rates stay unknown.
+export function spendForStop(usage, estimateRates) {
+  if (usage.costReportedCalls === usage.modelCalls) return usage.costUsd;
+  if (usage.costReportedCalls !== 0 || !validEstimateRates(estimateRates)) return undefined;
+  if (!everyCallReportedTokens(usage)) return undefined;
+  return estimatedUsd(usage, estimateRates);
+}
+
+const ESTIMATE_RATE_KEYS = [
+  "inputUsdPerMtok",
+  "outputUsdPerMtok",
+  "cacheReadUsdPerMtok",
+  "cacheCreationUsdPerMtok",
+];
+
+function validEstimateRates(rates) {
+  return ESTIMATE_RATE_KEYS.every((key) => Number.isFinite(rates?.[key]) && rates[key] >= 0);
+}
+
+function everyCallReportedTokens(usage) {
+  return (
+    usage.inputReportedCalls === usage.modelCalls && usage.outputReportedCalls === usage.modelCalls
+  );
+}
+
+// LangChain's input total includes both cache buckets; price them apart.
+function estimatedUsd(usage, rates) {
+  const cacheRead = usage.cacheReadInputTokens ?? 0;
+  const cacheCreation = usage.cacheCreationInputTokens ?? 0;
+  const uncached = usage.inputTokens - cacheRead - cacheCreation;
+  if (!(uncached >= 0)) return undefined;
+  const micro =
+    uncached * rates.inputUsdPerMtok +
+    cacheRead * rates.cacheReadUsdPerMtok +
+    cacheCreation * rates.cacheCreationUsdPerMtok +
+    usage.outputTokens * rates.outputUsdPerMtok;
+  return micro / 1_000_000;
 }
 
 function addMessageUsage(total, message) {
@@ -658,11 +728,46 @@ export function isAiMessage(message) {
   );
 }
 
+// One tool result must not crowd out the investigation: every result is
+// re-sent on each later turn, so an unbounded read (a whole generated file, a
+// repository-wide query) overflowed a 200k-token context within a few turns.
+// The cut is disclosed to the model so it can narrow the next call.
+export const TOOL_RESULT_MAX_CHARS = 24_000;
+
 export function toolMessageForOutput(call, output) {
-  if (output instanceof ToolMessage || output?._getType?.() === "tool") return output;
+  if (output instanceof ToolMessage || output?._getType?.() === "tool") {
+    return boundedToolMessage(output);
+  }
   const content = typeof output === "string" ? output : JSON.stringify(output ?? null);
   return new ToolMessage({
     tool_call_id: call.id ?? call.name,
-    content,
+    content: boundedToolText(content),
   });
+}
+
+function boundedToolMessage(message) {
+  if (typeof message.content === "string") {
+    message.content = boundedToolText(message.content);
+  } else if (Array.isArray(message.content)) {
+    message.content = boundedToolBlocks(message.content);
+  }
+  return message;
+}
+
+function boundedToolBlocks(blocks) {
+  let remaining = TOOL_RESULT_MAX_CHARS;
+  return blocks.map((block) => {
+    if (block?.type !== "text" || typeof block.text !== "string") return block;
+    const text = boundedToolText(block.text, Math.max(remaining, 0));
+    remaining -= block.text.length;
+    return { ...block, text };
+  });
+}
+
+export function boundedToolText(text, limit = TOOL_RESULT_MAX_CHARS) {
+  if (text.length <= limit) return text;
+  return (
+    `${text.slice(0, limit)}\n[tool output truncated: showed ${limit} of ${text.length} ` +
+    "characters; narrow the query, path, or line range to see the rest]"
+  );
 }

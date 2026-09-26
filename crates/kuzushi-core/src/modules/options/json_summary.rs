@@ -78,6 +78,17 @@ fn option_spec_for_input_key<'a>(tool: &'a ToolDescriptor, name: &str) -> Option
         .find(|spec| spec.matches_name_or_alias(name))
 }
 
+/// Refuse an operator-supplied option name the tool does not declare, with
+/// the same message and suggestion as unknown `--input` keys. `--option`
+/// values land in the option store, whose unknown keys the prepare boundary
+/// otherwise ignores (a stored `setg` value may target other tools).
+pub fn ensure_declared_tool_option(tool: &ToolDescriptor, name: &str) -> Result<()> {
+    match option_spec_for_input_key(tool, name) {
+        Some(_) => Ok(()),
+        None => anyhow::bail!("{}", unknown_tool_option_message(tool, name)),
+    }
+}
+
 fn reject_unknown_tool_options(tool: &ToolDescriptor, object: &Map<String, Value>) -> Result<()> {
     if let Some(name) = object.keys().next() {
         anyhow::bail!("{}", unknown_tool_option_message(tool, name));
@@ -150,7 +161,20 @@ pub fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
         OptionType::Int => coerce_int_option(spec, value),
         OptionType::Float => coerce_float_option(value),
         OptionType::Enum => coerce_enum_option(spec, value),
-        OptionType::Json => Ok(value),
+        OptionType::Json => Ok(coerce_json_option(value)),
+    }
+}
+
+/// Operator surfaces (`--option key=value`, shell `set`, stored options)
+/// deliver every value as text. A json option given the text of an object
+/// or array means that structure; any other value passes through unchanged.
+fn coerce_json_option(value: Value) -> Value {
+    let Value::String(text) = &value else {
+        return value;
+    };
+    match serde_json::from_str::<Value>(text.trim()) {
+        Ok(parsed @ (Value::Object(_) | Value::Array(_))) => parsed,
+        _ => value,
     }
 }
 

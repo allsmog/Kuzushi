@@ -1,9 +1,9 @@
 use super::{
-    AbortReason, JobHub, ProjectScopeDiscoveryResult, ProjectScopeDiscoveryRuntime,
-    ReviewYieldState, StampedTargetCandidateFacts, TargetCandidateDiscoveryResult,
-    TargetCandidateDiscoveryRuntime, TargetFactsRuntime, TerminalLoopWake, ToolRunState,
-    ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey, ViewHydrationRuntime,
-    WorkerHandleRegistry,
+    AbortReason, FindingsStoreProbe, JobHub, ProjectScopeDiscoveryResult,
+    ProjectScopeDiscoveryRuntime, ReviewYieldState, StampedTargetCandidateFacts,
+    TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime, TargetFactsRuntime,
+    TerminalLoopWake, ToolRunState, ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey,
+    ViewHydrationRuntime, WorkerHandleRegistry,
 };
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
@@ -32,6 +32,8 @@ pub(crate) struct RuntimeState {
     /// deck can reap it (no zombie) and so kill targets a verified-live pid
     /// instead of a possibly recycled one.
     dispatcher_child: Option<std::process::Child>,
+    /// Idle-tick stat probe that notices findings written by other processes.
+    findings_store_probe: FindingsStoreProbe,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +147,14 @@ impl RuntimeState {
 
     pub(crate) fn drain_active_target_facts(&mut self) -> Vec<StampedTargetCandidateFacts> {
         self.active_target_facts.drain_current()
+    }
+
+    pub(crate) fn findings_store_probe(&self) -> &FindingsStoreProbe {
+        &self.findings_store_probe
+    }
+
+    pub(crate) fn findings_store_probe_mut(&mut self) -> &mut FindingsStoreProbe {
+        &mut self.findings_store_probe
     }
 
     pub(crate) fn scan_cancel(&self) -> Option<&ScanCancellation> {
