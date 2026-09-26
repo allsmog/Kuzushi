@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       hosted:
-        description: Smoke the darwin legs on GitHub-hosted macOS runners
+        description: Smoke the darwin legs on GitHub-hosted macOS runners (false uses the self-hosted Mac)
         required: false
         type: boolean
-        default: false
+        default: true
   workflow_dispatch:
     inputs:
       version:
@@ -19,10 +19,10 @@ on:
         required: false
         type: string
       hosted:
-        description: Smoke the darwin legs on GitHub-hosted macOS runners
+        description: Smoke the darwin legs on GitHub-hosted macOS runners (false uses the self-hosted Mac)
         required: false
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -50,9 +50,9 @@ jobs:
           - os: windows-2025
             slug: win32-x64
     name: published-${{ matrix.slug }}
-    # Both darwin legs default to the owner's self-hosted Apple silicon runner.
-    # darwin-x64 is smoked there under Rosetta; `hosted: true` restores the
-    # 10x-billed `macos-15-intel` and `macos-14` images for one run.
+    # Both darwin legs default to the GitHub-hosted `macos-15-intel` and
+    # `macos-14` images. `hosted: false` moves them onto the owner's
+    # self-hosted Apple silicon runner, where darwin-x64 is smoked under Rosetta.
     runs-on: ${{ fromJSON(matrix.self_hosted && !inputs.hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || format('["{0}"]', matrix.os)) }}
     timeout-minutes: 30
     steps:

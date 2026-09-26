@@ -1,9 +1,10 @@
 # Self-hosted CI runner
 
-Routine Kuzushi CI runs on one ephemeral self-hosted GitHub Actions runner on
-the repository owner's Apple-Silicon Mac. The private repository sits on a
-personal account whose Actions spending cap is exhausted, so hosted minutes are
-the constraint this arrangement removes.
+Routine Kuzushi CI runs on GitHub-hosted `ubuntu-latest`. The quick pull-request
+gate takes about four billed Linux minutes, which the private repository's
+included Actions quota covers at routine volume. Keeping the owner's
+Apple-Silicon Mac online as a runner cost more than those minutes, so the Mac is
+now an opt-in runner for one dispatched run or one release, not the default.
 
 The operational detail — installation, the fine-grained PAT, verification, and
 teardown — lives in [`scripts/runner/README.md`](../../scripts/runner/README.md).
@@ -13,10 +14,11 @@ This page records what the arrangement means for reading a CI result.
 
 | Workflow | Jobs | Runner |
 | --- | --- | --- |
-| `ci.yml` | `quality-gauntlet` | self-hosted Mac |
-| `ci-full.yml` | `quality-gauntlet`, `rust-core`, `cargo-deny`, `rust-cli`, `coverage`, `mutation`, `node22-compat`, `verify-pack`, `e2e` | self-hosted Mac |
+| `ci.yml` | `quality-gauntlet` | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
+| `ci-full.yml` | `quality-gauntlet`, `rust-core`, `cargo-deny`, `rust-cli`, `coverage`, `mutation`, `node22-compat`, `verify-pack`, `e2e` | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
 | `ci-full.yml` | `windows-compile` | `windows-latest` (hosted) |
-| `release-candidate.yml`, `release.yml`, `published-release-smoke.yml` | all | hosted |
+| `release-candidate.yml`, `published-release-smoke.yml` | darwin legs | hosted macOS; `hosted: false` or `KUZUSHI_RELEASE_SELF_HOSTED=true` opts into the Mac |
+| `release-candidate.yml`, `release.yml`, `published-release-smoke.yml` | every other job | hosted |
 
 Runner labels are `self-hosted`, `macOS`, `ARM64`, `kuzushi-mac`. Workflows
 select on the complete set, so a runner carrying only the built-in labels never
@@ -25,19 +27,20 @@ picks up a Kuzushi job.
 Publishing never touches this machine. `NPM_TOKEN` and every other release
 credential stay on hosted runners.
 
-## Escape hatch: `hosted: true`
+## Opting in: `self_hosted: true`
 
-Both workflows take a boolean `hosted` input, default `false`. Dispatching
-either with `hosted: true` puts every self-hosted job back on `ubuntu-latest`.
-Use it when:
+Both workflows take a boolean `self_hosted` input, default `false`. A pull
+request always runs hosted, because pull-request events carry no inputs.
+Dispatching with `self_hosted: true` puts every Linux job on the Mac instead,
+which is worth it only when the runner is already online. Keep a run hosted when:
 
-- the Mac is offline and a run must not wait;
+- the Mac is offline;
 - a change needs the Linux-only sandbox coverage (below) proven;
 - a dependency bump looks untrustworthy and should not execute `build.rs` on
   the owner's machine.
 
 ```sh
-gh workflow run ci-full.yml -f hosted=true
+gh workflow run ci-full.yml -f self_hosted=true
 ```
 
 ## What a green run on this runner does not prove
@@ -71,7 +74,7 @@ lint step therefore runs the native binary through
 which requires the exact pinned `1.7.12` on `PATH` and fails with an install
 hint (`brew install actionlint`) otherwise, so the lint surface cannot drift
 because a machine carries a different build. The SHA-pinned
-`rhysd/actionlint:1.7.12` image remains as the `hosted: true` branch.
+`rhysd/actionlint:1.7.12` image is the default hosted branch.
 
 ## Headless by construction
 

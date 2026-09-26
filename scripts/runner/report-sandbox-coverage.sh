@@ -31,7 +31,7 @@ if [ "${backend}" = "none" ]; then
     echo "- **Bubblewrap and AppArmor execution was NOT exercised on this runner.**"
     echo "  Kuzushi resolves \`SandboxBackend::Plain\`, so repository-execution"
     echo "  isolation is unproven by this run. Only a Linux runner"
-    echo "  (\`hosted: true\`, or the monthly hosted sweep) covers it."
+    echo "  (the hosted default, or the monthly hosted sweep) covers it."
   } >>"${summary}"
   echo "::warning title=Sandbox isolation unproven::No isolating sandbox backend on PATH; bubblewrap/AppArmor execution was not exercised."
 else
