@@ -217,5 +217,6 @@ fn recon_nmap_report(run: &ReconNmapRun<'_>, persisted: PersistedReconNmap) -> R
         skipped_out_of_scope: None,
         subdomains: Vec::new(),
         fingerprint: BTreeMap::new(),
+        redirects: None,
     }
 }

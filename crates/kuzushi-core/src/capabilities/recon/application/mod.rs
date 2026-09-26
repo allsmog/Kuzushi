@@ -1,4 +1,5 @@
 mod http_fingerprint;
+mod http_fingerprint_walk;
 mod import_amass;
 mod import_httpx;
 mod import_nmap_xml;
@@ -23,8 +24,8 @@ use crate::capabilities::recon::adapters::{
     ReconSubdomainEnumerator, SubdomainInput,
 };
 use crate::capabilities::recon::domain::{
-    now_isoish, split_host_port, NmapHost, NmapParseResult, NmapService, ReconHost, ReconNote,
-    ReconPersisted, ReconReport, ReconService,
+    now_isoish, NmapHost, NmapParseResult, NmapService, ReconHost, ReconNote, ReconPersisted,
+    ReconReport, ReconService,
 };
 use crate::capabilities::recon::persistence::ReconWorkspaceStore;
 use crate::modules::ToolExecutionContext;
