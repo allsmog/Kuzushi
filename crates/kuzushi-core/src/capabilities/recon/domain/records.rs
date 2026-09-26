@@ -66,4 +66,9 @@ pub(crate) struct ReconReport {
     pub(crate) subdomains: Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) fingerprint: BTreeMap<String, Value>,
+    /// Where a `recon:http-fingerprint` run went before the response it
+    /// describes, for a run that met a redirect. `None` means the requested URL
+    /// answered it, which is every other verb and the ordinary fingerprint.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) redirects: Option<FingerprintRedirects>,
 }

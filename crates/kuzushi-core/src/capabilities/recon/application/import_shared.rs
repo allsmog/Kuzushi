@@ -79,6 +79,7 @@ impl<'a> ReconImportContext<'a> {
             skipped_out_of_scope: Some(self.skipped_out_of_scope),
             subdomains: Vec::new(),
             fingerprint: BTreeMap::new(),
+        redirects: None,
         })
     }
 }

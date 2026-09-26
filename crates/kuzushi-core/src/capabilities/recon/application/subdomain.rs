@@ -32,6 +32,7 @@ pub(crate) fn run_recon_subdomain(
         skipped_out_of_scope: None,
         subdomains,
         fingerprint: BTreeMap::new(),
+        redirects: None,
     })
 }
 
