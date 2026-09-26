@@ -2,8 +2,9 @@
 
 Live policy, alongside `crap-gate.md`.
 
-Kuzushi's routine merge gate runs on the maintainer's machine, not on hosted
-GitHub Actions. This page describes the receipt that makes that run auditable.
+Kuzushi's local merge gate runs on the maintainer's machine; the same quick
+contract also runs on GitHub-hosted `ubuntu-latest` for each ready pull
+request. This page describes the receipt that makes the local run auditable.
 
 ## What this is, and what it is not
 
@@ -26,8 +27,7 @@ A valid receipt is **not**:
 - enforcement — `git push --no-verify` skips the hook entirely, by design;
 - proof the plan is sufficient — the receipt states its own gaps in
   `exceptions[]`, and a `quick` receipt names every CI-only gate it skipped;
-- a substitute for the release pipeline — hosted CI stays release-only
-  (see `RELEASING.md`).
+- a substitute for the release pipeline (see `RELEASING.md`).
 
 ## The commands
 

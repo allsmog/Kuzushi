@@ -17,25 +17,64 @@ impl ReconReport {
                 plural(self.subdomains.len()),
                 self.target
             ),
-            "recon:http-fingerprint" => {
-                let service = self
-                    .services
-                    .first()
-                    .map(|service| {
-                        format!(
-                            "{}:{}",
-                            service.name.as_deref().unwrap_or("http"),
-                            service.port
-                        )
-                    })
-                    .unwrap_or_else(|| "http".to_string());
-                format!(
-                    "recon:http-fingerprint registered {} as {service}",
-                    self.target
-                )
-            }
+            "recon:http-fingerprint" => self.http_fingerprint_output(),
             _ => self.completion_output(),
         }
+    }
+
+    /// What a fingerprint run registered, named as the endpoint that answered
+    /// rather than as the target that was asked for: a redirect moves the
+    /// response, and the row in the recon store belongs to whoever sent it.
+    fn http_fingerprint_output(&self) -> String {
+        let service = self
+            .services
+            .first()
+            .map(|service| {
+                format!(
+                    "{}:{}",
+                    service.name.as_deref().unwrap_or("http"),
+                    service.port
+                )
+            })
+            .unwrap_or_else(|| "http".to_string());
+        let subject = self.fingerprinted_url().unwrap_or(&self.target);
+        format!(
+            "recon:http-fingerprint registered {subject} as {service}{}",
+            self.redirect_disclosure()
+        )
+    }
+
+    /// The URL whose response the fingerprint describes, named only when it is
+    /// not the requested target.
+    fn fingerprinted_url(&self) -> Option<&str> {
+        let redirects = self.redirects.as_ref()?;
+        redirects
+            .followed_from()
+            .and_then(|_| redirects.fetched.last().map(String::as_str))
+    }
+
+    /// The redirects a fingerprint run followed and the one it declined. Silent
+    /// for a run that met none.
+    fn redirect_disclosure(&self) -> String {
+        let Some(redirects) = self.redirects.as_ref() else {
+            return String::new();
+        };
+        let followed = redirects.followed_from().map(|from| {
+            let hops = redirects.hops();
+            format!("followed {hops} redirect{} from {from}", plural(hops))
+        });
+        let declined = redirects.not_followed.as_ref().map(|declined| {
+            format!(
+                "redirect to {} not followed: {}",
+                declined.url,
+                declined.reason.phrase()
+            )
+        });
+        [followed, declined]
+            .into_iter()
+            .flatten()
+            .map(|phrase| format!(" · {phrase}"))
+            .collect()
     }
 
     /// The line a verb outside the three scan verbs above completes with. For a
@@ -342,6 +381,7 @@ mod tests {
             skipped_out_of_scope: Some(1),
             subdomains: Vec::new(),
             fingerprint: BTreeMap::new(),
+                    redirects: None,
         };
 
         let output = report.output();

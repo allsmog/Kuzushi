@@ -306,6 +306,35 @@ Notable changes to Kuzushi. Release procedure lives in
   existing idle tick, at most every two seconds, the shell now stats the
   store's main and WAL files and reloads findings when that identity moved and
   the store's projection watermark differs from the one it last read.
+- `recon:http-fingerprint` no longer leaves the program scope by following a
+  redirect, and no longer files the response under an endpoint that only
+  pointed at it. The fetch ran `curl -i -L`, so the dispatch gate weighed the
+  requested target while curl sent up to fifty further requests to whatever
+  `Location` named — a redirect to a host `.kuzushi/scope.toml` denies was
+  probed anyway, which for a bounty program is a request the operator never
+  authorized. The parser then read the *last* hop's status, headers, server,
+  title, and technologies, while the recon store recorded the host and port of
+  the *requested* target with a scheme guessed from the port number, so one
+  service row mixed two endpoints and could call a cleartext service on 443
+  `https`. The walk now fetches one hop at a time: each `Location` is resolved
+  against the hop that sent it and weighed by the same scope rule the dispatch
+  gate applies before any request reaches it, with a bound of 10 hops. The host,
+  port, and scheme come from the URL that answered, the note records both the
+  requested target and the `fingerprintedUrl`, and the result's `redirects`
+  carries every URL fetched plus any redirect declined with its reason
+  (`out-of-scope`, `hop-limit`). The completion line names the endpoint it
+  registered and discloses both (`recon:http-fingerprint registered
+  https://www.example.com:8443/app as https:8443 · followed 1 redirect from
+  http://www.example.com/`). A target whose port no HTTP client can read is now
+  refused too: `example.com:99999` parsed its port with `unwrap_or(default)` and
+  registered a service on port 80 that nothing had probed.
+
+- CI runs on GitHub-hosted runners by default. Pull-request CI and the Full
+  CI sweep use `ubuntu-latest` (the quick gate is about four billed Linux
+  minutes per run), and release darwin legs use hosted macOS. The owner's
+  self-hosted Mac is now opt-in: dispatch with `self_hosted: true`, or set
+  `KUZUSHI_RELEASE_SELF_HOSTED=true` for one release. Before, every routine job
+  waited on that runner and queued indefinitely whenever it was offline.
 - The campaign folds no longer present a findings ledger they could not read
   as an empty one. `campaign:status` folded its review decisions with
   `list_all_review_decisions().ok().unwrap_or_default()`, so an unopenable

@@ -232,15 +232,15 @@ Four runners produce the five shipped platform payloads:
 | -------------- | --------------------- | ------------------------- |
 | `linux-x64`    | `ubuntu-24.04`        | `ubuntu-24.04`            |
 | `linux-arm64`  | `ubuntu-24.04-arm`    | `ubuntu-24.04-arm`        |
-| `darwin-arm64` | `kuzushi-mac`         | `kuzushi-mac`             |
-| `darwin-x64`   | `kuzushi-mac` (cross) | `kuzushi-mac` (Rosetta)   |
+| `darwin-arm64` | `macos-14`            | `macos-14`                |
+| `darwin-x64`   | `macos-14` (cross)    | `macos-15-intel`          |
 | `win32-x64`    | `windows-2025`        | `windows-2025`            |
 
-`kuzushi-mac` is the owner's self-hosted Apple silicon runner — see
+Releases use those hosted macOS images by default. Passing `hosted: false` (or
+setting the `KUZUSHI_RELEASE_SELF_HOSTED` repository variable) moves every darwin
+leg onto `kuzushi-mac`, the owner's self-hosted Apple silicon runner — see
 [the darwin release legs](#darwin-release-legs-on-the-self-hosted-mac) below for
-its prerequisites and the hosted escape hatch. Passing `hosted: true` (or setting
-the `KUZUSHI_RELEASE_HOSTED` repository variable) restores `macos-14` for
-`darwin-arm64` and `macos-15-intel` for `darwin-x64`.
+its prerequisites.
 
 `darwin-x64` is cross-compiled from the Apple silicon runner with
 `rustup target add x86_64-apple-darwin` followed by a second
@@ -250,8 +250,8 @@ the `KUZUSHI_RELEASE_HOSTED` repository variable) restores `macos-14` for
 crosses cleanly — no openssl, git2, or portable-pty; the tree-sitter grammars
 and bundled `libsqlite3-sys` build through `cc`, wasmtime is cranelift-only, and
 reqwest uses rustls. The x64 payload is still *installed and executed* as an
-Intel payload — on a hosted Intel runner when `hosted: true`, and otherwise
-through Rosetta 2 on the self-hosted Mac — so cross-compilation never replaces
+Intel payload — on the hosted Intel runner by default, or through Rosetta 2 when
+a release opts into the self-hosted Mac — so cross-compilation never replaces
 execution evidence.
 
 To cross-build one platform locally:
@@ -279,13 +279,15 @@ unlocked.
 
 Hosted macOS runners bill at 10x, and a release touches five macOS legs: the
 native build, both local-tarball smokes, and both published-install smokes. All
-five default to the owner's self-hosted Apple silicon runner (labels
-`self-hosted, macOS, ARM64, kuzushi-mac`), so a release spends no hosted macOS
-minutes. Linux and Windows legs are unchanged, and `identity`, `assemble`,
+five run on hosted `macos-14` / `macos-15-intel` by default, because keeping the
+owner's Mac runner online between releases cost more than the occasional hosted
+release. All five stay eligible for that runner (labels
+`self-hosted, macOS, ARM64, kuzushi-mac`) when a release opts in. Linux and
+Windows legs are unchanged, and `identity`, `assemble`,
 `publish-npm`, and `github-release` stay pinned to `ubuntu-24.04` — they hold
 `NPM_TOKEN` or `contents: write`, which must never reach a persistent machine.
 
-**Owner prerequisites**, one time on the Mac:
+**Owner prerequisites** for opting in, one time on the Mac:
 
 ```sh
 softwareupdate --install-rosetta --agree-to-license   # translate the x64 payload
@@ -298,18 +300,19 @@ The x64 Node is not optional for the `darwin-x64` legs: npm gates
 platform package. The workflow puts `vars.KUZUSHI_X64_NODE_PREFIX` (default
 `/usr/local`) first on `PATH` and fails the leg loudly if no x64 Node is there.
 
-**Escape hatch.** To run one release entirely on hosted macOS — the Mac is
-offline, mid-upgrade, or suspect:
+**Opting in.** To run one release on the self-hosted Mac, bring the runner
+online, then:
 
 ```sh
-gh variable set KUZUSHI_RELEASE_HOSTED --body true
-git push origin vX.Y.Z          # this release runs on macos-14 / macos-15-intel
-gh variable delete KUZUSHI_RELEASE_HOSTED
+gh variable set KUZUSHI_RELEASE_SELF_HOSTED --body true
+git push origin vX.Y.Z          # this release's darwin legs run on kuzushi-mac
+gh variable delete KUZUSHI_RELEASE_SELF_HOSTED
 ```
 
-`release.yml` forwards `hosted: ${{ vars.KUZUSHI_RELEASE_HOSTED == 'true' }}` to
-both the candidate and the published smoke, so the one variable moves every
-darwin leg. `workflow_dispatch` on either workflow exposes `hosted` directly.
+`release.yml` forwards `hosted: ${{ vars.KUZUSHI_RELEASE_SELF_HOSTED != 'true' }}`
+to both the candidate and the published smoke, so the one variable moves every
+darwin leg. `workflow_dispatch` on either workflow exposes `hosted` directly
+(default `true`).
 
 Full detail, including how a translated leg proves it smoked the Intel payload,
 is in [docs/quality/release-legs-self-hosted.md](./docs/quality/release-legs-self-hosted.md).

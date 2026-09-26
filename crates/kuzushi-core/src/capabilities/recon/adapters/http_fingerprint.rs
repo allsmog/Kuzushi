@@ -19,7 +19,6 @@ impl HttpFingerprintInput {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReconHttpFingerprinter {
-    pub(crate) target: String,
     pub(crate) binary: String,
     pub(crate) timeout_seconds: u64,
 }
@@ -27,21 +26,22 @@ pub(crate) struct ReconHttpFingerprinter {
 impl ReconHttpFingerprinter {
     pub(crate) fn from_input(input: &HttpFingerprintInput) -> Self {
         Self {
-            target: input.target.clone(),
             binary: input.binary.clone(),
             timeout_seconds: input.timeout_seconds,
         }
     }
 
-    pub(crate) fn fingerprint(&self, cancel: &ScanCancellation) -> Result<HttpFingerprint> {
-        let target = ensure_http_scheme(&self.target);
+    /// Fetch exactly one URL. Redirects are deliberately not followed here:
+    /// `-L` would send the next request before anything could weigh the host it
+    /// names against `.kuzushi/scope.toml`, and would leave the response
+    /// attributed to the endpoint that had only pointed elsewhere.
+    pub(crate) fn fetch(&self, url: &str, cancel: &ScanCancellation) -> Result<HttpFingerprint> {
         let args = vec![
             "-i".to_string(),
-            "-L".to_string(),
             "-sS".to_string(),
             "--max-time".to_string(),
             self.timeout_seconds.to_string(),
-            target,
+            url.to_string(),
         ];
         let output = run_subprocess(
             "recon:http-fingerprint",

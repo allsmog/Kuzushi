@@ -97,7 +97,8 @@ impl ShellApp {
     }
 
     /// 3D playground controls (active only while `ShellView::Scene` is open and
-    /// the prompt is empty): cycle scenes, pause, reset, and orbit by keyboard.
+    /// Prompt mode is not mid-draft): cycle scenes, pause, reset, and orbit by
+    /// keyboard.
     pub(super) fn handle_scene_view_key(
         &mut self,
         key: KeyEvent,
@@ -109,13 +110,25 @@ impl ShellApp {
         // Gallery hotkeys yield to the prompt the moment the operator starts
         // typing — otherwise `back`/`home` are untypeable on the 3D page
         // (h/j/k/l would orbit the camera instead of reaching the prompt).
-        if !self.input().is_empty() {
+        // Only Prompt mode extends that draft, so the yield is Prompt's alone:
+        // a draft preserved into Navigate used to disarm the whole gallery,
+        // which turned `q` — the advertised way out of a leaf view — into one
+        // more character of the draft and left the operator inside the view
+        // they asked to leave.
+        if self.composer_is_mid_draft() {
             return InputUpdate::ignored();
         }
         match target {
             GalleryKeyTarget::EmbeddedMap => self.handle_embedded_map_gallery_key(key),
             GalleryKeyTarget::FullScene => self.handle_full_scene_view_key(key),
         }
+    }
+
+    /// `true` while the composer is mid-draft in the one mode that extends a
+    /// draft. This is `view_key_navigation_is_active`'s rule from the other
+    /// side: Navigate owns view controls whatever the composer still holds.
+    fn composer_is_mid_draft(&self) -> bool {
+        self.input_mode() == InputMode::Prompt && !self.input().is_empty()
     }
 
     fn gallery_key_target(&self, modifiers: KeyModifierState) -> Option<GalleryKeyTarget> {
@@ -717,6 +730,60 @@ mod tests {
         );
         assert_eq!(app.input(), "draft5");
         assert_eq!(app.input_mode(), InputMode::Prompt);
+    }
+
+    /// The `/scene` gallery is a leaf view whose own keys are the only way to
+    /// cycle or leave it. A draft preserved into Navigate mode used to disarm
+    /// every one of them: `Tab` did nothing at all and `q` was typed into the
+    /// draft, leaving the operator inside the view they asked to leave.
+    #[test]
+    fn navigate_mode_keeps_gallery_keys_active_with_a_preserved_draft() {
+        let (_target, mut app) = scene_gallery_app(InputMode::Navigate, "preserved draft");
+        let before = app.router.scene().page();
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert!(update.handled);
+        assert_ne!(app.router.scene().page(), before);
+        assert_eq!(app.input(), "preserved draft");
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+    }
+
+    #[test]
+    fn navigate_mode_gallery_exit_leaves_the_scene_instead_of_typing() {
+        let (_target, mut app) = scene_gallery_app(InputMode::Navigate, "preserved draft");
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+
+        assert!(update.handled);
+        assert_ne!(app.shell_view(), ShellView::Scene);
+        // The view it lands on owns its own composer mode; what matters here
+        // is that the draft survived instead of absorbing the exit key.
+        assert_eq!(app.input(), "preserved draft");
+    }
+
+    /// Prompt mode still owns a draft in progress, so the gallery keeps
+    /// yielding the printable keys `back`/`home` are spelled with.
+    #[test]
+    fn prompt_mode_gallery_keys_still_extend_the_draft() {
+        let (_target, mut app) = scene_gallery_app(InputMode::Prompt, "draft");
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+
+        assert!(update.handled);
+        assert_eq!(app.shell_view(), ShellView::Scene);
+        assert_eq!(app.input(), "draftq");
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+    }
+
+    fn scene_gallery_app(mode: InputMode, draft: &str) -> (tempfile::TempDir, ShellApp) {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.set_shell_view(ShellView::Scene);
+        app.set_input(draft);
+        app.set_input_mode(mode);
+        (target, app)
     }
 
     #[test]

@@ -572,6 +572,15 @@ and the importers do with it: `10.0.0.1-2` is a domain name to them and resolves
 to whatever DNS answers with, so it is judged as the one host it is and not as
 the pair it reads like.
 
+A redirect is not consent to leave the scope file. `recon:http-fingerprint`
+follows redirects one hop at a time and judges each `Location` by the same rule
+before the request is sent, so a redirect to a host the file refuses is declined
+and named rather than probed. The walk stops after 10 hops, and
+`timeoutSeconds` bounds each hop rather than the chain. The endpoint that
+answered — not the target that was asked for — is what the recon store records,
+including the scheme the fetch actually spoke, and the result's `redirects`
+carries every URL fetched plus any redirect declined with its reason.
+
 ## Patch application and re-verification
 
 `PatchResult` controls patch synthesis and disposable-worktree validation only.

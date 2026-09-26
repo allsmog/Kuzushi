@@ -262,6 +262,217 @@ HTTP
         );
     }
 
+    /// A curl stand-in that answers per requested URL and records every URL it
+    /// was asked for, so a test can prove which requests were actually sent.
+    #[cfg(unix)]
+    fn write_recording_curl(path: &Path, log: &Path, cases: &[(&str, &str)]) {
+        let branches: String = cases
+            .iter()
+            .map(|(url, response)| {
+                format!(
+                    "  {url})\n    cat <<'HTTP'\n{response}\nHTTP\n    ;;\n",
+                    url = url,
+                    response = response
+                )
+            })
+            .collect();
+        write_executable(
+            path,
+            &format!(
+                "#!/bin/sh\nPATH=/usr/bin:/bin\nfor arg in \"$@\"; do url=\"$arg\"; done\n\
+                 printf '%s\\n' \"$url\" >> {log}\ncase \"$url\" in\n{branches}  *)\n    \
+                 printf 'HTTP/1.1 599 Unexpected\\r\\n\\r\\n'\n    ;;\nesac\n",
+                log = log.display(),
+                branches = branches
+            ),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn http_fingerprint_registers_the_endpoint_that_answered_the_redirect() {
+        // `curl -L` followed redirects and the run still filed the response
+        // under the requested target's host, port, and port-guessed scheme, so
+        // a service row described an endpoint that had only pointed elsewhere.
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("curl");
+        let log = temp.path().join("requests.log");
+        write_recording_curl(
+            &binary,
+            &log,
+            &[
+                (
+                    "http://www.example.com/",
+                    "HTTP/1.1 301 Moved Permanently\r\nLocation: https://www.example.com:8443/app\r\n\r\n",
+                ),
+                (
+                    "https://www.example.com:8443/app",
+                    "HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n<html><title>Acme</title></html>",
+                ),
+            ],
+        );
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let result = execute_recon_tool(
+            "recon:http-fingerprint",
+            json!({"target":"www.example.com","binary":binary.display().to_string()}),
+            &ctx,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/services/0/port").and_then(Value::as_u64),
+            Some(8443)
+        );
+        assert_eq!(
+            result.pointer("/data/services/0/name").and_then(Value::as_str),
+            Some("https")
+        );
+        assert_eq!(
+            result.pointer("/data/fingerprint/server").and_then(Value::as_str),
+            Some("nginx")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/redirects/fetched")
+                .and_then(Value::as_array)
+                .map(|fetched| fetched
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()),
+            Some(vec![
+                "http://www.example.com/",
+                "https://www.example.com:8443/app"
+            ])
+        );
+        let output = result["output"].as_str().unwrap();
+        assert!(
+            output.contains("registered https://www.example.com:8443/app as https:8443"),
+            "got: {output}"
+        );
+        assert!(
+            output.contains("followed 1 redirect from http://www.example.com/"),
+            "got: {output}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_redirect_out_of_scope_is_never_requested() {
+        // The dispatch gate weighs only the requested target. Following a
+        // redirect with `-L` sent the next request before anything could weigh
+        // the host it named, so a redirect reached hosts the program had put
+        // out of scope.
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("curl");
+        let log = temp.path().join("requests.log");
+        write_recording_curl(
+            &binary,
+            &log,
+            &[(
+                "http://www.example.com/",
+                "HTTP/1.1 302 Found\r\nLocation: https://cdn.out-of-scope.test/app\r\n\r\n",
+            )],
+        );
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let scope_dir = temp.path().join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[in_scope]\nhosts = [\"www.example.com\"]\n",
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let result = execute_recon_tool(
+            "recon:http-fingerprint",
+            json!({"target":"www.example.com","binary":binary.display().to_string()}),
+            &ctx,
+        )
+        .unwrap();
+
+        let requested = fs::read_to_string(&log).unwrap();
+        assert_eq!(requested.lines().collect::<Vec<_>>(), vec!["http://www.example.com/"]);
+        assert_eq!(
+            result
+                .pointer("/data/redirects/notFollowed/url")
+                .and_then(Value::as_str),
+            Some("https://cdn.out-of-scope.test/app")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/redirects/notFollowed/reason")
+                .and_then(Value::as_str),
+            Some("out-of-scope")
+        );
+        let output = result["output"].as_str().unwrap();
+        assert!(
+            output.contains(
+                "redirect to https://cdn.out-of-scope.test/app not followed: out of scope"
+            ),
+            "got: {output}"
+        );
+        // The endpoint that answered is still the requested one.
+        assert_eq!(
+            result.pointer("/data/services/0/port").and_then(Value::as_u64),
+            Some(80)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fingerprint_without_a_redirect_discloses_none() {
+        let temp = tempfile::tempdir().unwrap();
+        let binary = temp.path().join("curl");
+        let log = temp.path().join("requests.log");
+        write_recording_curl(
+            &binary,
+            &log,
+            &[(
+                "https://www.example.com/",
+                "HTTP/1.1 200 OK\r\nServer: nginx\r\n\r\n<html><title>Acme</title></html>",
+            )],
+        );
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let result = execute_recon_tool(
+            "recon:http-fingerprint",
+            json!({"target":"https://www.example.com","binary":binary.display().to_string()}),
+            &ctx,
+        )
+        .unwrap();
+
+        assert!(result.pointer("/data/redirects").is_none());
+        let output = result["output"].as_str().unwrap();
+        assert_eq!(
+            output,
+            "recon:http-fingerprint registered https://www.example.com as https:443"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_target_port_is_refused_before_any_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let error = execute_recon_tool(
+            "recon:http-fingerprint",
+            json!({"target":"www.example.com:99999"}),
+            &ctx,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("could not read target"), "got: {error}");
+    }
+
     #[test]
     fn missing_nmap_binary_error_is_actionable() {
         let temp = tempfile::tempdir().unwrap();
@@ -355,14 +566,15 @@ authorization: Default::default(),
             "#!/bin/sh\nsleep 5\nprintf 'HTTP/1.1 200 OK\\n\\n'\n",
         );
         let fingerprinter = ReconHttpFingerprinter {
-            target: "http://example.com".to_string(),
             binary: binary.display().to_string(),
             timeout_seconds: 10,
         };
         let cancellation = ScanCancellation::default();
         let worker_cancellation = cancellation.clone();
         let started_at = Instant::now();
-        let worker = thread::spawn(move || fingerprinter.fingerprint(&worker_cancellation));
+        let worker = thread::spawn(move || {
+            fingerprinter.fetch("http://example.com/", &worker_cancellation)
+        });
         thread::sleep(Duration::from_millis(200));
         cancellation.cancel();
         let error = worker.join().unwrap().unwrap_err().to_string();
