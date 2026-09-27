@@ -29,13 +29,12 @@ fn an_unlistable_directory_is_recorded_rather_than_read_as_empty() {
 
 #[test]
 fn a_fully_read_tree_discloses_no_gap() {
+    // No credential shape here on purpose: this test is about coverage
+    // accounting, and the leak fixtures the secret gate approves live under
+    // `tests/fixtures/secret-scan/leaks/`.
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir(temp.path().join("src")).unwrap();
-    fs::write(
-        temp.path().join("src/config.env"),
-        "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF\n",
-    )
-    .unwrap();
+    fs::write(temp.path().join("src/config.env"), "LOG_LEVEL=debug\n").unwrap();
 
     let report = scan_for_secrets(
         temp.path(),
@@ -44,6 +43,7 @@ fn a_fully_read_tree_discloses_no_gap() {
     )
     .unwrap();
 
+    assert_eq!(report.files_scanned, 1);
     assert!(report.coverage_gaps.is_empty());
     assert!(!report.output().contains("Unread paths"));
     assert_eq!(
