@@ -33,15 +33,20 @@ A2-10 (`artifacts.json` dedupes run-relative paths), A2-11, A2-12, A2-13, A3-16,
 A3-23, and A3-24's partial result (a violated coverage invariant already
 returns `status: partial`).
 
-Still open: A1-2b (no ETA, repeated cost wording), A1-6 (`run <tool> {}`
-remains the escape hatch by design), A1-7 mid-word DFD label truncation,
-A1-11(a) (raw bridge errors withheld by policy), A1-13 facet chips,
-A2-2 (needs a live check at 120x36), A2-6 (the OAuth credential choice
-switches the model with a notice but no consent step), A3-15 (bound keys still
-fire as hotkeys in Navigate), A3-17 (phase chip flip, path-dependent),
-A3-22 (OAuth completeness classification), A3-24(b/c) (no validation failure
-for heavy drops, no single-pipeline gap fill), and the threat-intel Bazel
-fallback.
+Fixed in the follow-up sweep: A1-2b (Run Focus ETA from the bound tool's
+history; the rail no longer repeats Run Focus cost), A1-7 mid-word DFD label
+truncation (`fit_words`), A1-13's header chips (search terms render as facet
+chips), A2-6 (the OAuth credential choice now asks before switching the model
+and names the real target), A3-15 (state-changing Navigate hotkeys announce
+themselves; movement keys stay quiet), A3-17 (an ad-hoc Map tool run holds the
+phase chip), A3-24(b/c) (single-pipeline gap fill plus a `minCoverage` refusal
+floor), and the threat-intel Bazel fallback (enclosing workspace root; empty
+inventory is `partial`).
+
+Still open: A1-6 (`run <tool> {}` remains the escape hatch by design),
+A1-11(a) (raw bridge errors withheld by policy), A1-13's interactive facet
+cursor, A2-2 (needs a live check at 120x36), and A3-22 (OAuth completeness
+classification).
 
 ## Audit 1 — monorepo / edge-gateway walkthrough
 

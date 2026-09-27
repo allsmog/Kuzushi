@@ -25,6 +25,7 @@ fn parse_generation_build_input(input: &Value) -> Result<BuildInput> {
         mode: read_build_mode(input)?,
         seed_mode: read_seed_mode(input)?,
         budget_usd: read_budget_usd(input)?,
+        min_coverage: read_min_coverage(input)?,
         history_depth: read_usize(input, &["historyDepth", "history_depth"], 300, 0),
         variant_scan: read_bool(input, &["variantScan", "variant_scan"], true),
         advisories: read_advisories(input)?,
@@ -397,6 +398,24 @@ fn read_budget_usd(input: &Value) -> Result<Option<f64>> {
         "threat-model:build budgetUsd must be a positive number, got {budget}"
     );
     Ok(Some(budget))
+}
+
+/// The default refuses a model that accounts for fewer than half of the
+/// grounded entry points it was shown.
+const DEFAULT_MIN_COVERAGE: f64 = 0.5;
+
+fn read_min_coverage(input: &Value) -> Result<f64> {
+    let Some(value) = input.get("minCoverage").or_else(|| input.get("min_coverage")) else {
+        return Ok(DEFAULT_MIN_COVERAGE);
+    };
+    let floor = value
+        .as_f64()
+        .context("threat-model:build minCoverage must be a number")?;
+    anyhow::ensure!(
+        (0.0..=1.0).contains(&floor),
+        "threat-model:build minCoverage must be between 0 and 1, got {floor}"
+    );
+    Ok(floor)
 }
 
 fn context_limit(input: &Value) -> usize {

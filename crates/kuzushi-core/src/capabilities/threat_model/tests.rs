@@ -12835,7 +12835,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         let result = registry
             .execute_tool_with_runtime(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
                 Some(&runtime),
             )
@@ -12853,7 +12853,9 @@ pub fn accepts_scope(scope: &str) -> bool {
             json!(false),
             "sample document never mentions src/admin.js, so the detected route must be a gap"
         );
-        assert_eq!(coverage["gapFillMethod"], json!("unresolved"));
+        // The mock answers one call, so the single-pipeline repair attempt
+        // fails and is disclosed instead of discarding the model.
+        assert_eq!(coverage["gapFillMethod"], json!("gap-fill-failed"));
         assert!(coverage["gaps"]
             .as_array()
             .is_some_and(|gaps| gaps.iter().any(|gap| gap["path"] == json!("src/admin.js"))));
@@ -12893,6 +12895,52 @@ pub fn accepts_scope(scope: &str) -> bool {
             "trustedCallers": [],
         });
         document
+    }
+
+    #[test]
+    fn threat_model_build_below_the_coverage_floor_is_refused_and_not_saved() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/admin.js"),
+            "const express = require('express');\nconst app = express();\napp.get('/admin/debug', (req, res) => res.send('ok'));\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let error = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("below minCoverage 0.5"), "{error:#}");
+        assert!(
+            crate::capabilities::threat_model::try_load_persistent_threat_model(temp.path())
+                .unwrap()
+                .is_none(),
+            "a refused build must not become the persisted model"
+        );
     }
 
     #[test]
@@ -12983,7 +13031,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         let result = registry
             .execute_tool_with_runtime(
                 "threat-model:build",
-                json!({"seedMode": "fresh", "preserveUserEdits": false}),
+                json!({"seedMode": "fresh", "preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
                 Some(&runtime),
             )
@@ -13041,7 +13089,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         let result = registry
             .execute_tool_with_runtime(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
                 Some(&runtime),
             )

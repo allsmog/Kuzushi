@@ -343,6 +343,14 @@ fn threat_model_budget_options() -> Vec<OptionSpec> {
         .aliases(&["budget_usd"])
         .advanced(),
         opt(
+            "minCoverage",
+            OptionType::Float,
+            "Smallest share (0-1) of grounded entry points a build must cover to be saved; below it the build is refused.",
+        )
+        .aliases(&["min_coverage"])
+        .default(json!(0.5))
+        .advanced(),
+        opt(
             "historyDepth",
             OptionType::Int,
             "Commits of git history mined for security fixes in the staged pipeline (0 disables).",

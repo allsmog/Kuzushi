@@ -392,7 +392,67 @@ fn collect_packages(target: &Path) -> Result<Vec<Value>> {
     if entries.is_empty() {
         collect_nested_go_modules(target, &mut entries)?;
     }
+    if entries.is_empty() {
+        collect_enclosing_bazel_workspace_deps(target, &mut entries)?;
+    }
     Ok(entries)
+}
+
+/// A Bazel monorepo sub-module usually holds only `BUILD` files; the Go
+/// module and repository rules live at the workspace root above it. Read
+/// that root (never above the enclosing git root), confined to it.
+fn collect_enclosing_bazel_workspace_deps(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let Some(root) = enclosing_bazel_workspace_root(target) else {
+        return Ok(());
+    };
+    collect_go_modules_at(&root, &root.join("go.mod"), entries)?;
+    for path in bazel_root_manifest_paths(&root) {
+        let Some(body) = read_optional_threat_intel_input(&root, &path)? else {
+            continue;
+        };
+        collect_bazel_dep_rules(&body, entries);
+        collect_go_repository_rules(&body, entries);
+    }
+    Ok(())
+}
+
+const BAZEL_WORKSPACE_MARKERS: [&str; 3] = ["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"];
+const MAX_BAZEL_ROOT_ASCENT: usize = 16;
+
+/// The nearest strict ancestor of `target` that marks a Bazel workspace,
+/// searched no higher than the enclosing git root.
+fn enclosing_bazel_workspace_root(target: &Path) -> Option<std::path::PathBuf> {
+    for ancestor in target.ancestors().skip(1).take(MAX_BAZEL_ROOT_ASCENT) {
+        if is_bazel_workspace_root(ancestor) {
+            return Some(ancestor.to_path_buf());
+        }
+        if ancestor.join(".git").exists() {
+            return None;
+        }
+    }
+    None
+}
+
+fn is_bazel_workspace_root(directory: &Path) -> bool {
+    BAZEL_WORKSPACE_MARKERS
+        .iter()
+        .any(|marker| directory.join(marker).is_file())
+}
+
+/// Root manifests plus top-level `*.bzl` macro files such as `deps.bzl`,
+/// where `go_repository` rules are commonly declared.
+fn bazel_root_manifest_paths(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut paths: BTreeSet<std::path::PathBuf> =
+        BAZEL_WORKSPACE_MARKERS.iter().map(|marker| root.join(marker)).collect();
+    if let Ok(children) = std::fs::read_dir(root) {
+        paths.extend(
+            children
+                .flatten()
+                .map(|child| child.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "bzl")),
+        );
+    }
+    paths.into_iter().collect()
 }
 
 fn collect_npm_packages(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
@@ -816,7 +876,7 @@ fn discover_response(
         if packages.len() == 1 { "" } else { "s" },
         path.display()
     );
-    crate::module_result::completed_output_result(
+    let result = crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({
@@ -825,7 +885,21 @@ fn discover_response(
             "technologies": technologies,
             "packageCount": packages.len(),
         }),
-    )
+    );
+    disclose_empty_package_inventory(result, packages.is_empty())
+}
+
+/// Zero packages is not a clean inventory: no supported manifest was found
+/// here or at an enclosing Bazel workspace root, so CVE harvest has nothing
+/// to work from. Say so instead of reporting `completed`.
+fn disclose_empty_package_inventory(mut result: Value, empty: bool) -> Value {
+    if empty {
+        result["status"] = json!("partial");
+        result["warnings"] = json!([
+            "no dependency manifest found (package.json, Cargo.toml, requirements, go.mod, MODULE.bazel/WORKSPACE, or *.bzl at an enclosing Bazel root); the CVE inventory is empty"
+        ]);
+    }
+    result
 }
 
 fn emit_discover_start(ctx: &ToolExecutionContext<'_>, target: &Path) {
@@ -976,6 +1050,56 @@ go_mod_download(
             entry.get("name").and_then(Value::as_str) == Some("google.golang.org/grpc")
                 && entry.get("scope").and_then(Value::as_str) == Some("go_mod_download")
         }));
+    }
+
+    #[test]
+    fn a_bazel_sub_module_reads_its_enclosing_workspace_root() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".git")).unwrap();
+        std::fs::write(root.path().join("WORKSPACE"), BAZEL_WORKSPACE_FIXTURE).unwrap();
+        std::fs::write(
+            root.path().join("deps.bzl"),
+            "def go_deps():\n    go_repository(\n        name = \"com_github_pkg_errors\",\n        importpath = \"github.com/pkg/errors\",\n        version = \"v0.9.1\",\n    )\n",
+        )
+        .unwrap();
+        let target = root.path().join("services/gateway");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("BUILD.bazel"), "go_library(name = \"gateway\")\n").unwrap();
+
+        let packages = collect_packages(&target).unwrap();
+
+        let names: Vec<&str> = packages
+            .iter()
+            .filter_map(|entry| entry.get("name").and_then(Value::as_str))
+            .collect();
+        assert!(names.contains(&"github.com/gorilla/mux"), "{names:?}");
+        assert!(names.contains(&"github.com/pkg/errors"), "{names:?}");
+    }
+
+    #[test]
+    fn the_bazel_root_search_stops_at_the_git_root() {
+        let outer = tempfile::tempdir().unwrap();
+        std::fs::write(outer.path().join("WORKSPACE"), BAZEL_WORKSPACE_FIXTURE).unwrap();
+        let repo = outer.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let target = repo.join("svc");
+        std::fs::create_dir_all(&target).unwrap();
+
+        assert!(enclosing_bazel_workspace_root(&target).is_none());
+        assert!(collect_packages(&target).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_inventory_is_reported_partial_with_a_reason() {
+        let result = discover_response(Path::new("/t"), Path::new("/t/c.json"), &[], &[]);
+
+        assert_eq!(result["status"], "partial");
+        assert!(result["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("no dependency manifest"));
+        let found = discover_response(Path::new("/t"), Path::new("/t/c.json"), &[], &[json!({})]);
+        assert_eq!(found["status"], "completed");
     }
 
     fn write_bazel_package_fixture(target: &Path) {

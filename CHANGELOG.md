@@ -45,6 +45,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A single-pipeline `threat-model:build` that misses grounded entry points
+  now runs one bounded gap-fill call when budget remains, as the staged
+  pipeline and refine already did. Before, it only labelled the gaps
+  `unresolved`. After that, a build that still covers less than the new
+  `minCoverage` option (default 0.5) is refused rather than saved. A
+  single-pipeline Juice Shop build had been persisted at 0/40 entry points
+  covered. A failed gap-fill call keeps the model and records
+  `gap-fill-failed`.
+- `threat-intel:discover` on a Bazel sub-module without manifests of its own
+  reads the enclosing workspace root's `go.mod`, `MODULE.bazel`/`WORKSPACE`,
+  and top-level `*.bzl` `go_repository` rules. It never reads above the git
+  root, and reads stay confined to that root. An empty package inventory is
+  now `partial` with a reason instead of a clean `completed`.
 - TUI polish from the operator feedback sweep:
   - In Navigate mode, a letter hotkey that changes state (suppress, decide,
     pause, …) shows a notice naming what it did and that Esc returns to typing.

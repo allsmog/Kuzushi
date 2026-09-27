@@ -1,5 +1,6 @@
 pub(crate) use coverage::*;
 pub(crate) use evidence::*;
+pub(crate) use gap_fill::run_gap_fill;
 pub(crate) use pipeline::*;
 pub(crate) use provenance::*;
 pub(crate) use refine::*;
