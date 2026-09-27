@@ -74,7 +74,7 @@ Notable changes to Kuzushi. Release procedure lives in
   configured, now records its run as `blocked` rather than `failed`. That
   matches the artifact contract. The refusal message is unchanged.
 - KWP brokered network fetches ignore proxy environment variables and dial
-  only the validated, pinned address. Before, with `HTTPS_PROXY` set, the
+  only the approved, pinned address. Before, with `HTTPS_PROXY` set, the
   request went through the proxy, which resolved the host itself and bypassed
   the pin.
 - Pull-request CI now runs clippy and the full Rust test suite (`rust-tests`)

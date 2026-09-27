@@ -92,9 +92,9 @@ enum NetTransportPolicy {
     HttpsNoRedirect,
 }
 
-/// The client dials only the validated, pinned address. Proxy environment
-/// variables are ignored: a proxy would re-resolve the host itself and bypass
-/// the address that brokered egress validated.
+/// The client dials only the pinned address that brokered egress approved.
+/// Proxy environment variables are ignored: a proxy would re-resolve the host
+/// itself and bypass that approved address.
 fn build_net_client(key: &NetClientKey) -> Result<reqwest::blocking::Client, KwpError> {
     reqwest::blocking::Client::builder()
         .no_proxy()
