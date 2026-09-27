@@ -466,9 +466,21 @@ fn legacy_inference_applies(app: &ShellApp, phase: WorkflowPhase) -> bool {
 /// dispatched cannot suppress inference forever.
 fn phase_attempt_in_flight(app: &ShellApp, phase: WorkflowPhase) -> bool {
     app.jobs().has_running_job()
-        && app.activity().is_some_and(|session| {
-            session.origin_phase == Some(phase) && session.completed_at.is_none()
-        })
+        && (run_focus_phase_in_flight(app, phase) || running_tool_serves_phase(app, phase))
+}
+
+fn run_focus_phase_in_flight(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    app.activity().is_some_and(|session| {
+        session.origin_phase == Some(phase) && session.completed_at.is_none()
+    })
+}
+
+/// An ad-hoc run (`run context:build`, an agent launch) carries no origin
+/// phase, yet its tool still writes that phase's artifacts while it runs.
+fn running_tool_serves_phase(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    app.running_tool_name()
+        .and_then(kuzushi_core::modules::autonomy::tool_phase)
+        == Some(phase)
 }
 
 /// Returns whether an accepted checkpoint was a partial result explicitly
@@ -2042,6 +2054,33 @@ mod tests {
             Some("Map 1/5"),
             "the phase chip must not flip to Scan mid-run"
         );
+    }
+
+    #[test]
+    fn ad_hoc_map_tool_run_keeps_the_phase_chip_on_map() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+        let tool = "entry-points:extract";
+        assert_eq!(
+            kuzushi_core::modules::autonomy::tool_phase(tool),
+            Some(WorkflowPhase::Map)
+        );
+        let mut app = hydrated_app(&workspace, vec![ViewHydrationKey::MapArtifacts]);
+        let _ticket = app.jobs_mut().start(crate::app::JobKind::Run, tool);
+        // A direct `run` carries no Run Focus origin phase.
+        app.runtime_state.tool_run_mut().start(
+            tool.to_string(),
+            kuzushi_core::ScanCancellation::default(),
+            "adhoc-run-1".to_string(),
+            target.path().to_path_buf(),
+            None,
+        );
+
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(!journey.progress.map_checkpoint);
+        assert_eq!(journey.current, WorkflowPhase::Map);
     }
 
     #[test]

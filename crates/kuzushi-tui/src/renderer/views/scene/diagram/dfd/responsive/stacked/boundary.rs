@@ -189,7 +189,7 @@ fn draw_node(
     flow_id: Option<&str>,
     rect: Rect,
 ) {
-    let label = fit(
+    let label = crate::renderer::shared::text::fit_words(
         &node_graph_label(diagram, node_id, flow_id),
         rect.width.saturating_sub(3) as usize,
     );

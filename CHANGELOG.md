@@ -45,6 +45,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- TUI polish from the operator feedback sweep:
+  - In Navigate mode, a letter hotkey that changes state (suppress, decide,
+    pause, …) shows a notice naming what it did and that Esc returns to typing.
+    Movement keys stay quiet.
+  - The phase chip no longer flips to Scan while an ad-hoc Map tool
+    (`run entry-points:extract`, an agent launch) is still writing artifacts.
+  - DFD node labels cut at a whole word instead of mid-word.
+  - The Findings header shows active search terms as facet chips
+    (`sev:high tool:semgrep text:"sqli"`) rather than the raw query.
+  - Run Focus shows an ETA for planned variant rows such as
+    `threat-model:build[stride]` from that tool's history, and the context
+    rail no longer repeats the cost the Run Focus header already shows.
 - A tool refused before doing any work, for example because no model is
   configured, now records its run as `blocked` rather than `failed`. That
   matches the artifact contract. The refusal message is unchanged.

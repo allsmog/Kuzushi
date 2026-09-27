@@ -321,9 +321,19 @@ fn reconciliation_filter_chips(
     let filters = combined_filter_label(active_filter, component);
     let filters = backlog_filter_chips(filters, backlog);
     match search {
-        Some(query) => join_filter_label(filters, format!("search:\"{query}\"")),
+        Some(query) => join_filter_label(filters, search_chip_label(query)),
         None => filters,
     }
+}
+
+/// Active search terms as the same facet chips the search bar shows
+/// (`sev:high tool:semgrep text:"sqli"`), never the raw query string.
+fn search_chip_label(query: &str) -> String {
+    let chips = super::finding_search::FindingSearch::parse(query).chips(false);
+    if chips.is_empty() {
+        return format!("search:\"{query}\"");
+    }
+    chips.join(" ")
 }
 
 fn backlog_filter_chips(mut filters: String, backlog: &BacklogReconciliationState) -> String {

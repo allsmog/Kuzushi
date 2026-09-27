@@ -52,6 +52,38 @@ pub(crate) fn fit_path(value: &str, max_chars: usize) -> String {
     format!("…{tail}")
 }
 
+/// Fit a human label (a DFD node name, a component) to `max_chars`, cutting
+/// only at a word boundary so no word is shown half-cut. Boundaries are
+/// spaces, `_`, `/`, and `-`; at least the first word is kept, and it is cut
+/// mid-word only when that single word alone is too wide. Truncation is
+/// marked with the same `...` as `fit`.
+pub(crate) fn fit_words(value: &str, max_chars: usize) -> String {
+    if max_chars <= 3 || display_width(value) <= max_chars {
+        return fit(value, max_chars);
+    }
+    let head = take_columns(value, max_chars - 3);
+    let next = value[head.len()..].chars().next();
+    if next.is_some_and(is_label_word_boundary) {
+        return format!("{}...", head.trim_end_matches(is_label_word_boundary));
+    }
+    let kept = last_label_word_end(&head).map_or(head.as_str(), |end| &head[..end]);
+    format!("{kept}...")
+}
+
+fn is_label_word_boundary(ch: char) -> bool {
+    matches!(ch, ' ' | '_' | '/' | '-')
+}
+
+/// End of the last complete word in `head`, if any word precedes a boundary.
+fn last_label_word_end(head: &str) -> Option<usize> {
+    head.char_indices()
+        .filter(|(_, ch)| is_label_word_boundary(*ch))
+        .map(|(idx, _)| idx)
+        .filter(|idx| head[..*idx].chars().any(|ch| !is_label_word_boundary(ch)))
+        .last()
+        .map(|idx| head[..idx].trim_end_matches(is_label_word_boundary).len())
+}
+
 fn fit_with_ellipsis(value: &str, max_chars: usize) -> String {
     let budget = max_chars.saturating_sub(3);
     let head = take_columns(value, budget);
@@ -310,5 +342,35 @@ mod fit_path_tests {
 
         assert_eq!(lines, vec!["?"]);
         assert!(lines.iter().all(|line| display_width(line) <= 1));
+    }
+}
+
+#[cfg(test)]
+mod fit_words_tests {
+    use super::fit_words;
+
+    #[test]
+    fn cuts_at_the_last_whole_word() {
+        assert_eq!(fit_words("Bluejay authorization service", 16), "Bluejay...");
+        assert_eq!(
+            fit_words("edge-gateway ingress router", 20),
+            "edge-gateway..."
+        );
+    }
+
+    #[test]
+    fn keeps_a_word_that_ends_exactly_at_the_cut() {
+        assert_eq!(fit_words("Order service backend", 16), "Order service...");
+    }
+
+    #[test]
+    fn a_single_overlong_word_is_the_only_mid_word_cut() {
+        assert_eq!(fit_words("Authorization", 6), "Aut...");
+    }
+
+    #[test]
+    fn short_labels_are_unchanged() {
+        assert_eq!(fit_words("API", 10), "API");
+        assert_eq!(fit_words("Web app", 7), "Web app");
     }
 }

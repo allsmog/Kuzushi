@@ -84,9 +84,23 @@ fn active_dag_task_eta_secs(app: &ShellApp, session: &ActivitySession) -> Option
         .tasks
         .values()
         .find(|row| row.state == DagTaskState::Active && row.prior_run_ref.is_none())?;
-    let estimate = app.estimate_task_duration_secs(&row.task_id)?;
+    let estimate = task_duration_estimate(app, &row.task_id)?;
     let elapsed = row.started_at?.elapsed().as_secs();
     Some(estimate.saturating_sub(elapsed))
+}
+
+/// Duration history is recorded per tool, while planned rows carry a bound
+/// variant id such as `threat-model:build[stride]`; fall back to the tool.
+fn task_duration_estimate(app: &ShellApp, task_id: &str) -> Option<u64> {
+    app.estimate_task_duration_secs(task_id)
+        .or_else(|| bound_tool_name(task_id).and_then(|tool| app.estimate_task_duration_secs(tool)))
+}
+
+fn bound_tool_name(task_id: &str) -> Option<&str> {
+    task_id
+        .split_once('[')
+        .map(|(tool, _)| tool)
+        .filter(|tool| !tool.is_empty())
 }
 
 /// True when the Run Focus run reached the same terminal outcome the header
@@ -560,6 +574,16 @@ mod tests {
     use super::*;
     use crate::DagTaskRow;
     use kuzushi_core::{RunSummary, V2Config, WorkspaceTarget};
+
+    #[test]
+    fn a_bound_variant_row_falls_back_to_its_tool_history() {
+        assert_eq!(
+            bound_tool_name("threat-model:build[stride]"),
+            Some("threat-model:build")
+        );
+        assert_eq!(bound_tool_name("context:build"), None);
+        assert_eq!(bound_tool_name("[odd]"), None);
+    }
 
     #[test]
     fn activity_view_model_projects_inactive_state() {

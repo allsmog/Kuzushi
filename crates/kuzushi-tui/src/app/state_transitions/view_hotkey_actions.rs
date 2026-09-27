@@ -23,6 +23,39 @@ fn human_review_decision(
     }
 }
 
+/// Hotkeys that only move a cursor, scroll, or change page. They are the
+/// expected use of Navigate and would drown the notice area if announced.
+fn is_movement_hotkey(action: ViewHotkeyAction) -> bool {
+    use ViewHotkeyAction::*;
+    matches!(
+        action,
+        WorkbenchCyclePane
+            | WorkbenchCyclePanePrev
+            | WorkbenchScrollNext
+            | WorkbenchScrollPrev
+            | WorkbenchScrollFirst
+            | WorkbenchScrollLast
+            | WorkbenchPageNext
+            | WorkbenchPagePrev
+            | WorkbenchPage(_)
+            | ViewScrollUp
+            | ViewScrollDown
+            | ViewScrollTop
+            | ViewScrollBottom
+            | ViewPageUp
+            | ViewPageDown
+            | RecommendCursorPrevious
+            | RecommendCursorNext
+            | TuneCursorPrevious
+            | TuneCursorNext
+            | PromptsCursorPrevious
+            | PromptsCursorNext
+            | ThreatModelNext
+            | ThreatModelPrevious
+            | Back
+    )
+}
+
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> InputUpdate {
         let Some(binding) = self
@@ -36,8 +69,25 @@ impl ShellApp {
         let update = self.apply_view_hotkey(binding.action);
         if update.handled && char_trigger {
             self.ui_mut().record_operator_interaction(Instant::now());
+            self.announce_navigate_hotkey(&binding);
         }
         update
+    }
+
+    /// In Navigate, a letter that changes state says what it did, so text
+    /// typed there is never silently consumed as hotkeys. Pure movement keys
+    /// stay quiet.
+    fn announce_navigate_hotkey(&mut self, binding: &ViewKeybinding) {
+        if self.input_mode() != InputMode::Navigate || is_movement_hotkey(binding.action) {
+            return;
+        }
+        self.set_info_notice(
+            "navigate",
+            format!(
+                "Navigate · {} → {} · Esc to type",
+                binding.hint, binding.label
+            ),
+        );
     }
 
     pub(super) fn apply_view_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
@@ -1669,3 +1719,20 @@ const FOCUSED_HOTKEY_HANDLERS: &[FocusedHotkeyHandler] = &[
     ShellApp::apply_actor_hotkey_update,
     ShellApp::apply_campaign_hotkey,
 ];
+
+#[cfg(test)]
+mod navigate_announcement_tests {
+    use super::*;
+
+    #[test]
+    fn movement_keys_stay_quiet_and_state_changes_are_announced() {
+        assert!(is_movement_hotkey(ViewHotkeyAction::WorkbenchScrollNext));
+        assert!(is_movement_hotkey(ViewHotkeyAction::ViewPageDown));
+        assert!(is_movement_hotkey(ViewHotkeyAction::Back));
+        assert!(!is_movement_hotkey(ViewHotkeyAction::WorkbenchSuppress));
+        assert!(!is_movement_hotkey(
+            ViewHotkeyAction::WorkbenchBacklogDecide("confirmed")
+        ));
+        assert!(!is_movement_hotkey(ViewHotkeyAction::PauseScan));
+    }
+}

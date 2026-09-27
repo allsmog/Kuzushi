@@ -976,7 +976,10 @@ fn draw_node_box(
 }
 
 fn node_box_label(node: &DfdNodeModel, box_width: u16) -> String {
-    crate::renderer::shared::text::fit(&node_label(node), box_width.saturating_sub(3) as usize)
+    crate::renderer::shared::text::fit_words(
+        &node_label(node),
+        box_width.saturating_sub(3) as usize,
+    )
 }
 
 fn node_box_context_label(node: &DfdNodeModel, box_width: u16, context_count: usize) -> String {
@@ -984,7 +987,7 @@ fn node_box_context_label(node: &DfdNodeModel, box_width: u16, context_count: us
         return node_box_label(node, box_width);
     }
     let label = format!("{} +{context_count}", node_label(node));
-    crate::renderer::shared::text::fit(&label, box_width.saturating_sub(3) as usize)
+    crate::renderer::shared::text::fit_words(&label, box_width.saturating_sub(3) as usize)
 }
 
 fn security_context_count(model: &DfdModel, element_id: &str) -> usize {
