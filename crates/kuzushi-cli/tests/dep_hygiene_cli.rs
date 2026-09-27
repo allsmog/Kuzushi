@@ -7,10 +7,15 @@ use kuzushi_core::{
 };
 use serde_json::Value;
 
+/// A placeholder credential: the fake bridges never contact a provider, but
+/// runtime policy still requires the selected OpenAI model to have a key.
+const FAKE_OPENAI_API_KEY: &str = "fake-openai-key-for-fake-bridge";
+
 fn kuzushi_command(home: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_kuzushi"));
     command
         .env("HOME", home)
+        .env("OPENAI_API_KEY", FAKE_OPENAI_API_KEY)
         .env_remove("KUZUSHI_MODEL")
         .env_remove("KUZUSHI_V2_MODEL")
         .env_remove("KUZUSHI_API_KEY_ENV")
