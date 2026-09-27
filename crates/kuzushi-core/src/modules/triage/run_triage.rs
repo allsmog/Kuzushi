@@ -235,6 +235,8 @@ fn emit_triage_done(ctx: &ToolExecutionContext<'_>, stats: &TriageRunStats) {
 fn triage_done_label(stats: &TriageRunStats, cost: crate::runtime::RuntimeCostReport) -> String {
     let unresolved = if cost.is_complete() {
         String::new()
+    } else if let Some(estimate) = cost.estimated_total_usd() {
+        format!(" · estimated cost ~${estimate:.4} (provider reported no charge)")
     } else {
         format!(
             " · provider spend unresolved (observed ${:.4})",
