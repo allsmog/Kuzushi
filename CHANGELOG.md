@@ -45,6 +45,21 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `secret-scan` and `iac-scan` disclose the paths they could not read. Both
+  walkers returned `Ok(())` for a directory `read_dir` refused, so an
+  unreadable subtree produced no findings, no `filesScanned` and no
+  `filesSkipped` — a permission-denied `config/` was indistinguishable from an
+  empty one. `secret-scan` additionally dropped a file whose content failed to
+  read into an outcome that incremented neither counter, so the file left the
+  report entirely. Both engines now record every unread directory, entry, and
+  file in a shared `coverageGaps` structure that the report text prints as
+  `Unread paths: <n> (coverage is incomplete)` and the tool JSON carries
+  verbatim, bounded at 50 named paths with the remainder counted. A deliberate
+  exclusion is unchanged: an oversized or non-text file stays in
+  `filesSkipped`. The scan still completes over what it could read rather than
+  failing the whole run, so a clean result is now disclosed as partial instead
+  of presented as full coverage.
+
 - A headless or shell `threat-model:build mode=refine` now reads the findings
   ledger. Before, `kuzushi run` handed the tool no findings store, so refine
   reported `newFindings 0` no matter what triage had confirmed.

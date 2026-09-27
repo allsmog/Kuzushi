@@ -15,6 +15,7 @@ impl IacScanReport {
                 "findings": self.findings,
                 "filesScanned": self.files_scanned,
                 "filesSkipped": self.files_skipped,
+                "coverageGaps": self.coverage_gaps,
                 "target": self.target,
                 "kind": self.kind,
             }),
@@ -23,7 +24,7 @@ impl IacScanReport {
 }
 
 fn iac_header_lines(report: &IacScanReport) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!(
             "iac-scan: {} finding{} under {}",
             report.findings.len(),
@@ -32,7 +33,9 @@ fn iac_header_lines(report: &IacScanReport) -> Vec<String> {
         ),
         format!("  Files scanned: {}", report.files_scanned),
         format!("  Files skipped: {}", report.files_skipped),
-    ]
+    ];
+    lines.extend(report.coverage_gaps.disclosure_lines());
+    lines
 }
 
 fn append_iac_top_findings(lines: &mut Vec<String>, findings: &[IacScanFinding]) {

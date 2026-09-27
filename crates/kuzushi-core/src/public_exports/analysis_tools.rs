@@ -57,6 +57,7 @@ pub use crate::recon::{
 pub use crate::sbom_scan::{
     scan_sbom, SbomComponent, SbomDependencyEdge, SbomLockfile, SbomScanReport,
 };
+pub use crate::scan::engines::coverage_gaps::{CoverageGap, CoverageGapKind, CoverageGaps};
 pub use crate::scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,
     normalize_semgrep_json, parse_govulncheck_json, run_scan_engines, run_semgrep_scan,

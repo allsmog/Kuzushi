@@ -43,8 +43,8 @@ pub fn scan_iac(
     cancellation: &ScanCancellation,
 ) -> Result<IacScanReport> {
     let target = canonical_directory(target)?;
-    let files = sorted_iac_files(&target, options)?;
     let mut scan = IacScanAccumulator::default();
+    let files = sorted_iac_files(&target, options, &mut scan.coverage_gaps)?;
 
     for file in files {
         scan.scan_file(&target, &file, options, cancellation)?;
@@ -56,12 +56,17 @@ pub fn scan_iac(
         findings: scan.findings,
         files_scanned: scan.files_scanned,
         files_skipped: scan.files_skipped,
+        coverage_gaps: scan.coverage_gaps,
     })
 }
 
-fn sorted_iac_files(target: &Path, options: &IacScanOptions) -> Result<Vec<PathBuf>> {
+fn sorted_iac_files(
+    target: &Path,
+    options: &IacScanOptions,
+    gaps: &mut CoverageGaps,
+) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_iac_files(target, target, options, &mut files)?;
+    collect_iac_files(target, target, options, &mut files, gaps)?;
     files.sort();
     Ok(files)
 }
