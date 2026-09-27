@@ -103,3 +103,46 @@ fn report_with_unreadable_directory() -> SecretScanReport {
         coverage_gaps,
     }
 }
+
+/// `kuzushi scan` reads coverage only from `ScanEngineOutput::scan_errors`.
+/// The default `scan_artifacts` forwards findings alone, which would let the
+/// umbrella run report a partially read target as complete.
+#[test]
+fn the_scan_engine_forwards_gaps_as_aggregate_scan_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("notes.txt"), "LOG_LEVEL=debug\n").unwrap();
+
+    let output = SecretScanScanner
+        .scan_artifacts(temp.path(), &ScanCancellation::default())
+        .unwrap();
+
+    assert!(output.scan_errors.is_empty());
+    assert!(output.codeql_sarif_documents.is_empty());
+    output.ensure_empty_result_is_complete().unwrap();
+}
+
+/// The mapping the engine hands the aggregate channel, over a gap the walk
+/// recorded. An unread path has to arrive as an unanalyzed part, not as the
+/// silence that reads as full coverage.
+#[test]
+fn a_recorded_gap_becomes_an_unanalyzed_part() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut files = Vec::new();
+    let mut gaps = CoverageGaps::default();
+    collect_files(
+        temp.path(),
+        &temp.path().join("config"),
+        &SecretScanOptions::default(),
+        &mut files,
+        &mut gaps,
+    )
+    .unwrap();
+
+    let scan_errors = gaps.scan_error_lines();
+
+    assert_eq!(scan_errors.len(), 1);
+    assert!(
+        scan_errors[0].starts_with("unread directory config: "),
+        "{scan_errors:?}"
+    );
+}

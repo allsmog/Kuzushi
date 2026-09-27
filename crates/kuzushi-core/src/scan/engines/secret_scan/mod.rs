@@ -1,6 +1,6 @@
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::scan::engines::coverage_gaps::{read_dir_entries, CoverageGapKind, CoverageGaps};
-use crate::scan::{ScanCancellation, ScanEngine};
+use crate::scan::{ScanCancellation, ScanEngine, ScanEngineOutput};
 use anyhow::{Context, Result};
 pub(crate) use assignment_detection::*;
 pub(crate) use canonical_directory::*;

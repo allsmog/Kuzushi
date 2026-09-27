@@ -56,9 +56,11 @@ Notable changes to Kuzushi. Release procedure lives in
   `Unread paths: <n> (coverage is incomplete)` and the tool JSON carries
   verbatim, bounded at 50 named paths with the remainder counted. A deliberate
   exclusion is unchanged: an oversized or non-text file stays in
-  `filesSkipped`. The scan still completes over what it could read rather than
-  failing the whole run, so a clean result is now disclosed as partial instead
-  of presented as full coverage.
+  `filesSkipped`. Both engines also hand their gaps to the aggregate scan
+  through `ScanEngineOutput::scan_errors`, so `kuzushi scan` refuses to report
+  a partially read target as complete instead of forwarding findings alone.
+  Direct `secret-scan`/`iac-scan` dispatch still completes over what it could
+  read, with the gap disclosed, rather than failing the whole run.
 
 - A headless or shell `threat-model:build mode=refine` now reads the findings
   ledger. Before, `kuzushi run` handed the tool no findings store, so refine

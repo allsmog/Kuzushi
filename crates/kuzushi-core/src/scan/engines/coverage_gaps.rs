@@ -106,6 +106,24 @@ impl CoverageGaps {
     }
 }
 
+impl CoverageGaps {
+    /// One entry per unread path, for `ScanEngineOutput::scan_errors`. The
+    /// aggregate scan counts these as parts of the target that went
+    /// unanalyzed, so the paths past the naming cap contribute an entry of
+    /// their own rather than dropping out of that count.
+    pub(crate) fn scan_error_lines(&self) -> Vec<String> {
+        let mut lines = self
+            .gaps
+            .iter()
+            .map(|gap| format!("unread {}", gap_description(gap)))
+            .collect::<Vec<_>>();
+        if self.unnamed > 0 {
+            lines.push(format!("{} further unread path(s) not named", self.unnamed));
+        }
+        lines
+    }
+}
+
 /// List `dir`, recording the failures a walk would otherwise swallow: the
 /// directory itself when it cannot be opened, and each entry the iterator
 /// cannot yield. `None` means the directory was never listed, so the caller
@@ -135,7 +153,11 @@ pub(crate) fn read_dir_entries(
 }
 
 fn gap_line(gap: &CoverageGap) -> String {
-    format!("    - {} {}: {}", gap.kind.as_str(), gap.path, gap.reason)
+    format!("    - {}", gap_description(gap))
+}
+
+fn gap_description(gap: &CoverageGap) -> String {
+    format!("{} {}: {}", gap.kind.as_str(), gap.path, gap.reason)
 }
 
 fn relative_display(root: &Path, path: &Path) -> String {
@@ -194,6 +216,33 @@ mod tests {
         );
 
         assert_eq!(gaps.gaps[0].path, "/etc/shadow");
+    }
+
+    /// `kuzushi scan` has no coverage field, so it fails when an engine
+    /// reports any unanalyzed part. Every gap has to reach that list, the
+    /// unnamed remainder included, or the umbrella run counts wrong.
+    #[test]
+    fn every_gap_reaches_the_aggregate_scan_error_list() {
+        let mut gaps = CoverageGaps::default();
+        for index in 0..MAX_NAMED_GAPS + 2 {
+            gaps.record(
+                &root(),
+                &root().join(format!("dir{index}")),
+                CoverageGapKind::Directory,
+                &denied(),
+            );
+        }
+
+        let lines = gaps.scan_error_lines();
+
+        assert_eq!(lines.len(), MAX_NAMED_GAPS + 1);
+        assert_eq!(lines[0], "unread directory dir0: Permission denied");
+        assert_eq!(lines.last().unwrap(), "2 further unread path(s) not named");
+    }
+
+    #[test]
+    fn a_complete_walk_reports_no_aggregate_scan_error() {
+        assert!(CoverageGaps::default().scan_error_lines().is_empty());
     }
 
     #[test]

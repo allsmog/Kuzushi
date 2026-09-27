@@ -1,6 +1,6 @@
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::scan::engines::coverage_gaps::{read_dir_entries, CoverageGapKind, CoverageGaps};
-use crate::scan::{ScanCancellation, ScanEngine};
+use crate::scan::{ScanCancellation, ScanEngine, ScanEngineOutput};
 pub(crate) use analyze_dockerfile::*;
 pub(crate) use analyze_github_actions::*;
 pub(crate) use analyze_terraform::*;

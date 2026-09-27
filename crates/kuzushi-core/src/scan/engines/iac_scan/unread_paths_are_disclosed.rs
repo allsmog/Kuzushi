@@ -75,3 +75,46 @@ fn a_gap_reaches_both_the_output_and_the_tool_json() {
     assert_eq!(json["data"]["coverageGaps"]["gaps"][0]["path"], "infra");
     assert_eq!(json["data"]["coverageGaps"]["gaps"][0]["kind"], "directory");
 }
+
+/// `kuzushi scan` reads coverage only from `ScanEngineOutput::scan_errors`.
+/// The default `scan_artifacts` forwards findings alone, which would let the
+/// umbrella run report a partially read target as complete.
+#[test]
+fn the_scan_engine_forwards_gaps_as_aggregate_scan_errors() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("Dockerfile"), "FROM node:latest\nUSER root\n").unwrap();
+
+    let output = IacScanScanner::default()
+        .scan_artifacts(temp.path(), &ScanCancellation::default())
+        .unwrap();
+
+    assert!(!output.findings.is_empty());
+    assert!(output.scan_errors.is_empty());
+    assert!(output.codeql_sarif_documents.is_empty());
+}
+
+/// The mapping the engine hands the aggregate channel, over a gap the walk
+/// recorded. An unread path has to arrive as an unanalyzed part, not as the
+/// silence that reads as full coverage.
+#[test]
+fn a_recorded_gap_becomes_an_unanalyzed_part() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut files = Vec::new();
+    let mut gaps = CoverageGaps::default();
+    collect_iac_files(
+        temp.path(),
+        &temp.path().join("infra"),
+        &IacScanOptions::default(),
+        &mut files,
+        &mut gaps,
+    )
+    .unwrap();
+
+    let scan_errors = gaps.scan_error_lines();
+
+    assert_eq!(scan_errors.len(), 1);
+    assert!(
+        scan_errors[0].starts_with("unread directory infra: "),
+        "{scan_errors:?}"
+    );
+}

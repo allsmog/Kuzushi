@@ -28,13 +28,36 @@ impl ScanEngine for IacScanScanner {
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        let report = scan_iac(target, &self.options, cancellation)?;
-        Ok(report
+        Ok(iac_scan_engine_output(target, &self.options, cancellation)?.findings)
+    }
+
+    /// The aggregate scan learns about unread paths only through
+    /// `scan_errors`; the default implementation would forward findings
+    /// alone and let a partially read target report as complete.
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        iac_scan_engine_output(target, &self.options, cancellation)
+    }
+}
+
+fn iac_scan_engine_output(
+    target: &Path,
+    options: &IacScanOptions,
+    cancellation: &ScanCancellation,
+) -> Result<ScanEngineOutput> {
+    let report = scan_iac(target, options, cancellation)?;
+    Ok(ScanEngineOutput {
+        findings: report
             .findings
             .iter()
             .map(IacScanFinding::to_core_finding)
-            .collect())
-    }
+            .collect(),
+        codeql_sarif_documents: Vec::new(),
+        scan_errors: report.coverage_gaps.scan_error_lines(),
+    })
 }
 
 pub fn scan_iac(
