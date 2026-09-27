@@ -15,6 +15,9 @@ pub struct AdvisoryState {
     /// separate from the rendered confirmation copy so non-run confirmations
     /// do not grow extra UI-facing fields.
     pub(crate) pending_confirm_launch: Option<crate::app::RunToolLaunch>,
+    /// The OAuth credential choice parked behind a `ModelSwitch` confirmation;
+    /// it runs only after the operator explicitly approves the switch.
+    pub(crate) pending_confirm_model_switch: Option<crate::app::PendingModelSwitchConsent>,
     /// End-of-engagement retry gate: offered after 掛 KAKE when planning tasks
     /// failed. Yes re-runs them (with auto-adjustments); no skips them.
     pub pending_retry: Option<crate::app::PendingRetry>,

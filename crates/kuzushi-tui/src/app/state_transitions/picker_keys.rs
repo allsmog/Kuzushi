@@ -741,13 +741,31 @@ impl ShellApp {
         effects
     }
 
+    /// An OAuth choice that would change the model waits for explicit consent.
     fn accept_auth_oauth_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
-        let oauth_provider = oauth_credential_provider(provider);
-        let model_switch = oauth_model_switch_for_provider(provider);
-        if !self.pending_oauth_reconnect_required()
-            && oauth_credential_is_ready(self.config(), oauth_provider)
-        {
-            return self.reuse_auth_oauth_choice(provider, model_switch);
+        let reuse = self.oauth_choice_reuses_stored_credential(provider);
+        if let Some(selection) = oauth_model_switch_for_provider(provider) {
+            self.request_oauth_model_switch_consent(provider, &selection, reuse);
+            return Vec::new();
+        }
+        self.continue_oauth_choice(provider, reuse)
+    }
+
+    fn oauth_choice_reuses_stored_credential(&self, provider: &str) -> bool {
+        !self.pending_oauth_reconnect_required()
+            && oauth_credential_is_ready(self.config(), oauth_credential_provider(provider))
+    }
+
+    /// Reuse the stored OAuth connection, or start its login; either way the
+    /// provider's model switch (if any) has already been consented to.
+    pub(crate) fn continue_oauth_choice(
+        &mut self,
+        provider: &str,
+        reuse: bool,
+    ) -> Vec<ShellEffect> {
+        if reuse {
+            return self
+                .reuse_auth_oauth_choice(provider, oauth_model_switch_for_provider(provider));
         }
         self.clear_credential_notice();
         self.log(

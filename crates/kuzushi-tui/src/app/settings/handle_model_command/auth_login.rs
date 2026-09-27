@@ -219,6 +219,13 @@ impl ShellApp {
         let Some(selection) = selection else {
             return Some(Vec::new());
         };
+        if let Err(error) = kuzushi_core::runtime::validate_model_spec(&selection.model) {
+            self.set_error_notice(
+                "model",
+                format!("Refusing the OAuth model switch: {error:#}"),
+            );
+            return None;
+        }
         if !self.pending_auth_switch_context_is_current() {
             self.set_error_notice(
                 "planning",

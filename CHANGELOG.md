@@ -45,6 +45,14 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Choosing OpenAI OAuth for an OpenAI API model no longer switches the model
+  on the same key press. It raises a model-switch confirmation that names the
+  current and target models, and only `y` continues. Continuing either reuses
+  the stored connection or starts the browser login. `n` or Esc keeps the
+  model and leaves the credential picker open. The target is checked against
+  the model policy before it is applied. The credential row, Setup detail, and
+  picker intro now name the real target (`openai-oauth:gpt-5.6-terra`) instead
+  of the stale GPT-5.4.
 - A headless or shell `threat-model:build mode=refine` now reads the findings
   ledger. Before, `kuzushi run` handed the tool no findings store, so refine
   reported `newFindings 0` no matter what triage had confirmed.

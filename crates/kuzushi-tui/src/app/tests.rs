@@ -236,6 +236,57 @@ fn press_key(app: &mut ShellApp, key: KeyEvent) -> bool {
     update_and_execute_effects(app, Msg::Term(TermEvent::Key(key)))
 }
 
+/// Enter on an OAuth row that switches the model only raises the consent card:
+/// no effect, no model change. `y` then continues the credential choice.
+fn press_oauth_row_with_consent(app: &mut ShellApp) -> UpdateResult {
+    assert_oauth_row_asks_consent(app, |app| {
+        update(
+            app,
+            Msg::Term(TermEvent::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::empty(),
+            ))),
+        )
+        .effects
+        .is_empty()
+    });
+    update(
+        app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Char('y'),
+            KeyModifiers::empty(),
+        ))),
+    )
+}
+
+fn press_oauth_row_with_consent_executing(app: &mut ShellApp) -> bool {
+    assert_oauth_row_asks_consent(app, |app| {
+        press_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+        true
+    });
+    press_key(
+        app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty()),
+    )
+}
+
+fn assert_oauth_row_asks_consent(app: &mut ShellApp, press: impl FnOnce(&mut ShellApp) -> bool) {
+    let model_before = app.config().model.clone();
+    assert!(press(app), "consent must precede every effect");
+    assert_eq!(
+        app.config().model,
+        model_before,
+        "no model switch before consent"
+    );
+    assert_eq!(
+        app.advisory()
+            .pending_confirm
+            .as_ref()
+            .map(|confirm| confirm.kind),
+        Some(crate::ConfirmKind::ModelSwitch)
+    );
+}
+
 fn paste_text(app: &mut ShellApp, text: &str) -> bool {
     update_and_execute_effects(app, Msg::Term(TermEvent::Paste(text.to_string())))
 }
@@ -8481,6 +8532,53 @@ fn explicit_openai_api_model_offers_a_labeled_oauth_switch_without_mutating_on_o
 }
 
 #[test]
+fn declining_the_oauth_model_switch_keeps_the_model_and_the_picker() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let config = openai_api_config_with_oauth_store(&credentials_path);
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+    let model_before = app.config().model.clone();
+
+    update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    let confirm = app
+        .advisory()
+        .pending_confirm
+        .clone()
+        .expect("consent card");
+    assert_eq!(confirm.kind, crate::ConfirmKind::ModelSwitch);
+    assert!(
+        confirm.target.contains("openai-oauth:gpt-5.6-terra"),
+        "{}",
+        confirm.target
+    );
+    let declined = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Char('n'),
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(declined.effects.is_empty());
+    assert!(global_model_persist_effect(&declined.effects).is_none());
+    assert_eq!(app.config().model, model_before);
+    assert!(app.advisory().pending_confirm.is_none());
+    assert!(app.advisory().pending_confirm_model_switch.is_none());
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+}
+
+#[test]
 fn stored_openai_oauth_explicitly_switches_the_configured_api_model_without_login() {
     let _env_lock = env_test_lock();
     let _key = EnvVarGuard::unset("OPENAI_API_KEY");
@@ -8493,13 +8591,7 @@ fn stored_openai_oauth_explicitly_switches_the_configured_api_model_without_logi
     app.open_credential_entry("openai".to_string());
     app.router.auth_picker_mut().set_cursor(1);
 
-    let result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let result = press_oauth_row_with_consent(&mut app);
 
     assert!(auth_login_effect(&result.effects).is_none());
     let persist = global_model_persist_effect(&result.effects).expect("model persist effect");
@@ -8560,13 +8652,7 @@ fn missing_openai_oauth_carries_the_explicit_switch_through_the_existing_login_e
     app.open_credential_entry("openai".to_string());
     app.router.auth_picker_mut().set_cursor(1);
 
-    let result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let result = press_oauth_row_with_consent(&mut app);
 
     let login = auth_login_effect(&result.effects).expect("shared OAuth login effect");
     assert_eq!(login.provider, "openai-codex");
@@ -8614,13 +8700,7 @@ fn successful_picker_login_writes_and_reprobes_the_configured_oauth_store() {
     let mut app = ShellApp::new(config, None);
     app.open_credential_entry("openai".to_string());
     app.router.auth_picker_mut().set_cursor(1);
-    let update_result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let update_result = press_oauth_row_with_consent(&mut app);
     let login = update_result
         .effects
         .into_iter()
@@ -8661,13 +8741,7 @@ fn oauth_login_exit_zero_without_usable_credentials_is_not_success() {
     let mut app = ShellApp::new(config, None);
     app.open_credential_entry("openai".to_string());
     app.router.auth_picker_mut().set_cursor(1);
-    let update_result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let update_result = press_oauth_row_with_consent(&mut app);
     let login = update_result
         .effects
         .into_iter()
@@ -8710,10 +8784,7 @@ fn failed_openai_oauth_login_preserves_the_api_model_and_returns_to_its_picker()
     app.open_credential_entry("openai".to_string());
     app.router.auth_picker_mut().set_cursor(1);
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
-    );
+    press_oauth_row_with_consent_executing(&mut app);
 
     assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
     assert_eq!(app.session_thinking_level(), Some("high"));
@@ -8762,7 +8833,7 @@ fn setup_explains_when_openai_oauth_is_incompatible_with_selected_model() {
     assert!(credentials.detail.contains("requires OPENAI_API_KEY"));
     assert!(credentials
         .detail
-        .contains("explicit switch to OpenAI OAuth GPT-5.4"));
+        .contains("explicit switch to openai-oauth:gpt-5.6-terra"));
 }
 
 #[test]
@@ -21223,13 +21294,7 @@ fn stored_openai_oauth_retargets_and_resumes_the_preserved_scan_plan() {
     );
     app.router.auth_picker_mut().set_cursor(1);
 
-    let result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let result = press_oauth_row_with_consent(&mut app);
 
     assert!(auth_login_effect(&result.effects).is_none());
     assert!(global_model_persist_effect(&result.effects).is_some());
@@ -21306,13 +21371,7 @@ fn new_openai_oauth_login_resumes_the_exact_committed_scan_plan() {
     assert_eq!(preserved.phase, WorkflowPhase::Scan);
     assert_eq!(preserved.work, PendingCredentialWork::CommittedPlan(plan));
     app.router.auth_picker_mut().set_cursor(1);
-    let picker_result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let picker_result = press_oauth_row_with_consent(&mut app);
     let login = picker_result
         .effects
         .into_iter()
@@ -21392,13 +21451,7 @@ fn stored_openai_oauth_switches_only_an_explicitly_bound_deferred_step() {
     );
     app.router.auth_picker_mut().set_cursor(1);
 
-    let result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let result = press_oauth_row_with_consent(&mut app);
 
     assert!(global_model_persist_effect(&result.effects).is_none());
     assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
@@ -21468,13 +21521,7 @@ fn oauth_switch_refuses_to_clobber_a_model_changed_while_recovery_was_open() {
     app.router.auth_picker_mut().set_cursor(1);
     app.config_mut().model = Some("anthropic:claude-sonnet-4-6".to_string());
 
-    let result = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Enter,
-            KeyModifiers::empty(),
-        ))),
-    );
+    let result = press_oauth_row_with_consent(&mut app);
 
     assert!(result.effects.is_empty());
     assert_eq!(

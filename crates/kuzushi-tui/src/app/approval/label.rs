@@ -7,6 +7,9 @@ pub enum ConfirmKind {
     DestructiveVerb,
     PwnCandidateAttempt,
     DescriptorEffect,
+    /// A credential choice that would change the model. Never remembered:
+    /// each switch is its own explicit operator decision.
+    ModelSwitch,
 }
 
 impl ConfirmKind {
@@ -17,6 +20,7 @@ impl ConfirmKind {
             ConfirmKind::DestructiveVerb => "REFUSED · destructive verb",
             ConfirmKind::PwnCandidateAttempt => "CONFIRM · pwn candidate attempts",
             ConfirmKind::DescriptorEffect => "CONFIRM · descriptor-declared effect",
+            ConfirmKind::ModelSwitch => "CONFIRM · model switch",
         }
     }
 
@@ -74,6 +78,7 @@ impl ShellApp {
         let advisory = self.advisory_mut();
         advisory.pending_confirm = Some(request);
         advisory.pending_confirm_launch = None;
+        advisory.pending_confirm_model_switch = None;
     }
 
     pub(crate) fn request_confirm_for_run(

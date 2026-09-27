@@ -58,7 +58,7 @@ const OPENAI_API_AUTH_ROWS: [AuthMethodRow; 3] = [
     AuthMethodRow {
         kind: AuthMethodRowKind::OAuth,
         label: "Use OpenAI OAuth (switch model)",
-        hint: "reuse or sign in; selects OpenAI OAuth GPT-5.4",
+        hint: "reuse or sign in; asks before switching the model",
     },
     OFFLINE_DEMO_ROW,
 ];
