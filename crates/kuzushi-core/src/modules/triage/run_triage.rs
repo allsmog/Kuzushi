@@ -39,6 +39,7 @@ fn run_triage_against_source(
         &completed.stats,
         run.missing_fingerprints,
     );
+    attach_prefilter_drop_report(&mut response, &completed.prefilter_report);
     attach_triage_advisory_reports(&mut response, run.store, &run.input)?;
     Ok(response)
 }
@@ -108,6 +109,7 @@ fn resolve_triage_execution<'a>(
 
 struct CompletedTriageRun {
     stage1: PrefilteredTriageFindings,
+    prefilter_report: PrefilterDropReport,
     stats: TriageRunStats,
 }
 
@@ -117,11 +119,16 @@ fn classify_triage_findings(
     execution: &TriageExecution<'_>,
 ) -> Result<CompletedTriageRun> {
     let findings = std::mem::take(&mut run.findings);
-    let stage1 = prefilter_triage_findings(findings, run.input.prefilter_threshold);
+    let (stage1, prefilter_report) =
+        prefilter_triage_findings_with_receipts(findings, run.input.prefilter_threshold);
     let evidence_phase = emit_triage_evidence_phase(ctx, &run.input, &stage1);
     let kept = stage1.kept.clone();
     let stats = run_triage_stage2_with_scope(ctx, evidence_phase, run, execution, kept)?;
-    Ok(CompletedTriageRun { stage1, stats })
+    Ok(CompletedTriageRun {
+        stage1,
+        prefilter_report,
+        stats,
+    })
 }
 
 fn run_triage_stage2_with_scope(
@@ -228,8 +235,6 @@ fn emit_triage_done(ctx: &ToolExecutionContext<'_>, stats: &TriageRunStats) {
 fn triage_done_label(stats: &TriageRunStats, cost: crate::runtime::RuntimeCostReport) -> String {
     let unresolved = if cost.is_complete() {
         String::new()
-    } else if let Some(estimate) = cost.estimated_total_usd() {
-        format!(" · estimated cost ~${estimate:.4} (provider reported no charge)")
     } else {
         format!(
             " · provider spend unresolved (observed ${:.4})",
@@ -457,6 +462,23 @@ pub(in crate::modules) fn resolve_triage_model(
     Ok(model)
 }
 
+const PREFILTER_DROP_RECEIPT_LIMIT: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PrefilterDropReceipt {
+    finding_id: Option<i64>,
+    identity_id: Option<String>,
+    score: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PrefilterDropReport {
+    threshold: i64,
+    total: usize,
+    receipts: Vec<PrefilterDropReceipt>,
+    omitted: usize,
+}
+
 pub(in crate::modules) struct PrefilteredTriageFindings {
     pub(in crate::modules) total: usize,
     pub(in crate::modules) kept_count: usize,
@@ -468,17 +490,81 @@ pub(in crate::modules) fn prefilter_triage_findings(
     findings: Vec<Finding>,
     prefilter_threshold: i64,
 ) -> PrefilteredTriageFindings {
+    prefilter_triage_findings_with_receipts(findings, prefilter_threshold).0
+}
+
+fn prefilter_triage_findings_with_receipts(
+    findings: Vec<Finding>,
+    prefilter_threshold: i64,
+) -> (PrefilteredTriageFindings, PrefilterDropReport) {
     let total = findings.len();
-    let (kept, dropped): (Vec<Finding>, Vec<Finding>) = findings
-        .into_iter()
-        .partition(|finding| prefilter_score(finding) >= prefilter_threshold);
-    let kept_count = kept.len();
-    PrefilteredTriageFindings {
-        total,
-        kept_count,
-        dropped: dropped.len(),
-        kept,
+    let mut kept = Vec::with_capacity(total);
+    let mut dropped = 0usize;
+    let mut receipts = Vec::new();
+    let mut omitted = 0usize;
+
+    for finding in findings {
+        let score = prefilter_score(&finding);
+        if score >= prefilter_threshold {
+            kept.push(finding);
+            continue;
+        }
+
+        dropped += 1;
+        if receipts.len() < PREFILTER_DROP_RECEIPT_LIMIT {
+            receipts.push(PrefilterDropReceipt {
+                finding_id: finding.id,
+                identity_id: finding.identity_id.clone(),
+                score,
+            });
+        } else {
+            omitted += 1;
+        }
     }
+
+    let kept_count = kept.len();
+    (
+        PrefilteredTriageFindings {
+            total,
+            kept_count,
+            dropped,
+            kept,
+        },
+        PrefilterDropReport {
+            threshold: prefilter_threshold,
+            total: dropped,
+            receipts,
+            omitted,
+        },
+    )
+}
+
+fn attach_prefilter_drop_report(response: &mut Value, report: &PrefilterDropReport) {
+    let Some(data) = response.get_mut("data").and_then(Value::as_object_mut) else {
+        return;
+    };
+    let items = report
+        .receipts
+        .iter()
+        .map(|receipt| {
+            json!({
+                "findingId": receipt.finding_id,
+                "identityId": receipt.identity_id,
+                "score": receipt.score,
+                "reason": "prefilter_score_below_threshold",
+            })
+        })
+        .collect::<Vec<_>>();
+    data.insert(
+        "prefilterDrops".to_string(),
+        json!({
+            "count": report.total,
+            "threshold": report.threshold,
+            "items": items,
+            "omitted": report.omitted,
+            "limit": PREFILTER_DROP_RECEIPT_LIMIT,
+        }),
+    );
 }
 
 pub(in crate::modules) struct TriageExecutionConfig {
@@ -489,5 +575,69 @@ pub(in crate::modules) struct TriageExecutionConfig {
 impl TriageExecutionConfig {
     pub(in crate::modules) fn new(cwd: PathBuf, stage2_model: String) -> Self {
         Self { cwd, stage2_model }
+    }
+}
+
+#[cfg(test)]
+mod prefilter_drop_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn prefilter_drop_report_is_itemized_and_bounded() {
+        let findings = (0..(PREFILTER_DROP_RECEIPT_LIMIT + 3))
+            .map(|index| {
+                let mut finding = Finding::new_tool(
+                    "other",
+                    format!("rule-{index}"),
+                    "src/lib.rs",
+                    index as u32 + 1,
+                    None,
+                    Severity::Unknown,
+                    format!("plain finding {index}"),
+                );
+                finding.id = Some(index as i64 + 1);
+                finding.identity_id = Some(format!("identity-{index}"));
+                finding
+            })
+            .collect::<Vec<_>>();
+
+        let (stage1, report) = prefilter_triage_findings_with_receipts(findings, 5);
+
+        assert_eq!(stage1.total, PREFILTER_DROP_RECEIPT_LIMIT + 3);
+        assert_eq!(stage1.kept_count, 0);
+        assert_eq!(stage1.dropped, PREFILTER_DROP_RECEIPT_LIMIT + 3);
+        assert_eq!(report.total, PREFILTER_DROP_RECEIPT_LIMIT + 3);
+        assert_eq!(report.receipts.len(), PREFILTER_DROP_RECEIPT_LIMIT);
+        assert_eq!(report.omitted, 3);
+        assert!(report
+            .receipts
+            .iter()
+            .all(|receipt| receipt.score < report.threshold));
+        assert_eq!(report.receipts[0].finding_id, Some(1));
+        assert_eq!(
+            report.receipts[0].identity_id.as_deref(),
+            Some("identity-0")
+        );
+
+        let mut response = json!({"data": {}});
+        attach_prefilter_drop_report(&mut response, &report);
+
+        assert_eq!(
+            response["data"]["prefilterDrops"]["count"],
+            json!(PREFILTER_DROP_RECEIPT_LIMIT + 3)
+        );
+        assert_eq!(
+            response["data"]["prefilterDrops"]["items"]
+                .as_array()
+                .unwrap()
+                .len(),
+            PREFILTER_DROP_RECEIPT_LIMIT
+        );
+        assert_eq!(response["data"]["prefilterDrops"]["omitted"], json!(3));
+        assert_eq!(
+            response["data"]["prefilterDrops"]["items"][0]["reason"],
+            json!("prefilter_score_below_threshold")
+        );
+        assert_eq!(response["data"]["prefilterDrops"]["threshold"], json!(5));
     }
 }
