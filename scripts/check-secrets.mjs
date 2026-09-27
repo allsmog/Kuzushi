@@ -76,7 +76,7 @@ const APPROVED_FIXTURE_HASHES = new Map([
   [".env.example", "6866628bba6a4fe45f8b3b7e81a03f503402a7bb3a19507e641e005d8c58fc2c"],
   [
     "crates/kuzushi-cli/tests/dep_hygiene_cli.rs",
-    "b1c874905608db802746b13f06f0cf515062faac87c361e303d84da66c48f564",
+    "ff9e9bb160ed4082a16a93ccfb1d4a19d9d83e19de9606de06e1c14ebd32d4fe",
   ],
   [
     "crates/kuzushi-core/src/demo.rs",
