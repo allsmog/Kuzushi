@@ -37,7 +37,8 @@ pub use mcp_probe::{
 };
 pub use policy::{
     bind_model_auth, bridge_api_key_env_for_model, canonical_model_spec, decide_tie_break,
-    public_auth_provider, require_configured_model, require_model_auth_binding,
+    is_pre_execution_refusal, public_auth_provider, require_configured_model,
+    require_model_auth_binding,
     resolve_explicit_model, validate_model_api_key_env, validate_model_spec, ModelAuthBinding,
     PublicAuthProvider, TieBreakEscalation, TieBreakRefusal,
 };

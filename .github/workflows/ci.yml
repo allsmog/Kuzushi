@@ -116,3 +116,31 @@ jobs:
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: pnpm verify:quick:summary
+
+  # Clippy and the Rust test suite. `verify:quick` runs neither, so without
+  # this job a pull request could merge with no `cargo test` run at all. It
+  # costs roughly 15-25 billed Linux minutes, so it runs once when a PR becomes
+  # ready for review (opened non-draft, reopened, ready_for_review), in the
+  # merge queue, and on manual dispatch -- not on every later push, which the
+  # quick gate above keeps covering.
+  rust-tests:
+    name: rust-tests
+    needs: quality-gauntlet
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && github.event.action != 'synchronize') }}
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: true
+      - uses: ./.github/actions/install-patch-validation-sandbox
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked

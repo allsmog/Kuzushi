@@ -92,8 +92,12 @@ enum NetTransportPolicy {
     HttpsNoRedirect,
 }
 
+/// The client dials only the validated, pinned address. Proxy environment
+/// variables are ignored: a proxy would re-resolve the host itself and bypass
+/// the address that brokered egress validated.
 fn build_net_client(key: &NetClientKey) -> Result<reqwest::blocking::Client, KwpError> {
     reqwest::blocking::Client::builder()
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(key.timeout)
         .resolve(&key.host, key.pinned_addr)
@@ -221,10 +225,8 @@ mod tests {
     fn hanging_tls_peer_is_bounded_by_the_effective_worker_timeout() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let pinned_addr = listener.local_addr().unwrap();
-        let peer = std::thread::spawn(move || {
-            let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(2_500));
-        });
+        listener.set_nonblocking(true).unwrap();
+        let peer = std::thread::spawn(move || accept_then_stall(&listener));
         let mut checked = checked(&pinned_addr.to_string(), None);
         checked.request.url = format!("https://example.com:{}/", pinned_addr.port());
         checked.endpoint.port = pinned_addr.port();
@@ -236,7 +238,24 @@ mod tests {
 
         assert!(matches!(error, KwpError::Internal(_)));
         assert!(started.elapsed() < Duration::from_secs(2));
-        peer.join().unwrap();
+        assert!(
+            peer.join().unwrap(),
+            "the client must dial the pinned address directly, even with a proxy configured"
+        );
+    }
+
+    /// Accept one connection within a deadline, then hold it without speaking
+    /// TLS. Returns whether any client dialed the listener.
+    fn accept_then_stall(listener: &std::net::TcpListener) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while std::time::Instant::now() < deadline {
+            if let Ok((_stream, _)) = listener.accept() {
+                std::thread::sleep(Duration::from_millis(500));
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
     }
 
     fn checked(pinned: &str, timeout_ms: Option<u64>) -> ValidatedNetFetch {

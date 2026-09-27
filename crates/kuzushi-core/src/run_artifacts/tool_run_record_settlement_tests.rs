@@ -123,6 +123,13 @@ fn canceled_summary_failure_forces_partial_inspection_settlement() {
     let run_dir = crate::run_artifacts::run_dir(fixture.target.path(), &fixture.run_id);
     std::fs::File::create(run_dir.join(".terminal.lock")).unwrap();
     std::fs::set_permissions(&run_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    if directory_permissions_are_bypassed(&run_dir) {
+        // Root (or a filesystem without mode enforcement) can still write the
+        // read-only directory, so the injected failure cannot happen here.
+        std::fs::set_permissions(&run_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        eprintln!("skipped: directory permissions are not enforced for this user");
+        return;
+    }
     let result = try_record_tool_run_canceled_settled(
         fixture.record(),
         "operator canceled",
@@ -217,4 +224,13 @@ fn item_sequence(
         .find(|item| predicate(&item.item))
         .map(|item| item.seq)
         .unwrap()
+}
+
+/// Whether this process can still create a file inside a read-only directory.
+#[cfg(unix)]
+fn directory_permissions_are_bypassed(dir: &std::path::Path) -> bool {
+    let probe = dir.join(".permission-probe");
+    let bypassed = std::fs::File::create(&probe).is_ok();
+    let _ = std::fs::remove_file(&probe);
+    bypassed
 }

@@ -149,7 +149,8 @@ pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
 pub use display_name::tool_display_name;
 pub use dynamic_loader::{
     approve_dynamic_module, default_dynamic_lockfile_path, inspect_dynamic_module,
-    revoke_dynamic_module, DynamicModuleInspection, DynamicModuleLoadOptions,
+    kwp_node_execution_available, revoke_dynamic_module, DynamicModuleInspection,
+    DynamicModuleLoadOptions,
 };
 pub use options::{coerce_option_value, ensure_declared_tool_option};
 pub use registry::ModuleRegistry;

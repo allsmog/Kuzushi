@@ -31,7 +31,7 @@ pub fn require_configured_model(tool_name: &str, config_model: Option<&str>) -> 
     let model = config_model
         .map(str::trim)
         .map(str::to_string)
-        .with_context(|| config_model_error(tool_name))?;
+        .ok_or_else(|| PreExecutionRefusal::error(config_model_error(tool_name)))?;
     normalize_model_spec(&model)
         .with_context(|| format!("{tool_name} received an invalid configured model"))
 }
@@ -44,7 +44,7 @@ pub fn resolve_explicit_model(
     let model = input_model
         .or_else(|| config_model.map(str::to_string))
         .map(|model| model.trim().to_string())
-        .with_context(|| tool_input_model_error(tool_name))?;
+        .ok_or_else(|| PreExecutionRefusal::error(tool_input_model_error(tool_name)))?;
     normalize_model_spec(&model).with_context(|| format!("{tool_name} received an invalid model"))
 }
 
@@ -108,6 +108,33 @@ fn require_provider_default_api_key_env(
         );
     }
     Ok(())
+}
+
+/// A policy refusal raised before a tool does any work, such as a missing
+/// model. Run lifecycle records it as `blocked` rather than `failed`: nothing
+/// executed, so there is nothing to diagnose beyond the refusal itself.
+#[derive(Debug)]
+pub struct PreExecutionRefusal(String);
+
+impl PreExecutionRefusal {
+    fn error(message: String) -> anyhow::Error {
+        anyhow::Error::new(Self(message))
+    }
+}
+
+impl std::fmt::Display for PreExecutionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for PreExecutionRefusal {}
+
+/// Whether `error` (or anything it wraps) is a pre-execution refusal.
+pub fn is_pre_execution_refusal(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|source| source.is::<PreExecutionRefusal>())
 }
 
 fn config_model_error(tool_name: &str) -> String {

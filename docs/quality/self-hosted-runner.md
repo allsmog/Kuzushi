@@ -14,7 +14,7 @@ This page records what the arrangement means for reading a CI result.
 
 | Workflow | Jobs | Runner |
 | --- | --- | --- |
-| `ci.yml` | `quality-gauntlet` | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
+| `ci.yml` | `quality-gauntlet` (every ready-PR push), `rust-tests` (clippy + `cargo test`, once per ready PR and in the merge queue) | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
 | `ci-full.yml` | `quality-gauntlet`, `rust-core`, `cargo-deny`, `rust-cli`, `coverage`, `mutation`, `node22-compat`, `verify-pack`, `e2e` | `ubuntu-latest`; `self_hosted: true` opts into the Mac |
 | `ci-full.yml` | `windows-compile` | `windows-latest` (hosted) |
 | `release-candidate.yml`, `published-release-smoke.yml` | darwin legs | hosted macOS; `hosted: false` or `KUZUSHI_RELEASE_SELF_HOSTED=true` opts into the Mac |

@@ -7,7 +7,8 @@ pub use model_auth_binding::{
     PublicAuthProvider,
 };
 pub use no_silent_fallback::{
-    bridge_api_key_env_for_model, canonical_model_spec, require_configured_model,
-    resolve_explicit_model, validate_model_api_key_env, validate_model_spec,
+    bridge_api_key_env_for_model, canonical_model_spec, is_pre_execution_refusal,
+    require_configured_model, resolve_explicit_model, validate_model_api_key_env,
+    validate_model_spec, PreExecutionRefusal,
 };
 pub use tie_break_escalation::{decide_tie_break, TieBreakEscalation, TieBreakRefusal};

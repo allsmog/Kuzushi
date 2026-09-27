@@ -45,6 +45,20 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A tool refused before doing any work, for example because no model is
+  configured, now records its run as `blocked` rather than `failed`. That
+  matches the artifact contract. The refusal message is unchanged.
+- KWP brokered network fetches ignore proxy environment variables and dial
+  only the validated, pinned address. Before, with `HTTPS_PROXY` set, the
+  request went through the proxy, which resolved the host itself and bypassed
+  the pin.
+- Pull-request CI now runs clippy and the full Rust test suite (`rust-tests`)
+  once when a PR becomes ready for review, and again in the merge queue. The
+  quick gate skips both, so a PR could previously merge without `cargo test`
+  ever running in CI. Development pins Node 26.3.1, the CI version. The KWP
+  dynamic-module tests skip on older Node instead of failing, and the
+  cancellation-settlement test skips where directory permissions are not
+  enforced (root).
 - Choosing OpenAI OAuth for an OpenAI API model no longer switches the model
   on the same key press. It raises a model-switch confirmation that names the
   current and target models, and only `y` continues. Continuing either reuses
