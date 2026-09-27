@@ -77,10 +77,10 @@ fn is_label_word_boundary(ch: char) -> bool {
 /// End of the last complete word in `head`, if any word precedes a boundary.
 fn last_label_word_end(head: &str) -> Option<usize> {
     head.char_indices()
+        .rev()
         .filter(|(_, ch)| is_label_word_boundary(*ch))
         .map(|(idx, _)| idx)
-        .filter(|idx| head[..*idx].chars().any(|ch| !is_label_word_boundary(ch)))
-        .last()
+        .find(|idx| head[..*idx].chars().any(|ch| !is_label_word_boundary(ch)))
         .map(|idx| head[..idx].trim_end_matches(is_label_word_boundary).len())
 }
 
