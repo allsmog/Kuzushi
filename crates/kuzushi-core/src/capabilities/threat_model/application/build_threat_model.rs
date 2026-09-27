@@ -77,7 +77,7 @@ fn build_single_threat_model(
     let mut source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     let grounding = load_prompt_grounding(&input, ctx)?;
     source_bundle.authenticate_entry_point_sources(&grounding.entry_point_catalog.receipt)?;
-    source_bundle.attach_source_code(
+    let code_evidence = source_bundle.attach_source_code(
         &input,
         &grounding.surfaces,
         grounding.entry_point_catalog.receipt.tree_hash.as_deref(),
@@ -104,6 +104,7 @@ fn build_single_threat_model(
         generated,
         source_bundle,
         grounding,
+        &code_evidence,
     )
 }
 
@@ -147,8 +148,10 @@ fn finish_agentic_threat_model(
     mut generated: GeneratedThreatModel,
     source_bundle: ThreatModelSourceBundle,
     grounding: PromptGrounding,
+    code_evidence: &super::source_code::CodeEvidence,
 ) -> Result<Value> {
-    let gap_fill = fill_single_pipeline_gaps(runtime, ctx, verb, &input, &grounding, &mut generated)?;
+    let evidence = (&grounding, code_evidence);
+    let gap_fill = fill_single_pipeline_gaps(runtime, ctx, verb, &input, evidence, &mut generated)?;
     let (coverage, parked) = finalize_single_document(
         &mut generated.document,
         input.workspace_root(),
@@ -182,7 +185,7 @@ fn fill_single_pipeline_gaps(
     ctx: &ToolExecutionContext<'_>,
     verb: &str,
     input: &BuildInput,
-    grounding: &PromptGrounding,
+    (grounding, code_evidence): (&PromptGrounding, &super::source_code::CodeEvidence),
     generated: &mut GeneratedThreatModel,
 ) -> Result<Option<&'static str>> {
     let report = check_coverage(&generated.document, &grounding.surfaces);
@@ -199,7 +202,7 @@ fn fill_single_pipeline_gaps(
         verb,
         &report.gaps,
         &mut generated.document,
-        &super::source_code::CodeEvidence::default(),
+        code_evidence,
     );
     match outcome {
         Ok(outcome) => {
@@ -208,13 +211,39 @@ fn fill_single_pipeline_gaps(
                 .checked_add(outcome.cost, "single-pipeline gap-fill cost")?;
             Ok(Some("stride-llm"))
         }
-        // A failed repair must not discard the model it was repairing: the
-        // gaps stay parked and disclosed, and the floor below still applies.
-        Err(error) => {
-            emit_gap_fill_failed(ctx, verb, &error);
-            Ok(Some("gap-fill-failed"))
-        }
+        Err(error) => record_failed_gap_fill(ctx, verb, error, generated),
     }
+}
+
+/// A failed repair must not discard the model it was repairing: the gaps stay
+/// parked and disclosed, the floor still applies, and the spend the failed
+/// call reported is kept. Cancellation is not a repair failure; it ends the
+/// build.
+fn record_failed_gap_fill(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    error: anyhow::Error,
+    generated: &mut GeneratedThreatModel,
+) -> Result<Option<&'static str>> {
+    if ctx.is_cancelled() {
+        return Err(error);
+    }
+    generated.cost = generated
+        .cost
+        .checked_add(failed_gap_fill_cost(&error), "failed gap-fill cost")?;
+    emit_gap_fill_failed(ctx, verb, &error);
+    Ok(Some("gap-fill-failed"))
+}
+
+/// The cost a failed structured call reported. A failure that carries no cost
+/// is recorded as incomplete rather than free.
+fn failed_gap_fill_cost(error: &anyhow::Error) -> crate::runtime::RuntimeCostReport {
+    error
+        .chain()
+        .find_map(|source| source.downcast_ref::<crate::structured_output::StructuredOutputError>())
+        .map_or(crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO, |failure| {
+            failure.cost_report()
+        })
 }
 
 fn emit_gap_fill_failed(ctx: &ToolExecutionContext<'_>, verb: &str, error: &anyhow::Error) {

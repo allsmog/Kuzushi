@@ -12875,6 +12875,116 @@ pub fn accepts_scope(scope: &str) -> bool {
         );
     }
 
+    fn run_single_gap_fill_build(
+        runtime: &dyn AgentRuntime,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<Value> {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation,
+            authorization: Default::default(),
+        };
+        ModuleRegistry::with_v2_builtins().execute_tool_with_runtime(
+            "threat-model:build",
+            json!({"preserveUserEdits": false, "minCoverage": 0}),
+            &ctx,
+            Some(runtime),
+        )
+    }
+
+    fn costed_response(structured: Value, cost_usd: f64) -> AgentQueryResponse {
+        AgentQueryResponse {
+            text: String::new(),
+            structured: Some(structured),
+            cost_usd,
+            cost_usd_reported: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn single_pipeline_gap_fill_is_grounded_in_the_collected_source_code() {
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+
+        run_single_gap_fill_build(&runtime, None).unwrap();
+
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 2, "synthesis plus one gap-fill call");
+        assert!(
+            requests[1].prompt.contains("res.send('ok')"),
+            "the gap-fill prompt must carry the source excerpt collected for this build"
+        );
+    }
+
+    #[test]
+    fn single_pipeline_failed_gap_fill_keeps_the_spend_it_reported() {
+        let runtime = MockThreatRuntime::responses(vec![
+            costed_response(json!({"document": sample_document()}), 0.05),
+            AgentQueryResponse {
+                text: "not a gap-fill document".to_string(),
+                cost_usd: 0.02,
+                cost_usd_reported: true,
+                ..Default::default()
+            },
+        ]);
+
+        let result = run_single_gap_fill_build(&runtime, None).unwrap();
+
+        let coverage = result.pointer("/data/document/coverage").unwrap();
+        assert_eq!(coverage["gapFillMethod"], json!("gap-fill-failed"));
+        // The failed repair reported no cost, so spend is observed, not known.
+        let cost = result
+            .pointer("/observedCostUsd")
+            .and_then(Value::as_f64)
+            .unwrap();
+        assert!(
+            cost >= 0.07 - 1e-9,
+            "the failed gap-fill call's reported spend must be counted, got {cost}"
+        );
+    }
+
+    /// Cancels the scan when asked for anything after the first answer, the
+    /// way an operator cancel lands while the gap-fill call is in flight.
+    struct CancelDuringGapFill {
+        inner: MockThreatRuntime,
+        cancellation: crate::scan::ScanCancellation,
+    }
+
+    impl AgentRuntime for CancelDuringGapFill {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            if !self.inner.requests().is_empty() {
+                self.cancellation.cancel();
+                anyhow::bail!("query cancelled");
+            }
+            self.inner.query_blocking(request)
+        }
+
+        fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
+            self.inner.triage_finding_blocking(request)
+        }
+    }
+
+    #[test]
+    fn single_pipeline_gap_fill_cancellation_ends_the_build() {
+        let cancellation = crate::scan::ScanCancellation::default();
+        let runtime = CancelDuringGapFill {
+            inner: MockThreatRuntime::new(json!({"document": sample_document()})),
+            cancellation: cancellation.clone(),
+        };
+
+        let error = run_single_gap_fill_build(&runtime, Some(&cancellation))
+            .expect_err("a cancel during gap fill must not finish and save the model");
+
+        assert!(format!("{error:#}").contains("cancelled"), "{error:#}");
+    }
+
     /// Observed 2026-07-30: a cold build collapsed 70 concrete file:line
     /// surfaces into 6 abstract buckets with `path: null` and no evidence, and
     /// still reported `completed`. Entry points that name a surface without
