@@ -67,7 +67,7 @@ const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
             stage: "model_assessed",
             label: "model-assessed - unverified at runtime",
             reason: "automated review assessed exploitability without executing target code",
-            next_step: "run verify:finding with a runtime-backed mode",
+            next_step: "run verify:exploit to attempt empirical runtime proof",
         },
     ),
     (ProofLadderKind::Suspected, SUSPECTED_PROOF_LADDER),
@@ -78,4 +78,23 @@ pub(in crate::findings) fn proof_ladder_text(kind: ProofLadderKind) -> ProofLadd
         .iter()
         .find_map(|(candidate, text)| (*candidate == kind).then_some(*text))
         .unwrap_or(SUSPECTED_PROOF_LADDER)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_assessed_points_to_empirical_runtime_verification() {
+        let text = proof_ladder_text(ProofLadderKind::ModelAssessed);
+        assert_eq!(
+            text.next_step,
+            "run verify:exploit to attempt empirical runtime proof"
+        );
+        assert!(
+            !text.next_step.contains("verify:finding"),
+            "model-only verification must not be presented as the runtime proof step"
+        );
+    }
 }
