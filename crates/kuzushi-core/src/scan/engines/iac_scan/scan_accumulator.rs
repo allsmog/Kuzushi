@@ -3,6 +3,7 @@ use super::{
     analyze_dockerfile, analyze_github_actions, analyze_terraform, classify_iac_file,
     IacScanFinding, IacScanKind, IacScanOptions,
 };
+use crate::scan::engines::coverage_gaps::{CoverageGapKind, CoverageGaps};
 use crate::scan::ScanCancellation;
 use anyhow::Result;
 use std::path::Path;
@@ -12,6 +13,7 @@ pub(super) struct IacScanAccumulator {
     pub findings: Vec<IacScanFinding>,
     pub files_scanned: usize,
     pub files_skipped: usize,
+    pub coverage_gaps: CoverageGaps,
 }
 
 impl IacScanAccumulator {
@@ -26,6 +28,10 @@ impl IacScanAccumulator {
         match read_iac_file(file, options) {
             IacFileRead::Analyze(raw) => self.record_iac_analysis(target, file, options, &raw),
             IacFileRead::Skip => self.files_skipped += 1,
+            IacFileRead::Unreadable(error) => {
+                self.coverage_gaps
+                    .record(target, file, CoverageGapKind::File, &error)
+            }
         }
         Ok(())
     }
@@ -46,6 +52,7 @@ impl IacScanAccumulator {
 enum IacFileRead {
     Analyze(String),
     Skip,
+    Unreadable(std::io::Error),
 }
 
 fn ensure_iac_scan_active(cancellation: &ScanCancellation) -> Result<()> {
@@ -58,10 +65,15 @@ fn ensure_iac_scan_active(cancellation: &ScanCancellation) -> Result<()> {
 fn read_iac_file(file: &Path, options: &IacScanOptions) -> IacFileRead {
     let max_bytes =
         usize::try_from(options.max_file_bytes).unwrap_or(MAX_SUPPORTED_FILE_BYTES as usize);
-    crate::bounded_file::read_utf8_text(file, max_bytes)
-        .ok()
-        .map(IacFileRead::Analyze)
-        .unwrap_or(IacFileRead::Skip)
+    match crate::bounded_file::read_utf8_text(file, max_bytes) {
+        Ok(raw) => IacFileRead::Analyze(raw),
+        // Oversized for the configured bound, or not UTF-8 text at all: both
+        // are deliberate exclusions the report already counts as skipped.
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => IacFileRead::Skip,
+        // Everything else is a failure to read a manifest the walk already
+        // selected, so no rule ran against it.
+        Err(error) => IacFileRead::Unreadable(error),
+    }
 }
 
 type IacAnalyzer = fn(&Path, &Path, &str) -> Vec<IacScanFinding>;

@@ -19,28 +19,36 @@ pub(crate) fn canonical_directory(target: &Path) -> Result<PathBuf> {
     Ok(canonical)
 }
 
+/// Walk `dir` for candidate files. A directory the process cannot list is a
+/// hole in the scan, not an empty subtree, so it is recorded in `gaps` rather
+/// than dropped: the report has to be able to say the tree was not fully read.
 pub(crate) fn collect_files(
+    root: &Path,
     dir: &Path,
     options: &SecretScanOptions,
     out: &mut Vec<PathBuf>,
+    gaps: &mut CoverageGaps,
 ) -> Result<()> {
-    let Ok(read_dir) = fs::read_dir(dir) else {
+    let Some(mut entries) = read_dir_entries(root, dir, gaps) else {
         return Ok(());
     };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
     entries.sort_by_key(|entry| entry.path());
 
     for entry in entries {
         let file_name = entry.file_name().to_string_lossy().to_string();
         let path = entry.path();
-        let Ok(file_type) = entry.file_type() else {
-            continue;
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) => {
+                gaps.record(root, &path, CoverageGapKind::Entry, &error);
+                continue;
+            }
         };
         if file_type.is_dir() {
             if options.exclude_dirs.contains(file_name.as_str()) {
                 continue;
             }
-            collect_files(&path, options, out)?;
+            collect_files(root, &path, options, out, gaps)?;
         } else if file_type.is_file() {
             out.push(path);
         }

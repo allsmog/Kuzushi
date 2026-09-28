@@ -14,6 +14,7 @@ impl SecretScanReport {
                 "findings": self.findings,
                 "filesScanned": self.files_scanned,
                 "filesSkipped": self.files_skipped,
+                "coverageGaps": self.coverage_gaps,
                 "target": self.target,
             }),
         )
@@ -21,7 +22,7 @@ impl SecretScanReport {
 }
 
 fn secret_scan_header_lines(report: &SecretScanReport) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!(
             "secret-scan: {} finding{} ({})",
             report.findings.len(),
@@ -31,7 +32,9 @@ fn secret_scan_header_lines(report: &SecretScanReport) -> Vec<String> {
         format!("  Files scanned: {}", report.files_scanned),
         format!("  Files skipped: {}", report.files_skipped),
         format!("  Target:        {}", report.target),
-    ]
+    ];
+    lines.extend(report.coverage_gaps.disclosure_lines());
+    lines
 }
 
 fn severity_summary(findings: &[SecretScanFinding]) -> String {

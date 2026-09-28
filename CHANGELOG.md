@@ -45,6 +45,23 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `secret-scan` and `iac-scan` disclose the paths they could not read. Both
+  walkers returned `Ok(())` for a directory `read_dir` refused, so an
+  unreadable subtree produced no findings, no `filesScanned` and no
+  `filesSkipped` — a permission-denied `config/` was indistinguishable from an
+  empty one. `secret-scan` additionally dropped a file whose content failed to
+  read into an outcome that incremented neither counter, so the file left the
+  report entirely. Both engines now record every unread directory, entry, and
+  file in a shared `coverageGaps` structure that the report text prints as
+  `Unread paths: <n> (coverage is incomplete)` and the tool JSON carries
+  verbatim, bounded at 50 named paths with the remainder counted. A deliberate
+  exclusion is unchanged: an oversized or non-text file stays in
+  `filesSkipped`. Both engines also hand their gaps to the aggregate scan
+  through `ScanEngineOutput::scan_errors`, so `kuzushi scan` refuses to report
+  a partially read target as complete instead of forwarding findings alone.
+  Direct `secret-scan`/`iac-scan` dispatch still completes over what it could
+  read, with the gap disclosed, rather than failing the whole run.
+
 - A single-pipeline `threat-model:build` that misses grounded entry points
   now runs one bounded gap-fill call when budget remains, as the staged
   pipeline and refine already did. Before, it only labelled the gaps

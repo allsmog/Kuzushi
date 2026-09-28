@@ -28,13 +28,36 @@ impl ScanEngine for IacScanScanner {
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        let report = scan_iac(target, &self.options, cancellation)?;
-        Ok(report
+        Ok(iac_scan_engine_output(target, &self.options, cancellation)?.findings)
+    }
+
+    /// The aggregate scan learns about unread paths only through
+    /// `scan_errors`; the default implementation would forward findings
+    /// alone and let a partially read target report as complete.
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        iac_scan_engine_output(target, &self.options, cancellation)
+    }
+}
+
+fn iac_scan_engine_output(
+    target: &Path,
+    options: &IacScanOptions,
+    cancellation: &ScanCancellation,
+) -> Result<ScanEngineOutput> {
+    let report = scan_iac(target, options, cancellation)?;
+    Ok(ScanEngineOutput {
+        findings: report
             .findings
             .iter()
             .map(IacScanFinding::to_core_finding)
-            .collect())
-    }
+            .collect(),
+        codeql_sarif_documents: Vec::new(),
+        scan_errors: report.coverage_gaps.scan_error_lines(),
+    })
 }
 
 pub fn scan_iac(
@@ -43,8 +66,8 @@ pub fn scan_iac(
     cancellation: &ScanCancellation,
 ) -> Result<IacScanReport> {
     let target = canonical_directory(target)?;
-    let files = sorted_iac_files(&target, options)?;
     let mut scan = IacScanAccumulator::default();
+    let files = sorted_iac_files(&target, options, &mut scan.coverage_gaps)?;
 
     for file in files {
         scan.scan_file(&target, &file, options, cancellation)?;
@@ -56,12 +79,17 @@ pub fn scan_iac(
         findings: scan.findings,
         files_scanned: scan.files_scanned,
         files_skipped: scan.files_skipped,
+        coverage_gaps: scan.coverage_gaps,
     })
 }
 
-fn sorted_iac_files(target: &Path, options: &IacScanOptions) -> Result<Vec<PathBuf>> {
+fn sorted_iac_files(
+    target: &Path,
+    options: &IacScanOptions,
+    gaps: &mut CoverageGaps,
+) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_iac_files(target, target, options, &mut files)?;
+    collect_iac_files(target, target, options, &mut files, gaps)?;
     files.sort();
     Ok(files)
 }

@@ -71,4 +71,8 @@ pub struct IacScanReport {
     pub findings: Vec<IacScanFinding>,
     pub files_scanned: usize,
     pub files_skipped: usize,
+    /// Paths the walk reached but could not read. A clean report over a tree
+    /// with gaps has not cleared the whole tree.
+    #[serde(default)]
+    pub coverage_gaps: CoverageGaps,
 }
