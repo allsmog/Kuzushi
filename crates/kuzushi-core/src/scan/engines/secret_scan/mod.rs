@@ -1,5 +1,6 @@
 use crate::findings::{Finding, Severity, StaticProofState};
-use crate::scan::{ScanCancellation, ScanEngine};
+use crate::scan::engines::coverage_gaps::{read_dir_entries, CoverageGapKind, CoverageGaps};
+use crate::scan::{ScanCancellation, ScanEngine, ScanEngineOutput};
 use anyhow::{Context, Result};
 pub(crate) use assignment_detection::*;
 pub(crate) use canonical_directory::*;
@@ -27,6 +28,8 @@ mod secret_scan_report;
 pub(in crate::scan::engines::secret_scan) use is_token_char::*;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unread_paths_are_disclosed;
 
 pub use output::SecretScanFinding;
 pub use output::SecretSeverity;

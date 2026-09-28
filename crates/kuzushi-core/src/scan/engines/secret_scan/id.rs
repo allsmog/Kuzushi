@@ -6,13 +6,35 @@ impl ScanEngine for SecretScanScanner {
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        let report = scan_for_secrets(target, &SecretScanOptions::default(), cancellation)?;
-        Ok(report
+        Ok(secret_scan_engine_output(target, cancellation)?.findings)
+    }
+
+    /// The aggregate scan learns about unread paths only through
+    /// `scan_errors`; the default implementation would forward findings
+    /// alone and let a partially read target report as complete.
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        secret_scan_engine_output(target, cancellation)
+    }
+}
+
+fn secret_scan_engine_output(
+    target: &Path,
+    cancellation: &ScanCancellation,
+) -> Result<ScanEngineOutput> {
+    let report = scan_for_secrets(target, &SecretScanOptions::default(), cancellation)?;
+    Ok(ScanEngineOutput {
+        findings: report
             .findings
             .iter()
             .map(SecretScanFinding::to_core_finding)
-            .collect())
-    }
+            .collect(),
+        codeql_sarif_documents: Vec::new(),
+        scan_errors: report.coverage_gaps.scan_error_lines(),
+    })
 }
 
 #[derive(Debug, Clone, Copy)]

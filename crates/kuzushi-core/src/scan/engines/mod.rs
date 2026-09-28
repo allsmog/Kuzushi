@@ -1,5 +1,6 @@
 mod bounded_regular_files;
 pub mod codeql;
+pub mod coverage_gaps;
 pub mod dep_hygiene;
 pub mod exploit_chain;
 pub mod govulncheck;
