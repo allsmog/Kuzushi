@@ -399,11 +399,11 @@ fn openai_auth_intro(app: &ShellApp, recovery: bool) -> String {
     } else {
         "OpenAI browser sign-in is available."
     };
-    let target = "openai-oauth:gpt-5.4";
+    let target = openai_oauth_switch_target();
     let switch = if app.pending_auth_switch_is_step_scoped() {
-        format!("OAuth explicitly switches only the paused step to {target}.")
+        format!("OAuth asks before switching only the paused step to {target}.")
     } else {
-        format!("OAuth explicitly changes the configured model to {target}.")
+        format!("OAuth asks before changing the configured model to {target}.")
     };
     let outcome = if recovery {
         "Choose the API key or OAuth to resume the preserved Scan."
@@ -424,7 +424,8 @@ fn compact_auth_intro_text(app: &ShellApp, provider: &str, recovery: bool) -> St
 fn compact_openai_api_intro(app: &ShellApp, recovery: bool) -> String {
     let model = credential_model_label(app, "OpenAI API model");
     let scope = auth_model_switch_scope(app);
-    let detail = format!("{model} needs API key · OAuth switches {scope} to openai-oauth:gpt-5.4");
+    let target = openai_oauth_switch_target();
+    let detail = format!("{model} needs API key · OAuth asks to switch {scope} to {target}");
     recovery
         .then(|| format!("Scan preserved · {detail}"))
         .unwrap_or(detail)
@@ -469,6 +470,11 @@ fn oauth_sign_in_action(provider: &str, reconnect: bool) -> &'static str {
         (_, true) => "reconnects OpenAI OAuth",
         (_, false) => "opens OpenAI sign-in",
     }
+}
+
+fn openai_oauth_switch_target() -> String {
+    crate::app::oauth_model_switch_target_label("openai")
+        .unwrap_or_else(|| "an OpenAI OAuth model".to_string())
 }
 
 fn auth_model_switch_scope(app: &ShellApp) -> &'static str {
@@ -556,7 +562,7 @@ mod tests {
 
         assert!(text.contains("API key (OPENAI_API_KEY)"), "{text}");
         assert!(text.contains("Use OpenAI OAuth (switch model)"), "{text}");
-        assert!(text.contains("openai-oauth:gpt-5.4"), "{text}");
+        assert!(text.contains("openai-oauth:gpt-5.6-terra"), "{text}");
         assert!(text.contains("preserved Scan"), "{text}");
         assert!(!text.contains("Offline demo"), "{text}");
     }

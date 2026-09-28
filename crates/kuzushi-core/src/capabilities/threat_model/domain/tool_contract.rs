@@ -153,6 +153,9 @@ pub(crate) struct BuildInput {
     pub(crate) mode: String,
     pub(crate) seed_mode: String,
     pub(crate) budget_usd: Option<f64>,
+    /// Smallest share of grounded entry points a single-pipeline build must
+    /// cover to be saved; a model below it is refused, not persisted.
+    pub(crate) min_coverage: f64,
     pub(crate) history_depth: usize,
     pub(crate) variant_scan: bool,
     pub(crate) advisories: String,

@@ -72,7 +72,9 @@ impl AuthProvider {
 fn openai_credential_guidance(model: &str, provider: &str) -> String {
     match provider {
         "openai" => format!(
-            "{model} requires OPENAI_API_KEY; Credentials offers an explicit switch to OpenAI OAuth GPT-5.4"
+            "{model} requires OPENAI_API_KEY; Credentials offers an explicit switch to {}",
+            crate::app::oauth_model_switch_target_label("openai")
+                .unwrap_or_else(|| "OpenAI OAuth".to_string())
         ),
         "openai-codex" => {
             format!("{model} requires stored OpenAI OAuth; run `auth login openai`")

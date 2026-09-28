@@ -60,12 +60,12 @@ async fn type_text(world: &mut OnboardingWorld, value: String) {
 #[when(regex = r#"^I move the cursor to "([^"]+)"$"#)]
 async fn move_cursor_to(world: &mut OnboardingWorld, label: String) {
     let session = world.require_session();
-    // Up to 10 Down presses to find the row — every planning picker fits.
+    // Up to 10 Down presses to find the row — every picker and Setup fits.
     for _ in 0..10 {
         let snapshot = session.snapshot().expect("snapshot failed");
         if snapshot
             .lines()
-            .any(|line| line.contains("> ") && line.contains(&label))
+            .any(|line| is_selected_row(line) && line.contains(&label))
         {
             return;
         }
@@ -139,6 +139,12 @@ async fn compact_run_focus_capture_is_stacked(
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Planning pickers mark the selected row with `> `; Setup and the model
+/// catalog mark it with `▸ `.
+fn is_selected_row(line: &str) -> bool {
+    line.contains("> ") || line.contains("▸ ")
 }
 
 fn remember_run_focus_capture(captured: &mut Option<String>, snapshot: &str) {
@@ -380,6 +386,13 @@ fn translate_key(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn selected_rows_use_either_picker_marker() {
+        assert!(super::is_selected_row(" ▸ · Model          NOT NEEDED"));
+        assert!(super::is_selected_row("> [x] Build threat model"));
+        assert!(!super::is_selected_row("   · Model          NOT NEEDED"));
+    }
+
     use super::{
         compact_run_focus_matches, planning_row_is_checked, planning_row_is_unchecked,
         remember_run_focus_capture, run_focus_shows_both,

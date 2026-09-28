@@ -159,7 +159,8 @@ pub(super) fn result_fields(
 
 /// A failed tool may still have paid for model calls. A structured-output
 /// failure carries what it observed (including a labelled estimate); any other
-/// error has no receipt.
+/// error has no receipt. A policy refusal raised before any work ran (such as
+/// a missing model) is `blocked`, not `failed`.
 fn failed_result_fields(
     error: &anyhow::Error,
 ) -> (RunItemStatus, RuntimeCostReport, Vec<SafeText>, u64, u64) {
@@ -167,13 +168,12 @@ fn failed_result_fields(
         .chain()
         .find_map(|source| source.downcast_ref::<crate::structured_output::StructuredOutputError>())
         .map_or(RuntimeCostReport::UNAVAILABLE, |failure| failure.cost_report());
-    (
-        RunItemStatus::Failed,
-        cost,
-        Vec::new(),
-        0,
-        1,
-    )
+    let status = if crate::runtime::is_pre_execution_refusal(error) {
+        RunItemStatus::Blocked
+    } else {
+        RunItemStatus::Failed
+    };
+    (status, cost, Vec::new(), 0, 1)
 }
 
 fn lifecycle_status(status: ToolResultStatus) -> RunItemStatus {

@@ -95,7 +95,7 @@ fn draw_graph_title(buf: &mut Buffer, area: Rect, selected: &SelectedFlow<'_>) {
 }
 
 fn draw_node_box(diagram: &DfdDiagram, buf: &mut Buffer, area: Rect, node_id: &str, y: u16) {
-    let label = fit(
+    let label = crate::renderer::shared::text::fit_words(
         &graph_node_label(diagram, node_id),
         area.width.saturating_sub(3) as usize,
     );

@@ -656,6 +656,9 @@ mod tests {
 
     #[test]
     fn loads_and_executes_trusted_dynamic_js_module() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("echo-module.mjs");
         fs::write(
@@ -752,6 +755,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_supports_sdk_execute_and_input_schema_options() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("sdk-module.mjs");
         fs::write(
@@ -853,6 +859,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_can_call_declared_runtime_after_large_stderr() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("runtime-module.mjs");
         fs::write(
@@ -948,6 +957,9 @@ export default {
 
     #[test]
     fn dynamic_module_registration_is_atomic_on_duplicate_tools() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("duplicate-module.mjs");
         fs::write(
@@ -984,6 +996,9 @@ export default {
 
     #[test]
     fn dynamic_module_rejects_invalid_option_defaults_before_registration() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("invalid-default-module.mjs");
         fs::write(
@@ -1024,6 +1039,9 @@ export default {
 
     #[test]
     fn dynamic_module_cannot_replace_a_builtin_module() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("builtin-collision.mjs");
         fs::write(
@@ -1075,6 +1093,9 @@ export default {
 
     #[test]
     fn dynamic_module_requires_an_explicit_headless_contract() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("implicit-headless.mjs");
         fs::write(
@@ -1114,6 +1135,9 @@ export default {
 
     #[test]
     fn dynamic_module_requires_explicit_effect_policy() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("implicit-effect.mjs");
         fs::write(
@@ -1152,6 +1176,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_requires_lockfile_approval() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("unapproved-module.mjs");
         fs::write(
@@ -1192,6 +1219,9 @@ export default {
 
     #[test]
     fn dynamic_js_probe_and_worker_do_not_inherit_host_secrets() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let _guard = EnvVarGuard::set("KUZUSHI_DYNAMIC_PROBE_SECRET", "do-not-leak");
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("env-module.mjs");
@@ -1240,6 +1270,9 @@ export default {
 
     #[test]
     fn dynamic_js_stdout_noise_does_not_corrupt_protocol() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("stdout-module.mjs");
         fs::write(
@@ -1330,6 +1363,9 @@ export default {
 
     #[test]
     fn dynamic_js_single_file_worker_cannot_import_sibling_helper() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("import-module.mjs");
         fs::write(
@@ -1375,6 +1411,9 @@ export default {
 
     #[test]
     fn dynamic_js_execute_rejects_revocation_after_load() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("revoked-module.mjs");
         fs::write(
@@ -1424,6 +1463,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_rejects_unverified_signature_chain() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("signed-module.mjs");
         fs::write(
@@ -1466,6 +1508,9 @@ export default {
 
     #[test]
     fn dynamic_js_worker_initialize_rejects_descriptor_drift() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("drift-module.mjs");
         fs::write(
@@ -1521,6 +1566,9 @@ export default {
 
     #[test]
     fn dynamic_js_broker_denies_path_escape() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("escape-module.mjs");
         fs::write(
@@ -1574,6 +1622,9 @@ export default {
 
     #[test]
     fn dynamic_js_broker_denies_metadata_service_ssrf() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("ssrf-module.mjs");
         fs::write(
@@ -1629,6 +1680,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_uses_brokered_fs_artifacts_and_anchored_audit() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("broker-module.mjs");
         fs::write(
@@ -1715,6 +1769,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_fs_write_respects_cumulative_byte_quota() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("quota-module.mjs");
         fs::write(
@@ -1770,6 +1827,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_artifact_sha_mismatch_is_denied() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("artifact-module.mjs");
         fs::write(
@@ -1830,6 +1890,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_persists_findings_with_grant() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("finding-module.mjs");
         fs::write(
@@ -1890,6 +1953,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_calls_dedicated_host_mcp() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("mcp-module.mjs");
         fs::write(
@@ -1960,6 +2026,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_runs_host_fuzz_executor() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("fuzz-module.mjs");
         fs::write(
@@ -2035,6 +2104,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_fuzz_network_request_is_denied() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("fuzz-network-module.mjs");
         fs::write(
@@ -2099,6 +2171,9 @@ export default {
 
     #[test]
     fn dynamic_js_agentic_fuzz_example_uses_kwp_fuzz_and_optional_symcc() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = agentic_fuzz_module_path();
         assert!(module_path.is_file(), "missing {}", module_path.display());
@@ -2184,6 +2259,9 @@ export default {
 
     #[test]
     fn dynamic_js_module_accepts_canonical_tool_phases() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("canonical-phases.mjs");
         fs::write(
@@ -2221,6 +2299,9 @@ export default {
 
     #[test]
     fn dynamic_js_deadline_cancels_and_drops_late_broker_work() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("deadline-module.mjs");
         fs::write(
@@ -3103,7 +3184,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "a07152cc1512f07217fbe1f444cd784a12329b11f0889dea986dae4388e378b1",
+            "091f95805ac0a4530999704767bad8274532875d9980b53518c0644df1ce15f9",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }

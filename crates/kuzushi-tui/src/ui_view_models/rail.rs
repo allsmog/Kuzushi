@@ -21,11 +21,16 @@ pub(crate) fn rail_sections(app: &ShellApp, width: usize) -> Vec<RailSection> {
         journey_section(app),
         in_flight_section(app, width),
         findings_section(app, width),
-        Some(cost_section(app)),
+        cost_section_unless_shown(app),
     ]
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// Run Focus already reports cost in its header, so the rail does not repeat it.
+fn cost_section_unless_shown(app: &ShellApp) -> Option<RailSection> {
+    (app.shell_view() != crate::ShellView::Activity).then(|| cost_section(app))
 }
 
 /// Always present: which target, which scope. The rail's anchor row.

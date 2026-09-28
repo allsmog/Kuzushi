@@ -7,10 +7,15 @@ use kuzushi_core::{
 };
 use serde_json::Value;
 
+/// A placeholder credential: the fake bridges never contact a provider, but
+/// runtime policy still requires the selected OpenAI model to have a key.
+const FAKE_OPENAI_API_KEY: &str = "fake-openai-key-for-fake-bridge";
+
 fn kuzushi_command(home: &std::path::Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_kuzushi"));
     command
         .env("HOME", home)
+        .env("OPENAI_API_KEY", FAKE_OPENAI_API_KEY)
         .env_remove("KUZUSHI_MODEL")
         .env_remove("KUZUSHI_V2_MODEL")
         .env_remove("KUZUSHI_API_KEY_ENV")
@@ -871,20 +876,25 @@ fn run_dep_hygiene_check_missing_target_is_actionable() {
     );
 }
 
-fn assert_latest_failed_run_bundle(repo: &std::path::Path, expected_tool: &str, error: &str) {
+/// A missing model is refused before the tool does any work, so the run
+/// bundle records `blocked` (policy refusal), not `failed` (execution failure).
+fn assert_latest_refused_run_bundle(repo: &std::path::Path, expected_tool: &str, error: &str) {
     let run_id = latest_run_id(repo);
     let run = run_json(repo, &run_id, "run.json");
     let failures = run_json(repo, &run_id, "failures.json");
     let result = run_json(repo, &run_id, "result.json");
 
-    assert_eq!(run.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(run.get("status").and_then(Value::as_str), Some("blocked"));
     assert_eq!(run.get("tool").and_then(Value::as_str), Some(expected_tool));
     assert_eq!(
         failures.get("status").and_then(Value::as_str),
-        Some("failed")
+        Some("blocked")
     );
     assert!(failures.to_string().contains(error));
-    assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(
+        result.get("status").and_then(Value::as_str),
+        Some("blocked")
+    );
     assert!(result.to_string().contains(error));
 }
 
@@ -1494,7 +1504,7 @@ fn run_variant_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
-    assert_latest_failed_run_bundle(&repo, "variant:hunt", "requires an explicit model");
+    assert_latest_refused_run_bundle(&repo, "variant:hunt", "requires an explicit model");
 }
 
 #[test]
@@ -1521,7 +1531,7 @@ fn run_ndiff_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
-    assert_latest_failed_run_bundle(&repo, "ndiff:hunt-variants", "requires an explicit model");
+    assert_latest_refused_run_bundle(&repo, "ndiff:hunt-variants", "requires an explicit model");
 }
 
 #[cfg(unix)]
@@ -1961,7 +1971,7 @@ fn run_carlini_threat_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
-    assert_latest_failed_run_bundle(
+    assert_latest_refused_run_bundle(
         &repo,
         "carlini-threat-hunt:run",
         "requires an explicit model",
@@ -2015,7 +2025,7 @@ fn run_systems_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
-    assert_latest_failed_run_bundle(
+    assert_latest_refused_run_bundle(
         &repo,
         "systems-hunt:systems-hunt",
         "requires an explicit model",
@@ -2696,7 +2706,7 @@ fn run_triage_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
-    assert_latest_failed_run_bundle(&repo, "triage:run", "requires an explicit model");
+    assert_latest_refused_run_bundle(&repo, "triage:run", "requires an explicit model");
 }
 
 #[cfg(unix)]
@@ -2768,7 +2778,7 @@ fn run_verify_finding_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
-    assert_latest_failed_run_bundle(&repo, "verify:finding", "requires an explicit model");
+    assert_latest_refused_run_bundle(&repo, "verify:finding", "requires an explicit model");
 }
 
 #[cfg(unix)]
@@ -2988,7 +2998,8 @@ fn run_threat_model_build_without_model_fails_without_fallback() {
         "missing model must be machine-readable and exit nonzero"
     );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
+    // Refused before any work ran: `blocked`, not an execution `failed`.
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("blocked"));
     assert!(body.pointer("/data/provider").is_none());
     assert!(body.to_string().contains("explicit model"));
 }

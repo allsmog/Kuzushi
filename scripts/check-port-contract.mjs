@@ -126,6 +126,9 @@ const quickCiRequirements = [
   "scripts/runner/lint-workflows.sh",
   '"self-hosted","macOS","ARM64","kuzushi-mac"',
   "quality-gauntlet:",
+  // Clippy and the Rust suite run once per ready PR; the quick gate skips both.
+  "rust-tests:",
+  "cargo test --workspace --locked",
   "types: [opened, reopened, ready_for_review, synchronize]",
   "github.event.pull_request.draft == false",
   "workflow_call:",

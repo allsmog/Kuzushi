@@ -46,7 +46,10 @@ Use a full run before merging platform, packaging, release, coverage-policy, or
 mutation-policy changes. For an ordinary PR, run the quick local contract after
 intermediate pushes; marking a draft ready requests the hosted quick gate once.
 
-Requires Rust 1.96.1 (including rustfmt and Clippy) and Node 22+. The repo has
+Requires Rust 1.96.1 (including rustfmt and Clippy) and Node 22+ to run the
+CLI. Development pins Node 26.3.1, the version CI uses: the KWP dynamic-module
+tests need its network permission boundary and skip themselves on older Node,
+so run them on 26.3.1 before changing module loading. The repo has
 `rust-toolchain.toml`, `.nvmrc`, and `.tool-versions` so `rustup`, `nvm use`,
 `asdf install`, and `mise install` all pick up the right version
 automatically. pnpm is pinned via `packageManager` in `package.json` and

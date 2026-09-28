@@ -1685,6 +1685,13 @@ impl ShellApp {
 
     fn apply_confirm_key_action(&mut self, action: ConfirmKeyAction) -> InputUpdate {
         let resolved = self.resolve_confirm(action.outcome, action.remember);
+        if resolved
+            .as_ref()
+            .is_some_and(|confirm| confirm.kind == ConfirmKind::ModelSwitch)
+        {
+            let effects = self.resolve_model_switch_consent(action.outcome);
+            return InputUpdate::handled_with_effects(effects);
+        }
         let launch = self.confirmed_run_launch(action, resolved.as_ref());
         self.advisory_mut().pending_confirm_launch = None;
         match launch {

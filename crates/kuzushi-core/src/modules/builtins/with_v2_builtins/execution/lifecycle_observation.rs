@@ -127,7 +127,7 @@ impl DispatchLifecycle {
             preview,
             warning_count,
             error_count,
-            execution_may_have_occurred: true,
+            execution_may_have_occurred: status != RunItemStatus::Blocked,
         }
     }
 

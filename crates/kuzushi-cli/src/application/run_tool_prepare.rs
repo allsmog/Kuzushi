@@ -591,6 +591,9 @@ mod resolve_cli_autonomy_tests {
 
     #[test]
     fn run_rejects_dynamic_shell_only_tools_after_loading_their_descriptor() {
+        if !kuzushi_core::modules::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("shell-only.mjs");
         write_shell_only_module(&module_path);
