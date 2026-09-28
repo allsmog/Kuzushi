@@ -181,6 +181,26 @@ fn change_projection(app: &mut ShellApp, state: &str, other: &std::path::Path) {
 }
 
 #[test]
+fn planner_result_arms_the_card_it_presents_over_an_empty_composer() {
+    let (_target, mut app) = completed_scan();
+    app.activity_mut()
+        .unwrap()
+        .run_focus_origin
+        .as_mut()
+        .unwrap()
+        .input_mode = InputMode::Prompt;
+
+    assert!(app.finalize_run_focus_if_idle());
+
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+    app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('u'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert_eq!(app.input(), "");
+}
+
+#[test]
 fn planner_result_preserves_prompt_typing_ownership() {
     let (_target, mut app) = completed_scan();
     app.activity_mut()

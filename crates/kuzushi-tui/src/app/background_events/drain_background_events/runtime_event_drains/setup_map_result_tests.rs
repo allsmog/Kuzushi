@@ -280,4 +280,28 @@ fn completed_setup_map_preserves_prompt_typing_ownership() {
         .is_none());
 }
 
+#[test]
+fn completed_setup_map_arms_the_card_it_presents_over_an_empty_composer() {
+    let (_target, mut app) = completed_map();
+    app.activity_mut()
+        .unwrap()
+        .run_focus_origin
+        .as_mut()
+        .unwrap()
+        .input_mode = InputMode::Prompt;
+
+    assert!(app.finalize_run_focus_if_idle());
+
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+    app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('u'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert_eq!(app.input(), "");
+    assert!(app
+        .engagement
+        .selected_phase_attempt(WorkflowPhase::Map)
+        .is_some());
+}
+
 mod acceptance;

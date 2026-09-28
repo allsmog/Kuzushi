@@ -1,5 +1,5 @@
 use super::{
-    phase_attempt_outcome_label, RunFocusOrigin, RunFocusReceipt, ShellApp, ShellView,
+    phase_attempt_outcome_label, InputMode, RunFocusOrigin, RunFocusReceipt, ShellApp, ShellView,
     WorkbenchPage, WorkflowPhase,
 };
 
@@ -23,7 +23,24 @@ impl ShellApp {
         };
         self.set_workbench_page(WorkbenchPage::from_phase(phase));
         self.ui_mut().clear_phase_result_cursor();
+        self.arm_presented_result_card();
         true
+    }
+
+    /// The card the shell just presented advertises single-key actions that
+    /// only Navigate mode dispatches. Restoring the launch origin re-applies
+    /// the mode the operator left behind, which for a Setup or planner launch
+    /// is ordinarily Prompt — so the card arrives asking for a decision with
+    /// its own keys disarmed, and the next press lands in the composer as
+    /// text. Arm it here, where the destination is known.
+    ///
+    /// A draft in flight is operator work and is never interrupted: the mode
+    /// stays as restored, and the card's control hint already names the `Esc`
+    /// step that reaches the actions from there.
+    fn arm_presented_result_card(&mut self) {
+        if self.input().is_empty() {
+            self.set_input_mode(InputMode::Navigate);
+        }
     }
 
     fn pending_result_phase(&self, origin: Option<RunFocusOrigin>) -> Option<WorkflowPhase> {
