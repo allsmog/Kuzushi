@@ -1,8 +1,8 @@
 Feature: Durable phase pages survive in-place terminal resizing
   One live shell process keeps an available canonical phase while tmux resizes
-  through the supported cockpit matrix. Locked phases remain visibly locked
-  instead of becoming selectable through a resize. Every assertion captures
-  only the active alternate screen.
+  through the supported cockpit matrix. A page viewed ahead of reality keeps
+  naming the phase still required at every size, so a resize never makes it
+  look complete. Every assertion captures only the active alternate screen.
 
   Background:
     Given a fresh kuzushi workspace
@@ -31,18 +31,17 @@ Feature: Durable phase pages survive in-place terminal resizing
     Then the same shell process is still running
     And the resized live frame shows "Viewing Map"
 
-  Scenario Outline: Locked phases remain locked through a resize
+  Scenario Outline: A page ahead of reality stays honest through a resize
     When I launch the shell
     And I press "Esc"
     And I press "<key>"
-    Then an alternate-screen capture shows "<title> is locked"
-    And an alternate-screen capture shows "Viewing Map"
+    Then one alternate-screen row shows "Viewing <title>" and "next required Map"
     When I resize the live terminal to 40 by 12
     Then the same shell process is still running
-    And the resized live frame shows "MAP"
+    And the resized live frame shows "Viewing <title> · next Map"
     When I resize the live terminal to 160 by 48
     Then the same shell process is still running
-    And the resized live frame shows "Viewing Map"
+    And the resized live frame shows "Viewing <title>"
 
     Examples:
       | key | title  |

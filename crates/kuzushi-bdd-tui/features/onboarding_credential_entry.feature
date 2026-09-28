@@ -7,9 +7,7 @@ Feature: Session credential entry returns a readiness receipt
     And the model is set to "anthropic:claude-sonnet-4-6"
     When I launch the shell
     Then I see "SETUP · READY THE MAP RUN"
-    When I press "Down"
-    And I press "Down"
-    And I press "Down"
+    When I move the cursor to "Credentials"
     And I press "Enter"
     And I type text "bdd-anthropic-key"
     And I press "Enter"
@@ -23,9 +21,7 @@ Feature: Session credential entry returns a readiness receipt
     And the model is set to "anthropic:claude-sonnet-4-6"
     When I launch the shell
     Then I see "SETUP · READY THE MAP RUN"
-    When I press "Down"
-    And I press "Down"
-    And I press "Down"
+    When I move the cursor to "Credentials"
     And I press "Enter"
     Then I see "No key yet?"
     And I see "Offline demo"

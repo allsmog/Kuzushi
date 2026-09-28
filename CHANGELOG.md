@@ -84,6 +84,13 @@ Notable changes to Kuzushi. Release procedure lives in
   dynamic-module tests skip on older Node instead of failing, and the
   cancellation-settlement test skips where directory permissions are not
   enforced (root).
+- The tmux-driven TUI journeys (`kuzushi-bdd-tui`) run in `rust-tests` for the
+  first time. Their scenarios now match the current screens: the Report route
+  lists six formats and an `EXPORTED` receipt, Workbench pages can be viewed
+  ahead of reality while the header names the phase still required, `Shift+Tab`
+  cycles pages forward, and a completed Setup Map presents its result for
+  acceptance. Setup scenarios select rows by label instead of counting key
+  presses, so a new readiness row no longer shifts them.
 - Choosing OpenAI OAuth for an OpenAI API model no longer switches the model
   on the same key press. It raises a model-switch confirmation that names the
   current and target models, and only `y` continues. Continuing either reuses

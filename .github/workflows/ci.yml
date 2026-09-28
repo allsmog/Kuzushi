@@ -143,7 +143,8 @@ jobs:
           cache: true
       - uses: ./.github/actions/install-patch-validation-sandbox
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # The tmux-driven BDD journeys (kuzushi-bdd-tui) are excluded until their
-      # feature files are brought back in line with the current screens; they
-      # predate several Report/Setup/Workbench copy changes and never ran here.
-      - run: cargo test --workspace --locked --exclude kuzushi-bdd-tui
+      # The kuzushi-bdd-tui journeys drive the real shell inside tmux.
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+      - run: cargo test --workspace --locked

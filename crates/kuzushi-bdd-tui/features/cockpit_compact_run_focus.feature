@@ -9,11 +9,6 @@ Feature: Compact Run Focus remains operable in a real terminal
     When I launch the shell
     Then the live terminal is 60 by 30
     And I see "SETUP · READY THE MAP RUN"
-    When I press "Down"
-    And I press "Down"
-    And I press "Down"
-    And I press "Down"
-    And I press "Down"
-    And I press "Down"
+    When I move the cursor to "Start Map"
     And I press "Enter"
     Then one compact Run Focus capture shows plan "Build project" then "Extract entry" with "TASKS" above "OUTPUT" without a shell prompt
