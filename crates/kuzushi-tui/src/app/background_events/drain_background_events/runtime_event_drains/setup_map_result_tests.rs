@@ -304,4 +304,34 @@ fn completed_setup_map_arms_the_card_it_presents_over_an_empty_composer() {
         .is_some());
 }
 
+#[test]
+fn completed_setup_map_leaves_an_open_reverse_search_owning_its_keys() {
+    let (_target, mut app) = completed_map();
+    app.activity_mut()
+        .unwrap()
+        .run_focus_origin
+        .as_mut()
+        .unwrap()
+        .input_mode = InputMode::Prompt;
+    app.enter_history_search();
+
+    assert!(app.finalize_run_focus_if_idle());
+
+    // `handle_overlay_key` consumes printables while the search is open, so
+    // arming here would have the card advertise keys the overlay eats.
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+    app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('u'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert_eq!(
+        app.history_search().map(|search| search.query.as_str()),
+        Some("u")
+    );
+    assert!(app
+        .engagement
+        .selected_phase_attempt(WorkflowPhase::Map)
+        .is_none());
+}
+
 mod acceptance;

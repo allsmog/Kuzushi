@@ -34,11 +34,14 @@ impl ShellApp {
     /// its own keys disarmed, and the next press lands in the composer as
     /// text. Arm it here, where the destination is known.
     ///
-    /// A draft in flight is operator work and is never interrupted: the mode
-    /// stays as restored, and the card's control hint already names the `Esc`
-    /// step that reaches the actions from there.
+    /// A draft in flight is operator work and is never interrupted, and an open
+    /// reverse search owns every printable key from `handle_overlay_key`
+    /// regardless of mode — arming over either would make the card advertise
+    /// actions something else is about to consume. In both cases the mode stays
+    /// as restored, and the card's control hint already names the `Esc` step
+    /// that reaches the actions from there.
     fn arm_presented_result_card(&mut self) {
-        if self.input().is_empty() {
+        if self.input().is_empty() && self.history_search().is_none() {
             self.set_input_mode(InputMode::Navigate);
         }
     }
