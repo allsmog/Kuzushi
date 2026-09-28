@@ -50,7 +50,7 @@ Notable changes to Kuzushi. Release procedure lives in
   picker, finishes by restoring the launch origin's input mode and then moving
   the operator to the Workbench page holding the unresolved attempt. The origin
   mode for those launches is ordinarily Prompt, and the card's single-key
-  actions (`u` select, `n` continue, `d` discard, `r` run again) are
+  actions (`u` select, `n` continue, `d` discard, `r` run again, …) are
   dispatched only in Navigate mode — so the card the shell had just asked the
   operator to decide arrived disarmed, and the `u` it advertised landed in the
   composer as text with no card action and no notice. The one existing
