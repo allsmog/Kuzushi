@@ -184,6 +184,13 @@ pub(crate) fn oauth_model_switch_for_provider(provider: &str) -> Option<AuthMode
         })
 }
 
+/// The public selector of the model an OAuth credential choice would switch
+/// to, for copy that must name the real target rather than a stale one.
+pub(crate) fn oauth_model_switch_target_label(provider: &str) -> Option<String> {
+    oauth_model_switch_for_provider(provider)
+        .map(|selection| crate::app::display_model_selector(&selection.model))
+}
+
 pub(crate) fn visible_model_choice_indexes(config: &V2Config) -> Vec<usize> {
     let preferred = preferred_model_choice_index(config);
     std::iter::once(preferred)

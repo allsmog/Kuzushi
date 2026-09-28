@@ -881,8 +881,9 @@ fn ensure_node_network_permission_boundary() -> Result<()> {
         .map_err(anyhow::Error::msg)
 }
 
-#[cfg(test)]
-pub(crate) fn kwp_node_execution_available() -> bool {
+/// Whether this host's Node can run KWP workers (it enforces the network
+/// permission boundary). Tests that start a worker skip on older Node.
+pub fn kwp_node_execution_available() -> bool {
     ensure_node_network_permission_boundary().is_ok()
 }
 
@@ -1642,6 +1643,9 @@ mod dynamic_loader_tests {
 
     #[test]
     fn single_file_worker_permission_does_not_expose_its_parent_directory() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let host_dir = tmp.path().join("host");
         let module_dir = tmp.path().join("module");
@@ -1664,6 +1668,9 @@ mod dynamic_loader_tests {
 
     #[test]
     fn kwp_node_permission_boundary_denies_direct_network_access() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let script = tmp.path().join("host.mjs");
         let entry = tmp.path().join("entry.mjs");

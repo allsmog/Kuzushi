@@ -198,6 +198,23 @@ binary, non-UTF-8, and budget-omitted code is disclosed. Rust code uses the test
 projection described above. Target drift or an incomplete inventory stops the
 build with recovery guidance.
 
+### Single-pipeline coverage: gap fill and the coverage floor
+
+When a single-pipeline `threat-model:build` leaves grounded entry points
+uncovered and budget remains, it makes one bounded gap-fill call. This is the
+same repair the staged pipeline and refine use. `coverage.gapFillMethod`
+records what happened:
+- `none-needed`: coverage already held.
+- `stride-llm`: gap fill ran.
+- `budget-exhausted`: no budget was left for the call.
+- `gap-fill-failed`: the call failed. The model is kept and the gaps stay
+  parked and disclosed.
+
+The build is then refused, and nothing is persisted, if it still covers less
+than `minCoverage` of the grounded entry points (declared option, 0–1, default
+`0.5`). The error names covered/considered and the remedies. Pass
+`minCoverage: 0` to keep a low-coverage model deliberately.
+
 ### Confirmed findings as threat-model variant patterns
 
 `threat-model:build mode=refine` reads the workspace findings ledger, including

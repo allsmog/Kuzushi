@@ -20,6 +20,9 @@ fn context<'a>(
     }
 }
 
+/// A bare README repository has no detectable build, and `patch:finding`
+/// binds a validation plan at preparation; the patch inputs below therefore
+/// name `testCmd` explicitly so these tests exercise authorization only.
 fn initialize_repo(repo: &Path) {
     run_git(repo, &["init"]);
     std::fs::write(repo.join("README.md"), "snapshot one\n").unwrap();
@@ -80,7 +83,7 @@ fn interactive_request_is_not_an_authorization_grant() {
     let error = registry
         .execute_tool(
             "patch:finding",
-            json!({"fingerprint": "finding-1"}),
+            json!({"fingerprint": "finding-1", "testCmd": "true"}),
             &request_ctx,
         )
         .unwrap_err()
@@ -100,7 +103,7 @@ fn prepared_operation_can_consume_one_interactive_request() {
     let prepared = registry
         .prepare_dispatch_input(
             "patch:finding",
-            json!({"fingerprint": "finding-1"}),
+            json!({"fingerprint": "finding-1", "testCmd": "true"}),
             &ctx,
             None,
         )
@@ -158,7 +161,7 @@ fn operation_authorization_rejects_head_movement_after_prepare() {
     let prepared = registry
         .prepare_dispatch_input(
             "patch:finding",
-            json!({"fingerprint": "finding-1"}),
+            json!({"fingerprint": "finding-1", "testCmd": "true"}),
             &ctx,
             None,
         )

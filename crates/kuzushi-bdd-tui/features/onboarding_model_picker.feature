@@ -15,8 +15,7 @@ Feature: Model selection is an editor inside aggregate Setup
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell
-    And I press "Down"
-    And I press "Down"
+    And I move the cursor to "Model"
     And I press "Enter"
     Then I see "CHOOSE A MODEL"
     And the status segment shows "setup:model"
@@ -28,12 +27,10 @@ Feature: Model selection is an editor inside aggregate Setup
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell
-    And I press "Down"
-    And I press "Down"
+    And I move the cursor to "Model"
     And I press "Enter"
-    And I press "Down"
-    And I press "Down"
-    Then I see "OpenAI OAuth GPT-5.4"
+    Then I see "CHOOSE A MODEL"
+    When I move the cursor to "OpenAI OAuth GPT-5.6 Terra"
     When I press "Enter"
     Then I see "SETUP · READY THE MAP RUN"
     And the config file contains "openai-codex"

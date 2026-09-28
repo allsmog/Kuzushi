@@ -45,6 +45,60 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A single-pipeline `threat-model:build` that misses grounded entry points
+  now runs one bounded gap-fill call when budget remains, as the staged
+  pipeline and refine already did. Before, it only labelled the gaps
+  `unresolved`. After that, a build that still covers less than the new
+  `minCoverage` option (default 0.5) is refused rather than saved. A
+  single-pipeline Juice Shop build had been persisted at 0/40 entry points
+  covered. A failed gap-fill call keeps the model and records
+  `gap-fill-failed`.
+- `threat-intel:discover` on a Bazel sub-module without manifests of its own
+  reads the enclosing workspace root's `go.mod`, `MODULE.bazel`/`WORKSPACE`,
+  and top-level `*.bzl` `go_repository` rules. It never reads above the git
+  root, and reads stay confined to that root. An empty package inventory is
+  now `partial` with a reason instead of a clean `completed`.
+- TUI polish from the operator feedback sweep:
+  - In Navigate mode, a letter hotkey that changes state (suppress, decide,
+    pause, …) shows a notice naming what it did and that Esc returns to typing.
+    Movement keys stay quiet.
+  - The phase chip no longer flips to Scan while an ad-hoc Map tool
+    (`run entry-points:extract`, an agent launch) is still writing artifacts.
+  - DFD node labels cut at a whole word instead of mid-word.
+  - The Findings header shows active search terms as facet chips
+    (`sev:high tool:semgrep text:"sqli"`) rather than the raw query.
+  - Run Focus shows an ETA for planned variant rows such as
+    `threat-model:build[stride]` from that tool's history, and the context
+    rail no longer repeats the cost the Run Focus header already shows.
+- A tool refused before doing any work, for example because no model is
+  configured, now records its run as `blocked` rather than `failed`. That
+  matches the artifact contract. The refusal message is unchanged.
+- KWP brokered network fetches ignore proxy environment variables and dial
+  only the approved, pinned address. Before, with `HTTPS_PROXY` set, the
+  request went through the proxy, which resolved the host itself and bypassed
+  the pin.
+- Pull-request CI now runs clippy and the full Rust test suite (`rust-tests`)
+  once when a PR becomes ready for review, and again in the merge queue. The
+  quick gate skips both, so a PR could previously merge without `cargo test`
+  ever running in CI. Development pins Node 26.3.1, the CI version. The KWP
+  dynamic-module tests skip on older Node instead of failing, and the
+  cancellation-settlement test skips where directory permissions are not
+  enforced (root).
+- The tmux-driven TUI journeys (`kuzushi-bdd-tui`) run in `rust-tests` for the
+  first time. Their scenarios now match the current screens: the Report route
+  lists six formats and an `EXPORTED` receipt, Workbench pages can be viewed
+  ahead of reality while the header names the phase still required, `Shift+Tab`
+  cycles pages forward, and a completed Setup Map presents its result for
+  acceptance. Setup scenarios select rows by label instead of counting key
+  presses, so a new readiness row no longer shifts them.
+- Choosing OpenAI OAuth for an OpenAI API model no longer switches the model
+  on the same key press. It raises a model-switch confirmation that names the
+  current and target models, and only `y` continues. Continuing either reuses
+  the stored connection or starts the browser login. `n` or Esc keeps the
+  model and leaves the credential picker open. The target is checked against
+  the model policy before it is applied. The credential row, Setup detail, and
+  picker intro now name the real target (`openai-oauth:gpt-5.6-terra`) instead
+  of the stale GPT-5.4.
 - A headless or shell `threat-model:build mode=refine` now reads the findings
   ledger. Before, `kuzushi run` handed the tool no findings store, so refine
   reported `newFindings 0` no matter what triage had confirmed.

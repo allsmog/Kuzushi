@@ -12835,7 +12835,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         let result = registry
             .execute_tool_with_runtime(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
                 Some(&runtime),
             )
@@ -12853,7 +12853,9 @@ pub fn accepts_scope(scope: &str) -> bool {
             json!(false),
             "sample document never mentions src/admin.js, so the detected route must be a gap"
         );
-        assert_eq!(coverage["gapFillMethod"], json!("unresolved"));
+        // The mock answers one call, so the single-pipeline repair attempt
+        // fails and is disclosed instead of discarding the model.
+        assert_eq!(coverage["gapFillMethod"], json!("gap-fill-failed"));
         assert!(coverage["gaps"]
             .as_array()
             .is_some_and(|gaps| gaps.iter().any(|gap| gap["path"] == json!("src/admin.js"))));
@@ -12871,6 +12873,116 @@ pub fn accepts_scope(scope: &str) -> bool {
             "the measured coverage shortfall must reach the operator as a warning: {:?}",
             result["warnings"]
         );
+    }
+
+    fn run_single_gap_fill_build(
+        runtime: &dyn AgentRuntime,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<Value> {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation,
+            authorization: Default::default(),
+        };
+        ModuleRegistry::with_v2_builtins().execute_tool_with_runtime(
+            "threat-model:build",
+            json!({"preserveUserEdits": false, "minCoverage": 0}),
+            &ctx,
+            Some(runtime),
+        )
+    }
+
+    fn costed_response(structured: Value, cost_usd: f64) -> AgentQueryResponse {
+        AgentQueryResponse {
+            text: String::new(),
+            structured: Some(structured),
+            cost_usd,
+            cost_usd_reported: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn single_pipeline_gap_fill_is_grounded_in_the_collected_source_code() {
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+
+        run_single_gap_fill_build(&runtime, None).unwrap();
+
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 2, "synthesis plus one gap-fill call");
+        assert!(
+            requests[1].prompt.contains("res.send('ok')"),
+            "the gap-fill prompt must carry the source excerpt collected for this build"
+        );
+    }
+
+    #[test]
+    fn single_pipeline_failed_gap_fill_keeps_the_spend_it_reported() {
+        let runtime = MockThreatRuntime::responses(vec![
+            costed_response(json!({"document": sample_document()}), 0.05),
+            AgentQueryResponse {
+                text: "not a gap-fill document".to_string(),
+                cost_usd: 0.02,
+                cost_usd_reported: true,
+                ..Default::default()
+            },
+        ]);
+
+        let result = run_single_gap_fill_build(&runtime, None).unwrap();
+
+        let coverage = result.pointer("/data/document/coverage").unwrap();
+        assert_eq!(coverage["gapFillMethod"], json!("gap-fill-failed"));
+        // The failed repair reported no cost, so spend is observed, not known.
+        let cost = result
+            .pointer("/observedCostUsd")
+            .and_then(Value::as_f64)
+            .unwrap();
+        assert!(
+            cost >= 0.07 - 1e-9,
+            "the failed gap-fill call's reported spend must be counted, got {cost}"
+        );
+    }
+
+    /// Cancels the scan when asked for anything after the first answer, the
+    /// way an operator cancel lands while the gap-fill call is in flight.
+    struct CancelDuringGapFill {
+        inner: MockThreatRuntime,
+        cancellation: crate::scan::ScanCancellation,
+    }
+
+    impl AgentRuntime for CancelDuringGapFill {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            if !self.inner.requests().is_empty() {
+                self.cancellation.cancel();
+                anyhow::bail!("query cancelled");
+            }
+            self.inner.query_blocking(request)
+        }
+
+        fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
+            self.inner.triage_finding_blocking(request)
+        }
+    }
+
+    #[test]
+    fn single_pipeline_gap_fill_cancellation_ends_the_build() {
+        let cancellation = crate::scan::ScanCancellation::default();
+        let runtime = CancelDuringGapFill {
+            inner: MockThreatRuntime::new(json!({"document": sample_document()})),
+            cancellation: cancellation.clone(),
+        };
+
+        let error = run_single_gap_fill_build(&runtime, Some(&cancellation))
+            .expect_err("a cancel during gap fill must not finish and save the model");
+
+        assert!(format!("{error:#}").contains("cancelled"), "{error:#}");
     }
 
     /// Observed 2026-07-30: a cold build collapsed 70 concrete file:line
@@ -12893,6 +13005,52 @@ pub fn accepts_scope(scope: &str) -> bool {
             "trustedCallers": [],
         });
         document
+    }
+
+    #[test]
+    fn threat_model_build_below_the_coverage_floor_is_refused_and_not_saved() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/admin.js"),
+            "const express = require('express');\nconst app = express();\napp.get('/admin/debug', (req, res) => res.send('ok'));\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let error = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("below minCoverage 0.5"), "{error:#}");
+        assert!(
+            crate::capabilities::threat_model::try_load_persistent_threat_model(temp.path())
+                .unwrap()
+                .is_none(),
+            "a refused build must not become the persisted model"
+        );
     }
 
     #[test]
@@ -12983,7 +13141,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         let result = registry
             .execute_tool_with_runtime(
                 "threat-model:build",
-                json!({"seedMode": "fresh", "preserveUserEdits": false}),
+                json!({"seedMode": "fresh", "preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
                 Some(&runtime),
             )
@@ -13041,7 +13199,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         let result = registry
             .execute_tool_with_runtime(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"preserveUserEdits": false, "minCoverage": 0}),
                 &ctx,
                 Some(&runtime),
             )

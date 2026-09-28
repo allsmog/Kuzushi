@@ -77,7 +77,7 @@ fn build_single_threat_model(
     let mut source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     let grounding = load_prompt_grounding(&input, ctx)?;
     source_bundle.authenticate_entry_point_sources(&grounding.entry_point_catalog.receipt)?;
-    source_bundle.attach_source_code(
+    let code_evidence = source_bundle.attach_source_code(
         &input,
         &grounding.surfaces,
         grounding.entry_point_catalog.receipt.tree_hash.as_deref(),
@@ -96,6 +96,7 @@ fn build_single_threat_model(
         &grounding,
     )?;
     finish_agentic_threat_model(
+        runtime,
         ctx,
         flavor,
         verb,
@@ -103,6 +104,7 @@ fn build_single_threat_model(
         generated,
         source_bundle,
         grounding,
+        &code_evidence,
     )
 }
 
@@ -138,6 +140,7 @@ fn attach_result_snapshot(result: Value, snapshot: Option<ResultSnapshot>) -> Va
 }
 
 fn finish_agentic_threat_model(
+    runtime: &dyn AgentRuntime,
     ctx: &ToolExecutionContext<'_>,
     flavor: BuildFlavor,
     verb: &str,
@@ -145,10 +148,18 @@ fn finish_agentic_threat_model(
     mut generated: GeneratedThreatModel,
     source_bundle: ThreatModelSourceBundle,
     grounding: PromptGrounding,
+    code_evidence: &super::source_code::CodeEvidence,
 ) -> Result<Value> {
-    let (coverage, parked) =
-        finalize_single_document(&mut generated.document, input.workspace_root(), &grounding)?;
+    let evidence = (&grounding, code_evidence);
+    let gap_fill = fill_single_pipeline_gaps(runtime, ctx, verb, &input, evidence, &mut generated)?;
+    let (coverage, parked) = finalize_single_document(
+        &mut generated.document,
+        input.workspace_root(),
+        &grounding,
+        gap_fill,
+    )?;
     emit_coverage_checked(ctx, verb, &coverage);
+    enforce_min_coverage(&input, &coverage)?;
     let reconciliation = BuildReconciliation::from_report(
         &coverage,
         parked,
@@ -166,10 +177,105 @@ fn finish_agentic_threat_model(
     )
 }
 
+/// One bounded gap-fill call when the generated model misses grounded entry
+/// points and budget remains, the same repair the staged pipeline and refine
+/// run. Returns the method to record, or `None` when coverage already holds.
+fn fill_single_pipeline_gaps(
+    runtime: &dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+    (grounding, code_evidence): (&PromptGrounding, &super::source_code::CodeEvidence),
+    generated: &mut GeneratedThreatModel,
+) -> Result<Option<&'static str>> {
+    let report = check_coverage(&generated.document, &grounding.surfaces);
+    if report.invariant_satisfied() {
+        return Ok(None);
+    }
+    if super::staged::staged_budget_exhausted(input, generated.cost) {
+        return Ok(Some("budget-exhausted"));
+    }
+    let outcome = super::staged::run_gap_fill(
+        runtime,
+        ctx,
+        input,
+        verb,
+        &report.gaps,
+        &mut generated.document,
+        code_evidence,
+    );
+    match outcome {
+        Ok(outcome) => {
+            generated.cost = generated
+                .cost
+                .checked_add(outcome.cost, "single-pipeline gap-fill cost")?;
+            Ok(Some("stride-llm"))
+        }
+        Err(error) => record_failed_gap_fill(ctx, verb, error, generated),
+    }
+}
+
+/// A failed repair must not discard the model it was repairing: the gaps stay
+/// parked and disclosed, the floor still applies, and the spend the failed
+/// call reported is kept. Cancellation is not a repair failure; it ends the
+/// build.
+fn record_failed_gap_fill(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    error: anyhow::Error,
+    generated: &mut GeneratedThreatModel,
+) -> Result<Option<&'static str>> {
+    if ctx.is_cancelled() {
+        return Err(error);
+    }
+    generated.cost = generated
+        .cost
+        .checked_add(failed_gap_fill_cost(&error), "failed gap-fill cost")?;
+    emit_gap_fill_failed(ctx, verb, &error);
+    Ok(Some("gap-fill-failed"))
+}
+
+/// The cost a failed structured call reported. A failure that carries no cost
+/// is recorded as incomplete rather than free.
+fn failed_gap_fill_cost(error: &anyhow::Error) -> crate::runtime::RuntimeCostReport {
+    error
+        .chain()
+        .find_map(|source| source.downcast_ref::<crate::structured_output::StructuredOutputError>())
+        .map_or(crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO, |failure| {
+            failure.cost_report()
+        })
+}
+
+fn emit_gap_fill_failed(ctx: &ToolExecutionContext<'_>, verb: &str, error: &anyhow::Error) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool-progress", verb, format!("gap-fill failed · {error:#}"))
+            .emit();
+    }
+}
+
+/// Refuse to save a model that accounts for too few grounded entry points.
+fn enforce_min_coverage(input: &BuildInput, coverage: &CoverageReport) -> Result<()> {
+    if coverage.considered == 0 {
+        return Ok(());
+    }
+    let share = coverage.covered() as f64 / coverage.considered as f64;
+    anyhow::ensure!(
+        share >= input.min_coverage,
+        "threat-model:build covered only {}/{} grounded entry points, below minCoverage {}; \
+         the model was not saved. Raise budgetUsd so gap fill can run, rebuild, or lower minCoverage.",
+        coverage.covered(),
+        coverage.considered,
+        input.min_coverage
+    );
+    Ok(())
+}
+
 fn finalize_single_document(
     document: &mut Value,
     target: &Path,
     grounding: &PromptGrounding,
+    gap_fill: Option<&'static str>,
 ) -> Result<(CoverageReport, usize)> {
     restore_grounded_entry_point_facts(
         document,
@@ -182,7 +288,7 @@ fn finalize_single_document(
     apply_coverage(
         document,
         &coverage,
-        single_pipeline_gap_fill_method(&coverage),
+        single_pipeline_gap_fill_method(&coverage, gap_fill),
         parked,
     );
     stamp_grounding_selection(document, &grounding.selection);
@@ -731,11 +837,14 @@ pub(crate) fn emit_coverage_checked(
     }
 }
 
-fn single_pipeline_gap_fill_method(coverage: &CoverageReport) -> &'static str {
-    if coverage.invariant_satisfied() {
-        "none-needed"
-    } else {
-        "unresolved"
+fn single_pipeline_gap_fill_method(
+    coverage: &CoverageReport,
+    gap_fill: Option<&'static str>,
+) -> &'static str {
+    match gap_fill {
+        Some(method) => method,
+        None if coverage.invariant_satisfied() => "none-needed",
+        None => "unresolved",
     }
 }
 
@@ -1138,7 +1247,7 @@ mod catalog_receipt_tests {
             "attackSurface": {"entryPoints": [{"id": "AS-one"}]},
         });
 
-        finalize_single_document(&mut document, target.path(), &grounding).unwrap();
+        finalize_single_document(&mut document, target.path(), &grounding, None).unwrap();
 
         assert_eq!(
             document["provenance"]["entryPointCatalog"]["records"],

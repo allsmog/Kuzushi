@@ -8,9 +8,7 @@ Feature: Credential readiness is an editor inside aggregate Setup
     And the model is set to "anthropic:claude-sonnet-4-6"
     When I launch the shell
     Then I see "SETUP · READY THE MAP RUN"
-    When I press "Down"
-    And I press "Down"
-    And I press "Down"
+    When I move the cursor to "Credentials"
     And I press "Enter"
     Then I see "CHOOSE AUTH METHOD"
     And I see "API key (ANTHROPIC_API_KEY)"
@@ -23,9 +21,7 @@ Feature: Credential readiness is an editor inside aggregate Setup
     And the model is set to "anthropic:claude-sonnet-4-6"
     When I launch the shell
     Then I see "SETUP · READY THE MAP RUN"
-    When I press "Down"
-    And I press "Down"
-    And I press "Down"
+    When I move the cursor to "Credentials"
     And I press "Enter"
     And I press "Esc"
     Then I see "SETUP · READY THE MAP RUN"

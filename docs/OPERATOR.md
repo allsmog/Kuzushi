@@ -570,8 +570,10 @@ node/flow/boundary deltas, entry-point coverage, and methodology),
 without minting content), `threat-model:restore` (re-commit historical
 content as a new revision and activate it), and `threat-model:adopt`
 (commit a hand-edited compatibility mirror as a new revision); PASTA-style `randori:pasta` +
-`randori:threat-model`; `threat-intel:discover` (target-local package inventory
-only), `threat-intel:research` (explicit external action: bounded OSV package
+`randori:threat-model`; `threat-intel:discover` (package inventory for the target; a Bazel
+sub-module with no manifests of its own reads the enclosing workspace root's
+`go.mod`, `MODULE.bazel`/`WORKSPACE`, and `*.bzl` rules, no higher than the git
+root, and an empty inventory is reported `partial`), `threat-intel:research` (explicit external action: bounded OSV package
 queries followed directly by catalog harvest, with no hand-authored CVE JSON),
 `threat-intel:harvest`, `threat-intel:apply`, `threat-intel:list`; lead generation
 `threat-leads:build` + `threat-leads:read`; system X-ray `x-ray:run`,
