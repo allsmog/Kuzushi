@@ -335,3 +335,4 @@ fn completed_setup_map_leaves_an_open_reverse_search_owning_its_keys() {
 }
 
 mod acceptance;
+mod key_ownership;

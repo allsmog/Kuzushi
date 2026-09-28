@@ -2,6 +2,7 @@ use super::{
     phase_attempt_outcome_label, InputMode, RunFocusOrigin, RunFocusReceipt, ShellApp, ShellView,
     WorkbenchPage, WorkflowPhase,
 };
+use crate::ui_view_models::answers_own_input;
 
 impl ShellApp {
     pub(super) fn open_completed_run_destination(
@@ -34,16 +35,26 @@ impl ShellApp {
     /// its own keys disarmed, and the next press lands in the composer as
     /// text. Arm it here, where the destination is known.
     ///
-    /// A draft in flight is operator work and is never interrupted, and an open
-    /// reverse search owns every printable key from `handle_overlay_key`
-    /// regardless of mode — arming over either would make the card advertise
-    /// actions something else is about to consume. In both cases the mode stays
-    /// as restored, and the card's control hint already names the `Esc` step
-    /// that reaches the actions from there.
+    /// A draft in flight is operator work and is never interrupted, whether it
+    /// sits in the composer or in a Run Focus steer editor the run outlived.
+    /// An open reverse search owns every printable key from
+    /// `handle_overlay_key` regardless of mode, and a focused Answers deck owns
+    /// them from `handle_answer_key` ahead of any card dispatch. Arming over
+    /// any of these would make the card advertise actions something else is
+    /// about to consume — or turn in-flight keystrokes into card decisions. In
+    /// each case the mode stays as restored, and the card's control hint
+    /// already names the `Esc` step that reaches the actions from there.
     fn arm_presented_result_card(&mut self) {
-        if self.input().is_empty() && self.history_search().is_none() {
+        if self.result_card_keys_are_unowned() {
             self.set_input_mode(InputMode::Navigate);
         }
+    }
+
+    fn result_card_keys_are_unowned(&self) -> bool {
+        self.input().is_empty()
+            && self.router.activity().steer_editor.is_none()
+            && self.history_search().is_none()
+            && !answers_own_input(self)
     }
 
     fn pending_result_phase(&self, origin: Option<RunFocusOrigin>) -> Option<WorkflowPhase> {
