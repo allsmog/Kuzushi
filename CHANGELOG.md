@@ -45,6 +45,25 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A RESULT READY card the shell presents on its own now arrives with its keys
+  armed. A Map launched from Setup, or a phase run launched from the planning
+  picker, finishes by restoring the launch origin's input mode and then moving
+  the operator to the Workbench page holding the unresolved attempt. The origin
+  mode for those launches is ordinarily Prompt, and the card's single-key
+  actions (`u` select, `n` continue, `d` discard, `r` run again, …) are
+  dispatched only in Navigate mode — so the card the shell had just asked the
+  operator to decide arrived disarmed, and the `u` it advertised landed in the
+  composer as text with no card action and no notice. The one existing
+  regression test covered only the case with a prompt draft in flight, where
+  preserving Prompt is correct, so the empty-composer case went unnoticed; the
+  KZ TUI operator-experience audit (#172) reproduced it as an intermittent
+  "key-dispatch race". Presenting a result card now enters Navigate mode when
+  nothing else owns the keys: the composer is empty, no Run Focus steer draft
+  is open, and neither a reverse search nor a focused Answers deck is capturing
+  input. A draft in flight is still never interrupted: the mode stays as
+  restored, and the card's control hint already names the `Esc` step that
+  reaches the actions from there.
+
 - The Scan page's finding delta no longer prints a total its own breakdown
   contradicts. Where the attempt has no typed receipt delta, the panel took its
   total from the runs' recorded emission count and its severity bands from the
