@@ -136,7 +136,14 @@ pub(crate) struct ScanAttemptModel {
     pub(crate) outcome: String,
     pub(crate) disposition: String,
     pub(crate) freshness: String,
+    /// The findings this attempt is credited with, counted the way the
+    /// `severity_counts` beside it are counted. On the store-backed paths
+    /// that means distinct ledger findings, not producer observations.
     pub(crate) findings: Option<u64>,
+    /// Raw producer observations the runs recorded emitting, set only when
+    /// corroboration folded several of them into fewer findings. Without it
+    /// a panel prints one number as "findings" and breaks the other down.
+    pub(crate) findings_observed: Option<u64>,
     pub(crate) findings_added: Option<u64>,
     pub(crate) findings_updated: Option<u64>,
     /// Severity buckets for the attempt's findings, highest band first,

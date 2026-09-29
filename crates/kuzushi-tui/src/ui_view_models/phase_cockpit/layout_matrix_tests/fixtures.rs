@@ -96,6 +96,7 @@ fn fixture_scan_attempt(richness: usize, state: SemanticFixture) -> ScanAttemptM
         disposition: "selected".to_string(),
         freshness: "current".to_string(),
         findings: Some(1),
+        findings_observed: None,
         findings_added: (richness >= 3).then_some(1),
         findings_updated: Some(0),
         severity_counts: (richness >= 3)

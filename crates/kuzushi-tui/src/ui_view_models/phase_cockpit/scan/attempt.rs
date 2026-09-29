@@ -5,6 +5,7 @@ use kuzushi_core::workflow_attempts::{
     PhaseAttemptOutcome, PhaseAttemptRecord, PhaseTargetSnapshot,
 };
 use kuzushi_core::RunSummary;
+use std::collections::BTreeSet;
 
 pub(super) fn scan_attempt_from_stage(
     app: &ShellApp,
@@ -25,6 +26,7 @@ pub(super) fn scan_attempt_from_stage(
         disposition: disposition.to_string(),
         freshness: attempt_freshness(app, &scan.target_snapshot),
         findings: Some(findings),
+        findings_observed: None,
         findings_added: Some(scan.finding_delta.added),
         findings_updated: Some(scan.finding_delta.updated),
         severity_counts: scan
@@ -42,11 +44,18 @@ pub(super) fn scan_attempt_from_stage(
 }
 
 fn typed_run_id(receipt: &PhaseStageReceipt, record: &PhaseAttemptRecord) -> String {
-    receipt
-        .run_refs
+    match receipt.run_refs.first() {
+        Some(run_ref) => run_ref.clone(),
+        None => leading_run_ref(&record.completed.run_refs),
+    }
+}
+
+/// The run an attempt is named by, or an honest placeholder when it recorded
+/// none — never a blank that reads as a run id.
+fn leading_run_ref(run_refs: &[String]) -> String {
+    run_refs
         .first()
         .cloned()
-        .or_else(|| record.completed.run_refs.first().cloned())
         .unwrap_or_else(|| "run reference missing".to_string())
 }
 
@@ -80,13 +89,13 @@ pub(super) fn scan_attempt_from_record(
     disposition: &str,
     summaries: &[&RunSummary],
 ) -> ScanAttemptModel {
-    let run_id = record
-        .completed
-        .run_refs
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "run reference missing".to_string());
+    let run_id = leading_run_ref(&record.completed.run_refs);
     let (cost_usd, cost_complete) = summed_recorded_cost(summaries);
+    let findings = attempt_finding_facts(
+        app,
+        &record.completed.run_refs,
+        sum_recorded_findings(summaries),
+    );
     ScanAttemptModel {
         attempt_id: Some(record.completed.attempt_id.clone()),
         run_id,
@@ -94,10 +103,11 @@ pub(super) fn scan_attempt_from_record(
         outcome: attempt_outcome_label(record.completed.outcome).to_string(),
         disposition: disposition.to_string(),
         freshness: attempt_freshness(app, &record.completed.target_snapshot),
-        findings: sum_recorded_findings(summaries),
+        findings: findings.count,
+        findings_observed: findings.observed,
         findings_added: None,
         findings_updated: None,
-        severity_counts: severity_counts_from_store(app, &record.completed.run_refs),
+        severity_counts: findings.severity_counts,
         artifact_count: summaries
             .iter()
             .map(|summary| summary.artifacts.len())
@@ -114,6 +124,8 @@ pub(super) fn scan_attempt_from_legacy_summary(
     app: &ShellApp,
     summary: &RunSummary,
 ) -> ScanAttemptModel {
+    let findings =
+        attempt_finding_facts(app, std::slice::from_ref(&summary.run_id), summary.findings);
     ScanAttemptModel {
         attempt_id: None,
         run_id: summary.run_id.clone(),
@@ -121,10 +133,11 @@ pub(super) fn scan_attempt_from_legacy_summary(
         outcome: normalized_outcome(&summary.status),
         disposition: "legacy inferred".to_string(),
         freshness: scan_freshness(app, summary),
-        findings: summary.findings.or_else(|| findings_for_run(app, summary)),
+        findings: findings.count,
+        findings_observed: findings.observed,
         findings_added: None,
         findings_updated: None,
-        severity_counts: severity_counts_from_store(app, std::slice::from_ref(&summary.run_id)),
+        severity_counts: findings.severity_counts,
         artifact_count: summary.artifacts.len(),
         artifact_paths: Vec::new(),
         duration_secs: summary
@@ -212,34 +225,87 @@ fn normalized_outcome(status: &str) -> String {
     }
 }
 
-/// Fallback for attempts whose receipts predate severity recording: bucket
-/// the findings the store attributes to this attempt's runs. The typed
-/// receipt path never consults the store — its counts are the durable truth.
-fn severity_counts_from_store(app: &ShellApp, run_refs: &[String]) -> Vec<(String, u64)> {
+/// What the loaded ledger says about one attempt's runs: how many distinct
+/// findings it attributes to them, and how those split across severity bands.
+struct AttributedFindings {
+    distinct: u64,
+    /// Highest band first, zero buckets omitted.
+    severity_counts: Vec<(String, u64)>,
+}
+
+/// Bucket the findings the ledger attributes to this attempt's runs, counting
+/// the total and the bands in one pass so a panel can never print one number
+/// as "findings" and break a different one down beside it.
+///
+/// Attribution is `finding_observed_in_runs`, the shared source-aware rule: a
+/// finding re-observed by a later run keeps that run as its representative
+/// `scan_id` while the earlier run stays in `sources`, so matching the
+/// representative alone would drop the finding from the very attempt that
+/// found it — and then read the recorded count's excess as corroboration.
+///
+/// `None` when the claim has no backing. A clamped ledger holds only part of
+/// the target's findings and a filtered one only the rows the operator asked
+/// to see, so in either case both numbers would be floors — a filter must
+/// never move what an accepted attempt found. An attempt the ledger attributes
+/// nothing to is the ordinary case of a summary whose findings were never
+/// projected, not an observed zero. The typed receipt path never consults the
+/// ledger; its counts are the durable truth.
+fn attributed_findings(app: &ShellApp, run_refs: &[String]) -> Option<AttributedFindings> {
+    if app.findings_are_partial() || app.active_findings_filter().is_some() {
+        return None;
+    }
+    let run_refs = run_refs.iter().cloned().collect::<BTreeSet<_>>();
     let mut counts = std::collections::BTreeMap::new();
+    let mut distinct = 0_u64;
     for finding in app.findings() {
-        let attributed = finding
-            .scan_id
-            .as_deref()
-            .is_some_and(|scan_id| run_refs.iter().any(|run_ref| run_ref == scan_id));
-        if attributed {
+        if crate::app::finding_observed_in_runs(finding, &run_refs) {
+            distinct += 1;
             *counts.entry(finding.severity).or_insert(0u64) += 1;
         }
     }
-    counts
-        .into_iter()
-        .rev()
-        .map(|(severity, count)| (severity.as_str().to_string(), count))
-        .collect()
+    (distinct > 0).then(|| AttributedFindings {
+        distinct,
+        severity_counts: counts
+            .into_iter()
+            .rev()
+            .map(|(severity, count)| (severity.as_str().to_string(), count))
+            .collect(),
+    })
 }
 
-fn findings_for_run(app: &ShellApp, summary: &RunSummary) -> Option<u64> {
-    let count = app
-        .findings()
-        .iter()
-        .filter(|finding| finding.scan_id.as_deref() == Some(summary.run_id.as_str()))
-        .count();
-    (count > 0).then_some(count as u64)
+/// The three finding facts one attempt's panel shows, derived together so the
+/// count and the bands beneath it can never come from different evidence.
+struct AttemptFindingFacts {
+    count: Option<u64>,
+    observed: Option<u64>,
+    severity_counts: Vec<(String, u64)>,
+}
+
+/// `recorded` is what the attempt's runs reported emitting. The ledger folds
+/// same-issue observations into one finding, so a recorded count above the
+/// ledger's is that fold, not a second finding count: reporting it as the
+/// attempt's findings is what made the delta panel read `findings 27` beside
+/// its own `20 high · 5 medium` breakdown. It is disclosed only when it is the
+/// higher number, since nothing else would be a fold. Without ledger evidence
+/// the recorded count stands alone with no bands, which is all this projection
+/// ever knew.
+fn attempt_finding_facts(
+    app: &ShellApp,
+    run_refs: &[String],
+    recorded: Option<u64>,
+) -> AttemptFindingFacts {
+    let Some(ledger) = attributed_findings(app, run_refs) else {
+        return AttemptFindingFacts {
+            count: recorded,
+            observed: None,
+            severity_counts: Vec::new(),
+        };
+    };
+    AttemptFindingFacts {
+        count: Some(ledger.distinct),
+        observed: recorded.filter(|observations| *observations > ledger.distinct),
+        severity_counts: ledger.severity_counts,
+    }
 }
 
 fn scan_freshness(app: &ShellApp, summary: &RunSummary) -> String {

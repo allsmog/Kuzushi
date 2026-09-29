@@ -5,7 +5,12 @@ use kuzushi_core::FindingListReport;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-fn finding_observed_in_runs(finding: &Finding, run_refs: &BTreeSet<String>) -> bool {
+/// Whether one ledger finding was observed by any of `run_refs`.
+///
+/// A re-observed finding keeps the later run as its representative `scan_id`
+/// while the earlier run stays in `sources`, so matching the representative
+/// alone silently drops the finding from the earlier run that found it.
+pub(crate) fn finding_observed_in_runs(finding: &Finding, run_refs: &BTreeSet<String>) -> bool {
     if finding
         .scan_id
         .as_ref()
