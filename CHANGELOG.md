@@ -55,9 +55,12 @@ Notable changes to Kuzushi. Release procedure lives in
   and Review all said 25. Both numbers now come from one pass over the ledger
   rows attributed to the attempt's runs, and the recorded count is named for
   what it is when it is higher: `findings 25 distinct · 27 observations`, the
-  same distinction `SastFindingTally` already draws in the core. A clamped
-  ledger supports neither claim, so the recorded count stands alone there and
-  no bands are shown. Reported in issue #172 (2026-09-28 audit).
+  same distinction `SastFindingTally` already draws in the core. Attribution is
+  the shared source-aware `finding_observed_in_runs`, so a finding a later run
+  re-observed still counts for the run that found it. A ledger that is clamped
+  or narrowed by a Review filter supports neither claim, so the recorded count
+  stands alone there and no bands are shown — a filter never moves what an
+  accepted attempt found. Reported in issue #172 (2026-09-28 audit).
 
 - `secret-scan` and `iac-scan` disclose the paths they could not read. Both
   walkers returned `Ok(())` for a directory `read_dir` refused, so an

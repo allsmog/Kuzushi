@@ -5,6 +5,7 @@ use kuzushi_core::workflow_attempts::{
     PhaseAttemptOutcome, PhaseAttemptRecord, PhaseTargetSnapshot,
 };
 use kuzushi_core::RunSummary;
+use std::collections::BTreeSet;
 
 pub(super) fn scan_attempt_from_stage(
     app: &ShellApp,
@@ -232,27 +233,32 @@ struct AttributedFindings {
     severity_counts: Vec<(String, u64)>,
 }
 
-/// Bucket the findings the store attributes to this attempt's runs, counting
+/// Bucket the findings the ledger attributes to this attempt's runs, counting
 /// the total and the bands in one pass so a panel can never print one number
 /// as "findings" and break a different one down beside it.
 ///
-/// `None` when the claim has no backing: a clamped ledger holds only part of
-/// the target's findings, so both numbers would be floors, and an attempt the
-/// ledger attributes nothing to is the ordinary case of a summary whose
-/// findings were never projected — not an observed zero. The typed receipt
-/// path never consults the store; its counts are the durable truth.
+/// Attribution is `finding_observed_in_runs`, the shared source-aware rule: a
+/// finding re-observed by a later run keeps that run as its representative
+/// `scan_id` while the earlier run stays in `sources`, so matching the
+/// representative alone would drop the finding from the very attempt that
+/// found it — and then read the recorded count's excess as corroboration.
+///
+/// `None` when the claim has no backing. A clamped ledger holds only part of
+/// the target's findings and a filtered one only the rows the operator asked
+/// to see, so in either case both numbers would be floors — a filter must
+/// never move what an accepted attempt found. An attempt the ledger attributes
+/// nothing to is the ordinary case of a summary whose findings were never
+/// projected, not an observed zero. The typed receipt path never consults the
+/// ledger; its counts are the durable truth.
 fn attributed_findings(app: &ShellApp, run_refs: &[String]) -> Option<AttributedFindings> {
-    if app.findings_are_partial() {
+    if app.findings_are_partial() || app.active_findings_filter().is_some() {
         return None;
     }
+    let run_refs = run_refs.iter().cloned().collect::<BTreeSet<_>>();
     let mut counts = std::collections::BTreeMap::new();
     let mut distinct = 0_u64;
     for finding in app.findings() {
-        let attributed = finding
-            .scan_id
-            .as_deref()
-            .is_some_and(|scan_id| run_refs.iter().any(|run_ref| run_ref == scan_id));
-        if attributed {
+        if crate::app::finding_observed_in_runs(finding, &run_refs) {
             distinct += 1;
             *counts.entry(finding.severity).or_insert(0u64) += 1;
         }
