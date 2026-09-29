@@ -182,7 +182,12 @@ pub(super) fn severity_chip_style(counts: &[(String, u64)]) -> ratatui::style::S
 fn compact_finding_delta(attempt: &ScanAttemptModel) -> String {
     match (attempt.findings_added, attempt.findings_updated) {
         (Some(added), Some(updated)) => format!("findings +{added}/~{updated}"),
-        _ => format!("findings {}", optional_count(attempt.findings)),
+        _ => match (attempt.findings, attempt.findings_observed) {
+            (Some(findings), Some(observations)) => {
+                format!("findings {findings} from {observations} obs")
+            }
+            _ => format!("findings {}", optional_count(attempt.findings)),
+        },
     }
 }
 
@@ -237,5 +242,51 @@ pub(super) fn disposition_style(disposition: &str) -> ratatui::style::Style {
         theme::warn()
     } else {
         theme::muted()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compact_finding_delta, ScanAttemptModel};
+
+    fn attempt(findings: Option<u64>, findings_observed: Option<u64>) -> ScanAttemptModel {
+        ScanAttemptModel {
+            attempt_id: None,
+            run_id: "run-1".to_string(),
+            run_refs: vec!["run-1".to_string()],
+            outcome: "completed".to_string(),
+            disposition: "selected".to_string(),
+            freshness: "current revision".to_string(),
+            findings,
+            findings_observed,
+            findings_added: None,
+            findings_updated: None,
+            severity_counts: Vec::new(),
+            artifact_count: 0,
+            artifact_paths: Vec::new(),
+            duration_secs: None,
+            cost_usd: None,
+            cost_complete: None,
+            error: None,
+        }
+    }
+
+    /// The compact pane carries the same two quantities as the full delta
+    /// panel, so a narrow terminal cannot be the one that reads the runs'
+    /// observation count as the attempt's findings. Issue #172.
+    #[test]
+    fn compact_delta_names_the_observations_a_smaller_finding_count_folds() {
+        assert_eq!(
+            compact_finding_delta(&attempt(Some(25), Some(27))),
+            "findings 25 from 27 obs"
+        );
+        assert_eq!(
+            compact_finding_delta(&attempt(Some(25), None)),
+            "findings 25"
+        );
+        assert_eq!(
+            compact_finding_delta(&attempt(None, None)),
+            "findings not recorded"
+        );
     }
 }

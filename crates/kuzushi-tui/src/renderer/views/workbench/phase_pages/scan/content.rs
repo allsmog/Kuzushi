@@ -193,7 +193,12 @@ pub(super) fn finding_delta_lines(model: &ScanPhaseModel, width: usize) -> Vec<L
 fn finding_delta_label(attempt: &crate::ui_view_models::ScanAttemptModel) -> String {
     match (attempt.findings_added, attempt.findings_updated) {
         (Some(added), Some(updated)) => format!("findings +{added} added · {updated} updated"),
-        _ => format!("findings {}", optional_count(attempt.findings)),
+        _ => match (attempt.findings, attempt.findings_observed) {
+            (Some(findings), Some(observations)) => {
+                format!("findings {findings} distinct · {observations} observations")
+            }
+            _ => format!("findings {}", optional_count(attempt.findings)),
+        },
     }
 }
 
@@ -244,6 +249,7 @@ mod tests {
                 disposition: "selected".to_string(),
                 freshness: "current revision".to_string(),
                 findings: Some(3),
+                findings_observed: None,
                 findings_added: Some(3),
                 findings_updated: Some(0),
                 severity_counts: vec![("critical".to_string(), 1), ("medium".to_string(), 2)],
@@ -282,6 +288,53 @@ mod tests {
             !quiet.contains("critical"),
             "no chips may be invented when severity was never recorded: {quiet}"
         );
+    }
+
+    /// The delta panel used to print the runs' raw observation count as
+    /// "findings" beside a severity breakdown of the distinct findings the
+    /// ledger actually holds, so the same frame read `findings 27` over
+    /// `20 high · 5 medium`. Issue #172, 2026-09-28 audit.
+    #[test]
+    fn delta_pane_never_prints_a_total_its_own_breakdown_contradicts() {
+        let model = ScanPhaseModel {
+            scope: "target".to_string(),
+            plan: "manual".to_string(),
+            attempt: Some(crate::ui_view_models::ScanAttemptModel {
+                attempt_id: None,
+                run_id: "run-1".to_string(),
+                run_refs: vec!["run-1".to_string()],
+                outcome: "completed".to_string(),
+                disposition: "selected".to_string(),
+                freshness: "current revision".to_string(),
+                findings: Some(25),
+                findings_observed: Some(27),
+                findings_added: None,
+                findings_updated: None,
+                severity_counts: vec![("high".to_string(), 20), ("medium".to_string(), 5)],
+                artifact_count: 0,
+                artifact_paths: Vec::new(),
+                duration_secs: None,
+                cost_usd: None,
+                cost_complete: None,
+                error: None,
+            }),
+            engine_outcomes: Vec::new(),
+            empty_hint: None,
+            live: None,
+        };
+
+        let text = finding_delta_lines(&model, 80)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            text.contains("findings 25 distinct · 27 observations"),
+            "the total must be the one the breakdown adds up to, with the \
+             observations behind it named: {text}"
+        );
+        assert!(text.contains("20 high · 5 medium"), "{text}");
     }
 
     #[test]
