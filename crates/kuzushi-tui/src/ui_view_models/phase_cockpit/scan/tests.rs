@@ -43,6 +43,78 @@ fn projects_only_terminal_scan_phase_runs() {
     assert_eq!(model.engine_outcomes[0].engine, "Run SAST scan");
 }
 
+/// Issue #172 (2026-09-28 audit): `secret-scan` recorded 27 emitted findings
+/// while the ledger held the 25 distinct findings they folded into, and the
+/// delta panel printed the first as its total next to a breakdown of the
+/// second. Both numbers are real; only one of them is the attempt's findings.
+#[test]
+fn attempt_findings_match_their_own_severity_breakdown_and_name_the_observations() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    write_map_and_scan_summaries(target.path());
+
+    let mut app = hydrated_app(&workspace);
+    app.set_findings(ledger_findings("scan-run", 2, 1));
+    let attempt = scan_phase_model(&app).attempt.expect("scan attempt");
+
+    assert_eq!(attempt.findings, Some(3));
+    assert_eq!(attempt.findings_observed, None);
+    assert_eq!(
+        attempt.severity_counts,
+        vec![("high".to_string(), 2), ("medium".to_string(), 1)]
+    );
+
+    // The same runs, now with one more observation recorded than the ledger
+    // folded into findings.
+    app.set_findings(ledger_findings("scan-run", 1, 1));
+    let attempt = scan_phase_model(&app).attempt.expect("scan attempt");
+
+    assert_eq!(attempt.findings, Some(2));
+    assert_eq!(attempt.findings_observed, Some(3));
+    let breakdown: u64 = attempt.severity_counts.iter().map(|(_, count)| count).sum();
+    assert_eq!(breakdown, 2);
+}
+
+/// A clamped ledger holds only part of the target's findings, so counting the
+/// rows it attributes to these runs would report a floor as a count. The
+/// recorded summary count stands alone instead, and no breakdown is claimed.
+#[test]
+fn a_partial_ledger_claims_neither_a_distinct_count_nor_a_breakdown() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    write_map_and_scan_summaries(target.path());
+
+    let mut app = hydrated_app(&workspace);
+    app.set_findings(ledger_findings("scan-run", 1, 1));
+    app.set_findings_total_count(9);
+    let attempt = scan_phase_model(&app).attempt.expect("scan attempt");
+
+    assert_eq!(attempt.findings, Some(3), "the recorded count is unchanged");
+    assert_eq!(attempt.findings_observed, None);
+    assert!(attempt.severity_counts.is_empty());
+}
+
+fn ledger_findings(scan_id: &str, high: u32, medium: u32) -> Vec<kuzushi_core::findings::Finding> {
+    use kuzushi_core::findings::{Finding, Severity};
+    (0..high)
+        .map(|index| (index, Severity::High))
+        .chain((0..medium).map(|index| (high + index, Severity::Medium)))
+        .map(|(index, severity)| {
+            let mut finding = Finding::new_tool(
+                "secret-scan",
+                format!("rule-{index}"),
+                format!("src/file{index}.rs"),
+                index + 1,
+                None,
+                severity,
+                "ledger row",
+            );
+            finding.scan_id = Some(scan_id.to_string());
+            finding
+        })
+        .collect()
+}
+
 fn write_map_and_scan_summaries(target: &std::path::Path) {
     let map = RunSummary::running(
         "map-run",

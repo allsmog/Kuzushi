@@ -45,6 +45,20 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The Scan page's finding delta no longer prints a total its own breakdown
+  contradicts. Where the attempt has no typed receipt delta, the panel took its
+  total from the runs' recorded emission count and its severity bands from the
+  findings ledger — two different quantities, because corroboration folds
+  same-issue producer observations into one finding. A `secret-scan` that
+  emitted 27 observations over 25 distinct findings therefore rendered
+  `findings 27` directly above `20 high · 5 medium`, while the rail, the footer
+  and Review all said 25. Both numbers now come from one pass over the ledger
+  rows attributed to the attempt's runs, and the recorded count is named for
+  what it is when it is higher: `findings 25 distinct · 27 observations`, the
+  same distinction `SastFindingTally` already draws in the core. A clamped
+  ledger supports neither claim, so the recorded count stands alone there and
+  no bands are shown. Reported in issue #172 (2026-09-28 audit).
+
 - `secret-scan` and `iac-scan` disclose the paths they could not read. Both
   walkers returned `Ok(())` for a directory `read_dir` refused, so an
   unreadable subtree produced no findings, no `filesScanned` and no
