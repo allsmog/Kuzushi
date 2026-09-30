@@ -172,11 +172,13 @@ mod supervision_regressions {
     #[tokio::test]
     async fn timeout_prevents_descendant_marker() {
         let dir = tempfile::tempdir().unwrap();
-        let mut options = shell("(sleep 0.5; echo escaped > marker) & wait");
+        let mut options =
+            shell("(while [ ! -e release ]; do sleep 0.01; done; echo escaped > marker) & wait");
         options.workdir = Some(dir.path().into());
         options.timeout_ms = 100;
         let result = sandbox_exec(SandboxBackend::Plain, options).await.unwrap();
         assert_eq!(result.outcome, ExitOutcome::TimedOut);
+        std::fs::write(dir.path().join("release"), "after timeout").unwrap();
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(!dir.path().join("marker").exists());
     }
@@ -184,7 +186,7 @@ mod supervision_regressions {
     #[tokio::test]
     async fn cancellation_prevents_descendant_marker() {
         let dir = tempfile::tempdir().unwrap();
-        let mut options = shell("echo ready > ready; (sleep 0.5; echo escaped > marker) & wait");
+        let mut options = shell("(echo ready > ready; while [ ! -e release ]; do sleep 0.01; done; echo escaped > marker) & wait");
         options.workdir = Some(dir.path().into());
         let task = tokio::spawn(sandbox_exec(SandboxBackend::Plain, options));
         for _ in 0..100 {
@@ -196,6 +198,9 @@ mod supervision_regressions {
         assert!(dir.path().join("ready").exists());
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
+        // A delayed CI runner cannot let the descendant write before abort.
+        // Opening this gate afterwards tests survival after cancellation.
+        std::fs::write(dir.path().join("release"), "after cancellation").unwrap();
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(!dir.path().join("marker").exists());
     }

@@ -100,7 +100,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 92 | Fix the mutation diff loop's lost exit status | Implemented | Preserve mutation diff command failure status. |
 | 93 | Discover all Node contract tests automatically | Implemented | Recursively discover every Node contract test. |
 | 94 | Keep quiet verification's failure evidence | Implemented | Bounded logs retain command, exit, digest and diagnostic tail in verification receipts. |
-| 95 | Exercise platform runtime contracts before release time | Partial | Configure Windows/macOS runtime jobs for ready PRs. Actual platform receipts and path selection remain. |
+| 95 | Exercise platform runtime contracts before release time | Partial | Ready PRs select Windows/macOS filesystem, process, terminal and launcher suites from the Git diff; explicit domain-only changes skip the matrix and unknown history selects all. macOS passed; Windows exposed retained-directory bugs fixed in PR #310. Awaiting updated platform qualification. |
 | 96 | Add a real scanner integration lane beside deterministic smoke | Implemented | Real Semgrep 1.146.0 invokes the native CLI with local rules; vulnerable line 2 found, fixed fixture clean. Separate Full CI job. |
 | 97 | Test the dependency tree that fresh npm users actually resolve | Implemented | Fresh npm production resolution passes bridge contracts and records its graph; public-install receipts now include the installed graph and bridge checks. |
 | 98 | Promote `latest` only after the public-install smoke passes | Partial | Publish candidate dist-tag and gate latest promotion on exact-version public smoke. GitHub release visibility follows promotion. Interrupted promotion and actual public-tag qualification remain. |

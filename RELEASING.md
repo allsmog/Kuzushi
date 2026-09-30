@@ -7,6 +7,13 @@ part of every release commit.
 
 ### Audit remediation compatibility
 
+- Windows bounded MCP file reads now retain an opening content digest and
+  verify both returned bytes and current handle content before accepting a read
+  or copy. Read identities always include a content digest on Windows. This adds
+  bounded streaming reads; same-size writes and restored timestamps cannot reuse
+  a stale content identity. Loop checkpoint owners explicitly unlock on drop,
+  including error paths, before concurrent spawned processes finish exec.
+
 - Shell composer and form fields move and delete by extended Unicode graphemes.
   Cursor projections and clipping use terminal display widths, including emoji
   sequences and combining accents. Existing scalar-offset view-model interfaces

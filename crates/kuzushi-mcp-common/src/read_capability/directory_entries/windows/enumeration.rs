@@ -16,29 +16,17 @@ pub(super) fn entries(directory: &File, max_entries: usize) -> Result<Vec<EntryR
 }
 
 fn reopen_directory(directory: &File) -> Result<File> {
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::Storage::FileSystem::{
-        ReOpenFile, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    };
-
-    // SAFETY: the source handle is live. A successful fresh handle is
-    // transferred immediately into `File` ownership.
-    let handle = unsafe {
-        ReOpenFile(
-            directory.as_raw_handle(),
-            FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(std::io::Error::last_os_error())
-            .context("could not reopen retained MCP directory handle");
-    }
-    // SAFETY: `ReOpenFile` returned a fresh, valid, owned handle.
-    Ok(unsafe { File::from_raw_handle(handle) })
+    // Reopen by the retained file ID, never the mutable visible path. Unlike
+    // ReOpenFile this also works for directory handles opened by OpenFileById,
+    // and gives each traversal an independent enumeration cursor.
+    let id = super::file_id(directory)?;
+    let reopened = super::open_by_id(directory, id)
+        .context("could not reopen retained MCP directory by file ID")?;
+    anyhow::ensure!(
+        super::file_id(&reopened)? == id,
+        "reopened MCP directory identity changed"
+    );
+    Ok(reopened)
 }
 
 struct WindowsDirectoryEnumeration {
