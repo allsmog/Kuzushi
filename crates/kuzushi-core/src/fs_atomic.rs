@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(any(windows, test))]
+#[path = "fs_atomic/replacement_retry.rs"]
+mod replacement_retry;
+
 #[cfg(test)]
 use std::cell::RefCell;
 
@@ -155,11 +159,13 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
     let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
-    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    replacement_retry::replace_with_retry(|| {
+        if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    })
 }
 
 /// Write the full contents to `temp` and flush them to stable storage before
