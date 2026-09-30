@@ -176,6 +176,7 @@ pub struct OperatorConfig {
     pub keybindings: Vec<KeybindingOverrideConfig>,
     #[serde(default = "default_session_retention_days")]
     pub session_retention_days: u64,
+    pub semantic_cache: crate::semantic_cache::SemanticCacheLimits,
 }
 
 impl Default for OperatorConfig {
@@ -190,6 +191,7 @@ impl Default for OperatorConfig {
             fuzz_executors: Vec::new(),
             keybindings: Vec::new(),
             session_retention_days: DEFAULT_SESSION_RETENTION_DAYS,
+            semantic_cache: crate::semantic_cache::SemanticCacheLimits::default(),
         }
     }
 }

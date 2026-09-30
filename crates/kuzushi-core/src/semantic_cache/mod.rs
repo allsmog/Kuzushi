@@ -1,23 +1,23 @@
 //! Durable memoization for closed-world model calls.
 //!
-//! A closed-world call embeds everything the model may consult in the
-//! request itself — system prompt, user prompt, and output schema — with no
-//! tools, MCPs, or filesystem access. For those calls the response is a
-//! function of nothing but the request bytes, so replaying a stored response
-//! is semantically equivalent to paying for the call again. The cache key is
-//! a Blake3 hash over every request ingredient; an edited source file, a
-//! revised prompt, a migrated schema, or a different model each produce a
-//! different key and therefore a live call.
-//!
-//! The cache is strictly best-effort: corruption, permission trouble, or a
-//! validator that no longer accepts a stored value all degrade to a live
-//! call, never to a failed scan.
+//! Only an attested, tool-free execution contract may reuse a response. The
+//! indexed store has a hard page/entry quota and bounded incremental eviction.
+//! Cache corruption and IO failures remain misses rather than scan failures.
 
 use crate::identity::{hash_parts, Blake3Hash};
 use anyhow::{Context, Result};
+use rusqlite::{Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+mod database;
+mod legacy_cleanup;
+mod limits;
+mod maintenance;
+pub use limits::SemanticCacheLimits;
+pub use maintenance::CacheMaintenance;
 
 mod execution_contract;
 pub(crate) use execution_contract::execution_query_cache_key;
@@ -33,17 +33,9 @@ pub const MAX_SEMANTIC_CACHE_ENTRY_BYTES: usize = 16 * 1024 * 1024;
 /// the escape hatch for debugging a suspected stale replay.
 pub const SEMANTIC_CACHE_ENV: &str = "KUZUSHI_SEMANTIC_CACHE";
 
-/// Entries older than this are dropped by the retention pass so the store
-/// cannot grow without bound. An entry only replays while its exact prompt
-/// (and therefore the file content inside it) is unchanged, so re-paying a
-/// call once per retention window is the whole cost of expiry.
+/// Expired entries never replay and are reclaimed incrementally.
 pub const SEMANTIC_CACHE_RETENTION_DAYS: u64 = 14;
-
 const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
-
-/// Root-level stamp recording when the retention pass last walked the
-/// store, so opening a cache is O(1) except at most once a day.
-const PRUNE_STAMP_FILE: &str = "last-prune-at-ms";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,118 +56,81 @@ pub struct SemanticCacheEntry {
 #[derive(Debug, Clone)]
 pub struct SemanticCache {
     root: PathBuf,
+    limits: SemanticCacheLimits,
+    database: Arc<Mutex<Connection>>,
 }
 
 impl SemanticCache {
-    /// Opens the target's cache under `.kuzushi/v3/semantic-cache`. Returns
-    /// `None` when disabled via [`SEMANTIC_CACHE_ENV`] or when the directory
-    /// cannot be prepared — callers treat `None` as "every call goes live".
+    /// Uses operator-owned policy; a target cannot raise its cache quota.
     pub fn open_for_target(target_root: impl AsRef<Path>) -> Option<Self> {
         if disabled_by_env() {
             return None;
         }
+        let limits = crate::config::load_config_for_target(None)
+            .ok()?
+            .operator
+            .semantic_cache;
         let root = crate::workspace::workspace_state_dir(target_root).join(SEMANTIC_CACHE_DIR);
-        ensure_cache_directory(&root).ok()?;
-        let cache = Self { root };
-        cache.prune_if_due(crate::fs_atomic::now_ms());
-        Some(cache)
+        Self::open_at_with_limits(root, limits).ok()
     }
 
-    /// Test/bench constructor bypassing the workspace layout and env gate.
     pub fn open_at(root: impl AsRef<Path>) -> Result<Self> {
+        Self::open_at_with_limits(root, SemanticCacheLimits::default())
+    }
+
+    pub fn open_at_with_limits(
+        root: impl AsRef<Path>,
+        limits: SemanticCacheLimits,
+    ) -> Result<Self> {
+        limits.validate()?;
         let root = root.as_ref().to_path_buf();
         ensure_cache_directory(&root)?;
-        Ok(Self { root })
+        let database = Arc::new(Mutex::new(database::open(&root, limits)?));
+        let cache = Self {
+            root,
+            limits,
+            database,
+        };
+        // The database remains usable if legacy cleanup fails. Its cursor is not
+        // advanced and the next open retries; a maintenance caller sees the error.
+        let _ = cache.maintain();
+        Ok(cache)
     }
 
-    /// Returns the stored entry for `key`, or `None` for a miss. Corrupt or
-    /// unreadable entries are misses, not errors: the cache must never make
-    /// a scan fail that would have succeeded live.
     pub fn get(&self, key: &Blake3Hash) -> Option<SemanticCacheEntry> {
-        let text = crate::bounded_file::read_utf8_text(
-            &self.entry_path(key),
-            MAX_SEMANTIC_CACHE_ENTRY_BYTES,
-        )
-        .ok()?;
-        serde_json::from_str(&text).ok()
+        let connection = self.connection().ok()?;
+        let cutoff = maintenance::retention_cutoff(crate::fs_atomic::now_ms());
+        let body = database::read(&connection, key.as_str(), cutoff).ok()??;
+        serde_json::from_slice(&body).ok()
     }
 
     pub fn put(&self, key: &Blake3Hash, entry: &SemanticCacheEntry) -> Result<()> {
-        let body = serde_json::to_string(entry).context("Could not serialize cache entry")?;
-        let path = self.entry_path(key);
-        if let Some(shard) = path.parent() {
-            ensure_cache_directory(shard)?;
-        }
-        crate::fs_atomic::write_atomic(&path, &body)
-    }
-
-    fn entry_path(&self, key: &Blake3Hash) -> PathBuf {
-        let hex = key.as_str();
-        self.root.join(&hex[0..2]).join(format!("{hex}.json"))
-    }
-
-    /// Runs the retention pass when the last one is over a day old. Like
-    /// every other cache path this is best-effort: prune trouble leaves
-    /// entries behind, never fails an open.
-    fn prune_if_due(&self, now_ms: u64) {
-        if !self.prune_due(now_ms) {
-            return;
-        }
-        let _ =
-            crate::fs_atomic::write_atomic(&self.root.join(PRUNE_STAMP_FILE), &now_ms.to_string());
-        self.prune_entries_older_than(
-            now_ms.saturating_sub(SEMANTIC_CACHE_RETENTION_DAYS * MS_PER_DAY),
+        let body =
+            kuzushi_mcp_common::server::bounded_json_bytes(entry, MAX_SEMANTIC_CACHE_ENTRY_BYTES)?
+                .context("semantic cache entry exceeds its serialization limit")?;
+        anyhow::ensure!(
+            (body.len() as u64) <= self.limits.max_bytes / 2,
+            "semantic cache entry exceeds its byte quota"
         );
-    }
-
-    fn prune_due(&self, now_ms: u64) -> bool {
-        let Ok(text) = fs::read_to_string(self.root.join(PRUNE_STAMP_FILE)) else {
-            return true;
-        };
-        text.trim()
-            .parse::<u64>()
-            .map(|last| now_ms.saturating_sub(last) >= MS_PER_DAY)
-            .unwrap_or(true)
-    }
-
-    fn prune_entries_older_than(&self, cutoff_ms: u64) {
-        let Ok(shards) = fs::read_dir(&self.root) else {
-            return;
-        };
-        for shard in shards.flatten() {
-            prune_shard(&shard.path(), cutoff_ms);
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        database::remove(&transaction, key.as_str())?;
+        let admitted = maintenance::make_room(&transaction, self.limits, body.len() as u64)?;
+        if admitted {
+            database::insert(&transaction, key.as_str(), entry.created_at_ms, &body)?;
         }
+        transaction.commit()?;
+        anyhow::ensure!(
+            admitted,
+            "semantic cache quota pressure; bounded eviction remains pending"
+        );
+        Ok(())
     }
-}
 
-fn prune_shard(shard: &Path, cutoff_ms: u64) {
-    let Ok(metadata) = fs::symlink_metadata(shard) else {
-        return;
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return;
-    }
-    let Ok(files) = fs::read_dir(shard) else {
-        return;
-    };
-    for file in files.flatten() {
-        prune_entry_file(&file.path(), cutoff_ms);
-    }
-    // Only succeeds once the shard emptied; `put` recreates shards on demand.
-    let _ = fs::remove_dir(shard);
-}
-
-fn prune_entry_file(path: &Path, cutoff_ms: u64) {
-    if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
-        return;
-    }
-    let created_at_ms = crate::bounded_file::read_utf8_text(path, MAX_SEMANTIC_CACHE_ENTRY_BYTES)
-        .ok()
-        .and_then(|text| serde_json::from_str::<SemanticCacheEntry>(&text).ok())
-        .map(|entry| entry.created_at_ms);
-    // An unreadable or corrupt entry can never replay; drop it with the stale.
-    if created_at_ms.map_or(true, |created| created < cutoff_ms) {
-        let _ = fs::remove_file(path);
+    fn connection(&self) -> Result<MutexGuard<'_, Connection>> {
+        self.database
+            .lock()
+            .map_err(|_| anyhow::anyhow!("semantic cache lock poisoned"))
     }
 }
 

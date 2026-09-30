@@ -49,6 +49,10 @@ attestation binding effective backend settings and implementation revisions.
 Adapters without `semantic_cache_identity` execute live; the current external
 LangGraph bridge does not attest its installed dependency closure. Generation
 settings participate in versioned keys; credentials and diagnostics do not.
+The cache applies global `operator.semantic_cache` byte/entry quotas inside an
+immediate transaction. `SemanticCache::maintain()` reports bounded eviction and
+legacy-cleanup progress. Interrupted cleanup retries its unfinished shard on the
+next pass; successful-prune timestamps are recorded only after pending work ends.
 
 MCP servers validate arguments against registered schemas before dispatch. Clients
 must handle invalid-argument, capacity, cancellation and shutdown responses.

@@ -2,31 +2,28 @@ use super::*;
 use serde_json::json;
 
 fn entry(value: serde_json::Value) -> SemanticCacheEntry {
-    SemanticCacheEntry {
-        task: "full-mode-multi:chunk".to_string(),
-        model: "claude-haiku-4-5".to_string(),
-        created_at_ms: 1,
-        source_cost_usd: 0.42,
-        value,
-    }
+    cache_entry_now("full-mode-multi:chunk", "test-model", 0.42, value)
+}
+
+fn key(id: u32) -> Blake3Hash {
+    hash_parts("cache-test", &[&id.to_be_bytes()])
 }
 
 #[test]
 fn round_trips_an_entry_by_key() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = SemanticCache::open_at(tmp.path()).unwrap();
-    let key = structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({"type": "array"}));
-
-    assert_eq!(cache.get(&key), None);
-    cache.put(&key, &entry(json!([{"file": "a.c"}]))).unwrap();
-
-    let hit = cache.get(&key).expect("stored entry must be readable");
+    assert_eq!(cache.get(&key(0)), None);
+    cache
+        .put(&key(0), &entry(json!([{"file": "a.c"}])))
+        .unwrap();
+    let hit = cache.get(&key(0)).unwrap();
     assert_eq!(hit.value, json!([{"file": "a.c"}]));
     assert_eq!(hit.source_cost_usd, 0.42);
 }
 
 #[test]
-fn every_key_ingredient_changes_the_key() {
+fn every_legacy_key_ingredient_changes_the_key() {
     let schema = json!({"type": "array"});
     let base = structured_query_cache_key("m", "sys", "prompt", "Schema", &schema);
     let variants = [
@@ -34,10 +31,10 @@ fn every_key_ingredient_changes_the_key() {
         structured_query_cache_key("m", "sys2", "prompt", "Schema", &schema),
         structured_query_cache_key("m", "sys", "prompt2", "Schema", &schema),
         structured_query_cache_key("m", "sys", "prompt", "Schema2", &schema),
-        structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({"type": "object"})),
+        structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({})),
     ];
     for variant in variants {
-        assert_ne!(base, variant, "changed ingredient must change the key");
+        assert_ne!(base, variant);
     }
 }
 
@@ -45,107 +42,165 @@ fn every_key_ingredient_changes_the_key() {
 fn corrupt_entries_read_as_misses() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = SemanticCache::open_at(tmp.path()).unwrap();
-    let key = structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({}));
-    cache.put(&key, &entry(json!(1))).unwrap();
-    std::fs::write(cache.entry_path(&key), b"not json").unwrap();
-
-    assert_eq!(cache.get(&key), None);
+    cache.put(&key(0), &entry(json!(1))).unwrap();
+    cache
+        .connection()
+        .unwrap()
+        .execute("UPDATE entries SET body=x'ff'", [])
+        .unwrap();
+    assert_eq!(cache.get(&key(0)), None);
 }
 
 #[cfg(unix)]
 #[test]
-fn refuses_symlinked_cache_root() {
+fn refuses_symlinked_cache_root_and_database() {
     use std::os::unix::fs::symlink;
-
     let tmp = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    let linked = tmp.path().join("linked-cache");
-    symlink(outside.path(), &linked).unwrap();
-
-    assert!(SemanticCache::open_at(&linked).is_err());
+    symlink(outside.path(), tmp.path().join("linked")).unwrap();
+    assert!(SemanticCache::open_at(tmp.path().join("linked")).is_err());
+    let foreign = outside.path().join("foreign");
+    fs::write(&foreign, "preserve").unwrap();
+    symlink(&foreign, tmp.path().join(database::DATABASE_FILE)).unwrap();
+    assert!(SemanticCache::open_at(tmp.path()).is_err());
+    assert_eq!(fs::read_to_string(foreign).unwrap(), "preserve");
 }
 
 #[cfg(unix)]
 #[test]
-fn put_refuses_a_symlinked_shard_directory() {
+fn legacy_cleanup_refuses_symlinked_shards_without_touching_outside_entries() {
     use std::os::unix::fs::symlink;
-
     let tmp = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
+    let foreign = outside.path().join(format!("{}.json", key(1)));
+    fs::write(&foreign, "preserve").unwrap();
+    symlink(outside.path(), tmp.path().join("00")).unwrap();
     let cache = SemanticCache::open_at(tmp.path()).unwrap();
-    let key = structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({}));
-    let shard = cache.entry_path(&key).parent().unwrap().to_path_buf();
-    symlink(outside.path(), &shard).unwrap();
-
-    assert!(cache.put(&key, &entry(json!(1))).is_err());
-    assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none());
+    assert!(cache.maintain().is_err());
+    assert_eq!(fs::read_to_string(foreign).unwrap(), "preserve");
 }
 
 #[test]
-fn retention_pass_drops_stale_entries_and_keeps_fresh_ones() {
+fn expired_entries_never_replay_and_open_evicts_only_one_indexed_batch() {
     let tmp = tempfile::tempdir().unwrap();
     let cache = SemanticCache::open_at(tmp.path()).unwrap();
-    let stale_key = structured_query_cache_key("m", "sys", "old", "Schema", &json!({}));
-    let fresh_key = structured_query_cache_key("m", "sys", "new", "Schema", &json!({}));
-    cache.put(&stale_key, &entry(json!("stale"))).unwrap();
-    cache
-        .put(
-            &fresh_key,
-            &cache_entry_now("full-mode-multi:chunk", "m", 0.1, json!("fresh")),
-        )
-        .unwrap();
-
-    cache.prune_entries_older_than(1_000);
-
-    assert_eq!(cache.get(&stale_key), None);
-    assert!(cache.get(&fresh_key).is_some());
-    assert!(!cache.entry_path(&stale_key).parent().unwrap().exists());
-}
-
-#[test]
-fn retention_pass_drops_corrupt_entries() {
-    let tmp = tempfile::tempdir().unwrap();
+    let mut stale = entry(json!("old"));
+    stale.created_at_ms = 1;
+    for id in 0..150 {
+        cache.put(&key(id), &stale).unwrap();
+    }
+    assert_eq!(cache.get(&key(0)), None);
+    drop(cache);
     let cache = SemanticCache::open_at(tmp.path()).unwrap();
-    let key = structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({}));
-    cache
-        .put(
-            &key,
-            &cache_entry_now("full-mode-multi:chunk", "m", 0.1, json!("fresh")),
-        )
-        .unwrap();
-    std::fs::write(cache.entry_path(&key), b"not json").unwrap();
-
-    // Cutoff 0 keeps every dated entry — only corruption is dropped.
-    cache.prune_entries_older_than(0);
-
-    assert!(!cache.entry_path(&key).exists());
-}
-
-#[test]
-fn open_for_target_prunes_at_most_once_a_day() {
-    let tmp = tempfile::tempdir().unwrap();
-    let _lock = crate::test_env::semantic_cache_env_lock();
-    let stale_key = structured_query_cache_key("m", "sys", "old", "Schema", &json!({}));
-    let stamp = crate::workspace::workspace_state_dir(tmp.path())
-        .join(SEMANTIC_CACHE_DIR)
-        .join("last-prune-at-ms");
-
-    let cache = SemanticCache::open_for_target(tmp.path()).expect("cache should open");
-    assert!(stamp.is_file(), "first open must record a prune stamp");
-    cache.put(&stale_key, &entry(json!("stale"))).unwrap();
-
-    let cache = SemanticCache::open_for_target(tmp.path()).expect("cache should reopen");
-    assert!(
-        cache.get(&stale_key).is_some(),
-        "a same-day reopen must not walk the store again"
-    );
-
-    std::fs::remove_file(&stamp).unwrap();
-    let cache = SemanticCache::open_for_target(tmp.path()).expect("cache should reopen");
     assert_eq!(
-        cache.get(&stale_key),
-        None,
-        "a due retention pass must drop entries past the retention window"
+        database::totals(&cache.connection().unwrap()).unwrap().0,
+        86
+    );
+    let report = cache.maintain().unwrap();
+    assert_eq!(report.entries, 22);
+    assert!(report.pending);
+    assert!(report.reclaimed_payload_bytes > 0);
+    let report = cache.maintain().unwrap();
+    assert_eq!(report.entries, 0);
+    assert!(!report.pending);
+}
+
+#[test]
+fn concurrent_connections_enforce_entry_and_disk_quotas() {
+    let tmp = tempfile::tempdir().unwrap();
+    let limits = SemanticCacheLimits {
+        max_bytes: 128 * 1024,
+        max_entries: 5,
+    };
+    let left = SemanticCache::open_at_with_limits(tmp.path(), limits).unwrap();
+    let right = SemanticCache::open_at_with_limits(tmp.path(), limits).unwrap();
+    std::thread::scope(|scope| {
+        for (cache, start) in [(&left, 0), (&right, 100)] {
+            scope.spawn(move || {
+                for id in start..start + 50 {
+                    cache
+                        .put(&key(id), &entry(json!("x".repeat(8 * 1024))))
+                        .unwrap();
+                    assert!(database::totals(&cache.connection().unwrap()).unwrap().0 <= 5);
+                }
+            });
+        }
+    });
+    let report = left.maintain().unwrap();
+    assert_eq!(report.entries, 5);
+    assert!(report.quota_pressure);
+    assert!(report.payload_bytes <= limits.max_bytes / 2);
+    assert!(
+        fs::metadata(tmp.path().join(database::DATABASE_FILE))
+            .unwrap()
+            .len()
+            <= limits.max_bytes
+    );
+}
+
+#[test]
+fn oversized_serialization_never_creates_an_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = SemanticCache::open_at(tmp.path()).unwrap();
+    assert!(cache
+        .put(
+            &key(0),
+            &entry(json!("x".repeat(MAX_SEMANTIC_CACHE_ENTRY_BYTES)))
+        )
+        .is_err());
+    assert_eq!(
+        database::totals(&cache.connection().unwrap()).unwrap(),
+        (0, 0)
+    );
+}
+
+#[test]
+fn interrupted_legacy_cleanup_resumes_without_a_daily_delay() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = SemanticCache::open_at(tmp.path()).unwrap();
+    let shard = tmp.path().join("00");
+    fs::create_dir(&shard).unwrap();
+    for id in 0..100 {
+        fs::write(shard.join(format!("{id:064x}.json")), "legacy").unwrap();
+    }
+    cache
+        .connection()
+        .unwrap()
+        .execute("UPDATE cache_state SET legacy_shard=0,last_prune_ms=0", [])
+        .unwrap();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "semantic_cache::tests::crash_during_legacy_prune_child",
+            "--nocapture",
+        ])
+        .env("KUZUSHI_CACHE_CRASH_TEST_ROOT", tmp.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(27));
+    assert_eq!(fs::read_dir(&shard).unwrap().count(), 37);
+    assert_eq!(
+        cache
+            .connection()
+            .unwrap()
+            .query_row("SELECT last_prune_ms FROM cache_state", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    drop(cache);
+    let cache = SemanticCache::open_at(tmp.path()).unwrap();
+    assert!(!shard.exists());
+    while cache.maintain().unwrap().pending {}
+    assert!(
+        cache
+            .connection()
+            .unwrap()
+            .query_row("SELECT last_prune_ms FROM cache_state", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap()
+            > 0
     );
 }
 
@@ -154,7 +209,6 @@ fn open_for_target_respects_the_env_kill_switch() {
     let tmp = tempfile::tempdir().unwrap();
     let _lock = crate::test_env::semantic_cache_env_lock();
     let _guard = crate::test_env::ScopedEnv::set(SEMANTIC_CACHE_ENV, "off");
-
     assert!(SemanticCache::open_for_target(tmp.path()).is_none());
 }
 
@@ -162,11 +216,24 @@ fn open_for_target_respects_the_env_kill_switch() {
 fn open_for_target_lands_under_the_workspace_state_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let _lock = crate::test_env::semantic_cache_env_lock();
-    let cache = SemanticCache::open_for_target(tmp.path()).expect("cache should open");
-    let key = structured_query_cache_key("m", "sys", "prompt", "Schema", &json!({}));
-    cache.put(&key, &entry(json!(1))).unwrap();
+    let cache = SemanticCache::open_for_target(tmp.path()).unwrap();
+    cache.put(&key(0), &entry(json!(1))).unwrap();
+    let root = crate::workspace::workspace_state_dir(tmp.path()).join(SEMANTIC_CACHE_DIR);
+    assert!(root.join(database::DATABASE_FILE).is_file());
+}
 
-    let expected_root = crate::workspace::workspace_state_dir(tmp.path()).join(SEMANTIC_CACHE_DIR);
-    assert!(cache.entry_path(&key).starts_with(&expected_root));
-    assert!(cache.entry_path(&key).is_file());
+#[test]
+fn crash_during_legacy_prune_child() {
+    let Some(root) = std::env::var_os("KUZUSHI_CACHE_CRASH_TEST_ROOT") else {
+        return;
+    };
+    let root = PathBuf::from(root);
+    let mut connection = database::open(&root, SemanticCacheLimits::default()).unwrap();
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .unwrap();
+    let (_, pending) = legacy_cleanup::prune_batch(&root, &transaction).unwrap();
+    assert!(pending);
+    // Exit without destructors or transaction commit, as on process death.
+    std::process::exit(27);
 }

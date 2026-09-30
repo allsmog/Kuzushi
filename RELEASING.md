@@ -13,6 +13,17 @@ part of every release commit.
   including the current LangGraph adapter, execute live. This can increase model
   spend compared with earlier cache replay. Credentials and transport diagnostics
   are excluded, and tracing/routing wrappers preserve the inner attestation.
+- Semantic responses now use an indexed SQLite cache with defaults of 10,000
+  entries and 64 MiB of database pages. Set `operator.semantic_cache.max_entries`
+  and `max_bytes` in global config; target config cannot raise quotas. Half the
+  page budget is reserved for response payload and the rest for index overhead.
+  A rollback journal can temporarily add up to one database's size. Oversized
+  entries and quota pressure skip caching. Legacy JSON entries safely miss and
+  are reclaimed in resumable batches of at most 64 directory entries per open;
+  indexed expiry also visits at most 64 entries per pass. `maintain()` reports
+  reclaimed bytes, quota pressure and pending work. Lowering the byte budget below
+  an existing database's size disables that cache until it is cleared; it never
+  admits new writes above the new budget.
 - Sandbox children receive an explicit minimal environment. Callers must grant
   required variables through `SandboxExecOptions.env`; stdin and each output
   stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.

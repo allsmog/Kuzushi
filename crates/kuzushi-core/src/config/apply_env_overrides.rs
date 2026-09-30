@@ -66,6 +66,7 @@ pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
     validate_model(&config.model)?;
     validate_runtime(&config.runtime)?;
     validate_operator(&config.operator)?;
+    config.operator.semantic_cache.validate()?;
     validate_phases(&config.phases)?;
     validate_review_yield(&config.review_yield)?;
     Ok(())
