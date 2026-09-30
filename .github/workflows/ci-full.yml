@@ -363,7 +363,7 @@ jobs:
   real-semgrep:
     name: real-semgrep
     needs: rust-cli
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

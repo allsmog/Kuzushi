@@ -129,3 +129,9 @@ test("artifact verification must be executable, not commented out or disabled", 
     assert.throws(() => requireArtifactVerification(disabled, name));
   }
 });
+
+test("real scanner smoke runs on the same host architecture as its native artifact", () => {
+  const full = workflow("ci-full");
+  assert.equal(full.jobs["real-semgrep"]["runs-on"], full.jobs["rust-cli"]["runs-on"]);
+  assert.deepEqual(full.jobs["real-semgrep"].needs, "rust-cli");
+});

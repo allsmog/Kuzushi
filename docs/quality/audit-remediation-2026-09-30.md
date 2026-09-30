@@ -109,7 +109,9 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 
 ## Verification
 
-- Full Node contract suite: 335 passed; final repository verification reruns the suite.
+- Full Node contract suite: 336 passed before the final runner-architecture assertion; that assertion is tested separately.
+- Repository quick gate and workspace/all-target Clippy with warnings denied passed.
+- History/editor-related TUI suite: 54 passed.
 - Core focused suite: 889 passed, one ignored; includes findings, runtime, verification, offense, spend, storage, stage checkpoints and scoped CPG integration.
 - MCP common, CPG, MCP CPG, code-index, sandbox and evaluator suites passed.
 - Real pinned Semgrep and fresh npm dependency-graph smoke passed.
