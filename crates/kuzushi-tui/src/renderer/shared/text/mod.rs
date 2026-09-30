@@ -1,5 +1,6 @@
 pub(in crate::renderer) use super::*;
 pub(crate) use crate::ui_view_models::format_session_cost;
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(super) mod styled_wrap;
@@ -254,12 +255,12 @@ fn char_display_width(ch: char) -> usize {
 pub(crate) fn take_columns(value: &str, max_columns: usize) -> String {
     let mut width = 0usize;
     let mut out = String::new();
-    for ch in value.chars() {
-        let next = width + char_display_width(ch);
+    for grapheme in value.graphemes(true) {
+        let next = width + display_width(grapheme);
         if next > max_columns {
             break;
         }
-        out.push(ch);
+        out.push_str(grapheme);
         width = next;
     }
     out
@@ -268,12 +269,12 @@ pub(crate) fn take_columns(value: &str, max_columns: usize) -> String {
 pub(crate) fn take_tail_columns(value: &str, max_columns: usize) -> String {
     let mut width = 0usize;
     let mut chars = Vec::new();
-    for ch in value.chars().rev() {
-        let next = width + char_display_width(ch);
+    for grapheme in value.graphemes(true).rev() {
+        let next = width + display_width(grapheme);
         if next > max_columns {
             break;
         }
-        chars.push(ch);
+        chars.push(grapheme);
         width = next;
     }
     chars.into_iter().rev().collect()

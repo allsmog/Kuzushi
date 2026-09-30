@@ -83,7 +83,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 75 | Restore the original composer draft when reverse-history search is canceled | Implemented | Restore draft, cursor and paste payloads on history-search cancellation or empty acceptance. |
 | 76 | Store command history as structured records so multiline commands survive restart | Implemented | Versioned structured history preserves multiline input; compatible legacy import. |
 | 77 | Apply the history byte budget on writes as well as reads | Implemented | Enforce history count and byte limits when writing and reading. |
-| 78 | Make text editing operate on grapheme clusters | Open | Use grapheme boundaries consistently for movement, deletion and cursor rendering. |
+| 78 | Make text editing operate on grapheme clusters | Implemented | Shared composer/field grapheme movement, deletion and word operations; display-cell navigation and whole-grapheme cursor/clipping. Accents, ZWJ emoji, modifiers, flags and CJK regressions pass. |
 | 79 | Treat collapsed paste placeholders as atomic editable objects | Open | Model paste placeholders as atomic editable objects with payload lifetime. |
 | 80 | Reject shadowed keybindings and chord-prefix conflicts | Open | Reject active-context key conflicts and one-stroke/chord-prefix shadowing. |
 | 81 | Provide an interactive linear mode for screen-reader users | Open | Add an interactive linear terminal mode with accessible focus and prompts. |

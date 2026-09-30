@@ -1,5 +1,7 @@
 use super::EditorState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// Form fields use the composer's Unicode-aware editing operations without
 /// exposing command history, completion, or submission to the shell.
@@ -99,7 +101,7 @@ impl FieldEditor {
     fn move_line_edge(&mut self, end: bool) {
         let (line, _) = self.line_position();
         let lines = self.text().split('\n').collect::<Vec<_>>();
-        let column = if end { lines[line].chars().count() } else { 0 };
+        let column = if end { lines[line].width() } else { 0 };
         self.set_line_position(line, column);
     }
 
@@ -113,12 +115,7 @@ impl FieldEditor {
     fn line_position(&self) -> (usize, usize) {
         let before = self.text().chars().take(self.cursor()).collect::<String>();
         let line = before.matches('\n').count();
-        let column = before
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
+        let column = before.rsplit('\n').next().unwrap_or_default().width();
         (line, column)
     }
 
@@ -129,9 +126,20 @@ impl FieldEditor {
             .take(line)
             .map(|text| text.chars().count() + 1)
             .sum();
-        let cursor = before + column.min(lines[line].chars().count());
+        let cursor = before + scalar_at_column(lines[line], column);
         self.buffer.set_cursor(cursor);
     }
+}
+
+fn scalar_at_column(line: &str, column: usize) -> usize {
+    let mut cells = 0;
+    line.graphemes(true)
+        .take_while(|grapheme| {
+            cells += grapheme.width();
+            cells <= column
+        })
+        .map(|grapheme| grapheme.chars().count())
+        .sum()
 }
 
 #[cfg(test)]
@@ -140,6 +148,22 @@ mod tests {
 
     fn press(field: &mut FieldEditor, code: KeyCode) {
         assert!(field.handle_key(KeyEvent::new(code, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn grapheme_field_navigation_uses_display_columns_and_shared_deletion() {
+        let mut field = FieldEditor::new("e\u{301}東x\nab東z");
+        field.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
+        press(&mut field, KeyCode::Right);
+        press(&mut field, KeyCode::Right);
+        assert_eq!(field.cursor(), 3);
+        press(&mut field, KeyCode::Down);
+        assert_eq!(field.cursor(), 7);
+        press(&mut field, KeyCode::Delete);
+        assert_eq!(field.text(), "e\u{301}東x\nabz");
+        field.insert("👩‍💻");
+        press(&mut field, KeyCode::Backspace);
+        assert_eq!(field.text(), "e\u{301}東x\nabz");
     }
 
     #[test]

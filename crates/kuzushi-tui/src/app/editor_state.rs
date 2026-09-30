@@ -2,6 +2,9 @@ use super::*;
 use std::cell::{Ref, RefCell};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod grapheme_tests;
+mod graphemes;
 mod history;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +122,7 @@ impl EditorState {
     }
 
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
-        let cursor = cursor.min(self.char_count());
+        let cursor = graphemes::floor(&self.input, cursor);
         if self.cursor != cursor {
             self.cursor = cursor;
             self.touch_completion_preview();
@@ -211,7 +214,7 @@ impl EditorState {
     }
 
     pub(crate) fn restore_input_snapshot(&mut self, snapshot: EditorInputSnapshot) {
-        let cursor = snapshot.cursor.min(snapshot.input.chars().count());
+        let cursor = graphemes::floor(&snapshot.input, snapshot.cursor);
         if self.input == snapshot.input
             && self.cursor == cursor
             && self.pasted_blocks == snapshot.pasted_blocks
@@ -283,7 +286,7 @@ impl EditorState {
         }
         let byte = self.cursor_byte();
         self.input.insert_str(byte, s);
-        self.cursor += s.chars().count();
+        self.cursor = graphemes::ceil(&self.input, self.cursor + s.chars().count());
         self.history_index = None;
         self.touch_completion_preview();
     }
@@ -305,11 +308,7 @@ impl EditorState {
     }
 
     pub(crate) fn insert_char_at_cursor(&mut self, ch: char) {
-        let byte = self.cursor_byte();
-        self.input.insert(byte, ch);
-        self.cursor += 1;
-        self.history_index = None;
-        self.touch_completion_preview();
+        self.insert_str_at_cursor(ch.encode_utf8(&mut [0; 4]));
     }
 
     pub(crate) fn backspace(&mut self) {
@@ -320,7 +319,7 @@ impl EditorState {
         if self.cursor > count {
             self.cursor = count;
         }
-        let new_cursor = self.cursor - 1;
+        let new_cursor = graphemes::previous(&self.input, self.cursor);
         let start = char_index_to_byte(&self.input, new_cursor);
         let end = char_index_to_byte(&self.input, self.cursor);
         self.input.drain(start..end);
@@ -335,7 +334,7 @@ impl EditorState {
             return;
         }
         let start = char_index_to_byte(&self.input, self.cursor);
-        let end = char_index_to_byte(&self.input, self.cursor + 1);
+        let end = char_index_to_byte(&self.input, graphemes::next(&self.input, self.cursor));
         self.input.drain(start..end);
         self.history_index = None;
         self.touch_completion_preview();
@@ -343,7 +342,7 @@ impl EditorState {
 
     pub(crate) fn move_cursor_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            self.cursor = graphemes::previous(&self.input, self.cursor);
             self.touch_completion_preview();
         }
     }
@@ -351,7 +350,7 @@ impl EditorState {
     pub(crate) fn move_cursor_right(&mut self) {
         let count = self.char_count();
         if self.cursor < count {
-            self.cursor += 1;
+            self.cursor = graphemes::next(&self.input, self.cursor);
             self.touch_completion_preview();
         }
     }
@@ -372,28 +371,11 @@ impl EditorState {
     }
 
     pub(crate) fn word_boundary_left(&self) -> usize {
-        let chars: Vec<char> = self.input.chars().collect();
-        let mut idx = self.cursor.min(chars.len());
-        while idx > 0 && !is_word_char(chars[idx - 1]) {
-            idx -= 1;
-        }
-        while idx > 0 && is_word_char(chars[idx - 1]) {
-            idx -= 1;
-        }
-        idx
+        graphemes::word_left(&self.input, self.cursor)
     }
 
     pub(crate) fn word_boundary_right(&self) -> usize {
-        let chars: Vec<char> = self.input.chars().collect();
-        let mut idx = self.cursor.min(chars.len());
-        let len = chars.len();
-        while idx < len && is_word_char(chars[idx]) {
-            idx += 1;
-        }
-        while idx < len && !is_word_char(chars[idx]) {
-            idx += 1;
-        }
-        idx
+        graphemes::word_right(&self.input, self.cursor)
     }
 
     pub(crate) fn delete_word_left(&mut self) {
@@ -508,6 +490,7 @@ impl EditorState {
     }
 
     fn touch_completion_preview(&mut self) {
+        self.cursor = graphemes::floor(&self.input, self.cursor);
         self.pasted_blocks
             .retain(|block| self.input.contains(&block.marker));
         self.revision = self.revision.wrapping_add(1);

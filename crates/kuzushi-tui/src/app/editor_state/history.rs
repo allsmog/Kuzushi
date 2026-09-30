@@ -1,6 +1,7 @@
 use super::EditorState;
 use crate::app::line_editor::subsequence_score;
 use crate::app::HistorySearch;
+use unicode_segmentation::UnicodeSegmentation;
 
 impl EditorState {
     pub(crate) fn history_prev(&mut self) {
@@ -57,7 +58,12 @@ impl EditorState {
 
     pub(crate) fn history_search_backspace(&mut self) {
         if let Some(search) = self.history_search.as_mut() {
-            search.query.pop();
+            let end = search
+                .query
+                .grapheme_indices(true)
+                .next_back()
+                .map_or(0, |(at, _)| at);
+            search.query.truncate(end);
             search.cursor = 0;
         }
     }

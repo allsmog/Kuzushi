@@ -44,6 +44,10 @@ an unversioned or dirty target; their historical records are not rewritten.
 
 ## Audit remediation contracts
 
+Shell composer and form fields share grapheme-aware cursor movement and deletion.
+Their renderers retain whole graphemes and measure terminal cells; vertical field
+navigation preserves display columns. This changes shell presentation only.
+
 Semantic response reuse requires a closed-world tool policy and a runtime
 attestation binding effective backend settings and implementation revisions.
 Adapters without `semantic_cache_identity` execute live; the current external
