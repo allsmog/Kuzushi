@@ -26,7 +26,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 18 | Make spend admission atomic across processes and limiter instances | Implemented | SQLite immediate transaction makes cap admission and reservation atomic across connections. |
 | 19 | Refresh durable budget caps at reservation time | Implemented | Read durable caps during admission; independent-connection cap-change regression. |
 | 20 | Give unresolved spend reservations provenance and reconciliation | Open | Persist reservation run/model/owner provenance and expose reconciliation. |
-| 21 | Include the full model execution contract in semantic cache keys | Open | Bind semantic cache identity to the full execution contract without persisting credentials. |
+| 21 | Include the full model execution contract in semantic cache keys | Implemented | Versioned generation/implementation keys require adapter attestation; unauthenticated runtimes execute live. Setting-by-setting replay/miss and credential-exclusion regressions. Current external LangGraph adapter safely bypasses semantic reuse. |
 | 22 | Bound semantic-cache disk usage and make pruning incremental | Open | Add disk/entry quotas and incremental, correctly stamped pruning. |
 | 23 | Preserve accumulated loop spend when a later model turn fails | Implemented | Typed loop failures retain transcript and known spend; unresolved reservations retain observed cost. |
 | 24 | Journal tool-call intent and completion before resuming side effects | Partial | Persist tool-call intent before execution; unresolved intent refuses automatic replay. Per-tool replay-safety declarations and reconciliation UI remain. |

@@ -393,6 +393,13 @@ fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelU
 
 #[async_trait]
 impl AgentRuntime for TracedRuntime<'_> {
+    fn semantic_cache_identity(
+        &self,
+        request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner.semantic_cache_identity(request)
+    }
+
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         self.inner.preflight_model_blocking(model)
     }

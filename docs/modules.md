@@ -44,6 +44,12 @@ an unversioned or dirty target; their historical records are not rewritten.
 
 ## Audit remediation contracts
 
+Semantic response reuse requires a closed-world tool policy and a runtime
+attestation binding effective backend settings and implementation revisions.
+Adapters without `semantic_cache_identity` execute live; the current external
+LangGraph bridge does not attest its installed dependency closure. Generation
+settings participate in versioned keys; credentials and diagnostics do not.
+
 MCP servers validate arguments against registered schemas before dispatch. Clients
 must handle invalid-argument, capacity, cancellation and shutdown responses.
 CPG callers must select regex or literal query semantics and check coverage,

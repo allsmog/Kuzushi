@@ -108,6 +108,18 @@ mod agent_loop_outcome_serde_tests {
 
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
+    /// Attest the response-affecting adapter contract for this request. The
+    /// identity must bind backend/endpoint, effective defaults and implementation
+    /// revisions, excluding credentials and transport-only diagnostics. Return
+    /// `None` when an external bridge or ambient configuration is not authenticated;
+    /// such runtimes always execute live instead of risking a stale replay.
+    fn semantic_cache_identity(
+        &self,
+        _request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        None
+    }
+
     /// Verify that `model` can authenticate before any tool executor performs
     /// local setup or starts a provider bridge. Runtimes that do not own
     /// credential resolution retain the compatibility no-op.

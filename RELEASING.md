@@ -7,6 +7,12 @@ part of every release commit.
 
 ### Audit remediation compatibility
 
+- Semantic query keys now include generation settings and an attested runtime
+  identity. Legacy keys safely miss. Runtime adapters opt in through
+  `AgentRuntime::semantic_cache_identity`; unauthenticated external bridges,
+  including the current LangGraph adapter, execute live. This can increase model
+  spend compared with earlier cache replay. Credentials and transport diagnostics
+  are excluded, and tracing/routing wrappers preserve the inner attestation.
 - Sandbox children receive an explicit minimal environment. Callers must grant
   required variables through `SandboxExecOptions.env`; stdin and each output
   stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.

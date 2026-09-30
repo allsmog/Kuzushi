@@ -4,6 +4,7 @@
 //! state. They produce content-addressed identifiers that can be reused by the
 //! event log, projection tables, and TUI review frames.
 
+pub(crate) mod executable;
 pub mod finding_identity;
 pub mod hash;
 

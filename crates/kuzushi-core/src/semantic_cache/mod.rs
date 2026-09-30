@@ -19,6 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod execution_contract;
+pub(crate) use execution_contract::execution_query_cache_key;
+
 pub const SEMANTIC_CACHE_DIR: &str = "semantic-cache";
 
 /// Anti-corruption read bound for one cached response. Structured outputs
@@ -176,8 +179,8 @@ fn prune_entry_file(path: &Path, cutoff_ms: u64) {
     }
 }
 
-/// Cache key for a one-shot structured query: every ingredient that could
-/// change the response participates, so equal keys imply an equivalent call.
+/// Legacy key constructor retained for compatibility with stored-entry tooling.
+/// Runtime queries use the attested, versioned execution-contract key instead.
 pub fn structured_query_cache_key(
     model: &str,
     system_prompt: &str,
