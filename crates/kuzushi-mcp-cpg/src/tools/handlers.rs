@@ -84,6 +84,7 @@ fn required_line(args: &Value) -> Result<u32> {
 
 fn method_json(record: &queries::MethodRecord, lang: &str) -> Value {
     json!({
+        "selector": record.selector,
         "name": record.name,
         "fullName": record.full_name,
         "signature": record.signature,
@@ -100,15 +101,9 @@ impl ToolHandler for CallersOfTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let function = required_str(&args, "fn")?;
         with_language_projects(move |_, projects| {
-            let callers: Vec<Value> = projects
-                .iter()
-                .flat_map(|(lang, project)| {
-                    queries::callers_of(project, &function)
-                        .iter()
-                        .map(|record| method_json(record, lang))
-                        .collect::<Vec<_>>()
-                })
-                .collect();
+            ensure_unique_function(projects, &function)?;
+            let callers =
+                method_results(projects, |project| queries::callers_of(project, &function))?;
             Ok(json!({"fn": function, "callers": callers}))
         })
         .await
@@ -122,15 +117,16 @@ impl ToolHandler for CalleesOfTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let function = required_str(&args, "fn")?;
         with_language_projects(move |_, projects| {
-            let callees: Vec<Value> = projects
-                .iter()
-                .flat_map(|(lang, project)| {
+            ensure_unique_function(projects, &function)?;
+            let mut callees = Vec::new();
+            for (lang, project) in projects {
+                callees.extend(
                     queries::callees_of(project, &function)
+                        .map_err(anyhow::Error::msg)?
                         .into_iter()
-                        .map(|callee| json!({"callee": callee, "language": lang}))
-                        .collect::<Vec<_>>()
-                })
-                .collect();
+                        .map(|callee| json!({"callee":callee, "language":lang})),
+                );
+            }
             Ok(json!({"fn": function, "callees": callees}))
         })
         .await
@@ -168,25 +164,17 @@ impl ToolHandler for ReachingDefTool {
         let var = required_str(&args, "var")?;
         let line = required_line(&args)?;
         with_language_projects(move |_, projects| {
-            let definitions: Vec<Value> = projects
-                .iter()
-                .flat_map(|(lang, project)| {
-                    queries::reaching_defs(project, &file, line, &var)
-                        .iter()
-                        .map(|record| {
-                            json!({
-                                "var": record.var,
-                                "defLine": record.def_line,
-                                "defCode": record.def_code,
-                                "useLine": record.use_line,
-                                "useCode": record.use_code,
-                                "language": lang,
-                            })
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .collect();
-            Ok(json!({"var": var, "file": file, "line": line, "definitions": definitions}))
+            ensure_unique_file(projects, &file)?;
+            let mut definitions = Vec::new();
+            for (lang, project) in projects {
+                let records = queries::reaching_defs(project, &file, line, &var)
+                    .map_err(anyhow::Error::msg)?;
+                definitions.extend(records.iter().map(|record| reaching_def_json(record, lang)));
+            }
+            Ok(
+                json!({"var": var, "file": file, "line": line, "definitions": definitions,
+                "membershipEvidence": "unambiguous AST node at requested line"}),
+            )
         })
         .await
     }
@@ -200,13 +188,10 @@ impl ToolHandler for MethodAtTool {
         let file = required_str(&args, "file")?;
         let line = required_line(&args)?;
         with_language_projects(move |_, projects| {
-            let method = projects
-                .iter()
-                .find_map(|(lang, project)| {
-                    queries::method_at(project, &file, line)
-                        .map(|record| method_json(&record, lang))
-                })
-                .unwrap_or(Value::Null);
+            ensure_unique_file(projects, &file)?;
+            let mut matches = method_results(projects, |project|
+                queries::method_at(project, &file, line).map(|record| record.into_iter().collect()))?;
+            let method = matches.pop().unwrap_or(Value::Null);
             Ok(json!({"file": file, "line": line, "method": method,
                 "matchQuality": "nearest-preceding", "exactContainment": false,
                 "limitation": "Method end lines are unavailable; this result does not establish containment."}))
@@ -256,13 +241,15 @@ impl ToolHandler for SliceTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let method = required_str(&args, "method")?;
         let line = required_line(&args)?;
-        let depth = args.get("depth").and_then(Value::as_u64).unwrap_or(2) as usize;
+        let depth = requested_depth(&args)?;
         with_language_projects(move |_, projects| {
+            ensure_unique_function(projects, &method)?;
             let mut entries = Vec::new();
             let mut truncated = false;
             for (lang, project) in projects {
                 let (records, was_truncated) =
-                    queries::backward_slice_at(project, &method, line, depth);
+                    queries::backward_slice_at(project, &method, line, depth)
+                        .map_err(anyhow::Error::msg)?;
                 truncated |= was_truncated;
                 entries.extend(records.iter().map(|record| {
                     json!({
@@ -285,4 +272,63 @@ impl ToolHandler for SliceTool {
         })
         .await
     }
+}
+
+fn method_results(
+    projects: &[(String, kuzushi_cpg::Project)],
+    query: impl Fn(&kuzushi_cpg::Project) -> queries::QueryResult<Vec<queries::MethodRecord>>,
+) -> Result<Vec<Value>> {
+    let mut results = Vec::new();
+    for (lang, project) in projects {
+        results.extend(
+            query(project)
+                .map_err(anyhow::Error::msg)?
+                .iter()
+                .map(|record| method_json(record, lang)),
+        );
+    }
+    Ok(results)
+}
+
+fn ensure_unique_function(projects: &[(String, kuzushi_cpg::Project)], name: &str) -> Result<()> {
+    let candidates = method_results(projects, |project| {
+        Ok(queries::methods_named(project, name))
+    })?;
+    anyhow::ensure!(
+        candidates.len() <= 1,
+        "ambiguous method; use a canonical selector from cpg.definitions: {}",
+        Value::Array(candidates.into_iter().take(8).collect())
+    );
+    Ok(())
+}
+
+fn ensure_unique_file(projects: &[(String, kuzushi_cpg::Project)], file: &str) -> Result<()> {
+    let mut candidates = Vec::new();
+    for (lang, project) in projects {
+        if let Some(file) = queries::resolved_file(project, file).map_err(anyhow::Error::msg)? {
+            candidates.push(json!({"language":lang,"file":file}));
+        }
+    }
+    anyhow::ensure!(
+        candidates.len() <= 1,
+        "ambiguous file across language graphs: {}",
+        Value::Array(candidates)
+    );
+    Ok(())
+}
+
+fn reaching_def_json(record: &queries::ReachingDefRecord, lang: &str) -> Value {
+    json!({"var":record.var, "defLine":record.def_line, "defCode":record.def_code,
+        "useLine":record.use_line, "useCode":record.use_code, "language":lang})
+}
+
+fn requested_depth(args: &Value) -> Result<usize> {
+    let Some(value) = args.get("depth") else {
+        return Ok(2);
+    };
+    value
+        .as_u64()
+        .filter(|depth| (0..=32).contains(depth))
+        .map(|depth| depth as usize)
+        .ok_or_else(|| anyhow::anyhow!("depth must be an integer in 0..=32"))
 }

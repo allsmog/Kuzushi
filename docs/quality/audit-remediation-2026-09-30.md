@@ -52,8 +52,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 44 | Bound CPG work by bytes, memory, and cancellation as well as file count | Open | Bound source and graph bytes and move builds/queries to supervised cancellable workers. |
 | 45 | Make CPG source census errors visible and platform-correct | Open | Make source census fallible and consistent for exclusions, generated files, symlinks and Windows paths. |
 | 46 | Avoid rediscovering and reopening every language on every graph query | Open | Reuse source census and authenticated graphs under a bounded worker lifecycle. |
-| 47 | Make method-position answers exact or explicitly approximate | Partial | method_at identifies nearest-preceding approximation. Exact containment and downstream reaching-definitions behavior remain. |
-| 48 | Reject overflowing and ambiguous CPG query inputs | Partial | Reject overflowing line numbers. Ambiguous file/method resolution remains. |
+| 47 | Make method-position answers exact or explicitly approximate | Implemented | method_at explicitly labels nearest-preceding approximation; reaching definitions require unambiguous AST membership at the exact requested line. Inside/gap/beyond cases pass through the real MCP process. |
+| 48 | Reject overflowing and ambiguous CPG query inputs | Implemented | Checked line/depth inputs, canonical method selectors, explicit file/name/start-position/language ambiguity errors and candidates; duplicate-basename and overloaded-symbol regressions. |
 | 49 | Put a local deadline around code-index initialization and tool requests | Implemented | Deadline covers initialization, lock wait, writes and response; cancelled clients retire and reap. |
 | 50 | Bound code-index protocol frames and discard unrelated frames iteratively | Implemented | Bound protocol frames and ignored-frame counts; iterative frame filtering. |
 | 51 | Ground the finding's own primary location on every insert | Implemented | Ground every primary anchor against actual source while preserving original coordinates. |
@@ -108,6 +108,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 100 | Test workflow semantics rather than token presence | Partial | Parse YAML and assert promotion/PR-test/quality-base semantics. Remaining token-only release contracts must be migrated. |
 
 ## Verification
+
+- CPG follow-up (PR #307): ten core adapter tests and CPG/MCP suites pass; real stdio cases cover uncertainty, gaps, ambiguous identities and canonical selectors.
 
 - Model receipt follow-up: 99 lifecycle/tracing-related tests pass, one ignored, including paid completion and terminal replay after ordinary stream exhaustion.
 

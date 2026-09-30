@@ -52,6 +52,14 @@ part of every release commit.
   default of 10. Invalid or larger values now return an explicit error instead of
   silently using a clamped value. The MCP query retains its separately advertised
   output range and discloses the engine flow cap.
+- CPG structural queries now return explicit ambiguity errors for duplicate
+  suffix paths, method names, start positions or language-graph matches. Use the
+  canonical `selector` returned by `cpg.definitions` for overloaded methods.
+  Rust query helpers now return `QueryResult`; callers must handle resolution
+  errors. Reaching definitions require an unambiguous AST node at the requested
+  line, so blank lines and inter-method gaps return an unavailable-membership
+  error. `method_at` remains explicitly approximate. Slice depth is checked in
+  the advertised 0–32 range; depth zero retains intra-method behavior.
 - CPG caches use source-content and implementation identities; existing caches
   rebuild. `maxCallDepth` is rejected until the engine can enforce it. Regex and
   literal matching are explicit; limits and approximate method positions are

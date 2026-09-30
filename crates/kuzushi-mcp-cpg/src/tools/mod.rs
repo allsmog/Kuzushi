@@ -48,8 +48,8 @@ fn parse_descriptor() -> Tool {
 fn callers_descriptor() -> Tool {
     function_descriptor(
         "cpg.callers_of",
-        "Methods that contain a call to the named function (exact name), deduped, across \
-         every language graph of the target.",
+        "Methods containing calls to the function. Bare names use name matching and \
+         reject ambiguous definitions; canonical selectors require resolved call targets.",
     )
 }
 
@@ -64,8 +64,8 @@ fn callees_descriptor() -> Tool {
 fn definitions_descriptor() -> Tool {
     function_descriptor(
         "cpg.definitions",
-        "Exact-name method definitions as typed symbol records (name, fullName, signature, \
-         file, line, language). Full names may be bare for dynamic languages.",
+        "Method definitions as typed records including a canonical selector, name, fullName, \
+         signature, file, line and language. Returns all candidates for ambiguous names.",
     )
 }
 
@@ -76,7 +76,7 @@ fn function_descriptor(name: &str, description: &str) -> Tool {
         json!({
             "type": "object",
             "required": ["fn"],
-            "properties": { "fn": {"type": "string"} }
+            "properties": { "fn": {"type": "string", "description": "Unique name, full name, or canonical selector returned by cpg.definitions."} }
         }),
     )
 }
@@ -85,7 +85,8 @@ fn reaching_def_descriptor() -> Tool {
     descriptor(
         "cpg.reaching_def",
         "Reaching definitions for a variable inside the method enclosing (file, line). \
-         Intra-method (matching what reachingDefIn answered in practice).",
+         Requires an unambiguous AST node at that exact line; blank lines and gaps fail \
+         rather than borrowing the preceding method. Returns intra-method definitions.",
         json!({
             "type": "object",
             "required": ["file", "line", "var"],
@@ -158,7 +159,7 @@ fn slice_descriptor() -> Tool {
             "properties": {
                 "method": {"type": "string"},
                 "line": {"type": "integer", "minimum": 1, "maximum": 4294967295_u64},
-                "depth": {"type": "integer", "minimum": 0, "default": 2}
+                "depth": {"type": "integer", "minimum": 0, "maximum": 32, "default": 2}
             }
         }),
     )
