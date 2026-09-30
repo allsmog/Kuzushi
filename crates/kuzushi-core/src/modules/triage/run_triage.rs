@@ -488,13 +488,6 @@ pub(in crate::modules) struct PrefilteredTriageFindings {
     pub(in crate::modules) dropped: usize,
 }
 
-pub(in crate::modules) fn prefilter_triage_findings(
-    findings: Vec<Finding>,
-    prefilter_threshold: i64,
-) -> PrefilteredTriageFindings {
-    prefilter_triage_findings_with_receipts(findings, prefilter_threshold).0
-}
-
 fn prefilter_triage_findings_with_receipts(
     findings: Vec<Finding>,
     prefilter_threshold: i64,
