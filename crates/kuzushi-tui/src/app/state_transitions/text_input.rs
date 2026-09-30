@@ -77,6 +77,9 @@ impl ShellApp {
     }
 
     fn paste_preflight(&self, text: &str) -> Option<InputUpdate> {
+        if self.editor().paste_inspection().is_some() {
+            return Some(InputUpdate::handled());
+        }
         if text.is_empty() {
             return Some(InputUpdate::ignored());
         }
@@ -180,7 +183,7 @@ impl ShellApp {
         self.set_warn_notice(
             "paste",
             format!(
-                "stored all {lines} pasted lines ({chars} chars) as {marker}; keep the placeholder intact and press Enter once to submit"
+                "stored all {lines} pasted lines ({chars} chars) as {marker}; Ctrl+Y inspects, Delete removes the whole block, Ctrl+_ undoes, Enter submits"
             ),
         );
         true
@@ -210,6 +213,9 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_mouse(&mut self, mouse: MouseEvent) -> InputUpdate {
+        if self.editor().paste_inspection().is_some() {
+            return InputUpdate::handled();
+        }
         if let Some(update) = self.handle_answer_mouse(mouse) {
             return update;
         }

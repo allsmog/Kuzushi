@@ -84,7 +84,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 76 | Store command history as structured records so multiline commands survive restart | Implemented | Versioned structured history preserves multiline input; compatible legacy import. |
 | 77 | Apply the history byte budget on writes as well as reads | Implemented | Enforce history count and byte limits when writing and reading. |
 | 78 | Make text editing operate on grapheme clusters | Implemented | Shared composer/field grapheme movement, deletion and word operations; display-cell navigation and whole-grapheme cursor/clipping. Accents, ZWJ emoji, modifiers, flags and CJK regressions pass. |
-| 79 | Treat collapsed paste placeholders as atomic editable objects | Open | Model paste placeholders as atomic editable objects with payload lifetime. |
+| 79 | Treat collapsed paste placeholders as atomic editable objects | Implemented | Tracked spans prevent partial marker edits; read-only Ctrl+Y preview supports expand/remove/cancel, with exact-byte paste undo until submit/clear. Forty paste regressions pass, including literal marker identity and history/clear recovery. |
 | 80 | Reject shadowed keybindings and chord-prefix conflicts | Open | Reject active-context key conflicts and one-stroke/chord-prefix shadowing. |
 | 81 | Provide an interactive linear mode for screen-reader users | Open | Add an interactive linear terminal mode with accessible focus and prompts. |
 | 82 | Stream plain-mode progress and consume input incrementally | Open | Stream plain-mode events and consume commands incrementally. |
@@ -108,6 +108,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 100 | Test workflow semantics rather than token presence | Partial | Parse YAML and assert promotion/PR-test/quality-base semantics. Remaining token-only release contracts must be migrated. |
 
 ## Verification
+
+- TUI editing follow-up (PR #308): nine grapheme tests, 94 editor tests, 132 prompt tests (one ignored) and 40 paste tests pass. Covers rendering, word operations, exact-byte recovery and preview input ownership.
 
 - CPG follow-up (PR #307): ten core adapter tests and CPG/MCP suites pass; real stdio cases cover uncertainty, gaps, ambiguous identities and canonical selectors.
 

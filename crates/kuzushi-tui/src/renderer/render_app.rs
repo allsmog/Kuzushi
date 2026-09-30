@@ -47,6 +47,13 @@ fn current_primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
 }
 
 pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
+    if super::paste_inspection::render(frame, app) {
+        return;
+    }
+    render_shell_app(frame, app);
+}
+
+fn render_shell_app(frame: &mut Frame<'_>, app: &ShellApp) {
     let full = frame.area();
     if full.height == 0 || full.width == 0 {
         return;

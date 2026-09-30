@@ -11,6 +11,13 @@ part of every release commit.
   Cursor projections and clipping use terminal display widths, including emoji
   sequences and combining accents. Existing scalar-offset view-model interfaces
   remain compatible; interior offsets snap to a complete character boundary.
+- Collapsed multiline pastes are tracked editor spans. Arrows, word movement,
+  Backspace and Delete cannot damage a marker. Ctrl+Y opens the adjacent block's
+  read-only preview; Enter/e expands it, Delete removes it and Esc cancels.
+  Ctrl+_ or Ctrl+/ restores paste edits or a cleared draft, including all payload
+  bytes. Paste undo lasts until submission or intentional clearing. Completion
+  waits until pasted blocks are expanded. Literal copies of marker text never
+  acquire a document payload.
 - Semantic query keys now include generation settings and an attested runtime
   identity. Legacy keys safely miss. Runtime adapters opt in through
   `AgentRuntime::semantic_cache_identity`; unauthenticated external bridges,

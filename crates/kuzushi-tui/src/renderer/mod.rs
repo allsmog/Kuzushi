@@ -29,6 +29,7 @@ pub(crate) use views::{activity_output_scroll, ActivityOutputScroll};
 pub(crate) use views::{run_artifact_max_scroll, run_artifact_page_rows};
 mod answers;
 mod chrome;
+mod paste_inspection;
 pub(crate) use answers::{
     answer_body_area, answer_plain_lines, render_answer_prompt, render_answers,
 };

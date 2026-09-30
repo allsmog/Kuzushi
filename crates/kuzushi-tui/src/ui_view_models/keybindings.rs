@@ -39,11 +39,18 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings = input_mode_bindings(bindings, app.input_mode());
     push_input_mode_binding(&mut bindings, app);
     insert_prompt_completion_binding(&mut bindings, app);
+    push_paste_inspection_binding(&mut bindings, app);
     if super::answers_available(app) && app.agent_chat().is_some() {
         bindings.insert(0, bind("Ctrl+T", "answers"));
     }
     prioritize_entry_point_paging(&mut bindings, app);
     apply_operator_chrome_overrides(bindings, app)
+}
+
+fn push_paste_inspection_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
+    if app.input_mode() == crate::InputMode::Prompt && app.editor().has_pasted_blocks() {
+        bindings.push(bind("Ctrl+Y", "inspect paste · Ctrl+_ undo"));
+    }
 }
 
 fn prioritize_entry_point_paging(bindings: &mut [FooterKeybinding], app: &ShellApp) {

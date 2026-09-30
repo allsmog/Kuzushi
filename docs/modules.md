@@ -47,6 +47,11 @@ an unversioned or dirty target; their historical records are not rewritten.
 Shell composer and form fields share grapheme-aware cursor movement and deletion.
 Their renderers retain whole graphemes and measure terminal cells; vertical field
 navigation preserves display columns. This changes shell presentation only.
+Collapsed pastes have tracked spans and undoable whole-block edits. Ctrl+Y opens
+a read-only preview with expand/remove/cancel controls; Ctrl+_ restores paste
+edits. Preview captures keys, pointer events and pasted input until it closes.
+Payloads stay in memory and are expanded exactly when the draft is submitted;
+marker text typed by an operator never resolves to a hidden payload.
 
 Semantic response reuse requires a closed-world tool policy and a runtime
 attestation binding effective backend settings and implementation revisions.

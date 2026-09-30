@@ -51,6 +51,10 @@ const CONTROL_KEY_ACTIONS: &[(char, ControlKeyAction)] = &[
     ),
     ('r', ControlKeyAction::Edit(ShellApp::enter_history_search)),
     (
+        'y',
+        ControlKeyAction::Edit(ShellApp::inspect_paste_at_cursor),
+    ),
+    (
         '_',
         ControlKeyAction::Edit(ShellApp::restore_last_cleared_input),
     ),

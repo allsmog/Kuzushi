@@ -547,8 +547,10 @@ is expected to behave identically and should be filed as a parity bug.
   phase-result cards. A typed attention broker projects approvals, questions,
   credential gates, partial acknowledgements, and unresolved results into the
   footer and terminal title. Multiline paste remains one explicit submission:
-  the composer shows a placeholder and expands the complete payload only when
-  Enter is pressed.
+  the composer tracks atomic paste spans and expands their exact payloads on
+  submission. Ctrl+Y opens a read-only preview with expand/remove/cancel actions;
+  Ctrl+_ restores paste edits. Composer and form fields edit whole graphemes and
+  project cursor positions using terminal display widths.
 - **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
   and background handoff (`background`/`bg`, Run Focus `b`)** — shell-only.
   `jobs` is a Metasploit-style live control surface over the shared
