@@ -92,7 +92,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 84 | Put the exact export preview on the Report route | Open | Place a source-bound exact export preview on the Report route. |
 | 85 | Give interactive OAuth children exclusive ownership of terminal input | Open | Suspend terminal input ownership while interactive OAuth child runs. |
 | 86 | Bound and coalesce the terminal input backlog | Open | Bound and coalesce input backlog while preserving ordered command events. |
-| 87 | Require a Rust test receipt for the actual merge candidate | Partial | Rust test job runs for every ready PR update and merge queue. Required-check administration must be configured externally. |
+| 87 | Require a Rust test receipt for the actual merge candidate | Partial | Rust tests and platform jobs cover ready PR updates against every base branch, including stacked PRs, and the merge queue. A semantic regression rejects main-only and branch-ignore filters. Required-check administration must be configured externally. |
 | 88 | Pin the frequently executed PR action supply chain | Partial | Pin CI actions, actionlint image, and reference-workflow first-party actions. Verified sticky-comment action pin remains. |
 | 89 | Measure the entire interval between deep-quality runs | Implemented | Select latest successful ancestral full-quality run; explicit bootstrap baseline required. |
 | 90 | Fail closed on missing coverage instrumentation | Implemented | Missing changed executable-line instrumentation fails coverage. |
