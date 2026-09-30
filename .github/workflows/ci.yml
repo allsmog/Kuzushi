@@ -83,6 +83,13 @@ jobs:
   # share a build cache; each keeps its own.
   quality-gauntlet:
     name: quality-gauntlet
+    outputs:
+      platform-runtime: ${{ steps.platform.outputs.runtime }}
+      platform-mcp: ${{ steps.platform.outputs.mcp }}
+      platform-sandbox: ${{ steps.platform.outputs.sandbox }}
+      platform-core: ${{ steps.platform.outputs.core }}
+      platform-terminal: ${{ steps.platform.outputs.terminal }}
+      platform-launcher: ${{ steps.platform.outputs.launcher }}
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
@@ -111,6 +118,11 @@ jobs:
         env:
           ACTIONLINT_VERSION: "1.7.12"
         run: bash scripts/runner/lint-workflows.sh
+      - name: Select platform runtime suites
+        id: platform
+        env:
+          PLATFORM_DIFF_BASE: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+        run: node scripts/select-platform-runtime.mjs
       - name: Run quick repository contract
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
@@ -149,7 +161,10 @@ jobs:
   platform-runtime:
     name: platform-runtime (${{ matrix.os }})
     needs: quality-gauntlet
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    if: ${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.quality-gauntlet.outputs.platform-runtime == 'true' }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -162,7 +177,30 @@ jobs:
         with:
           inherit-toolchain: true
           cache: true
-      - run: cargo test -p kuzushi-mcp-common --locked
-      - run: cargo test -p kuzushi-codeindex --locked
-      - run: "cargo test -p kuzushi-core --lib storage_v3:: --locked"
-      - run: "cargo test -p kuzushi-core --lib runtime::application::loop_checkpoint:: --locked"
+      - name: MCP process, cancellation and path contracts
+        if: ${{ needs.quality-gauntlet.outputs.platform-mcp == 'true' }}
+        run: |
+          cargo test -p kuzushi-mcp-common --locked
+          cargo test -p kuzushi-codeindex --locked
+      - name: Sandbox process contracts
+        if: ${{ needs.quality-gauntlet.outputs.platform-sandbox == 'true' }}
+        run: cargo test -p kuzushi-sandbox --locked
+      - name: Durable file and checkpoint contracts
+        if: ${{ needs.quality-gauntlet.outputs.platform-core == 'true' }}
+        run: |
+          cargo test -p kuzushi-core --lib fs_atomic:: --locked
+          cargo test -p kuzushi-core --lib bounded_file:: --locked
+          cargo test -p kuzushi-core --lib storage_v3:: --locked
+          cargo test -p kuzushi-core --lib runtime::application::loop_checkpoint:: --locked
+      - name: Terminal input and output contracts
+        if: ${{ needs.quality-gauntlet.outputs.platform-terminal == 'true' }}
+        run: |
+          cargo test -p kuzushi-tui --lib terminal --locked
+          cargo test -p kuzushi-tui --lib editor_state:: --locked
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: ${{ needs.quality-gauntlet.outputs.platform-launcher == 'true' }}
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Native launcher contracts
+        if: ${{ needs.quality-gauntlet.outputs.platform-launcher == 'true' }}
+        run: node --test scripts/native-runtime-contract.test.mjs scripts/native-launch.test.mjs scripts/stage-native-binary.test.mjs

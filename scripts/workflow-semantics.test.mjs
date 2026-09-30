@@ -63,6 +63,53 @@ function requireAllPullRequestBranches(document) {
   assert.equal(document.on.pull_request["branches-ignore"], undefined);
 }
 
+function requirePlatformSelection(document) {
+  const quality = document.jobs["quality-gauntlet"];
+  assert.equal(
+    quality.if,
+    "${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}",
+  );
+  const selector = quality.steps.find((step) => step.id === "platform");
+  assert.equal(selector?.run, "node scripts/select-platform-runtime.mjs");
+  assert.equal(selector.if, undefined);
+  assert.equal(
+    selector.env.PLATFORM_DIFF_BASE,
+    "${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}",
+  );
+  const runtime = document.jobs["platform-runtime"];
+  assert.equal(
+    runtime.if,
+    "${{ (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.quality-gauntlet.outputs.platform-runtime == 'true' }}",
+  );
+  assert.equal(runtime.defaults.run.shell, "bash", "each command must fail its step on every OS");
+  for (const suite of ["runtime", "mcp", "sandbox", "core", "terminal", "launcher"]) {
+    assert.equal(quality.outputs[`platform-${suite}`], `\${{ steps.platform.outputs.${suite} }}`);
+  }
+  for (const suite of ["mcp", "sandbox", "core", "terminal", "launcher"]) {
+    assert.ok(
+      runtime.steps.some(
+        (step) =>
+          step.run &&
+          step.if === `\${{ needs.quality-gauntlet.outputs.platform-${suite} == 'true' }}`,
+      ),
+    );
+  }
+}
+
+test("platform selection remains wired through job outputs and fail-fast runtime steps", () => {
+  const ci = workflow("ci");
+  requirePlatformSelection(ci);
+  const disabled = structuredClone(ci);
+  disabled.jobs["quality-gauntlet"].steps.find((step) => step.id === "platform").if = false;
+  assert.throws(() => requirePlatformSelection(disabled));
+  const disconnected = structuredClone(ci);
+  delete disconnected.jobs["quality-gauntlet"].outputs["platform-core"];
+  assert.throws(() => requirePlatformSelection(disconnected));
+  const maskedFailure = structuredClone(ci);
+  maskedFailure.jobs["platform-runtime"].defaults.run.shell = "pwsh";
+  assert.throws(() => requirePlatformSelection(maskedFailure));
+});
+
 test("stacked pull requests cannot be excluded from the CI trigger", () => {
   const ci = workflow("ci");
   requireAllPullRequestBranches(ci);
