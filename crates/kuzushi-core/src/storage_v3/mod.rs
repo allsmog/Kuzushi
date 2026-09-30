@@ -164,6 +164,12 @@ impl ProjectionDb {
             .conn
             .unchecked_transaction()
             .context("Could not open projection event transaction")?;
+        let applied = meta_u64(&tx, "applied_seq")?;
+        anyhow::ensure!(
+            applied.checked_add(1) == Some(event.seq),
+            "projection requires contiguous event sequence: applied {applied}, received {}",
+            event.seq
+        );
         insert_event_row(&tx, event)?;
         let receipt = apply_projection_event(&tx, event)?;
         set_meta_u64(&tx, "applied_seq", event.seq)?;
@@ -172,6 +178,28 @@ impl ProjectionDb {
         Ok(receipt)
     }
 
+    fn rebuild_from_events(&self, events: &[EventEnvelope]) -> Result<u64> {
+        let tx = self.conn.unchecked_transaction()?;
+        let generation = meta_u64(&tx, "generation")?.saturating_add(1);
+        clear_projection_tables(&tx)?;
+        let mut applied = 0_u64;
+        for event in events {
+            anyhow::ensure!(
+                applied.checked_add(1) == Some(event.seq),
+                "rebuild event sequence has a gap"
+            );
+            insert_event_row(&tx, event)?;
+            apply_projection_event(&tx, event)?;
+            applied = event.seq;
+        }
+        set_meta_u64(&tx, "applied_seq", applied)?;
+        set_meta_u64(&tx, "generation", generation)?;
+        rebuild_fts_if_available(&tx)?;
+        tx.commit()?;
+        Ok(applied)
+    }
+
+    #[cfg(test)]
     fn reset_for_rebuild(&self) -> Result<ProjectionMeta> {
         let tx = self
             .conn

@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -39,6 +40,8 @@ impl McpClient {
             stderr_drain: Mutex::new(Some(spawn_stderr_drain(stderr))),
             next_id: AtomicI64::new(1),
             initialized: Mutex::new(false),
+            request_gate: Mutex::new(()),
+            retired: AtomicBool::new(false),
             binary: binary.to_string(),
             process_group,
         })
@@ -75,30 +78,66 @@ impl McpClient {
     }
 
     pub async fn shutdown(&self) -> Result<()> {
-        let _ = self.notify("shutdown", json!({})).await;
-        let _ = self.notify("exit", json!({})).await;
-        self.process_group.kill();
-        let mut child = self.child.lock().await;
-        let _ = child.kill().await;
-        drop(child);
-        self.wait_for_stderr_drain().await;
-        Ok(())
+        self.retire().await
     }
 
     pub(crate) async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        self.request_with_deadline(method, params, Duration::from_secs(30))
+            .await
+    }
+
+    pub(crate) async fn request_with_deadline(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Duration,
+    ) -> Result<Value> {
+        match tokio::time::timeout(deadline, self.request_serialized(method, params)).await {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => {
+                self.retire()
+                    .await
+                    .context("retire failed code-index server")?;
+                Err(error)
+            }
+            Err(_) => {
+                self.retire()
+                    .await
+                    .context("retire timed-out code-index server")?;
+                anyhow::bail!(
+                    "{}: MCP {method} exceeded its {} ms deadline; client retired",
+                    self.binary,
+                    deadline.as_millis()
+                )
+            }
+        }
+    }
+
+    async fn request_serialized(&self, method: &str, params: Value) -> Result<Value> {
+        let _serial = self.request_gate.lock().await;
+        anyhow::ensure!(
+            !self.retired.load(Ordering::SeqCst),
+            "MCP client is retired"
+        );
+        let mut guard = RequestGuard {
+            client: self,
+            complete: false,
+        };
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         self.write_line(&json_rpc_request_body(id, method, params))
             .await?;
-        self.read_response_for_id(id).await
+        let result = self.read_response_for_id(id).await;
+        guard.complete = result.is_ok();
+        result
     }
 
     pub(crate) async fn read_response_for_id(&self, id: i64) -> Result<Value> {
-        if let Some(result) = self.read_response_candidate(id).await? {
-            return Ok(result);
+        for _ in 0..128 {
+            if let Some(result) = self.read_response_candidate(id).await? {
+                return Ok(result);
+            }
         }
-        // Notifications and responses to other ids are ignored; we
-        // serialise calls so this should be rare in practice.
-        Box::pin(self.read_response_for_id(id)).await
+        anyhow::bail!("MCP server exceeded the 128-frame response search limit")
     }
 
     pub(crate) async fn read_response_candidate(&self, id: i64) -> Result<Option<Value>> {
@@ -112,7 +151,14 @@ impl McpClient {
             "method": method,
             "params": params,
         });
-        self.write_line(&body).await
+        let result = tokio::time::timeout(Duration::from_secs(1), self.write_line(&body))
+            .await
+            .context("MCP notification write timed out")
+            .and_then(|result| result);
+        if result.is_err() {
+            self.retire().await?;
+        }
+        result
     }
 
     pub(crate) async fn write_line(&self, body: &Value) -> Result<()> {
@@ -129,20 +175,55 @@ impl McpClient {
     pub(crate) async fn read_raw_line(&self) -> Result<String> {
         let mut stdout = self.stdout.lock().await;
         let mut line = String::new();
-        let n = stdout.read_line(&mut line).await?;
+        let n = (&mut *stdout)
+            .take(MAX_RESPONSE_FRAME_BYTES as u64 + 1)
+            .read_line(&mut line)
+            .await?;
+        anyhow::ensure!(
+            n <= MAX_RESPONSE_FRAME_BYTES,
+            "MCP response frame exceeds 4 MiB"
+        );
         ensure_server_line_read(n)?;
         Ok(line)
     }
 
-    async fn wait_for_stderr_drain(&self) {
+    async fn retire(&self) -> Result<()> {
+        self.retired.store(true, Ordering::SeqCst);
+        self.process_group.kill();
+        let mut child = self.child.lock().await;
+        child.start_kill()?;
+        tokio::time::timeout(Duration::from_secs(2), child.wait())
+            .await
+            .context("MCP child did not exit after termination")??;
+        drop(child);
         let drain = self.stderr_drain.lock().await.take();
         if let Some(drain) = drain {
-            let _ = drain.await;
+            drain.abort();
         }
+        Ok(())
     }
 }
 
+const MAX_RESPONSE_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const STDERR_DRAIN_BUFFER_BYTES: usize = 8 * 1024;
+
+#[cfg(all(test, unix))]
+#[path = "supervision_tests.rs"]
+mod supervision_tests;
+
+struct RequestGuard<'a> {
+    client: &'a McpClient,
+    complete: bool,
+}
+
+impl Drop for RequestGuard<'_> {
+    fn drop(&mut self) {
+        if !self.complete {
+            self.client.retired.store(true, Ordering::SeqCst);
+            self.client.process_group.kill();
+        }
+    }
+}
 
 pub(crate) fn spawn_stderr_drain<R>(mut stderr: R) -> JoinHandle<u64>
 where

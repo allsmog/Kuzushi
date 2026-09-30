@@ -38,7 +38,9 @@ impl<'a> TracedRuntime<'a> {
     pub fn observed_spend(&self) -> crate::runtime::RuntimeCostReport {
         self.spend
             .lock()
-            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| *spend)
+            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| {
+                *spend
+            })
     }
 
     /// An arithmetic failure keeps the observed floor but drops the estimate.

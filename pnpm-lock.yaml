@@ -57,6 +57,9 @@ importers:
       lint-staged:
         specifier: ^17.0.8
         version: 17.4.1
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     optionalDependencies:
       '@kuzushi/darwin-arm64':
         specifier: 0.24.0-alpha.14
@@ -2354,8 +2357,7 @@ snapshots:
 
   y18n@5.0.8: {}
 
-  yaml@2.9.0:
-    optional: true
+  yaml@2.9.0: {}
 
   yargs-parser@22.0.0: {}
 

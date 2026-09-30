@@ -29,13 +29,14 @@ pub fn scoped_artifact_path(root: &Path, subdir: Option<&Path>, lang: &str) -> P
     }
 }
 
-/// Filesystem-safe single-segment key for a scope subdir. Distinct subdirs
-/// that sanitize identically would share a key; traversal is rejected by the
-/// scope constructor before paths ever reach here.
+/// Versioned, collision-resistant identity of the normalized relative scope.
 fn scope_key(subdir: &Path) -> String {
-    subdir
+    let normalized: PathBuf = subdir.components().collect();
+    let digest = blake3::hash(normalized.as_os_str().as_encoded_bytes());
+    let prefix: String = normalized
         .to_string_lossy()
         .chars()
+        .take(48)
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || ch == '-' {
                 ch
@@ -43,7 +44,8 @@ fn scope_key(subdir: &Path) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    format!("v2-{prefix}-{digest}")
 }
 
 /// True when at least one current-shape-version graph exists for the target.
@@ -90,7 +92,8 @@ mod tests {
         assert_eq!(
             scoped,
             PathBuf::from(format!(
-                "/repo/.kuzushi/cpg-rs/scoped/platform_src_acme/go.v{GRAPH_SHAPE_VERSION}.cpg"
+                "/repo/.kuzushi/cpg-rs/scoped/{}/go.v{GRAPH_SHAPE_VERSION}.cpg",
+                scope_key(Path::new("platform/src/acme"))
             ))
         );
     }
@@ -122,5 +125,21 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         assert!(!has_artifacts(temp.path()));
         assert!(artifact_langs(temp.path()).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod scope_identity_tests {
+    use super::*;
+    #[test]
+    fn formerly_colliding_scopes_have_distinct_identities() {
+        assert_ne!(
+            scope_key(Path::new("api/auth")),
+            scope_key(Path::new("api_auth"))
+        );
+        assert_eq!(
+            scope_key(Path::new("api/./auth")),
+            scope_key(Path::new("api/auth"))
+        );
     }
 }

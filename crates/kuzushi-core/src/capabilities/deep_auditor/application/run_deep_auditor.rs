@@ -65,9 +65,9 @@ fn run_deep_audit_pass(
     let mut toolbox = deep_audit_toolbox(cfg, readiness, trace);
 
     // 4. Drive the loop.
-    let mut outcome: AgentLoopOutcome =
-        run_tool_loop(runtime as &dyn AgentRuntime, &request, &mut toolbox)
-            .context("deep_audit tool loop failed")?;
+    let mut outcome = run_tool_loop(runtime as &dyn AgentRuntime, &request, &mut toolbox)
+        .map_err(|error| retain_failed_loop_spend(spend, ticket.as_ref(), error))
+        .context("deep_audit tool loop failed")?;
 
     // 4b. Synthesis fallback. The model can exhaust its tool budget reading
     // code without ever emitting a structured verdict — Sonnet does this
@@ -402,11 +402,27 @@ fn settle_deep_audit_spend(
         // Dropping an unsettled ticket intentionally keeps its estimate in the
         // durable ledger. Unknown provider spend must never be refunded to an
         // observed subtotal (including zero).
-        return Ok(());
+        return limiter.retain_observed(&ticket, outcome.cost_usd);
     }
     limiter
         .refund(ticket, outcome.cost_usd)
         .context("deep_audit refund failed")
+}
+
+fn retain_failed_loop_spend(
+    spend: Option<&SpendLimiter>,
+    ticket: Option<&crate::spend::SpendTicket>,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let failure = error.downcast_ref::<crate::runtime::AgentLoopFailure>();
+    if let (Some(limiter), Some(ticket), Some(failure)) = (spend, ticket, failure) {
+        if let Err(accounting) = limiter.retain_observed(ticket, failure.outcome.cost_usd) {
+            return error.context(format!(
+                "could not retain interrupted-loop spend: {accounting}"
+            ));
+        }
+    }
+    error
 }
 
 /// Combine N independent deep-audit outcomes into one consensus verdict.

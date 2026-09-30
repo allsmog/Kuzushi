@@ -116,7 +116,7 @@ test("only the translated darwin-x64 leg carries the Rosetta opt-in", () => {
 
 test("no credentialed or write-permission job is eligible for the self-hosted runner", () => {
   assert.deepEqual(hostedOnlyCandidateJobs, ["identity", "assemble"]);
-  assert.deepEqual(hostedOnlyPublisherJobs, ["publish-npm", "github-release"]);
+  assert.deepEqual(hostedOnlyPublisherJobs, ["publish-npm", "github-release", "promote-latest"]);
   for (const [source, jobs] of [
     [candidate, hostedOnlyCandidateJobs],
     [publisher, hostedOnlyPublisherJobs],
@@ -143,7 +143,7 @@ function jobSource(source, jobName) {
   return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
 }
 
-test("release publisher remains latest-tagged and main-bound", () => {
+test("release publisher remains candidate-tagged and main-bound", () => {
   const withoutMain = publisher.replace(
     "release tag must point at current origin/${DEFAULT_BRANCH}",
     "release tag accepted",
@@ -152,8 +152,8 @@ test("release publisher remains latest-tagged and main-bound", () => {
   assert.match(publisherWorkflowFailures(withoutMain).join("\n"), /current origin/);
   assert.deepEqual(platformPublisherFailures(platformPublisher), []);
   assert.match(
-    platformPublisherFailures(platformPublisher.replace('"latest",', '"alpha",')).join("\n"),
-    /latest/,
+    platformPublisherFailures(platformPublisher.replace('"candidate",', '"latest",')).join("\n"),
+    /candidate/,
   );
 });
 

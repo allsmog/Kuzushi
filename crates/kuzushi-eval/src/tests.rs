@@ -30,6 +30,7 @@ mod tests {
             cost_usd: None,
             wall_seconds: 0,
             pretty: true,
+            enforce_threshold: false,
         }
     }
 
@@ -89,6 +90,46 @@ mod tests {
         assert_eq!(report.hits, 1);
         assert_eq!(report.recall.pm_lines, 1.0);
         assert_eq!(report.recall.exact_line, 0.0);
+    }
+
+    #[test]
+    fn one_distinct_finding_cannot_hit_two_oracles_or_inflate_yield() {
+        let entry = OracleEntry {
+            file: "src/foo.c".into(),
+            function: String::new(),
+            line_start: 100,
+            line_end: 100,
+            cwe: vec!["CWE-78".into()],
+            expected_verdict: None,
+            expected_severity: None,
+        };
+        let oracle = Oracle {
+            cve: "test".into(),
+            name: None,
+            commit: None,
+            ground_truth: vec![
+                entry.clone(),
+                OracleEntry {
+                    line_start: 105,
+                    ..entry
+                },
+            ],
+            expected_min_recall: Some(0.75),
+        };
+        let dump = FindingsDump {
+            findings: vec![
+                finding_row("src/foo.c", 102, "CWE-78"),
+                finding_row("src/foo.c", 102, "CWE-78"),
+                finding_row("unjudged.c", 1, "independently valid issue"),
+            ],
+        };
+        let report = score(&cli(), &oracle, &dump, Path::new("/tmp"));
+        assert_eq!(report.hits, 1);
+        assert_eq!(report.findings_total, 2);
+        assert_eq!(report.unjudged_findings, 1);
+        assert_eq!(report.oracle_hit_yield, 0.5);
+        assert!(crate::runner::enforce_threshold(&report, true).is_err());
+        assert!(crate::runner::enforce_threshold(&report, false).is_ok());
     }
 
     #[test]
@@ -174,6 +215,7 @@ mod tests {
             cost_usd: None,
             wall_seconds: 0,
             pretty: false,
+            enforce_threshold: false,
         };
 
         let report = load_match_report(&cli).unwrap();

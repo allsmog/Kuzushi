@@ -42,6 +42,26 @@ receipt's watermark records the gap and the shell labels the count
 source receipts remain inspectable and require a new run before acceptance on
 an unversioned or dirty target; their historical records are not rewritten.
 
+## Audit remediation contracts
+
+MCP servers validate arguments against registered schemas before dispatch. Clients
+must handle invalid-argument, capacity, cancellation and shutdown responses.
+CPG callers must select regex or literal query semantics and check coverage,
+truncation and approximate-position metadata. Unsupported depth limits fail.
+
+Persisted findings retain their original primary coordinates alongside grounding.
+Source-independent evidence has an explicit kind; a code citation must identify
+real source lines. Static verification accepts substantive verdicts only with
+source-checked source/sink or control/reachability citations. Consensus receipts retain
+individual assessments and label raw confidence as uncalibrated.
+
+Resumable tool loops journal intent before a handler runs and refuse to replay an
+unresolved intent automatically. Checkpoint IO/size/ownership failures are errors;
+known paid work remains recorded even when a later turn fails. Module authors must
+not interpret unresolved spend as zero or an inconclusive static review as an
+empirical proof. See [migration notes](../RELEASING.md#audit-remediation-compatibility)
+and the [itemized ledger](quality/audit-remediation-2026-09-30.md).
+
 ## Sources of truth
 
 Use these in descending order when documentation and code disagree:

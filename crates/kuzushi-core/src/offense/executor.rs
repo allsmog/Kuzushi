@@ -26,7 +26,7 @@ pub fn run_play(
         .authorize(target, now_unix)
         .map_err(|reason| format!("{}: refused {target_host}: {reason}", play.name()))?;
     let ctx = PlayContext::new(authorized, run_id);
-    play.execute(&ctx, transport)
+    ctx.execute(play, transport)
 }
 
 #[cfg(test)]

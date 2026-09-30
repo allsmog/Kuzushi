@@ -128,13 +128,10 @@ pub struct PendingStageCheckpoint {
 /// surfaces use this to disclose that re-running the failed operation
 /// resumes from its checkpointed stages.
 pub fn pending_stage_checkpoints(target: &Path) -> Vec<PendingStageCheckpoint> {
-    let source_identity =
-        crate::incremental_index::current_workspace_resume_identity(target).ok();
+    let source_identity = crate::incremental_index::current_workspace_resume_identity(target).ok();
     let mut pending: Vec<PendingStageCheckpoint> = checkpoint_files(target)
         .into_iter()
-        .map(|(path, file)| {
-            pending_checkpoint(target, path, file, source_identity.as_deref())
-        })
+        .map(|(path, file)| pending_checkpoint(target, path, file, source_identity.as_deref()))
         .collect();
     pending.sort_by_key(|entry| std::cmp::Reverse(entry.modified_at_unix));
     pending
@@ -189,7 +186,7 @@ fn is_stage_checkpoint_leaf(path: &Path) -> bool {
 }
 
 fn parse_checkpoint_file(path: &Path) -> Option<StageCheckpointFile> {
-    let raw = fs::read_to_string(path).ok()?;
+    let raw = crate::bounded_file::read_utf8_text(path, 8 * 1024 * 1024).ok()?;
     let file = serde_json::from_str::<StageCheckpointFile>(&raw).ok()?;
     let implementation_identity = stage_implementation_identity()?;
     (file.version == STAGE_CHECKPOINT_VERSION

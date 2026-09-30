@@ -74,10 +74,9 @@ impl PlannedLoop<'_> {
             self.model,
             self.workspace_root,
         )?;
-        self.cost = self.cost.checked_add(
-            decision.cost_report()?,
-            "offense planner accumulated cost",
-        )?;
+        self.cost = self
+            .cost
+            .checked_add(decision.cost_report()?, "offense planner accumulated cost")?;
         let Some(spec) = proposed_play(decision.value, &mut self.stopped_by_planner) else {
             return Ok(false);
         };
@@ -176,7 +175,7 @@ fn execute_planned_step(
     let play = spec
         .build_play()
         .map_err(|reason| anyhow::anyhow!("planner proposed an invalid play: {reason}"))?;
-    play.execute(ctx, transport)
+    ctx.execute(play.as_ref(), transport)
         .map_err(|reason| anyhow::anyhow!(reason))
 }
 

@@ -255,7 +255,9 @@ fn review_session_write_appends_review_session_started_event() {
     let mut writer =
         StorageWriter::open(tmp.path().join("log"), tmp.path().join("index.sqlite3")).unwrap();
 
-    let receipt = writer.record_review_session(review_session("session-1")).unwrap();
+    let receipt = writer
+        .record_review_session(review_session("session-1"))
+        .unwrap();
 
     assert_eq!(receipt.committed_seq, 1);
     assert_eq!(writer.current_watermark().unwrap(), 1);
@@ -360,8 +362,7 @@ fn review_session_payload_key_whitelist() {
 
     // No payload key may be a feature name: the session records a digest of the
     // feature vector, never a value from it.
-    let feature_names: Vec<&str> =
-        crate::review_yield::domain::FEATURE_FIELD_NAMES.to_vec();
+    let feature_names: Vec<&str> = crate::review_yield::domain::FEATURE_FIELD_NAMES.to_vec();
     for key in keys {
         assert!(
             !feature_names.contains(&key),
@@ -1203,4 +1204,87 @@ fn cross_process_writers_keep_one_linear_hash_chain() {
         events.iter().map(|event| event.seq).collect::<Vec<_>>(),
         (1..=WRITERS as u64).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn projection_failure_blocks_the_next_event_until_contiguous_replay() {
+    let temp = tempfile::tempdir().unwrap();
+    let log_dir = temp.path().join("log");
+    let db_path = temp.path().join("projection.sqlite");
+    let mut writer = StorageWriter::open(&log_dir, &db_path).unwrap();
+    writer.projection.conn.execute_batch("CREATE TRIGGER fail_projection BEFORE INSERT ON finding_events BEGIN SELECT RAISE(ABORT, 'injected failure'); END;").unwrap();
+    assert!(writer.record_checkpoint().is_err());
+    assert_eq!(writer.lifecycle.state(), WriterActorState::Replaying);
+    assert!(writer.record_checkpoint().is_err());
+    assert_eq!(writer.log.head_seq().unwrap(), 1);
+    assert_eq!(writer.projection.meta().unwrap().applied_seq, 0);
+    writer
+        .projection
+        .conn
+        .execute_batch("DROP TRIGGER fail_projection;")
+        .unwrap();
+    writer
+        .execute_command(WriterCommand::Control(ControlCommand::Barrier))
+        .unwrap();
+    assert_eq!(writer.projection.meta().unwrap().applied_seq, 1);
+    writer.record_checkpoint().unwrap();
+    drop(writer);
+    let writer = StorageWriter::open(&log_dir, &db_path).unwrap();
+    assert_eq!(writer.projection.meta().unwrap().applied_seq, 2);
+}
+
+#[test]
+fn failed_rebuild_preserves_the_serving_generation_and_lifecycle() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut writer = StorageWriter::open(
+        temp.path().join("log"),
+        temp.path().join("projection.sqlite"),
+    )
+    .unwrap();
+    writer.record_checkpoint().unwrap();
+    let before = writer.projection.meta().unwrap();
+    writer.projection.conn.execute_batch("CREATE TRIGGER fail_rebuild BEFORE INSERT ON finding_events BEGIN SELECT RAISE(ABORT, 'injected rebuild failure'); END;").unwrap();
+    assert!(writer.rebuild_projection().is_err());
+    assert_eq!(writer.projection.meta().unwrap(), before);
+    assert_eq!(writer.lifecycle.state(), WriterActorState::Live);
+    writer
+        .projection
+        .conn
+        .execute_batch("DROP TRIGGER fail_rebuild;")
+        .unwrap();
+    writer.rebuild_projection().unwrap();
+    assert_eq!(
+        writer.projection.meta().unwrap().applied_seq,
+        before.applied_seq
+    );
+    assert_eq!(
+        writer.projection.meta().unwrap().generation,
+        before.generation + 1
+    );
+}
+
+#[test]
+fn idle_storage_actor_does_not_hold_its_runtime_open() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("events");
+    let index = temp.path().join("projection.sqlite");
+    let (sent, received) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let actor = runtime.block_on(async {
+            let actor = StorageWriterActor::spawn(log, index, Default::default());
+            actor.control(ControlCommand::Barrier).await.unwrap();
+            actor
+        });
+        drop(runtime);
+        sent.send(actor).unwrap();
+    });
+    let actor = received
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .expect("idle actor prevented runtime shutdown");
+    drop(actor);
+    thread.join().unwrap();
 }

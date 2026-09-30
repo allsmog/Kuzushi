@@ -7,6 +7,7 @@
 // Phase 0 ships without tree-sitter, so the `function` tolerance falls back to
 // pm_lines:50. Phase 5 will rewire it to the real enclosing-function lookup.
 
+mod assignment;
 mod breakdowns;
 mod cli;
 mod input;

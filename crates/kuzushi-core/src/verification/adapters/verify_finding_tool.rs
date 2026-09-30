@@ -295,9 +295,19 @@ fn run_one_verify_pass(
             "VerificationResult",
             verification_result_schema(),
         ),
-        |raw| normalize_verification_result(raw, fingerprint),
+        |raw| {
+            let mut result = normalize_verification_result(raw.clone(), fingerprint)?;
+            super::verify_citations::enforce_citations(workspace_root, &raw, &mut result);
+            Ok(result)
+        },
     )
-    .map(|cached| cached.costed)
+    .map(|cached| {
+        let mut costed = cached.costed;
+        costed.value["assessmentReceipt"] = json!({"model":model, "promptRevision":"cited-review-v1",
+            "fromCache":cached.from_cache, "observedCostUsd":costed.cost_usd,
+            "costExact":costed.cost_usd_exact, "estimatedCostUsd":costed.estimated_cost_usd});
+        costed
+    })
 }
 
 fn verify_agent_query_request(
@@ -402,7 +412,9 @@ fn append_cost_line(lines: &mut Vec<String>, cost: &RuntimeCostReport) {
         return;
     }
     if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
-        lines.push(format!("      estimated cost=~${estimate:.4} (tokens × list price)"));
+        lines.push(format!(
+            "      estimated cost=~${estimate:.4} (tokens × list price)"
+        ));
         return;
     }
     let cost_label = if cost.is_complete() {
@@ -869,10 +881,16 @@ mod tests {
             "proofLevel": 2,
             "proofVerdict": if exploitable { "exploited" } else { "not_reproduced" },
             "attackVector": if exploitable { json!("sqli") } else { Value::Null },
+            "codeCitations": [
+                {"filePath":"src/db.ts","startLine":1,"endLine":1,"snippet":"db.query(input);","description":"input reaches query","role":"source"},
+                {"filePath":"src/db.ts","startLine":1,"endLine":1,"snippet":"db.query(input);","description":"query sink","role":if exploitable {"sink"} else {"control"}}
+            ]
         })
     }
 
     fn triaged_store(target: &Path) -> (crate::findings::FindingStore, crate::findings::Finding) {
+        std::fs::create_dir_all(target.join("src")).unwrap();
+        std::fs::write(target.join("src/db.ts"), "db.query(input);\n").unwrap();
         let store = crate::findings::FindingStore::open_in_memory().unwrap();
         store
             .record_run_started("scan-1", target, "running")

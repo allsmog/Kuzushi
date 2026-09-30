@@ -79,6 +79,9 @@ impl EngagementScope {
         if let Some(denied) = self.window_denial(now_unix) {
             return denied;
         }
+        if let Err(reason) = target.validate() {
+            return ScopeDecision::Denied(reason);
+        }
         self.membership_decision(target)
     }
 

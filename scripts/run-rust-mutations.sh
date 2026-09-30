@@ -49,12 +49,14 @@ write_empty_receipt() {
 
 write_change_diff() {
   local output="$1"
+  local status
   git diff --no-color "${base}" -- '*.rs' > "${output}"
   while IFS= read -r -d '' file; do
     if git diff --no-color --no-index -- /dev/null "${file}" >> "${output}"; then
       continue
+    else
+      status=$?
     fi
-    status=$?
     if [[ "${status}" -ne 1 ]]; then
       return "${status}"
     fi

@@ -79,7 +79,7 @@ impl StageCheckpointStore {
     }
 
     fn load(&self) -> Option<StageCheckpointFile> {
-        let raw = fs::read_to_string(&self.path).ok()?;
+        let raw = crate::bounded_file::read_utf8_text(&self.path, 8 * 1024 * 1024).ok()?;
         let file = serde_json::from_str::<StageCheckpointFile>(&raw).ok()?;
         let matches = file.version == STAGE_CHECKPOINT_VERSION
             && file.fingerprint == self.fingerprint
@@ -284,7 +284,12 @@ impl StageCheckpointHandle {
     /// prior failed run).
     pub fn read_stage_payload(&self, receipt: &ToolStageReceipt) -> Option<Value> {
         let relative = receipt.artifacts.first()?;
-        let raw = fs::read_to_string(self.target.join(relative)).ok()?;
+        let raw = crate::bounded_file::read_utf8_text_within(
+            &self.target,
+            &self.target.join(relative),
+            8 * 1024 * 1024,
+        )
+        .ok()?;
         serde_json::from_str(&raw).ok()
     }
 
@@ -369,10 +374,7 @@ fn prior_checkpoint_is_fresh(
     file.tool == tool && source_identity.is_some_and(|current| file.source_identity == current)
 }
 
-pub(super) fn reusable_stage_prefix_len(
-    target: &Path,
-    completed: &[ToolStageReceipt],
-) -> usize {
+pub(super) fn reusable_stage_prefix_len(target: &Path, completed: &[ToolStageReceipt]) -> usize {
     completed
         .iter()
         .take_while(|receipt| stage_receipt_artifacts_are_current(target, receipt))
@@ -409,11 +411,13 @@ fn stage_artifact_digest(target: &Path, artifact: &str) -> Option<String> {
     if !canonical_artifact.starts_with(&canonical_target) {
         return None;
     }
-    let bytes = fs::read(canonical_artifact).ok()?;
-    Some(
-        crate::identity::hash_parts("kuzushi.stage-artifact.v1", &[bytes.as_slice()])
-            .to_string(),
+    let bytes = crate::bounded_file::read_regular_bytes_within(
+        &canonical_target,
+        &canonical_artifact,
+        64 * 1024 * 1024,
     )
+    .ok()?;
+    Some(crate::identity::hash_parts("kuzushi.stage-artifact.v1", &[bytes.as_slice()]).to_string())
 }
 
 fn sanitized_stage_leaf(stage: &str) -> String {

@@ -91,14 +91,14 @@ fn reaching_def_descriptor() -> Tool {
             "required": ["file", "line", "var"],
             "properties": {
                 "file": {"type": "string"},
-                "line": {"type": "integer", "minimum": 1},
+                "line": {"type": "integer", "minimum": 1, "maximum": 4294967295_u64},
                 "var": {"type": "string"}
             }
         }),
     )
 }
 
-const TAINT_PATHS_DESCRIPTION: &str = "Interprocedural taint paths from a source to a sink over the in-process cpg-rs engine. `source`/`sink` accept a regex (or literal substring): matching call NAMES are harvested as the propagation vocabulary — the same regex finds call-style sources (postgres `PG_GETARG_TEXT_PP`, JS `req.query`) and method-name entry points (handler parameters). Propagation is summaries-first and name-based (recall-first; no SSA) with effectively unbounded call depth, so `maxCallDepth` is accepted for compatibility but ignored. Returns `{sourceCounts: {calls, methodParams}, sinkCount, flowCount, flows}` so \"the source pattern matched nothing\" is distinguishable from \"sources exist but no flow reaches the sink\". Flows carry witness steps with per-step code/line plus advisory guard/authz annotations.";
+const TAINT_PATHS_DESCRIPTION: &str = "Interprocedural taint paths from a source to a sink over the in-process cpg-rs engine. `source`/`sink` accept a regex (or literal substring): matching call NAMES are harvested as the propagation vocabulary — the same regex finds call-style sources (postgres `PG_GETARG_TEXT_PP`, JS `req.query`) and method-name entry points (handler parameters). Propagation is summaries-first and name-based (recall-first; no SSA) with effectively unbounded call depth, so `maxCallDepth` is rejected because the engine cannot enforce it. Returns `{sourceCounts: {calls, methodParams}, sinkCount, flowCount, flows}` so \"the source pattern matched nothing\" is distinguishable from \"sources exist but no flow reaches the sink\". Flows carry witness steps with per-step code/line plus advisory guard/authz annotations.";
 
 fn taint_paths_descriptor() -> Tool {
     descriptor(
@@ -110,8 +110,9 @@ fn taint_paths_descriptor() -> Tool {
             "properties": {
                 "source": {"type": "string", "description": "Regex (or literal) for taint sources; matched against call names, call code, and method names."},
                 "sink": {"type": "string", "description": "Regex (or literal) for taint sinks, e.g. `snprintf` or `snprintf|memcpy|strcpy`."},
-                "maxPaths": {"type": "integer", "minimum": 1, "default": 50},
-                "maxCallDepth": {"type": "integer", "minimum": 1, "description": "Accepted for joern-contract compatibility; the summaries-first engine has no depth knob, so this is echoed back and ignored."}
+                "maxPaths": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
+                "maxCallDepth": {"type": "integer", "minimum": 1, "description": "Unsupported by this engine; supplying this option fails before analysis."},
+                "patternMode": {"type": "string", "enum": ["regex", "literal"], "default": "regex"}
             },
             "examples": [
                 {"source": "PG_GETARG_TEXT_PP", "sink": "snprintf"},
@@ -132,7 +133,7 @@ fn method_at_descriptor() -> Tool {
             "required": ["file", "line"],
             "properties": {
                 "file": {"type": "string"},
-                "line": {"type": "integer", "minimum": 1}
+                "line": {"type": "integer", "minimum": 1, "maximum": 4294967295_u64}
             }
         }),
     )
@@ -156,7 +157,7 @@ fn slice_descriptor() -> Tool {
             "required": ["method", "line"],
             "properties": {
                 "method": {"type": "string"},
-                "line": {"type": "integer", "minimum": 1},
+                "line": {"type": "integer", "minimum": 1, "maximum": 4294967295_u64},
                 "depth": {"type": "integer", "minimum": 0, "default": 2}
             }
         }),

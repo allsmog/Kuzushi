@@ -88,15 +88,15 @@ jobs:
     runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3
         with:
           inherit-toolchain: true
           cache: true
@@ -106,7 +106,7 @@ jobs:
       # so it lints with the native binary at the same pinned version.
       - name: Lint GitHub Actions workflows (hosted, Docker)
         if: ${{ !inputs.self_hosted }}
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
       - name: Lint GitHub Actions workflows (native binary)
         if: ${{ inputs.self_hosted }}
         env:
@@ -119,25 +119,23 @@ jobs:
 
   # Clippy and the Rust test suite. `verify:quick` runs neither, so without
   # this job a pull request could merge with no `cargo test` run at all. It
-  # costs roughly 15-25 billed Linux minutes, so it runs once when a PR becomes
-  # ready for review (opened non-draft, reopened, ready_for_review), in the
-  # merge queue, and on manual dispatch -- not on every later push, which the
-  # quick gate above keeps covering.
+  # runs for every ready PR head, the merge queue, and manual dispatch. A
+  # previous head cannot supply a Rust-test receipt for a later synchronize.
   rust-tests:
     name: rust-tests
     needs: quality-gauntlet
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && github.event.action != 'synchronize') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: moonrepo/setup-rust@v1
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3
         with:
           inherit-toolchain: true
           cache: true
@@ -148,3 +146,24 @@ jobs:
         if: runner.os == 'Linux'
         run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
       - run: cargo test --workspace --locked
+
+  platform-runtime:
+    name: platform-runtime (${{ matrix.os }})
+    needs: quality-gauntlet
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+        with:
+          inherit-toolchain: true
+          cache: true
+      - run: cargo test -p kuzushi-mcp-common --locked
+      - run: cargo test -p kuzushi-codeindex --locked
+      - run: "cargo test -p kuzushi-core --lib storage_v3:: --locked"
+      - run: "cargo test -p kuzushi-core --lib runtime::application::loop_checkpoint:: --locked"

@@ -7,6 +7,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import { exerciseConsumerBridge } from "./consumer-bridge-smoke.mjs";
 import {
   machineArchitecture,
   nodeArchitectureFailure,
@@ -210,6 +211,26 @@ function collectCommandReports(kuzushi, target, commandOptions) {
   return { doctor, demo };
 }
 
+function inspectInstalledDependencies(prefix, environment) {
+  const dependencyGraph = parseJsonOutput(
+    "production dependency graph",
+    runCommand(
+      "capture production dependency graph",
+      npmCommand(),
+      ["ls", "--global", "--prefix", prefix, "--omit=dev", "--all", "--json"],
+      { env: environment },
+    ),
+  );
+  const installedRoot = runCommand(
+    "locate installed packages",
+    npmCommand(),
+    ["root", "--global", "--prefix", prefix],
+    { env: environment },
+  ).trim();
+  exerciseConsumerBridge(path.join(installedRoot, PACKAGE_NAME), runCommand);
+  return dependencyGraph;
+}
+
 function smokePublishedRelease() {
   const plan = resolveSmokePlan(process.env.KUZUSHI_SMOKE_SLUG, currentSmokeHost());
   const version = resolvePublishedVersion(process.env.KUZUSHI_SMOKE_VERSION);
@@ -218,6 +239,7 @@ function smokePublishedRelease() {
     const { prefix, target, home } = prepareSmokeDirectories(root);
     const environment = isolatedCliEnvironment(home);
     const installSeconds = installPublishedPackage(version, prefix, environment);
+    const dependencyGraph = inspectInstalledDependencies(prefix, environment);
     const commandOptions = { cwd: target, env: environment };
     exerciseWrappers(version, prefix, commandOptions);
     const kuzushi = installedCommandPath(prefix, "kuzushi");
@@ -230,6 +252,8 @@ function smokePublishedRelease() {
         ? { hostSlug: plan.hostSlug, smokedSlug: plan.smokedSlug, translation: plan.translation }
         : {}),
       installSeconds,
+      dependencyGraph,
+      bridgeContracts: "passed",
       doctor: doctor.summary,
       demoFindings: demo.findingsCount,
     });

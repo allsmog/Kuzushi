@@ -15,6 +15,12 @@ fi
 SUMMARY="$REPORT_DIR/summary.md"
 HISTORY="$EVAL_DIR/reports/HISTORY.md"
 
+# Refuse the whole summary before writing it when any slice failed or drifted.
+for slice_dir in "$REPORT_DIR"/*/; do
+  [[ -d "$slice_dir" ]] || continue
+  node "$EVAL_DIR/../../scripts/recall-run-receipt.mjs" verify "$slice_dir"
+done
+
 ts=$(basename "$REPORT_DIR")
 git_sha=$(git -C "$(git rev-parse --show-toplevel)" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
@@ -23,7 +29,7 @@ git_sha=$(git -C "$(git rev-parse --show-toplevel)" rev-parse --short HEAD 2>/de
   echo
   echo "Kuzushi commit: \`$git_sha\`"
   echo
-  echo "| slice | findings | hits | misses | precision | recall_exact | recall_±10 | recall_fn | recall_file | usd | wall_s |"
+  echo "| slice | findings | hits | misses | oracle-hit yield | recall_exact | recall_±10 | recall_fn | recall_file | usd | wall_s |"
   echo "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
 } > "$SUMMARY"
 
@@ -42,7 +48,7 @@ for slice_dir in "$REPORT_DIR"/*/; do
   findings_count=$(jq -r '.findings_total // 0' "$match")
   hits=$(jq -r '.hits // 0' "$match")
   misses=$(jq -r '.misses // 0' "$match")
-  precision=$(jq -r '.precision // 0 | (. * 1000 | floor / 1000)' "$match")
+  precision=$(jq -r '.oracle_hit_yield | (. * 1000 | floor / 1000)' "$match")
   recall_exact=$(jq -r '.recall.exact_line // 0 | (. * 1000 | floor / 1000)' "$match")
   recall_pm10=$(jq -r '.recall.pm_lines  // 0 | (. * 1000 | floor / 1000)' "$match")
   recall_fn=$(jq -r '.recall.function_  // .recall.function // 0 | (. * 1000 | floor / 1000)' "$match")
@@ -79,7 +85,7 @@ fi
     overall_prec=$(awk -v h="$agg_hits" -v t="$agg_total" 'BEGIN{printf "%.3f", h/t}')
   else overall_prec="0"
   fi
-  echo "**Aggregate:** recall=$overall_recall precision=$overall_prec total_findings=$agg_total cost=$aggregate_cost"
+  echo "**Aggregate:** recall=$overall_recall oracle_hit_yield=$overall_prec total_findings=$agg_total cost=$aggregate_cost"
 } >> "$SUMMARY"
 
 # Append one row per run to HISTORY.md
@@ -87,7 +93,7 @@ if [[ ! -f "$HISTORY" ]]; then
   {
     echo "# recall-eval HISTORY"
     echo
-    echo "| timestamp | kuzushi_sha | findings | hits | recall | precision | usd |"
+    echo "| timestamp | kuzushi_sha | findings | hits | recall | oracle-hit yield | usd |"
     echo "|---|---|---:|---:|---:|---:|---:|"
   } > "$HISTORY"
 fi

@@ -62,6 +62,10 @@ impl WriterLifecycle {
         Ok(())
     }
 
+    pub(super) fn projection_failed(&mut self) {
+        self.state = WriterActorState::Replaying;
+    }
+
     pub fn projection_advanced(&mut self, applied_seq: u64) -> Result<()> {
         require_projection_advance_state(self.state)?;
         require_projection_watermark(applied_seq, self.log_head, self.applied_seq)?;

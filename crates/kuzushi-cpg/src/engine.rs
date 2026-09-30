@@ -2,11 +2,14 @@
 //! primitive that makes a fresh checkout scannable with zero setup.
 
 use crate::artifacts::scoped_artifact_path;
-use crate::languages::{build_excludes, extensions_for, walk_sources};
+use crate::languages::{build_excludes, extensions_for};
 use cpg_core::{Cpg, Query};
 use cpg_incremental::Project;
 use std::path::{Component, Path, PathBuf};
-use std::time::SystemTime;
+
+#[path = "source_identity.rs"]
+mod source_identity;
+use source_identity::{load_fresh, save_project, source_census, SourceCensus};
 
 /// Build refusal threshold: one graph build may consume at most this many
 /// source files before the engine refuses instead of grinding unbounded.
@@ -131,7 +134,7 @@ pub fn open_project_in(scope: &BuildScope, lang: &str) -> Option<Project> {
 /// graph degrades to `None` — the caller's `Failed`/`Missing` readiness — and
 /// never aborts the (audit) thread. Both entry points share this guard, so the
 /// `Available` policy's unvetted on-disk load is safe too.
-fn load_project(cpg_path: &Path, lang: &str) -> Option<Project> {
+pub(super) fn load_project(cpg_path: &Path, lang: &str) -> Option<Project> {
     let path = cpg_path.to_string_lossy().into_owned();
     let cpg = std::panic::catch_unwind(|| Cpg::load(&path)).ok()?.ok()?;
     let (mut project, _) = cpg_cli::make_project(lang).ok()?;
@@ -140,8 +143,8 @@ fn load_project(cpg_path: &Path, lang: &str) -> Option<Project> {
 }
 
 /// Load the scope's graph for `lang` when fresh, else build it from source
-/// and persist it. Freshness = the artifact is newer than every in-scope
-/// source file. A stale/missing graph whose corpus exceeds the limits is an
+/// and persist it. Freshness is a digest of the exact source snapshot, scope,
+/// exclusions, engine revision and graph bytes. A stale/missing graph whose corpus exceeds the limits is an
 /// explicit refusal, never a silent multi-hour build.
 pub fn ensure_project_in(
     scope: &BuildScope,
@@ -151,7 +154,7 @@ pub fn ensure_project_in(
     let started = std::time::Instant::now();
     let scan_root = scope.scan_root();
     let cpg_path = scope.artifact_path(lang);
-    let census = source_census(&scan_root, lang);
+    let census = source_census(&scan_root, lang)?;
     let (project, reused_cache) = match load_fresh(&census, lang, &cpg_path) {
         Some(project) => (project, true),
         None => (
@@ -170,31 +173,6 @@ pub fn ensure_project_in(
     Ok((project, report))
 }
 
-/// One walk feeding both decisions: corpus size (build guardrail) and
-/// newest source mtime (artifact freshness).
-struct SourceCensus {
-    files: usize,
-    newest_mtime: Option<SystemTime>,
-}
-
-fn source_census(scan_root: &Path, lang: &str) -> SourceCensus {
-    let exts = extensions_for(lang);
-    let excludes = build_excludes(lang);
-    let mut census = SourceCensus {
-        files: 0,
-        newest_mtime: None,
-    };
-    walk_sources(scan_root, exts, &excludes, &mut |path| {
-        census.files += 1;
-        if let Ok(mtime) = std::fs::metadata(path).and_then(|m| m.modified()) {
-            if census.newest_mtime.is_none_or(|current| mtime > current) {
-                census.newest_mtime = Some(mtime);
-            }
-        }
-    });
-    census
-}
-
 fn build_report(
     lang: &str,
     cpg_path: PathBuf,
@@ -207,25 +185,12 @@ fn build_report(
         language: lang.to_string(),
         cpg_path,
         reused_cache,
-        source_files: census.files,
+        source_files: census.sources.len(),
         methods: project.cpg.methods().len(),
         calls: project.cpg.calls().len(),
         nodes: project.cpg.live_count(),
         duration_ms: elapsed.as_millis(),
     }
-}
-
-fn load_fresh(census: &SourceCensus, lang: &str, cpg_path: &Path) -> Option<Project> {
-    let artifact_mtime = std::fs::metadata(cpg_path)
-        .and_then(|m| m.modified())
-        .ok()?;
-    if census
-        .newest_mtime
-        .is_some_and(|source| source > artifact_mtime)
-    {
-        return None;
-    }
-    load_project(cpg_path, lang)
 }
 
 fn build_and_save(
@@ -235,40 +200,28 @@ fn build_and_save(
     census: &SourceCensus,
     limits: &BuildLimits,
 ) -> Result<Project, String> {
-    if census.files > limits.max_source_files {
+    if census.sources.len() > limits.max_source_files {
         return Err(format!(
             "refusing to build the {lang} graph: {} source files under {} exceed the build \
              cap of {} — scope the build to a subtree (targetSubdir / subdir) or raise \
              maxSourceFiles explicitly",
-            census.files,
+            census.sources.len(),
             scan_root.display(),
             limits.max_source_files
         ));
     }
-    let excludes = build_excludes(lang);
-    let project = build_project_quietly(scan_root, lang, &excludes)?;
-    if let Some(parent) = cpg_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-    }
-    project
-        .cpg
-        .save(&cpg_path.to_string_lossy())
-        .map_err(|error| format!("cannot save {}: {error}", cpg_path.display()))?;
+    let project = build_project_quietly(lang, census)?;
+    save_project(&project, cpg_path, &census.identity)?;
     Ok(project)
 }
 
 /// `cpg_cli::build_project_filtered` without its build-timing `eprintln!`:
 /// that line leaked onto the stderr of `kuzushi scan`/`run` as unlabelled
 /// noise. Same sources, same frontend, same passes.
-fn build_project_quietly(
-    scan_root: &Path,
-    lang: &str,
-    excludes: &[&str],
-) -> Result<Project, String> {
-    let (mut project, extensions) = cpg_cli::make_project(lang)?;
-    let sources = cpg_cli::collect_sources_filtered(scan_root, extensions, excludes)?;
-    let refs: Vec<(&str, &str)> = sources
+fn build_project_quietly(lang: &str, census: &SourceCensus) -> Result<Project, String> {
+    let (mut project, _) = cpg_cli::make_project(lang)?;
+    let refs: Vec<(&str, &str)> = census
+        .sources
         .iter()
         .map(|(path, source)| (path.as_str(), source.as_str()))
         .collect();
@@ -373,18 +326,26 @@ mod tests {
         write_go_fixture(temp.path());
         let (_, first) = ensure_project(temp.path(), "go").unwrap();
 
-        // Push the source mtime past the artifact's.
-        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        // A content edit must rebuild even when its timestamp is preserved.
+        let mtime = std::fs::metadata(temp.path().join("main.go"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::fs::write(
+            temp.path().join("main.go"),
+            "package main\nfunc changed() {}\n",
+        )
+        .unwrap();
         let file = std::fs::File::options()
             .append(true)
             .open(temp.path().join("main.go"))
             .unwrap();
-        file.set_modified(future).unwrap();
+        file.set_modified(mtime).unwrap();
         drop(file);
 
         let (_, second) = ensure_project(temp.path(), "go").unwrap();
         assert!(!second.reused_cache, "edited source must rebuild");
-        assert_eq!(second.methods, first.methods);
+        assert_ne!(second.methods, first.methods);
     }
 
     #[test]
@@ -436,7 +397,7 @@ mod tests {
         assert!(
             report
                 .cpg_path
-                .starts_with(temp.path().join(".kuzushi/cpg-rs/scoped/svc")),
+                .starts_with(temp.path().join(".kuzushi/cpg-rs/scoped")),
             "got {}",
             report.cpg_path.display()
         );

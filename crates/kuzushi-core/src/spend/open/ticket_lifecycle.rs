@@ -1,14 +1,35 @@
 use super::*;
 
 impl SpendLimiter {
+    /// Keep uncertain provider exposure reserved, raising it to observed spend.
+    pub fn retain_observed(&self, ticket: &SpendTicket, observed_usd: f64) -> Result<()> {
+        crate::runtime::RuntimeCost::from_usd(observed_usd, "unresolved observed spend")?;
+        let state = self.lock();
+        let updated = state.conn.execute(
+            "update spend_ledger set est_usd = max(est_usd, ?1) where id = ?2 and settled_at is null",
+            params![observed_usd, ticket.id],
+        )?;
+        anyhow::ensure!(
+            updated == 1,
+            "unresolved spend ticket is missing or already settled"
+        );
+        Ok(())
+    }
+
     /// Open a ticket with an estimated cost. Fails with [`SpendError`] when
     /// the per-op cap or the global hard ceiling would be exceeded.
     pub fn deposit(&self, op: Operation, est_usd: f64) -> Result<SpendTicket> {
         crate::runtime::RuntimeCost::from_usd(est_usd, "spend deposit estimate")?;
-        let state = self.lock();
-        enforce_hard_ceiling(&state, est_usd)?;
-        enforce_operation_cap(&state, op, est_usd)?;
-        insert_spend_ticket(&state, op, est_usd)
+        let mut state = self.lock();
+        let ceiling = state.hard_ceiling;
+        let transaction = state
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        enforce_hard_ceiling(&transaction, ceiling, est_usd)?;
+        enforce_operation_cap(&transaction, op, est_usd)?;
+        let ticket = insert_spend_ticket(&transaction, op, est_usd)?;
+        transaction.commit()?;
+        Ok(ticket)
     }
 
     /// Settle a ticket with the actual observed cost. Always succeeds —
@@ -36,7 +57,7 @@ impl SpendLimiter {
     /// when no cap is set.
     pub fn remaining(&self, op: Operation) -> Result<f64> {
         let state = self.lock();
-        let Some(cap) = state.caps.get(&op).copied() else {
+        let Some(cap) = load_caps(&state.conn)?.get(&op).copied() else {
             return Ok(f64::INFINITY);
         };
         let committed = total_committed_for(&state.conn, op)?;
@@ -58,11 +79,11 @@ impl SpendLimiter {
     }
 }
 
-fn enforce_hard_ceiling(state: &LimiterState, request: f64) -> Result<()> {
-    let Some(cap) = state.hard_ceiling else {
+fn enforce_hard_ceiling(conn: &Connection, ceiling: Option<f64>, request: f64) -> Result<()> {
+    let Some(cap) = ceiling else {
         return Ok(());
     };
-    let committed = total_committed_all(&state.conn)?;
+    let committed = total_committed_all(conn)?;
     if checked_commitment(committed, request, "global spend commitment")? > cap {
         return Err(SpendError::HardCeilingExceeded {
             cap,
@@ -74,11 +95,11 @@ fn enforce_hard_ceiling(state: &LimiterState, request: f64) -> Result<()> {
     Ok(())
 }
 
-fn enforce_operation_cap(state: &LimiterState, op: Operation, request: f64) -> Result<()> {
-    let Some(cap) = state.caps.get(&op).copied() else {
+fn enforce_operation_cap(conn: &Connection, op: Operation, request: f64) -> Result<()> {
+    let Some(cap) = load_caps(conn)?.get(&op).copied() else {
         return Ok(());
     };
-    let committed = total_committed_for(&state.conn, op)?;
+    let committed = total_committed_for(conn, op)?;
     if checked_commitment(committed, request, "operation spend commitment")? > cap {
         return Err(SpendError::Exceeded {
             op: op.as_db_str(),
@@ -96,18 +117,14 @@ fn checked_commitment(committed: f64, request: f64, context: &str) -> Result<f64
         .map(crate::runtime::RuntimeCost::usd)
 }
 
-fn insert_spend_ticket(
-    state: &LimiterState,
-    op: Operation,
-    est_usd: f64,
-) -> Result<SpendTicket> {
-    state.conn.execute(
+fn insert_spend_ticket(conn: &Connection, op: Operation, est_usd: f64) -> Result<SpendTicket> {
+    conn.execute(
         "insert into spend_ledger(op, est_usd, actual_usd, created_at, settled_at)
          values (?, ?, null, ?, null)",
         params![op.as_db_str(), est_usd, unix_seconds()],
     )?;
     Ok(SpendTicket {
-        id: state.conn.last_insert_rowid(),
+        id: conn.last_insert_rowid(),
         op,
         est_usd,
         settled: false,

@@ -9,11 +9,13 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+libc.workspace = true
 tempfile.workspace = true
 
 [lints]

@@ -11,6 +11,7 @@ impl StorageWriter {
         &mut self,
         command: WriterCommand,
     ) -> Result<WriteReceipt> {
+        self.replay_projection()?;
         match command {
             WriterCommand::Control(command) => self.execute_control_command(command),
             WriterCommand::Decision(command) => self.execute_decision_command(command),

@@ -472,7 +472,18 @@ fn review_session_projects_to_review_sessions_table() {
         )
     );
 
-    let measurement: (String, Option<String>, i64, String, String, i64, Option<i64>, i64, String, String) = db
+    let measurement: (
+        String,
+        Option<String>,
+        i64,
+        String,
+        String,
+        i64,
+        Option<i64>,
+        i64,
+        String,
+        String,
+    ) = db
         .conn
         .query_row(
             "select feature_schema_id, feature_snapshot_hash, feature_cutoff_seq, model_id,
@@ -522,7 +533,13 @@ fn review_session_rank_objective_round_trips() {
     let mut payload = review_session_payload("session-1", "fp3_session");
     payload["shadowRankObjective"] = serde_json::json!("learn");
     let event = log
-        .append(EventKind::ReviewSessionStarted, "operator", None, None, payload)
+        .append(
+            EventKind::ReviewSessionStarted,
+            "operator",
+            None,
+            None,
+            payload,
+        )
         .unwrap();
 
     db.apply_event(&event).unwrap();
@@ -695,7 +712,10 @@ fn decision_with_session_id_round_trips_and_joins() {
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    assert_eq!(joined, ("session-1".to_string(), "confirmed".to_string(), 17));
+    assert_eq!(
+        joined,
+        ("session-1".to_string(), "confirmed".to_string(), 17)
+    );
 }
 
 /// A verdict taken without shadow recording keeps a null link rather than

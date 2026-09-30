@@ -18,11 +18,31 @@ const packages = [...platformPackages, rootPackage];
 run("npm", ["whoami"]);
 run("npm", ["access", "list", "packages", "@kuzushi", "--json"]);
 
+const promote = process.argv.slice(2).includes("--promote");
 const states = packages.map((entry) => ({ entry, published: publishedIntegrity(entry) }));
-for (const { entry, published } of states) {
+if (promote) {
+  promotePackages(states);
+} else {
+  publishPackages(states);
+}
+
+function promotePackages(states) {
+  for (const { entry, published } of states) {
+    if (published !== entry.npmIntegrity)
+      throw new Error(`promotion integrity mismatch for ${entry.name}@${entry.version}`);
+  }
+  for (const { entry } of states)
+    run("npm", ["dist-tag", "add", `${entry.name}@${entry.version}`, "latest"]);
+}
+
+function publishPackages(states) {
+  for (const state of states) publishPackage(state);
+}
+
+function publishPackage({ entry, published }) {
   if (published === entry.npmIntegrity) {
     process.stdout.write(`reusing ${entry.name}@${entry.version} with matching integrity\n`);
-    continue;
+    return;
   }
   if (published) {
     throw new Error(
@@ -35,7 +55,7 @@ for (const { entry, published } of states) {
     "--access",
     "public",
     "--tag",
-    "latest",
+    "candidate",
     "--ignore-scripts",
   ];
   if (process.env.NPM_PROVENANCE === "true") args.push("--provenance");

@@ -35,6 +35,10 @@ impl EditorState {
     }
 
     pub(crate) fn enter_history_search(&mut self) {
+        if self.history_search.is_some() {
+            return;
+        }
+        self.history_search_draft = Some(self.snapshot_input());
         self.history_search = Some(HistorySearch {
             query: std::mem::take(&mut self.input),
             cursor: 0,
@@ -70,7 +74,7 @@ impl EditorState {
 
     pub(crate) fn accept_history_search(&mut self) {
         let chosen = self.current_history_match().map(str::to_string);
-        self.history_search = None;
+        self.cancel_history_search();
         if let Some(command) = chosen {
             self.input = command;
             self.pasted_blocks.clear();
@@ -81,6 +85,9 @@ impl EditorState {
 
     pub(crate) fn cancel_history_search(&mut self) {
         self.history_search = None;
+        if let Some(draft) = self.history_search_draft.take() {
+            self.restore_input_snapshot(draft);
+        }
     }
 
     pub(crate) fn history_search_matches(&self) -> Vec<usize> {
@@ -117,5 +124,29 @@ impl EditorState {
         self.pasted_blocks = std::mem::take(&mut self.history_draft_pasted_blocks);
         self.cursor = self.char_count();
         self.touch_completion_preview();
+    }
+}
+
+#[cfg(test)]
+mod search_draft_tests {
+    use super::EditorState;
+
+    #[test]
+    fn cancel_and_empty_accept_restore_the_cursor_and_paste_payload() {
+        let mut editor = EditorState::default();
+        editor.insert_str_at_cursor("draft ");
+        editor.insert_multiline_paste("first\nsecond\n");
+        editor.set_cursor(2);
+        let original = editor.snapshot_input();
+        editor.enter_history_search();
+        editor.history_search_input('x');
+        editor.cancel_history_search();
+        assert_eq!(editor.input, original.input);
+        assert_eq!(editor.cursor, original.cursor);
+        assert_eq!(editor.pasted_blocks, original.pasted_blocks);
+        editor.enter_history_search();
+        editor.accept_history_search();
+        assert_eq!(editor.cursor, 2);
+        assert_eq!(editor.expanded_input(), "draft first\nsecond\n");
     }
 }

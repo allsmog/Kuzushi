@@ -36,6 +36,10 @@ for name in "${!REPOS[@]}"; do
   rel="experiments/recall-eval/slices/$name"
   scope_file="$SCOPE_DIR/$name.txt"
 
+  if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "fetch-slices: a full pinned KUZUSHI_SLICE_SHA_${name^^} is required" >&2
+    exit 1
+  fi
   if [[ ! -f "$scope_file" ]]; then
     echo "fetch-slices: missing scope file $scope_file" >&2
     exit 1
@@ -60,8 +64,6 @@ for name in "${!REPOS[@]}"; do
     echo "[$name] fetching $sha"
     git fetch --depth=1 origin "$sha"
     git checkout --detach "$sha"
-  else
-    echo "[$name] WARN: no SHA pinned (set KUZUSHI_SLICE_SHA_${name^^}); using current HEAD"
   fi
 
   resolved="$(git rev-parse HEAD)"

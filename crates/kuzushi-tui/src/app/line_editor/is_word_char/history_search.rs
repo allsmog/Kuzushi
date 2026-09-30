@@ -23,8 +23,7 @@ impl ShellApp {
         self.editor.accept_history_search();
     }
 
-    /// Cancel search, restoring an empty prompt (the pre-search draft was
-    /// consumed as the seed query, matching readline's Ctrl+G behavior).
+    /// Cancel search, restoring the original draft, cursor and paste payloads.
     pub(crate) fn cancel_history_search(&mut self) {
         self.editor_mut().cancel_history_search();
     }

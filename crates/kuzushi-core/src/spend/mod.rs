@@ -7,9 +7,9 @@
 /// `Drop`-aware: dropping without a refund settles at the deposited
 /// estimate (best-effort logging — no Result from Drop).
 
-/// The ledger. Reads/writes are serialised through a single mutex so that
-/// concurrent depositors observe a consistent view of the cap. A SQLite
-/// transaction would be slightly faster but the mutex keeps the API clean.
+/// The ledger serializes admission across connections with an IMMEDIATE
+/// SQLite transaction. The mutex protects only this connection; durable caps
+/// and commitments are read again inside each admission transaction.
 
 /// Parse a CLI `--budget` flag like `triage=50,deep-audit=200,full-mode=300`
 /// into `(Operation, f64)` pairs. Hyphens and underscores are accepted in op

@@ -128,6 +128,7 @@ pub struct HarvestedSpec {
     pub entry_methods: Vec<String>,
     pub source_call_matches: usize,
     pub sink_call_matches: usize,
+    pub truncated_categories: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -137,6 +138,8 @@ pub struct CpgFlowQueryStats {
     pub source_call_matches: usize,
     pub sink_call_matches: usize,
     pub flow_count: usize,
+    pub flow_count_before_cap: usize,
+    pub truncated_categories: Vec<&'static str>,
 }
 
 pub fn artifact_dir(target: &Path) -> PathBuf {
@@ -219,8 +222,8 @@ pub fn harvest_regex_spec(
     _project: &Project,
     _source_pattern: &str,
     _sink_pattern: &str,
-) -> HarvestedSpec {
-    HarvestedSpec::default()
+) -> Result<HarvestedSpec, String> {
+    Err(crate::engine_unavailable_message().to_string())
 }
 
 pub fn run_taint_query(
@@ -235,6 +238,8 @@ pub fn run_taint_query(
             source_call_matches: harvested.source_call_matches,
             sink_call_matches: harvested.sink_call_matches,
             flow_count: 0,
+            flow_count_before_cap: 0,
+            truncated_categories: Vec::new(),
         },
     )
 }

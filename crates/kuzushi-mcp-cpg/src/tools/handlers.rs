@@ -76,8 +76,10 @@ fn required_line(args: &Value) -> Result<u32> {
     args.get("line")
         .and_then(Value::as_u64)
         .filter(|line| *line >= 1)
-        .map(|line| line as u32)
-        .ok_or_else(|| anyhow::anyhow!("missing required argument `line` (integer >= 1)"))
+        .and_then(|line| u32::try_from(line).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!("missing required argument `line` (integer in 1..=4294967295)")
+        })
 }
 
 fn method_json(record: &queries::MethodRecord, lang: &str) -> Value {
@@ -205,7 +207,9 @@ impl ToolHandler for MethodAtTool {
                         .map(|record| method_json(&record, lang))
                 })
                 .unwrap_or(Value::Null);
-            Ok(json!({"file": file, "line": line, "method": method}))
+            Ok(json!({"file": file, "line": line, "method": method,
+                "matchQuality": "nearest-preceding", "exactContainment": false,
+                "limitation": "Method end lines are unavailable; this result does not establish containment."}))
         })
         .await
     }

@@ -50,6 +50,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   NODE_VERSION: "26.3.1"
@@ -77,6 +78,8 @@ jobs:
     name: quality-gauntlet
     runs-on: ${{ fromJSON(inputs.self_hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 20
+    outputs:
+      quality-base: ${{ steps.interval.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -102,9 +105,15 @@ jobs:
         env:
           ACTIONLINT_VERSION: "1.7.12"
         run: bash scripts/runner/lint-workflows.sh
+      - name: Resolve the complete quality interval
+        id: interval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALITY_BASE_REF: ${{ inputs.quality_base_ref }}
+        run: node scripts/quality-interval.mjs
       - name: Run quick repository contract
         env:
-          KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          KUZUSHI_CRAP_RISK_BASE_REF: ${{ steps.interval.outputs.base }}
         run: pnpm verify:quick:summary
 
   # These jobs exist only in this full workflow, which cannot be triggered by
@@ -226,7 +235,7 @@ jobs:
       - uses: ./.github/actions/install-patch-validation-sandbox
       - name: Enforce measured coverage
         env:
-          KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          KUZUSHI_QUALITY_BASE_REF: ${{ needs.quality-gauntlet.outputs.quality-base }}
         run: pnpm test:coverage
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
@@ -270,7 +279,7 @@ jobs:
           tool: cargo-mutants@27.1.0
       - name: Require sampled changed mutants to be caught
         env:
-          KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          KUZUSHI_QUALITY_BASE_REF: ${{ needs.quality-gauntlet.outputs.quality-base }}
         run: pnpm test:mutations
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
@@ -339,8 +348,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Install semgrep (pip, cached)
-        run: python -m pip install --upgrade pip && pip install -r .github/requirements-ci.txt
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ needs.rust-cli.outputs.native-artifact }}
@@ -352,3 +359,47 @@ jobs:
           slug=$(node -p 'process.platform + "-" + process.arch')
           export KUZUSHI_NATIVE_BIN="$PWD/native/$slug/kuzushi"
           pnpm test:e2e
+
+  real-semgrep:
+    name: real-semgrep
+    needs: rust-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: python -m pip install -r .github/requirements-ci.txt
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ${{ needs.rust-cli.outputs.native-artifact }}
+          path: native/
+      - name: Exercise pinned real scanner with local rules
+        shell: bash
+        run: |
+          slug=$(node -p 'process.platform + "-" + process.arch')
+          export KUZUSHI_NATIVE_BIN="$PWD/native/$slug/kuzushi"
+          chmod +x "$KUZUSHI_NATIVE_BIN"
+          node scripts/real-semgrep-smoke.mjs
+
+  fresh-dependencies:
+    name: fresh-npm-dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: node scripts/smoke-fresh-dependencies.mjs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: fresh-npm-dependencies
+          path: fresh-dependencies.json
+          if-no-files-found: error

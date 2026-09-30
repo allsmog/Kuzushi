@@ -26,20 +26,54 @@ pub(super) struct LoopCheckpointStore {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LoopCheckpointFile {
+struct LoopCheckpointFile<T = Vec<LoopHistoryEntry>> {
     version: u32,
     fingerprint: String,
     workspace_root: String,
     source_identity: String,
     tool_contract_fingerprint: String,
     runtime_contract_fingerprint: String,
-    transcript: Vec<LoopHistoryEntry>,
+    transcript: T,
 }
 
-const LOOP_CHECKPOINT_VERSION: u32 = 2;
-const LOOP_CHECKPOINT_FINGERPRINT_PREFIX: usize = 16;
+const LOOP_CHECKPOINT_VERSION: u32 = 3;
+const MAX_CHECKPOINT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_TRANSCRIPT_ENTRIES: usize = 512;
+const LOOP_CHECKPOINT_FINGERPRINT_PREFIX: usize = 64;
 
 impl LoopCheckpointStore {
+    /// A kernel-held lock is released on process death; identical concurrent
+    /// requests cannot share, overwrite, or delete an active transcript.
+    pub(super) fn acquire_lease(&self) -> Result<fs::File> {
+        let parent = self.path.parent().context("checkpoint has no parent")?;
+        fs::create_dir_all(parent)?;
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.path.with_extension("lock"))?;
+        file.try_lock()
+            .context("an identical resumable loop is already running")?;
+        self.require_reconciled_checkpoint()?;
+        Ok(file)
+    }
+
+    fn require_reconciled_checkpoint(&self) -> Result<()> {
+        let raw = match crate::bounded_file::read_utf8_text(&self.path, MAX_CHECKPOINT_BYTES) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error).context("checkpoint unreadable; resume requires reconciliation")
+            }
+        };
+        let file: LoopCheckpointFile = serde_json::from_str(&raw)
+            .context("checkpoint malformed; resume requires reconciliation")?;
+        anyhow::ensure!(!matches!(file.transcript.last(), Some(LoopHistoryEntry::AssistantToolCall(_))),
+            "checkpoint contains an unresolved tool-call intent; reconcile its effects before restarting");
+        Ok(())
+    }
+
     /// A store exists only when the request's canonical cwd is already a
     /// Kuzushi target and a source identity can be established. Every target
     /// uses a content-derived workspace tree identity; Git targets bind the
@@ -78,7 +112,7 @@ impl LoopCheckpointStore {
 
     /// Restore the transcript from an interrupted run of this exact request.
     pub(super) fn load(&self) -> Option<Vec<LoopHistoryEntry>> {
-        let raw = fs::read_to_string(&self.path).ok()?;
+        let raw = crate::bounded_file::read_utf8_text(&self.path, MAX_CHECKPOINT_BYTES).ok()?;
         let file = serde_json::from_str::<LoopCheckpointFile>(&raw).ok()?;
         let matches = file.version == LOOP_CHECKPOINT_VERSION
             && file.fingerprint == self.fingerprint
@@ -86,13 +120,18 @@ impl LoopCheckpointStore {
             && file.source_identity == self.source_identity
             && file.tool_contract_fingerprint == self.tool_contract_fingerprint
             && file.runtime_contract_fingerprint == self.runtime_contract_fingerprint
-            && !file.transcript.is_empty();
+            && !file.transcript.is_empty()
+            && file.transcript.len() <= MAX_TRANSCRIPT_ENTRIES;
         matches.then_some(file.transcript)
     }
 
     /// Persist the transcript after a completed round. Best-effort: a failed
     /// checkpoint write must not fail the paid run it is protecting.
-    pub(super) fn save(&self, transcript: &[LoopHistoryEntry]) {
+    pub(super) fn save(&self, transcript: &[LoopHistoryEntry]) -> Result<()> {
+        anyhow::ensure!(
+            transcript.len() <= MAX_TRANSCRIPT_ENTRIES,
+            "loop transcript exceeds 512 entries; resume unavailable"
+        );
         let file = LoopCheckpointFile {
             version: LOOP_CHECKPOINT_VERSION,
             fingerprint: self.fingerprint.clone(),
@@ -100,16 +139,36 @@ impl LoopCheckpointStore {
             source_identity: self.source_identity.clone(),
             tool_contract_fingerprint: self.tool_contract_fingerprint.clone(),
             runtime_contract_fingerprint: self.runtime_contract_fingerprint.clone(),
-            transcript: transcript.to_vec(),
+            transcript,
         };
-        let Ok(serialized) = serde_json::to_string(&file) else {
-            return;
-        };
-        let _ = write_atomically(&self.path, &serialized);
+        let serialized =
+            kuzushi_mcp_common::server::bounded_json_bytes(&file, MAX_CHECKPOINT_BYTES)?
+                .context("loop checkpoint exceeds 8 MiB; resume unavailable")?;
+        write_atomically(&self.path, std::str::from_utf8(&serialized)?)?;
+        Ok(())
     }
 
     pub(super) fn clear(&self) {
         let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn implementation_identity() -> Option<&'static str> {
+    static IDENTITY: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    IDENTITY.get_or_init(|| executable_digest().ok()).as_deref()
+}
+
+fn executable_digest() -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(std::env::current_exe()?)?;
+    let mut digest = blake3::Hasher::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(digest.finalize().to_hex().to_string());
+        }
+        digest.update(&buffer[..count]);
     }
 }
 
@@ -160,7 +219,7 @@ fn loop_request_fingerprint(
         crate::identity::hash_parts(
             "agent-loop-checkpoint-request-v2",
             &[
-                env!("CARGO_PKG_VERSION").as_bytes(),
+                implementation_identity()?.as_bytes(),
                 &protocol_version,
                 workspace_root.as_bytes(),
                 source_identity.as_bytes(),
@@ -226,7 +285,10 @@ fn pending_checkpoint(
     source_identity: &str,
 ) -> Option<PendingLoopCheckpoint> {
     let name = path.file_name()?.to_str()?;
-    let raw = fs::read_to_string(path).ok()?;
+    if !name.starts_with("agent-loop-") || !name.ends_with(".json") {
+        return None;
+    }
+    let raw = crate::bounded_file::read_utf8_text(path, MAX_CHECKPOINT_BYTES).ok()?;
     let file = serde_json::from_str::<LoopCheckpointFile>(&raw).ok()?;
     let expected_leaf = checkpoint_leaf(&file.fingerprint)?;
     let pending = name == expected_leaf
@@ -235,7 +297,8 @@ fn pending_checkpoint(
         && file.source_identity == source_identity
         && !file.tool_contract_fingerprint.is_empty()
         && !file.runtime_contract_fingerprint.is_empty()
-        && !file.transcript.is_empty();
+        && !file.transcript.is_empty()
+        && file.transcript.len() <= MAX_TRANSCRIPT_ENTRIES;
     pending.then_some(PendingLoopCheckpoint {
         completed_turns: restored_step_count(&file.transcript),
         modified_at_unix: modified_at_unix(path),
@@ -260,6 +323,56 @@ pub(super) fn restored_step_count(transcript: &[LoopHistoryEntry]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identical_runs_cannot_own_one_checkpoint_concurrently() {
+        let root = workspace();
+        let store = LoopCheckpointStore::discover(&request(root.path(), "lease")).unwrap();
+        let first = store.acquire_lease().unwrap();
+        assert!(store.acquire_lease().is_err());
+        drop(first);
+        assert!(store.acquire_lease().is_ok());
+    }
+
+    #[test]
+    fn unfinished_intent_requires_reconciliation_before_resume() {
+        let root = workspace();
+        let store = LoopCheckpointStore::discover(&request(root.path(), "intent")).unwrap();
+        store.save(&transcript()).unwrap();
+        assert!(store
+            .acquire_lease()
+            .unwrap_err()
+            .to_string()
+            .contains("unresolved tool-call intent"));
+        let mut completed = transcript();
+        completed.push(LoopHistoryEntry::ToolResult(ToolResult {
+            call_id: "call-1".into(),
+            output: serde_json::Value::Null,
+            is_error: false,
+        }));
+        store.save(&completed).unwrap();
+        assert!(store.acquire_lease().is_ok());
+    }
+
+    #[test]
+    fn oversized_checkpoints_are_refused_before_decode_and_during_write() {
+        let root = workspace();
+        let store = LoopCheckpointStore::discover(&request(root.path(), "bounded")).unwrap();
+        fs::create_dir_all(store.path.parent().unwrap()).unwrap();
+        fs::File::create(&store.path)
+            .unwrap()
+            .set_len(MAX_CHECKPOINT_BYTES as u64 + 1)
+            .unwrap();
+        assert!(store.load().is_none());
+        assert!(store.acquire_lease().is_err());
+        let huge = vec![LoopHistoryEntry::AssistantText(
+            "x".repeat(MAX_CHECKPOINT_BYTES),
+        )];
+        assert!(store.save(&huge).is_err());
+        assert!(store
+            .save(&vec![LoopHistoryEntry::AssistantText(String::new()); 513])
+            .is_err());
+    }
     use crate::runtime::{AgentTool, ToolCall};
     use std::process::Command;
 
@@ -309,7 +422,7 @@ mod tests {
         let store = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
 
         assert!(store.load().is_none());
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
         let restored = store.load().expect("restored transcript");
         assert_eq!(restored.len(), 1);
         assert_eq!(restored_step_count(&restored), 1);
@@ -324,7 +437,7 @@ mod tests {
         assert!(pending_agent_loop_checkpoints(temp.path()).is_empty());
 
         let store = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
 
         let pending = pending_agent_loop_checkpoints(temp.path());
         assert_eq!(pending.len(), 1);
@@ -338,7 +451,7 @@ mod tests {
     fn changed_request_identity_orphans_the_checkpoint() {
         let temp = workspace();
         let store = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
 
         let other = LoopCheckpointStore::discover(&request(temp.path(), "different")).unwrap();
         assert_ne!(other.path, store.path);
@@ -350,7 +463,7 @@ mod tests {
         let temp = workspace();
         fs::write(temp.path().join("source.rs"), "fn first() {}\n").unwrap();
         let store = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
         assert_eq!(pending_agent_loop_checkpoints(temp.path()).len(), 1);
 
         fs::write(temp.path().join("source.rs"), "fn second() {}\n").unwrap();
@@ -369,7 +482,7 @@ mod tests {
         let temp = workspace();
         let original = request(temp.path(), "p");
         let store = LoopCheckpointStore::discover(&original).unwrap();
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
 
         let mut changed = request(temp.path(), "p");
         changed.tools[0].input_schema = serde_json::json!({
@@ -389,7 +502,7 @@ mod tests {
     fn changed_runtime_settings_orphan_the_checkpoint() {
         let temp = workspace();
         let store = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
 
         let mut changed = request(temp.path(), "p");
         changed.runtime_options = Some(AgentRuntimeOptions {
@@ -448,7 +561,7 @@ mod tests {
         let fixed = store.path.with_extension("json.tmp");
         fs::write(&fixed, "unrelated staging file").unwrap();
 
-        store.save(&transcript());
+        store.save(&transcript()).unwrap();
 
         assert_eq!(fs::read_to_string(fixed).unwrap(), "unrelated staging file");
         assert!(store.load().is_some());
@@ -469,7 +582,7 @@ mod tests {
         git(temp.path(), &["commit", "-m", "first"]);
 
         let first = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        first.save(&transcript());
+        first.save(&transcript()).unwrap();
         assert!(first.source_identity.starts_with("git:"));
         assert!(first.source_identity.contains(";tree:"));
 
@@ -500,7 +613,7 @@ mod tests {
         fs::write(temp.path().join("draft.rs"), "fn first() {}\n").unwrap();
 
         let first = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        first.save(&transcript());
+        first.save(&transcript()).unwrap();
         assert!(first.source_identity.starts_with("git:"));
         assert!(first.source_identity.contains(";tree:"));
         assert_eq!(pending_agent_loop_checkpoints(temp.path()).len(), 1);
@@ -535,7 +648,7 @@ mod tests {
         git(temp.path(), &["commit", "-m", "tracked"]);
 
         let first = LoopCheckpointStore::discover(&request(temp.path(), "p")).unwrap();
-        first.save(&transcript());
+        first.save(&transcript()).unwrap();
         assert_eq!(pending_agent_loop_checkpoints(temp.path()).len(), 1);
 
         fs::write(temp.path().join("local-policy.toml"), "mode = 'second'\n").unwrap();

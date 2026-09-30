@@ -5,6 +5,50 @@ part of every release commit.
 
 ## Export compatibility notes
 
+### Audit remediation compatibility
+
+- Sandbox children receive an explicit minimal environment. Callers must grant
+  required variables through `SandboxExecOptions.env`; stdin and each output
+  stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.
+  Cancellation owns the process group/Windows Job Object and kills descendants.
+- MCP tool arguments are validated against their advertised JSON Schema before
+  execution. Invalid input now returns a protocol error without invoking the
+  handler. The server limits concurrent requests to eight and honors cancellation
+  and shutdown; clients must not depend on acceptance after shutdown.
+- Loop checkpoint protocol 3 binds the executable digest and uses full request
+  fingerprints. Old checkpoints are not resumed. A kernel lease excludes a second
+  owner; an unfinished tool intent requires explicit effect reconciliation before
+  retry. Checkpoints over 8 MiB or 512 transcript entries fail visibly. Historical
+  files are not rewritten and spend from failed turns remains unresolved.
+- Finding anchors are grounded even without evidence. `unavailable` is distinct
+  from invalid source evidence; claimed coordinates are preserved. Cross-producer
+  evidence is merged independently of severity. Static verification requires exact
+  bounded source citations; missing or invalid citations produce an inconclusive
+  result. Raw model confidence remains explicitly uncalibrated.
+- CPG caches use source-content and implementation identities; existing caches
+  rebuild. `maxCallDepth` is rejected until the engine can enforce it. Regex and
+  literal matching are explicit; limits and approximate method positions are
+  disclosed in results. Queries with failed language coverage return an error.
+- History uses a versioned JSON record format to preserve multiline commands;
+  legacy records are imported on read. Evaluations require complete run-bound
+  receipts, distinguish unjudged output, and enforce recall thresholds only when
+  requested. Historical score files do not acquire provenance retroactively.
+- Publication uses the `candidate` npm dist-tag. The exact-version public-install
+  matrix must pass before promotion of platform tags and finally the root `latest`
+  tag, followed by GitHub release visibility. Rerunning promotion verifies registry
+  integrity before changing any tag. If interrupted, the root launcher remains on
+  the previous version until its final tag operation; rerun the same candidate
+  after correcting the failure. To roll back a completed promotion, move the root
+  `latest` tag to the previously verified exact version and then restore platform
+  tags; never republish different bytes under an existing version.
+- Full-quality runs compare with the latest successful ancestral full run, not
+  the previous commit. The initial run requires `quality_base_ref`; failures to
+  resolve a baseline fail the gate rather than silently narrowing the interval.
+
+See [the audit ledger](docs/quality/audit-remediation-2026-09-30.md) for acceptance
+work that remains open; these changes are not an all-items completion claim.
+
+
 - Static `verify:finding` results now use `exploitable: null` for incomplete
   evidence, unsupported language, or an unresolved panel. These outcomes have
   `status: partial` and cannot replace selected proof. Consumers must handle

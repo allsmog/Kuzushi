@@ -285,13 +285,19 @@ impl StorageWriter {
 
     fn rebuild_projection(&mut self) -> Result<WriteReceipt> {
         require_state(self.lifecycle.state(), WriterActorState::Live)?;
+        let previous = self.lifecycle;
         self.lifecycle.begin_rebuild()?;
-        self.projection.reset_for_rebuild()?;
-        let mut applied_seq = 0;
-        for event in self.log.read_all()? {
-            self.projection.apply_event(&event)?;
-            applied_seq = event.seq;
-        }
+        let rebuilt = self
+            .log
+            .read_all()
+            .and_then(|events| self.projection.rebuild_from_events(&events));
+        let applied_seq = match rebuilt {
+            Ok(applied) => applied,
+            Err(error) => {
+                self.lifecycle = previous;
+                return Err(error);
+            }
+        };
         self.lifecycle.finish_rebuild(applied_seq)?;
         Ok(WriteReceipt {
             committed_seq: applied_seq,
@@ -328,7 +334,13 @@ impl StorageWriter {
         #[cfg(test)]
         test_hooks::after_event_append(event);
         self.lifecycle.append_committed_event(event.seq)?;
-        let projection = self.projection.apply_event(event)?;
+        let projection = match self.projection.apply_event(event) {
+            Ok(projection) => projection,
+            Err(error) => {
+                self.lifecycle.projection_failed();
+                return Err(error);
+            }
+        };
         self.lifecycle.projection_advanced(event.seq)?;
         Ok(WriteReceipt {
             committed_seq: event.seq,
@@ -449,6 +461,6 @@ fn workspace_state_ancestor(path: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod process_stress_tests;
+#[cfg(test)]
+mod tests;

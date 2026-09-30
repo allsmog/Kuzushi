@@ -6,6 +6,7 @@ pub(crate) use verify_finding_tool::*;
 
 mod json_fields;
 mod verify_assessment;
+mod verify_citations;
 mod verify_consensus;
 mod verify_exploit_tool;
 mod verify_finding_input;

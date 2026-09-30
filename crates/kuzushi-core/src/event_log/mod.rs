@@ -200,7 +200,7 @@ impl EventLog {
             .with_context(|| format!("Could not create {}", path.display()))?;
         file.sync_all()
             .with_context(|| format!("Could not fsync {}", path.display()))?;
-        sync_directory(&self.root);
+        sync_directory(&self.root)?;
         Ok(path)
     }
 
@@ -234,7 +234,7 @@ impl EventLog {
             .context("Could not append event")?;
         file.sync_all().context("Could not fsync event log")?;
         if created {
-            sync_directory(&self.root);
+            sync_directory(&self.root)?;
         }
         Ok(())
     }
@@ -364,10 +364,11 @@ fn event_hash_for_envelope(event: &EventEnvelope) -> Result<Blake3Hash> {
     )
 }
 
-fn sync_directory(path: &Path) {
-    if let Ok(directory) = fs::File::open(path) {
-        let _ = directory.sync_all();
-    }
+/// Unix directory durability is mandatory. Other platforms retain the weaker
+/// namespace guarantee of fs_atomic::sync_parent_dir.
+fn sync_directory(path: &Path) -> Result<()> {
+    crate::fs_atomic::sync_parent_dir(&path.join(".namespace-sync"))
+        .with_context(|| format!("Could not sync event-log directory {}", path.display()))
 }
 
 fn ensure_log_directory(path: &Path) -> Result<()> {
@@ -383,7 +384,7 @@ fn ensure_log_directory(path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             fs::create_dir(path).with_context(|| format!("Could not create {}", path.display()))?;
             if let Some(parent) = path.parent() {
-                sync_directory(parent);
+                sync_directory(parent)?;
             }
             Ok(())
         }
@@ -409,8 +410,8 @@ fn read_segment_events(
     );
     let (complete, torn) = split_torn_tail(&bytes);
     validate_torn_tail(path, complete, torn, allow_torn_tail)?;
-    let body = std::str::from_utf8(complete)
-        .context("Could not read event log segment as UTF-8")?;
+    let body =
+        std::str::from_utf8(complete).context("Could not read event log segment as UTF-8")?;
     parse_segment_body(path, body, event_limit)
 }
 

@@ -58,6 +58,7 @@ pub(crate) struct EditorState {
     /// that exact key (a stale-frame re-press) is absorbed instead of typed.
     resolved_result_key: Option<char>,
     history_search: Option<HistorySearch>,
+    history_search_draft: Option<EditorInputSnapshot>,
     revision: u64,
     completion_preview: RefCell<Option<CompletionPreviewMemo>>,
     #[cfg(test)]
@@ -81,6 +82,7 @@ impl Default for EditorState {
             input_mode: InputMode::Prompt,
             resolved_result_key: None,
             history_search: None,
+            history_search_draft: None,
             revision: 0,
             completion_preview: RefCell::new(None),
             #[cfg(test)]

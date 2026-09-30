@@ -48,4 +48,8 @@ pub(crate) struct Cli {
     /// Pretty-print the output JSON.
     #[arg(long, default_value_t = true)]
     pub(crate) pretty: bool,
+
+    /// Return a nonzero status when primary recall is below the oracle threshold.
+    #[arg(long)]
+    pub(crate) enforce_threshold: bool,
 }

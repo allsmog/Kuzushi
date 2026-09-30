@@ -9,4 +9,4 @@ pub use checked_queries::{
     triage_finding_blocking_checked,
 };
 pub use loop_checkpoint::{pending_agent_loop_checkpoints, PendingLoopCheckpoint};
-pub use run_tool_loop::{run_tool_loop, run_tool_loop_observed};
+pub use run_tool_loop::{run_tool_loop, run_tool_loop_observed, AgentLoopFailure};

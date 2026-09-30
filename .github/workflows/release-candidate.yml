@@ -46,6 +46,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -116,6 +117,7 @@ jobs:
       self_hosted: ${{ !inputs.hosted }}
     permissions:
       contents: read
+      actions: read
 
   native-binaries:
     needs: [identity, ci]

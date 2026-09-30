@@ -60,6 +60,59 @@ mod tests {
     }
 
     #[test]
+    fn provider_failure_keeps_paid_turns_and_unresolved_budget_exposure() {
+        let runtime = ScriptedRuntime::new(
+            [3.0, 4.0]
+                .into_iter()
+                .enumerate()
+                .map(|(index, cost)| AgentLoopStep::ToolCall {
+                    call: ToolCall {
+                        name: "read_source".into(),
+                        input: serde_json::Value::Null,
+                        call_id: format!("call-{index}"),
+                    },
+                    cost_usd: Some(cost),
+                })
+                .collect(),
+        );
+        let mut tools = ToolBox::new();
+        tools.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::json!({"read":true}),
+                is_error: false,
+            })
+        });
+        let error = run_tool_loop(&runtime, &req(), &mut tools).unwrap_err();
+        let failure = error.downcast_ref::<AgentLoopFailure>().unwrap();
+        assert_eq!(failure.outcome.cost_usd, 7.0);
+        assert!(!failure.outcome.cost_usd_exact);
+        assert_eq!(failure.outcome.steps_used, 2);
+        assert_eq!(failure.outcome.transcript.len(), 4);
+        assert_eq!(failure.usage.total_calls, 2);
+        let spend = crate::spend::SpendLimiter::open_in_memory().unwrap();
+        let ticket = spend
+            .deposit(crate::spend::Operation::DeepAudit, 1.0)
+            .unwrap();
+        spend
+            .retain_observed(&ticket, failure.outcome.cost_usd)
+            .unwrap();
+        assert_eq!(
+            spend
+                .total_spent(crate::spend::Operation::DeepAudit)
+                .unwrap(),
+            7.0
+        );
+        spend.retain_observed(&ticket, 0.5).unwrap();
+        assert_eq!(
+            spend
+                .total_spent(crate::spend::Operation::DeepAudit)
+                .unwrap(),
+            7.0
+        );
+    }
+
+    #[test]
     fn governance_requires_explicit_model_without_fallback() {
         let error = resolve_explicit_model("triage:run", None, None)
             .unwrap_err()
@@ -284,7 +337,12 @@ mod tests {
         assert_eq!(outcome.cost_usd, 0.01, "restored rounds were already paid");
         let checkpoints = target.path().join(".kuzushi/v3/checkpoints");
         let leftover = std::fs::read_dir(&checkpoints)
-            .map(|entries| entries.count())
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+                    .count()
+            })
             .unwrap_or(0);
         assert_eq!(leftover, 0, "completion must clear the checkpoint");
     }

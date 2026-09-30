@@ -32,6 +32,24 @@ fi
 
 REPORT_DIR="${2:-$EVAL_DIR/reports/$(date -u +%Y%m%dT%H%M%S)}"
 mkdir -p "$REPORT_DIR/$SLICE"
+REPORT_DIR="$(cd "$REPORT_DIR" && pwd)"
+RECEIPT="$REPORT_DIR/$SLICE/validity.json"
+RECEIPT_TOOL="$REPO_ROOT/scripts/recall-run-receipt.mjs"
+if [[ -e "$RECEIPT" || -e "$REPORT_DIR/$SLICE/match.json" ]]; then
+  echo "run-slice: use a fresh report directory for each benchmark run" >&2
+  exit 2
+fi
+mark_invalid() {
+  jq -n --arg stage "$1" --argjson exit_code "$2" \
+    '{schemaVersion:1,status:"invalid",stage:$stage,exitCode:$exit_code}' > "$RECEIPT"
+}
+if node "$RECEIPT_TOOL" prepare "$TARGET" "$ORACLE_FILE" "$EVAL_DIR/scope/$SLICE.txt" "$RECEIPT"; then
+  :
+else
+  status=$?
+  mark_invalid provenance "$status"
+  exit "$status"
+fi
 START_TS=$(date -u +%s)
 
 # Default to scan task names supported by current main. Override with
@@ -53,15 +71,28 @@ set +e
   --tasks "$TASKS" \
   --triage \
   --json \
+  --sarif "$REPORT_DIR/$SLICE/scan.sarif" \
   > "$scan_json" 2> "$scan_log"
 scan_status=$?
 set -e
 
 if [[ $scan_status -ne 0 ]]; then
-  echo "[$SLICE] WARN: kuzushi scan exited $scan_status (see $scan_log)"
+  mark_invalid scan "$scan_status"
+  echo "[$SLICE] invalid benchmark: scan exited $scan_status (see $scan_log)" >&2
+  exit "$scan_status"
 fi
 
-"$KUZ" findings --target "$TARGET" --json > "$REPORT_DIR/$SLICE/findings.json" || true
+if node "$RECEIPT_TOOL" complete "$TARGET" "$ORACLE_FILE" "$EVAL_DIR/scope/$SLICE.txt" "$RECEIPT" \
+  "$scan_json" "$REPORT_DIR/$SLICE/scan.sarif" "$REPORT_DIR/$SLICE/findings.json"; then
+  :
+else
+  status=$?
+  mark_invalid export "$status"
+  exit "$status"
+fi
+COST_ARGS=()
+exact_cost=$(jq -r '.cost.exactUsd // empty' "$RECEIPT")
+if [[ -n "$exact_cost" ]]; then COST_ARGS=(--cost-usd "$exact_cost"); fi
 
 END_TS=$(date -u +%s)
 WALL=$(( END_TS - START_TS ))
@@ -73,12 +104,14 @@ WALL=$(( END_TS - START_TS ))
   --slice    "$SLICE" \
   --target   "$TARGET" \
   --wall-seconds "$WALL" \
+  --enforce-threshold \
+  "${COST_ARGS[@]}" \
   > "$REPORT_DIR/$SLICE/match.json"
 
 cat "$REPORT_DIR/$SLICE/match.json" | jq -r '
   "[" + .slice + "] hits=" + (.hits | tostring)
   + " misses=" + (.misses | tostring)
-  + " precision=" + ((.precision * 100 | floor / 100) | tostring)
+  + " oracle_hit_yield=" + ((.oracle_hit_yield * 100 | floor / 100) | tostring)
   + " recall_pm10="    + ((.recall.pm_lines * 100 | floor / 100) | tostring)
   + " recall_file="    + ((.recall.file_only * 100 | floor / 100) | tostring)
   + " wall=" + (.wall_seconds | tostring) + "s"

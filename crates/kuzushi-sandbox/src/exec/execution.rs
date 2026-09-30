@@ -1,72 +1,164 @@
 use crate::backend::SandboxBackend;
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::time::timeout;
 
 use super::argv::build_argv;
-use super::output::sandbox_result_from_child_output;
-use super::{SandboxError, SandboxExecOptions, SandboxExecResult};
+use super::output::completed_sandbox_result;
+use super::streams::{deliver_stdin, read_bounded};
+use super::supervision::ProcessGroup;
+use super::{ExitOutcome, SandboxError, SandboxExecOptions, SandboxExecResult, MAX_OUTPUT_BYTES};
 
 pub async fn sandbox_exec(
     backend: SandboxBackend,
     opts: SandboxExecOptions,
 ) -> Result<SandboxExecResult, SandboxError> {
+    validate_options(backend, &opts)?;
+    let mut command = sandbox_command(backend, &opts);
+    let mut group = ProcessGroup::configure(&mut command)?;
+    let started = Instant::now();
+    let mut child = command.spawn().map_err(SandboxError::Spawn)?;
+    group.attach(&child)?;
+    let result = supervise(&mut child, &group, backend, &opts, started).await;
+    group.terminate();
+    // Also reap after an IO/input error. No detached IO tasks survive this call.
+    reap(&mut child).await?;
+    result
+}
+
+fn validate_options(
+    backend: SandboxBackend,
+    opts: &SandboxExecOptions,
+) -> Result<(), SandboxError> {
+    if opts.cmd.first().is_none_or(|s| s.is_empty()) {
+        return Err(SandboxError::InvalidOptions("empty executable".into()));
+    }
+    if opts
+        .stdin
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_OUTPUT_BYTES)
+    {
+        return Err(SandboxError::InvalidOptions("stdin exceeds 1 MiB".into()));
+    }
     if backend.is_isolating() && crate::backend::which(backend.binary_name()).is_none() {
         return Err(SandboxError::BackendUnavailable(backend));
     }
+    Ok(())
+}
 
-    let argv = build_argv(backend, &opts);
+fn sandbox_command(backend: SandboxBackend, opts: &SandboxExecOptions) -> Command {
+    let argv = build_argv(backend, opts);
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
-    command.stdin(Stdio::piped());
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-
-    configure_plain_backend_process(backend, &opts, &mut command);
-
-    let started = Instant::now();
-    let mut child = command.spawn().map_err(SandboxError::Spawn)?;
-    pipe_stdin_to_child(opts.stdin.as_deref(), child.stdin.take());
-
-    let result = timeout(
-        Duration::from_millis(opts.timeout_ms),
-        child.wait_with_output(),
-    )
-    .await;
-    let duration_ms = started.elapsed().as_millis() as u64;
-
-    sandbox_result_from_child_output(backend, opts.timeout_ms, duration_ms, result)
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("LANG", "C.UTF-8");
+    if backend == SandboxBackend::Plain {
+        command.envs(&opts.env);
+        if let Some(workdir) = &opts.workdir {
+            command.current_dir(workdir);
+        }
+    }
+    command.kill_on_drop(true);
+    command
 }
 
-fn configure_plain_backend_process(
+async fn supervise(
+    child: &mut Child,
+    group: &ProcessGroup,
     backend: SandboxBackend,
     opts: &SandboxExecOptions,
-    command: &mut Command,
-) {
-    if backend != SandboxBackend::Plain {
-        return;
-    }
-    if let Some(wd) = &opts.workdir {
-        command.current_dir(wd);
-    }
-    if opts.env.is_empty() {
-        return;
-    }
-    command.env_clear();
-    for (k, v) in &opts.env {
-        command.env(k, v);
-    }
+    started: Instant,
+) -> Result<SandboxExecResult, SandboxError> {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let pipes = (
+        child.stdin.take(),
+        child.stdout.take().unwrap(),
+        child.stderr.take().unwrap(),
+    );
+    let work = async {
+        tokio::try_join!(
+            child.wait(),
+            read_bounded(pipes.1, &mut stdout),
+            read_bounded(pipes.2, &mut stderr),
+            deliver_stdin(opts.stdin.as_deref(), pipes.0)
+        )
+    };
+    let completion = timeout(Duration::from_millis(opts.timeout_ms), work).await;
+    let outcome = execution_outcome(&completion, &stdout, &stderr)?;
+    group.terminate();
+    let status = reap(child).await?;
+    let output = Output {
+        status,
+        stdout,
+        stderr,
+    };
+    Ok(terminal_result(
+        backend,
+        started,
+        output,
+        outcome,
+        opts.timeout_ms,
+    ))
 }
 
-fn pipe_stdin_to_child(stdin: Option<&str>, child_stdin: Option<tokio::process::ChildStdin>) {
-    let (Some(input), Some(mut stdin)) = (stdin, child_stdin) else {
-        return;
-    };
-    let bytes = input.as_bytes().to_vec();
-    tokio::spawn(async move {
-        let _ = stdin.write_all(&bytes).await;
-        let _ = stdin.shutdown().await;
-    });
+fn terminal_result(
+    backend: SandboxBackend,
+    started: Instant,
+    output: Output,
+    outcome: Option<ExitOutcome>,
+    timeout_ms: u64,
+) -> SandboxExecResult {
+    let mut result =
+        completed_sandbox_result(backend, started.elapsed().as_millis() as u64, output);
+    if let Some(outcome) = outcome {
+        result.outcome = outcome;
+    }
+    if result.outcome == ExitOutcome::TimedOut {
+        result.stderr.push_str(&format!(
+            "\n[kuzushi-sandbox] timeout after {timeout_ms} ms"
+        ));
+    }
+    result
+}
+
+async fn reap(child: &mut Child) -> Result<std::process::ExitStatus, SandboxError> {
+    child.start_kill()?;
+    timeout(Duration::from_secs(5), child.wait())
+        .await
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "sandbox cleanup exceeded five seconds",
+            )
+        })?
+        .map_err(SandboxError::Io)
+}
+
+type Completion =
+    Result<std::io::Result<(std::process::ExitStatus, (), (), ())>, tokio::time::error::Elapsed>;
+
+fn execution_outcome(
+    completion: &Completion,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<Option<ExitOutcome>, SandboxError> {
+    if stdout.len() > MAX_OUTPUT_BYTES || stderr.len() > MAX_OUTPUT_BYTES {
+        return Ok(Some(ExitOutcome::OutputLimitExceeded));
+    }
+    match completion {
+        Err(_) => Ok(Some(ExitOutcome::TimedOut)),
+        Ok(Ok(_)) => Ok(None),
+        Ok(Err(error)) => Err(SandboxError::Io(std::io::Error::new(
+            error.kind(),
+            error.to_string(),
+        ))),
+    }
 }

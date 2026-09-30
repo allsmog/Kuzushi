@@ -1,5 +1,14 @@
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+#[error("agent tool loop interrupted; final provider spend is unresolved: {cause}")]
+pub struct AgentLoopFailure {
+    pub outcome: AgentLoopOutcome,
+    pub usage: ModelTokenUsage,
+    #[source]
+    cause: anyhow::Error,
+}
+
 pub fn run_tool_loop(
     runtime: &dyn AgentRuntime,
     request: &AgentToolLoopRequest,
@@ -17,15 +26,24 @@ pub fn run_tool_loop_observed(
 
     let cap = request.max_steps.max(1);
     let checkpoint = super::loop_checkpoint::LoopCheckpointStore::discover(request);
+    let _lease = checkpoint
+        .as_ref()
+        .map(|store| store.acquire_lease())
+        .transpose()?;
     let mut accumulator = LoopAccumulator::resumed_from(&checkpoint);
     let first_step = super::loop_checkpoint::restored_step_count(&accumulator.transcript);
     for step in first_step..cap {
-        let outcome = next_loop_step(runtime, request, &accumulator.transcript, step)?;
-        if let Some(final_outcome) = accumulator.apply_step(outcome, handler, step + 1)? {
+        let outcome = next_loop_step(runtime, request, &accumulator.transcript, step)
+            .map_err(|error| accumulator.failure(error, step))?;
+        if let Some(final_outcome) = accumulator
+            .apply_step(outcome, handler, step + 1, &checkpoint)
+            .map_err(|error| accumulator.failure(error, step + 1))?
+        {
             clear_checkpoint(&checkpoint);
             return Ok(final_outcome);
         }
-        save_checkpoint(&checkpoint, &accumulator.transcript);
+        save_checkpoint(&checkpoint, &accumulator.transcript)
+            .map_err(|error| accumulator.failure(error, step + 1))?;
     }
 
     clear_checkpoint(&checkpoint);
@@ -35,10 +53,11 @@ pub fn run_tool_loop_observed(
 fn save_checkpoint(
     checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>,
     transcript: &[LoopHistoryEntry],
-) {
+) -> Result<()> {
     if let Some(store) = checkpoint {
-        store.save(transcript);
+        store.save(transcript)?;
     }
+    Ok(())
 }
 
 fn clear_checkpoint(checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>) {
@@ -64,6 +83,22 @@ impl Default for LoopAccumulator {
 }
 
 impl LoopAccumulator {
+    fn failure(&self, cause: anyhow::Error, steps_used: u32) -> AgentLoopFailure {
+        AgentLoopFailure {
+            cause,
+            usage: self.usage,
+            outcome: AgentLoopOutcome {
+                text: String::new(),
+                structured: None,
+                steps_used,
+                truncated: true,
+                cost_usd: self.cost.observed_usd(),
+                cost_usd_exact: false,
+                transcript: self.transcript.clone(),
+            },
+        }
+    }
+
     /// Seed the transcript from an interrupted run of the identical request.
     /// Restored rounds were paid for by the previous run, so cost/usage stay
     /// zero here — this run reports only what it spends itself.
@@ -82,13 +117,14 @@ impl LoopAccumulator {
         outcome: Observed<AgentLoopStep>,
         handler: &mut dyn ToolCallHandler,
         steps_used: u32,
+        checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>,
     ) -> Result<Option<Observed<AgentLoopOutcome>>> {
         self.usage = self
             .usage
             .checked_add(outcome.usage, "agent tool-loop accumulated")?;
         match outcome.value {
             AgentLoopStep::ToolCall { call, cost_usd } => {
-                self.apply_tool_call(call, cost_usd, handler)?;
+                self.apply_tool_call(call, cost_usd, handler, checkpoint)?;
                 Ok(None)
             }
             AgentLoopStep::Final {
@@ -106,10 +142,14 @@ impl LoopAccumulator {
         call: ToolCall,
         cost_usd: Option<f64>,
         handler: &mut dyn ToolCallHandler,
+        checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>,
     ) -> Result<()> {
         self.add_cost(cost_usd)?;
         self.transcript
             .push(LoopHistoryEntry::AssistantToolCall(call.clone()));
+        // An unfinished intent is never replayed automatically. If completion
+        // persistence fails, recovery requires reconciliation of this call ID.
+        save_checkpoint(checkpoint, &self.transcript)?;
         let result = handler
             .run(&call)
             .unwrap_or_else(|err| tool_error_result(&call, err));

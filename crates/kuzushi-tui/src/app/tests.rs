@@ -3697,7 +3697,10 @@ fn command_history_reducer_persists_only_for_workspace_backed_history() {
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert_eq!(fs::read_to_string(history_path).unwrap(), "tools");
+    assert!(history_path.exists());
+    let mut restored = ShellApp::new(V2Config::default(), Some(&workspace));
+    restored.load_persisted_history();
+    assert_eq!(restored.command_history(), ["tools".to_string()]);
 }
 
 #[test]

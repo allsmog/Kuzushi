@@ -17,7 +17,7 @@ mod traced_runtime;
 pub use application::{
     pending_agent_loop_checkpoints, query_blocking_checked, query_blocking_controlled_checked,
     run_tool_loop, run_tool_loop_observed, spawn_subagent_blocking_checked,
-    triage_finding_blocking_checked, PendingLoopCheckpoint,
+    triage_finding_blocking_checked, AgentLoopFailure, PendingLoopCheckpoint,
 };
 pub use domain::runtime_failure_metadata;
 pub use domain::{
@@ -38,9 +38,8 @@ pub use mcp_probe::{
 pub use policy::{
     bind_model_auth, bridge_api_key_env_for_model, canonical_model_spec, decide_tie_break,
     is_pre_execution_refusal, public_auth_provider, require_configured_model,
-    require_model_auth_binding,
-    resolve_explicit_model, validate_model_api_key_env, validate_model_spec, ModelAuthBinding,
-    PublicAuthProvider, TieBreakEscalation, TieBreakRefusal,
+    require_model_auth_binding, resolve_explicit_model, validate_model_api_key_env,
+    validate_model_spec, ModelAuthBinding, PublicAuthProvider, TieBreakEscalation, TieBreakRefusal,
 };
 pub use traced_runtime::{
     model_error_class_from_message, model_failure_metadata, model_provider, prompt_pair_hash,

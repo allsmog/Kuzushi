@@ -59,21 +59,47 @@ pub fn detect_buildable_languages(dir: &Path) -> Vec<&'static str> {
         .filter(|(count, _)| *count > 0)
         .collect();
     counts.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
-    resolve_c_cpp_overlap(counts.into_iter().map(|(_, lang)| lang).collect())
+    resolve_c_cpp_overlap(dir, counts.into_iter().map(|(_, lang)| lang).collect())
 }
 
 /// `.h` files count toward both c and cpp; when both are detected keep only
 /// the dominant one so a C repo doesn't also build a header-only cpp graph.
-fn resolve_c_cpp_overlap(langs: Vec<&'static str>) -> Vec<&'static str> {
+fn resolve_c_cpp_overlap(dir: &Path, langs: Vec<&'static str>) -> Vec<&'static str> {
     let c_pos = langs.iter().position(|l| *l == "c");
     let cpp_pos = langs.iter().position(|l| *l == "cpp");
     match (c_pos, cpp_pos) {
         (Some(c), Some(cpp)) => {
-            let drop = if c < cpp { "cpp" } else { "c" };
+            let c_owned = count_implementations(dir, "c");
+            let cpp_owned = count_implementations(dir, "cpp");
+            if c_owned > 0 && cpp_owned > 0 {
+                return langs;
+            }
+            let drop = match (c_owned > 0, cpp_owned > 0) {
+                (true, false) => "cpp",
+                (false, true) => "c",
+                _ => {
+                    if c < cpp {
+                        "cpp"
+                    } else {
+                        "c"
+                    }
+                }
+            };
             langs.into_iter().filter(|l| *l != drop).collect()
         }
         _ => langs,
     }
+}
+
+fn count_implementations(dir: &Path, lang: &str) -> usize {
+    let extensions: Vec<_> = extensions_for(lang)
+        .iter()
+        .copied()
+        .filter(|extension| !["h", "hpp", "hxx", "hh"].contains(extension))
+        .collect();
+    let mut count = 0;
+    walk_sources(dir, &extensions, &build_excludes(lang), &mut |_| count += 1);
+    count
 }
 
 fn count_sources(dir: &Path, lang: &str) -> usize {
@@ -171,5 +197,21 @@ mod tests {
             std::fs::write(sub.join("g.go"), "package g").unwrap();
         }
         assert_eq!(count_go(temp.path()), 1);
+    }
+}
+
+#[cfg(test)]
+mod mixed_native_tests {
+    use super::*;
+    #[test]
+    fn implementations_in_both_native_languages_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("c.c"), "void c(void) {}").unwrap();
+        std::fs::write(dir.path().join("cpp.cpp"), "void cpp() {}").unwrap();
+        std::fs::write(dir.path().join("shared.h"), "void c(void);").unwrap();
+        let languages = detect_buildable_languages(dir.path());
+        assert!(languages.contains(&"c") && languages.contains(&"cpp"));
+        std::fs::remove_file(dir.path().join("cpp.cpp")).unwrap();
+        assert_eq!(detect_buildable_languages(dir.path()), vec!["c"]);
     }
 }
