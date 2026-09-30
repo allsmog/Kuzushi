@@ -18,6 +18,11 @@ part of every release commit.
   bytes. Paste undo lasts until submission or intentional clearing. Completion
   waits until pasted blocks are expanded. Literal copies of marker text never
   acquire a document payload.
+- The interactive terminal inbox is limited to 256 queued events and 4 MiB of
+  event data. Resize, pointer-move and focus updates coalesce without crossing
+  ordered input. Keys, pointer actions and accepted pastes apply backpressure;
+  a paste over 1 MiB is rejected explicitly. Background wakes have a separate
+  coalesced slot, and saturation produces one bounded input diagnostic.
 - Semantic query keys now include generation settings and an attested runtime
   identity. Legacy keys safely miss. Runtime adapters opt in through
   `AgentRuntime::semantic_cache_identity`; unauthenticated external bridges,

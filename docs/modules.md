@@ -50,6 +50,11 @@ navigation preserves display columns. This changes shell presentation only.
 Collapsed pastes have tracked spans and undoable whole-block edits. Ctrl+Y opens
 a read-only preview with expand/remove/cancel controls; Ctrl+_ restores paste
 edits. Preview captures keys, pointer events and pasted input until it closes.
+The terminal inbox admits at most 256 events and 4 MiB of event data, with a
+1 MiB limit per accepted paste. Replaceable resize, pointer-move and focus states
+coalesce only between ordered actions. Keys and pastes wait for capacity instead
+of being dropped. Background wakes remain deliverable while input is saturated;
+the shell records queue pressure once and joins the reader during shutdown.
 Payloads stay in memory and are expanded exactly when the draft is submitted;
 marker text typed by an operator never resolves to a hidden payload.
 

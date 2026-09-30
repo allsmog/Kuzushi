@@ -551,6 +551,9 @@ is expected to behave identically and should be filed as a parity bug.
   submission. Ctrl+Y opens a read-only preview with expand/remove/cancel actions;
   Ctrl+_ restores paste edits. Composer and form fields edit whole graphemes and
   project cursor positions using terminal display widths.
+  The terminal inbox bounds count and bytes, coalesces replaceable state only
+  between ordered actions, and preserves accepted keys/pastes with backpressure.
+  A separate wake slot keeps background service responsive under input load.
 - **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
   and background handoff (`background`/`bg`, Run Focus `b`)** — shell-only.
   `jobs` is a Metasploit-style live control surface over the shared

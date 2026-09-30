@@ -59,7 +59,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 51 | Ground the finding's own primary location on every insert | Implemented | Ground every primary anchor against actual source while preserving original coordinates. |
 | 52 | Replace evidence-shape heuristics with typed evidence variants | Partial | Reject zero-line code and mixed code/HTTP evidence; preserve explicit non-source kinds. Typed evidence migration remains. |
 | 53 | Merge corroborating and contradicting evidence independently of severity | Implemented | Union independently grounded cross-producer evidence regardless of severity; stable provenance and ordering. |
-| 54 | Persist per-finding prefilter dispositions | Open | Continue existing PR #299 (supersedes #296); add durable per-input dispositions and readable output. No third prefilter implementation here. |
+| 54 | Persist per-finding prefilter dispositions | Partial | Merged PR #299 is integrated: bounded per-item dropped-finding output preserves score, threshold and omitted count. Complete durable per-input dispositions and their readable views remain; extend this implementation. |
 | 55 | Enforce citations for substantive verification verdicts | Implemented | Validate bounded exact source citations and required proof roles before accepting verdicts. |
 | 56 | Preserve every panel member's reasoning and evidence | Partial | Preserve every verification pass and dissent in consensus receipts. Triage and gate panel receipts remain. |
 | 57 | Calibrate confidence rather than average self-reported certainty | Partial | Label model confidence as uncalibrated and retain raw values. Held-out calibration dataset remains. |
@@ -91,7 +91,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 83 | Separate review disposition from proof status in finding filters | Open | Separate disposition and proof-state facets in filtering and counts. |
 | 84 | Put the exact export preview on the Report route | Open | Place a source-bound exact export preview on the Report route. |
 | 85 | Give interactive OAuth children exclusive ownership of terminal input | Open | Suspend terminal input ownership while interactive OAuth child runs. |
-| 86 | Bound and coalesce the terminal input backlog | Open | Bound and coalesce input backlog while preserving ordered command events. |
+| 86 | Bound and coalesce the terminal input backlog | Implemented | 256-event / 4 MiB inbox coalesces resize, pointer movement and focus between ordered actions; keys and accepted pastes apply backpressure. Separate background wake slot, explicit 1 MiB paste rejection, pressure counters/diagnostic and joined reader shutdown. Flood, saturation, exact-paste and close regressions pass. |
 | 87 | Require a Rust test receipt for the actual merge candidate | Partial | Rust tests and platform jobs cover ready PR updates against every base branch, including stacked PRs, and the merge queue. A semantic regression rejects main-only and branch-ignore filters. Required-check administration must be configured externally. |
 | 88 | Pin the frequently executed PR action supply chain | Partial | Pin CI actions, actionlint image, and reference-workflow first-party actions. Verified sticky-comment action pin remains. |
 | 89 | Measure the entire interval between deep-quality runs | Implemented | Select latest successful ancestral full-quality run; explicit bootstrap baseline required. |
@@ -108,6 +108,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 100 | Test workflow semantics rather than token presence | Partial | Parse YAML and assert promotion/PR-test/quality-base semantics. Remaining token-only release contracts must be migrated. |
 
 ## Verification
+
+- Terminal input follow-up: five queue flood/ordering/byte-bound/shutdown tests pass; 78 runtime tests pass, one ignored.
 
 - Checkpoint bounds follow-up: 65 checkpoint tests pass, including nested/oversized input, failed publication, payload reads, clear failure and shared dispatch health. Core/all-target Clippy passes with warnings denied.
 

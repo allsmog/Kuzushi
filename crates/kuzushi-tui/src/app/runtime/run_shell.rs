@@ -339,6 +339,7 @@ pub(crate) fn terminal_shell_step(
     wake: &TerminalLoopWake,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
 ) -> Result<()> {
+    input.report_pressure(app);
     if let Some(input_changed) = state.run_focus_hold.intercept_input(app, input)? {
         state.request_redraw(input_changed, RedrawPriority::Interactive);
         draw_terminal_if_needed(terminal, app, state)?;

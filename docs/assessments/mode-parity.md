@@ -39,6 +39,7 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Capability | scan | shell | run | Notes |
 | --- | :--: | :---: | :-: | --- |
 | Grapheme editing and atomic paste preview | N/A | ✓ | N/A | Shared composer/form editing uses complete graphemes and display cells. Ctrl+Y inspects a collapsed paste; expand/remove/cancel and Ctrl+_ undo preserve exact payload bytes until submission or clearing. |
+| Bounded terminal input | N/A | ✓ | N/A | 256-event / 4 MiB inbox; replaceable states coalesce between ordered actions. Keys and accepted pastes apply backpressure, oversized pastes fail explicitly, and background wakes retain a separate slot. |
 | Registry input preparation | ✓ | ✓ | ✓ | CLI scan compiles flags into `sast:scan`; shell and run prepare focused tool input through the same registry method. |
 | Descriptor option validation | ✓ | ✓ | ✓ | `OptionSpec` aliases, defaults, coercion, and unknown-key checks are centralized where descriptors are present. |
 | Stored tool options | ✓ | ✓ | ✓ | Global/workspace option stores are loaded before registry preparation. |
