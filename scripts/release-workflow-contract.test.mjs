@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -157,15 +157,33 @@ test("release publisher remains candidate-tagged and main-bound", () => {
   );
 });
 
-test("the complete release call graph uses immutable action refs", () => {
-  const workflows = [
-    { name: "candidate", source: candidate },
-    { name: "publisher", source: publisher },
-    { name: "full CI", source: fullCi },
-    { name: "published smoke", source: publishedSmoke },
-  ];
+test("all repository workflows use immutable external action refs", () => {
+  const workflows = readdirSync(new URL("../.github/workflows/", import.meta.url))
+    .filter((name) => /\.ya?ml$/.test(name))
+    .map((name) => ({ name, source: workflow(name) }));
   assert.deepEqual(callGraphActionPinFailures(workflows), []);
   assert.deepEqual(actionlintImageFailures(fullCi), []);
+  const reference = workflow("kuzushi-reference.yml");
+  const unpinnedComment = reference.replace(
+    "marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88",
+    "marocchino/sticky-pull-request-comment@v3",
+  );
+  assert.match(
+    callGraphActionPinFailures([{ name: "reference", source: unpinnedComment }]).join("\n"),
+    /full commit pin/,
+  );
+  assert.deepEqual(
+    callGraphActionPinFailures([
+      { name: "quoted", source: 'jobs: {test: {steps: [{uses: "owner/action@v1"}]}}' },
+    ]).length,
+    1,
+  );
+  assert.deepEqual(
+    callGraphActionPinFailures([
+      { name: "comment", source: 'jobs: {test: {steps: [{run: "echo uses: owner/action@v1"}]}}' },
+    ]),
+    [],
+  );
 
   const movable = candidate.replace(
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",

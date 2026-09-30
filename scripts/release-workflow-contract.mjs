@@ -1,3 +1,5 @@
+import { parse } from "yaml";
+
 const fullCommitRef = /^[0-9a-f]{40}$/;
 
 /** Every slug is still installed and executed on its own release runner. */
@@ -284,7 +286,9 @@ function externalActionPinFailures(workflowName, source) {
 }
 
 function actionUses(source) {
-  return [...source.matchAll(/^\s*-?\s*uses:\s+([^\s#]+)/gm)].map((match) => match[1]);
+  return Object.values(parse(source)?.jobs ?? {})
+    .flatMap((job) => [job.uses, ...(job.steps ?? []).map((step) => step.uses)])
+    .filter((specifier) => specifier !== undefined);
 }
 
 function missingTokens(source, subject, tokens) {
