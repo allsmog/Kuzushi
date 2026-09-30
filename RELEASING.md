@@ -24,6 +24,12 @@ part of every release commit.
   reclaimed bytes, quota pressure and pending work. Lowering the byte budget below
   an existing database's size disables that cache until it is cleared; it never
   admits new writes above the new budget.
+- Run-item writers reserve a bounded model completion receipt before each model
+  start and preserve a terminal outcome slot. At most eight calls may be in flight
+  in one run stream; a start without available receipt capacity fails before
+  provider dispatch. Model start/finish emission is synchronous and durable,
+  including through the ordinary `emit` API. Completed usage/cost receipts remain
+  admissible after ordinary log capacity is exhausted; the run still ends degraded.
 - Sandbox children receive an explicit minimal environment. Callers must grant
   required variables through `SandboxExecOptions.env`; stdin and each output
   stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.

@@ -53,6 +53,10 @@ The cache applies global `operator.semantic_cache` byte/entry quotas inside an
 immediate transaction. `SemanticCache::maintain()` reports bounded eviction and
 legacy-cleanup progress. Interrupted cleanup retries its unfinished shard on the
 next pass; successful-prune timestamps are recorded only after pending work ends.
+Model lifecycle producers must persist `ModelCallStarted` before provider
+dispatch. The writer reserves completion space, rejects starts beyond its eight
+in-flight slots, and commits model receipts synchronously. Normal log exhaustion
+does not erase completed usage/cost or permit a healthy terminal outcome.
 
 MCP servers validate arguments against registered schemas before dispatch. Clients
 must handle invalid-argument, capacity, cancellation and shutdown responses.
