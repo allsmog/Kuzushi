@@ -42,7 +42,8 @@ pub(crate) fn cpg_taint_paths_tool() -> AgentTool {
                 "source": { "type": "string", "description": "Regex for the source call/param, e.g. req\\.query" },
                 "sink":   { "type": "string", "description": "Regex for the sink call, e.g. memcpy|strcpy" },
                 "patternMode": { "type": "string", "enum": ["regex", "literal"], "default": "regex" },
-                "maxPaths": { "type": "integer", "description": "Max flows to return (default 10)." }
+                "maxPaths": { "type": "integer", "minimum": 1, "maximum": MAX_FLOWS_PER_QUERY,
+                    "default": 10, "description": "Max flows to return; larger requests are rejected, not clamped." }
             },
             "required": ["source", "sink"]
         }),
@@ -297,13 +298,19 @@ fn parse_taint_paths_args(call: &ToolCall) -> Result<TaintPathsArgs> {
     Ok(TaintPathsArgs {
         source: required_pattern(&call.input, "source")?,
         sink: required_pattern(&call.input, "sink")?,
-        max_paths: call
-            .input
-            .get("maxPaths")
-            .and_then(Value::as_u64)
-            .map(|value| value.clamp(1, MAX_FLOWS_PER_QUERY as u64) as usize)
-            .unwrap_or(10),
+        max_paths: requested_max_paths(&call.input)?,
     })
+}
+
+fn requested_max_paths(input: &Value) -> Result<usize> {
+    let Some(value) = input.get("maxPaths") else {
+        return Ok(10);
+    };
+    value
+        .as_u64()
+        .filter(|value| (1..=MAX_FLOWS_PER_QUERY as u64).contains(value))
+        .map(|value| value as usize)
+        .ok_or_else(|| anyhow::anyhow!("maxPaths must be an integer in 1..={MAX_FLOWS_PER_QUERY}"))
 }
 
 fn required_pattern(input: &Value, key: &str) -> Result<String> {
@@ -505,6 +512,39 @@ fn envelope_guard_note(envelope: &FlowEnvelope) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn max_paths_schema_and_parser_reject_invalid_or_silently_clamped_values() {
+        let schema = cpg_taint_paths_tool().input_schema;
+        assert_eq!(schema["properties"]["maxPaths"]["minimum"], 1);
+        assert_eq!(
+            schema["properties"]["maxPaths"]["maximum"],
+            MAX_FLOWS_PER_QUERY
+        );
+        assert_eq!(requested_max_paths(&json!({})).unwrap(), 10);
+        assert_eq!(requested_max_paths(&json!({"maxPaths": 1})).unwrap(), 1);
+        for value in [
+            json!(0),
+            json!(-1),
+            json!(MAX_FLOWS_PER_QUERY + 1),
+            json!(u64::MAX),
+            json!(1.5),
+            json!("10"),
+            Value::Null,
+        ] {
+            let result = handle_cpg_taint_paths(
+                Path::new("missing-graph"),
+                None,
+                &call(json!({"source":"a", "sink":"b", "maxPaths":value})),
+            )
+            .unwrap();
+            assert!(result.is_error);
+            assert!(result.output["error"]
+                .as_str()
+                .unwrap()
+                .contains("maxPaths"));
+        }
+    }
 
     fn write_guarded_ts_fixture(root: &Path) {
         std::fs::write(

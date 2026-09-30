@@ -62,6 +62,8 @@ MCP servers validate arguments against registered schemas before dispatch. Clien
 must handle invalid-argument, capacity, cancellation and shutdown responses.
 CPG callers must select regex or literal query semantics and check coverage,
 truncation and approximate-position metadata. Unsupported depth limits fail.
+The core `cpg_taint_paths` adapter enforces its advertised `maxPaths` range
+(1–25, default 10); invalid values are errors, never silent clamps.
 
 Persisted findings retain their original primary coordinates alongside grounding.
 Source-independent evidence has an explicit kind; a code citation must identify

@@ -46,7 +46,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 38 | Replace mtime-only graph freshness with source-content identity | Implemented | Source-content, configuration, implementation and graph-byte identities replace mtime freshness. |
 | 39 | Keep both C and C++ in genuinely mixed repositories | Implemented | Retain C and C++ in mixed repositories. |
 | 40 | Return failed-language coverage in CPG tool results | Implemented | Reject incomplete graph queries with failed-language coverage. |
-| 41 | Disclose every taint-query truncation and its scope | Partial | All taint category and flow caps disclosed. Core adapter input validation and resource coverage remain. |
+| 41 | Disclose every taint-query truncation and its scope | Implemented | MCP and core adapters disclose source/flow/language caps. Core maxPaths now has matching schema/parser bounds and rejects invalid or oversized values instead of clamping. Ten core adapter tests pass. |
 | 42 | Enforce or reject the advertised maxCallDepth option | Implemented | Reject maxCallDepth while the engine cannot enforce it. |
 | 43 | Make regex versus literal matching an explicit contract | Implemented | Explicit regex/literal query mode; invalid regex returns a diagnostic. |
 | 44 | Bound CPG work by bytes, memory, and cancellation as well as file count | Open | Bound source and graph bytes and move builds/queries to supervised cancellable workers. |

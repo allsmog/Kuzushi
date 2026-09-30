@@ -48,6 +48,10 @@ part of every release commit.
   evidence is merged independently of severity. Static verification requires exact
   bounded source citations; missing or invalid citations produce an inconclusive
   result. Raw model confidence remains explicitly uncalibrated.
+- Core `cpg_taint_paths.maxPaths` accepts integers from 1 through 25, with a
+  default of 10. Invalid or larger values now return an explicit error instead of
+  silently using a clamped value. The MCP query retains its separately advertised
+  output range and discloses the engine flow cap.
 - CPG caches use source-content and implementation identities; existing caches
   rebuild. `maxCallDepth` is rejected until the engine can enforce it. Regex and
   literal matching are explicit; limits and approximate method positions are
