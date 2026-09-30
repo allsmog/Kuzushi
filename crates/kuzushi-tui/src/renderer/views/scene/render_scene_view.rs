@@ -124,10 +124,31 @@ fn render_line_page_body(
     page: VizPage,
     line_scroll: u16,
 ) {
+    let lines = page_body_lines(app, area, page);
+    let Some(window) =
+        super::gallery_layout::line_page_window(area.height, lines.len(), line_scroll)
+    else {
+        render_scrolled_lines(frame, area, lines, 0);
+        return;
+    };
+    let sections = super::gallery_layout::line_page_position_sections(area);
+    render_scrolled_lines(frame, sections[0], lines, window.start);
     frame.render_widget(
-        Paragraph::new(page_body_lines(app, area, page))
+        Paragraph::new(Line::styled(window.position_label, crate::theme::muted())),
+        sections[1],
+    );
+}
+
+fn render_scrolled_lines(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+    scroll: u16,
+) {
+    frame.render_widget(
+        Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((line_scroll, 0)),
+            .scroll((scroll, 0)),
         area,
     );
 }
@@ -241,4 +262,147 @@ fn styled(text: String, fg: Color, bg: Color) -> Span<'static> {
         return Span::styled(text, Style::default());
     }
     Span::styled(text, Style::default().fg(fg).bg(bg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{StampedTargetCandidateFacts, TargetCandidateFacts};
+    use kuzushi_core::{SbomComponent, SbomLockfile, SbomScanReport, V2Config, WorkspaceTarget};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::collections::BTreeMap;
+    use std::path::PathBuf;
+
+    /// The audit reproduced this on a 2657-row component tree: the embedded
+    /// canvas cut the tree off mid-branch with no indicator, so nothing on
+    /// screen said the rest existed. `z` zoom disclosed the true count.
+    #[test]
+    fn the_embedded_component_tree_states_how_much_it_is_hiding() {
+        let (temp, mut app) = app_with_component_inventory();
+        app.router.scene_mut().set_page(VizPage::Components);
+        assert_eq!(app.current_map_viz_page(), VizPage::Components);
+
+        let rendered = render_embedded_gallery(&app, 60, 10, 0);
+
+        let position = rendered.last().expect("a rendered canvas").trim_end();
+        assert_eq!(position, " rows 1-7/16", "{rendered:#?}");
+        drop(temp);
+    }
+
+    /// `G` sets the surface scroll to `u16::MAX`; an unclamped `Paragraph`
+    /// scroll answered that with an empty canvas.
+    #[test]
+    fn scrolling_the_embedded_component_tree_to_the_end_keeps_content_on_screen() {
+        let (temp, mut app) = app_with_component_inventory();
+        app.router.scene_mut().set_page(VizPage::Components);
+
+        let rendered = render_embedded_gallery(&app, 60, 10, u16::MAX);
+
+        assert!(
+            rendered[2..rendered.len() - 1]
+                .iter()
+                .any(|row| !row.trim().is_empty()),
+            "the last page must show the tree's tail, not blank rows: {rendered:#?}"
+        );
+        let position = rendered.last().expect("a rendered canvas").trim_end();
+        assert_eq!(position, " rows 10-16/16", "{rendered:#?}");
+        drop(temp);
+    }
+
+    /// A projection that fits states nothing — the disclosure is a truncation
+    /// signal, not permanent chrome.
+    #[test]
+    fn a_component_tree_that_fits_its_canvas_states_no_position() {
+        let (temp, mut app) = app_with_component_inventory();
+        app.router.scene_mut().set_page(VizPage::Components);
+
+        let rendered = render_embedded_gallery(&app, 60, 40, 0);
+
+        assert!(
+            !rendered.iter().any(|row| row.contains("rows ")),
+            "a page that fits must not claim a window: {rendered:#?}"
+        );
+        drop(temp);
+    }
+
+    fn render_embedded_gallery(
+        app: &ShellApp,
+        width: u16,
+        height: u16,
+        line_scroll: u16,
+    ) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                render_embedded_map_gallery(frame, frame.area(), app, line_scroll);
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|row| {
+                (0..width)
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    fn app_with_component_inventory() -> (tempfile::TempDir, ShellApp) {
+        let temp = tempfile::tempdir().expect("temp target");
+        let workspace = WorkspaceTarget::new(temp.path()).expect("workspace");
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let path = temp.path().to_path_buf();
+        app.session_mut().begin_active_target_facts(path.clone(), 1);
+        assert!(app
+            .session_mut()
+            .apply_active_target_facts(StampedTargetCandidateFacts {
+                generation: 1,
+                facts: component_facts(path),
+            }));
+        (temp, app)
+    }
+
+    fn component_facts(path: PathBuf) -> TargetCandidateFacts {
+        TargetCandidateFacts {
+            path,
+            repository_kind: "git repository".into(),
+            branch: None,
+            revision: None,
+            dirty: None,
+            languages: vec!["Rust".into()],
+            build_systems: vec!["Cargo".into()],
+            nested_scopes: Vec::new(),
+            file_count: 12,
+            file_count_capped: false,
+            prior_artifact_count: 0,
+            prior_artifacts: Vec::new(),
+            component_inventory: Some(component_report()),
+            component_inventory_error: None,
+        }
+    }
+
+    fn component_report() -> SbomScanReport {
+        let components = (0..8)
+            .map(|index| SbomComponent {
+                name: format!("crate-{index}"),
+                version: Some(format!("1.{index}.0")),
+                package_url: None,
+                ecosystem: "cargo".into(),
+                manifest_path: "Cargo.toml".into(),
+                scope: "dependencies".into(),
+            })
+            .collect::<Vec<_>>();
+        SbomScanReport {
+            target: "/repo/demo".into(),
+            manifests_scanned: 1,
+            lockfiles: vec![SbomLockfile {
+                path: "Cargo.lock".into(),
+                sha256: "abc".into(),
+            }],
+            dependencies: Vec::new(),
+            by_ecosystem: BTreeMap::from([("cargo".into(), components.len())]),
+            components,
+        }
+    }
 }
