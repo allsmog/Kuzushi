@@ -1,9 +1,10 @@
-use crate::identity::executable::implementation_identity;
 use super::*;
+use crate::checkpoint_limits::{self, MAX_CHECKPOINT_BYTES, MAX_RECORDS as MAX_TRANSCRIPT_ENTRIES};
+use crate::identity::executable::implementation_identity;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Best-effort transcript checkpoint for agent tool loops.
+/// Bounded transcript checkpoint for agent tool loops.
 ///
 /// A multi-turn loop that dies mid-flight (provider outage, terminal rate
 /// limit, crash) has already paid for every completed round-trip. The driver
@@ -25,8 +26,22 @@ pub(super) struct LoopCheckpointStore {
     runtime_contract_fingerprint: String,
 }
 
+#[derive(Debug)]
+pub(super) struct LoopCheckpointLease(fs::File);
+
+impl Drop for LoopCheckpointLease {
+    fn drop(&mut self) {
+        // Explicitly release ownership even if a concurrent process spawn
+        // briefly inherited the descriptor before its close-on-exec boundary.
+        let _ = self.0.unlock();
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(
+    rename_all = "camelCase",
+    bound(deserialize = "T: FromIterator<LoopHistoryEntry>")
+)]
 struct LoopCheckpointFile<T = Vec<LoopHistoryEntry>> {
     version: u32,
     fingerprint: String,
@@ -34,18 +49,25 @@ struct LoopCheckpointFile<T = Vec<LoopHistoryEntry>> {
     source_identity: String,
     tool_contract_fingerprint: String,
     runtime_contract_fingerprint: String,
+    #[serde(deserialize_with = "deserialize_transcript")]
     transcript: T,
 }
 
 const LOOP_CHECKPOINT_VERSION: u32 = 3;
-const MAX_CHECKPOINT_BYTES: usize = 8 * 1024 * 1024;
-const MAX_TRANSCRIPT_ENTRIES: usize = 512;
 const LOOP_CHECKPOINT_FINGERPRINT_PREFIX: usize = 64;
+
+fn deserialize_transcript<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: FromIterator<LoopHistoryEntry>,
+{
+    checkpoint_limits::deserialize_records::<D, LoopHistoryEntry, T>(deserializer)
+}
 
 impl LoopCheckpointStore {
     /// A kernel-held lock is released on process death; identical concurrent
     /// requests cannot share, overwrite, or delete an active transcript.
-    pub(super) fn acquire_lease(&self) -> Result<fs::File> {
+    pub(super) fn acquire_lease(&self) -> Result<LoopCheckpointLease> {
         let parent = self.path.parent().context("checkpoint has no parent")?;
         fs::create_dir_all(parent)?;
         let file = fs::OpenOptions::new()
@@ -56,8 +78,9 @@ impl LoopCheckpointStore {
             .open(self.path.with_extension("lock"))?;
         file.try_lock()
             .context("an identical resumable loop is already running")?;
+        let lease = LoopCheckpointLease(file);
         self.require_reconciled_checkpoint()?;
-        Ok(file)
+        Ok(lease)
     }
 
     fn require_reconciled_checkpoint(&self) -> Result<()> {
@@ -126,13 +149,16 @@ impl LoopCheckpointStore {
         matches.then_some(file.transcript)
     }
 
-    /// Persist the transcript after a completed round. Best-effort: a failed
-    /// checkpoint write must not fail the paid run it is protecting.
+    /// Persist a borrowed transcript after a completed round. Failure stops
+    /// further work while the typed loop failure preserves already-paid cost.
     pub(super) fn save(&self, transcript: &[LoopHistoryEntry]) -> Result<()> {
         anyhow::ensure!(
             transcript.len() <= MAX_TRANSCRIPT_ENTRIES,
             "loop transcript exceeds 512 entries; resume unavailable"
         );
+        for entry in transcript {
+            checkpoint_limits::validate_record(entry)?;
+        }
         let file = LoopCheckpointFile {
             version: LOOP_CHECKPOINT_VERSION,
             fingerprint: self.fingerprint.clone(),

@@ -54,6 +54,19 @@ part of every release commit.
   owner; an unfinished tool intent requires explicit effect reconciliation before
   retry. Checkpoints over 8 MiB or 512 transcript entries fail visibly. Historical
   files are not rewritten and spend from failed turns remains unresolved.
+- Loop and stage checkpoints now admit at most 512 records, 1 MiB per encoded
+  record and 8 MiB per checkpoint. Readers validate raw record length before
+  allocating structured records and retain the JSON nesting limit. Stage payload
+  publication also stops at 8 MiB, including its newline. Oversized legacy
+  checkpoints require inspection instead of implicit recovery; bounded serializers
+  borrow transcripts and stage receipts instead of cloning the completed history.
+- Staged tools expose `resumeHealth` separately from execution success, persist
+  `resume-health.json` when storage permits, and emit one warning per failure
+  class and operation. The receipt names the last durable stage and source run.
+  A load, payload, receipt or save failure stops checkpoint advancement for that
+  dispatch while paid execution may continue; recovery retries on the next
+  dispatch. A failed clear is visible. Embedders must handle the new `Result`
+  returned by `StageCheckpointStore::clear`.
 - Finding anchors are grounded even without evidence. `unavailable` is distinct
   from invalid source evidence; claimed coordinates are preserved. Cross-producer
   evidence is merged independently of severity. Static verification requires exact

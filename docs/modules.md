@@ -92,6 +92,16 @@ not interpret unresolved spend as zero or an inconclusive static review as an
 empirical proof. See [migration notes](../RELEASING.md#audit-remediation-compatibility)
 and the [itemized ledger](quality/audit-remediation-2026-09-30.md).
 
+Loop and stage checkpoint codecs enforce 512 records, 1 MiB per encoded record,
+8 MiB in total and the JSON nesting limit. Stage payload writers use the same
+8 MiB budget before publishing an artifact. Staged tools return `resumeHealth`
+and retain a bounded `resume-health.json` receipt when storage permits. Recovery
+durability is separate from execution status: degradation preserves the last
+durable recovery point, warns once per operation/failure class and stops further
+checkpoint advancement until the next dispatch. An absent or stale receipt during a disk
+failure must not be interpreted as healthy recovery; live diagnostics and result
+metadata carry the in-memory state.
+
 ## Sources of truth
 
 Use these in descending order when documentation and code disagree:

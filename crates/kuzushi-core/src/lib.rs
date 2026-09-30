@@ -24,6 +24,7 @@ public_modules!(
 pub(crate) mod artifact_contract;
 pub(crate) mod bounded_file;
 pub(crate) mod bounded_subprocess;
+mod checkpoint_limits;
 pub(crate) mod codeql_build_mode;
 pub(crate) mod codeql_repository_execution;
 #[cfg(test)]

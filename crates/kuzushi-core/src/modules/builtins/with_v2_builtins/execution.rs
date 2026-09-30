@@ -5,6 +5,8 @@ use crate::modules::autonomy::WorkflowPhase;
 
 mod lifecycle_observation;
 mod prompt_input_limits;
+#[cfg(test)]
+mod resume_health_tests;
 use lifecycle_observation::DispatchLifecycle;
 pub use lifecycle_observation::{ApplicationToolCall, PendingToolCallCompletion, ToolCallIdentity};
 use prompt_input_limits::validate_tool_prompt_inputs;
@@ -450,8 +452,7 @@ impl ModuleRegistry {
             self.stage_checkpoint_handle(name, &operation_binding, execution_ctx);
         let _stage_scope =
             crate::run_artifacts::StageCheckpointScope::install(stage_checkpoints.clone());
-        let result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);
-        let completion = lifecycle.pending_completion(&result);
+        let mut result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);
         if result
             .as_ref()
             .is_ok_and(|output| tool_result_status(output).is_completed())
@@ -459,6 +460,8 @@ impl ModuleRegistry {
             clear_completed_stage_checkpoint(stage_checkpoints.as_deref());
             self.record_recent_tool_use(name, authorized_ctx);
         }
+        attach_resume_health(&mut result, stage_checkpoints.as_deref());
+        let completion = lifecycle.pending_completion(&result);
         Ok(ObservedDispatchOutcome {
             execution: result,
             completion,
@@ -482,7 +485,8 @@ impl ModuleRegistry {
         let store =
             crate::run_artifacts::StageCheckpointStore::discover(&target, operation_binding)?;
         Some(std::sync::Arc::new(
-            crate::run_artifacts::StageCheckpointHandle::open(store, &target, &run_id, name),
+            crate::run_artifacts::StageCheckpointHandle::open(store, &target, &run_id, name)
+                .with_trace(ctx.trace.cloned()),
         ))
     }
 
@@ -1664,6 +1668,21 @@ fn workspace_prompt_source_label(workspace: &std::path::Path, path: &std::path::
 fn clear_completed_stage_checkpoint(handle: Option<&crate::run_artifacts::StageCheckpointHandle>) {
     if let Some(handle) = handle {
         handle.clear_checkpoint();
+    }
+}
+
+fn attach_resume_health(
+    result: &mut Result<Value>,
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+) {
+    let Some(handle) = handle else {
+        return;
+    };
+    let Ok(Value::Object(output)) = result else {
+        return;
+    };
+    if let Ok(health) = serde_json::to_value(handle.resume_health()) {
+        output.insert("resumeHealth".into(), health);
     }
 }
 

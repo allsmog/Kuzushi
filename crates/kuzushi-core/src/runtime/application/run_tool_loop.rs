@@ -145,6 +145,7 @@ impl LoopAccumulator {
         checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>,
     ) -> Result<()> {
         self.add_cost(cost_usd)?;
+        crate::checkpoint_limits::validate_record(&call)?;
         self.transcript
             .push(LoopHistoryEntry::AssistantToolCall(call.clone()));
         // An unfinished intent is never replayed automatically. If completion
@@ -153,7 +154,9 @@ impl LoopAccumulator {
         let result = handler
             .run(&call)
             .unwrap_or_else(|err| tool_error_result(&call, err));
-        self.transcript.push(LoopHistoryEntry::ToolResult(result));
+        let entry = LoopHistoryEntry::ToolResult(result);
+        crate::checkpoint_limits::validate_record(&entry)?;
+        self.transcript.push(entry);
         Ok(())
     }
 
@@ -234,5 +237,41 @@ fn tool_error_result(call: &ToolCall, err: anyhow::Error) -> ToolResult {
         call_id: call.call_id.clone(),
         output: serde_json::json!({ "error": err.to_string() }),
         is_error: true,
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_budget_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_tool_result_stops_before_another_turn_and_keeps_paid_cost() {
+        let mut accumulator = LoopAccumulator::default();
+        let call = ToolCall {
+            name: "large_result".into(),
+            input: serde_json::json!({}),
+            call_id: "paid-1".into(),
+        };
+        let mut executions = 0;
+        let mut handler = |call: &ToolCall| {
+            executions += 1;
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                is_error: false,
+                output: serde_json::json!({"text": "x".repeat(crate::checkpoint_limits::MAX_RECORD_BYTES)}),
+            })
+        };
+        let error = accumulator
+            .apply_tool_call(call, Some(0.25), &mut handler, &None)
+            .unwrap_err();
+        assert!(error.to_string().contains("resume unavailable"));
+        assert_eq!(executions, 1);
+        let failure = accumulator.failure(error, 1);
+        assert_eq!(failure.outcome.cost_usd, 0.25);
+        assert_eq!(failure.outcome.transcript.len(), 1);
+        assert!(matches!(
+            failure.outcome.transcript[0],
+            LoopHistoryEntry::AssistantToolCall(_)
+        ));
     }
 }

@@ -31,8 +31,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 23 | Preserve accumulated loop spend when a later model turn fails | Implemented | Typed loop failures retain transcript and known spend; unresolved reservations retain observed cost. |
 | 24 | Journal tool-call intent and completion before resuming side effects | Partial | Persist tool-call intent before execution; unresolved intent refuses automatic replay. Per-tool replay-safety declarations and reconciliation UI remain. |
 | 25 | Give resumable loop checkpoints cross-process ownership | Implemented | Kernel file lease covers same-request load, save and clear; lock files retain stable identity. |
-| 26 | Apply byte and record bounds to checkpoint loading and serialization | Partial | Loop and stage reads bounded; loop count and serialization bounded. Stage serialization and per-tool result quotas remain. |
-| 27 | Report checkpoint degradation before operators depend on resume | Partial | Checkpoint write/load/lease failures are explicit and stop unsafe continuation. Operator-facing resume health receipts remain. |
+| 26 | Apply byte and record bounds to checkpoint loading and serialization | Implemented | Shared 512-record / 1 MiB-record / 8 MiB-file limits before structured decode and publication; borrowed serialization, stage payload cap, and oversized tool-result rejection preserving paid cost. Deep/oversize fixtures pass. |
+| 27 | Report checkpoint degradation before operators depend on resume | Partial | Staged dispatch exposes bounded resumeHealth, last durable stage/run, retry state, deduplicated warnings and a durable health artifact. Load/payload/receipt/save/clear failures are visible and preserve prior recovery. Loop clear and loop-level health metadata remain. |
 | 28 | Budget tool-loop context by tokens and tool-result size | Open | Apply token and per-tool-result budgets with a resumable evidence summary. |
 | 29 | Preserve backpressure after storage messages leave bounded channels | Partial | Internal actor queue is count-bounded. Aggregate queued-byte admission remains. |
 | 30 | Move blocking storage work off Tokio executor threads | Implemented | Storage actor performs blocking database and sync work on a blocking worker. |
@@ -109,7 +109,9 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 
 ## Verification
 
-- TUI editing follow-up (PR #308): nine grapheme tests, 94 editor tests, 132 prompt tests (one ignored) and 40 paste tests pass. Covers rendering, word operations, exact-byte recovery and preview input ownership.
+- Checkpoint bounds follow-up: 65 checkpoint tests pass, including nested/oversized input, failed publication, payload reads, clear failure and shared dispatch health. Core/all-target Clippy passes with warnings denied.
+
+- TUI editing follow-up (PR #308): ten grapheme tests, 55 history tests, 94 editor tests, 132 prompt tests (one ignored) and 40 paste tests pass. Covers rendering, word operations, exact-byte recovery and preview input ownership.
 
 - CPG follow-up (PR #307): ten core adapter tests and CPG/MCP suites pass; real stdio cases cover uncertainty, gaps, ambiguous identities and canonical selectors.
 
@@ -124,7 +126,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 - MCP common, CPG, MCP CPG, code-index, sandbox and evaluator suites passed.
 - Real pinned Semgrep and fresh npm dependency-graph smoke passed.
 - Full core-suite attempts stalled in aggregate scan/lifecycle tests; the isolated scan fixture passed. Repository-execution tests also failed because this workspace cannot open the required Bubblewrap namespaces. The full core gate is not claimed green.
-- macOS/Windows, actual container resource enforcement, public npm publication and paid benchmark runs require their corresponding execution environments. No such receipt is claimed here.
+- PR #309 CI: the quality gate, workspace/all-target Clippy and macOS platform lane passed. The Windows lane exposed retained-directory reopen and platform assertion failures, tracked in a separate follow-up. The full Rust job is still running; no all-platform pass is claimed.
+- Actual container resource enforcement, public npm publication and paid benchmark runs still require their corresponding execution environments.
 
 ## Review boundaries
 
