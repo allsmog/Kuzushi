@@ -1,5 +1,10 @@
 # Kuzushi modules
 
+Windows MCP file capabilities bind an opening content digest and verify the
+returned bytes against it before accepting reads or copies. Verification uses
+bounded streaming passes and restores the retained file cursor. Timestamp and
+file-ID metadata alone do not authorize reuse of changed content.
+
 This document describes the module surfaces implemented by the current Rust
 product. Kuzushi has two authoring paths:
 

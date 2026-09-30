@@ -7,6 +7,13 @@ part of every release commit.
 
 ### Audit remediation compatibility
 
+- Windows bounded MCP file reads now retain an opening content digest and
+  verify both returned bytes and current handle content before accepting a read
+  or copy. Read identities always include a content digest on Windows. This adds
+  bounded streaming reads; same-size writes and restored timestamps cannot reuse
+  a stale content identity. Loop checkpoint owners explicitly unlock on drop,
+  including error paths, before concurrent spawned processes finish exec.
+
 - Sandbox children receive an explicit minimal environment. Callers must grant
   required variables through `SandboxExecOptions.env`; stdin and each output
   stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.

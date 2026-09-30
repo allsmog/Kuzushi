@@ -364,6 +364,34 @@ fn rejects_a_replaced_root_after_path_resolution() {
 
 #[cfg(windows)]
 #[test]
+fn windows_bounded_reads_bind_content_despite_same_size_and_restored_write_time() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("same-size.txt");
+    let capability = ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+    for _ in 0..32 {
+        std::fs::write(&file, "before").unwrap();
+        let modified = std::fs::metadata(&file).unwrap().modified().unwrap();
+        let opened = capability.open(&file, 32).unwrap();
+        std::fs::write(&file, "after!").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert!(opened.read_bytes().is_err());
+    }
+    let (bytes, identity) = capability
+        .open(&file, 32)
+        .unwrap()
+        .read_bytes_with_identity()
+        .unwrap();
+    assert_eq!(bytes, b"after!");
+    assert!(identity.content_sha256.is_some());
+}
+
+#[cfg(windows)]
+#[test]
 fn authorizes_the_retained_root_directory_itself() {
     let root = tempfile::tempdir().unwrap();
     let capability = ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
