@@ -18,11 +18,17 @@ fn paste_interior_cursor_typing_and_deletion_are_atomic_and_undoable() {
     editor.set_cursor(12);
     assert_eq!(editor.cursor(), 7);
     editor.insert_str_at_cursor("NEW ");
-    assert_eq!(editor.expanded_input(), format!("before NEW {}", &original[7..]));
+    assert_eq!(
+        editor.expanded_input(),
+        format!("before NEW {}", &original[7..])
+    );
     editor.delete_forward();
     assert_eq!(editor.input(), "before NEW  after");
     editor.restore_last_cleared_input();
-    assert_eq!(editor.expanded_input(), format!("before NEW {}", &original[7..]));
+    assert_eq!(
+        editor.expanded_input(),
+        format!("before NEW {}", &original[7..])
+    );
     editor.move_cursor_right();
     editor.backspace();
     assert_eq!(editor.input(), "before NEW  after");
@@ -57,10 +63,15 @@ fn paste_payload_identity_uses_spans_instead_of_marker_text() {
     let marker = editor.insert_multiline_paste("actual\npayload\n");
     editor.move_cursor_home();
     editor.insert_str_at_cursor(&format!("{marker} literal "));
-    assert_eq!(editor.expanded_input(), format!("{marker} literal actual\npayload\n"));
+    assert_eq!(
+        editor.expanded_input(),
+        format!("{marker} literal actual\npayload\n")
+    );
     editor.move_cursor_end();
     editor.insert_multiline_paste("second\nblock");
-    assert!(editor.take_input().ends_with("actual\npayload\nsecond\nblock"));
+    assert!(editor
+        .take_input()
+        .ends_with("actual\npayload\nsecond\nblock"));
     assert!(editor.paste_undo.is_empty());
 }
 
@@ -89,7 +100,10 @@ fn paste_inspection_keys_own_input_and_cancel_without_changing_the_draft() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.editor_mut().insert_multiline_paste("first\nlast\n");
     let original = app.editor().snapshot_input();
-    assert!(app.reduce_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)).handled);
+    assert!(
+        app.reduce_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL))
+            .handled
+    );
     assert!(app.editor().paste_inspection().is_some());
     app.reduce_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     app.reduce_paste("ignored\npaste");
