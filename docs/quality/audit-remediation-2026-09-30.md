@@ -41,7 +41,7 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 33 | Stream event-log verification and index terminal deduplication | Open | Stream event-log verification and maintain bounded terminal-event deduplication. |
 | 34 | Propagate event-log directory fsync failures | Implemented | Propagate directory synchronization failures. |
 | 35 | Invalidate loop resumes when the implementation changes | Implemented | Checkpoint identity includes the executing binary digest and protocol revision. |
-| 36 | Reserve lifecycle capacity for model completion and cost receipts | Open | Reserve capacity for model completion and spend receipts through overload and shutdown. |
+| 36 | Reserve lifecycle capacity for model completion and cost receipts | Implemented | Reserve bounded completion capacity before each of eight possible in-flight calls, recover outstanding slots on reopen, and synchronously persist usage/cost through saturation while keeping terminal status degraded. |
 | 37 | Make scoped CPG artifact keys collision-resistant | Implemented | Versioned collision-resistant scoped CPG keys. |
 | 38 | Replace mtime-only graph freshness with source-content identity | Implemented | Source-content, configuration, implementation and graph-byte identities replace mtime freshness. |
 | 39 | Keep both C and C++ in genuinely mixed repositories | Implemented | Retain C and C++ in mixed repositories. |
@@ -108,6 +108,8 @@ Tracks the supplied 100-item audit (reviewed `cdfb4fc6df743b14fb3bcb362b1b409235
 | 100 | Test workflow semantics rather than token presence | Partial | Parse YAML and assert promotion/PR-test/quality-base semantics. Remaining token-only release contracts must be migrated. |
 
 ## Verification
+
+- Model receipt follow-up: 99 lifecycle/tracing-related tests pass, one ignored, including paid completion and terminal replay after ordinary stream exhaustion.
 
 - Cache follow-up (PR #305): 107 cache/config/full-mode tests pass, including changed execution settings, concurrent quotas and recovery after process exit during pruning.
 

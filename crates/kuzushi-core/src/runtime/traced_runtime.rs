@@ -214,10 +214,9 @@ impl<'a> TracedRuntime<'a> {
         let Some(observation) = self.trace.run_observation() else {
             return Ok(());
         };
-        if succeeded {
-            self.record_model_response_summary(&observation, lifecycle)?;
-        }
-        observation.emit(
+        let summary =
+            succeeded.then(|| self.record_model_response_summary(&observation, lifecycle));
+        observation.emit_and_flush(
             crate::run_lifecycle::RunItemRecord::new(
                 lifecycle.item_id,
                 crate::run_lifecycle::RunItemSource::Runtime,
@@ -235,7 +234,8 @@ impl<'a> TracedRuntime<'a> {
                 },
             )
             .with_call(lifecycle.call_id),
-        )
+        )?;
+        summary.transpose().map(|_| ())
     }
 
     fn record_model_response_summary(

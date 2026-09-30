@@ -19,6 +19,8 @@ mod writer_commit;
 mod writer_delivery;
 #[path = "writer_derivatives.rs"]
 mod writer_derivatives;
+#[path = "writer_model_reserve.rs"]
+mod writer_model_reserve;
 #[path = "writer_open.rs"]
 mod writer_open;
 #[path = "writer_range_delivery.rs"]
@@ -97,6 +99,7 @@ struct WriterState {
     next_seq: u64,
     previous_hash: Option<String>,
     bytes_written: u64,
+    model_receipts: writer_model_reserve::ModelReceiptReserve,
     delivery: Option<DeliveryPublisher>,
     failure: Option<RunItemWriterFault>,
     _lock: crate::file_lock::ExclusiveFileLock,
@@ -226,6 +229,13 @@ impl RunItemWriter {
     }
 
     pub fn emit(&self, record: RunItemRecord) -> Result<()> {
+        if matches!(
+            record.item,
+            crate::run_lifecycle::RunItemV1::ModelCallStarted { .. }
+                | crate::run_lifecycle::RunItemV1::ModelCallFinished { .. }
+        ) {
+            return self.emit_and_flush(record).map(|_| ());
+        }
         RunItemPersistencePolicy::validate(&record.item)?;
         anyhow::ensure!(
             RunItemPersistencePolicy::class(&record.item) == PersistenceClass::Lossless,
@@ -262,7 +272,6 @@ impl RunItemWriter {
             .context("run-item writer stopped")?;
         receive_result(receiver.recv(), "run-item flush")
     }
-
 }
 
 #[cfg(test)]

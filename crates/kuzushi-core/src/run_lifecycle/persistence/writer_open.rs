@@ -1,8 +1,7 @@
 use super::super::stream_reader::{parse_record, RunItemStreamReader};
+use super::writer_model_reserve::ModelReceiptReserve;
 use super::WriterState;
-use crate::run_lifecycle::{
-    RunId, RunItemEnvelopeV1, MAX_SERIALIZED_RUN_ITEM_BYTES,
-};
+use crate::run_lifecycle::{RunId, RunItemEnvelopeV1, MAX_SERIALIZED_RUN_ITEM_BYTES};
 use anyhow::{Context, Result};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
@@ -24,13 +23,15 @@ pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterSta
         "Run item stream",
     )?;
     let recovery_file = file.try_clone().context("clone run-item stream handle")?;
-    let (next_seq, previous_hash, bytes_written) = recover_tail(target, &path, recovery_file)?;
+    let (next_seq, previous_hash, bytes_written, model_receipts) =
+        recover_tail(target, &path, recovery_file)?;
     let state = WriterState {
         run_id,
         file,
         next_seq,
         previous_hash,
         bytes_written,
+        model_receipts,
         delivery: None,
         failure: None,
         _lock: lock,
@@ -48,21 +49,27 @@ fn record_stream_artifact(target: &Path, run_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn recover_tail(root: &Path, path: &Path, mut file: File) -> Result<(u64, Option<String>, u64)> {
+fn recover_tail(
+    root: &Path,
+    path: &Path,
+    mut file: File,
+) -> Result<(u64, Option<String>, u64, ModelReceiptReserve)> {
     file.seek(SeekFrom::Start(0))?;
     let mut reader = RunItemStreamReader::from_open_file_within(root, path, file)
         .with_context(|| format!("open {}", path.display()))?;
     let mut next_seq = 1;
     let mut previous_hash = None;
+    let mut model_receipts = ModelReceiptReserve::default();
     while let Some(record) = reader.next_record()? {
         let envelope = parse_record(record).map_err(anyhow::Error::msg)?;
         validate_recovered_envelope(&envelope, next_seq, &previous_hash)?;
+        model_receipts.observe(&envelope);
         next_seq += 1;
         previous_hash = Some(envelope.event_hash);
     }
     reader.verify_path_unchanged()?;
     let bytes = reader.bytes_read();
-    Ok((next_seq, previous_hash, bytes))
+    Ok((next_seq, previous_hash, bytes, model_receipts))
 }
 
 fn validate_recovered_envelope(
@@ -98,7 +105,7 @@ mod tests {
         let recovery = writer.try_clone().unwrap();
         assert_eq!(
             recover_tail(temp.path(), &path, recovery).unwrap(),
-            (1, None, 0)
+            (1, None, 0, ModelReceiptReserve::default())
         );
 
         std::fs::rename(&path, &displaced).unwrap();

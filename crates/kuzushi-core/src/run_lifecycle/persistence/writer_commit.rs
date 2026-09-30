@@ -25,6 +25,10 @@ pub(super) fn prepare_batch(
         envelopes.push(envelope);
     }
     validate_stream_budget(state.bytes_written, &envelopes)?;
+    let projected = state
+        .bytes_written
+        .saturating_add(serialize_batch(&envelopes)?.len() as u64);
+    state.model_receipts.validate_batch(projected, &envelopes)?;
     Ok(envelopes)
 }
 
@@ -75,6 +79,9 @@ pub(super) fn commit_batch(
 
 fn commit_state(state: &mut WriterState, envelopes: &[RunItemEnvelopeV1], bytes: u64) {
     state.bytes_written += bytes;
+    for envelope in envelopes {
+        state.model_receipts.observe(envelope);
+    }
     if let Some(last) = envelopes.last() {
         state.next_seq = last.seq + 1;
         state.previous_hash = Some(last.event_hash.clone());
@@ -121,6 +128,7 @@ pub(super) fn reserve_eligible_item(item: &RunItemV1) -> bool {
     ) || matches!(
         item,
         RunItemV1::OperatorQuestion { .. }
+            | RunItemV1::ModelCallFinished { .. }
             | RunItemV1::OperatorDecision { .. }
             | RunItemV1::TerminalOutcome { .. }
             | RunItemV1::PhaseReceipt { .. }
