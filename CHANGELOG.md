@@ -152,6 +152,12 @@ Notable changes to Kuzushi. Release procedure lives in
   the model policy before it is applied. The credential row, Setup detail, and
   picker intro now name the real target (`openai-oauth:gpt-5.6-terra`) instead
   of the stale GPT-5.4.
+
+- `triage:run` now discloses bounded item-level receipts for findings
+  excluded by the deterministic stage-1 prefilter, including finding/identity
+  IDs, score, threshold, total count, and an explicit omitted count instead of
+  reporting only an aggregate drop count.
+
 - A headless or shell `threat-model:build mode=refine` now reads the findings
   ledger. Before, `kuzushi run` handed the tool no findings store, so refine
   reported `newFindings 0` no matter what triage had confirmed.
