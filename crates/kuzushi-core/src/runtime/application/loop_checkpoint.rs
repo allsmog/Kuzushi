@@ -24,6 +24,17 @@ pub(super) struct LoopCheckpointStore {
     runtime_contract_fingerprint: String,
 }
 
+#[derive(Debug)]
+pub(super) struct LoopCheckpointLease(fs::File);
+
+impl Drop for LoopCheckpointLease {
+    fn drop(&mut self) {
+        // A concurrent fork can briefly retain the file description before
+        // close-on-exec. Explicit unlock releases this owner's lease now.
+        let _ = self.0.unlock();
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoopCheckpointFile<T = Vec<LoopHistoryEntry>> {
@@ -44,7 +55,7 @@ const LOOP_CHECKPOINT_FINGERPRINT_PREFIX: usize = 64;
 impl LoopCheckpointStore {
     /// A kernel-held lock is released on process death; identical concurrent
     /// requests cannot share, overwrite, or delete an active transcript.
-    pub(super) fn acquire_lease(&self) -> Result<fs::File> {
+    pub(super) fn acquire_lease(&self) -> Result<LoopCheckpointLease> {
         let parent = self.path.parent().context("checkpoint has no parent")?;
         fs::create_dir_all(parent)?;
         let file = fs::OpenOptions::new()
@@ -55,8 +66,9 @@ impl LoopCheckpointStore {
             .open(self.path.with_extension("lock"))?;
         file.try_lock()
             .context("an identical resumable loop is already running")?;
+        let lease = LoopCheckpointLease(file);
         self.require_reconciled_checkpoint()?;
-        Ok(file)
+        Ok(lease)
     }
 
     fn require_reconciled_checkpoint(&self) -> Result<()> {
