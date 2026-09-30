@@ -120,7 +120,21 @@ fn assert_retained_names_during_swap(authorized: &Path, swapped: &Path) {
     let capability = ReadRootCapability::new([outer.path().to_path_buf()]).unwrap();
     let directory = capability.authorize_directory(&authorized).unwrap();
 
-    std::fs::rename(&swapped, &retained).unwrap();
+    let renamed = std::fs::rename(&swapped, &retained);
+    #[cfg(windows)]
+    if let Err(error) = &renamed {
+        // NTFS can prevent an ancestor rename while a descendant is retained.
+        // The rejected namespace mutation itself preserves the capability.
+        assert!(matches!(error.raw_os_error(), Some(5 | 32)), "{error}");
+        assert!(!retained.exists());
+        assert_eq!(
+            directory.entry_names(4).unwrap(),
+            [std::ffi::OsString::from("trusted")]
+        );
+        directory.verify_unchanged().unwrap();
+        return;
+    }
+    renamed.unwrap();
     std::fs::create_dir_all(&authorized).unwrap();
     std::fs::write(authorized.join("decoy"), "decoy").unwrap();
     let first = directory.entry_names(4).unwrap();
@@ -384,7 +398,12 @@ fn rejects_a_parent_junction_swapped_after_path_resolution() {
     let root = capability.root_for(&resolved).unwrap();
     let error = super::open::open_file_beneath(root, &resolved).unwrap_err();
 
-    assert!(error.to_string().contains("escaped the retained read root"));
+    assert!(
+        error
+            .to_string()
+            .contains("refusing to follow an MCP reparse point"),
+        "{error:#}"
+    );
 }
 
 #[cfg(windows)]
