@@ -19,7 +19,6 @@ on:
   # because a path filter must never become a way to land executable or
   # workflow changes without a receipt.
   pull_request:
-    branches: [main]
     types: [opened, reopened, ready_for_review, synchronize]
     paths-ignore:
       - "**/*.md"

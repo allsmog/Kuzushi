@@ -42,6 +42,7 @@ test("public-install smoke must succeed before latest promotion", () => {
 
 test("every ready PR update has Rust tests and platform runtime jobs", () => {
   const ci = workflow("ci");
+  requireAllPullRequestBranches(ci);
   assert.ok(ci.on.pull_request.types.includes("synchronize"));
   assert.ok(Object.hasOwn(ci.on, "merge_group"));
   assert.equal(
@@ -55,6 +56,22 @@ test("every ready PR update has Rust tests and platform runtime jobs", () => {
     "macos-latest",
     "windows-latest",
   ]);
+});
+
+function requireAllPullRequestBranches(document) {
+  assert.equal(document.on.pull_request.branches, undefined);
+  assert.equal(document.on.pull_request["branches-ignore"], undefined);
+}
+
+test("stacked pull requests cannot be excluded from the CI trigger", () => {
+  const ci = workflow("ci");
+  requireAllPullRequestBranches(ci);
+  const mainOnly = structuredClone(ci);
+  mainOnly.on.pull_request.branches = ["main"];
+  assert.throws(() => requireAllPullRequestBranches(mainOnly));
+  const ignoredStack = structuredClone(ci);
+  ignoredStack.on.pull_request["branches-ignore"] = ["codex/**"];
+  assert.throws(() => requireAllPullRequestBranches(ignoredStack));
 });
 
 test("quality interval selects the latest successful ancestral run, never HEAD parent", () => {
