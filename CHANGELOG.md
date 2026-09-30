@@ -45,6 +45,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Map's embedded visualization no longer hides rows without saying so. The
+  Components/attack-path/heatmap/worklist projections drew into the canvas as a
+  plain scrolled `Paragraph`, and Ratatui clips one silently: on a real 2657-row
+  component tree the operator saw the tree stop mid-branch, with an unrelated
+  receipt line and the NEXT ACTION drawer on the next rows and no indication
+  that anything was missing. Only `z` zoom, whose full-frame path reserves a row
+  for `rows X-Y/N`, disclosed the true size. The embedded canvas now reserves
+  that row too and states the same window. It also clamps the window, so `G`
+  (and a held `j`) land on the tree's last page instead of scrolling the canvas
+  past its content into blank rows, and a projection that fits its canvas is
+  never scrolled away and states no position. Reported by the 2026-09-29 KZ TUI
+  operator-experience audit (#172).
+
 - A RESULT READY card the shell presents on its own now arrives with its keys
   armed. A Map launched from Setup, or a phase run launched from the planning
   picker, finishes by restoring the launch origin's input mode and then moving
