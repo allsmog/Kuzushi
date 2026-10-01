@@ -1,8 +1,10 @@
 use super::*;
 pub(crate) use super::*;
 
+pub(crate) use attributed_findings::*;
 pub(crate) use format_chain_alias::*;
 pub(crate) use show_aliases::*;
+mod attributed_findings;
 mod format_chain_alias;
 use self::{with_next_step, ExploitChain, ShellApp, ShellView};
 use anyhow::Result;
