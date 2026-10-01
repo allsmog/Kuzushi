@@ -67,9 +67,9 @@ pub(crate) struct PhaseResultCompactSummary {
     pub(crate) finding_delta_observed: Option<bool>,
     /// Distinct findings the loaded ledger attributes to this attempt's runs,
     /// set only when no typed finding delta measured them and the ledger backs
-    /// the claim. `changed_findings` is then the runs' own observation total,
-    /// which the ledger's fold can exceed, so the label leads with this count
-    /// instead of printing a total the rest of the frame contradicts.
+    /// the claim. `changed_findings` is then the runs' own reported total, which
+    /// the ledger's same-issue fold can exceed, so the label states this count
+    /// instead of a total the rest of the frame contradicts.
     pub(crate) attributed_findings: Option<u64>,
     pub(crate) cost: Option<String>,
     pub(crate) revision_recorded: bool,
@@ -78,11 +78,11 @@ pub(crate) struct PhaseResultCompactSummary {
 
 impl PhaseResultCompactSummary {
     /// `findings +N`, or `findings unmeasured` when no typed finding delta
-    /// backs the count. A ledger-measured count reads in the Scan delta pane's
-    /// `distinct`/`observations` vocabulary instead, because it is not a delta.
+    /// backs the count. A ledger-measured count reads as `findings N distinct`
+    /// instead, because it is not a delta.
     pub(crate) fn findings_label(&self) -> String {
         if let Some(distinct) = self.attributed_findings {
-            return attributed_findings_label(distinct, self.changed_findings);
+            return attributed_findings_label(distinct);
         }
         finding_delta_label(
             &format!("+{}", self.changed_findings),
@@ -387,7 +387,9 @@ impl ShellApp {
     /// total, not a delta — which is the number the banner used to print as
     /// `findings +27` over a panel that said 25. The ledger measures the same
     /// runs under the same attribution rule the Scan page uses, so when it
-    /// backs a claim both surfaces name the same findings.
+    /// backs a claim both surfaces name the same findings. The runs' own
+    /// reported total is deliberately not carried here; see
+    /// `attributed_findings_label`.
     fn phase_result_compact_summary(
         &self,
         completed: &PhaseAttemptCompleted,
@@ -1199,10 +1201,11 @@ mod tests {
             .compact_summary;
 
         assert_eq!(summary.attributed_findings, Some(3));
-        assert_eq!(
-            summary.findings_label(),
-            "findings 3 distinct · 5 observations"
-        );
+        assert_eq!(summary.findings_label(), "findings 3 distinct");
+        // The receipt's 5 is `receipt_run_changes`'s `max` over the attempt's
+        // runs, while the Scan pane sums the same runs; neither may be stated
+        // here as the attempt's observations.
+        assert!(!summary.findings_label().contains("observation"));
     }
 
     /// A typed finding delta is the durable measurement; the ledger must not

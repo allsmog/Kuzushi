@@ -20,18 +20,18 @@ pub(crate) fn finding_delta_label(counts: &str, total: u64, observed: Option<boo
 }
 
 /// The label for a findings count the ledger measured because no typed delta
-/// did. `distinct` is what the ledger attributes to the attempt's runs and
-/// `recorded` what those runs reported emitting; the ledger folds same-issue
-/// observations into one finding, so a recorded count above the distinct one is
-/// that fold, never a second finding count, and nothing else would be. Neither
-/// number is a delta, so neither carries a `+`. The vocabulary is the Scan
-/// delta pane's so the RESULT READY banner and the panel under it read alike.
-pub(crate) fn attributed_findings_label(distinct: u64, recorded: u64) -> String {
-    if recorded > distinct {
-        format!("findings {distinct} distinct · {recorded} observations")
-    } else {
-        format!("findings {distinct} distinct")
-    }
+/// did. `distinct` is what the ledger attributes to the attempt's runs: not a
+/// delta, so no `+`.
+///
+/// It states no observation count beside it, unlike the Scan delta pane. The
+/// pane sums `findings` over every summary it loaded for the attempt; the
+/// receipt's `changed_findings` is `receipt_run_changes`'s `max` over the same
+/// runs. Those differ the moment an attempt has two finding-producing runs, and
+/// one word printed over two arithmetics is the defect this label exists to
+/// fix. The pane keeps the fold disclosure, beside the severity breakdown it
+/// reconciles with.
+pub(crate) fn attributed_findings_label(distinct: u64) -> String {
+    format!("findings {distinct} distinct")
 }
 
 #[cfg(test)]
@@ -67,26 +67,22 @@ mod tests {
     }
 
     #[test]
-    fn a_ledger_measured_count_leads_with_the_distinct_findings() {
-        assert_eq!(
-            attributed_findings_label(25, 27),
-            "findings 25 distinct · 27 observations"
-        );
-    }
-
-    #[test]
-    fn a_recorded_count_is_disclosed_only_when_it_is_the_fold() {
-        assert_eq!(attributed_findings_label(25, 25), "findings 25 distinct");
-        assert_eq!(attributed_findings_label(30, 15), "findings 30 distinct");
+    fn a_ledger_measured_count_states_the_distinct_findings() {
+        assert_eq!(attributed_findings_label(25), "findings 25 distinct");
+        assert_eq!(attributed_findings_label(0), "findings 0 distinct");
     }
 
     #[test]
     fn a_ledger_measured_count_never_reads_as_a_delta() {
-        for label in [
-            attributed_findings_label(25, 27),
-            attributed_findings_label(25, 25),
-        ] {
-            assert!(!label.contains('+'), "{label}");
-        }
+        assert!(!attributed_findings_label(25).contains('+'));
+    }
+
+    /// The receipt's count is a `max` over the attempt's runs and the Scan
+    /// pane's is a sum, so this label must not restate either as the
+    /// attempt's observations.
+    #[test]
+    fn a_ledger_measured_count_claims_no_observation_total() {
+        let label = attributed_findings_label(10);
+        assert!(!label.contains("observation"), "{label}");
     }
 }
