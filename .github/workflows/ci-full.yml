@@ -220,7 +220,7 @@ jobs:
       # its checksum. The version stays exact because
       # scripts/run-rust-coverage.sh refuses any other build.
       - name: Install coverage tool
-        uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-llvm-cov@0.8.7
       - uses: ./.github/actions/install-patch-validation-sandbox
@@ -265,7 +265,7 @@ jobs:
       # release binary instead of a from-source build. The version stays exact
       # because scripts/run-rust-mutations.sh refuses any other build.
       - name: Install mutation tool
-        uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2.87.1
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-mutants@27.1.0
       - name: Require sampled changed mutants to be caught
