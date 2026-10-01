@@ -5,7 +5,6 @@ use kuzushi_core::workflow_attempts::{
     PhaseAttemptOutcome, PhaseAttemptRecord, PhaseTargetSnapshot,
 };
 use kuzushi_core::RunSummary;
-use std::collections::BTreeSet;
 
 pub(super) fn scan_attempt_from_stage(
     app: &ShellApp,
@@ -91,11 +90,8 @@ pub(super) fn scan_attempt_from_record(
 ) -> ScanAttemptModel {
     let run_id = leading_run_ref(&record.completed.run_refs);
     let (cost_usd, cost_complete) = summed_recorded_cost(summaries);
-    let findings = attempt_finding_facts(
-        app,
-        &record.completed.run_refs,
-        sum_recorded_findings(summaries),
-    );
+    let findings =
+        app.attempt_finding_facts(&record.completed.run_refs, sum_recorded_findings(summaries));
     ScanAttemptModel {
         attempt_id: Some(record.completed.attempt_id.clone()),
         run_id,
@@ -125,7 +121,7 @@ pub(super) fn scan_attempt_from_legacy_summary(
     summary: &RunSummary,
 ) -> ScanAttemptModel {
     let findings =
-        attempt_finding_facts(app, std::slice::from_ref(&summary.run_id), summary.findings);
+        app.attempt_finding_facts(std::slice::from_ref(&summary.run_id), summary.findings);
     ScanAttemptModel {
         attempt_id: None,
         run_id: summary.run_id.clone(),
@@ -222,89 +218,6 @@ fn normalized_outcome(status: &str) -> String {
         "unknown".to_string()
     } else {
         status
-    }
-}
-
-/// What the loaded ledger says about one attempt's runs: how many distinct
-/// findings it attributes to them, and how those split across severity bands.
-struct AttributedFindings {
-    distinct: u64,
-    /// Highest band first, zero buckets omitted.
-    severity_counts: Vec<(String, u64)>,
-}
-
-/// Bucket the findings the ledger attributes to this attempt's runs, counting
-/// the total and the bands in one pass so a panel can never print one number
-/// as "findings" and break a different one down beside it.
-///
-/// Attribution is `finding_observed_in_runs`, the shared source-aware rule: a
-/// finding re-observed by a later run keeps that run as its representative
-/// `scan_id` while the earlier run stays in `sources`, so matching the
-/// representative alone would drop the finding from the very attempt that
-/// found it — and then read the recorded count's excess as corroboration.
-///
-/// `None` when the claim has no backing. A clamped ledger holds only part of
-/// the target's findings and a filtered one only the rows the operator asked
-/// to see, so in either case both numbers would be floors — a filter must
-/// never move what an accepted attempt found. An attempt the ledger attributes
-/// nothing to is the ordinary case of a summary whose findings were never
-/// projected, not an observed zero. The typed receipt path never consults the
-/// ledger; its counts are the durable truth.
-fn attributed_findings(app: &ShellApp, run_refs: &[String]) -> Option<AttributedFindings> {
-    if app.findings_are_partial() || app.active_findings_filter().is_some() {
-        return None;
-    }
-    let run_refs = run_refs.iter().cloned().collect::<BTreeSet<_>>();
-    let mut counts = std::collections::BTreeMap::new();
-    let mut distinct = 0_u64;
-    for finding in app.findings() {
-        if crate::app::finding_observed_in_runs(finding, &run_refs) {
-            distinct += 1;
-            *counts.entry(finding.severity).or_insert(0u64) += 1;
-        }
-    }
-    (distinct > 0).then(|| AttributedFindings {
-        distinct,
-        severity_counts: counts
-            .into_iter()
-            .rev()
-            .map(|(severity, count)| (severity.as_str().to_string(), count))
-            .collect(),
-    })
-}
-
-/// The three finding facts one attempt's panel shows, derived together so the
-/// count and the bands beneath it can never come from different evidence.
-struct AttemptFindingFacts {
-    count: Option<u64>,
-    observed: Option<u64>,
-    severity_counts: Vec<(String, u64)>,
-}
-
-/// `recorded` is what the attempt's runs reported emitting. The ledger folds
-/// same-issue observations into one finding, so a recorded count above the
-/// ledger's is that fold, not a second finding count: reporting it as the
-/// attempt's findings is what made the delta panel read `findings 27` beside
-/// its own `20 high · 5 medium` breakdown. It is disclosed only when it is the
-/// higher number, since nothing else would be a fold. Without ledger evidence
-/// the recorded count stands alone with no bands, which is all this projection
-/// ever knew.
-fn attempt_finding_facts(
-    app: &ShellApp,
-    run_refs: &[String],
-    recorded: Option<u64>,
-) -> AttemptFindingFacts {
-    let Some(ledger) = attributed_findings(app, run_refs) else {
-        return AttemptFindingFacts {
-            count: recorded,
-            observed: None,
-            severity_counts: Vec::new(),
-        };
-    };
-    AttemptFindingFacts {
-        count: Some(ledger.distinct),
-        observed: recorded.filter(|observations| *observations > ledger.distinct),
-        severity_counts: ledger.severity_counts,
     }
 }
 

@@ -28,7 +28,7 @@ mod continuation;
 mod finding_delta_label;
 #[path = "phase_results/typed_receipt.rs"]
 mod typed_receipt;
-use finding_delta_label::finding_delta_label;
+use finding_delta_label::{attributed_findings_label, finding_delta_label};
 use typed_receipt::TypedReceiptResolution;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +65,12 @@ pub(crate) struct PhaseResultCompactSummary {
     pub(crate) changed_findings: u64,
     /// See `PhaseAttemptReceipt::finding_delta_observed`.
     pub(crate) finding_delta_observed: Option<bool>,
+    /// Distinct findings the loaded ledger attributes to this attempt's runs,
+    /// set only when no typed finding delta measured them and the ledger backs
+    /// the claim. `changed_findings` is then the runs' own reported total, which
+    /// the ledger's same-issue fold can exceed, so the label states this count
+    /// instead of a total the rest of the frame contradicts.
+    pub(crate) attributed_findings: Option<u64>,
     pub(crate) cost: Option<String>,
     pub(crate) revision_recorded: bool,
     pub(crate) receipt_recorded: bool,
@@ -72,8 +78,12 @@ pub(crate) struct PhaseResultCompactSummary {
 
 impl PhaseResultCompactSummary {
     /// `findings +N`, or `findings unmeasured` when no typed finding delta
-    /// backs the count.
+    /// backs the count. A ledger-measured count reads as `findings N distinct`
+    /// instead, because it is not a delta.
     pub(crate) fn findings_label(&self) -> String {
+        if let Some(distinct) = self.attributed_findings {
+            return attributed_findings_label(distinct);
+        }
         finding_delta_label(
             &format!("+{}", self.changed_findings),
             self.changed_findings,
@@ -87,6 +97,7 @@ impl PhaseResultCompactSummary {
     pub(crate) fn findings_segment(&self) -> Option<String> {
         let unmeasured_map = self.phase == WorkflowPhase::Map
             && self.changed_findings == 0
+            && self.attributed_findings.is_none()
             && self.finding_delta_observed != Some(true);
         (!unmeasured_map).then(|| self.findings_label())
     }
@@ -337,7 +348,7 @@ impl ShellApp {
         let actions =
             ordered_phase_result_actions(completed.phase, effective_outcome, &policy.actions);
         let emphasis = phase_result_emphasis(completed.phase, effective_outcome, &actions);
-        let compact_summary = phase_result_compact_summary(completed, effective_outcome);
+        let compact_summary = self.phase_result_compact_summary(completed, effective_outcome);
         let recommended_next = policy
             .recommended_next
             .unwrap_or_else(|| "open the result and choose a disposition".to_string());
@@ -365,6 +376,32 @@ impl ShellApp {
             actions,
             recommended_next,
         }
+    }
+
+    /// The compact summary, with the ledger consulted for the one count the
+    /// receipt could not measure itself.
+    ///
+    /// A receipt whose `finding_delta_observed` is set carries a typed finding
+    /// delta: durable truth, already a delta, left alone. Without one,
+    /// `changed_findings` is what the attempt's runs reported emitting — a
+    /// total, not a delta — which is the number the banner used to print as
+    /// `findings +27` over a panel that said 25. The ledger measures the same
+    /// runs under the same attribution rule the Scan page uses, so when it
+    /// backs a claim both surfaces name the same findings. The runs' own
+    /// reported total is deliberately not carried here; see
+    /// `attributed_findings_label`.
+    fn phase_result_compact_summary(
+        &self,
+        completed: &PhaseAttemptCompleted,
+        outcome: PhaseAttemptOutcome,
+    ) -> PhaseResultCompactSummary {
+        let mut summary = phase_result_compact_summary(completed, outcome);
+        if summary.finding_delta_observed.is_none() {
+            summary.attributed_findings = self
+                .attributed_findings(&completed.run_refs)
+                .map(|ledger| ledger.distinct);
+        }
+        summary
     }
 
     fn phase_result_detail_rows(
@@ -725,6 +762,7 @@ fn phase_result_compact_summary(
         artifact_count: receipt.map_or(0, |receipt| receipt.changed_artifacts.len()),
         changed_findings: receipt.map_or(0, |receipt| receipt.changed_findings),
         finding_delta_observed: receipt.and_then(|receipt| receipt.finding_delta_observed),
+        attributed_findings: None,
         cost: receipt.map(|receipt| receipt.cost.clone()),
         revision_recorded: completed.target_snapshot.revision.is_some(),
         receipt_recorded: receipt.is_some(),
@@ -1143,6 +1181,109 @@ fn successful_result_recommendation(phase: WorkflowPhase, routes_to_report: bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The RESULT READY banner printed the runs' raw observation count as a
+    /// finding delta (`findings +27`) one line above the Scan delta pane that
+    /// #302 had already fixed to read `findings 25 distinct · 27 observations`
+    /// from the same ledger. Issue #172, 2026-09-30 audit.
+    #[test]
+    fn the_banner_names_the_same_findings_the_scan_pane_beneath_it_names() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.set_findings(ledger_observed_by("scan-run", 3));
+
+        let completed = attempt_with_outcome(target.path(), PhaseAttemptOutcome::Completed)
+            .with_receipt(run_reported_receipt(5));
+
+        let summary = app
+            .phase_result_presentation_for(&completed)
+            .compact_summary;
+
+        assert_eq!(summary.attributed_findings, Some(3));
+        assert_eq!(summary.findings_label(), "findings 3 distinct");
+        // The receipt's 5 is `receipt_run_changes`'s `max` over the attempt's
+        // runs, while the Scan pane sums the same runs; neither may be stated
+        // here as the attempt's observations.
+        assert!(!summary.findings_label().contains("observation"));
+    }
+
+    /// A typed finding delta is the durable measurement; the ledger must not
+    /// be allowed to restate it, least of all as a non-delta count.
+    #[test]
+    fn a_typed_finding_delta_is_never_restated_from_the_ledger() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.set_findings(ledger_observed_by("scan-run", 3));
+
+        let mut receipt = run_reported_receipt(5);
+        receipt.finding_delta_observed = Some(true);
+        let completed = attempt_with_outcome(target.path(), PhaseAttemptOutcome::Completed)
+            .with_receipt(receipt);
+
+        let summary = app
+            .phase_result_presentation_for(&completed)
+            .compact_summary;
+
+        assert_eq!(summary.attributed_findings, None);
+        assert_eq!(summary.findings_label(), "findings +5");
+    }
+
+    /// A filtered projection holds only the rows the operator asked to see, so
+    /// its count is a floor. The recorded count has to stand as it did before.
+    #[test]
+    fn a_filtered_ledger_never_moves_what_an_attempt_found() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.set_findings(ledger_observed_by("scan-run", 3));
+        app.set_active_findings_filter(Some("severity:high".to_string()));
+
+        let completed = attempt_with_outcome(target.path(), PhaseAttemptOutcome::Completed)
+            .with_receipt(run_reported_receipt(5));
+
+        let summary = app
+            .phase_result_presentation_for(&completed)
+            .compact_summary;
+
+        assert_eq!(summary.attributed_findings, None);
+        assert_eq!(summary.findings_label(), "findings +5");
+    }
+
+    /// `changed_findings` without a typed delta is what the runs reported
+    /// emitting, which `receipt_run_changes` reads off each run summary.
+    fn run_reported_receipt(reported: u64) -> kuzushi_core::workflow_attempts::PhaseAttemptReceipt {
+        kuzushi_core::workflow_attempts::PhaseAttemptReceipt {
+            run_count: 1,
+            elapsed_secs: 2,
+            cost: "$0.0000".to_string(),
+            changed_findings: reported,
+            finding_delta_observed: None,
+            changed_artifacts: Vec::new(),
+            interaction_count: 0,
+            rerun_specification: None,
+            actions: vec![PhaseResultAction::Select],
+            recommended_next: None,
+        }
+    }
+
+    fn ledger_observed_by(run_id: &str, count: usize) -> Vec<kuzushi_core::Finding> {
+        (0..count)
+            .map(|index| {
+                let mut finding = kuzushi_core::Finding::new_semgrep(
+                    &format!("demo.rule.{index}"),
+                    "src/app.rs",
+                    index as u32 + 1,
+                    None,
+                    kuzushi_core::Severity::High,
+                    "ledger finding",
+                );
+                finding.scan_id = Some(run_id.to_string());
+                finding
+            })
+            .collect()
+    }
 
     fn durable_partial_attempt(target: &std::path::Path) -> PhaseAttemptCompleted {
         PhaseAttemptCompleted::new(
