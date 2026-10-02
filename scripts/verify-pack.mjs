@@ -3,11 +3,17 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { checkArtifactSchemaInventory } from "./artifact-schema-inventory-contract.mjs";
+import { bridgeModuleClosure } from "./bridge-module-closure.mjs";
 import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
 import { nativePlatformPackages } from "./native-runtime-contract.mjs";
 import { packedInventoryFailures } from "./npm-pack-inventory-contract.mjs";
 
 const repo = process.cwd();
+// The bridge entries of the packaging contract are derived from the bridge's
+// own module graph, so a newly imported module cannot be left unpublished.
+const bridgeClosure = bridgeModuleClosure((module) =>
+  readFileSync(path.join(repo, module), "utf8"),
+);
 const manifest = readPackageManifest();
 const rawPackageFileEntries = manifest.files;
 const packageFileShapeFailures = packageFileEntryShapeFailures(rawPackageFileEntries);
@@ -53,21 +59,7 @@ const allowedPackageEntries = [
   "bin",
   "scripts/native-runtime-contract.mjs",
   "scripts/source-native-runtime.mjs",
-  "scripts/langgraph-bridge.mjs",
-  "scripts/langgraph-bridge/confined-file-read.mjs",
-  "scripts/langgraph-bridge/diagnostics.mjs",
-  "scripts/langgraph-bridge/errors.mjs",
-  "scripts/langgraph-bridge/file-tools.mjs",
-  "scripts/langgraph-bridge/grep-regex-runner.mjs",
-  "scripts/langgraph-bridge/grep-regex-worker.mjs",
-  "scripts/langgraph-bridge/mcp.mjs",
-  "scripts/langgraph-bridge/model.mjs",
-  "scripts/langgraph-bridge/next-step-messages.mjs",
-  "scripts/langgraph-bridge/oauth-login.mjs",
-  "scripts/langgraph-bridge/oauth-models.mjs",
-  "scripts/langgraph-bridge/process-exit.mjs",
-  "scripts/langgraph-bridge/schema.mjs",
-  "scripts/langgraph-bridge/tool-policy-handshake.mjs",
+  ...bridgeClosure.modules,
   "scripts/kuzushi-dynamic-module-host.mjs",
   "schemas",
   "examples/kwp/agentic-fuzz",
@@ -276,6 +268,7 @@ const bridgeDependencyFailures = packagedBridgeDependencyFailures(packageDepende
 
 if (
   offenders.length > 0 ||
+  bridgeClosure.failures.length > 0 ||
   actualInventoryFailures.length > 0 ||
   deniedFixtureFailures.length > 0 ||
   packagePathShapeFailures.length > 0 ||
@@ -312,6 +305,7 @@ if (
     process.stderr.write(`- ${offender}\n`);
   }
   for (const failure of [
+    ...bridgeClosure.failures,
     ...actualInventoryFailures,
     ...nativeFailures,
     ...deniedFixtureFailures,
