@@ -8,16 +8,33 @@ import path from "node:path";
 export const BRIDGE_ENTRYPOINT = "scripts/langgraph-bridge.mjs";
 
 // `from "./x.mjs"` covers static import, `export … from`, and bare
-// side-effect import; `import("./x.mjs")` covers the dynamic form.
-const IMPORT_SPECIFIER = /(?:\bfrom|\bimport)\s*\(?\s*(["'])(\.{1,2}\/[^"'\n]*\.mjs)\1/g;
+// side-effect import; `import("./x.mjs")` covers the dynamic form. All three
+// quote styles count, because a template literal is a valid specifier too.
+const IMPORT_SITE = /(?:\bfrom|\bimport)\s*\(?\s*(["'`])(\.{1,2}\/[^"'`\n]*)\1/g;
 // A worker or asset the bridge resolves at runtime ships just like an import.
-const RUNTIME_URL_SPECIFIER = /\bnew\s+URL\s*\(\s*(["'])(\.{1,2}\/[^"'\n]*\.mjs)\1/g;
+const RUNTIME_URL_SITE = /\bnew\s+URL\s*\(\s*(["'`])(\.{1,2}\/[^"'`\n]*)\1/g;
 
 export function bridgeModuleReferences(source) {
-  return [
-    ...relativeSpecifiers(source, IMPORT_SPECIFIER),
-    ...relativeSpecifiers(source, RUNTIME_URL_SPECIFIER),
-  ];
+  const references = [
+    ...relativeSpecifiers(source, IMPORT_SITE),
+    ...relativeSpecifiers(source, RUNTIME_URL_SITE),
+  ].map(bridgeModuleReference);
+  return {
+    modules: references.flatMap((reference) => (reference.module ? [reference.module] : [])),
+    unresolvable: references.flatMap((reference) =>
+      reference.unresolvable ? [reference.unresolvable] : [],
+    ),
+  };
+}
+
+// A `?worker`/`#fragment` suffix is a loader hint rather than part of the path.
+// Interpolation leaves the target unknowable, so it is reported instead of
+// being dropped: a silently unseen specifier is the exemption this contract
+// exists to close, and only the author can make the reference literal.
+export function bridgeModuleReference(specifier) {
+  const target = specifier.replace(/[?#].*$/, "");
+  if (target.includes("${")) return { unresolvable: specifier };
+  return target.endsWith(".mjs") ? { module: target } : {};
 }
 
 export function resolveBridgeModule(fromModule, specifier) {
@@ -34,14 +51,18 @@ export function bridgeModuleClosure(readModule, entrypoint = BRIDGE_ENTRYPOINT) 
     if (visited.has(module)) continue;
     visited.add(module);
     modules.push(module);
-    const source = readBridgeModule(readModule, module, failures);
-    pending.push(...referencedModules(module, source));
+    const references = bridgeModuleReferences(readBridgeModule(readModule, module, failures));
+    failures.push(...unresolvableFailures(module, references.unresolvable));
+    pending.push(...references.modules.map((specifier) => resolveBridgeModule(module, specifier)));
   }
   return { modules: modules.sort(), failures };
 }
 
-function referencedModules(module, source) {
-  return bridgeModuleReferences(source).map((specifier) => resolveBridgeModule(module, specifier));
+function unresolvableFailures(module, unresolvable) {
+  return unresolvable.map(
+    (specifier) =>
+      `shipped bridge module ${module} references ${specifier}, which the packaging contract cannot resolve: keep bridge module specifiers literal`,
+  );
 }
 
 // An unreadable module is reported rather than thrown: the caller is a contract

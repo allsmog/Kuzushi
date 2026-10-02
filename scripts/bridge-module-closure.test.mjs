@@ -28,7 +28,7 @@ test("references cover static, bare, dynamic, and runtime-URL forms", () => {
     'const d = await import("./d.mjs");',
     'const worker = new URL("./worker.mjs", import.meta.url);',
   ].join("\n");
-  assert.deepEqual(bridgeModuleReferences(source), [
+  assert.deepEqual(bridgeModuleReferences(source).modules, [
     "./a.mjs",
     "./nested/b.mjs",
     "./c.mjs",
@@ -37,16 +37,47 @@ test("references cover static, bare, dynamic, and runtime-URL forms", () => {
   ]);
 });
 
+test("references cover template-literal specifiers", () => {
+  const source = [
+    "const worker = new URL(`./worker.mjs`, import.meta.url);",
+    "const loaded = await import(`./loaded.mjs`);",
+  ].join("\n");
+  assert.deepEqual(bridgeModuleReferences(source).modules, ["./loaded.mjs", "./worker.mjs"]);
+});
+
+test("a loader query or fragment suffix is not part of the module path", () => {
+  const source = [
+    'await import("./worker.mjs?worker");',
+    'const url = new URL("./asset.mjs#inline", import.meta.url);',
+  ].join("\n");
+  assert.deepEqual(bridgeModuleReferences(source).modules, ["./worker.mjs", "./asset.mjs"]);
+});
+
+test("an interpolated specifier is reported rather than silently dropped", () => {
+  const source = [
+    "await import(`./${name}.mjs`);",
+    "const url = new URL(`./engines/${engine}/run.mjs`, import.meta.url);",
+  ].join("\n");
+  const references = bridgeModuleReferences(source);
+  assert.deepEqual(references.modules, []);
+  assert.deepEqual(references.unresolvable, ["./${name}.mjs", "./engines/${engine}/run.mjs"]);
+});
+
+test("a relative reference that is not a module is out of scope", () => {
+  const source = 'const schema = new URL("./schema.json", import.meta.url);';
+  assert.deepEqual(bridgeModuleReferences(source), { modules: [], unresolvable: [] });
+});
+
 test("references survive a multiline import clause", () => {
   const source = ["import {", "  first,", "  second,", '} from "./wide.mjs";"'].join("\n");
-  assert.deepEqual(bridgeModuleReferences(source), ["./wide.mjs"]);
+  assert.deepEqual(bridgeModuleReferences(source).modules, ["./wide.mjs"]);
 });
 
 test("references ignore bare and node specifiers", () => {
   const source = ['import a from "langchain";', 'import { readFileSync } from "node:fs";'].join(
     "\n",
   );
-  assert.deepEqual(bridgeModuleReferences(source), []);
+  assert.deepEqual(bridgeModuleReferences(source).modules, []);
 });
 
 test("specifiers resolve against the referencing module's directory", () => {
@@ -93,6 +124,19 @@ test("a module cycle terminates", () => {
   );
   assert.deepEqual(failures, []);
   assert.deepEqual(modules, ["scripts/entry.mjs", "scripts/loop.mjs"]);
+});
+
+test("the closure reports an unresolvable specifier as a contract failure", () => {
+  const { modules, failures } = bridgeModuleClosure(
+    readerFor({ "scripts/entry.mjs": "await import(`./${engine}.mjs`);" }),
+    "scripts/entry.mjs",
+  );
+  assert.deepEqual(modules, ["scripts/entry.mjs"]);
+  assert.equal(failures.length, 1);
+  assert.match(
+    failures[0],
+    /references \.\/\$\{engine\}\.mjs, which the packaging contract cannot resolve/,
+  );
 });
 
 test("a referenced module that cannot be read is reported, not thrown", () => {
