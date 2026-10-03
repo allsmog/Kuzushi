@@ -45,6 +45,29 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `cargo deny check advisories` passes again, and the four advisories it was
+  holding are gone from the shipped dependency graph. Three of them are
+  memory-safety bugs in wasmtime 49.0.1 — the engine behind Kuzushi's plugin
+  sandbox: mis-typed WebAssembly tag imports and missing rooting across
+  `try_call` can corrupt the GC heap (RUSTSEC-2026-0325, RUSTSEC-2026-0326),
+  and an unvalidated async-lifted callback result count overflows the native
+  stack (RUSTSEC-2026-0327). The fourth is rustls 0.23.40 accepting a plaintext
+  `EncryptedExtensions` packed into the same record as the `ServerHello`, which
+  RFC 8446 section 5.1 requires a peer to reject with `unexpected_message`
+  (RUSTSEC-2026-0285 / GHSA-2mjx-qc3c-rqvc); the handshake transcript stays
+  authenticated, so that one is lost strictness rather than impersonation, but
+  every provider call reaches rustls through `reqwest`. The lockfile moves to
+  wasmtime 49.0.2 and rustls 0.23.45 (with rustls-webpki 0.103.15), both
+  semver-compatible patches, and the workspace wasmtime requirement moves to
+  `49.0.2` so a fresh resolve cannot land back on the vulnerable patch. A gate
+  that is already red cannot report the next advisory, which is why these had
+  accumulated: the rustls one has been failing since before the 2026-10-01
+  monthly Full CI run, and the wasmtime three were published after it.
+  The now-unnecessary `tree-sitter-javascript@0.25.0` `bans` skip goes with
+  them: that grammar has converged on a single version, cargo-deny reported the
+  skip as unnecessary, and leaving it in place would absorb a future re-split
+  without a word.
+
 - Map's embedded visualization no longer hides rows without saying so. The
   Components/attack-path/heatmap/worklist projections drew into the canvas as a
   plain scrolled `Paragraph`, and Ratatui clips one silently: on a real 2657-row
