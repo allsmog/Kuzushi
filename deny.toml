@@ -73,10 +73,11 @@ skip = [
   { crate = "digest@0.10.7", reason = "sha2 0.10 and curve25519-dalek 4 pin digest 0.10 while Kuzushi's sha2 0.11 graph uses digest 0.11" },
   { crate = "block-buffer@0.10.4", reason = "digest 0.10 pins block-buffer 0.10 beside the digest 0.11 graph" },
   { crate = "crypto-common@0.1.7", reason = "digest 0.10 pins crypto-common 0.1 beside the digest 0.11 graph" },
-  # The pinned oxidized-joern CPG graph uses the 0.25 Go and JavaScript grammar
-  # APIs while Kuzushi's native tree-sitter tooling remains on 0.23.
+  # The pinned oxidized-joern CPG graph uses the 0.25 Go grammar API while
+  # Kuzushi's native tree-sitter tooling remains on 0.23. The JavaScript
+  # grammar has converged on one version, so cargo-deny reports its former
+  # skip as unnecessary; leaving it would silently absorb a future re-split.
   { crate = "tree-sitter-go@0.25.0", reason = "pinned oxidized-joern cpg-lang-ts requires tree-sitter-go 0.25 alongside Kuzushi's 0.23 grammar" },
-  { crate = "tree-sitter-javascript@0.25.0", reason = "pinned oxidized-joern cpg-lang-ts requires tree-sitter-javascript 0.25 alongside Kuzushi's 0.23 grammar" },
 ]
 skip-tree = [
   # windows-sys releases an ABI binding family whose version follows each
