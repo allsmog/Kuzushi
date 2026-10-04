@@ -30,10 +30,11 @@ impl AgentRuntime for OfflineContextRuntime {
             .as_ref()
             .context("test request has no approved allowance")?;
         let reservation = binding.reserve(&request.model)?;
+        let generated = document(&request.cwd)?;
         self.requests.lock().unwrap().push(request);
         binding.settle(reservation, RuntimeCostReport::UNAVAILABLE)?;
         Ok(AgentQueryResponse {
-            structured: Some(document()),
+            structured: Some(generated),
             ..Default::default()
         })
     }
@@ -42,10 +43,16 @@ impl AgentRuntime for OfflineContextRuntime {
     }
 }
 
-fn document() -> Value {
-    json!({"version":"2.0","title":"Offline generated context",
+fn document(root: &Path) -> Result<Value> {
+    let catalog = crate::capabilities::entry_points::ensure_current_entry_point_catalog(root)?
+        .catalog.context("offline context fixture requires the real source catalog")?;
+    let deprioritized = catalog.entry_points.iter().map(|entry| json!({
+        "entryPointId": entry.surface.id,
+        "reason": "Offline fixture prints a greeting and has no untrusted input",
+    })).collect::<Vec<_>>();
+    Ok(json!({"version":"2.0","title":"Offline generated context",
         "dfd":{"nodes":[{"id":"app","type":"process","name":"Command line application","description":"Prints a greeting","trustZone":"internal","evidenceAnchors":[{"filePath":"main.rs","startLine":1}]},{"id":"terminal","type":"external-entity","name":"Terminal","description":"Receives standard output","trustZone":"external"}],"flows":[{"id":"stdout","sourceId":"app","targetId":"terminal","description":"Greeting on standard output","trustBoundaryIds":[]}],"trustBoundaries":[]},
-        "threats":[],"summary":{"total":0,"bySeverity":{},"byCategory":{}},"openQuestions":["Which callers supply the input?"]})
+        "threats":[],"deprioritized":deprioritized,"summary":{"total":0,"bySeverity":{},"byCategory":{}},"openQuestions":["Which callers supply the input?"]}))
 }
 
 #[test]

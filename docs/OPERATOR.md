@@ -295,6 +295,12 @@ responsive work editor remain in development.
 An unbound legacy invocation keeps its existing spending behavior.
 Call limits do not establish a dollar ceiling or approve follow-up work.
 
+For one generated context draft, use `campaign:context-study` with an
+`investigationId` and a `contextInput` object. It freezes one `threat-model:build`
+job, preserves the current context selection, and requires plan and allowance
+approval before execution. See the [module contract](modules.md) for the
+supported generation options and preparation jobs.
+
 ## 4. Campaign workflow (plan → run → status → gap-fill)
 
 1. **Plan** — `campaign:plan` crosses shards × threats × models into a

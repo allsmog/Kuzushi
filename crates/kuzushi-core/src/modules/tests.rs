@@ -1893,7 +1893,7 @@ OUT
         assert!(context
             .options
             .iter()
-            .all(|option| option.option_type != OptionType::Json));
+            .all(|option| option.option_type != OptionType::Json || option.name == "allowanceRef"));
         assert!(context_lite
             .options
             .iter()

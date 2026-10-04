@@ -47,8 +47,23 @@ Feature: Durable phase pages survive in-place terminal resizing
       | key | title  |
       | 2   | Scan   |
       | 3   | Review |
-      | 4   | Prove  |
-      | 5   | Fix    |
+
+  Scenario Outline: Legacy page digits preserve the current guided Map page
+    When I launch the shell
+    And I press "Esc"
+    And I press "<key>"
+    Then an alternate-screen capture shows "Viewing Map"
+    When I resize the live terminal to 40 by 12
+    Then the same shell process is still running
+    And the resized live frame shows "MAP"
+    When I resize the live terminal to 160 by 48
+    Then the same shell process is still running
+    And the resized live frame shows "Viewing Map"
+
+    Examples:
+      | key |
+      | 4   |
+      | 5   |
 
   Scenario: A contextual DFD survives compact fallback and restores its origin
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"bdd\"}"

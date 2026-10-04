@@ -40,6 +40,25 @@ fn round_trips_an_entry_by_key() {
     assert_eq!(hit.source_cost_usd, 0.42);
 }
 
+#[cfg(unix)]
+#[test]
+fn host_parent_aliases_work_without_accepting_linked_cache_roots() {
+    let host = tempfile::tempdir().unwrap();
+    let cache_root = host.path().join("state/cache");
+    std::fs::create_dir_all(&cache_root).unwrap();
+    let aliases = tempfile::tempdir().unwrap();
+    let alias = aliases.path().join("host");
+    std::os::unix::fs::symlink(host.path(), &alias).unwrap();
+
+    let cache = SemanticCache::open_at(alias.join("state/cache")).unwrap();
+    cache.put(&key(0), &entry(json!(1))).unwrap();
+    assert_eq!(cache.get(&key(0)).unwrap().value, json!(1));
+
+    let linked_root = aliases.path().join("linked-cache");
+    std::os::unix::fs::symlink(&cache_root, &linked_root).unwrap();
+    assert!(SemanticCache::open_at(&linked_root).is_err());
+}
+
 #[test]
 fn every_legacy_key_ingredient_changes_the_key() {
     let schema = json!({"type": "array"});
@@ -245,7 +264,7 @@ fn crash_during_legacy_prune_child() {
     let Some(root) = std::env::var_os("KUZUSHI_CACHE_CRASH_TEST_ROOT") else {
         return;
     };
-    let root = PathBuf::from(root);
+    let root = PathBuf::from(root).canonicalize().unwrap();
     let mut connection = database::open(&root, SemanticCacheLimits::default()).unwrap();
     let transaction = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)

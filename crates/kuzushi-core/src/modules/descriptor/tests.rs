@@ -207,7 +207,9 @@ mod tests {
         assert_eq!(after.headless, before.headless);
         assert_eq!(after.hidden, before.hidden);
         assert_eq!(after.runtime_requirement, before.runtime_requirement);
-        assert_eq!(after.options, before.options);
+        assert_eq!(after.options[..before.options.len()], before.options);
+        assert_eq!(after.options.len(), before.options.len() + 1);
+        assert_eq!(after.options.last().unwrap().name, "allowanceRef");
         assert_eq!(after.effect, ToolEffect::Read);
         assert_eq!(after.approval, ApprovalPolicy::None);
         assert_eq!(after.workspace_requirement, WorkspaceRequirement::Required);

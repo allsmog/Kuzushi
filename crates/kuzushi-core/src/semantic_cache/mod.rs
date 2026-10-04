@@ -86,6 +86,9 @@ impl SemanticCache {
         limits.validate()?;
         let root = root.as_ref().to_path_buf();
         ensure_cache_directory(&root)?;
+        // Resolve host aliases before SQLite checks every path component with
+        // NOFOLLOW. Cache roots and database leaves still reject links.
+        let root = fs::canonicalize(&root).context("Could not resolve semantic cache directory")?;
         let database = Arc::new(Mutex::new(database::open(&root, limits)?));
         let cache = Self {
             root,

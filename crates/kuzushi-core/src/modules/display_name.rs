@@ -33,6 +33,7 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("campaign:plan", "Plan campaign jobs"),
     ("campaign:approve-allowance", "Approve investigation allowance"),
     ("campaign:study", "Draft bounded scan study"),
+    ("campaign:context-study", "Draft context generation study"),
     ("campaign:allowance", "Show investigation allowance"),
     ("campaign:status", "Show campaign status"),
     ("cargo-audit:scan", "Audit Rust dependencies"),
