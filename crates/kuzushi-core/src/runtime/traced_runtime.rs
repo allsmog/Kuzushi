@@ -52,7 +52,9 @@ impl<'a> TracedRuntime<'a> {
     pub fn observed_spend(&self) -> crate::runtime::RuntimeCostReport {
         self.spend
             .lock()
-            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| *spend)
+            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| {
+                *spend
+            })
     }
 
     /// An arithmetic failure keeps the observed floor but drops the estimate.
@@ -226,10 +228,9 @@ impl<'a> TracedRuntime<'a> {
         let Some(observation) = self.trace.run_observation() else {
             return Ok(());
         };
-        if succeeded {
-            self.record_model_response_summary(&observation, lifecycle)?;
-        }
-        observation.emit(
+        let summary =
+            succeeded.then(|| self.record_model_response_summary(&observation, lifecycle));
+        observation.emit_and_flush(
             crate::run_lifecycle::RunItemRecord::new(
                 lifecycle.item_id,
                 crate::run_lifecycle::RunItemSource::Runtime,
@@ -247,7 +248,8 @@ impl<'a> TracedRuntime<'a> {
                 },
             )
             .with_call(lifecycle.call_id),
-        )
+        )?;
+        summary.transpose().map(|_| ())
     }
 
     fn record_model_response_summary(
@@ -414,6 +416,13 @@ impl AgentRuntime for TracedRuntime<'_> {
             trace: self.trace.clone(),
             spend: self.spend.clone(),
         }))
+    }
+
+    fn semantic_cache_identity(
+        &self,
+        request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner.get().semantic_cache_identity(request)
     }
 
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {

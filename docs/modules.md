@@ -1,5 +1,10 @@
 # Kuzushi modules
 
+Windows MCP file capabilities bind an opening content digest and verify the
+returned bytes against it before accepting reads or copies. Verification uses
+bounded streaming passes and restores the retained file cursor. Timestamp and
+file-ID metadata alone do not authorize reuse of changed content.
+
 This document describes the module surfaces implemented by the current Rust
 product. Kuzushi has two authoring paths:
 
@@ -86,6 +91,71 @@ receipt's watermark records the gap and the shell labels the count
 `findings unmeasured` (or `partly unmeasured`) instead of a measured `+0`. Older runs without
 source receipts remain inspectable and require a new run before acceptance on
 an unversioned or dirty target; their historical records are not rewritten.
+
+## Audit remediation contracts
+
+Shell composer and form fields share grapheme-aware cursor movement and deletion.
+Their renderers retain whole graphemes and measure terminal cells; vertical field
+navigation preserves display columns. This changes shell presentation only.
+Collapsed pastes have tracked spans and undoable whole-block edits. Ctrl+Y opens
+a read-only preview with expand/remove/cancel controls; Ctrl+_ restores paste
+edits. Preview captures keys, pointer events and pasted input until it closes.
+The terminal inbox admits at most 256 events and 4 MiB of event data, with a
+1 MiB limit per accepted paste. Replaceable resize, pointer-move and focus states
+coalesce only between ordered actions. Keys and pastes wait for capacity instead
+of being dropped. Background wakes remain deliverable while input is saturated;
+the shell records queue pressure once and joins the reader during shutdown.
+Payloads stay in memory and are expanded exactly when the draft is submitted;
+marker text typed by an operator never resolves to a hidden payload.
+
+Semantic response reuse requires a closed-world tool policy and a runtime
+attestation binding effective backend settings and implementation revisions.
+Adapters without `semantic_cache_identity` execute live; the current external
+LangGraph bridge does not attest its installed dependency closure. Generation
+settings participate in versioned keys; credentials and diagnostics do not.
+The cache applies global `operator.semantic_cache` byte/entry quotas inside an
+immediate transaction. `SemanticCache::maintain()` reports bounded eviction and
+legacy-cleanup progress. Interrupted cleanup retries its unfinished shard on the
+next pass; successful-prune timestamps are recorded only after pending work ends.
+Model lifecycle producers must persist `ModelCallStarted` before provider
+dispatch. The writer reserves completion space, rejects starts beyond its eight
+in-flight slots, and commits model receipts synchronously. Normal log exhaustion
+does not erase completed usage/cost or permit a healthy terminal outcome.
+
+MCP servers validate arguments against registered schemas before dispatch. Clients
+must handle invalid-argument, capacity, cancellation and shutdown responses.
+CPG callers must select regex or literal query semantics and check coverage,
+truncation and approximate-position metadata. Unsupported depth limits fail.
+The core `cpg_taint_paths` adapter enforces its advertised `maxPaths` range
+(1–25, default 10); invalid values are errors, never silent clamps.
+Structural queries reject ambiguous file or method identities and return
+candidates. `cpg.definitions` returns a canonical method selector for subsequent
+queries. Reaching definitions require exact AST membership at the requested line;
+they cannot use the approximate nearest-preceding method from `cpg.method_at`.
+Slice depth is an integer in 0–32, checked before graph work.
+
+Persisted findings retain their original primary coordinates alongside grounding.
+Source-independent evidence has an explicit kind; a code citation must identify
+real source lines. Static verification accepts substantive verdicts only with
+source-checked source/sink or control/reachability citations. Consensus receipts retain
+individual assessments and label raw confidence as uncalibrated.
+
+Resumable tool loops journal intent before a handler runs and refuse to replay an
+unresolved intent automatically. Checkpoint IO/size/ownership failures are errors;
+known paid work remains recorded even when a later turn fails. Module authors must
+not interpret unresolved spend as zero or an inconclusive static review as an
+empirical proof. See [migration notes](../RELEASING.md#audit-remediation-compatibility)
+and the [itemized ledger](quality/audit-remediation-2026-09-30.md).
+
+Loop and stage checkpoint codecs enforce 512 records, 1 MiB per encoded record,
+8 MiB in total and the JSON nesting limit. Stage payload writers use the same
+8 MiB budget before publishing an artifact. Staged tools return `resumeHealth`
+and retain a bounded `resume-health.json` receipt when storage permits. Recovery
+durability is separate from execution status: degradation preserves the last
+durable recovery point, warns once per operation/failure class and stops further
+checkpoint advancement until the next dispatch. An absent or stale receipt during a disk
+failure must not be interpreted as healthy recovery; live diagnostics and result
+metadata carry the in-memory state.
 
 ## Sources of truth
 

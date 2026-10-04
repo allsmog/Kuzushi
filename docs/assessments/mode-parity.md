@@ -38,6 +38,8 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 
 | Capability | scan | shell | run | Notes |
 | --- | :--: | :---: | :-: | --- |
+| Grapheme editing and atomic paste preview | N/A | ✓ | N/A | Shared composer/form editing uses complete graphemes and display cells. Ctrl+Y inspects a collapsed paste; expand/remove/cancel and Ctrl+_ undo preserve exact payload bytes until submission or clearing. |
+| Bounded terminal input | N/A | ✓ | N/A | 256-event / 4 MiB inbox; replaceable states coalesce between ordered actions. Keys and accepted pastes apply backpressure, oversized pastes fail explicitly, and background wakes retain a separate slot. |
 | Registry input preparation | ✓ | ✓ | ✓ | CLI scan compiles flags into `sast:scan`; shell and run prepare focused tool input through the same registry method. |
 | Descriptor option validation | ✓ | ✓ | ✓ | `OptionSpec` aliases, defaults, coercion, and unknown-key checks are centralized where descriptors are present. |
 | Stored tool options | ✓ | ✓ | ✓ | Global/workspace option stores are loaded before registry preparation. |
@@ -46,7 +48,7 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Runtime no-silent-fallback policy | ✓ | ✓ | ✓ | Runtime-backed tools resolve a configured or explicit input model and fail on incompatible provider/runtime pairs; project-local model steering is rejected. |
 | Findings store support | ✓ | ✓ | ✓ | Tools that require a store use the shared `tool_needs_finding_store` predicate before mode dispatch. Verification proof is attached by durable finding identity, not a scan-local row id. |
 | Typed run lifecycle/artifacts | ✓ | ✓ | ✓ | Shared dispatch writes stable task/call identities to authoritative `items.jsonl`, plus prepared `input.json` and normalized `result.json`. One reducer drives live/replay/plain projections; terminal states and cost completeness remain distinct. |
-| Staged-tool checkpoints | ✓ | ✓ | ✓ | Shared dispatch keys checkpoints from stable registry/descriptor/input/workspace fingerprints, reuses them only at the same known clean revision, and publishes them with durable unique-temp writes. `workspace:status` exposes pending coordinates and whether each checkpoint is reusable. |
+| Staged-tool checkpoints | ✓ | ✓ | ✓ | Shared dispatch keys checkpoints from stable registry/descriptor/input/workspace fingerprints and reuses content-bound receipts only for unchanged source and artifacts. Checkpoints and payloads are bounded. `resumeHealth`, live warnings and a health artifact expose recovery degradation separately from execution success; `workspace:status` exposes pending coordinates and reusability. |
 | Verification provenance | ✓ | ✓ | ✓ | Persisted proof carries both the verification run id and the discovery scan it verified. A later observation may reuse proof by durable identity, but is marked for revalidation; shell replay opens the verification run only. |
 | Changed-file scan scope (`--since` / `scan since`) | ✓ | ✓ | N/A | Both modes resolve "what changed since `<ref>`" through one shared helper, `kuzushi_core::workspace::changed_scan_input`: same file set, paths the reference deleted dropped, same git error text, and the same refusal when nothing changed. The resolved scope compiles into the canonical `sast:scan` `paths` and `diffBase` options in both modes, so every engine is narrowed; `kuzushi scan --since` additionally materializes the same effective list into `.kuzushi/v3/since.txt` for `full-mode:hunt`. With `--paths`/`--shard` the effective scope is the intersection, disclosed as `scope: N files since <ref> ∩ M requested → K`; an empty scope refuses (exit 1, no run artifact) rather than widening to the whole target. `run` has no `--since` shorthand; pass `paths`/`diffBase` as tool input. |
 | Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. A live shell run keeps the target captured at launch even if ambient app state later changes. |
@@ -234,9 +236,9 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   One typed attention broker projects approvals, questions, credential gates,
   partial-result acknowledgements, and unresolved result dispositions into the
   footer and terminal title without persisting prompt or secret text. Multiline
-  bracketed paste is staged behind one visible placeholder and expands only on
-  the operator's explicit submission; it is never split into automatic
-  commands.
+  bracketed paste is staged behind an atomic span. Ctrl+Y opens a read-only
+  preview for explicit expansion or removal, with Ctrl+_ undo; submission
+  expands remaining spans exactly once without generating automatic commands.
 - **Run Focus is shell-only presentation over shared run artifacts.** One model
   owns the planned/DAG checklist and one clipped output window. Foreground
   runs capture route, phase/pane, input mode, scroll, pinned finding, and

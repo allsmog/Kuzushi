@@ -209,8 +209,14 @@ fn torn_tail_from_a_killed_writer_is_tolerated_and_healed_on_next_append() {
     let path = tmp.path().join("events-000000.jsonl");
     {
         let log = EventLog::open(tmp.path()).unwrap();
-        log.append(EventKind::RunStarted, "writer", Some("r1".into()), None, json!({}))
-            .unwrap();
+        log.append(
+            EventKind::RunStarted,
+            "writer",
+            Some("r1".into()),
+            None,
+            json!({}),
+        )
+        .unwrap();
     }
     // Simulate SIGKILL mid-append: a partial line with no trailing newline,
     // cut inside a multi-byte UTF-8 character for good measure.
@@ -228,12 +234,21 @@ fn torn_tail_from_a_killed_writer_is_tolerated_and_healed_on_next_append() {
 
     // The next append truncates the torn bytes and continues the chain.
     let second = log
-        .append(EventKind::RunCompleted, "writer", Some("r1".into()), None, json!({}))
+        .append(
+            EventKind::RunCompleted,
+            "writer",
+            Some("r1".into()),
+            None,
+            json!({}),
+        )
         .unwrap();
     assert_eq!(second.seq, 2);
     assert_eq!(second.prev_event_hash, Some(events[0].event_hash.clone()));
     let healed = std::fs::read(&path).unwrap();
-    assert!(healed.ends_with(b"\n"), "healed segment must end at a full line");
+    assert!(
+        healed.ends_with(b"\n"),
+        "healed segment must end at a full line"
+    );
     let reopened = EventLog::open(tmp.path()).unwrap();
     assert_eq!(reopened.read_all().unwrap().len(), 2);
     reopened.verify_chain().unwrap();
@@ -347,7 +362,10 @@ fn review_session_started_serde_matches_as_str() {
         let round_tripped: EventKind = serde_json::from_value(serialized).unwrap();
         assert_eq!(round_tripped, kind);
     }
-    assert_eq!(EventKind::ReviewSessionStarted.as_str(), "review-session-started");
+    assert_eq!(
+        EventKind::ReviewSessionStarted.as_str(),
+        "review-session-started"
+    );
 }
 
 /// A recorded session is an appended, chain-linked event like any other.

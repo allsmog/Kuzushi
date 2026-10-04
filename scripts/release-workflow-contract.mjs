@@ -1,3 +1,5 @@
+import { parse } from "yaml";
+
 const fullCommitRef = /^[0-9a-f]{40}$/;
 
 /** Every slug is still installed and executed on its own release runner. */
@@ -48,7 +50,11 @@ export const selfHostedDarwinLegs = Object.freeze([
  * and `NPM_TOKEN` and `contents: write` must never reach one.
  */
 export const hostedOnlyCandidateJobs = Object.freeze(["identity", "assemble"]);
-export const hostedOnlyPublisherJobs = Object.freeze(["publish-npm", "github-release"]);
+export const hostedOnlyPublisherJobs = Object.freeze([
+  "publish-npm",
+  "github-release",
+  "promote-latest",
+]);
 
 const crossBuiltSlugs = new Set(releaseCrossBuilds.map(({ slug }) => slug));
 
@@ -114,7 +120,7 @@ export function platformPublisherFailures(source) {
   return missingTokens(source, "platform publisher", [
     "verifyReleaseManifest",
     '"--tag",',
-    '"latest",',
+    '"candidate",',
     '"--ignore-scripts",',
     "entry.npmIntegrity",
     'kind }) => kind === "root-npm"',
@@ -280,7 +286,9 @@ function externalActionPinFailures(workflowName, source) {
 }
 
 function actionUses(source) {
-  return [...source.matchAll(/^\s*-?\s*uses:\s+([^\s#]+)/gm)].map((match) => match[1]);
+  return Object.values(parse(source)?.jobs ?? {})
+    .flatMap((job) => [job.uses, ...(job.steps ?? []).map((step) => step.uses)])
+    .filter((specifier) => specifier !== undefined);
 }
 
 function missingTokens(source, subject, tokens) {

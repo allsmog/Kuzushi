@@ -27,6 +27,7 @@ pub(crate) struct PartialOperatorConfig {
     pub(crate) fuzz_executors: Option<Vec<FuzzExecutorConfig>>,
     pub(crate) keybindings: Option<Vec<KeybindingOverrideConfig>>,
     pub(crate) session_retention_days: Option<u64>,
+    pub(crate) semantic_cache: Option<crate::semantic_cache::SemanticCacheLimits>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -406,6 +407,7 @@ fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'
         ("operator.mcp_mounts", operator.mcp_mounts.is_some()),
         ("operator.fuzz_executors", operator.fuzz_executors.is_some()),
         ("operator.keybindings", operator.keybindings.is_some()),
+        ("operator.semantic_cache", operator.semantic_cache.is_some()),
         (
             "operator.session_retention_days",
             operator.session_retention_days.is_some(),
@@ -482,6 +484,7 @@ fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig)
 }
 
 fn merge_operator_config(config: &mut OperatorConfig, patch: PartialOperatorConfig) {
+    apply_patch_field(&mut config.semantic_cache, patch.semantic_cache);
     apply_patch_field(&mut config.session_budget_usd, patch.session_budget_usd);
     apply_patch_field(
         &mut config.spend_hard_ceiling_usd,

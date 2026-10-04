@@ -4,6 +4,23 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn semantic_cache_quotas_are_operator_owned_and_validated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = ConfigPaths { home_dir: tmp.path().join("home"), target_dir: Some(tmp.path().join("target")) };
+        let global = paths.global_config_path();
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        fs::write(&global, "[operator.semantic_cache]\nmax_bytes=131072\nmax_entries=8\n").unwrap();
+        assert_eq!(load_config(paths.clone()).unwrap().operator.semantic_cache.max_entries, 8);
+        let target = paths.project_config_path().unwrap();
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, "[operator.semantic_cache]\nmax_entries=100\n").unwrap();
+        assert!(load_config(paths.clone()).unwrap_err().to_string().contains("operator.semantic_cache"));
+        fs::remove_file(target).unwrap();
+        fs::write(&global, "[operator.semantic_cache]\nmax_bytes=1\n").unwrap();
+        assert!(load_config(paths).unwrap_err().to_string().contains("max_bytes"));
+    }
+
+    #[test]
     fn loads_defaults_without_files() {
         let tmp = tempfile::tempdir().unwrap();
         let config = load_config(ConfigPaths {

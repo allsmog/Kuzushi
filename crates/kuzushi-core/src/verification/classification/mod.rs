@@ -67,9 +67,13 @@ pub fn classify_run_result(
 }
 
 fn classify_observation(run: &SandboxExecResult, evidence: SinkEvidence) -> RunClassification {
-    if run.outcome == ExitOutcome::TimedOut {
+    if matches!(
+        run.outcome,
+        ExitOutcome::TimedOut | ExitOutcome::OutputLimitExceeded
+    ) {
         return infrastructure_classification(
-            "verify: harness timed out; runtime result is inconclusive".to_string(),
+            "verify: harness exceeded its time/output budget; runtime result is inconclusive"
+                .to_string(),
         );
     }
     match evidence {
@@ -106,10 +110,8 @@ fn classify_reached_sink(run: &SandboxExecResult) -> RunClassification {
 }
 
 fn observed_crash(run: &SandboxExecResult) -> bool {
-    let signaled = run.outcome == ExitOutcome::Signaled && run.signal.is_some_and(is_crash_signal);
-    signaled
-        || stderr_has_sanitizer_crash(&run.stderr)
-        || stderr_has_wrapped_process_crash(&run.stderr)
+    // Target-controlled stderr is supporting text, never a trusted crash oracle.
+    run.outcome == ExitOutcome::Signaled && run.signal.is_some_and(is_crash_signal)
 }
 
 fn infrastructure_classification(note: String) -> RunClassification {
@@ -219,36 +221,4 @@ pub(crate) fn bounded_runtime_evidence(value: &str) -> Option<String> {
 
 pub(super) fn is_crash_signal(sig: i32) -> bool {
     matches!(sig, 4 | 6 | 7 | 11)
-}
-
-pub(crate) fn stderr_has_sanitizer_crash(stderr: &str) -> bool {
-    pub(super) const PATTERNS: &[&str] = &[
-        "AddressSanitizer:",
-        "==ERROR: AddressSanitizer",
-        "ThreadSanitizer:",
-        "MemorySanitizer:",
-        "UndefinedBehaviorSanitizer:",
-        "runtime error:",
-        "stack-buffer-overflow",
-        "heap-buffer-overflow",
-        "global-buffer-overflow",
-        "use-after-free",
-        "use-after-poison",
-        "stack-use-after-scope",
-        "stack-use-after-return",
-        "double-free",
-        "SEGV on unknown address",
-    ];
-    PATTERNS.iter().any(|pattern| stderr.contains(pattern))
-}
-
-fn stderr_has_wrapped_process_crash(stderr: &str) -> bool {
-    [
-        "signal: 4, SIGILL",
-        "signal: 6, SIGABRT",
-        "signal: 7, SIGBUS",
-        "signal: 11, SIGSEGV",
-    ]
-    .iter()
-    .any(|pattern| stderr.contains(pattern))
 }

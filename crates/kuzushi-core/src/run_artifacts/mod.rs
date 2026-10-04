@@ -106,7 +106,7 @@ pub use stage_checkpoint::{
     active_stage_checkpoints, checkpoint_coordinates_for_run,
     matching_checkpoint_coordinates_for_run, pending_stage_checkpoints, PendingStageCheckpoint,
     StageCheckpointCoordinates, StageCheckpointHandle, StageCheckpointScope, StageCheckpointStore,
-    StageGuard,
+    StageGuard, StageResumeHealth, StageResumeProblem,
 };
 pub use tool_output_cost::tool_run_output_cost_report;
 pub(crate) use tool_run_record::terminal_result_digest;

@@ -220,3 +220,58 @@ mod workers {
         assert_eq!(limiter.total_spent_all().unwrap(), 0.0);
     }
 }
+
+#[test]
+fn independent_connections_cannot_overbook_one_operation() {
+    use super::{Operation, SpendError, SpendLimiter};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spend.sqlite");
+    let first = SpendLimiter::open(&path).unwrap();
+    first.set_cap(Operation::Triage, 10.0).unwrap();
+    let second = SpendLimiter::open(&path).unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let workers: Vec<_> = [first, second]
+        .into_iter()
+        .map(|limiter| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                limiter.deposit(Operation::Triage, 6.0)
+            })
+        })
+        .collect();
+    let results: Vec<_> = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert!(results
+        .iter()
+        .find_map(|r| r.as_ref().err())
+        .unwrap()
+        .downcast_ref::<SpendError>()
+        .is_some());
+    assert_eq!(
+        SpendLimiter::open(&path)
+            .unwrap()
+            .total_spent_all()
+            .unwrap(),
+        6.0
+    );
+}
+
+#[test]
+fn admission_observes_caps_changed_by_another_limiter() {
+    use super::{Operation, SpendLimiter};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spend.sqlite");
+    let first = SpendLimiter::open(&path).unwrap();
+    let second = SpendLimiter::open(&path).unwrap();
+    second.set_cap(Operation::Triage, 5.0).unwrap();
+    assert!(first.deposit(Operation::Triage, 6.0).is_err());
+    second.set_cap(Operation::Triage, 10.0).unwrap();
+    assert!(first.deposit(Operation::Triage, 6.0).is_ok());
+    second.set_cap(Operation::Triage, 6.0).unwrap();
+    assert!(first.deposit(Operation::Triage, 1.0).is_err());
+    assert_eq!(first.remaining(Operation::Triage).unwrap(), 0.0);
+}

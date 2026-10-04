@@ -34,6 +34,7 @@ impl SpendLimiter {
                 "hard ceiling must be a finite non-negative number, got {value}"
             );
         }
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         ensure_schema(&conn)?;
         crate::spend::allowance::persistence::ensure_schema(&conn)?;
         let ledger_id = super::super::identity::ledger_identity(&conn)?;

@@ -40,9 +40,15 @@ fn combine_panel(passes: &[Value]) -> Result<Value> {
     overwrite(&mut result, "confidence", json!(mean_confidence(&winning)));
     overwrite(
         &mut result,
+        "confidenceKind",
+        json!("uncalibrated-model-assessment"),
+    );
+    overwrite(
+        &mut result,
         "consensus",
         consensus_block(passes.len(), positive, negative, verdict),
     );
+    result["consensus"]["assessments"] = json!(passes);
     if verdict.is_none() {
         overwrite(&mut result, "proofVerdict", json!("inconclusive"));
         overwrite(&mut result, "pocPayload", Value::Null);
@@ -230,6 +236,21 @@ mod tests {
         assert_eq!(combined["consensus"]["unanimous"], json!(false));
         // Representative is the most-confident exploitable pass.
         assert_eq!(combined["attackVector"], json!("sqli"));
+    }
+
+    #[test]
+    fn dissenting_evidence_survives_either_pass_order() {
+        let mut dissent = pass(false, 0.8);
+        dissent["codeCitations"] = json!([{"description":"authentication guard"}]);
+        let mut votes = vec![pass(true, 0.9), pass(true, 0.7), dissent.clone()];
+        for _ in 0..2 {
+            let result = combine_verify_passes(votes.clone()).unwrap();
+            assert!(result["consensus"]["assessments"]
+                .as_array()
+                .unwrap()
+                .contains(&dissent));
+            votes.reverse();
+        }
     }
 
     #[test]

@@ -158,3 +158,96 @@ mod tests {
         assert!(result.stdout.contains("inbound"));
     }
 }
+
+#[cfg(unix)]
+mod supervision_regressions {
+    use super::super::*;
+    use crate::backend::SandboxBackend;
+    use std::time::Duration;
+
+    fn shell(script: &str) -> SandboxExecOptions {
+        SandboxExecOptions::new(vec!["/bin/sh".into(), "-c".into(), script.into()])
+    }
+
+    #[tokio::test]
+    async fn timeout_prevents_descendant_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut options =
+            shell("(while [ ! -e release ]; do sleep 0.01; done; echo escaped > marker) & wait");
+        options.workdir = Some(dir.path().into());
+        options.timeout_ms = 100;
+        let result = sandbox_exec(SandboxBackend::Plain, options).await.unwrap();
+        assert_eq!(result.outcome, ExitOutcome::TimedOut);
+        std::fs::write(dir.path().join("release"), "after timeout").unwrap();
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!dir.path().join("marker").exists());
+    }
+
+    #[tokio::test]
+    async fn cancellation_prevents_descendant_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut options = shell("(echo ready > ready; while [ ! -e release ]; do sleep 0.01; done; echo escaped > marker) & wait");
+        options.workdir = Some(dir.path().into());
+        let task = tokio::spawn(sandbox_exec(SandboxBackend::Plain, options));
+        for _ in 0..100 {
+            if dir.path().join("ready").exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(dir.path().join("ready").exists());
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        // A delayed CI runner cannot let the descendant write before abort.
+        // Opening this gate afterwards tests survival after cancellation.
+        std::fs::write(dir.path().join("release"), "after cancellation").unwrap();
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!dir.path().join("marker").exists());
+    }
+
+    #[tokio::test]
+    async fn live_output_is_bounded_on_both_streams() {
+        for script in ["head -c 8388608 /dev/zero", "head -c 8388608 /dev/zero >&2"] {
+            let result = sandbox_exec(SandboxBackend::Plain, shell(script))
+                .await
+                .unwrap();
+            assert_eq!(result.outcome, ExitOutcome::OutputLimitExceeded);
+            assert!(result.stdout_truncated || result.stderr_truncated);
+            assert!(result.stdout.len() <= MAX_OUTPUT_BYTES + TRUNCATION_MARKER.len());
+            assert!(result.stderr.len() <= MAX_OUTPUT_BYTES + TRUNCATION_MARKER.len());
+        }
+    }
+
+    #[tokio::test]
+    async fn ambient_secrets_are_not_inherited_with_empty_or_explicit_grants() {
+        const KEY: &str = "KUZUSHI_SANDBOX_SYNTHETIC_PARENT_SECRET";
+        std::env::set_var(KEY, "synthetic-secret-value");
+        for explicit in [false, true] {
+            let mut options = shell("env");
+            if explicit {
+                options.env.insert("PUBLIC_VALUE".into(), "granted".into());
+            }
+            let result = sandbox_exec(SandboxBackend::Plain, options).await.unwrap();
+            assert!(!result.stdout.contains(KEY));
+            assert!(!result.stdout.contains("synthetic-secret-value"));
+            assert_eq!(result.stdout.contains("PUBLIC_VALUE=granted"), explicit);
+        }
+        std::env::remove_var(KEY);
+    }
+
+    #[tokio::test]
+    async fn broken_stdin_is_reported_and_oversize_input_is_rejected() {
+        let mut options = shell("exec 0<&-; sleep 1");
+        options.stdin = Some("a".repeat(MAX_OUTPUT_BYTES));
+        let error = sandbox_exec(SandboxBackend::Plain, options)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("stdin delivery failed"));
+        let mut options = shell("cat");
+        options.stdin = Some("a".repeat(MAX_OUTPUT_BYTES + 1));
+        assert!(matches!(
+            sandbox_exec(SandboxBackend::Plain, options).await,
+            Err(SandboxError::InvalidOptions(_))
+        ));
+    }
+}

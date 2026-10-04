@@ -91,7 +91,7 @@ pub fn run_chain(
     for play in &chain.plays {
         let ctx = PlayContext::new(authorized.clone(), run_id.clone())
             .with_preconditions(evidence.clone());
-        let outcome = play.execute(&ctx, transport)?;
+        let outcome = ctx.execute(play.as_ref(), transport)?;
         observer.on_hop(steps.len(), &outcome);
         let landed = outcome.exploited;
         evidence.extend(outcome.evidence.clone());

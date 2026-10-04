@@ -1,8 +1,17 @@
 use super::*;
 use std::cell::{Ref, RefCell};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+#[cfg(test)]
+mod grapheme_tests;
+mod graphemes;
 mod history;
+mod paste;
+#[cfg(test)]
+mod paste_tests;
+pub(crate) use paste::PasteInspection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditorClearResult {
@@ -30,7 +39,8 @@ struct CompletionPreviewMemo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PastedBlock {
     marker: String,
-    text: String,
+    text: Arc<str>,
+    range: Range<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,12 +62,15 @@ pub(crate) struct EditorState {
     last_cleared_pasted_blocks: Vec<PastedBlock>,
     pasted_blocks: Vec<PastedBlock>,
     next_paste_id: u64,
+    paste_undo: Vec<EditorInputSnapshot>,
+    paste_inspection: Option<PasteInspection>,
     completion_cycle: Option<CompletionCycle>,
     input_mode: InputMode,
     /// Result-card key that just resolved a RESULT READY card. A repeat of
     /// that exact key (a stale-frame re-press) is absorbed instead of typed.
     resolved_result_key: Option<char>,
     history_search: Option<HistorySearch>,
+    history_search_draft: Option<EditorInputSnapshot>,
     revision: u64,
     completion_preview: RefCell<Option<CompletionPreviewMemo>>,
     #[cfg(test)]
@@ -77,10 +90,13 @@ impl Default for EditorState {
             last_cleared_pasted_blocks: Vec::new(),
             pasted_blocks: Vec::new(),
             next_paste_id: 0,
+            paste_undo: Vec::new(),
+            paste_inspection: None,
             completion_cycle: None,
             input_mode: InputMode::Prompt,
             resolved_result_key: None,
             history_search: None,
+            history_search_draft: None,
             revision: 0,
             completion_preview: RefCell::new(None),
             #[cfg(test)]
@@ -117,7 +133,7 @@ impl EditorState {
     }
 
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
-        let cursor = cursor.min(self.char_count());
+        let cursor = self.atomic_floor(graphemes::floor(&self.input, cursor));
         if self.cursor != cursor {
             self.cursor = cursor;
             self.touch_completion_preview();
@@ -167,6 +183,10 @@ impl EditorState {
         if self.input == value && self.cursor == cursor {
             return;
         }
+        if self.input != value {
+            self.remember_paste_edit();
+            self.pasted_blocks.clear();
+        }
         self.input = value;
         self.cursor = cursor;
         self.history_index = None;
@@ -174,17 +194,21 @@ impl EditorState {
     }
 
     pub(crate) fn clear_input(&mut self) {
-        if self.input.is_empty() && self.cursor == 0 && self.pasted_blocks.is_empty() {
+        if self.input.is_empty() && self.paste_undo.is_empty() {
             return;
         }
         self.input.clear();
         self.pasted_blocks.clear();
+        self.paste_undo.clear();
+        self.paste_inspection = None;
         self.cursor = 0;
         self.history_index = None;
         self.touch_completion_preview();
     }
 
     pub(crate) fn take_input(&mut self) -> String {
+        self.paste_undo.clear();
+        self.paste_inspection = None;
         let changed = !self.input.is_empty() || self.cursor != 0 || !self.pasted_blocks.is_empty();
         self.cursor = 0;
         self.history_index = None;
@@ -209,7 +233,7 @@ impl EditorState {
     }
 
     pub(crate) fn restore_input_snapshot(&mut self, snapshot: EditorInputSnapshot) {
-        let cursor = snapshot.cursor.min(snapshot.input.chars().count());
+        let cursor = graphemes::floor(&snapshot.input, snapshot.cursor);
         if self.input == snapshot.input
             && self.cursor == cursor
             && self.pasted_blocks == snapshot.pasted_blocks
@@ -252,6 +276,8 @@ impl EditorState {
             self.cursor = self.char_count();
             self.history_index = None;
             self.touch_completion_preview();
+        } else if let Some(snapshot) = self.paste_undo.pop() {
+            self.restore_input_snapshot(snapshot);
         }
     }
 
@@ -271,22 +297,15 @@ impl EditorState {
         self.input.chars().count()
     }
 
-    pub(crate) fn cursor_byte(&self) -> usize {
-        char_index_to_byte(&self.input, self.cursor)
-    }
-
     pub(crate) fn insert_str_at_cursor(&mut self, s: &str) {
         if s.is_empty() {
             return;
         }
-        let byte = self.cursor_byte();
-        self.input.insert_str(byte, s);
-        self.cursor += s.chars().count();
-        self.history_index = None;
-        self.touch_completion_preview();
+        self.replace_edit(self.cursor..self.cursor, s);
     }
 
     pub(crate) fn insert_multiline_paste(&mut self, text: &str) -> String {
+        self.push_paste_undo();
         self.next_paste_id = self.next_paste_id.wrapping_add(1).max(1);
         let lines = text.split('\n').count();
         let chars = text.chars().count();
@@ -294,37 +313,26 @@ impl EditorState {
             "⟪paste #{} · {lines} lines · {chars} chars⟫",
             self.next_paste_id
         );
+        let start = self.cursor;
+        self.insert_str_at_cursor(&marker);
         self.pasted_blocks.push(PastedBlock {
             marker: marker.clone(),
-            text: text.to_string(),
+            text: Arc::from(text),
+            range: start..self.cursor,
         });
-        self.insert_str_at_cursor(&marker);
         marker
     }
 
     pub(crate) fn insert_char_at_cursor(&mut self, ch: char) {
-        let byte = self.cursor_byte();
-        self.input.insert(byte, ch);
-        self.cursor += 1;
-        self.history_index = None;
-        self.touch_completion_preview();
+        self.insert_str_at_cursor(ch.encode_utf8(&mut [0; 4]));
     }
 
     pub(crate) fn backspace(&mut self) {
         if self.cursor == 0 {
             return;
         }
-        let count = self.char_count();
-        if self.cursor > count {
-            self.cursor = count;
-        }
-        let new_cursor = self.cursor - 1;
-        let start = char_index_to_byte(&self.input, new_cursor);
-        let end = char_index_to_byte(&self.input, self.cursor);
-        self.input.drain(start..end);
-        self.cursor = new_cursor;
-        self.history_index = None;
-        self.touch_completion_preview();
+        let start = graphemes::previous(&self.input, self.cursor);
+        self.replace_edit(start..self.cursor, "");
     }
 
     pub(crate) fn delete_forward(&mut self) {
@@ -332,16 +340,13 @@ impl EditorState {
         if self.cursor >= count {
             return;
         }
-        let start = char_index_to_byte(&self.input, self.cursor);
-        let end = char_index_to_byte(&self.input, self.cursor + 1);
-        self.input.drain(start..end);
-        self.history_index = None;
-        self.touch_completion_preview();
+        let end = graphemes::next(&self.input, self.cursor);
+        self.replace_edit(self.cursor..end, "");
     }
 
     pub(crate) fn move_cursor_left(&mut self) {
         if self.cursor > 0 {
-            self.cursor -= 1;
+            self.cursor = self.atomic_floor(graphemes::previous(&self.input, self.cursor));
             self.touch_completion_preview();
         }
     }
@@ -349,7 +354,7 @@ impl EditorState {
     pub(crate) fn move_cursor_right(&mut self) {
         let count = self.char_count();
         if self.cursor < count {
-            self.cursor += 1;
+            self.cursor = self.atomic_ceil(graphemes::next(&self.input, self.cursor));
             self.touch_completion_preview();
         }
     }
@@ -370,28 +375,11 @@ impl EditorState {
     }
 
     pub(crate) fn word_boundary_left(&self) -> usize {
-        let chars: Vec<char> = self.input.chars().collect();
-        let mut idx = self.cursor.min(chars.len());
-        while idx > 0 && !is_word_char(chars[idx - 1]) {
-            idx -= 1;
-        }
-        while idx > 0 && is_word_char(chars[idx - 1]) {
-            idx -= 1;
-        }
-        idx
+        self.atomic_floor(graphemes::word_left(&self.input, self.cursor))
     }
 
     pub(crate) fn word_boundary_right(&self) -> usize {
-        let chars: Vec<char> = self.input.chars().collect();
-        let mut idx = self.cursor.min(chars.len());
-        let len = chars.len();
-        while idx < len && is_word_char(chars[idx]) {
-            idx += 1;
-        }
-        while idx < len && !is_word_char(chars[idx]) {
-            idx += 1;
-        }
-        idx
+        self.atomic_ceil(graphemes::word_right(&self.input, self.cursor))
     }
 
     pub(crate) fn delete_word_left(&mut self) {
@@ -399,12 +387,7 @@ impl EditorState {
             return;
         }
         let target = self.word_boundary_left();
-        let start = char_index_to_byte(&self.input, target);
-        let end = char_index_to_byte(&self.input, self.cursor);
-        self.input.drain(start..end);
-        self.cursor = target;
-        self.history_index = None;
-        self.touch_completion_preview();
+        self.replace_edit(target..self.cursor, "");
     }
 
     pub(crate) fn move_cursor_word_left(&mut self) {
@@ -427,11 +410,7 @@ impl EditorState {
         if self.cursor == 0 {
             return;
         }
-        let end = char_index_to_byte(&self.input, self.cursor);
-        self.input.drain(..end);
-        self.cursor = 0;
-        self.history_index = None;
-        self.touch_completion_preview();
+        self.replace_edit(0..self.cursor, "");
     }
 
     pub(crate) fn kill_to_end(&mut self) {
@@ -439,9 +418,7 @@ impl EditorState {
         if start == self.input.len() {
             return;
         }
-        self.input.truncate(start);
-        self.history_index = None;
-        self.touch_completion_preview();
+        self.replace_edit(self.cursor..self.char_count(), "");
     }
 
     fn restore_completion_prefix(&mut self) -> bool {
@@ -506,8 +483,7 @@ impl EditorState {
     }
 
     fn touch_completion_preview(&mut self) {
-        self.pasted_blocks
-            .retain(|block| self.input.contains(&block.marker));
+        self.cursor = self.atomic_floor(graphemes::floor(&self.input, self.cursor));
         self.revision = self.revision.wrapping_add(1);
         self.invalidate_completion_preview();
     }
@@ -516,7 +492,7 @@ impl EditorState {
 fn expand_pasted_blocks(input: String, blocks: &[PastedBlock]) -> String {
     let mut occurrences = blocks
         .iter()
-        .filter_map(|block| input.find(&block.marker).map(|offset| (offset, block)))
+        .map(|block| (char_index_to_byte(&input, block.range.start), block))
         .collect::<Vec<_>>();
     occurrences.sort_by_key(|(offset, _)| *offset);
     let mut expanded = String::with_capacity(input.len());

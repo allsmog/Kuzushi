@@ -126,7 +126,10 @@ impl RuntimeCostReport {
     /// Both sides must account for their unmetered spend: an exact side adds
     /// nothing, an estimated side adds its estimate, anything else is unknown.
     fn summed_unmetered_estimate(self, other: Self, context: &str) -> Result<Option<RuntimeCost>> {
-        match (self.unmetered_estimate_part(), other.unmetered_estimate_part()) {
+        match (
+            self.unmetered_estimate_part(),
+            other.unmetered_estimate_part(),
+        ) {
             (Some(left), Some(right)) => left.checked_add(right, context).map(Some),
             _ => Ok(None),
         }
@@ -439,7 +442,8 @@ mod tests {
             RuntimeCostReport::UNAVAILABLE
         );
 
-        let estimated = RuntimeCostReport::incomplete(usd(0.1)).with_unmetered_estimate(Some(usd(0.2)));
+        let estimated =
+            RuntimeCostReport::incomplete(usd(0.1)).with_unmetered_estimate(Some(usd(0.2)));
         let wire = serde_json::to_value(estimated).unwrap();
         assert_eq!(wire["estimatedUnmeteredUsd"], 0.2);
         let back: RuntimeCostReport = serde_json::from_value(wire).unwrap();

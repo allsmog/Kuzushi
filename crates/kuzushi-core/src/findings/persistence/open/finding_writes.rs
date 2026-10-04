@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 struct FindingInsertOutcome {
     id: i64,
     projected: Finding,
-    evidence: ProjectionEvidence,
+    evidence: Vec<FindingEvidence>,
     identity_link: ProjectionIdentityLink,
 }
 
@@ -29,11 +29,6 @@ struct ObservationProvenance {
 }
 
 const MAX_OBSERVATION_SOURCE_BYTES: usize = 64 * 1024 * 1024;
-
-enum ProjectionEvidence {
-    Replace(Vec<FindingEvidence>),
-    KeepExisting,
-}
 
 #[derive(Clone)]
 struct ProjectionIdentityLink {
@@ -142,7 +137,7 @@ impl FindingStore {
         Ok(FindingInsertOutcome {
             id,
             projected,
-            evidence: ProjectionEvidence::Replace(evidence),
+            evidence,
             identity_link,
         })
     }
@@ -191,13 +186,9 @@ impl FindingStore {
         scan_id: &str,
         existing: &Finding,
         incoming: &Finding,
-    ) -> Result<ProjectionEvidence> {
-        if incoming.severity <= existing.severity {
-            return Ok(ProjectionEvidence::KeepExisting);
-        }
-        Ok(ProjectionEvidence::Replace(
-            self.verified_finding_evidence(tx, scan_id, &incoming.evidence)?,
-        ))
+    ) -> Result<Vec<FindingEvidence>> {
+        let incoming_evidence = self.verified_finding_evidence(tx, scan_id, &incoming.evidence)?;
+        merge_collision_evidence(existing, incoming, incoming_evidence)
     }
 
     /// Look up an existing finding in this scan run that shares the dedup_key.
@@ -301,7 +292,10 @@ impl FindingStore {
         let sources =
             self.projected_finding_sources(previous_projection.as_ref(), scan_id, finding);
         apply_projected_sources(&mut projected, sources);
-        projected.evidence = projected_evidence(outcome.evidence, previous_projection.as_ref());
+        projected.evidence = outcome.evidence;
+        projected.grounding = Some(super::finding_evidence::ground_primary_anchor(
+            &self.conn, scan_id, &projected,
+        )?);
         Ok(projected)
     }
 
@@ -389,15 +383,32 @@ fn first_source_signature(sources: &[FindingSource]) -> Option<String> {
         .map(|source| source.source_signature.clone())
 }
 
-fn projected_evidence(
-    evidence: ProjectionEvidence,
-    previous_projection: Option<&Finding>,
-) -> Vec<FindingEvidence> {
-    match evidence {
-        ProjectionEvidence::Replace(evidence) => evidence,
-        ProjectionEvidence::KeepExisting => previous_projection
-            .map(|finding| finding.evidence.clone())
-            .unwrap_or_default(),
+fn merge_collision_evidence(
+    existing: &Finding,
+    incoming: &Finding,
+    evidence: Vec<FindingEvidence>,
+) -> Result<Vec<FindingEvidence>> {
+    let mut merged = std::collections::BTreeMap::new();
+    for (tool, items) in [
+        (&existing.tool, &existing.evidence),
+        (&incoming.tool, &evidence),
+    ] {
+        for item in items {
+            let mut item = item.clone();
+            tag_evidence_source(&mut item, tool);
+            merged.insert(serde_json::to_string(&item)?, item);
+        }
+    }
+    Ok(merged.into_values().collect())
+}
+
+fn tag_evidence_source(item: &mut FindingEvidence, tool: &str) {
+    if !item.rationale.starts_with("[source-tool=") {
+        item.rationale = format!(
+            "[source-tool={}] {}",
+            serde_json::json!(tool),
+            item.rationale
+        );
     }
 }
 
@@ -835,5 +846,44 @@ mod tests {
         assert!(dedup_collision_can_merge(&execute, &execute));
         assert!(!dedup_collision_can_merge(&execute, &prepare));
         assert!(!dedup_collision_can_merge(&execute, &missing));
+    }
+}
+
+#[cfg(test)]
+mod evidence_union_tests {
+    use super::*;
+
+    #[test]
+    fn equal_severity_scanners_keep_both_evidence_sets_in_either_order() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("app.c"), "sink(input);\nguard(input);\n").unwrap();
+        let make = |tool: &str, role: &str, line, snippet: &str| {
+            Finding::new_tool(tool, tool, "app.c", 1, None, Severity::High, "CWE-78 claim")
+                .with_evidence(vec![FindingEvidence {
+                    kind: role.into(),
+                    file_path: "app.c".into(),
+                    line,
+                    snippet: snippet.into(),
+                    rationale: role.into(),
+                    confidence: 90,
+                    ..Default::default()
+                }])
+        };
+        let first = make("semgrep", "sink", 1, "sink(input);");
+        let second = make("full-mode-multi", "guard", 2, "guard(input);");
+        let mut unions = Vec::new();
+        for pair in [[&first, &second], [&second, &first]] {
+            let store = FindingStore::open_in_memory().unwrap();
+            store
+                .record_run_started("union", root.path(), "running")
+                .unwrap();
+            let id = store.insert_finding("union", pair[0]).unwrap();
+            assert_eq!(id, store.insert_finding("union", pair[1]).unwrap());
+            let saved = store.list_findings_for_scan_id("union").unwrap();
+            assert_eq!(saved.len(), 1);
+            assert_eq!(saved[0].evidence.len(), 2);
+            unions.push(saved[0].evidence.clone());
+        }
+        assert_eq!(unions[0], unions[1]);
     }
 }

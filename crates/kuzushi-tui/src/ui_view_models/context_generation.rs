@@ -54,7 +54,7 @@ fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
     } else {
         lines.push("Enter freezes source, selected model and bounded generation options. Preparing the draft makes no model request.".into());
     }
-    lines.extend(generation_preparation_lines(generation));
+    lines.extend(generation_preparation_lines(config));
     lines.extend(allowance_status_lines(config));
     lines.push("n opens a new draft for separate approval. Previous spending and consumed attempts remain recorded.".into());
     lines
@@ -63,7 +63,8 @@ fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         .collect()
 }
 
-fn generation_preparation_lines(generation: &crate::app::StudyContextGeneration) -> Vec<String> {
+fn generation_preparation_lines(config: &crate::app::BatchScanConfig) -> Vec<String> {
+    let generation = config.context_generation.as_ref().unwrap();
     let preparations = generation
         .receipt
         .as_ref()

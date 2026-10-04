@@ -41,7 +41,9 @@ pub(crate) fn cpg_taint_paths_tool() -> AgentTool {
             "properties": {
                 "source": { "type": "string", "description": "Regex for the source call/param, e.g. req\\.query" },
                 "sink":   { "type": "string", "description": "Regex for the sink call, e.g. memcpy|strcpy" },
-                "maxPaths": { "type": "integer", "description": "Max flows to return (default 10)." }
+                "patternMode": { "type": "string", "enum": ["regex", "literal"], "default": "regex" },
+                "maxPaths": { "type": "integer", "minimum": 1, "maximum": MAX_FLOWS_PER_QUERY,
+                    "default": 10, "description": "Max flows to return; larger requests are rejected, not clamped." }
             },
             "required": ["source", "sink"]
         }),
@@ -245,9 +247,11 @@ fn cached_for(root: &Path) -> bool {
 
 fn cached_langs() -> Vec<String> {
     PROJECTS.with(|cell| {
-        cell.borrow().as_ref().map_or_else(Vec::new, |(_, projects)| {
-            projects.iter().map(|(lang, _)| lang.clone()).collect()
-        })
+        cell.borrow()
+            .as_ref()
+            .map_or_else(Vec::new, |(_, projects)| {
+                projects.iter().map(|(lang, _)| lang.clone()).collect()
+            })
     })
 }
 
@@ -282,6 +286,10 @@ pub(crate) fn handle_cpg_taint_paths(
     let Some(envelope) = with_projects(root, |projects| collect_flows(projects, &args)) else {
         return Ok(missing_graph_result(call));
     };
+    let envelope = match envelope {
+        Ok(envelope) => envelope,
+        Err(error) => return Ok(error_result(call, &error.to_string())),
+    };
     report_query(trace, &args, &envelope);
     Ok(success_result(call, &args, envelope))
 }
@@ -290,23 +298,36 @@ fn parse_taint_paths_args(call: &ToolCall) -> Result<TaintPathsArgs> {
     Ok(TaintPathsArgs {
         source: required_pattern(&call.input, "source")?,
         sink: required_pattern(&call.input, "sink")?,
-        max_paths: call
-            .input
-            .get("maxPaths")
-            .and_then(Value::as_u64)
-            .map(|value| value.clamp(1, MAX_FLOWS_PER_QUERY as u64) as usize)
-            .unwrap_or(10),
+        max_paths: requested_max_paths(&call.input)?,
     })
 }
 
+fn requested_max_paths(input: &Value) -> Result<usize> {
+    let Some(value) = input.get("maxPaths") else {
+        return Ok(10);
+    };
+    value
+        .as_u64()
+        .filter(|value| (1..=MAX_FLOWS_PER_QUERY as u64).contains(value))
+        .map(|value| value as usize)
+        .ok_or_else(|| anyhow::anyhow!("maxPaths must be an integer in 1..={MAX_FLOWS_PER_QUERY}"))
+}
+
 fn required_pattern(input: &Value, key: &str) -> Result<String> {
-    input
+    let pattern = input
         .get(key)
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
-        .ok_or_else(|| anyhow::anyhow!("cpg_taint_paths: `{key}` is required and must be non-empty"))
+        .ok_or_else(|| {
+            anyhow::anyhow!("cpg_taint_paths: `{key}` is required and must be non-empty")
+        })?;
+    let mode = input.get("patternMode").map_or(Ok("regex"), |value| {
+        value
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("patternMode must be a string"))
+    })?;
+    kuzushi_cpg::compile_query_pattern(&pattern, mode).map_err(anyhow::Error::msg)
 }
 
 #[derive(Default)]
@@ -320,16 +341,16 @@ struct FlowEnvelope {
     flows: Vec<Value>,
 }
 
-fn collect_flows(projects: &[(String, Project)], args: &TaintPathsArgs) -> FlowEnvelope {
+fn collect_flows(projects: &[(String, Project)], args: &TaintPathsArgs) -> Result<FlowEnvelope> {
     let mut envelope = FlowEnvelope::default();
     for (lang, project) in projects {
-        collect_language_flows(&mut envelope, lang, project, args);
+        collect_language_flows(&mut envelope, lang, project, args)?;
     }
     if envelope.flows.len() > args.max_paths {
         envelope.flows.truncate(args.max_paths);
         envelope.truncated = true;
     }
-    envelope
+    Ok(envelope)
 }
 
 fn collect_language_flows(
@@ -337,18 +358,21 @@ fn collect_language_flows(
     lang: &str,
     project: &Project,
     args: &TaintPathsArgs,
-) {
+) -> Result<()> {
     if envelope.flows.len() >= args.max_paths {
         // The flow cap is already full, so this whole language is skipped
         // unexamined — disclose that the result is partial.
         envelope.truncated = true;
-        return;
+        return Ok(());
     }
-    let harvested = harvest_regex_spec(project, &args.source, &args.sink);
+    let harvested =
+        harvest_regex_spec(project, &args.source, &args.sink).map_err(anyhow::Error::msg)?;
     envelope.source_calls += harvested.source_call_matches;
     envelope.entry_methods += harvested.entry_methods.len();
     envelope.sink_calls += harvested.sink_call_matches;
-    let (findings, _stats) = run_taint_query(project, &harvested);
+    let (findings, stats) = run_taint_query(project, &harvested);
+    envelope.truncated |=
+        stats.flow_count_before_cap > findings.len() || !stats.truncated_categories.is_empty();
     for finding in &findings {
         if envelope.flows.len() >= args.max_paths {
             envelope.truncated = true;
@@ -356,6 +380,7 @@ fn collect_language_flows(
         }
         envelope.flows.push(flow_value(lang, finding));
     }
+    Ok(())
 }
 
 /// Verbatim copy of the mcp-cpg `flow_json`, keeping `guard`/`authz` — the
@@ -488,6 +513,39 @@ fn envelope_guard_note(envelope: &FlowEnvelope) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn max_paths_schema_and_parser_reject_invalid_or_silently_clamped_values() {
+        let schema = cpg_taint_paths_tool().input_schema;
+        assert_eq!(schema["properties"]["maxPaths"]["minimum"], 1);
+        assert_eq!(
+            schema["properties"]["maxPaths"]["maximum"],
+            MAX_FLOWS_PER_QUERY
+        );
+        assert_eq!(requested_max_paths(&json!({})).unwrap(), 10);
+        assert_eq!(requested_max_paths(&json!({"maxPaths": 1})).unwrap(), 1);
+        for value in [
+            json!(0),
+            json!(-1),
+            json!(MAX_FLOWS_PER_QUERY + 1),
+            json!(u64::MAX),
+            json!(1.5),
+            json!("10"),
+            Value::Null,
+        ] {
+            let result = handle_cpg_taint_paths(
+                Path::new("missing-graph"),
+                None,
+                &call(json!({"source":"a", "sink":"b", "maxPaths":value})),
+            )
+            .unwrap();
+            assert!(result.is_error);
+            assert!(result.output["error"]
+                .as_str()
+                .unwrap()
+                .contains("maxPaths"));
+        }
+    }
+
     fn write_guarded_ts_fixture(root: &Path) {
         std::fs::write(
             root.join("users.ts"),
@@ -529,9 +587,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         // Cache is cold for this root: a call must return a structured error,
         // never an Err that would abort the tool loop.
-        let result =
-            handle_cpg_taint_paths(temp.path(), None, &call(json!({"source": "a", "sink": "b"})))
-                .unwrap();
+        let result = handle_cpg_taint_paths(
+            temp.path(),
+            None,
+            &call(json!({"source": "a", "sink": "b"})),
+        )
+        .unwrap();
         assert!(result.is_error);
         assert_eq!(result.output["error"], "no cpg graph; run cpg:build");
     }
@@ -539,9 +600,12 @@ mod tests {
     #[test]
     fn empty_or_missing_patterns_are_structured_errors() {
         let temp = tempfile::tempdir().unwrap();
-        let result =
-            handle_cpg_taint_paths(temp.path(), None, &call(json!({"source": "  ", "sink": "b"})))
-                .unwrap();
+        let result = handle_cpg_taint_paths(
+            temp.path(),
+            None,
+            &call(json!({"source": "  ", "sink": "b"})),
+        )
+        .unwrap();
         assert!(result.is_error);
     }
 
@@ -550,12 +614,19 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_guarded_ts_fixture(temp.path());
         let first = open_cpg_taint_engine(temp.path(), TaintToolPolicy::Build, None);
-        assert!(matches!(first, CpgTaintReadiness::Ready { .. }), "{first:?}");
+        assert!(
+            matches!(first, CpgTaintReadiness::Ready { .. }),
+            "{first:?}"
+        );
         let artifact = kuzushi_cpg::artifact_path(temp.path(), "typescript");
         let mtime = std::fs::metadata(&artifact)
             .and_then(|m| m.modified())
             .unwrap();
-        assert_eq!(detection_count(), 1, "first Build must detect languages once");
+        assert_eq!(
+            detection_count(),
+            1,
+            "first Build must detect languages once"
+        );
         // Second call HITS the thread-local cache: it neither rebuilds the
         // artifact (mtime unchanged) nor re-walks the source tree to re-detect
         // buildable languages (detection count stays 1).
@@ -580,13 +651,19 @@ mod tests {
         std::fs::write(temp.path().join("notes.txt"), "prose, not code\n").unwrap();
 
         let first = open_cpg_taint_engine(temp.path(), TaintToolPolicy::Build, None);
-        assert!(matches!(first, CpgTaintReadiness::Missing { .. }), "{first:?}");
+        assert!(
+            matches!(first, CpgTaintReadiness::Missing { .. }),
+            "{first:?}"
+        );
         assert_eq!(detection_count(), 1, "first Build detects languages once");
 
         // Second call must HIT the cached Missing: no second whole-source-tree
         // detection walk despite the zero-language branch storing no projects.
         let second = open_cpg_taint_engine(temp.path(), TaintToolPolicy::Build, None);
-        assert!(matches!(second, CpgTaintReadiness::Missing { .. }), "{second:?}");
+        assert!(
+            matches!(second, CpgTaintReadiness::Missing { .. }),
+            "{second:?}"
+        );
         assert_eq!(
             detection_count(),
             1,
@@ -626,7 +703,10 @@ mod tests {
         // Available must serve the stale graph as-is — never a from-source
         // rebuild, and never the Build-only language detection walk.
         let ready = open_cpg_taint_engine(temp.path(), TaintToolPolicy::Available, None);
-        assert!(matches!(ready, CpgTaintReadiness::Ready { .. }), "{ready:?}");
+        assert!(
+            matches!(ready, CpgTaintReadiness::Ready { .. }),
+            "{ready:?}"
+        );
         let mtime2 = std::fs::metadata(&artifact)
             .and_then(|m| m.modified())
             .unwrap();
@@ -643,7 +723,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_guarded_ts_fixture(temp.path());
         let readiness = open_cpg_taint_engine(temp.path(), TaintToolPolicy::Available, None);
-        assert!(matches!(readiness, CpgTaintReadiness::Missing { .. }), "{readiness:?}");
+        assert!(
+            matches!(readiness, CpgTaintReadiness::Missing { .. }),
+            "{readiness:?}"
+        );
         assert_eq!(
             detection_count(),
             0,
@@ -656,7 +739,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_guarded_ts_fixture(temp.path());
         let readiness = open_cpg_taint_engine(temp.path(), TaintToolPolicy::Build, None);
-        assert!(matches!(readiness, CpgTaintReadiness::Ready { .. }), "{readiness:?}");
+        assert!(
+            matches!(readiness, CpgTaintReadiness::Ready { .. }),
+            "{readiness:?}"
+        );
         let result = handle_cpg_taint_paths(
             temp.path(),
             None,
@@ -664,7 +750,11 @@ mod tests {
         )
         .unwrap();
         assert!(!result.is_error, "{:?}", result.output);
-        assert!(result.output["flowCount"].as_u64().unwrap() > 0, "{}", result.output);
+        assert!(
+            result.output["flowCount"].as_u64().unwrap() > 0,
+            "{}",
+            result.output
+        );
         // A single witnessed flow is not truncated.
         assert_eq!(result.output["truncated"], serde_json::json!(false));
         let flow = &result.output["flows"][0];

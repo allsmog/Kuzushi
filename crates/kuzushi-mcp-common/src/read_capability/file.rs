@@ -35,7 +35,8 @@ impl ReadFileIdentity {
         }
         #[cfg(windows)]
         {
-            self.change_time == 0
+            // A nonzero NTFS timestamp is still not a content identity.
+            true
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -79,6 +80,8 @@ pub struct BoundedReadFile {
     file: File,
     identity: ReadFileIdentity,
     max_bytes: usize,
+    #[cfg(windows)]
+    opening_digest: [u8; 32],
 }
 
 impl BoundedReadFile {
@@ -98,7 +101,7 @@ impl BoundedReadFile {
             "MCP file changed after it was opened: {}",
             self.path.display()
         );
-        Ok(())
+        self.verify_content_digest(None)
     }
 
     pub fn read_bytes_with_identity(mut self) -> Result<(Vec<u8>, ReadFileIdentity)> {
@@ -112,7 +115,7 @@ impl BoundedReadFile {
             .read_to_end(&mut bytes)
             .with_context(|| format!("could not read {}", self.path.display()))?;
         ensure_size(&self.path, bytes.len(), self.max_bytes)?;
-        self.verify_after_read()?;
+        self.verify_after_read(&bytes)?;
         let identity = self.identity.bind_content_digest(&bytes);
         Ok((bytes, identity))
     }
@@ -162,10 +165,10 @@ impl BoundedReadFile {
             "MCP file changed while it was being copied: {}",
             self.path.display()
         );
-        Ok(())
+        self.verify_content_digest(Some(digest))
     }
 
-    fn verify_after_read(&self) -> Result<()> {
+    fn verify_after_read(&self, bytes: &[u8]) -> Result<()> {
         let metadata = self.file.metadata()?;
         let current = identity_for(&self.file, &metadata)?;
         anyhow::ensure!(
@@ -173,6 +176,34 @@ impl BoundedReadFile {
             "MCP file changed while it was being read: {}",
             self.path.display()
         );
+        self.verify_content_bytes(bytes)
+    }
+
+    fn verify_content_bytes(&self, bytes: &[u8]) -> Result<()> {
+        #[cfg(windows)]
+        {
+            self.verify_content_digest(Some(Sha256::digest(bytes).into()))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = bytes;
+            Ok(())
+        }
+    }
+
+    #[cfg(windows)]
+    fn verify_content_digest(&self, read_digest: Option<[u8; 32]>) -> Result<()> {
+        let current = windows_digest(&self.file, self.max_bytes)?;
+        anyhow::ensure!(
+            current == self.opening_digest && read_digest.unwrap_or(current) == self.opening_digest,
+            "MCP file changed while it was being read: {}",
+            self.path.display()
+        );
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn verify_content_digest(&self, _read_digest: Option<[u8; 32]>) -> Result<()> {
         Ok(())
     }
 }
@@ -194,9 +225,40 @@ pub(super) fn bounded_regular_file(
     Ok(BoundedReadFile {
         path,
         identity: identity_for(&file, &metadata)?,
+        #[cfg(windows)]
+        opening_digest: windows_digest(&file, max_bytes)?,
         file,
         max_bytes,
     })
+}
+
+#[cfg(windows)]
+fn windows_digest(file: &File, max_bytes: usize) -> Result<[u8; 32]> {
+    use std::io::{Seek, SeekFrom};
+    let mut borrowed = file;
+    let position = borrowed.stream_position()?;
+    let result = windows_digest_from_start(file, max_bytes);
+    borrowed.seek(SeekFrom::Start(position))?;
+    result
+}
+
+#[cfg(windows)]
+fn windows_digest_from_start(file: &File, max_bytes: usize) -> Result<[u8; 32]> {
+    use std::os::windows::fs::FileExt;
+    let mut digest = Sha256::new();
+    let mut offset = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    while let read @ 1.. = file.seek_read(&mut buffer, offset)? {
+        offset = offset
+            .checked_add(read as u64)
+            .context("MCP digest size overflow")?;
+        anyhow::ensure!(
+            offset <= max_bytes as u64,
+            "MCP file exceeds its bounded digest limit"
+        );
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest.finalize().into())
 }
 
 fn ensure_size(path: &Path, size: usize, max_bytes: usize) -> Result<()> {

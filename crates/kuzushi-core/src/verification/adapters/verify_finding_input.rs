@@ -41,23 +41,14 @@ impl VerifyFindingInput {
             Some(_) => anyhow::bail!("verify:finding fingerprint must be a non-empty string"),
             None => anyhow::bail!("verify:finding requires a fingerprint"),
         };
-        let prompt_template = match input.get("VERIFY_PROMPT") {
-            Some(Value::String(value)) if !value.trim().is_empty() => {
-                Some(crate::options::resolve_prepared_prompt_override_for_key(
-                    value.trim(),
-                    cwd,
-                    "VERIFY_PROMPT",
-                    crate::verification::DEFAULT_VERIFY_PROMPT,
-                )?)
-            }
-            Some(Value::String(_)) | None => None,
-            Some(_) => anyhow::bail!("verify:finding VERIFY_PROMPT must be a string"),
-        };
+        let prompt_template = parse_prompt_template(input, cwd)?;
         let passes = parse_verify_passes(input)?;
         let mcps = parse_verify_mcps(input)?;
         let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
-        let max_model_turns =
-            crate::runtime::AgentRuntimeOptions::max_model_turns_from_input(input, "verify:finding")?;
+        let max_model_turns = crate::runtime::AgentRuntimeOptions::max_model_turns_from_input(
+            input,
+            "verify:finding",
+        )?;
         let gate_model = parse_gate_model(input)?;
         let escalation_model = parse_escalation_model(input)?;
 
@@ -72,6 +63,21 @@ impl VerifyFindingInput {
             escalation_model,
         })
     }
+}
+
+fn parse_prompt_template(input: &Value, cwd: &Path) -> Result<Option<String>> {
+    Ok(match input.get("VERIFY_PROMPT") {
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            Some(crate::options::resolve_prepared_prompt_override_for_key(
+                value.trim(),
+                cwd,
+                "VERIFY_PROMPT",
+                crate::verification::DEFAULT_VERIFY_PROMPT,
+            )?)
+        }
+        Some(Value::String(_)) | None => None,
+        Some(_) => anyhow::bail!("verify:finding VERIFY_PROMPT must be a string"),
+    })
 }
 
 /// The escalation model is stored raw (only trimmed), never validated here.
@@ -179,7 +185,7 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
     // default them — so the enforced schema must demand them from the model.
     json!({
         "type": "object",
-        "required": ["fingerprint", "exploitable", "confidence", "proofLevel", "proofVerdict"],
+        "required": ["fingerprint", "exploitable", "confidence", "proofLevel", "proofVerdict", "codeCitations"],
         "additionalProperties": true,
         "properties": {
             "fingerprint": {"type": "string"},
@@ -192,6 +198,7 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
             "attack_vector": {"type": ["string", "null"]},
             "preconditions": {"type": "array", "items": {"type": "string"}},
             "confidence": {"type": "number"},
+            "codeCitations": verification_citations_schema(),
             "proofLevel": {
                 "type": "integer",
                 "minimum": 1,
@@ -208,6 +215,21 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
                     "inconclusive"
                 ],
                 "description": "Verdict of this review: `exploited` when the traced path stands with no blocking control, `not_reproduced` only when cited evidence defeats the claim, `insufficient_finding_detail` when the finding lacks the detail needed to judge it (exploitable=null); language_unsupported_yet also requires exploitable=null."
+            }
+        }
+    })
+}
+
+fn verification_citations_schema() -> Value {
+    json!({
+        "type":"array", "maxItems":64,
+        "description":"Decisive positives require source and sink roles; negatives require a control or reachability role. Use exact on-disk snippets. An empty array is inconclusive.",
+        "items": {"type":"object", "required":["filePath","startLine","endLine","snippet","description","role"],
+            "properties": {
+                "filePath":{"type":"string"}, "startLine":{"type":"integer","minimum":1,"maximum":4294967295_u64},
+                "endLine":{"type":"integer","minimum":1,"maximum":4294967295_u64},
+                "snippet":{"type":"string","minLength":1}, "description":{"type":"string","minLength":1},
+                "role":{"type":"string","enum":["source","sink","control","reachability"]}
             }
         }
     })

@@ -1,6 +1,8 @@
 mod argv;
 mod execution;
 mod output;
+mod streams;
+mod supervision;
 mod types;
 
 #[cfg(test)]

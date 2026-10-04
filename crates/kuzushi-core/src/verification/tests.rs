@@ -1,8 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::classification::{
-        sink_marker_path, stderr_has_sanitizer_crash, SINK_MARKER_CONTENT,
-    };
+    use super::super::classification::{sink_marker_path, SINK_MARKER_CONTENT};
     use super::super::unsupported::enforce_empirical_provenance;
     use super::super::*;
     use crate::findings::Severity;
@@ -108,11 +106,11 @@ mod tests {
                 expected_verdict: ProofVerdict::InfrastructureError,
             },
             Case {
-                name: "marker matching wrapped crash",
+                name: "untrusted stderr cannot attest a wrapped crash",
                 result: wrapped_crash,
                 marker: Some(SINK_MARKER_CONTENT),
-                expected_level: 4,
-                expected_verdict: ProofVerdict::Exploited,
+                expected_level: 1,
+                expected_verdict: ProofVerdict::InfrastructureError,
             },
         ];
 
@@ -703,15 +701,12 @@ mod tests {
             cost_usd: 0.0,
             notes: Vec::new(),
             provenance: Some(crate::findings::VerificationProvenance {
-                source_identity:
-                    crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
-                        snapshot_hash: crate::run_lifecycle::SafeText::operator_visible(
-                            "a".repeat(64),
-                        ),
-                        tree_hash: Some(crate::run_lifecycle::SafeText::operator_visible(
-                            "b".repeat(64),
-                        )),
-                    },
+                source_identity: crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+                    snapshot_hash: crate::run_lifecycle::SafeText::operator_visible("a".repeat(64)),
+                    tree_hash: Some(crate::run_lifecycle::SafeText::operator_visible(
+                        "b".repeat(64),
+                    )),
+                },
                 reproducer: Some(crate::content_store::ObjectRef {
                     kind: crate::content_store::ObjectKind::ProofSnapshot,
                     hash: crate::identity::Blake3Hash::new("c".repeat(64)).unwrap(),
@@ -1046,39 +1041,8 @@ mod tests {
         assert!(error.to_string().contains("inside workspace"));
     }
 
-    // ----- sanitizer-stderr detection ------------------------------
-
     #[test]
-    fn stderr_detector_recognises_asan_stack_buffer_overflow() {
-        let stderr = "==123==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7f...";
-        assert!(stderr_has_sanitizer_crash(stderr));
-    }
-
-    #[test]
-    fn stderr_detector_recognises_ubsan_runtime_error() {
-        let stderr = "runtime error: signed integer overflow: ...";
-        assert!(stderr_has_sanitizer_crash(stderr));
-    }
-
-    #[test]
-    fn stderr_detector_recognises_use_after_free() {
-        assert!(stderr_has_sanitizer_crash(
-            "AddressSanitizer: heap-use-after-free on address 0x..."
-        ));
-        assert!(stderr_has_sanitizer_crash("==1==ERROR: use-after-free"));
-    }
-
-    #[test]
-    fn stderr_detector_ignores_clean_output() {
-        assert!(!stderr_has_sanitizer_crash(""));
-        assert!(!stderr_has_sanitizer_crash(
-            "clean stderr output\nno errors here\n"
-        ));
-        assert!(!stderr_has_sanitizer_crash("Compiled with -Wall -Werror"));
-    }
-
-    #[test]
-    fn classify_promotes_to_4_on_marker_backed_asan_output() {
+    fn target_printed_sanitizer_text_cannot_promote_runtime_proof() {
         let project = tempfile::tempdir().unwrap();
         std::fs::write(sink_marker_path(project.path()), SINK_MARKER_CONTENT).unwrap();
         let mut result = sandbox_result(ExitOutcome::Exited, Some(1), None);
@@ -1090,8 +1054,8 @@ mod tests {
             project.path(),
             HarnessFidelity::Faithful,
         );
-        assert_eq!(outcome.proof_level, 4);
-        assert_eq!(outcome.proof_verdict, ProofVerdict::Exploited);
+        assert_eq!(outcome.proof_level, 1);
+        assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
     }
 
     #[test]

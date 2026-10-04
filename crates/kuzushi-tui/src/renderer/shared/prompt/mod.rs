@@ -1,4 +1,5 @@
 pub(in crate::renderer) use super::*;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug)]
 pub(crate) struct PromptSegments {
@@ -20,13 +21,12 @@ pub(crate) fn prompt_segments(
     let fitted_prompt = fit_prompt(prompt, width.saturating_sub(min_editor_width));
     let editor_width = width.saturating_sub(display_width(&fitted_prompt)).max(1);
 
-    let input_chars = input.chars().collect::<Vec<_>>();
-    let cursor = cursor_index.min(input_chars.len());
-    let mut visual_chars = input_chars.clone();
+    let cursor = grapheme_cursor(input, cursor_index);
+    let mut visual_chars = input.graphemes(true).collect::<Vec<_>>();
     let cursor_text = if cursor < visual_chars.len() {
         visual_chars[cursor].to_string()
     } else {
-        visual_chars.push(cursor_glyph.chars().next().unwrap_or(' '));
+        visual_chars.push(cursor_glyph);
         cursor_glyph.to_string()
     };
 
@@ -41,15 +41,29 @@ pub(crate) fn prompt_segments(
     fit_editor_segments(
         PromptSegments {
             prompt: fitted_prompt,
-            before_cursor: visible[..visible_cursor].iter().collect(),
+            before_cursor: visible[..visible_cursor].concat(),
             cursor_text,
-            after_cursor: visible[visible_cursor.saturating_add(1)..].iter().collect(),
+            after_cursor: visible[visible_cursor.saturating_add(1)..].concat(),
         },
         editor_width,
     )
 }
 
+fn grapheme_cursor(input: &str, scalar: usize) -> usize {
+    let byte = input
+        .char_indices()
+        .nth(scalar)
+        .map_or(input.len(), |(at, _)| at);
+    input
+        .grapheme_indices(true)
+        .take_while(|(at, grapheme)| at + grapheme.len() <= byte)
+        .count()
+}
+
 fn fit_editor_segments(mut segments: PromptSegments, width: usize) -> PromptSegments {
+    if display_width(&segments.cursor_text) > width {
+        segments.cursor_text = "�".into();
+    }
     let cursor_width = display_width(&segments.cursor_text).max(1).min(width);
     let available = width.saturating_sub(cursor_width);
     let (before, after) = editor_side_budgets(&segments, available);
@@ -78,7 +92,7 @@ pub(crate) fn fit_prompt(prompt: &str, max_columns: usize) -> String {
     if max_columns == 0 {
         return String::new();
     }
-    if prompt.chars().count() <= max_columns {
+    if display_width(prompt) <= max_columns {
         return prompt.to_string();
     }
     fit_truncated_prompt(prompt, max_columns)
@@ -87,7 +101,7 @@ pub(crate) fn fit_prompt(prompt: &str, max_columns: usize) -> String {
 fn fit_truncated_prompt(prompt: &str, max_columns: usize) -> String {
     let suffix = prompt_truncation_suffix(prompt);
     let Some(body_columns) = prompt_body_columns(max_columns, suffix) else {
-        return prompt.chars().take(max_columns).collect();
+        return take_columns(prompt, max_columns);
     };
     format!(
         "{}...{}",
@@ -113,10 +127,7 @@ fn prompt_body_columns(max_columns: usize, suffix: &str) -> Option<usize> {
 }
 
 fn truncated_prompt_body(prompt: &str, body_columns: usize) -> String {
-    prompt
-        .chars()
-        .take(body_columns.saturating_sub(3))
-        .collect()
+    take_columns(prompt, body_columns.saturating_sub(3))
 }
 
 pub(crate) fn prompt_window_start(line_len: usize, cursor_index: usize, width: usize) -> usize {
@@ -126,4 +137,35 @@ pub(crate) fn prompt_window_start(line_len: usize, cursor_index: usize, width: u
     let max_start = line_len.saturating_sub(width);
     let cursor_margin = width.saturating_sub(1) / 2;
     max_start.min(cursor_index.saturating_sub(cursor_margin))
+}
+
+#[cfg(test)]
+mod grapheme_tests {
+    use super::*;
+
+    #[test]
+    fn grapheme_prompt_cursor_and_clipping_use_whole_display_cells() {
+        for text in ["é", "e\u{301}", "👩‍💻", "👍🏽", "🇺🇳", "東"] {
+            let input = format!("a{text}z");
+            let segments = prompt_segments("> ", &input, 1, 20, " ");
+            assert_eq!(segments.before_cursor, "a");
+            assert_eq!(segments.cursor_text, text);
+            assert_eq!(segments.after_cursor, "z");
+            for width in 1..8 {
+                let segments = prompt_segments("東京> ", &input, 1, width, " ");
+                let cells = [
+                    &segments.prompt,
+                    &segments.before_cursor,
+                    &segments.cursor_text,
+                    &segments.after_cursor,
+                ]
+                .into_iter()
+                .map(|part| display_width(part))
+                .sum::<usize>();
+                assert!(cells <= width, "{text}: {segments:?}");
+            }
+            assert_eq!(take_columns(text, 2), text);
+            assert_eq!(take_tail_columns(text, 2), text);
+        }
+    }
 }

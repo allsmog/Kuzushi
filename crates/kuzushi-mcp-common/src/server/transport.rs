@@ -10,13 +10,12 @@ use crate::jsonrpc::{
 };
 use crate::tool::ToolRegistry;
 
-use super::dispatch::dispatch;
 use super::ServerInfo;
 
 pub(crate) const MAX_JSONRPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_JSONRPC_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
-enum Frame {
+pub(super) enum Frame {
     EndOfStream,
     Message(Vec<u8>),
     Oversized,
@@ -39,50 +38,27 @@ where
     W: tokio::io::AsyncWrite + Unpin,
 {
     let mut reader = BufReader::new(reader);
+    let mut requests = super::lifecycle::Requests::default();
     loop {
-        let frame = read_frame(&mut reader).await?;
+        let frame = requests.next_frame(&mut reader, &mut writer).await?;
         if matches!(frame, Frame::EndOfStream) {
+            return requests.drain(&mut writer).await;
+        }
+        if !requests
+            .accept(frame, &info, &registry, &mut writer)
+            .await?
+        {
             return Ok(());
         }
-        if let Some(response) = response_for_frame(frame, &info, &registry).await {
-            write_jsonrpc_response(&mut writer, response).await?;
-        }
     }
 }
 
-async fn response_for_frame(
-    frame: Frame,
-    info: &ServerInfo,
-    registry: &ToolRegistry,
-) -> Option<JsonRpcResponse> {
-    match frame {
-        Frame::EndOfStream => None,
-        Frame::Oversized => Some(oversized_request_response()),
-        Frame::Message(bytes) => response_for_message_bytes(&bytes, info, registry).await,
-    }
-}
-
-fn oversized_request_response() -> JsonRpcResponse {
+pub(super) fn oversized_request_response() -> JsonRpcResponse {
     JsonRpcResponse::err(
         Value::Null,
         ERROR_INVALID_REQUEST,
         format!("JSON-RPC request exceeds the {MAX_JSONRPC_REQUEST_BYTES}-byte frame limit"),
     )
-}
-
-async fn response_for_message_bytes(
-    bytes: &[u8],
-    info: &ServerInfo,
-    registry: &ToolRegistry,
-) -> Option<JsonRpcResponse> {
-    match std::str::from_utf8(bytes) {
-        Ok(message) => handle_message(message.trim(), info, registry).await,
-        Err(error) => Some(JsonRpcResponse::err(
-            Value::Null,
-            ERROR_PARSE,
-            format!("parse error: request is not UTF-8: {error}"),
-        )),
-    }
 }
 
 struct ReadChunk {
@@ -102,7 +78,7 @@ impl ReadChunk {
     }
 }
 
-async fn read_frame<R>(reader: &mut R) -> io::Result<Frame>
+pub(super) async fn read_frame<R>(reader: &mut R) -> io::Result<Frame>
 where
     R: AsyncBufRead + Unpin,
 {
@@ -158,30 +134,13 @@ fn frame_at_boundary(frame: Vec<u8>, oversized: bool) -> Frame {
     }
 }
 
-pub(crate) async fn handle_message(
-    line: &str,
-    info: &ServerInfo,
-    registry: &ToolRegistry,
-) -> Option<JsonRpcResponse> {
-    if line.is_empty() {
-        return None;
-    }
-    let request = match parse_jsonrpc_request(line) {
-        Ok(request) => request,
-        Err(response) => return Some(response),
-    };
-    let id = request.id.clone();
-    let result = dispatch(&request, info, registry).await;
-    response_for_request_result(id, result)
-}
-
-fn parse_jsonrpc_request(line: &str) -> Result<JsonRpcRequest, JsonRpcResponse> {
+pub(super) fn parse_jsonrpc_request(line: &str) -> Result<JsonRpcRequest, JsonRpcResponse> {
     serde_json::from_str(line).map_err(|err| {
         JsonRpcResponse::err(Value::Null, ERROR_PARSE, format!("parse error: {err}"))
     })
 }
 
-fn response_for_request_result(
+pub(super) fn response_for_request_result(
     id: Option<Value>,
     result: std::result::Result<Value, (i32, String)>,
 ) -> Option<JsonRpcResponse> {
@@ -192,7 +151,10 @@ fn response_for_request_result(
     }
 }
 
-async fn write_jsonrpc_response<W>(writer: &mut W, response: JsonRpcResponse) -> Result<()>
+pub(super) async fn write_jsonrpc_response<W>(
+    writer: &mut W,
+    response: JsonRpcResponse,
+) -> Result<()>
 where
     W: tokio::io::AsyncWrite + Unpin,
 {
@@ -211,13 +173,16 @@ where
                 .ok_or_else(|| anyhow::anyhow!("bounded JSON-RPC error response exceeded limit"))?
         }
     };
-    writer.write_all(&encoded).await?;
-    writer.write_all(b"\n").await?;
-    writer.flush().await?;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        writer.write_all(&encoded).await?;
+        writer.write_all(b"\n").await?;
+        writer.flush().await
+    })
+    .await??;
     Ok(())
 }
 
-pub(crate) fn bounded_json_bytes<T>(value: &T, limit: usize) -> Result<Option<Vec<u8>>>
+pub fn bounded_json_bytes<T>(value: &T, limit: usize) -> Result<Option<Vec<u8>>>
 where
     T: Serialize,
 {

@@ -10,33 +10,39 @@ pub(super) fn entries(directory: &File, max_entries: usize) -> Result<Vec<EntryR
 }
 
 pub(super) fn open_child(directory: &File, record: &EntryRecord) -> Result<File> {
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Storage::FileSystem::{
-        ExtendedFileIdType, OpenFileById, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    };
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
     let EntryIdentity::Windows { file_id, file_type } = &record.identity;
     anyhow::ensure!(
         file_type & FILE_ATTRIBUTE_REPARSE_POINT == 0,
         "refusing to open an MCP directory-entry reparse point"
     );
+    let file = open_by_id(directory, *file_id)?;
+    reject_reparse_point(&file)?;
+    Ok(file)
+}
+
+fn open_by_id(volume: &File, id: [u8; 16]) -> Result<File> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        ExtendedFileIdType, OpenFileById, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
+    };
+
     let descriptor = FILE_ID_DESCRIPTOR {
         dwSize: size_of::<FILE_ID_DESCRIPTOR>() as u32,
         Type: ExtendedFileIdType,
         Anonymous: FILE_ID_DESCRIPTOR_0 {
-            ExtendedFileId: FILE_ID_128 {
-                Identifier: *file_id,
-            },
+            ExtendedFileId: FILE_ID_128 { Identifier: id },
         },
     };
     // SAFETY: the retained parent identifies the volume, the descriptor is
     // fully initialized, and a successful handle is transferred into `File`.
     let handle = unsafe {
         OpenFileById(
-            directory.as_raw_handle(),
+            volume.as_raw_handle(),
             &descriptor,
             GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -49,9 +55,7 @@ pub(super) fn open_child(directory: &File, record: &EntryRecord) -> Result<File>
             .context("could not open retained Windows directory entry by file ID");
     }
     // SAFETY: `OpenFileById` returned a fresh, valid, owned handle.
-    let file = unsafe { File::from_raw_handle(handle) };
-    reject_reparse_point(&file)?;
-    Ok(file)
+    Ok(unsafe { File::from_raw_handle(handle) })
 }
 
 pub(super) fn opened_entry_matches(identity: &EntryIdentity, file: &File) -> Result<bool> {

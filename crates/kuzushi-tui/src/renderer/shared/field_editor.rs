@@ -2,7 +2,8 @@ use crate::app::FieldEditor;
 use crate::theme;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// Keep the editing cursor in view without discarding any draft text. The
 /// same projection is used by terminal and plain rendering.
@@ -25,38 +26,35 @@ fn field_rows(field: &FieldEditor, width: usize) -> (Vec<Line<'static>>, usize) 
     let mut rows = vec![Line::default()];
     let mut columns = 0;
     let mut cursor_row = 0;
-    for (index, ch) in field
-        .text()
-        .chars()
-        .chain(std::iter::once('\n'))
-        .enumerate()
-    {
+    let mut index = 0;
+    for grapheme in field.text().graphemes(true).chain(std::iter::once("\n")) {
         let cursor = index == field.cursor();
-        append_field_character(&mut rows, &mut columns, ch, cursor, width);
+        append_field_grapheme(&mut rows, &mut columns, grapheme, cursor, width);
         if cursor {
             cursor_row = rows.len() - 1;
         }
-        if ch == '\n' {
+        if matches!(grapheme, "\n" | "\r\n") {
             rows.push(Line::default());
             columns = 0;
         }
+        index += grapheme.chars().count();
     }
     rows.pop();
     (rows, cursor_row)
 }
 
-fn append_field_character(
+fn append_field_grapheme(
     rows: &mut Vec<Line<'static>>,
     columns: &mut usize,
-    ch: char,
+    grapheme: &str,
     cursor: bool,
     width: usize,
 ) {
-    if ch == '\n' && !cursor {
+    if matches!(grapheme, "\n" | "\r\n") && !cursor {
         return;
     }
-    let text = field_character(ch, width);
-    let cells: usize = text.chars().map(|ch| ch.width().unwrap_or(0)).sum();
+    let text = field_grapheme(grapheme, width);
+    let cells = text.width();
     if *columns > 0 && *columns + cells > width {
         rows.push(Line::default());
         *columns = 0;
@@ -78,12 +76,12 @@ fn append_field_span(rows: &mut Vec<Line<'static>>, span: Span<'static>) {
     }
 }
 
-fn field_character(ch: char, width: usize) -> String {
-    match ch {
-        '\n' => " ".into(),
-        '\t' => "⇥".into(),
-        ch if ch.is_control() || ch.width().unwrap_or(0) > width => "�".into(),
-        ch => ch.to_string(),
+fn field_grapheme(grapheme: &str, width: usize) -> String {
+    match grapheme {
+        "\n" | "\r\n" => " ".into(),
+        "\t" => "⇥".into(),
+        text if text.chars().any(char::is_control) || text.width() > width => "�".into(),
+        text => text.to_string(),
     }
 }
 
@@ -91,6 +89,25 @@ fn field_character(ch: char, width: usize) -> String {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn grapheme_field_rows_keep_emoji_and_combining_marks_in_one_span() {
+        for text in ["é", "e\u{301}", "👩‍💻", "👍🏽", "🇺🇳", "東"] {
+            let mut field = FieldEditor::new(format!("a{text}z"));
+            field.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
+            field.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+            let lines = field_editor_lines(&field, 4, 8);
+            let highlighted = lines
+                .iter()
+                .flat_map(|line| &line.spans)
+                .find(|span| span.style.add_modifier.contains(Modifier::REVERSED))
+                .unwrap();
+            assert_eq!(highlighted.content, text);
+            assert!(lines.iter().all(|line| line.width() <= 4));
+            let joined = lines.iter().map(ToString::to_string).collect::<String>();
+            assert_eq!(joined, field.text());
+        }
+    }
 
     #[test]
     fn long_multiline_drafts_keep_the_cursor_visible_at_narrow_widths() {

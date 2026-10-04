@@ -17,6 +17,7 @@ pub struct AuthorizedTarget {
     target: ScopeTarget,
     authorization_ref: String,
     authorized_at_unix: u64,
+    scope: EngagementScope,
 }
 
 impl AuthorizedTarget {
@@ -47,6 +48,7 @@ impl EngagementScope {
                 target,
                 authorization_ref: self.authorization_ref.trim().to_string(),
                 authorized_at_unix: now_unix,
+                scope: self.clone(),
             }),
             ScopeDecision::Denied(reason) => Err(reason),
         }
@@ -63,6 +65,28 @@ pub struct PlayContext {
 }
 
 impl PlayContext {
+    /// All outbound requests, including those made by custom plays, recheck scope.
+    pub fn execute(
+        &self,
+        play: &dyn super::play::Play,
+        transport: &dyn super::transport::PlayTransport,
+    ) -> Result<super::play::PlayOutcome, String> {
+        let now = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|time| time.as_secs())
+                .map_err(|error| error.to_string())
+        };
+        play.execute(
+            self,
+            &AuthorizedTransport {
+                authorized: &self.authorized,
+                inner: transport,
+                now: &now,
+            },
+        )
+    }
+
     pub fn new(authorized: AuthorizedTarget, run_id: impl Into<String>) -> Self {
         Self {
             authorized,
@@ -93,5 +117,82 @@ impl PlayContext {
     /// Evidence accumulated by earlier plays in the chain.
     pub fn preconditions(&self) -> &[String] {
         &self.preconditions
+    }
+}
+
+struct AuthorizedTransport<'a> {
+    authorized: &'a AuthorizedTarget,
+    inner: &'a dyn super::transport::PlayTransport,
+    now: &'a dyn Fn() -> Result<u64, String>,
+}
+
+impl super::transport::PlayTransport for AuthorizedTransport<'_> {
+    fn send(
+        &self,
+        target: &ScopeTarget,
+        request: &super::transport::PlayRequest,
+    ) -> Result<super::transport::PlayResponse, String> {
+        if target != self.authorized.target() {
+            return Err("request target differs from authorization".into());
+        }
+        match self.authorized.scope.decide(target, (self.now)()?) {
+            ScopeDecision::Allowed => self.inner.send(target, request),
+            ScopeDecision::Denied(reason) => Err(format!("outbound request refused: {reason}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod expiry_tests {
+    use super::*;
+    use crate::offense::engagement_scope::{ScopeEntry, ScopeWindow};
+    use crate::offense::transport::{PlayRequest, PlayResponse, PlayTransport};
+    use std::cell::Cell;
+
+    struct CountTransport(Cell<usize>);
+    impl PlayTransport for CountTransport {
+        fn send(&self, _: &ScopeTarget, _: &PlayRequest) -> Result<PlayResponse, String> {
+            self.0.set(self.0.get() + 1);
+            Ok(PlayResponse {
+                status: 200,
+                headers: vec![],
+                body: String::new(),
+                elapsed_ms: 0,
+            })
+        }
+    }
+
+    #[test]
+    fn a_second_request_after_expiration_never_reaches_transport() {
+        let scope = EngagementScope {
+            authorized: true,
+            authorization_ref: "test".into(),
+            in_scope: vec![ScopeEntry::parse("example.test").unwrap()],
+            window: Some(ScopeWindow {
+                not_after_unix: Some(10),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let authorized = scope
+            .authorize(ScopeTarget::parse("example.test"), 9)
+            .unwrap();
+        let inner = CountTransport(Cell::new(0));
+        let clock = Cell::new(9);
+        let now = || Ok(clock.get());
+        let transport = AuthorizedTransport {
+            authorized: &authorized,
+            inner: &inner,
+            now: &now,
+        };
+        assert!(transport
+            .send(authorized.target(), &PlayRequest::get("/"))
+            .is_ok());
+        clock.set(11);
+        assert!(transport
+            .send(authorized.target(), &PlayRequest::get("/"))
+            .unwrap_err()
+            .contains("window"));
+        assert_eq!(inner.0.get(), 1);
     }
 }

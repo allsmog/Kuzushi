@@ -150,6 +150,12 @@ fn fail_pending(
 }
 
 pub(super) fn reserve_recovery_eligible_record(record: &RunItemRecord) -> bool {
+    if matches!(
+        &record.item,
+        crate::run_lifecycle::RunItemV1::ModelCallFinished { .. }
+    ) {
+        return true;
+    }
     let inspection_item = matches!(
         &record.item,
         crate::run_lifecycle::RunItemV1::PlanUpdated { .. }

@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicI64;
+use std::sync::atomic::{AtomicBool, AtomicI64};
 use tokio::io::BufReader;
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
@@ -23,6 +23,8 @@ pub struct McpClient {
     pub(crate) stderr_drain: Mutex<Option<JoinHandle<u64>>>,
     pub(crate) next_id: AtomicI64,
     pub(crate) initialized: Mutex<bool>,
+    pub(crate) request_gate: Mutex<()>,
+    pub(crate) retired: AtomicBool,
     pub(crate) binary: String,
     pub(crate) process_group: kuzushi_mcp_common::process::ParentDeathProcessGroup,
 }

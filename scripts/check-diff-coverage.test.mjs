@@ -66,3 +66,28 @@ test("a documentation-only Rust diff has no fabricated coverage debt", () => {
   assert.equal(result.measured, 0);
   assert.equal(result.percent, 100);
 });
+
+test("missing instrumentation cannot become perfect coverage", () => {
+  const coverage = parseLcov("SF:crates/other/src/lib.rs\nDA:1,1\nend_of_record\n");
+  const changed = parseChangedRustLines(
+    "+++ b/crates/new/src/lib.rs\n@@ -0,0 +1 @@\n+fn missed() {}\n",
+  );
+  assert.throws(
+    () => evaluateDiffCoverage(coverage, changed),
+    /missing coverage.*crates\/new\/src\/lib.rs/,
+  );
+});
+
+test("Git C-style paths retain spaces, control characters, quotes and UTF-8", () => {
+  for (const [encoded, decoded] of [
+    ['"b/crates/demo/src/space name.rs"', "crates/demo/src/space name.rs"],
+    ['"b/crates/demo/src/tab\\tname.rs"', "crates/demo/src/tab\tname.rs"],
+    ['"b/crates/demo/src/a\\"b.rs"', 'crates/demo/src/a"b.rs'],
+    ['"b/crates/demo/src/\\303\\251.rs"', "crates/demo/src/é.rs"],
+    ['"b/crates/demo/src/a\\\\b.rs"', "crates/demo/src/a\\b.rs"],
+  ]) {
+    const changed = parseChangedRustLines(`+++ ${encoded}\n@@ -0,0 +1 @@\n+fn changed() {}\n`);
+    assert.deepEqual([...changed.keys()], [decoded]);
+    assert.equal(evaluateDiffCoverage(new Map([[decoded, new Map([[1, 0]])]]), changed).percent, 0);
+  }
+});

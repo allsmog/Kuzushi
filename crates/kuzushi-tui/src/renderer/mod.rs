@@ -31,6 +31,7 @@ mod allowance_review;
 mod answers;
 mod chrome;
 mod context_generation;
+mod paste_inspection;
 mod study_config;
 mod study_context;
 pub(crate) use answers::{

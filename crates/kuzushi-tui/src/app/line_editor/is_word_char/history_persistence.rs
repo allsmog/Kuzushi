@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 /// Cap on retained command-history entries, in memory and on disk.
 pub(crate) const COMMAND_HISTORY_CAP: usize = 200;
-const MAX_COMMAND_HISTORY_BYTES: usize = 1024 * 1024;
+#[path = "history_codec.rs"]
+mod history_codec;
+use history_codec::MAX_COMMAND_HISTORY_BYTES;
 
 impl ShellApp {
     /// Resolve the per-workspace history file. History is scoped to a target so
@@ -28,17 +30,16 @@ impl ShellApp {
             MAX_COMMAND_HISTORY_BYTES,
         ) {
             Ok(Some(contents)) => {
-                let mut entries: Vec<String> = contents
-                    .lines()
-                    .map(str::trim_end)
-                    .filter(|line| !line.is_empty())
-                    .map(str::to_string)
-                    .collect();
-                let overflow = entries.len().saturating_sub(COMMAND_HISTORY_CAP);
-                entries.drain(0..overflow);
-                self.editor_mut().replace_command_history(entries);
+                self.restore_history_contents(&contents);
             }
             Ok(None) => {}
+            Err(error) => self.log("history", format!("could not load history: {error}")),
+        }
+    }
+
+    fn restore_history_contents(&mut self, contents: &str) {
+        match history_codec::decode(contents, COMMAND_HISTORY_CAP) {
+            Ok(entries) => self.editor_mut().replace_command_history(entries),
             Err(error) => self.log("history", format!("could not load history: {error}")),
         }
     }
@@ -49,20 +50,25 @@ impl ShellApp {
         let Some(root) = self.target_owned() else {
             return;
         };
-        if let Err(error) = write_history_file(&root, self.command_history()) {
-            self.log("history", format!("could not persist history: {error}"));
+        match write_history_file(&root, self.command_history()) {
+            Ok(0) => {}
+            Ok(omitted) => self.log(
+                "history",
+                format!("omitted {omitted} history entries to fit the disk budget"),
+            ),
+            Err(error) => self.log("history", format!("could not persist history: {error}")),
         }
     }
 }
 
-fn write_history_file(root: &Path, entries: &[String]) -> anyhow::Result<()> {
-    let body = entries.join("\n");
+fn write_history_file(root: &Path, entries: &[String]) -> anyhow::Result<usize> {
+    let (body, omitted) = history_codec::encode(entries, COMMAND_HISTORY_CAP);
     let history_path = kuzushi_core::workspace::workspace_history_path(root);
     let relative = history_path
         .strip_prefix(root)
         .map_err(|_| anyhow::anyhow!("workspace history path escaped the active target"))?;
     kuzushi_core::workspace::write_workspace_state_file(root, relative, body.as_bytes())?;
-    Ok(())
+    Ok(omitted)
 }
 
 #[cfg(test)]

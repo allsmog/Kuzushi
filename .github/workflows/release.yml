@@ -11,6 +11,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -71,6 +72,7 @@ jobs:
       hosted: ${{ vars.KUZUSHI_RELEASE_SELF_HOSTED != 'true' }}
     permissions:
       contents: read
+      actions: read
 
   publish-npm:
     needs: [preflight, candidate]
@@ -109,7 +111,7 @@ jobs:
         run: node scripts/publish-platform-packages.mjs
 
   github-release:
-    needs: [preflight, candidate, publish-npm]
+    needs: [preflight, candidate, publish-npm, promote-latest]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -149,10 +151,36 @@ jobs:
             dist/release/source/*
 
   published-release-smoke:
-    needs: [preflight, publish-npm, github-release]
+    needs: [preflight, publish-npm]
     uses: ./.github/workflows/published-release-smoke.yml
     with:
       version: v${{ needs.preflight.outputs.version }}
       hosted: ${{ vars.KUZUSHI_RELEASE_SELF_HOSTED != 'true' }}
     permissions:
       contents: read
+
+  promote-latest:
+    needs: [preflight, published-release-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate-artifacts
+          path: dist/release
+      - name: Promote verified public installs, launcher last
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          KUZUSHI_RELEASE_DIRECTORY: dist/release
+        run: node scripts/publish-platform-packages.mjs --promote

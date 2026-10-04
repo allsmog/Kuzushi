@@ -40,6 +40,9 @@ impl ShellApp {
     }
 
     fn reduce_owned_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if self.editor_mut().handle_paste_inspection_key(key) {
+            return Some(InputUpdate::handled());
+        }
         let budget_update = self.handle_budget_key(key);
         if budget_update.handled {
             return Some(budget_update);

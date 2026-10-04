@@ -1,6 +1,21 @@
 use super::*;
 
 impl SpendLimiter {
+    /// Keep uncertain provider exposure reserved, raising it to observed spend.
+    pub fn retain_observed(&self, ticket: &SpendTicket, observed_usd: f64) -> Result<()> {
+        crate::runtime::RuntimeCost::from_usd(observed_usd, "unresolved observed spend")?;
+        let state = self.lock();
+        let updated = state.conn.execute(
+            "update spend_ledger set est_usd = max(est_usd, ?1) where id = ?2 and settled_at is null",
+            params![observed_usd, ticket.id],
+        )?;
+        anyhow::ensure!(
+            updated == 1,
+            "unresolved spend ticket is missing or already settled"
+        );
+        Ok(())
+    }
+
     /// Open a ticket with an estimated cost. Fails with [`SpendError`] when
     /// the per-op cap or the global hard ceiling would be exceeded.
     pub fn deposit(&self, op: Operation, est_usd: f64) -> Result<SpendTicket> {

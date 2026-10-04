@@ -16,6 +16,8 @@ pub enum SandboxError {
     Spawn(#[source] std::io::Error),
     #[error("sandbox child IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("invalid sandbox execution options: {0}")]
+    InvalidOptions(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -76,6 +78,8 @@ pub enum ExitOutcome {
     Signaled,
     /// Wallclock timeout fired and the child was killed.
     TimedOut,
+    /// A stream exceeded the retained-output budget; the child was terminated.
+    OutputLimitExceeded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

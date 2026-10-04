@@ -12,6 +12,10 @@ pub(crate) struct MatchReport {
     pub(crate) misses: usize,
     pub(crate) near_misses: usize,
     pub(crate) precision: f64,
+    /// Positive-only oracle yield; unmatched findings have not been adjudicated.
+    pub(crate) oracle_hit_yield: f64,
+    pub(crate) unjudged_findings: usize,
+    pub(crate) metric_semantics: &'static str,
     pub(crate) recall: RecallByTolerance,
     pub(crate) proof_state_breakdown: ProofStateBreakdown,
     pub(crate) vuln_source_breakdown: BTreeMap<String, usize>,

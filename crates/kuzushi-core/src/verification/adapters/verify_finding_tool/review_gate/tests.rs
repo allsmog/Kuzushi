@@ -47,7 +47,9 @@ fn unreviewed_finding_names_triage_and_review_decision_remedies() {
     assert_eq!(result["data"]["reason"], json!("missing-triage"));
     let output = refusal_output(&result);
     assert!(output.contains("no triage verdict and no confirming review decision"));
-    assert!(output.contains("Run triage:run first, or record a confirmed or to_fix review decision."));
+    assert!(
+        output.contains("Run triage:run first, or record a confirmed or to_fix review decision.")
+    );
 }
 
 #[test]

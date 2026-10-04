@@ -34,6 +34,7 @@ pub trait ToolHandler: Send + Sync {
 pub struct ToolRegistry {
     descriptors: Vec<Tool>,
     handlers: HashMap<String, Box<dyn ToolHandler>>,
+    schemas: HashMap<String, jsonschema::Validator>,
 }
 
 impl ToolRegistry {
@@ -43,6 +44,15 @@ impl ToolRegistry {
 
     pub fn register(mut self, descriptor: Tool, handler: impl ToolHandler + 'static) -> Self {
         let name = descriptor.name.clone();
+        let schema = jsonschema::options()
+            .offline()
+            .build(&descriptor.input_schema)
+            .unwrap_or_else(|error| panic!("invalid MCP schema for {name}: {error}"));
+        assert!(
+            !self.handlers.contains_key(&name),
+            "duplicate MCP tool {name}"
+        );
+        self.schemas.insert(name.clone(), schema);
         self.descriptors.push(descriptor);
         self.handlers.insert(name, Box::new(handler));
         self
@@ -53,6 +63,12 @@ impl ToolRegistry {
     }
 
     pub async fn call(&self, name: &str, args: Value) -> Result<Value> {
+        if let Some(schema) = self.schemas.get(name) {
+            anyhow::ensure!(
+                schema.is_valid(&args),
+                "invalid arguments for {name}: advertised input schema rejected the request"
+            );
+        }
         match self.handlers.get(name) {
             Some(handler) => handler.call(args).await,
             None => anyhow::bail!("unknown tool: {name}"),
@@ -100,6 +116,47 @@ mod tests {
         let err = registry.call("missing", json!({})).await.unwrap_err();
         assert!(err.to_string().contains("unknown tool"));
         assert!(err.to_string().contains("missing"));
+    }
+
+    #[tokio::test]
+    async fn invalid_arguments_never_enter_the_handler() {
+        struct ForbiddenHandler;
+        #[async_trait]
+        impl ToolHandler for ForbiddenHandler {
+            async fn call(&self, _: Value) -> Result<Value> {
+                panic!("invalid request reached handler")
+            }
+        }
+        let registry = ToolRegistry::new().register(Tool { name:"strict".into(), description:String::new(),
+            input_schema:json!({"type":"object","required":["line"],"additionalProperties":false,
+                "properties":{"line":{"type":"integer","minimum":1,"maximum":99}}}) }, ForbiddenHandler);
+        for args in [
+            Value::Null,
+            json!({}),
+            json!({"line":"1"}),
+            json!({"line":0}),
+            json!({"line":100}),
+            json!({"line":1,"unknown":true}),
+        ] {
+            assert!(registry
+                .call("strict", args)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("invalid arguments"));
+        }
+    }
+
+    #[test]
+    fn schemas_cannot_resolve_files_or_network_resources() {
+        assert!(jsonschema::options()
+            .offline()
+            .build(&json!({"$ref":"file:///etc/passwd"}))
+            .is_err());
+        assert!(jsonschema::options()
+            .offline()
+            .build(&json!({"$ref":"https://example.test/schema"}))
+            .is_err());
     }
 
     #[test]

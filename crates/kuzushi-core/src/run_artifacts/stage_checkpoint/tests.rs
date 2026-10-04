@@ -25,6 +25,124 @@ fn open_real_handle(target: &Path, run_id: &str) -> StageCheckpointHandle {
 }
 
 #[test]
+fn checkpoint_overflow_preserves_the_previous_recovery_point_and_reports_health() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("first").complete(Vec::new());
+    let before = fs::read(&handle.store.path).unwrap();
+    let payload = Value::String("x".repeat(MAX_CHECKPOINT_BYTES));
+    assert!(handle.write_stage_payload("oversized", &payload).is_none());
+    handle.stage("after-overflow").complete(Vec::new());
+    assert_eq!(fs::read(&handle.store.path).unwrap(), before);
+    let health = handle.resume_health();
+    assert!(health.degraded);
+    assert!(health.retry_on_next_dispatch);
+    assert_eq!(health.last_durable_stage.as_deref(), Some("first"));
+    assert!(!run_dir(temp.path(), "run-1")
+        .join("stage-oversized.json")
+        .exists());
+    let persisted: Value = serde_json::from_str(
+        &fs::read_to_string(run_dir(temp.path(), "run-1").join("resume-health.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(persisted["degraded"], true);
+    assert_eq!(persisted["lastDurableStage"], "first");
+}
+
+#[test]
+fn oversized_stage_record_and_excessive_receipt_count_cannot_replace_checkpoint() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("first").complete(Vec::new());
+    let before = fs::read(&handle.store.path).unwrap();
+    let mut state = handle.state.lock().unwrap();
+    let receipt = state.completed_now[0].clone();
+    state.completed_now = vec![receipt; MAX_RECORDS + 1];
+    handle.save_locked(&state);
+    assert_eq!(fs::read(&handle.store.path).unwrap(), before);
+    assert!(handle.resume_health().degraded);
+    drop(state);
+    let second = open_handle(temp.path(), "run-2");
+    second.record_skipped("other", &"x".repeat(checkpoint_limits::MAX_RECORD_BYTES));
+    assert!(second.resume_health().degraded);
+    assert_eq!(fs::read(&second.store.path).unwrap(), before);
+}
+
+#[test]
+fn unreadable_and_deep_stage_checkpoints_are_visible_without_claiming_resume() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("first").complete(Vec::new());
+    let mut saved: Value = serde_json::from_slice(&fs::read(&handle.store.path).unwrap()).unwrap();
+    saved["completed"] = serde_json::json!([{"bad": "placeholder"}]);
+    let raw = saved.to_string().replace(
+        "\"placeholder\"",
+        &format!("{}0{}", "[".repeat(200), "]".repeat(200)),
+    );
+    fs::write(&handle.store.path, raw).unwrap();
+    let reopened = open_handle(temp.path(), "run-2");
+    assert!(reopened.resume_health().degraded);
+    assert!(reopened.resumed_from().is_none());
+}
+
+#[test]
+fn checkpoint_payload_decode_failure_reports_degraded_resume() {
+    let temp = workspace();
+    fs::write(temp.path().join("invalid.json"), "not JSON").unwrap();
+    let first = open_handle(temp.path(), "run-1");
+    first.stage("first").complete(vec!["invalid.json".into()]);
+    let second = open_handle(temp.path(), "run-2");
+    let receipt = second.completed_stage("first").unwrap();
+    assert!(second.read_stage_payload(&receipt).is_none());
+    let health = second.resume_health();
+    assert!(health.degraded);
+    assert_eq!(health.problems[0].operation, "payload-read");
+    assert_eq!(health.last_durable_stage.as_deref(), Some("first"));
+}
+
+#[test]
+fn checkpoint_io_failures_are_deduplicated_and_clear_failure_stays_visible() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("first").complete(Vec::new());
+    for errno in [28, 28, 13, 13] {
+        handle.resume_problem("save", &std::io::Error::from_raw_os_error(errno).into());
+    }
+    assert_eq!(handle.resume_health().problems.len(), 2);
+    assert_eq!(
+        handle.resume_health().last_durable_stage.as_deref(),
+        Some("first")
+    );
+    fs::remove_file(&handle.store.path).unwrap();
+    fs::create_dir(&handle.store.path).unwrap();
+    handle.clear_checkpoint();
+    assert!(!handle.resume_health().checkpoint_cleared);
+    assert_eq!(
+        handle.resume_health().problems.last().unwrap().operation,
+        "clear"
+    );
+}
+
+#[test]
+fn failed_checkpoint_publication_keeps_the_last_durable_stage() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("first").complete(Vec::new());
+    let before = fs::read(&handle.store.path).unwrap();
+    let _fault = crate::fs_atomic::inject_atomic_write_fault(
+        handle.store.path.clone(),
+        crate::fs_atomic::AtomicWriteFaultPoint::AfterTempSync,
+    );
+    handle.stage("second").complete(Vec::new());
+    assert_eq!(fs::read(&handle.store.path).unwrap(), before);
+    assert_eq!(
+        handle.resume_health().last_durable_stage.as_deref(),
+        Some("first")
+    );
+    assert!(handle.resume_health().degraded);
+}
+
+#[test]
 fn checkpoints_require_an_existing_kuzushi_target() {
     let temp = tempfile::tempdir().unwrap();
     assert!(StageCheckpointStore::discover(temp.path(), &[1u8; 32]).is_none());
@@ -318,7 +436,7 @@ fn changed_clean_revision_does_not_reuse_a_stage_checkpoint() {
     }
     let temp = workspace();
     git(temp.path(), &["init"]);
-    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    fs::write(temp.path().join(".gitignore"), "").unwrap();
     fs::write(temp.path().join("source.rs"), "fn first() {}\n").unwrap();
     git(temp.path(), &["add", "."]);
     git(temp.path(), &["commit", "-m", "first"]);
@@ -359,7 +477,7 @@ fn changed_dirty_target_does_not_reuse_a_stage_checkpoint() {
     }
     let temp = workspace();
     git(temp.path(), &["init"]);
-    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    fs::write(temp.path().join(".gitignore"), "").unwrap();
     fs::write(temp.path().join("source.rs"), "fn clean() {}\n").unwrap();
     git(temp.path(), &["add", "."]);
     git(temp.path(), &["commit", "-m", "clean"]);
@@ -385,19 +503,41 @@ fn unchanged_dirty_target_reuses_a_content_bound_checkpoint() {
     }
     let temp = workspace();
     git(temp.path(), &["init"]);
-    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    fs::write(temp.path().join(".gitignore"), "").unwrap();
     fs::write(temp.path().join("source.rs"), "fn clean() {}\n").unwrap();
     git(temp.path(), &["add", "."]);
     git(temp.path(), &["commit", "-m", "clean"]);
     fs::write(temp.path().join("source.rs"), "fn dirty() {}\n").unwrap();
-    open_real_handle(temp.path(), "run-1")
-        .stage("research")
-        .complete(Vec::new());
+    let first = open_real_handle(temp.path(), "run-1");
+    first.stage("research").complete(Vec::new());
+    assert!(
+        !first.resume_health().degraded,
+        "{:?}",
+        first.resume_health()
+    );
 
     let next = open_real_handle(temp.path(), "run-2");
 
     assert_eq!(next.resumed_from().as_deref(), Some("run-1"));
     assert!(next.completed_stage("research").is_some());
+}
+
+#[test]
+fn checkpoint_discloses_workspace_policy_failure_before_stage_work() {
+    let temp = workspace();
+    git(temp.path(), &["init"]);
+    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "blanket state ignore"]);
+    let handle = open_real_handle(temp.path(), "run-1");
+    handle.mark_current("research");
+    let health = handle.resume_health();
+    assert!(health.degraded);
+    assert!(health.last_durable_stage.is_none());
+    assert!(health
+        .problems
+        .iter()
+        .any(|problem| problem.message.contains("hides trackable")));
 }
 
 #[test]
@@ -411,11 +551,7 @@ fn changed_git_ignored_source_does_not_reuse_a_stage_checkpoint() {
     }
     let temp = workspace();
     git(temp.path(), &["init"]);
-    fs::write(
-        temp.path().join(".gitignore"),
-        ".kuzushi/\nlocal-policy.toml\n",
-    )
-    .unwrap();
+    fs::write(temp.path().join(".gitignore"), "local-policy.toml\n").unwrap();
     fs::write(temp.path().join("source.rs"), "fn stable() {}\n").unwrap();
     fs::write(temp.path().join("local-policy.toml"), "mode = 'first'\n").unwrap();
     git(temp.path(), &["add", "."]);

@@ -1,21 +1,8 @@
 use crate::backend::SandboxBackend;
 
-use super::{ExitOutcome, SandboxError, SandboxExecResult, MAX_OUTPUT_BYTES, TRUNCATION_MARKER};
+use super::{ExitOutcome, SandboxExecResult, MAX_OUTPUT_BYTES, TRUNCATION_MARKER};
 
-pub(crate) fn sandbox_result_from_child_output(
-    backend: SandboxBackend,
-    timeout_ms: u64,
-    duration_ms: u64,
-    result: Result<Result<std::process::Output, std::io::Error>, tokio::time::error::Elapsed>,
-) -> Result<SandboxExecResult, SandboxError> {
-    match result {
-        Ok(Ok(output)) => Ok(completed_sandbox_result(backend, duration_ms, output)),
-        Ok(Err(io_err)) => Err(SandboxError::Io(io_err)),
-        Err(_elapsed) => Ok(timeout_sandbox_result(backend, timeout_ms, duration_ms)),
-    }
-}
-
-fn completed_sandbox_result(
+pub(super) fn completed_sandbox_result(
     backend: SandboxBackend,
     duration_ms: u64,
     output: std::process::Output,
@@ -54,24 +41,6 @@ fn exit_outcome(signal: Option<i32>) -> ExitOutcome {
         ExitOutcome::Signaled
     } else {
         ExitOutcome::Exited
-    }
-}
-
-fn timeout_sandbox_result(
-    backend: SandboxBackend,
-    timeout_ms: u64,
-    duration_ms: u64,
-) -> SandboxExecResult {
-    SandboxExecResult {
-        backend,
-        outcome: ExitOutcome::TimedOut,
-        exit_code: None,
-        signal: None,
-        stdout: String::new(),
-        stderr: format!("[kuzushi-sandbox] timeout after {timeout_ms} ms"),
-        stdout_truncated: false,
-        stderr_truncated: false,
-        duration_ms,
     }
 }
 

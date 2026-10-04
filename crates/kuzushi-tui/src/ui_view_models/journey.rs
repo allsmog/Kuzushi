@@ -1561,9 +1561,11 @@ mod tests {
         );
         let partial = PhaseAttemptCompleted::new(
             WorkflowPhase::Scan,
-            "scan-partial",
+            vec!["scan-partial".to_string()],
+            PhaseTargetSnapshot::capture(target.path()),
             PhaseAttemptOutcome::Partial,
         );
+        append_phase_attempt_completed(target.path(), partial).unwrap();
 
         let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
 
@@ -2182,9 +2184,11 @@ mod tests {
         record_phase_source(target, phase, run_id, "completed");
         let completed = PhaseAttemptCompleted::new(
             phase,
-            run_id,
+            vec![run_id.to_string()],
+            PhaseTargetSnapshot::capture(target),
             PhaseAttemptOutcome::Completed,
         );
+        append_phase_attempt_completed(target, completed.clone()).unwrap();
         if discarded {
             append_phase_attempt_disposition(
                 target,

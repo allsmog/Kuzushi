@@ -196,6 +196,121 @@ part of every release commit.
   observed spend must be approved to continue. Unknown proposal estimates no
   longer pass a configured budget check as zero-cost work.
 
+### Audit remediation compatibility
+
+- Windows bounded MCP file reads now retain an opening content digest and
+  verify both returned bytes and current handle content before accepting a read
+  or copy. Read identities always include a content digest on Windows. This adds
+  bounded streaming reads; same-size writes and restored timestamps cannot reuse
+  a stale content identity. Loop checkpoint owners explicitly unlock on drop,
+  including error paths, before concurrent spawned processes finish exec.
+
+- Shell composer and form fields move and delete by extended Unicode graphemes.
+  Cursor projections and clipping use terminal display widths, including emoji
+  sequences and combining accents. Existing scalar-offset view-model interfaces
+  remain compatible; interior offsets snap to a complete character boundary.
+- Collapsed multiline pastes are tracked editor spans. Arrows, word movement,
+  Backspace and Delete cannot damage a marker. Ctrl+Y opens the adjacent block's
+  read-only preview; Enter/e expands it, Delete removes it and Esc cancels.
+  Ctrl+_ or Ctrl+/ restores paste edits or a cleared draft, including all payload
+  bytes. Paste undo lasts until submission or intentional clearing. Completion
+  waits until pasted blocks are expanded. Literal copies of marker text never
+  acquire a document payload.
+- The interactive terminal inbox is limited to 256 queued events and 4 MiB of
+  event data. Resize, pointer-move and focus updates coalesce without crossing
+  ordered input. Keys, pointer actions and accepted pastes apply backpressure;
+  a paste over 1 MiB is rejected explicitly. Background wakes have a separate
+  coalesced slot, and saturation produces one bounded input diagnostic.
+- Semantic query keys now include generation settings and an attested runtime
+  identity. Legacy keys safely miss. Runtime adapters opt in through
+  `AgentRuntime::semantic_cache_identity`; unauthenticated external bridges,
+  including the current LangGraph adapter, execute live. This can increase model
+  spend compared with earlier cache replay. Credentials and transport diagnostics
+  are excluded, and tracing/routing wrappers preserve the inner attestation.
+- Semantic responses now use an indexed SQLite cache with defaults of 10,000
+  entries and 64 MiB of database pages. Set `operator.semantic_cache.max_entries`
+  and `max_bytes` in global config; target config cannot raise quotas. Half the
+  page budget is reserved for response payload and the rest for index overhead.
+  A rollback journal can temporarily add up to one database's size. Oversized
+  entries and quota pressure skip caching. Legacy JSON entries safely miss and
+  are reclaimed in resumable batches of at most 64 directory entries per open;
+  indexed expiry also visits at most 64 entries per pass. `maintain()` reports
+  reclaimed bytes, quota pressure and pending work. Lowering the byte budget below
+  an existing database's size disables that cache until it is cleared; it never
+  admits new writes above the new budget.
+- Run-item writers reserve a bounded model completion receipt before each model
+  start and preserve a terminal outcome slot. At most eight calls may be in flight
+  in one run stream; a start without available receipt capacity fails before
+  provider dispatch. Model start/finish emission is synchronous and durable,
+  including through the ordinary `emit` API. Completed usage/cost receipts remain
+  admissible after ordinary log capacity is exhausted; the run still ends degraded.
+- Sandbox children receive an explicit minimal environment. Callers must grant
+  required variables through `SandboxExecOptions.env`; stdin and each output
+  stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.
+  Cancellation owns the process group/Windows Job Object and kills descendants.
+- MCP tool arguments are validated against their advertised JSON Schema before
+  execution. Invalid input now returns a protocol error without invoking the
+  handler. The server limits concurrent requests to eight and honors cancellation
+  and shutdown; clients must not depend on acceptance after shutdown.
+- Loop checkpoint protocol 3 binds the executable digest and uses full request
+  fingerprints. Old checkpoints are not resumed. A kernel lease excludes a second
+  owner; an unfinished tool intent requires explicit effect reconciliation before
+  retry. Checkpoints over 8 MiB or 512 transcript entries fail visibly. Historical
+  files are not rewritten and spend from failed turns remains unresolved.
+- Loop and stage checkpoints now admit at most 512 records, 1 MiB per encoded
+  record and 8 MiB per checkpoint. Readers validate raw record length before
+  allocating structured records and retain the JSON nesting limit. Stage payload
+  publication also stops at 8 MiB, including its newline. Oversized legacy
+  checkpoints require inspection instead of implicit recovery; bounded serializers
+  borrow transcripts and stage receipts instead of cloning the completed history.
+- Staged tools expose `resumeHealth` separately from execution success, persist
+  `resume-health.json` when storage permits, and emit one warning per failure
+  class and operation. The receipt names the last durable stage and source run.
+  A load, payload, receipt or save failure stops checkpoint advancement for that
+  dispatch while paid execution may continue; recovery retries on the next
+  dispatch. A failed clear is visible. Embedders must handle the new `Result`
+  returned by `StageCheckpointStore::clear`.
+- Finding anchors are grounded even without evidence. `unavailable` is distinct
+  from invalid source evidence; claimed coordinates are preserved. Cross-producer
+  evidence is merged independently of severity. Static verification requires exact
+  bounded source citations; missing or invalid citations produce an inconclusive
+  result. Raw model confidence remains explicitly uncalibrated.
+- Core `cpg_taint_paths.maxPaths` accepts integers from 1 through 25, with a
+  default of 10. Invalid or larger values now return an explicit error instead of
+  silently using a clamped value. The MCP query retains its separately advertised
+  output range and discloses the engine flow cap.
+- CPG structural queries now return explicit ambiguity errors for duplicate
+  suffix paths, method names, start positions or language-graph matches. Use the
+  canonical `selector` returned by `cpg.definitions` for overloaded methods.
+  Rust query helpers now return `QueryResult`; callers must handle resolution
+  errors. Reaching definitions require an unambiguous AST node at the requested
+  line, so blank lines and inter-method gaps return an unavailable-membership
+  error. `method_at` remains explicitly approximate. Slice depth is checked in
+  the advertised 0–32 range; depth zero retains intra-method behavior.
+- CPG caches use source-content and implementation identities; existing caches
+  rebuild. `maxCallDepth` is rejected until the engine can enforce it. Regex and
+  literal matching are explicit; limits and approximate method positions are
+  disclosed in results. Queries with failed language coverage return an error.
+- History uses a versioned JSON record format to preserve multiline commands;
+  legacy records are imported on read. Evaluations require complete run-bound
+  receipts, distinguish unjudged output, and enforce recall thresholds only when
+  requested. Historical score files do not acquire provenance retroactively.
+- Publication uses the `candidate` npm dist-tag. The exact-version public-install
+  matrix must pass before promotion of platform tags and finally the root `latest`
+  tag, followed by GitHub release visibility. Rerunning promotion verifies registry
+  integrity before changing any tag. If interrupted, the root launcher remains on
+  the previous version until its final tag operation; rerun the same candidate
+  after correcting the failure. To roll back a completed promotion, move the root
+  `latest` tag to the previously verified exact version and then restore platform
+  tags; never republish different bytes under an existing version.
+- Full-quality runs compare with the latest successful ancestral full run, not
+  the previous commit. The initial run requires `quality_base_ref`; failures to
+  resolve a baseline fail the gate rather than silently narrowing the interval.
+
+See [the audit ledger](docs/quality/audit-remediation-2026-09-30.md) for acceptance
+work that remains open; these changes are not an all-items completion claim.
+
+
 - Static `verify:finding` results now use `exploitable: null` for incomplete
   evidence, unsupported language, or an unresolved panel. These outcomes have
   `status: partial` and cannot replace selected proof. Consumers must handle
