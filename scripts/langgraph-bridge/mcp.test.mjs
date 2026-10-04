@@ -229,6 +229,73 @@ test("MCP client construction failures are typed before provider work", async (t
   );
 });
 
+test("a discovered MCP session renames tools provider-safely and closes on request", async (t) => {
+  const root = temporaryDirectory(t);
+  let closeCalls = 0;
+  const createClient = () => ({
+    getTools: async () => [{ name: "tree_sitter:query" }, { name: "cpg.taint_paths" }],
+    close: async () => {
+      closeCalls += 1;
+    },
+  });
+
+  const result = await mcpToolsForRequest(
+    requestForRoot(root, { toolPolicy: { mcps: true, mcpReadRoots: [root] } }),
+    createClient,
+  );
+
+  assert.deepEqual(
+    result.tools.map((tool) => tool.name),
+    ["tree_sitter_query", "cpg_taint_paths"],
+  );
+  await result.close();
+  assert.equal(closeCalls, 1);
+});
+
+test("provider-safe renaming keeps sanitized collisions and over-long names distinct", async (t) => {
+  const root = temporaryDirectory(t);
+  const createClient = () => ({
+    getTools: async () => [
+      { name: "cpg:slice" },
+      { name: "cpg.slice" },
+      { name: `cpg.${"taint_path".repeat(16)}` },
+    ],
+  });
+
+  const result = await mcpToolsForRequest(
+    requestForRoot(root, { toolPolicy: { mcps: true, mcpReadRoots: [root] } }),
+    createClient,
+  );
+
+  const names = result.tools.map((tool) => tool.name);
+  assert.deepEqual(names.slice(0, 2), ["cpg_slice", "cpg_slice_1"]);
+  assert.equal(new Set(names).size, names.length);
+  for (const name of names) assert.match(name, /^[a-zA-Z0-9_-]{1,128}$/);
+  // A client without `close` must still satisfy the returned cleanup contract.
+  await result.close();
+});
+
+test("a server connection failure is typed without echoing the raw cause", async (t) => {
+  const root = temporaryDirectory(t);
+  const createClient = (options) => {
+    options.onConnectionError({ server: { name: "cpg" } }, new Error("permission denied"));
+    return { getTools: async () => [] };
+  };
+
+  await assert.rejects(
+    () =>
+      mcpToolsForRequest(
+        requestForRoot(root, { toolPolicy: { mcps: true, mcpReadRoots: [root] } }),
+        createClient,
+      ),
+    (error) =>
+      error.errorClass === "mcp_unavailable" &&
+      error.cause.message.startsWith("requested MCP server cpg failed to start") &&
+      error.cause.message.endsWith(": permission denied") &&
+      !error.message.includes("permission denied"),
+  );
+});
+
 test("connection failures select bounded diagnostics and survive circular causes", () => {
   const message = mcpConnectionFailureMessage(
     { server: { name: "cpg" }, config: { command: "ignored-command" } },
