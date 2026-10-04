@@ -33,9 +33,9 @@ impl RunFocusVisibilityHold {
             };
             match inbox.recv_timeout(remaining)? {
                 Some(TerminalLoopEvent::Wake) => continue,
-                Some(TerminalLoopEvent::Terminal(event)) => {
+                Some(event) => {
                     self.until = None;
-                    return Ok(Some(update_and_execute_effects(app, Msg::Term(event))));
+                    return Ok(Some(apply_visible_input(app, event)));
                 }
                 None => {
                     self.until = None;
@@ -46,9 +46,30 @@ impl RunFocusVisibilityHold {
     }
 }
 
+fn apply_visible_input(app: &mut ShellApp, event: TerminalLoopEvent) -> bool {
+    match event {
+        TerminalLoopEvent::Terminal(event) => update_and_execute_effects(app, Msg::Term(event)),
+        TerminalLoopEvent::InputRejected(message) => {
+            app.set_warn_notice("input", message);
+            true
+        }
+        TerminalLoopEvent::Wake => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paste_rejection_during_visibility_hold_keeps_the_shell_active() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert!(apply_visible_input(
+            &mut app,
+            TerminalLoopEvent::InputRejected("paste rejected".into())
+        ));
+        assert!(!app.should_quit());
+    }
 
     #[test]
     fn foreground_run_transition_starts_a_visibility_hold() {

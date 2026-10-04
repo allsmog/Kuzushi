@@ -62,7 +62,7 @@ impl StageCheckpointHandle {
             return false;
         };
         health.degraded = true;
-        health.retry_on_next_dispatch = !health.checkpoint_cleared;
+        health.retry_on_next_dispatch = !health.checkpoint_cleared || problem.operation != "health-receipt";
         if health
             .problems
             .iter()
