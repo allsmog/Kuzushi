@@ -134,8 +134,8 @@ devex_footer_is_navigate() { # <last-three-lines>
 
 devex_prompt_contains_draft() { # <prompt-line> <literal-draft>
   case $1 in
-    *"› $2" | *"kz> $2" | *"kuzushi> $2" \
-    | *"› $2  "* | *"kz> $2  "* | *"kuzushi> $2  "*) return 0;;
+    *"› $2" | *"kz> $2" | *"kuzushi> $2" | *"kuzushi/"*"> $2" | *"kz/"*"> $2" \
+    | *"› $2  "* | *"kz> $2  "* | *"kuzushi> $2  "* | *"kuzushi/"*"> $2  "* | *"kz/"*"> $2  "*) return 0;;
     *) return 1;;
   esac
 }
@@ -354,14 +354,38 @@ devex_alternate_active() {
   [ "$(tmux display-message -p -t "$1" '#{alternate_on}' 2>/dev/null)" = 1 ]
 }
 
+# devex_wait_for_shell <session> <seconds> — prove the prior TUI exited.
+devex_wait_for_shell() {
+  local session=$1 seconds=$2 deadline state
+  deadline=$(( $(date +%s) + seconds ))
+  while :; do
+    state=$(tmux display-message -p -t "$session" '#{alternate_on}:#{pane_current_command}' 2>/dev/null) || return 1
+    case $state in 0:sh|0:bash|0:dash) return 0;; esac
+    [ "$(date +%s)" -ge "$deadline" ] && return 1
+    sleep 0.1
+  done
+}
+
 # devex_capture_live <session> <out.txt> <out.ansi>
 # Strict evidence path: fail instead of silently substituting a saved screen.
 devex_capture_live() {
   devex_alternate_active "$1" || return 1
-  # Capture ANSI first so a following plain content match cannot pair the
-  # matched frame with a later completion.
+  # Derive both artifacts from one capture. Two tmux reads can straddle a
+  # redraw and falsely pair a successful text predicate with another frame.
   tmux capture-pane -t "$1" -e -p > "$3" || return 1
-  tmux capture-pane -t "$1" -p > "$2"
+  devex_plain_from_ansi "$3" "$2"
+}
+
+devex_plain_from_ansi() { # <captured.ansi> <out.txt>
+  python3 - "$1" "$2" <<'PY'
+import re
+import sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
+text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+Path(sys.argv[2]).write_text(text, encoding="utf-8")
+PY
 }
 
 # devex_capture_saved <session> <out.txt> <out.ansi>
@@ -369,7 +393,7 @@ devex_capture_live() {
 # an error; callers that want ordinary shell output must use devex_capture.
 devex_capture_saved() {
   tmux capture-pane -t "$1" -a -q -e -p > "$3" || return 1
-  tmux capture-pane -t "$1" -a -q -p > "$2" || return 1
+  devex_plain_from_ansi "$3" "$2" || return 1
   LC_ALL=C grep -aq '[^[:space:]]' "$2"
 }
 
@@ -384,8 +408,8 @@ devex_capture() {
   if devex_capture_saved "$@"; then
     return
   fi
-  tmux capture-pane -t "$1" -e -p > "$3"
-  tmux capture-pane -t "$1" -p > "$2"
+  tmux capture-pane -t "$1" -e -p > "$3" || return 1
+  devex_plain_from_ansi "$3" "$2"
 }
 
 # devex_pane_contains <session> <fixed-substring>  (case-insensitive)

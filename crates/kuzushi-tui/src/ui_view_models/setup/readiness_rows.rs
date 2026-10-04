@@ -13,7 +13,7 @@ pub(super) fn readiness_rows(
         model_row(app, selected_model_tasks),
         credential_row(app, selected_model_tasks, credential_readiness),
         prompt_row(app, selected_rows),
-        budget_row(app),
+        budget_row(app, selected_model_tasks),
     ]
 }
 
@@ -323,7 +323,15 @@ fn prompt_row(app: &ShellApp, selected_rows: &[&crate::app::PlanningTaskRow]) ->
     )
 }
 
-fn budget_row(app: &ShellApp) -> SetupReadinessRow {
+fn budget_row(app: &ShellApp, model_tasks: usize) -> SetupReadinessRow {
+    if model_tasks > 0 {
+        return optional_row(SetupRowId::Budget, "Allowance", "APPROVAL NEXT",
+            "Start Map opens a fixed plan. Set total calls and protected review, then approve before any jobs start. Dollar costs may be unavailable.");
+    }
+    observed_budget_row(app)
+}
+
+fn observed_budget_row(app: &ShellApp) -> SetupReadinessRow {
     let Some(budget) = app.session().session_budget_usd() else {
         return optional_row(
             SetupRowId::Budget,

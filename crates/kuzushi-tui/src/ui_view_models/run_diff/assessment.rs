@@ -73,19 +73,28 @@ fn artifact_json(app: &ShellApp, run: &str, leaf: &str) -> Option<serde_json::Va
 }
 
 pub(super) fn context_label(app: &ShellApp, run: &str) -> String {
-    recorded_context(app, run).label()
+    recorded_context(app, run)
+        .map(|context| context.label())
+        .unwrap_or_else(|| "loading recorded context".into())
 }
 
 pub(super) fn context_comparison(app: &ShellApp, left: &str, right: &str) -> String {
-    recorded_context(app, left)
-        .comparison_label(&recorded_context(app, right))
-        .to_string()
+    match recorded_context(app, left).zip(recorded_context(app, right)) {
+        Some((left, right)) => left.comparison_label(&right).to_string(),
+        None => "loading recorded contexts".into(),
+    }
 }
 
 fn recorded_context(
     app: &ShellApp,
     run: &str,
-) -> kuzushi_core::run_artifacts::RunThreatModelContext {
-    let input = artifact_json(app, run, "scan-input.json");
-    kuzushi_core::run_artifacts::RunThreatModelContext::from_scan_input(input.as_ref())
+) -> Option<kuzushi_core::run_artifacts::RunThreatModelContext> {
+    use kuzushi_core::run_artifacts::RunThreatModelContext;
+    match run_json_state(app, run, "scan-input.json") {
+        ViewDataState::Ready(JsonFileState::Present(value)) => {
+            Some(RunThreatModelContext::from_scan_input(Some(&value)))
+        }
+        ViewDataState::Ready(_) => Some(RunThreatModelContext::Unavailable),
+        _ => None,
+    }
 }

@@ -1,4 +1,4 @@
-//! Durable engagement projection for Map -> Scan -> Review -> Prove -> Fix.
+//! Durable investigation projection for Map -> Scan -> Review -> Report.
 //!
 //! The selected Workbench page is intentionally absent from this module.
 //! Reality advances only from current-target evidence: accepted phase attempts,
@@ -63,19 +63,17 @@ pub enum JourneyDestination {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportReason {
+    ReviewComplete,
     CleanScan,
     NoActionableAfterReview,
-    NoProofBackedActionable,
-    RemediationComplete,
 }
 
 impl ReportReason {
     fn label(self) -> &'static str {
         match self {
+            Self::ReviewComplete => "review decisions are recorded",
             Self::CleanScan => "accepted scan found no candidates",
             Self::NoActionableAfterReview => "review left no actionable findings",
-            Self::NoProofBackedActionable => "prove left no proof-backed findings",
-            Self::RemediationComplete => "remediation is complete",
         }
     }
 }
@@ -192,35 +190,16 @@ impl JourneyProgress {
         if self.confirmed_findings == 0 {
             return JourneyDestination::Report(ReportReason::NoActionableAfterReview);
         }
-        if self.proven_findings < self.confirmed_findings {
-            return JourneyDestination::Phase(WorkflowPhase::Prove);
-        }
-        self.destination_after_prove()
-    }
-
-    fn destination_after_prove(self) -> JourneyDestination {
-        if self.proof_backed_findings == 0 {
-            return JourneyDestination::Report(ReportReason::NoProofBackedActionable);
-        }
-        if self.remediation_projection_complete
-            && self.remediated_findings >= self.proof_backed_findings
-        {
-            return JourneyDestination::Report(ReportReason::RemediationComplete);
-        }
-        JourneyDestination::Phase(WorkflowPhase::Fix)
+        JourneyDestination::Report(ReportReason::ReviewComplete)
     }
 
     pub fn current_phase(self) -> WorkflowPhase {
         match self.destination() {
             JourneyDestination::Phase(phase) => phase,
             JourneyDestination::Report(ReportReason::CleanScan) => WorkflowPhase::Scan,
-            JourneyDestination::Report(ReportReason::NoActionableAfterReview) => {
-                WorkflowPhase::Review
-            }
-            JourneyDestination::Report(ReportReason::NoProofBackedActionable) => {
-                WorkflowPhase::Prove
-            }
-            JourneyDestination::Report(ReportReason::RemediationComplete) => WorkflowPhase::Fix,
+            JourneyDestination::Report(
+                ReportReason::NoActionableAfterReview | ReportReason::ReviewComplete,
+            ) => WorkflowPhase::Review,
         }
     }
 
@@ -279,6 +258,8 @@ fn journey_destination(
     unresolved_phase: Option<WorkflowPhase>,
 ) -> JourneyDestination {
     let required = progress.destination();
+    let unresolved_phase =
+        unresolved_phase.filter(|phase| WorkflowPhase::INVESTIGATION_ORDER.contains(phase));
     match (required, unresolved_phase) {
         (JourneyDestination::Phase(required), Some(unresolved)) if required <= unresolved => {
             JourneyDestination::Phase(required)
@@ -289,7 +270,7 @@ fn journey_destination(
 }
 
 fn earliest_unresolved_phase(app: &ShellApp) -> Option<WorkflowPhase> {
-    WorkflowPhase::ORDER
+    WorkflowPhase::INVESTIGATION_ORDER
         .iter()
         .copied()
         .find(|phase| app.engagement.unresolved_phase_attempt(*phase).is_some())
@@ -306,7 +287,7 @@ pub(crate) fn journey_destination_after_selection(
         return None;
     }
     let progress = journey_reality_projection(app)?.progress;
-    let unresolved = WorkflowPhase::ORDER
+    let unresolved = WorkflowPhase::INVESTIGATION_ORDER
         .iter()
         .copied()
         .filter(|other| *other != phase)
@@ -687,7 +668,7 @@ fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
         .iter()
         .map(|failed| failed.task.phase())
         .collect();
-    for &phase in WorkflowPhase::ORDER {
+    for &phase in WorkflowPhase::INVESTIGATION_ORDER {
         let Some(record) = app.engagement.unresolved_phase_attempt(phase) else {
             continue;
         };
@@ -711,7 +692,7 @@ fn phase_statuses(
     failed: &BTreeSet<WorkflowPhase>,
 ) -> Vec<JourneyPhaseStatus> {
     let access = phase_access(app, progress);
-    WorkflowPhase::ORDER
+    WorkflowPhase::INVESTIGATION_ORDER
         .iter()
         .zip(access)
         .map(|(&phase, access)| {
@@ -728,7 +709,7 @@ fn phase_statuses(
         .collect()
 }
 
-fn phase_access(app: &ShellApp, progress: JourneyProgress) -> [JourneyPhaseAccess; 5] {
+fn phase_access(app: &ShellApp, progress: JourneyProgress) -> [JourneyPhaseAccess; 3] {
     [
         JourneyPhaseAccess::Available,
         available_for(
@@ -742,18 +723,6 @@ fn phase_access(app: &ShellApp, progress: JourneyProgress) -> [JourneyPhaseAcces
             WorkflowPhase::Review,
             app.findings_total_count() > 0,
             "no vulnerabilities to review; complete Scan or import findings",
-        ),
-        available_for(
-            app,
-            WorkflowPhase::Prove,
-            prove_view_has_material(app, progress),
-            "confirm a vulnerability in Review first",
-        ),
-        available_for(
-            app,
-            WorkflowPhase::Fix,
-            fix_view_has_material(app, progress),
-            "produce proof or a patch record first",
         ),
     ]
 }
@@ -777,22 +746,6 @@ fn scan_view_has_material(app: &ShellApp, progress: JourneyProgress) -> bool {
         || app
             .engagement
             .has_phase_attempt_for_target(WorkflowPhase::Scan)
-}
-
-fn prove_view_has_material(app: &ShellApp, progress: JourneyProgress) -> bool {
-    progress.confirmed_findings > 0
-        || progress.proven_findings > 0
-        || app
-            .findings()
-            .iter()
-            .any(|finding| finding.verification.is_some())
-}
-
-fn fix_view_has_material(app: &ShellApp, progress: JourneyProgress) -> bool {
-    progress.proof_backed_findings > 0
-        || progress.remediated_findings > 0
-        || app.engagement.pending_patch().is_some()
-        || app.domain().has_patch_lifecycle_records()
 }
 
 fn phase_state(
@@ -841,9 +794,9 @@ pub(crate) fn phase_verb_opens_page(app: &ShellApp, phase: WorkflowPhase) -> boo
 fn report_phase_state(phase: WorkflowPhase, reason: ReportReason) -> JourneyPhaseState {
     let last_applicable = match reason {
         ReportReason::CleanScan => WorkflowPhase::Scan,
-        ReportReason::NoActionableAfterReview => WorkflowPhase::Review,
-        ReportReason::NoProofBackedActionable => WorkflowPhase::Prove,
-        ReportReason::RemediationComplete => WorkflowPhase::Fix,
+        ReportReason::NoActionableAfterReview | ReportReason::ReviewComplete => {
+            WorkflowPhase::Review
+        }
     };
     if phase <= last_applicable {
         JourneyPhaseState::Done
@@ -878,7 +831,7 @@ fn destination_next_action(destination: JourneyDestination, progress: JourneyPro
         // the durable candidate ledger, which can be far larger than the
         // findings loaded into this session's list.
         JourneyDestination::Phase(WorkflowPhase::Review) => format!(
-            "record terminal dispositions for {} of {} ledger candidates",
+            "review {} remaining findings ({} total)",
             progress.unreviewed_findings(),
             progress.finding_total
         ),
@@ -913,7 +866,7 @@ fn unresolved_attempt(
         JourneyDestination::Report(_) => None,
     };
     destination_attempt.or_else(|| {
-        WorkflowPhase::ORDER
+        WorkflowPhase::INVESTIGATION_ORDER
             .iter()
             .find_map(|phase| app.engagement.unresolved_phase_attempt(*phase))
     })
@@ -1012,11 +965,14 @@ fn destination_tools(destination: JourneyDestination) -> String {
 }
 
 pub(crate) fn journey_phase_segment(phase: WorkflowPhase) -> String {
+    if !WorkflowPhase::INVESTIGATION_ORDER.contains(&phase) {
+        return format!("{} · compatibility", phase.title());
+    }
     format!(
         "{} {}/{}",
         phase.title(),
         phase.position(),
-        WorkflowPhase::ORDER.len()
+        WorkflowPhase::INVESTIGATION_ORDER.len()
     )
 }
 
@@ -1096,14 +1052,14 @@ mod tests {
         assert!(phase_complete_or_passed(WorkflowPhase::Scan, clean));
         assert!(!phase_complete_or_passed(WorkflowPhase::Review, clean));
 
-        let remediated = JourneyDestination::Report(ReportReason::RemediationComplete);
-        assert!(WorkflowPhase::ORDER
+        let remediated = JourneyDestination::Report(ReportReason::ReviewComplete);
+        assert!(WorkflowPhase::INVESTIGATION_ORDER
             .iter()
             .all(|phase| phase_complete_or_passed(*phase, remediated)));
     }
 
     #[test]
-    fn five_checkpoints_are_distinct() {
+    fn guided_checkpoints_end_at_review_without_proof_or_patching() {
         assert_eq!(
             progress(false, false, 0, 0, 0, 0, 0, 0).current_phase(),
             WorkflowPhase::Map
@@ -1118,15 +1074,15 @@ mod tests {
         );
         assert_eq!(
             progress(true, true, 2, 2, 1, 0, 0, 0).current_phase(),
-            WorkflowPhase::Prove
+            WorkflowPhase::Review
         );
         assert_eq!(
             progress(true, true, 2, 2, 1, 1, 1, 0).current_phase(),
-            WorkflowPhase::Fix
+            WorkflowPhase::Review
         );
         assert_eq!(
             progress(true, true, 2, 2, 1, 1, 1, 1).destination(),
-            JourneyDestination::Report(ReportReason::RemediationComplete)
+            JourneyDestination::Report(ReportReason::ReviewComplete)
         );
     }
 
@@ -1293,7 +1249,7 @@ mod tests {
         );
         assert_eq!(
             progress(true, true, 2, 2, 1, 1, 0, 0).destination(),
-            JourneyDestination::Report(ReportReason::NoProofBackedActionable)
+            JourneyDestination::Report(ReportReason::ReviewComplete)
         );
     }
 
@@ -1597,20 +1553,13 @@ mod tests {
             ),
         )
         .unwrap();
-        crate::test_support::record_indexed_run(
+        record_phase_source(
             target.path(),
+            WorkflowPhase::Scan,
             "scan-partial",
-            "sast:scan",
-            serde_json::json!({
-                "ok": true,
-                "status": "partial",
-                "summary": "partial scan",
-                "warnings": ["incomplete engine"],
-                "data": {"count": 0}
-            }),
+            "partial",
         );
-        crate::test_support::append_typed_attempt(
-            target.path(),
+        let partial = PhaseAttemptCompleted::new(
             WorkflowPhase::Scan,
             "scan-partial",
             PhaseAttemptOutcome::Partial,
@@ -1632,7 +1581,14 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         record_selected_scan_attempt(target.path(), PhaseAttemptOutcome::Completed);
-        record_attempt(target.path(), WorkflowPhase::Map, "map-new", false);
+        record_phase_source(target.path(), WorkflowPhase::Map, "map-new", "completed");
+        let map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-new".to_string()],
+            PhaseTargetSnapshot::capture(target.path()),
+            PhaseAttemptOutcome::Completed,
+        );
+        append_phase_attempt_completed(target.path(), map).unwrap();
 
         let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
 
@@ -2051,7 +2007,7 @@ mod tests {
         assert_eq!(journey.current, WorkflowPhase::Map);
         assert_eq!(
             journey_footer_segment(&app).as_deref(),
-            Some("Map 1/5"),
+            Some("Map 1/3"),
             "the phase chip must not flip to Scan mid-run"
         );
     }
@@ -2206,15 +2162,25 @@ mod tests {
         finding
     }
 
-    fn record_attempt(target: &Path, phase: WorkflowPhase, run_id: &str, discarded: bool) {
+    fn record_phase_source(target: &Path, phase: WorkflowPhase, run: &str, status: &str) {
+        let tool = if phase == WorkflowPhase::Map {
+            "recon:scan"
+        } else {
+            "sast:scan"
+        };
         crate::test_support::record_indexed_run(
             target,
-            run_id,
-            "context:build",
-            serde_json::json!({"ok": true, "data": {"snapshot": {"filesIndexed": 1}}}),
+            run,
+            tool,
+            serde_json::json!({
+                "ok": true, "status": status, "data": {}
+            }),
         );
-        let completed = crate::test_support::append_typed_attempt(
-            target,
+    }
+
+    fn record_attempt(target: &Path, phase: WorkflowPhase, run_id: &str, discarded: bool) {
+        record_phase_source(target, phase, run_id, "completed");
+        let completed = PhaseAttemptCompleted::new(
             phase,
             run_id,
             PhaseAttemptOutcome::Completed,

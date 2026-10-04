@@ -346,7 +346,11 @@ fn render_review_detail(
     render_lines_pane(
         frame,
         area,
-        "SELECTED FINDING",
+        model
+            .comparison_control
+            .as_ref()
+            .map(|control| format!("FINDING · {control}"))
+            .unwrap_or_else(|| "SELECTED FINDING".to_string()),
         review_detail_lines(model, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ReviewDetail,
         state,
@@ -358,15 +362,13 @@ fn review_detail_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'stat
         return empty_state_panel(
             "no finding selected",
             &["move through FINDINGS to inspect a result"],
-            &[("Enter", "open selected finding in Prove")],
+            &[("Enter", "open selected finding")],
         );
     };
     let mut lines = review_identity_lines(finding, width);
-    lines.extend(proof_ladder_lines(finding, width));
-    lines.extend(super::super::detail_pane::detail_pane_lines(
-        &Some(finding.clone()),
-        width,
-        None,
+    lines.extend(review_presence_lines(finding, width));
+    lines.extend(super::super::detail_pane::review_detail_lines(
+        finding, width,
     ));
     lines
 }
@@ -377,8 +379,8 @@ fn review_identity_lines(
 ) -> Vec<Line<'static>> {
     let alias = finding.alias.as_deref().unwrap_or(&finding.identity_label);
     let text = format!(
-        "{alias} · {} · sources:{}",
-        finding.severity_label, finding.source_count
+        "{alias} · {} · {}",
+        finding.decision, finding.severity_label
     );
     wrap_text(&text, width)
         .into_iter()
@@ -386,57 +388,33 @@ fn review_identity_lines(
         .collect()
 }
 
-/// A finding is a claim moving through an adversarial ladder. The strip makes
-/// the proof state visually obvious — including the refuted terminal state,
-/// which stays on screen instead of hiding behind a filter.
-fn proof_ladder_lines(
+fn review_presence_lines(
     finding: &crate::ui_view_models::FindingDetailModel,
     width: usize,
 ) -> Vec<Line<'static>> {
-    use crate::ui_view_models::ProofTier;
-    if finding.proof_tier == ProofTier::Rejected {
-        return vec![Line::styled(
-            fit(
-                &format!(
-                    "✖ REFUTED · {} — kept visible for the record",
-                    finding.decision
-                ),
-                width,
+    if finding.observation_gap.is_none() {
+        return wrap_text(
+            &format!(
+                "Evidence: {} · sources:{}",
+                finding.proof_label, finding.source_count
             ),
-            theme::danger(),
-        )];
+            width,
+        )
+        .into_iter()
+        .map(|line| Line::styled(line, theme::muted()))
+        .collect();
     }
-    let reached = match finding.proof_tier {
-        ProofTier::Suspected => 1,
-        ProofTier::StaticLinked => 2,
-        ProofTier::RuntimeVerified => 3,
-        ProofTier::Rejected => 0,
-    };
-    let proven = reached == 3
-        && (finding
-            .lifecycle_status
-            .to_ascii_lowercase()
-            .contains("patched")
-            || finding
-                .runtime_verification
-                .to_ascii_lowercase()
-                .contains("reverified"));
-    let rungs = ["candidate", "corroborated", "reproduced", "proven"];
-    let mut spans = Vec::new();
-    for (index, rung) in rungs.iter().enumerate() {
-        let lit = index < reached || (index == 3 && proven);
-        let mark = if lit { "●" } else { "○" };
-        let style = if lit {
-            theme::success()
-        } else {
-            theme::muted()
-        };
-        if index > 0 {
-            spans.push(Span::styled(" ─ ", theme::muted()));
-        }
-        spans.push(Span::styled(format!("{mark} {rung}"), style));
+    if width < 50 {
+        return vec![Line::styled("Not seen; no fix established.", theme::warn())];
     }
-    vec![Line::from(spans)]
+    [
+        "Not observed in later scan.",
+        "Absence does not establish a fix.",
+    ]
+    .into_iter()
+    .flat_map(|text| wrap_text(text, width))
+    .map(|line| Line::styled(line, theme::warn()))
+    .collect()
 }
 
 #[cfg(test)]
@@ -450,6 +428,24 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn observation_gap_summary_fits_a_two_line_review_viewport() {
+        let finding = crate::ui_view_models::FindingDetailModel {
+            alias: Some("F-0001".to_string()),
+            decision: "confirmed".to_string(),
+            severity_label: "high".to_string(),
+            observation_gap: Some("last seen in an earlier scan".to_string()),
+            ..Default::default()
+        };
+        let mut lines = review_identity_lines(&finding, 36);
+        lines.extend(review_presence_lines(&finding, 36));
+        assert_eq!(lines.len(), 2);
+        assert!(lines.iter().all(|line| line.width() <= 36));
+        let body = text(&lines);
+        assert!(body.contains("F-0001 · confirmed"));
+        assert!(body.contains("Not seen; no fix established."));
     }
 
     #[test]

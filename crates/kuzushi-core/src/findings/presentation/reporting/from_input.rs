@@ -60,6 +60,8 @@ pub enum FindingTriageStateFilter {
     // Legacy states, matched on the presence of triage metadata.
     Untriaged,
     Triaged,
+    /// Observation presence is independent of the human triage verdict.
+    NotObserved,
     // Derived triage-lifecycle states, matched via `derive_triage_state` in the
     // store layer. `Open` = still being worked (no verdict yet, or "needs
     // review"); distinct from review-completeness `open` (`completeness:open`).
@@ -77,6 +79,7 @@ impl FindingTriageStateFilter {
         match value.trim() {
             "new" | "untriaged" => Ok(Self::Untriaged),
             "triaged" | "classified" => Ok(Self::Triaged),
+            "not_observed" | "not-observed" => Ok(Self::NotObserved),
             "open" | "working" | "pending" => Ok(Self::Open),
             "reviewing" | "in_review" | "in-review" | "review" => Ok(Self::Reviewing),
             "confirmed" => Ok(Self::Confirmed),
@@ -91,7 +94,7 @@ impl FindingTriageStateFilter {
     /// True for states whose evaluation requires the derived triage lifecycle
     /// (and therefore the projected `stable_findings.current_status`).
     pub fn is_derived(self) -> bool {
-        !matches!(self, Self::Untriaged | Self::Triaged)
+        !matches!(self, Self::Untriaged | Self::Triaged | Self::NotObserved)
     }
 
     /// Whether a derived `FindingTriageState` satisfies this filter variant.
@@ -104,7 +107,7 @@ impl FindingTriageStateFilter {
             Self::Dismissed => derived.is_dismissed(),
             Self::Fixed => matches!(derived, FindingTriageState::Fixed),
             Self::Removed => matches!(derived, FindingTriageState::Removed),
-            Self::Untriaged | Self::Triaged => false,
+            Self::Untriaged | Self::Triaged | Self::NotObserved => false,
         }
     }
 }

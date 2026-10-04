@@ -52,3 +52,13 @@ fn picker_prompt_priority_preserves_normal_config_navigation_guidance() {
     let line = inactive_prompt_line(&app).unwrap().to_string();
     assert!(line.contains("Esc returns to prompt"), "{line}");
 }
+
+#[test]
+fn comparison_navigation_names_the_return_action() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::RunDiff);
+    app.set_input_mode(InputMode::Navigate);
+    let line = inactive_prompt_line(&app).unwrap().to_string();
+    assert!(line.contains("Esc back"));
+    assert!(!line.contains("returns to prompt"));
+}

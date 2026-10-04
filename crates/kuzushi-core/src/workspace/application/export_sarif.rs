@@ -471,6 +471,8 @@ fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::V
         "kuzushiPriority": record.priority,
         "kuzushiLifecycleStatus": record.lifecycle_status,
         "kuzushiReviewDecision": record.review_decision,
+        "kuzushiObservationGap": record.observation_gap,
+        "kuzushiObservationNote": record.observation_note,
         "kuzushiReviewDecisionConflict": record.review_decision_conflict,
         "kuzushiReviewDecisionReason": record.review_decision_reason,
         "kuzushiReviewDecisionAuthor": record.review_decision_author,

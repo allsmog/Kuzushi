@@ -112,6 +112,8 @@ fn sarif_result(finding: &Finding) -> Value {
             "kuzushiSeverity": finding.severity.as_str(),
             "kuzushiTool": finding.tool,
             "kuzushiTitle": finding.title,
+            "kuzushiObservationGap": finding.observation_gap,
+            "kuzushiObservationNote": crate::findings::observation_gap_note(finding),
         },
     })
 }

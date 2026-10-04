@@ -210,7 +210,11 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_mouse(&mut self, mouse: MouseEvent) -> InputUpdate {
-        if let Some(update) = self.handle_answer_mouse(mouse) {
+        if let Some(update) = self
+            .handle_confirm_mouse(mouse)
+            .or_else(|| self.handle_study_mouse(mouse))
+            .or_else(|| self.handle_answer_mouse(mouse))
+        {
             return update;
         }
         match mouse.kind {

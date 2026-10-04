@@ -38,6 +38,11 @@ fn run_diff_hydrates_recorded_context_and_distinguishes_missing_from_omitted() {
         .contains(reference["sha256"].as_str().unwrap()));
     assert_eq!(model.right_context, "explicitly no threat-model context");
     assert_eq!(
+        run_diff_model(&app, "unrecorded", "unrecorded").context_status,
+        "loading recorded contexts"
+    );
+    hydrate_diff(&mut app, "unrecorded", "unrecorded");
+    assert_eq!(
         run_diff_model(&app, "unrecorded", "unrecorded").left_context,
         "not recorded or unreadable"
     );
@@ -123,7 +128,7 @@ fn run_diff_model_compares_findings_by_stable_identity() {
     assert_eq!(model.right_revision, "rev:1234567");
     assert_eq!(model.left_status, "completed");
     assert_eq!(model.right_status, "completed");
-    assert_eq!(model.unchanged_count, 1);
+    assert_eq!(model.unchanged_findings.len(), 1);
     assert_eq!(model.changed_findings.len(), 1);
     assert_eq!(model.changed_findings[0].title, "changed item");
     assert_eq!(model.changed_findings[0].before.severity, "medium");

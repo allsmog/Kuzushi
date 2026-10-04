@@ -81,6 +81,7 @@ impl ShellApp {
     pub fn request_confirm(&mut self, request: PendingConfirm) {
         let advisory = self.advisory_mut();
         advisory.pending_confirm = Some(request);
+        advisory.confirm_scroll = 0;
         advisory.pending_confirm_launch = None;
         advisory.pending_confirm_model_switch = None;
     }

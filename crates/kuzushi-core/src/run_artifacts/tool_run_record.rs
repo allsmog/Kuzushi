@@ -74,6 +74,7 @@ pub fn try_record_tool_run_started_with_reproducibility(
     .with_model(model)
     .with_config_hash(config_hash)
     .with_loaded_modules(loaded_modules);
+    summary = super::threat_model_context::bind_summary_context(record.target, input, summary)?;
     let input_artifact = input_artifact(record, input)?;
     summary = summary.with_artifact(input_artifact.clone());
     write_run_summary(record.target, &summary)?;

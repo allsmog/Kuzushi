@@ -76,6 +76,7 @@ fn append_view_hydration_keys(
         ShellView::Health => append_health_keys(app, keys),
         ShellView::ProjectModel => append_project_model_keys(app, keys),
         ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
+        ShellView::Campaign => keys.push(ViewHydrationKey::ThreatModelStore),
         ShellView::FailureHandoff => {
             append_latest_run_keys(app, keys);
         }

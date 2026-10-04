@@ -1,0 +1,93 @@
+# Read-only context inspection and fixed scan planning; no provider calls.
+name: Inspect an immutable context diagram before selecting it for scans
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 @REPO/scripts/devex/fixtures/context_diagram.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use sast
+require-live-snap: 20 TOOLS | module
+submit: options sast:scan
+require-live-snap: 20 sast:scan | options
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | form
+keys: Down Down Enter Up v
+require-live-snap: 20 Inspect a context revision | inspect-first
+ask: Does opening a diagram require inspection of the selected revision, with a clear next action and no new model work?
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | preview
+expect: Alpha
+expect: v diagram
+keys: v
+require-live-snap: 20 CONTEXT DATA FLOW | diagram
+expect: Alpha client
+expect: Alpha receiver
+expect: Alpha records
+ask: Does the diagram identify the chosen revision and its grounding status, show concrete flows, and provide visible detail and return controls?
+keys: Down Enter
+require-live-snap: 15 Recorded input | linked-details
+expect: reader.py:1
+ask: Can the operator read the selected component's purpose and linked source evidence without leaving its context revision?
+resize: 80x24
+live-snap: details-80
+ask: Are linked context and source evidence readable at 80x24 with useful navigation controls?
+keys: Enter
+resize: 60x20
+live-snap: diagram-60
+ask: Does the compact diagram preserve the selected component and make its full details reachable?
+resize: 40x12
+live-snap: diagram-40
+ask: Does the smallest layout state its limits and preserve element navigation, details and return controls?
+keys: Enter End
+live-snap: details-40-last
+expect: reader.py:1
+ask: Is the complete evidence reachable at 40x12, without clipping the controls or implying a model action?
+keys: Home Enter Down Down
+resize: 96x89
+live-snap: selected-flow-tall
+ask: Does the tall layout make the selected flow and its trust boundary understandable?
+keys: Down Down
+resize: 160x48
+live-snap: selected-boundary-wide
+ask: Does the wide layout retain a comfortable reading width and show the selected boundary and crossing flow?
+keys: Enter
+live-snap: boundary-details
+expect: Request boundary
+expect: request
+keys: Escape
+require-live-snap: 15 CONTEXT SUMMARY | returned-context
+ask: Does Back restore the same inspected context instead of choosing or activating another revision?
+keys: v
+require-live-snap: 15 TRUST BOUNDARY | reopened-details
+ask: Does reopening the diagram preserve its selected element and detail mode?
+keys: Escape
+require-live-snap: 15 CONTEXT SUMMARY | leave-diagram
+keys: a
+require-live-snap: 20 Context selected for this study | context-selected
+keys: L
+require-live-snap: 30 Draft ready | selected-plan
+require-shell: python3 @REPO/scripts/devex/fixtures/context_diagram.py @TMP_TARGET @ART selected
+keys: Escape
+require-live-snap: 15 OPTIONS | returned-options
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 20 PLAN A STUDY | recovered-study
+keys: Down Down Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | recovered-context
+keys: v
+require-live-snap: 20 CONTEXT DATA FLOW | recovered-diagram
+expect: Alpha receiver
+ask: Does a fresh no-color session display the study's saved context diagram, with the active workspace model unchanged and no jobs started?
+require-shell: python3 @REPO/scripts/devex/fixtures/context_diagram.py @TMP_TARGET @ART resumed
+keys: Escape Escape Escape C-c

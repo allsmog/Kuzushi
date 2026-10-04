@@ -1,5 +1,5 @@
-# Two real CLI scans over labeled imported contexts; no provider or target code execution.
-name: Recorded context comparison across immutable revisions
+# Three real CLI scans over labeled source/context revisions; no provider or target code execution.
+name: Source and context comparison across immutable revisions
 size: 120x36
 cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
@@ -8,27 +8,73 @@ shell: python3 @REPO/scripts/devex/fixtures/context_comparison.py @TMP_TARGET @A
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | shell-ready
 submit: runs diff context-base context-later
-require-live-snap: 25 Threat model: changed | recorded-contexts
-require-live-snap: 30 status: completed -> completed | loaded-contexts
-expect: Base threat model: tm_
-expect: Later threat model: tm_
+require-live-snap: 30 Threat model: changed | loaded-conditions
+require-live-snap: 30 SEEN AGAIN | comparison-outcome
+expect: [Findings]
 expect: scan conditions differ
 expect: Absence does not establish a fix.
-ask: Do the source and threat-model identities make the changed scan conditions clear without implying a finding was fixed?
+expect-not: loading
+expect-not: missing findings.json
+ask: Does the 120x36 comparison lead with the outcome, changed conditions and a visible way to inspect sources?
+keys: Tab
+require-live-snap: 20 Base threat model: tm_ | recorded-contexts
+expect: [Sources & context]
+expect: Later threat model: tm_
+expect: status: completed -> completed
+expect-not: content:unknown
+ask: Does Tab reveal the full source and context identities without losing the run pair?
 resize: 80x24
 live-snap: narrow-contexts
 expect: Threat model: changed
-ask: At 80x24, are the source and context values wrapped legibly with the comparison state visible?
+ask: At 80x24, are full source and context values legible, with the active tab and paging affordance visible?
+resize: 60x20
 nav-mode:
 keys: NPage
-keys: NPage
 live-snap: comparison-details
-expect: NOT OBSERVED IN COVERED WORK
-ask: Can the operator reach the remaining comparison details and see that unavailable evidence has not established a fix?
-keys: PPage
-keys: PPage
-live-snap: comparison-origin
-expect: context-base
-expect: context-later
-ask: Can the operator return by keyboard to the same run pair after scrolling?
+expect: Later threat model:
+keys: Tab
+live-snap: compact-findings-return
+expect: [Findings]
+expect: SEEN AGAIN
+expect: Absence does not establish a fix.
+ask: Can the operator return directly to the findings at 60x20 without scrolling through identifiers?
+keys: Tab
+live-snap: restored-source-scroll
+expect: Later threat model:
+ask: Does returning to Sources restore its reading position and leave both tabs reachable?
+keys: g
+keys: Tab
+resize: 60x20
+live-snap: compact-outcome
+expect: [Findings]
+expect: Absence does not establish a fix.
+ask: Is the 60x20 comparison understandable and navigable without truncated controls?
+resize: 40x12
+live-snap: smallest-outcome
+expect: [Findings]
+expect: Absence does not establish a fix.
+keys: G
+live-snap: smallest-tail
+expect: AWS Access Key
+ask: At 40x12, can the operator reach the observation while the tabs remain visible?
+keys: g
+resize: 96x89
+live-snap: tall-outcome
+expect: SEEN AGAIN
+ask: Does the tall viewport retain a coherent reading order without stretching the comparison into unrelated panels?
+resize: 160x48
+live-snap: wide-outcome
+expect: SEEN AGAIN
+ask: Does the wide viewport make the outcome, caveat and finding easy to scan?
+resize: 120x36
+keys: Escape
+submit: runs diff context-later context-dirty
+require-live-snap: 30 SEEN AGAIN | dirty-outcome
+keys: Tab
+require-live-snap: 30 Later threat model: explicitly no threat-model context | dirty-source-context
+expect: status: completed -> completed
+expect: main, dirty
+expect: main, clean
+expect-not: content:unknown
+ask: Do these runs show the same full SHA with distinct content hashes and an explicit context omission, without implying a fix?
 keys: C-c

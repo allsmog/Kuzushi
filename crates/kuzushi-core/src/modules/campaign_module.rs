@@ -10,6 +10,7 @@ pub(crate) fn campaign_module() -> BuiltinModule {
         "Plan and track multi-job scan campaigns over threat-model, shard, and model axes.",
         vec![
             allowance::study_tool(),
+            allowance::context_study_tool(),
             allowance::approve_tool(),
             allowance::status_tool(),
             campaign_plan_tool().with_policy(workspace_policy(

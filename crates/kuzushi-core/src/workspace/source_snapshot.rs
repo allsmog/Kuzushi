@@ -17,11 +17,7 @@ pub(crate) fn run_source_bound_tool(
     run: impl FnOnce() -> Result<Value>,
 ) -> Result<Value> {
     let snapshot = SourceSnapshot::capture(ctx, tool, target)?;
-    let mut output = run()?;
-    if let Err(error) = snapshot.ensure_current(ctx, tool, target) {
-        mark_source_unverified(&mut output, &error);
-    }
-    Ok(snapshot.attach(output))
+    Ok(snapshot.finish(ctx, tool, target, run()?))
 }
 
 fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
@@ -33,6 +29,15 @@ fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
 }
 
 impl SourceSnapshot {
+    pub(crate) fn finish(
+        self, ctx: &ToolExecutionContext<'_>, tool: &str, target: &Path, mut output: Value,
+    ) -> Value {
+        if let Err(error) = self.ensure_current(ctx, tool, target) {
+            mark_source_unverified(&mut output, &error);
+        }
+        self.attach(output)
+    }
+
     pub(crate) fn capture(
         ctx: &ToolExecutionContext<'_>,
         tool: &str,

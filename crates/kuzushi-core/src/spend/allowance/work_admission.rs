@@ -90,10 +90,10 @@ pub(super) fn validate_work_call(
     let Some(plan) = &approval.work_plan else {
         return Ok(());
     };
-    plan.job(&call.work_id)?;
+    let job = plan.job(&call.work_id)?;
     anyhow::ensure!(
-        call.work == super::InvestigationWork::Discovery,
-        "approved scan jobs cannot spend protected review calls"
+        call.work == job.work_category()?,
+        "approved work cannot change its category or spend protected review calls"
     );
     let exists: bool = conn.query_row(
         "select exists(select 1 from investigation_work_attempts where investigation_id = ? and work_id = ? and run_id = ? and revision = ?)",

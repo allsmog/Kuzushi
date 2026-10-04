@@ -313,11 +313,12 @@ mod tests {
     }
 
     #[test]
-    fn fix_reports_but_does_not_auto_patch() {
+    fn compatibility_fix_picker_has_no_automatic_work_or_report_task() {
         let rows = rows_for(WorkflowPhase::Fix);
         let picked =
             recommended_tasks_for_phase(WorkflowPhase::Fix, profile(TargetKind::Source), &rows);
-        assert!(picked.contains(&PlanningTaskId::BuildReport));
+        assert!(picked.is_empty());
+        assert!(!rows.iter().any(|row| row.id == PlanningTaskId::BuildReport));
         assert!(!picked.contains(&PlanningTaskId::PatchFindings));
     }
 

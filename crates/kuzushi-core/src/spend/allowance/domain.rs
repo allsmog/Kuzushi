@@ -106,7 +106,7 @@ impl AllowanceReservation {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AllowanceSnapshot {
     pub schema_version: u32,

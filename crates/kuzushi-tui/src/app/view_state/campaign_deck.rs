@@ -37,6 +37,7 @@ pub struct CampaignRouteState {
     pub(crate) trend_history: Vec<TrendSnapshot>,
     /// Draft owned by the batch configurator. While present the Campaign
     /// surface renders configuration instead of the campaign list.
+    pub(crate) setup_context_study: Option<crate::app::BatchScanConfig>,
     pub(crate) batch_scan_config: Option<crate::app::BatchScanConfig>,
     /// The batch whose occurrence report scopes Review. The id survives deck
     /// refreshes until the operator clears it or switches targets.
@@ -58,6 +59,7 @@ impl Default for CampaignRouteState {
             trend: None,
             trend_history: Vec::new(),
             batch_scan_config: None,
+            setup_context_study: None,
             active_batch_id: None,
             active_batch_report: None,
         }

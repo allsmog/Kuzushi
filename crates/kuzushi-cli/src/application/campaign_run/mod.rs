@@ -187,6 +187,7 @@ struct PlanJob {
 }
 
 struct LoadedPlan {
+    context_study: bool,
     jobs: Vec<PlanJob>,
     batch_guard: Option<ScanBatchGuard>,
 }
@@ -248,7 +249,11 @@ fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result
         filtered_jobs(jobs, filter)?
     };
     approved_work::bind_approved_work(target, campaign_id, &plan, &mut jobs)?;
-    Ok(LoadedPlan { jobs, batch_guard })
+    Ok(LoadedPlan {
+        jobs,
+        batch_guard,
+        context_study: plan["kind"] == "context-study",
+    })
 }
 
 fn scan_batch_guard(
@@ -281,6 +286,9 @@ fn enforce_scan_batch_worker_boundary(
     plan: &LoadedPlan,
     settings: &DispatchSettings,
 ) -> Result<()> {
+    if plan.context_study {
+        enforce_frozen_worker_count(1, settings.workers)?;
+    }
     if let Some(guard) = &plan.batch_guard {
         enforce_frozen_worker_count(guard.effective_workers, settings.workers)?;
     }
@@ -290,7 +298,7 @@ fn enforce_scan_batch_worker_boundary(
 fn enforce_frozen_worker_count(expected: usize, received: usize) -> Result<()> {
     anyhow::ensure!(
         received == expected,
-        "scan-batch plan freezes effective workers at {expected}; dispatcher received {received}"
+        "study plan freezes effective workers at {expected}; dispatcher received {received}"
     );
     Ok(())
 }

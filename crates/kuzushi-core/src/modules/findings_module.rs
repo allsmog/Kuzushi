@@ -196,7 +196,7 @@ fn findings_triage_options() -> Vec<OptionSpec> {
         opt(
             "state",
             OptionType::StringList,
-            "Triage state filter: untriaged or triaged.",
+            "Filter: open, reviewing, confirmed, to_fix, dismissed, not_observed, untriaged or triaged. Not observed does not mean fixed.",
         )
         .advanced(),
     ]

@@ -190,7 +190,7 @@ fn confirm_action_line(confirm: &ConfirmCardModel, width: usize) -> Line<'static
         if !confirm.header_danger {
             return confirm_field_line(
                 "review",
-                &crate::app::allowance::resize_hint(confirm.minimum_viewport),
+                "PgUp/PgDn review terms · Esc cancel",
                 width,
                 theme::warn(),
             );
@@ -374,7 +374,6 @@ mod tests {
             allowlist: Some("example.test".to_string()),
             allows_decision: true,
             allows_remembered_yes: true,
-            minimum_viewport: None,
         }
     }
 

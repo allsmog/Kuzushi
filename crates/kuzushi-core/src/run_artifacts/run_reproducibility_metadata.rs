@@ -50,6 +50,9 @@ fn summary_with_prompt_overrides(target: &Path, summary: RunSummary) -> RunSumma
 }
 
 fn summary_with_threat_model_digest(target: &Path, summary: RunSummary) -> RunSummary {
+    if summary.threat_model_resolved_via.is_some() {
+        return summary;
+    }
     match crate::capabilities::threat_model::try_resolve_threat_model(target, ".") {
         Ok(Some(resolved)) => summary_with_resolved_threat_model(target, summary, resolved),
         Ok(None) => summary,

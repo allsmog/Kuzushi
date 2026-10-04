@@ -77,11 +77,15 @@ pub(crate) fn setup_readiness_model(app: &ShellApp) -> SetupReadinessModel {
     );
     let first_blocker = rows.iter().position(|row| row.blocker.is_some());
     let can_start = first_blocker.is_none();
-    rows.push(start_row(
+    let mut start = start_row(
         &rows,
         first_blocker,
         empty_start_outcome(app, &selected_rows),
-    ));
+    );
+    if selected_model_tasks > 0 && can_start {
+        start.detail = "Review the fixed Map jobs and shared call allowance. Nothing starts until approval and launch.".into();
+    }
+    rows.push(start);
     SetupReadinessModel {
         rows,
         first_blocker,

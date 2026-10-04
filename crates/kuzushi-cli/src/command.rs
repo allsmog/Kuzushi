@@ -48,8 +48,9 @@ pub(crate) enum Command {
         /// Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         confidence: Vec<String>,
-        /// Filter by triage-lifecycle state: open, reviewing, confirmed, to_fix,
-        /// dismissed, fixed, removed (or legacy untriaged/triaged).
+        /// Filter by review state: open, reviewing, confirmed, to_fix, dismissed,
+        /// or observation gap: not_observed (absence does not mean fixed).
+        /// Legacy untriaged/triaged and fixed/removed filters remain accepted.
         /// Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         state: Vec<String>,

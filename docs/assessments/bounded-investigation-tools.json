@@ -3,7 +3,7 @@
   "sourceCommit": "014c3ffc07efad21c486dfbe9e5e0252e774dee9",
   "sourceState": "uncommitted bounded-investigations implementation",
   "catalog": "kuzushi tools --all --json",
-  "visibility": "93 non-hidden operator tools plus a separate complete 164-tool built-in policy inventory; optional adapter registration differs from the captured operator catalog",
+  "visibility": "Historical captured baseline: 93 non-hidden operator tools and a 164-tool built-in policy inventory. Later functional additions are recorded below; those baseline counts are not a current registry census.",
   "meaning": "Registry baseline, not a completed functional audit. Core is a declared tier, not readiness proof. No retirement or maturity change is inferred.",
   "remainingEvidence": [
     "phase/target suitability",
@@ -150,6 +150,33 @@
       "resourceEvidence": [
         "Deterministic approval/status; no provider calls. Approval needs exact authorization, persists limits/revision without starting jobs; status uses a read-only ledger connection."
       ]
+    },
+    {
+      "tool": "campaign:context-study",
+      "module": "campaign",
+      "declaredMaturity": "core",
+      "declaredPhase": "map",
+      "purpose": "Draft one source-grounded context generation job for approval. Keeps the current context active until the operator selects the result. Makes no model requests.",
+      "scope": "one repository-wide source-only context generation job, optionally preceded by up to two frozen deterministic preparation jobs",
+      "runtimeRequirement": "never",
+      "headlessDeclared": true,
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "optional",
+      "requiredOptions": [
+        "investigationId",
+        "contextInput"
+      ],
+      "declaredOptions": [
+        "campaignId",
+        "investigationId",
+        "preparationJobs",
+        "contextInput",
+        "allowanceRef"
+      ],
+      "executionEvidence": "Shared prepared dispatch freezes one context job and up to two deterministic preparation jobs without spending. Core tests execute both preparation tools, run the real generator with a mocked provider, retain a non-active immutable result, refuse a second attempt, recover the run-associated revision, and approve a subsequent scan study under the same consumed allowance. CLI integration binds every exact job and refuses worker expansion. J67 verifies Setup entry, Back/draft preservation, exact inputs, paged approval, named jobs and a proven fresh no-color restart: 35 machine checks and 16 manual judgments pass. No live provider quality claim.",
+      "readinessVerdict": "narrow-functional-proof",
+      "evidenceSourceCommit": "77d69695602a5240a539819911c83eb0e4f9b5b5 plus uncommitted context-study implementation",
+      "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20260910-041224/J67/manual-review.json"
     },
     {
       "tool": "campaign:coverage",
@@ -1950,8 +1977,8 @@
       "module": "threat-model",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Read the current threat model artifact.",
-      "scope": "audit-pending",
+      "purpose": "Read the active threat model or an exact immutable scanner context.",
+      "scope": "active/scoped legacy read, or exact immutable scanner context; exact reads reject overlays",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
       "workspaceRequirement": "required",
@@ -1959,13 +1986,16 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "threatModelRef",
         "scope",
         "outputDir",
         "methodology",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "Shared exact-context read authenticates the selected document without activating it. Focused core tests cover exact reads and conflicting overlays; TUI tests cover foreign/malformed completion, selection isolation and all six viewport sizes. J68 executes real offline reads and scan-plan compilation: 29 machine checks and 12 manual judgments pass, including the selected revision DFD and a proven fresh no-color restart. No scans or provider requests start. Legacy/scoped read variants remain part of the broader audit.",
+      "readinessVerdict": "narrow-functional-proof",
+      "evidenceSourceCommit": "77d69695602a5240a539819911c83eb0e4f9b5b5 plus uncommitted exact-context reader and DFD inspection",
+      "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20260910-044815/J68/manual-review.json"
     },
     {
       "tool": "threat-model:restore",

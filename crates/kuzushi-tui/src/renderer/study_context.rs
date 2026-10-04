@@ -1,0 +1,108 @@
+use super::*;
+use crate::ui_view_models::study_context::{
+    context_catalog, context_detail_lines, context_layout, ContextRow,
+};
+use ratatui::widgets::{Block, Borders};
+
+mod diagram;
+
+pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
+    let Some(picker) = app.study_context_picker() else {
+        return;
+    };
+    if picker.diagram_visible {
+        diagram::render(frame, app, area);
+        return;
+    }
+    render_context_header(frame, app, area);
+    let catalog = context_catalog(app);
+    let layout = context_layout(area, catalog.rows.len());
+    let selected = catalog
+        .rows
+        .iter()
+        .position(|row| row.reference == picker.selected);
+    let start = selected
+        .unwrap_or(0)
+        .saturating_sub((layout.list.height as usize).saturating_sub(1));
+    let rows = catalog
+        .rows
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(layout.list.height as usize)
+        .map(|(index, row)| context_row(row, selected == Some(index), layout.list.width as usize))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(rows), layout.list);
+    let lines = context_detail_lines(app, layout.detail.width as usize);
+    let max = lines.len().saturating_sub(layout.detail.height as usize);
+    let offset = picker.detail_scroll.min(max);
+    let lines = lines
+        .into_iter()
+        .skip(offset)
+        .take(layout.detail.height as usize)
+        .map(|line| Line::styled(line, theme::primary()))
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), layout.detail);
+    render_context_controls(frame, layout.controls, offset, max, picker.raw);
+}
+
+fn render_context_header(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme::subtle())
+            .title(Span::styled(" CHOOSE STUDY CONTEXT ", theme::heading())),
+        area,
+    );
+    if let Some(config) = app.router.campaign().batch_scan_config.as_ref() {
+        super::study_config::render_study_target(frame, config, area);
+    }
+}
+
+fn context_row(row: &ContextRow, selected: bool, width: usize) -> Line<'static> {
+    let (marker, style) = if selected {
+        ("▸", theme::selection())
+    } else {
+        (" ", theme::primary())
+    };
+    Line::styled(fit(&format!("{marker} {}", row.label), width), style)
+}
+
+fn render_context_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    offset: usize,
+    max: usize,
+    raw: bool,
+) {
+    let tab = if area.width < 50 {
+        "view"
+    } else if raw {
+        "summary"
+    } else {
+        "JSON"
+    };
+    let nav = if area.width < 50 {
+        "↑↓ Enter · Tab"
+    } else {
+        "↑↓ choose · Enter inspect"
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::styled(
+                format!("{nav} · PgUp/Dn {}/{}", offset + 1, max + 1),
+                theme::muted(),
+            ),
+            Line::styled(context_action_controls(area.width, tab), theme::accent()),
+        ]),
+        area,
+    );
+}
+
+fn context_action_controls(width: u16, tab: &str) -> String {
+    if width < 50 {
+        "a use · g new · v DFD · Esc back".into()
+    } else {
+        format!("a use · g new · v diagram · Tab {tab} · Esc back")
+    }
+}

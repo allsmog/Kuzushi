@@ -131,14 +131,14 @@ pub fn acquire_scan_batch_threat_model_lease(
 }
 
 pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPlanHandle> {
-    compile_batch_plan(spec, false)
+    compile_batch_plan(spec, false, None)
 }
 
-pub(super) fn compile_study_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPlanHandle> {
-    compile_batch_plan(spec, true)
+pub(super) fn compile_study_plan(spec: ScanBatchPlanSpec<'_>, investigation: Option<&str>) -> Result<CampaignPlanHandle> {
+    compile_batch_plan(spec, true, investigation)
 }
 
-fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool) -> Result<CampaignPlanHandle> {
+fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool, investigation: Option<&str>) -> Result<CampaignPlanHandle> {
     validate_trial_count(spec.trials)?;
     let batch_id = spec.batch_id.clone().unwrap_or_else(generated_batch_id);
     validate_scan_batch_id(&batch_id)?;
@@ -157,7 +157,7 @@ fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool)
         &parallel_safety,
         &spec.gate_policy,
     );
-    if requires_work_approval { plan["requiresWorkApproval"] = Value::Bool(true); }
+    bind_study_investigation(&mut plan, requires_work_approval, investigation)?;
     let plan_path = campaign_plan_path(spec.root, &batch_id);
     anyhow::ensure!(
         !plan_path.exists(),
@@ -174,6 +174,16 @@ fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool)
         parallel_safety,
         gate_policy: spec.gate_policy,
     })
+}
+
+fn bind_study_investigation(plan: &mut Value, required: bool, investigation: Option<&str>) -> Result<()> {
+    if !required { return Ok(()); }
+    plan["requiresWorkApproval"] = Value::Bool(true);
+    if let Some(id) = investigation {
+        validate_scan_batch_id(id)?;
+        plan["investigationId"] = Value::String(id.into());
+    }
+    Ok(())
 }
 
 fn acquire_plan_threat_model_lease(

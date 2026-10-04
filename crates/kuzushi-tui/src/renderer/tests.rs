@@ -1439,12 +1439,13 @@ fn scan_batch_config_has_tty_and_plain_content_parity() {
     let plain = render_plain_app(&app, 132);
 
     for text in [
-        "SCAN BATCH",
-        "Scan trials",
-        "requested 1",
-        "using 1",
-        "cost not estimated",
-        "start this batch in the background",
+        "PLAN A STUDY",
+        "Discovery passes",
+        "Workers",
+        "set explicitly",
+        "Cost evidence",
+        "unknown",
+        "Prepare study draft",
     ] {
         assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
         assert!(plain.contains(text), "plain missing {text:?}: {plain}");
@@ -3335,7 +3336,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("Enter open Prove"), "{rendered}");
+    assert!(rendered.contains("Enter open detail"), "{rendered}");
     assert!(rendered.contains("j/k/↑/↓ move"), "{rendered}");
     assert!(rendered.contains("Shift+Tab phase→"), "{rendered}");
     assert!(rendered.contains("] pane"), "{rendered}");
@@ -4737,14 +4738,14 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     assert!(rendered.contains("Map"), "rail shows map phase");
     assert!(rendered.contains("Scan"), "rail shows Scan phase");
     assert!(rendered.contains("Review"), "rail shows Review phase");
-    assert!(rendered.contains("Prove"), "rail shows Prove phase");
-    assert!(rendered.contains("Fix"), "rail shows fix phase");
+    assert!(!rendered.contains("Prove"), "guided rail excludes Prove");
+    assert!(!rendered.contains("Fix"), "guided rail excludes Fix");
     assert!(!rendered.contains("Hunt"), "legacy Hunt label is retired");
     assert!(
         !rendered.contains("Confirm"),
         "legacy Confirm label is retired"
     );
-    assert!(rendered.contains("Map 1/5"), "footer phase chip");
+    assert!(rendered.contains("Map 1/3"), "footer phase chip");
     assert!(
         rendered.contains("type `next`"),
         "NEXT mechanics name the typed command"
@@ -5478,7 +5479,8 @@ fn cost_cap_halt_row_drops_bracket_chrome() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("COST CAP HALT"));
-    assert!(rendered.contains("continue past cap"));
+    assert!(rendered.contains("review cap"));
+    assert!(!rendered.contains("continue past cap"));
     assert!(rendered.contains("abort scan"));
     assert!(
         !rendered.contains("[c]"),
@@ -5661,6 +5663,7 @@ fn compact_trace_page_down_reaches_steps() {
     // loop keeps it in step with the terminal.
     app.set_viewport(crate::TerminalViewport::new(60, 20));
     app.set_target(Some(tmp.path().to_path_buf()));
+    app.set_viewport(crate::TerminalViewport::new(60, 20));
     seed_compact_scroll_findings(&mut app);
     app.router.trace_mut().open(run_id);
     app.set_shell_view(ShellView::Trace);
@@ -7846,6 +7849,9 @@ fn run_diff_preserves_full_source_hashes_across_viewport_widths() {
     app.set_shell_view(ShellView::RunDiff);
     app.hydrate_active_view_blocking();
     for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        if !app.router.run_diff().sources_open() {
+            app.router.run_diff_mut().toggle_sources(0);
+        }
         let lines = run_diff_lines(
             &app,
             Rect::new(0, 0, width, height),
@@ -7861,3 +7867,6 @@ fn run_diff_preserves_full_source_hashes_across_viewport_widths() {
         );
     }
 }
+
+#[path = "tests/run_diff_interaction.rs"]
+mod run_diff_interaction;

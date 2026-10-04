@@ -773,11 +773,11 @@ impl ShellApp {
     }
 
     /// After a phase's queue drains (or the operator skips it), open the next
-    /// phase's picker — 組 → 崩 → 作 → 掛 — or finish the engagement after 掛 KAKE.
+    /// supported picker, or return to the evidence-derived Review/Report surface.
     pub(crate) fn advance_to_next_phase(&mut self) -> Vec<ShellEffect> {
         let completed = self.engagement.current_phase();
         let effects = self.maybe_refresh_recommendations_after_map(completed);
-        match completed.and_then(|phase| phase.next()) {
+        match completed.and_then(|phase| phase.next_investigation_phase()) {
             Some(next) => self.open_or_announce_next_phase(next),
             None => self.finish_engagement(),
         }
@@ -892,15 +892,24 @@ impl ShellApp {
         // The phase walker covered the startup MCP-plan line; re-emit it now
         // that completed phases may have built new attachable artifacts.
         self.log_mcp_attachment_plan();
-        if !self.engagement.has_failed_tasks() {
+        let tasks: Vec<_> = self
+            .engagement
+            .failed_tasks_cloned()
+            .into_iter()
+            .filter(|failed| WorkflowPhase::INVESTIGATION_ORDER.contains(&failed.task.phase()))
+            .collect();
+        if tasks.is_empty() {
             self.finish_planning();
             return;
         }
-        self.open_retry_gate();
+        self.present_retry_gate(tasks);
     }
 
     fn open_retry_gate(&mut self) {
-        let tasks = self.engagement.failed_tasks_cloned();
+        self.present_retry_gate(self.engagement.failed_tasks_cloned());
+    }
+
+    fn present_retry_gate(&mut self, tasks: Vec<FailedPlanningTask>) {
         let count = tasks.len();
         self.advisory_mut().pending_retry = Some(PendingRetry { tasks });
         self.log(
@@ -1018,13 +1027,13 @@ impl ShellApp {
             .prepare_tool_input(tool_name, input, Some(self.option_store()))
     }
 
-    /// Planning is done. Return to the Workbench cockpit and leave the module
-    /// recommender as an explicit operator action.
+    /// Planning is done. Show the evidence-derived destination without taking
+    /// focus from active or background work.
     fn finish_planning(&mut self) {
         self.engagement.clear_planning_queue();
         self.log("planning", "planning complete");
         if !self.foreground_run_focus_owns_activity() && !self.run_focus_is_background_owned() {
-            self.open_workbench();
+            self.open_rederived_journey_destination();
         }
         self.log(
             "recommend",

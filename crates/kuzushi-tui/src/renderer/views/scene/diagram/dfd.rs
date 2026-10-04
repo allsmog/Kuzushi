@@ -11,8 +11,9 @@
 use super::*;
 use crate::theme;
 use crate::ui_view_models::{
-    dfd_selectable_count, dfd_selected_item, DfdBoundaryModel, DfdFlowModel, DfdKind, DfdLinkState,
-    DfdModel, DfdNodeModel, DfdSecurityKind, DfdSelected,
+    dfd_security_items_for_selection, dfd_selectable_count, dfd_selected_item,
+    dfd_selection_for_key, DfdBoundaryModel, DfdFlowModel, DfdKind, DfdLinkState, DfdModel,
+    DfdNodeModel, DfdSecurityKind, DfdSelected,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -539,7 +540,7 @@ impl DfdDiagram {
         let width = area.width.saturating_sub(2) as usize;
         let mut detail = selected_detail_content(&self.model, self.selection, width);
         prepend_resize_hint(&mut detail.lines, width, show_resize_hint);
-        append_legacy_rebuild_detail(&mut detail.lines, &self.model, width);
+        append_legacy_context_detail(&mut detail.lines, &self.model, width);
         let render_area = compact_detail_area(area, detail.lines.len());
         let viewport = render_area.height.saturating_sub(2) as usize;
         let max_scroll = detail.lines.len().saturating_sub(viewport);
@@ -607,7 +608,7 @@ fn full_legend_text(model: &DfdModel, selection: Option<usize>, total: usize) ->
         )
     });
     let context = if model.link_state == DfdLinkState::LegacyNeedsRebuild {
-        "context unlinked · Enter rebuild".to_string()
+        "context links unverified".to_string()
     } else {
         format!("ctx {}", model.security_context.len())
     };
@@ -1014,15 +1015,16 @@ fn draw_flow(buf: &mut Buffer, area: Rect, a: &Anchor, b: &Anchor, color: Color)
     use std::cmp::Ordering::{Equal, Greater, Less};
     match a.col.cmp(&b.col) {
         Less => connector_h(buf, area, (a.right, a.mid()), (b.left, b.mid()), color),
-        // Back-flow: draw left→right between the boxes (arrow lands on the
-        // right-hand node) — direction is approximate for the rarer reverse flows.
-        Greater => connector_h(buf, area, (b.right, b.mid()), (a.left, a.mid()), color),
+        Greater => connector_left(buf, area, (a.left, a.mid()), (b.right, b.mid()), color),
         Equal if a.top <= b.top => {
             connector_v(buf, area, (a.cx, a.bottom + 1), (b.cx, b.top), color)
         }
-        Equal => connector_v(buf, area, (b.cx, b.bottom + 1), (a.cx, a.top), color),
+        Equal => connector_up(buf, area, a.cx, a.top, b.bottom, color),
     }
 }
+
+#[cfg(test)]
+mod flow_direction_tests;
 
 fn selected_detail_content(
     model: &DfdModel,
@@ -1065,7 +1067,7 @@ fn boundary_detail_content(
     }
 }
 
-fn append_legacy_rebuild_detail(lines: &mut Vec<Line<'static>>, model: &DfdModel, width: usize) {
+fn append_legacy_context_detail(lines: &mut Vec<Line<'static>>, model: &DfdModel, width: usize) {
     if model.link_state != DfdLinkState::LegacyNeedsRebuild {
         return;
     }
@@ -1073,12 +1075,6 @@ fn append_legacy_rebuild_detail(lines: &mut Vec<Line<'static>>, model: &DfdModel
         lines,
         "context",
         "legacy model has no valid DFD links; overlay suppressed",
-        width,
-    );
-    append_detail_lines(
-        lines,
-        "action",
-        "Enter rebuilds with threat-model:build",
         width,
     );
 }
@@ -1105,9 +1101,7 @@ fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> D
     append_detail_lines(
         &mut lines,
         "purpose",
-        node.purpose
-            .as_deref()
-            .unwrap_or("not recorded; rebuild the threat model"),
+        node.purpose.as_deref().unwrap_or("not recorded"),
         width,
     );
     append_linked_context_detail(&mut lines, model, &node.key, width);
@@ -1142,20 +1136,18 @@ fn append_linked_context_detail(
     if model.link_state != DfdLinkState::Complete {
         return;
     }
-    let summary = format!("linked · {}", linked_context_summary(model, element_id));
+    let summary = linked_context_summary(model, element_id);
     append_detail_lines(lines, "context", &summary, width);
 }
 
 fn linked_context_summary(model: &DfdModel, element_id: &str) -> String {
-    let linked = model
-        .security_context
-        .iter()
-        .filter(|item| item.target_element_ids.iter().any(|id| id == element_id))
-        .collect::<Vec<_>>();
+    let linked = dfd_selection_for_key(model, element_id)
+        .map(|selection| dfd_security_items_for_selection(model, selection))
+        .unwrap_or_default();
     if linked.is_empty() {
         return "none linked".to_string();
     }
-    let mut parts = vec![linked.len().to_string()];
+    let mut parts = vec!["linked".into(), linked.len().to_string()];
     for kind in security_context_kinds() {
         let count = linked.iter().filter(|item| item.kind == kind).count();
         if count > 0 {

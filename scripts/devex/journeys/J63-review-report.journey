@@ -1,0 +1,68 @@
+# Two real offline static scans, one labeled seeded decision, one TUI decision.
+name: Review finishes at Report with source uncertainty and reading state intact
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+shell: python3 @REPO/scripts/devex/fixtures/review_report.py prepare @TMP_TARGET @ART/fixture
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/fixture/open-pending.txt
+keys: Enter
+require-live-snap: 30 F-0002 · needs_review | pending-review
+expect: review 1 remaining findings (2 total)
+expect-not: Prove ○
+expect-not: Fix ×
+submit: decision deferred Offline TUI review fixture
+require-live-snap: 30 open Report | review-complete
+expect: review decisions are recorded
+expect-not: remaining actionable findings
+ask: Does recording the final decision clearly offer Report without suggesting proof or patch work?
+nav-mode:
+keys: Z
+require-live-snap: 20 ZOOM SELECTED FINDING | focused-review
+keys: r
+require-live-snap: 30 Enter export | report-from-review
+expect: 2 findings · 2 reviewed · 1 confirmed
+expect: Workspace spend: total unavailable
+ask: Can the operator understand what will be exported, where it goes, and what cost information is missing?
+keys: Escape
+require-live-snap: 20 ZOOM SELECTED FINDING | report-return
+expect: Offline TUI review fixture
+ask: Does Report return to the same focused finding without losing the decision or zoom?
+submit: next
+require-live-snap: 30 Enter export | next-opens-report
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+resize: 80x24
+require-live-snap: 20 format json (4/6) | report-80
+ask: Are export controls and selected format readable at 80x24?
+resize: 60x20
+require-live-snap: 20 REPORT | report-60
+ask: Is the report usable at 60x20 with honest scrolling and return controls?
+resize: 40x12
+require-live-snap: 20 REPORT | report-40
+keys: NPage
+require-live-snap: 20 .kuzushi/reports/findings.json | report-40-paged
+ask: Can a keyboard operator reach the destination and export controls at 40x12?
+resize: 96x89
+require-live-snap: 20 format json (4/6) | report-tall
+ask: Does the tall layout retain a clear hierarchy without implying that absent findings were fixed?
+resize: 160x48
+require-live-snap: 20 format json (4/6) | report-wide
+keys: Enter
+require-live-snap: 30 EXPORTED | exported
+expect: findings.json
+expect: SESSION COST
+ask: Does the export receipt show the actual destination and outcome without launching more work?
+shell: python3 @REPO/scripts/devex/fixtures/review_report.py verify @TMP_TARGET @ART/fixture
+keys: C-c
+resize: 120x36
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restart
+submit: next
+require-live-snap: 30 Enter export | report-after-restart
+expect: 2 findings · 2 reviewed · 1 confirmed
+ask: After restart without color, do the persisted decisions still lead directly to Report?
+keys: C-c

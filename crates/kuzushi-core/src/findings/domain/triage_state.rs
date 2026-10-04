@@ -2,12 +2,10 @@
 //! lifecycle (`stable_findings.current_status`) plus the latest human review
 //! decision into a single operator-facing `FindingTriageState`.
 //!
-//! Design invariant: `Fixed` and `Removed` are **machine-derived only**. They
-//! are reachable exclusively through `StableLifecycleStatus::Stale`, which is
-//! projected from a `FindingDisappeared` event that only the re-scan
-//! reconciler emits. No human write API can assert `Fixed`/`Removed` — a
-//! finding is "fixed" only because a re-scan that ran the same tool no longer
-//! produces it.
+//! Scan presence and a review verdict are separate facts. A disappeared
+//! observation cannot establish a fix, even for a deterministic scanner.
+//! Revision-specific resolution requires its own evidence; this fold does not
+//! have that evidence and therefore never produces `Fixed` or `Removed`.
 
 use super::review_decision::{DismissReason, ReviewDecision, ReviewDecisionVerdict};
 use super::TriageAuthor;
@@ -24,10 +22,9 @@ pub enum FindingTriageState {
     Dismissed {
         reason: DismissReason,
     },
-    /// Was confirmed/to-fix, and a re-scan no longer produces it. Machine-only.
+    /// Legacy serialized state. Absence-based derivation no longer emits it.
     Fixed,
-    /// Never confirmed, and a re-scan no longer produces it (rule/code drift).
-    /// Machine-only.
+    /// Legacy serialized state. Absence-based derivation no longer emits it.
     Removed,
 }
 
@@ -81,14 +78,10 @@ impl StableLifecycleStatus {
 
 /// THE state machine fold. Pure and total.
 pub fn derive_triage_state(
-    lifecycle: StableLifecycleStatus,
+    _lifecycle: StableLifecycleStatus,
     latest_human_decision: Option<&ReviewDecision>,
 ) -> FindingTriageState {
-    let human = human_decision_state(latest_human_decision);
-    match lifecycle {
-        StableLifecycleStatus::Stale => resolve_stale_state(human),
-        _ => human,
-    }
+    human_decision_state(latest_human_decision)
 }
 
 /// Projects the latest human decision (ignoring automated triage) into the
@@ -109,17 +102,6 @@ fn human_decision_state(decision: Option<&ReviewDecision>) -> FindingTriageState
         ReviewDecisionVerdict::RejectedFalsePositive
         | ReviewDecisionVerdict::Suppressed
         | ReviewDecisionVerdict::AcceptedRisk => FindingTriageState::Open,
-    }
-}
-
-/// Overlays the stale (re-scan-disappeared) machine fact onto the human state.
-/// A dismissal survives disappearance (the human verdict is not erased); an
-/// affirmed finding becomes `Fixed`; anything else becomes `Removed`.
-fn resolve_stale_state(human: FindingTriageState) -> FindingTriageState {
-    match human {
-        FindingTriageState::Dismissed { reason } => FindingTriageState::Dismissed { reason },
-        FindingTriageState::Confirmed | FindingTriageState::ToFix => FindingTriageState::Fixed,
-        _ => FindingTriageState::Removed,
     }
 }
 
@@ -215,35 +197,35 @@ mod tests {
     }
 
     #[test]
-    fn stale_confirmed_is_fixed() {
+    fn stale_preserves_confirmation_without_asserting_a_fix() {
         let c = decision(ReviewDecisionVerdict::Confirmed, TriageAuthor::Human);
         assert_eq!(
             derive_triage_state(StableLifecycleStatus::Stale, Some(&c)),
-            FindingTriageState::Fixed
+            FindingTriageState::Confirmed
         );
         let f = decision(ReviewDecisionVerdict::ToFix, TriageAuthor::Human);
         assert_eq!(
             derive_triage_state(StableLifecycleStatus::Stale, Some(&f)),
-            FindingTriageState::Fixed
+            FindingTriageState::ToFix
         );
     }
 
     #[test]
-    fn stale_without_confirmation_is_removed() {
+    fn stale_without_confirmation_preserves_attention() {
         assert_eq!(
             derive_triage_state(StableLifecycleStatus::Stale, None),
-            FindingTriageState::Removed
+            FindingTriageState::Open
         );
         let reviewing = decision(ReviewDecisionVerdict::NeedsReview, TriageAuthor::Human);
         assert_eq!(
             derive_triage_state(StableLifecycleStatus::Stale, Some(&reviewing)),
-            FindingTriageState::Removed
+            FindingTriageState::Reviewing
         );
         let auto = decision(ReviewDecisionVerdict::Confirmed, TriageAuthor::Auto);
         assert_eq!(
             derive_triage_state(StableLifecycleStatus::Stale, Some(&auto)),
-            FindingTriageState::Removed,
-            "auto-only confirmation never earns Fixed"
+            FindingTriageState::Open,
+            "automated confirmation and absence cannot resolve a finding"
         );
     }
 
@@ -260,8 +242,7 @@ mod tests {
 
     #[test]
     fn reopened_finding_returns_to_human_state() {
-        // Re-observation flips current_status stale -> open; the state then
-        // falls back to the human decision, automatically leaving Fixed/Removed.
+        // Re-observation changes presence, not the human verdict.
         let c = decision(ReviewDecisionVerdict::Confirmed, TriageAuthor::Human);
         assert_eq!(
             derive_triage_state(StableLifecycleStatus::Open, Some(&c)),

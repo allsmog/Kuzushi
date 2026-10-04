@@ -109,7 +109,7 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("B", "review decision backlog"),
-    hint("Enter", "queue → Prove"),
+    hint("Enter", "finding details"),
     hint("findings", "show full queue"),
     hint("z", "open heatmap"),
 ];
@@ -273,7 +273,7 @@ fn immediate_workbench_page(app: &ShellApp) -> Option<WorkbenchPage> {
 /// cycling, and hints must all describe the result the operator is being
 /// asked to resolve, not a page re-derived from refreshed reality.
 fn unresolved_result_page(app: &ShellApp) -> Option<WorkbenchPage> {
-    kuzushi_core::WorkflowPhase::ORDER
+    kuzushi_core::WorkflowPhase::INVESTIGATION_ORDER
         .iter()
         .copied()
         .find(|phase| app.engagement.unresolved_phase_attempt(*phase).is_some())

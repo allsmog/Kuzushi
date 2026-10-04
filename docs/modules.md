@@ -20,6 +20,26 @@ for Core, Labs, and Compatibility discovery policy;
 [`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
 for the historical SDK audit that shaped the current surface.
 
+## Guided source investigation
+
+The guided shell follows **Map → Scan → Review → Report**. Review completion is
+based on durable decisions, including explicit deferral; it does not require
+proof execution or patch work. Report can also be opened before completion and
+exports the selected completeness policy without changing any finding verdict.
+
+Workbench navigation offers `1` Map, `2` Scan, `3` Review, and `r` Report in
+Navigate mode. `Shift+Tab` and next-page navigation from Review open Report;
+`Esc` returns to the same page, finding, focus, zoom, scroll and input draft.
+The Report shortcut is configurable as `workbench.report`. Draft text owns
+ordinary letter keys. The Review planner's right arrow also opens Report.
+
+The persisted five-value `WorkflowPhase` enum, legacy names, historical receipts,
+and explicit compatibility commands remain readable. Their presence does not
+add Prove/Fix steps to the guided journey. An unresolved historical Prove/Fix
+attempt cannot redirect that journey. Report is a separate descriptor surface;
+`BuildReport` is retained as a saved-plan identifier but is no longer offered as
+a Fix planning task. No public module executor is removed.
+
 ## Report surface
 
 `report:build` and `report:sarif` declare `phase: report`, a catalog and dispatch
@@ -350,9 +370,10 @@ their identity. Nested tools inherit the bound runtime and cannot replace it.
 model, total-call, protected-review and expected-revision values. Approval
 preserves previous commitments and starts no jobs. `campaign:allowance` reads
 the durable state without initializing a ledger. Neither tool requires provider
-credentials. The shell exposes exact terms before confirmation; the current
-card requires an 80×24 viewport, with resize guidance and cancellation below
-that size.
+credentials. The shell opens a full-frame review of the exact terms. Page Up /
+Page Down scroll the document at every supported terminal size; approval is
+available on its final page. Escape cancels and preserves the composer and
+navigation origin. Plain output includes the complete terms.
 
 `campaign:study` drafts an immutable discovery batch using the existing campaign
 compiler. It starts no children. The optional `campaignId`,
@@ -361,12 +382,41 @@ that exact batch to the allowance. Each child receives its host-selected work
 reference; shared dispatch verifies prepared input, source identity and config
 before atomically consuming a job attempt. Cancellation and restart do not
 refund attempts. Quota failures count against the finite attempt limit. The
-combined shell approval receipt requires 120×36 until the paged editor lands.
+combined shell review uses the same paged disclosure, including the complete
+plan digest, job count and attempt limit. Resizing reflows the terms and
+rechecks whether the final page is visible before allowing approval.
 The approval/snapshot contract adds optional `workPlan` and the spend database
 adds `investigation_work_attempts`; legacy records omit this field.
 
-The dedicated allowance editor and planning for context, review and learning
-jobs are still required before every guided model action is bound automatically.
+`campaign:context-study` drafts one `threat-model:build` job in the same campaign
+format and ledger. It requires `investigationId` and `contextInput`; an optional
+`campaignId` names the new immutable draft. Shared preparation freezes the
+selected model, source identity, config and generation options. This initial
+action is repository-wide, source-only, fresh, single-stage and non-activating.
+It requires one attempt; regeneration needs a new draft and explicit approval.
+Provider turns and retries within that attempt still consume the shared call
+allowance. The existing campaign dispatcher executes the approved job. Context
+calls cannot consume protected Review/Report calls. A subsequent scan study uses
+the same investigation id and a revised work approval, retaining prior consumption.
+
+The shell exposes this flow through `g` in the study context picker. Generated
+revisions remain immutable drafts; `a` on the completed campaign reopens review,
+and Enter reads its exact run-associated revision before selection. A completion
+without usable context remains available as a job outcome. Legacy context actions,
+review and learning still need guided allowance integration before every model
+action is bound automatically.
+Setup routes a model-backed Map plan through this study instead of starting its
+legacy planning queue. Optional `preparationJobs` freezes at most one
+`context:build` and one `entry-points:extract`, including their canonical inputs.
+They must remain deterministic and bound to the same repository. All jobs run
+in the reviewed order with one worker and one attempt each. The context engine
+still owns its own source grounding; this does not introduce DAG dependency
+execution or imply that every preparation artifact is required by synthesis.
+Preparation failures remain individual campaign outcomes. Other Map combinations
+and conflicting context options produce an explicit unsupported-plan error;
+they are never silently removed or substituted. These restrictions apply to the
+guided study, preserving direct public tool compatibility.
+
 An allowance reference does not approve additional jobs, retries beyond the
 approved limits, or a new context experiment. Existing unbound bridge calls
 keep their public contract. Dynamic adapters are not certified by these
@@ -381,6 +431,20 @@ context. With no option, legacy direct calls still select the active model.
 Campaign compilation records the selected revision or omission in each scan
 input and preserves a caller's explicit selection.
 
+`threat-model:read` also declares this option. An explicit reference returns the
+exact authenticated document in `data.document`, its identity in `data.modelRef`,
+and `data.resolvedFrom = "exact-context"`. Explicit omission returns null document
+and reference. Scope, output-directory and methodology overrides are rejected in
+this mode so the preview cannot differ from the selected scanner document.
+Unbound reads retain their existing persistent/scoped behavior. The study TUI
+uses this shared path to inspect revisions before accepting one for a plan.
+Its `v` diagram reader derives the existing DFD view model from the authenticated
+document returned by that read, retaining the selected revision's grounding
+status. Component, flow and boundary inspection cannot activate context or
+dispatch generation. Linked source evidence is readable in full, and plain
+output includes all elements with the exact context identity. Selecting the
+revision for a study remains a separate action in the context browser.
+
 Bound readers authenticate that immutable object without changing the active
 pointer. Missing objects, invalid references and digest mismatches fail without
 falling back to a different model. Agentic SAST, Carlini, taint planning, static
@@ -389,6 +453,12 @@ prompt or artifact paths. Supported whitebox MCP attachments point to the same
 object; the threat-model server checks its digest on each query. Explicit
 omission removes that attachment. Model context guides inspection and impact
 assessment; it never establishes a finding verdict.
+
+Shared tool-run startup copies an explicit revision or omission into the
+summary's threat-model provenance before execution. Terminal updates retain
+that initial selection. Existing historical summaries are not repaired merely
+by reading them; their scan input remains the recorded selection when the old
+summary captured the active model instead.
 
 This binds threat-model context only. Auxiliary context snapshots, other
 knowledge artifacts, attachments and reviewed lessons still need the complete
@@ -804,3 +874,37 @@ shows full model/revision/digest references separately from source identity.
 Changed context is labeled as changed scan conditions. Unavailable historical
 context cannot be equated with an explicit omission or the currently active
 model. These comparisons do not adjudicate a fix for a revision or branch.
+
+`sast:scan` writes a per-run `findings.json` array of discovery observations
+before optional post-processing. Reports and comparisons can read that saved
+array without querying the later state of the findings ledger. The result
+records the indexed starting `treeHash` and `snapshotHash`; a changed or
+unverifiable source makes it partial while retaining its evidence and spend.
+Index identity is bounded and does not prove complete repository coverage.
+Earlier runs without snapshots or content identities remain unknown.
+
+### Finding observation gaps
+
+`findings:list` accepts `state: ["not_observed"]` through the shared prepared
+input path. The shell equivalent is `findings filter state:not_observed`; CLI findings
+also accepts `--state not_observed`. A gap identifies the last observed run and
+the completed comparison run when the ledger has eligible scanner and scope
+evidence. Unknown historical references remain explicitly unknown.
+
+An observation gap preserves the human verdict. It does not close an open
+finding or establish that a confirmed finding was fixed. Re-observation clears
+the current gap; review and suppression changes preserve the separate scan
+history. Review detail and workspace exports carry this distinction. Full
+revision-specific fix assessment remains separate, unfinished work.
+
+Review's Enter action opens finding details within Review. When a gap contains
+both run references, **compare scans** opens Sources & context for that exact
+pair: `v` in Navigate mode, or `Esc` then `v` from an empty Prompt. The control
+uses the configurable `workbench.compare_observations` key binding. Escape
+returns to the same finding, filter, zoom and reading position. A composer
+draft owns typing; the comparison action does not overwrite it.
+
+The detail leads with the effective saved decision and source evidence.
+Other decisions remain in history, including newer automated decisions that
+do not override a human verdict. Comparison reports source and context
+differences without claiming that absence proves remediation.

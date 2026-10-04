@@ -5,8 +5,8 @@ phase: fix
 size: 80x24
 ---
 KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
  patch apply write reviewed diff · patch reject discard candidate
 │▸ REMEDIATION                │KUZUSHI · BREAKDOWN REPORT
 │STATE  Staged for approval   │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal...

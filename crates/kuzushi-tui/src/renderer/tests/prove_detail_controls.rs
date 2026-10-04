@@ -100,6 +100,10 @@ fn prove_details_park_result_actions_and_escape_restores_the_result() {
         assert_eq!(app.phase_result_target_phase(), None);
         for key in ['r', 'g', 'u', 'd', 'o'] {
             press(&mut app, KeyCode::Char(key));
+            if key == 'r' {
+                assert_eq!(app.shell_view(), ShellView::Report);
+                press(&mut app, KeyCode::Esc);
+            }
             assert!(!app.input().starts_with("run "), "{key}: {}", app.input());
             assert!(!app.has_running_work());
             assert_eq!(app.shell_view(), ShellView::Workbench);

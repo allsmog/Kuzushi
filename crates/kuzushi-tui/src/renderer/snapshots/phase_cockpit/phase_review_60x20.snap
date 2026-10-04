@@ -5,9 +5,8 @@ phase: review
 size: 60x20
 ---
 KUZUSHI · Viewing Review · target ./phase-target · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger
-        candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
 │▸ FINDINGS · 6
 │6 of 6 · [completeness:all]
 │[order: proof band, then severity]
@@ -15,6 +14,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE
 │  SQL injection reaches query
 │  sources:1 · @– · open
 │  src/auth/login.rs:17
+│
 │
 │
 │

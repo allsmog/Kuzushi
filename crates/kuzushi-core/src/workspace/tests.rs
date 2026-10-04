@@ -2143,6 +2143,13 @@ mod tests {
             lifecycle_status: "sentinel-lifecycle-status".to_string(),
             review_decision: "sentinel-review-decision".to_string(),
             triage_state: "sentinel-triage-state".to_string(),
+            observation_gap: Some(crate::findings::FindingObservationGap {
+                event_seq: 7,
+                event_hash: "sentinel-observation-event-hash".to_string(),
+                last_seen_run_id: Some("sentinel-observation-last-run".to_string()),
+                compared_run_id: Some("sentinel-observation-compared-run".to_string()),
+            }),
+            observation_note: Some("sentinel-observation-note".to_string()),
             dismissal: None,
             review_decision_conflict: Some("sentinel-review-decision-conflict".to_string()),
             review_decision_reason: Some("sentinel-review-decision-reason".to_string()),

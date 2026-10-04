@@ -1,10 +1,10 @@
-//! The five durable phases of a Kuzushi security engagement.
+//! Persisted phases and the supported source-analysis investigation order.
 //!
 //! Page selection is presentation state. This enum models the ordered domain
-//! spine used by planning and authorization: map the target, scan for candidate
-//! signals, review those candidates, prove the actionable findings, then fix
-//! them. Keeping the concept in `kuzushi-core` lets every execution mode use
-//! the same policy without depending on the interactive shell.
+//! vocabulary used by planning and authorization. Guided investigations map,
+//! scan, and review; Report is a separate surface. Prove and Fix remain readable
+//! for historical artifacts and explicit compatibility paths. Keeping these
+//! concepts in core avoids changing persisted identities with shell navigation.
 
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,18 @@ pub enum WorkflowPhase {
 }
 
 impl WorkflowPhase {
-    /// Canonical phase order the engagement walks through.
+    /// Supported source-analysis investigation. Report is a separate surface.
+    pub const INVESTIGATION_ORDER: &'static [WorkflowPhase] = &[
+        WorkflowPhase::Map,
+        WorkflowPhase::Scan,
+        WorkflowPhase::Review,
+    ];
+
+    pub fn next_investigation_phase(self) -> Option<WorkflowPhase> {
+        self.next().filter(|phase| Self::INVESTIGATION_ORDER.contains(phase))
+    }
+
+    /// Full persisted order, including retained compatibility phases.
     pub const ORDER: &'static [WorkflowPhase] = &[
         WorkflowPhase::Map,
         WorkflowPhase::Scan,
@@ -176,6 +187,15 @@ mod tests {
         assert!(WorkflowPhase::Review < WorkflowPhase::Prove);
         assert!(WorkflowPhase::Prove < WorkflowPhase::Fix);
         assert_eq!(WorkflowPhase::Fix.position(), 5);
+    }
+
+    #[test]
+    fn guided_investigation_stops_after_review_without_changing_legacy_order() {
+        assert_eq!(WorkflowPhase::INVESTIGATION_ORDER, &[WorkflowPhase::Map, WorkflowPhase::Scan, WorkflowPhase::Review]);
+        assert_eq!(WorkflowPhase::Scan.next_investigation_phase(), Some(WorkflowPhase::Review));
+        assert_eq!(WorkflowPhase::Review.next_investigation_phase(), None);
+        assert_eq!(WorkflowPhase::Prove.next_investigation_phase(), None);
+        assert_eq!(WorkflowPhase::Review.next(), Some(WorkflowPhase::Prove));
     }
 
     #[test]

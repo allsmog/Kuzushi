@@ -114,7 +114,9 @@ env-unset: ANTHROPIC_API_KEY       # unset for the NEXT launch only
 require-any-env: ANTHROPIC_API_KEY OPENAI_API_KEY   # else SKIP (require-env = all)
 require-wrapper-flow:                # if KUZUSHI_NATIVE_BIN is set, require kz
 shell: printf 'x' > @ART/seed.txt  # host-side setup command
+require-shell: test -s @ART/seed.txt # stop before later actions if prerequisite fails
 launch: --target @TARGET           # kuzushi <args>; empty = bare launch
+require-exit: 10                  # prove the TUI exited before relaunching (1–30s)
 launch-raw: @KUZUSHI demo | cat    # full shell line (pipes, --plain)
 wait: 2                            # fixed sleep (seconds)
 wait-for: 25 CHOOSE A TARGET       # poll pane for substring; [timeout] first

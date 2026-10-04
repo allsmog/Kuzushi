@@ -2,49 +2,27 @@ use super::worker_resolution::BatchWorkerResolution;
 use super::{resolve_batch_workers, BatchScanConfig};
 use crate::app::{force_shell_discovery_only_sast_input, ShellApp};
 use anyhow::{Context, Result};
-use kuzushi_core::capabilities::campaign::{
-    compile_scan_batch_plan, CampaignPlanHandle, ScanBatchGatePolicy, ScanBatchPlanSpec,
-};
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::WorkspaceTarget;
 use std::path::Path;
 
-pub(super) struct PreparedBatchLaunch {
-    pub(super) plan: CampaignPlanHandle,
-    pub(super) effective_workers: usize,
-    pub(super) clamp_reason: Option<String>,
-}
-
-pub(super) fn prepare_batch_launch(
+/// Prepare stored options through the same canonical boundary as a direct scan.
+/// Snapshot hashing and immutable plan compilation run in the normal tool worker.
+pub(super) fn study_input(
     app: &ShellApp,
     target: &Path,
     config: &BatchScanConfig,
-) -> Result<PreparedBatchLaunch> {
+    campaign_id: &str,
+) -> Result<serde_json::Value> {
     let workspace = initialized_workspace(target)?;
-    let prepared_input = prepared_scan_input(app, &workspace)?;
-    let workers = resolve_batch_workers(
-        app.registry(),
-        &prepared_input,
-        config.requested_workers,
-        config.trials,
-    )?;
-    let plan = compile_scan_batch_plan(ScanBatchPlanSpec {
-        root: workspace.root(),
-        batch_id: None,
-        trials: config.trials,
-        requested_workers: config.requested_workers,
-        gate_policy: ScanBatchGatePolicy::default(),
-        prepared_input,
-        config: app.config(),
-        registry: app.registry(),
-    })?;
-    let effective_workers = plan.effective_workers;
-    let clamp_reason = plan.parallel_safety.clamp_reason.clone().or(workers.reason);
-    Ok(PreparedBatchLaunch {
-        plan,
-        effective_workers,
-        clamp_reason,
-    })
+    let input = configured_scan_input(app, &workspace, config)?;
+    Ok(serde_json::json!({
+        "campaignId": campaign_id,
+        "investigationId": config.study.investigation_id,
+        "trials": config.trials,
+        "workers": config.requested_workers,
+        "scanInput": input,
+    }))
 }
 
 pub(super) fn resolve_config_workers(
@@ -53,13 +31,24 @@ pub(super) fn resolve_config_workers(
     config: &BatchScanConfig,
 ) -> Result<BatchWorkerResolution> {
     let workspace = initialized_workspace(target)?;
-    let prepared_input = prepared_scan_input(app, &workspace)?;
+    let prepared_input = configured_scan_input(app, &workspace, config)?;
     resolve_batch_workers(
         app.registry(),
         &prepared_input,
         config.requested_workers,
         config.trials,
     )
+}
+
+pub(super) fn configured_scan_input(
+    app: &ShellApp,
+    workspace: &WorkspaceTarget,
+    config: &BatchScanConfig,
+) -> Result<serde_json::Value> {
+    match &config.study.scan_input {
+        Some(input) => Ok(input.clone()),
+        None => prepared_scan_input(app, workspace),
+    }
 }
 
 fn initialized_workspace(target: &Path) -> Result<WorkspaceTarget> {
@@ -107,12 +96,13 @@ mod tests {
         );
         let config = BatchScanConfig::load(target.path(), None);
 
-        let launch = prepare_batch_launch(&app, target.path(), &config).unwrap();
-        let plan: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&launch.plan.plan_path).unwrap()).unwrap();
-
-        assert_eq!(plan["kind"], "scan-batch");
-        assert_eq!(plan["baseInput"]["identityFold"], "safe");
-        assert_eq!(plan["baseInput"]["triage"], false);
+        let plan = study_input(&app, target.path(), &config, "study").unwrap();
+        assert_eq!(plan["trials"], 3);
+        assert_eq!(plan["scanInput"]["identityFold"], "safe");
+        assert_eq!(plan["scanInput"]["triage"], false);
+        assert!(!target
+            .path()
+            .join(".kuzushi/v3/campaigns/study/plan.json")
+            .exists());
     }
 }

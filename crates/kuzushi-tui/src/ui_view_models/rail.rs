@@ -134,17 +134,11 @@ fn findings_section(app: &ShellApp, width: usize) -> Option<RailSection> {
     if let Some(counts) = app.domain().finding_ledger_counts() {
         rows.push(muted_row(
             &format!(
-                "{}/{} reviewed · {} proven",
-                counts.reviewed, counts.total, counts.proven
+                "{}/{} reviewed · {} confirmed",
+                counts.reviewed, counts.total, counts.confirmed
             ),
             width,
         ));
-        if counts.remediated > 0 {
-            rows.push(muted_row(
-                &format!("{} remediated", counts.remediated),
-                width,
-            ));
-        }
     }
     Some(RailSection {
         title: "FINDINGS",
@@ -167,7 +161,7 @@ fn cost_section(app: &ShellApp) -> RailSection {
         ],
     };
     RailSection {
-        title: "COST",
+        title: "SESSION COST",
         rows,
     }
 }
@@ -280,7 +274,7 @@ mod tests {
     fn idle_targetless_rail_carries_only_identity_and_cost() {
         let app = ShellApp::new(V2Config::default(), None);
 
-        assert_eq!(section_titles(&app), vec!["ENGAGEMENT", "COST"]);
+        assert_eq!(section_titles(&app), vec!["ENGAGEMENT", "SESSION COST"]);
     }
 
     #[test]
@@ -297,7 +291,7 @@ mod tests {
         let sections = rail_sections(&app, 33);
         let cost = sections.last().unwrap();
 
-        assert_eq!(cost.rows[0].to_string(), "$0.00 spent");
+        assert_eq!(cost.rows[0].to_string(), "$0.00");
         assert_eq!(cost.rows[1].to_string(), "budget not enforced");
     }
 

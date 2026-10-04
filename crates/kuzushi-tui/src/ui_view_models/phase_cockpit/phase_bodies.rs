@@ -16,12 +16,37 @@ pub(super) fn review_phase_model(app: &ShellApp) -> ReviewPhaseModel {
     let finding = visible_finding_at_cursor(app)
         .map(|(alias, finding)| finding_detail_model_for_projection(app, Some(alias), &finding));
     ReviewPhaseModel {
+        comparison_control: review_comparison_control(app),
         review: review_queue_model(app, active_review_queue_mode(app)),
         finding,
         selection_disclosure: review_selection_disclosure(app),
         next_plan: super::map::next_scans_state(app),
         chains: super::chain_artifacts::chain_artifacts_model(app),
     }
+}
+
+fn review_comparison_control(app: &ShellApp) -> Option<String> {
+    app.review_observation_run_pair()?;
+    if !app.input().is_empty() {
+        return None;
+    }
+    let keys = app
+        .ui()
+        .keymap_binding_labels("workbench", "compare_observations", &["v"]);
+    (!keys.is_empty()).then(|| format!("{} · compare scans", review_comparison_keys(app, keys)))
+}
+
+fn review_comparison_keys(app: &ShellApp, keys: Vec<String>) -> String {
+    if app.input_mode() == crate::InputMode::Navigate {
+        return keys.join("/");
+    }
+    let navigate = app
+        .ui()
+        .keymap_binding_labels("composer", "navigate_mode", &["Esc"]);
+    if navigate.is_empty() {
+        return "Navigate unbound".to_string();
+    }
+    format!("{} then {}", navigate.join("/"), keys.join("/"))
 }
 
 pub(super) fn fix_phase_model(app: &ShellApp) -> FixPhaseModel {

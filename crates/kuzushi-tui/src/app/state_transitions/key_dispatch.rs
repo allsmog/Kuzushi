@@ -250,7 +250,7 @@ impl ShellApp {
         {
             return Some(page_phase);
         }
-        WorkflowPhase::ORDER
+        WorkflowPhase::INVESTIGATION_ORDER
             .iter()
             .copied()
             .find(|phase| self.engagement.unresolved_phase_attempt(*phase).is_some())
@@ -1351,7 +1351,21 @@ impl ShellApp {
         if !key.modifiers.is_empty() {
             return false;
         }
-        let contextual_utility = matches!(
+        let contextual_utility = self.contextual_navigation_owns_keys();
+        if !contextual_utility {
+            return false;
+        }
+        if key.code == KeyCode::Esc {
+            return self.collapse_dfd_focus_or_restore_contextual_origin();
+        }
+        self.handle_catalog_expert_key(key)
+    }
+
+    fn contextual_navigation_owns_keys(&self) -> bool {
+        if self.batch_config_open() {
+            return false;
+        }
+        matches!(
             self.shell_view(),
             ShellView::Catalog
                 | ShellView::Keymap
@@ -1360,15 +1374,9 @@ impl ShellApp {
                 | ShellView::Campaign
                 | ShellView::Replay
                 | ShellView::Trace
+                | ShellView::RunDiff
                 | ShellView::Scene
-        );
-        if !contextual_utility {
-            return false;
-        }
-        if key.code == KeyCode::Esc {
-            return self.collapse_dfd_focus_or_restore_contextual_origin();
-        }
-        self.handle_catalog_expert_key(key)
+        )
     }
 
     fn collapse_dfd_focus_or_restore_contextual_origin(&mut self) -> bool {
@@ -1662,6 +1670,9 @@ impl ShellApp {
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {
         if self.advisory().pending_confirm.is_none() || is_quit_chord(key) {
             return InputUpdate::ignored();
+        }
+        if self.handle_allowance_review_key(key) {
+            return InputUpdate::handled();
         }
         if let Some(action) = self.applicable_confirm_action(key) {
             return self.apply_confirm_key_action(action);
@@ -3485,7 +3496,7 @@ mod tests {
     #[test]
     fn selecting_model_proof_materializes_non_runtime_reality_without_opening_fix() {
         let mut fixture = proof_selection_fixture("tool-proof-selection-restart");
-        assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Prove));
+        assert_eq!(journey_phase(&fixture.app), None);
 
         assert!(
             fixture
@@ -3508,11 +3519,11 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
-        assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Prove));
+        assert_eq!(journey_phase(&fixture.app), None);
 
         let mut restarted = ShellApp::new(V2Config::default(), Some(&fixture.workspace));
         restarted.refresh_findings(false);
-        assert_eq!(journey_phase(&restarted), Some(WorkflowPhase::Prove));
+        assert_eq!(journey_phase(&restarted), None);
         assert_selected_proof_persisted(&fixture);
     }
 

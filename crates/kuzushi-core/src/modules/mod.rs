@@ -55,6 +55,8 @@ pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
 mod allowance_dispatch;
 mod application;
+mod scan_planning;
+pub(crate) use scan_planning::validate_study_scan_selection;
 pub mod autonomy;
 mod builtins;
 mod catalog_query;

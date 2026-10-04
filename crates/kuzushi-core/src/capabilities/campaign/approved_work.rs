@@ -23,6 +23,9 @@ pub(super) fn approve_work(
         );
         return Ok(None);
     };
+    if let Some(plan) = super::context_study::approve_context_work(id, input, ctx)? {
+        return Ok(Some(plan));
+    }
     let registry = ModuleRegistry::with_v2_builtins();
     let (plan, digest, current) = review_campaign(id, input, ctx, &registry)?;
     let attempts = input["maxJobAttempts"]
@@ -50,6 +53,7 @@ fn review_campaign(id: &str, input: &Value, ctx: &ToolExecutionContext<'_>, regi
         .context("campaign approval requires a workspace")?
         .root();
     let plan = read_bounded_plan(root, id)?;
+    validate_investigation_binding(&plan, input)?;
     let digest = digest_serializable(&plan)?;
     anyhow::ensure!(
         input["campaignPlanSha256"].as_str() == Some(&digest),
@@ -73,6 +77,14 @@ fn review_campaign(id: &str, input: &Value, ctx: &ToolExecutionContext<'_>, regi
         );
     }
     Ok((plan, digest, current))
+}
+
+fn validate_investigation_binding(plan: &Value, input: &Value) -> Result<()> {
+    if let Some(id) = plan.get("investigationId") {
+        anyhow::ensure!(input.get("investigationId") == Some(id),
+            "study belongs to a different investigation; preserve its existing accounting");
+    }
+    Ok(())
 }
 
 fn validate_discovery_input(input: &Value) -> Result<()> {
@@ -115,7 +127,7 @@ pub fn work_input_digest(input: &Value) -> Result<String> {
     digest_serializable(&input)
 }
 
-fn read_bounded_plan(root: &Path, id: &str) -> Result<Value> {
+pub(super) fn read_bounded_plan(root: &Path, id: &str) -> Result<Value> {
     validate_scan_batch_id(id)?;
     let path = campaign_plan_path(root, id);
     let mut bytes = Vec::new();

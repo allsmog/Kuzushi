@@ -69,6 +69,8 @@ pub enum PlanningTaskId {
     VerifyFindings,
     // 掛 KAKE · fix — patch & report.
     PatchFindings,
+    /// Retained for saved plan compatibility. New exports use the Report surface.
+    #[allow(dead_code)]
     BuildReport,
 }
 
@@ -99,7 +101,6 @@ impl PlanningTaskId {
         PlanningTaskId::HuntChains,
         PlanningTaskId::VerifyFindings,
         PlanningTaskId::PatchFindings,
-        PlanningTaskId::BuildReport,
     ];
 
     /// Tasks belonging to a single phase, in canonical order.

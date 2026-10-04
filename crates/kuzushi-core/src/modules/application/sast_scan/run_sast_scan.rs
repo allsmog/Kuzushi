@@ -275,6 +275,7 @@ fn run_started_sast_scan(
     let requests = SastScanRequests::from_input(&input)?;
     let options = sast_scan_options(&input, whitebox_static.is_some())?;
     let option_store = sast_subtool_options(ctx, workspace)?;
+    let source = crate::workspace::source_snapshot::SourceSnapshot::capture(ctx, "sast:scan", workspace.root())?;
     let executed = execute_sast_scan(SastScanExecutionInput {
         registry,
         input: &input,
@@ -291,6 +292,7 @@ fn run_started_sast_scan(
     })?;
     let findings_count = executed.tally.distinct;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
+    let result = source.finish(ctx, "sast:scan", workspace.root(), result);
     persist_sast_scan_result(
         ctx,
         workspace,
@@ -771,6 +773,7 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
     let reports = scan_reports_with_failure_receipt(&input, &artifacts, &baseline)?;
     let run_ids = reports.run_ids(primary_run_id.clone());
     let core_findings = findings_for_sast_runs(input.store, &run_ids)?;
+    artifacts.write_json("findings.json", "discovery observations", &json!(core_findings))?;
     let whitebox_artifacts = input.whitebox_artifacts(&run_ids, &artifacts)?;
     input.record_scan_stage(
         &artifacts,
@@ -1452,6 +1455,7 @@ fn sast_artifacts_json(artifacts: &SastRunArtifacts, paths: WhiteboxArtifactPath
         "dir": artifacts.dir.display().to_string(),
         "input": artifacts.scan_input.display().to_string(),
         "summary": artifacts.sast_summary.display().to_string(),
+        "findings": artifacts.dir.join("findings.json").display().to_string(),
         "staticNarratives": paths.static_narratives,
         "staticVariants": paths.static_variants,
         "candidateSemgrepRules": paths.candidate_semgrep_rules,

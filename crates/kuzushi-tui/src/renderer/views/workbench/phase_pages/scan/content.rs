@@ -26,6 +26,7 @@ pub(super) fn scope_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'sta
     let mut lines = vec![
         Line::styled(fit(&model.scope, width), theme::primary()),
         Line::styled(fit(&model.plan, width), theme::muted()),
+        Line::styled(fit("b plan study and allowance", width), theme::accent()),
     ];
     if let Some(hint) = model.empty_hint.as_deref() {
         lines.push(Line::styled(fit(hint, width), theme::warn()));

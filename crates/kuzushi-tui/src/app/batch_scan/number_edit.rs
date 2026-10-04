@@ -12,15 +12,14 @@ pub(crate) struct BatchNumberEdit {
 }
 
 impl BatchNumberEdit {
-    pub(crate) fn bounds(&self) -> (usize, usize) {
-        match self.row {
-            BatchScanConfigRow::Trials => (MIN_BATCH_TRIALS, BATCH_HARD_CAP),
-            _ => (1, MAX_BATCH_WORKERS),
-        }
+    pub(crate) fn bounds(&self) -> Option<(usize, usize)> {
+        self.row.number_bounds()
     }
 
     fn value(&self) -> Result<usize, String> {
-        let (minimum, maximum) = self.bounds();
+        let (minimum, maximum) = self
+            .bounds()
+            .ok_or_else(|| "This row is not a numeric field.".to_string())?;
         self.field
             .text()
             .trim()
@@ -31,12 +30,24 @@ impl BatchNumberEdit {
     }
 }
 
+impl BatchScanConfigRow {
+    pub(crate) fn number_bounds(self) -> Option<(usize, usize)> {
+        [
+            (Self::Trials, MIN_BATCH_TRIALS, BATCH_HARD_CAP),
+            (Self::Workers, 1, MAX_BATCH_WORKERS),
+            (Self::ProviderCalls, 1, 1_000_000),
+            (Self::ReviewCalls, 0, 1_000_000),
+            (Self::Attempts, 1, 10),
+        ]
+        .into_iter()
+        .find(|(row, _, _)| *row == self)
+        .map(|(_, min, max)| (min, max))
+    }
+}
+
 impl BatchScanConfig {
     pub(crate) fn begin_number_edit(&mut self, row: BatchScanConfigRow) {
-        if !matches!(
-            row,
-            BatchScanConfigRow::Trials | BatchScanConfigRow::Workers
-        ) {
+        if row.number_bounds().is_none() {
             return;
         }
         self.number_edit = Some(BatchNumberEdit {
@@ -44,6 +55,28 @@ impl BatchScanConfig {
             field: FieldEditor::default(),
             error: None,
         });
+    }
+
+    fn apply_number(&mut self, row: BatchScanConfigRow, value: usize) {
+        match row {
+            BatchScanConfigRow::Trials => {
+                self.trials = value;
+                self.study.invalidate_plan();
+            }
+            BatchScanConfigRow::Workers => {
+                self.requested_workers = value;
+                self.study.invalidate_plan();
+            }
+            _ => self.apply_allowance_number(row, value),
+        }
+    }
+
+    fn apply_allowance_number(&mut self, row: BatchScanConfigRow, value: usize) {
+        match row {
+            BatchScanConfigRow::ProviderCalls => self.study.max_provider_calls = Some(value),
+            BatchScanConfigRow::ReviewCalls => self.study.protected_review_calls = Some(value),
+            _ => self.study.max_job_attempts = value,
+        }
     }
 
     fn save_number_edit(&mut self) -> bool {
@@ -57,12 +90,10 @@ impl BatchScanConfig {
                 return false;
             }
         };
-        match edit.row {
-            BatchScanConfigRow::Trials => self.trials = value,
-            _ => self.requested_workers = value,
-        }
+        let row = edit.row;
+        self.apply_number(row, value);
         self.number_edit = None;
-        self.disarm_review();
+        self.notice = None;
         true
     }
 }
@@ -77,10 +108,10 @@ impl ShellApp {
         if let Some(update) = self.handle_batch_number_key(key) {
             return Some(update);
         }
-        if self.batch_config_open() && key.modifiers.is_empty() && key.code == KeyCode::Esc {
-            return Some(self.close_batch_config());
+        if !self.batch_config_open() || batch_editor_yields_to_exit(key) {
+            return None;
         }
-        None
+        Some(self.handle_study_form_key(key))
     }
 
     pub(crate) fn batch_number_editor_open(&self) -> bool {

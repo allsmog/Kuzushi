@@ -5,11 +5,11 @@ phase: fix
 size: 160x48
 ---
 KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context   │ ENGAGEMENT
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○                                                                                │ phase-target
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates                                                           │ scope: F-0001 · Review
+ Map ✓ · Scan ✓ · Review ● · Report                                                                                         │ phase-target
+ ▸ NEXT review 6 remaining findings (6 total)                                                                               │ scope: F-0001 · Review
  patch apply write reviewed diff · patch reject discard candidate · patch regen replace candidate · report open Report      │
 │▸ REMEDIATION                    │KUZUSHI · BREAKDOWN REPORT                           │VERIFICATION                       │ JOURNEY
-│STATE  Staged for approval       │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6...  │✓ patch drafted through the...     │ Review 3/5
+│STATE  Staged for approval       │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6...  │✓ patch drafted through the...     │ Review 3/3
 │NEXT   patch apply · write...    │report sarif/all · preview only · no report written  │○ applied · build and tests...     │ ⛭ autonomy:fix
 │OR patch reject · patch regen    │◆ F-0001  CRITICAL  SQL injection reaches query      │○ proof fails after patch...       │
 │▸ report                         │                                                     │defer with a reason code...        │ IN FLIGHT
@@ -17,9 +17,9 @@ KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● L
 │and destination                  │                                                     │                                   │
 │F-0001 · pending reviewed diff   │                                                     │                                   │ FINDINGS
 │rationale: bind the user value   │                                                     │                                   │ 6 findings · 1 C · 2 H · 2 M
-│           as a query parameter  │                                                     │                                   │ 0/6 reviewed · 0 proven
+│           as a query parameter  │                                                     │                                   │ 0/6 reviewed · 0 confirmed
 │side effect: preserves the login │                                                     │                                   │
-│             response schema     │                                                     │                                   │ COST
+│             response schema     │                                                     │                                   │ SESSION COST
 │✓ login_rejects_sqli ·...        │                                                     │                                   │ $0.37 of $2.00
 │guardrail: human approval        │                                                     │                                   │ 19% of budget
 │           required              │                                                     │                                   │

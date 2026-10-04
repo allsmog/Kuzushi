@@ -114,6 +114,7 @@ pub(crate) struct FindingListRow {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct FindingDetailModel {
+    pub(crate) observation_gap: Option<String>,
     pub(crate) alias: Option<String>,
     pub(crate) identity_label: String,
     pub(crate) severity_tone: SeverityTone,
@@ -147,6 +148,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) decision_source: String,
     pub(crate) decision_history: String,
     pub(crate) decision_history_rows: Vec<DecisionHistoryRow>,
+    pub(crate) current_decision: Option<DecisionHistoryRow>,
     pub(crate) decision_history_overflow: usize,
     pub(crate) decision_conflict: Option<String>,
     pub(crate) evidence_state: String,
@@ -457,7 +459,12 @@ pub(crate) fn finding_detail_model_for_projection(
     detail.dataflow_evidence = dataflow;
     detail.dataflow_overflow = dataflow_overflow;
     detail.review_yield = review_yield_detail_for(app, finding);
-    apply_decision_history(&mut detail, finding, app.review_decisions());
+    apply_decision_history(
+        &mut detail,
+        finding,
+        app.review_decisions(),
+        decision.as_ref(),
+    );
     detail
 }
 
@@ -465,22 +472,32 @@ fn apply_decision_history(
     detail: &mut FindingDetailModel,
     finding: &Finding,
     decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+    effective: Option<&EffectiveReviewDecision>,
 ) {
     let history = review_decision_history_for(finding, decisions);
-    detail.decision_history_overflow = 0;
-    detail.decision_history_rows = history
-        .into_iter()
-        .map(|record| DecisionHistoryRow {
-            verdict: record.decision.verdict.as_str().to_string(),
-            author: record
-                .decision
-                .actor
-                .clone()
-                .unwrap_or_else(|| record.decision.author.as_str().to_string()),
-            created_at: super::recorded_timestamp_label(&record.created_at),
-            rationale: record.decision.rationale.clone(),
+    detail.current_decision = history
+        .iter()
+        .find(|record| {
+            Some(&record.decision) == effective.map(EffectiveReviewDecision::review_decision)
         })
-        .collect();
+        .map(|record| decision_history_row(record));
+    detail.decision_history_overflow = 0;
+    detail.decision_history_rows = history.into_iter().map(decision_history_row).collect();
+}
+
+fn decision_history_row(
+    record: &kuzushi_core::findings::ReviewDecisionRecord,
+) -> DecisionHistoryRow {
+    DecisionHistoryRow {
+        verdict: record.decision.verdict.as_str().to_string(),
+        author: record
+            .decision
+            .actor
+            .clone()
+            .unwrap_or_else(|| record.decision.author.as_str().to_string()),
+        created_at: record.created_at.clone(),
+        rationale: record.decision.rationale.clone(),
+    }
 }
 
 /// Project the finding's hydrated deep-audit dataflow rows from the workbench
@@ -1896,6 +1913,7 @@ impl FindingDetailModel {
     ) -> Self {
         let confidence = ProofConfidence::classify(finding);
         Self {
+            observation_gap: kuzushi_core::findings::observation_gap_note(finding),
             alias: projection.alias,
             identity_label: finding_identity_label(finding),
             severity_tone: SeverityTone::from_severity(projection.severity),

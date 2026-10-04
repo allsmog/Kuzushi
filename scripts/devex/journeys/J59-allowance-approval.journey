@@ -8,23 +8,27 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | shell-ready
 type: run campaign:approve-allowance {"investigationId":"offline-study","expectedRevision":0,"model":"openai-codex:gpt-5.5","maxProviderCalls":9,"protectedReviewCalls":3,"reason":"Offline TUI test; no provider execution"}
 keys: Enter
-require-live-snap: 20 CONFIRM · investigation allowance | allowance-terms
+require-live-snap: 20 REVIEW ALLOWANCE | allowance-terms
 expect: Total provider calls: 9
-expect: protected review: 3
+expect: Protected review calls: 3
 expect: openai-codex:gpt-5.5
 expect: Dollar ceiling: not enforced
 ask: Can the operator review the exact allowance before approving, with no dollar-ceiling or automatic-work promise?
 resize: 40x12
-require-live-snap: 20 resize to 80×24 | allowance-too-small
-expect-not: y allow once
+require-live-snap: 20 Read remaining terms to approve | allowance-first-page
+expect-not: y approve
 keys: y
 live-snap: hidden-terms-cannot-approve
-expect: CONFIRM · investigation allowance
-expect: resize to 80×24
-ask: Is approval blocked while its terms do not fit, with cancellation visible and the pending request preserved?
+expect: REVIEW ALLOWANCE
+expect: PgUp/PgDn read · Esc cancel
+ask: Are paging and cancellation clear while approval waits for the remaining terms?
+keys: End
+require-live-snap: 20 y approve | allowance-final-page
+expect: starts no jobs
+ask: Can the operator reach the remaining terms and approve at 40x12 without resizing?
 resize: 80x24
 require-live-snap: 20 Total provider calls: 9 | allowance-terms-restored
-expect: protected review: 3
+expect: Protected review calls: 3
 keys: y
 require-live-snap: 20 run receipt · completed | approved
 submit: logs

@@ -1304,7 +1304,7 @@ impl ShellApp {
             )
     }
 
-    fn open_run_diff_view(&mut self, left: String, right: String) {
+    pub(crate) fn open_run_diff_view(&mut self, left: String, right: String) {
         self.router.run_diff_mut().open(left.clone(), right.clone());
         self.set_shell_view(ShellView::RunDiff);
         self.router.default_scroll_mut().reset();

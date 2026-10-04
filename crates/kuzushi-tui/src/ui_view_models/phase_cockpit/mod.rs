@@ -233,6 +233,7 @@ pub(crate) struct NextScanRow {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReviewPhaseModel {
+    pub(crate) comparison_control: Option<String>,
     pub(crate) review: ReviewQueueModel,
     pub(crate) finding: Option<FindingDetailModel>,
     pub(crate) selection_disclosure: Option<SelectionDisclosureModel>,

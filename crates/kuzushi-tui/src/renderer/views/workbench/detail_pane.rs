@@ -9,137 +9,17 @@ use kuzushi_core::findings::DataflowEvidenceRow;
 use ratatui::prelude::{Line, Span};
 use ratatui::style::Style;
 
-pub(super) fn detail_pane_lines(
-    detail: &Option<FindingDetailModel>,
-    width: usize,
-    report_command: Option<&str>,
-) -> Vec<Line<'static>> {
-    let Some(detail) = detail else {
-        return no_detail_lines();
-    };
-    let budget = width.saturating_sub(2).max(16);
-    detail_lines_for_model(detail, budget, report_command)
-}
+mod review;
+pub(super) use review::review_detail_lines;
 
-fn no_detail_lines() -> Vec<Line<'static>> {
-    vec![muted(
-        "no finding selected — move through FINDINGS to preview details here.",
-    )]
-}
-
-fn detail_lines_for_model(
-    detail: &FindingDetailModel,
-    budget: usize,
-    report_command: Option<&str>,
-) -> Vec<Line<'static>> {
-    let mut lines = detail_title_lines(detail, budget);
-    push_signals_section(&mut lines, detail, budget);
-    push_decision_section(&mut lines, detail, budget);
-    push_next_section(&mut lines, detail, budget, report_command);
-    push_source_section(&mut lines, detail, budget);
-    push_evidence_section(
-        &mut lines,
-        &detail.evidence,
-        detail.evidence_overflow,
-        budget,
-    );
-    push_dataflow_section(
-        &mut lines,
-        &detail.dataflow_evidence,
-        detail.dataflow_overflow,
-        budget,
-    );
-    push_verification_section(&mut lines, detail, budget);
-    push_review_yield_section(&mut lines, detail.review_yield.as_ref(), budget);
-    push_analysis_section(&mut lines, detail, budget);
-    push_claim_section(&mut lines, detail, budget);
-    push_fix_section(&mut lines, detail, budget);
-    push_message_section(&mut lines, detail, budget);
-    push_provenance_section(&mut lines, detail, budget);
-    lines
-}
-
-fn push_claim_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
-    push_section_header(lines, "CLAIM");
-    if let Some(alias) = detail.alias.as_deref() {
-        push_detail_kv(lines, "alias", alias, budget);
-    }
-    push_detail_kv(lines, "rule", &detail.rule, budget);
-    push_detail_kv(lines, "location", &detail.location, budget);
-    push_detail_kv(lines, "producing tool", &detail.tool, budget);
-}
-
-fn push_signals_section(
+fn push_observation_gap(
     lines: &mut Vec<Line<'static>>,
     detail: &FindingDetailModel,
     budget: usize,
 ) {
-    push_section_header(lines, "STATUS");
-    push_detail_kv(lines, "severity", &detail.severity_label, budget);
-    push_wrapped(
-        lines,
-        &format!("proof band: {}", detail.proof_confidence_label),
-        budget,
-        "  ",
-        theme::proof_confidence_tone(detail.proof_confidence),
-    );
-    push_detail_kv(lines, "lifecycle status", &detail.lifecycle_status, budget);
-    push_detail_kv(lines, "evidence state", &detail.evidence_state, budget);
-    push_wrapped(
-        lines,
-        &format!(
-            "proof summary: {} {}",
-            detail.proof_marker, detail.proof_label
-        ),
-        budget,
-        "  ",
-        proof_detail_style(detail.proof_tier),
-    );
-}
-
-fn proof_detail_style(tier: ProofTier) -> Style {
-    match tier {
-        ProofTier::RuntimeVerified => theme::success(),
-        ProofTier::StaticLinked => theme::accent(),
-        ProofTier::Suspected => theme::muted(),
-        ProofTier::Rejected => theme::danger(),
-    }
-}
-
-fn push_next_section(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-    report_command: Option<&str>,
-) {
-    push_section_header(lines, "NEXT");
-    match &detail.next_command {
-        Some(command) => push_wrapped(
-            lines,
-            &format!("{}: `{command}`", detail.next_action_label),
-            budget,
-            "  ",
-            theme::accent(),
-        ),
-        None => push_wrapped(
-            lines,
-            &format!("{}: {}", detail.next_action_label, detail.next_detail),
-            budget,
-            "  ",
-            theme::accent(),
-        ),
-    }
-    if detail.next_command.is_some() {
-        push_wrapped(lines, &detail.next_detail, budget, "  ", theme::muted());
-    }
-    if let Some(report_command) = report_command {
-        push_wrapped(
-            lines,
-            &format!("report: `{report_command}`"),
-            budget,
-            "  ",
-            theme::muted(),
-        );
+    if let Some(note) = &detail.observation_gap {
+        push_section_header(lines, "OBSERVATION GAP");
+        push_wrapped(lines, note, budget, "  ", theme::warn());
     }
 }
 
@@ -147,7 +27,7 @@ fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
     let Some(snippet) = detail.source_snippet.as_ref() else {
         return;
     };
-    push_section_header(lines, "SOURCE · observation (on-disk excerpt)");
+    push_section_header(lines, source_section_label(budget));
     push_wrapped(lines, &detail.location, budget, "  ", theme::muted());
     if let Some(note) = snippet.note.as_deref() {
         push_wrapped(lines, note, budget, "  ", theme::warn());
@@ -161,6 +41,14 @@ fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
             number_width,
             budget,
         ));
+    }
+}
+
+fn source_section_label(budget: usize) -> &'static str {
+    if budget < 42 {
+        "SOURCE · observed excerpt"
+    } else {
+        "SOURCE · observation (on-disk excerpt)"
     }
 }
 
@@ -197,14 +85,6 @@ fn snippet_code_line(
     ])
 }
 
-fn push_fix_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
-    let Some(hint) = detail.remediation_hint.as_deref() else {
-        return;
-    };
-    push_section_header(lines, "FIX");
-    push_wrapped(lines, hint, budget, "  ", theme::primary());
-}
-
 fn push_message_section(
     lines: &mut Vec<Line<'static>>,
     detail: &FindingDetailModel,
@@ -221,53 +101,6 @@ fn push_message_section(
     push_overflow_notice(lines, detail.message_overflow, "message line");
 }
 
-fn push_analysis_section(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    push_section_header(lines, "ANALYSIS");
-    push_wrapped(
-        lines,
-        &format!(
-            "static proof: {} - {}",
-            detail.static_proof_label, detail.static_proof_explanation
-        ),
-        budget,
-        "  ",
-        theme::label(),
-    );
-}
-
-fn push_verification_section(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    push_section_header(lines, "VERIFICATION");
-    push_wrapped(
-        lines,
-        &format!(
-            "runtime verification: {} - {}",
-            detail.runtime_label, detail.runtime_explanation
-        ),
-        budget,
-        "  ",
-        theme::muted(),
-    );
-}
-
-fn push_decision_section(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    push_section_header(lines, "DECISION");
-    push_decision_summary_lines(lines, detail, budget);
-    push_triage_decision_lines(lines, detail, budget);
-    push_review_action_lines(lines, budget);
-}
-
 fn push_review_action_lines(lines: &mut Vec<Line<'static>>, budget: usize) {
     for action in [
         "triage: `decision <confirmed|deferred|needs_review> <reason>`",
@@ -276,59 +109,6 @@ fn push_review_action_lines(lines: &mut Vec<Line<'static>>, budget: usize) {
     ] {
         push_wrapped(lines, action, budget, "  ", theme::muted());
     }
-}
-
-fn push_decision_summary_lines(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    if let Some(current) = detail.decision_history_rows.first() {
-        push_recorded_decision(lines, "current decision", current, budget);
-        push_prior_decisions(lines, detail, budget);
-    } else {
-        push_unrecorded_decision_summary(lines, detail, budget);
-    }
-    push_wrapped(
-        lines,
-        &format!("decision source: {}", detail.decision_source),
-        budget,
-        "  ",
-        theme::muted(),
-    );
-    if let Some(conflict) = detail.decision_conflict.as_deref() {
-        push_wrapped(
-            lines,
-            &format!(
-                "decision conflict: {}",
-                crate::ui_view_models::review_conflicts::review_conflict_detail_label(conflict)
-            ),
-            budget,
-            "  ",
-            theme::warn(),
-        );
-    }
-}
-
-fn push_unrecorded_decision_summary(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    push_wrapped(
-        lines,
-        &format!("current decision: {}", detail.decision),
-        budget,
-        "  ",
-        theme::label(),
-    );
-    push_wrapped(
-        lines,
-        &format!("decision history: {}", detail.decision_history),
-        budget,
-        "  ",
-        theme::muted(),
-    );
 }
 
 fn push_recorded_decision(
@@ -348,78 +128,6 @@ fn push_recorded_decision(
         theme::label(),
     );
     push_wrapped(lines, &row.rationale, budget, "    ", theme::muted());
-}
-
-fn push_prior_decisions(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    for row in detail.decision_history_rows.iter().skip(1) {
-        push_recorded_decision(lines, "prior decision", row, budget);
-    }
-    if detail.decision_history_overflow > 0 {
-        push_wrapped(
-            lines,
-            &format!(
-                "+{} older decision(s) not shown",
-                detail.decision_history_overflow
-            ),
-            budget,
-            "  ",
-            theme::muted(),
-        );
-    }
-}
-
-fn push_triage_decision_lines(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    let Some(triage) = &detail.triage else {
-        return;
-    };
-    let score_context = matches!(triage.author.as_str(), "auto" | "agent" | "model")
-        .then_some(" (author-reported; not proof)")
-        .unwrap_or_default();
-    push_wrapped(
-        lines,
-        &format!(
-            "review decision: {} · decision score {}{} · by {} · source {}",
-            triage.review_decision, triage.confidence, score_context, triage.author, triage.source
-        ),
-        budget,
-        "  ",
-        theme::label(),
-    );
-    push_wrapped(
-        lines,
-        &format!("legacy triage verdict: {}", triage.verdict),
-        budget,
-        "  ",
-        theme::muted(),
-    );
-    push_wrapped(
-        lines,
-        &format!(
-            "{}: {}",
-            triage_rationale_label(&triage.author),
-            triage.rationale
-        ),
-        budget,
-        "  ",
-        theme::muted(),
-    );
-}
-
-fn triage_rationale_label(author: &str) -> &'static str {
-    match author {
-        "auto" => "automated/model-generated review reasoning",
-        "human" => "human review rationale",
-        "imported" => "imported review rationale",
-        _ => "review rationale",
-    }
 }
 
 fn push_evidence_section(
@@ -605,6 +313,9 @@ fn push_provenance_section(
     budget: usize,
 ) {
     push_section_header(lines, "PROVENANCE");
+    push_detail_kv(lines, "rule", &detail.rule, budget);
+    push_detail_kv(lines, "location", &detail.location, budget);
+    push_detail_kv(lines, "producing tool", &detail.tool, budget);
     push_detail_kv(lines, "run", &detail.run_label, budget);
     push_detail_kv(lines, "run status", &detail.run_status, budget);
     push_detail_kv(lines, "run tool", &detail.run_tool, budget);
@@ -749,11 +460,38 @@ mod tests {
         ProofTier, SeverityTone, TriageSummaryModel, WORKBENCH_REPORT_COMMAND,
     };
 
-    fn detail() -> FindingDetailModel {
+    pub(super) fn detail() -> FindingDetailModel {
         let mut detail = detail_claim();
         apply_detail_status(&mut detail);
         apply_detail_body(&mut detail);
         detail
+    }
+
+    #[test]
+    fn observation_gap_precedes_decision_and_keeps_both_run_references() {
+        for width in [36, 56, 76, 92, 116, 156] {
+            let mut finding = detail();
+            finding.observation_gap = Some("Not observed in run later-scan; last observed in run older-scan. Absence does not establish a fix.".to_string());
+            let lines = review_detail_lines(&finding, width);
+            let text = lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.find("OBSERVATION GAP").unwrap() < text.find("DECISION").unwrap());
+            let words = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(words.contains("Absence does not establish a fix."));
+            assert!(words.contains("later-scan") && words.contains("older-scan"));
+            assert!(
+                lines.iter().all(|line| line.width() <= width),
+                "width {width}: {:?}",
+                lines
+                    .iter()
+                    .filter(|line| line.width() > width)
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     fn detail_claim() -> FindingDetailModel {
@@ -837,9 +575,9 @@ mod tests {
     pub(super) fn detail_text_for_width(
         detail: &FindingDetailModel,
         width: usize,
-        report_command: Option<&'static str>,
+        _report_command: Option<&'static str>,
     ) -> String {
-        detail_lines_for_model(detail, width, report_command)
+        review_detail_lines(detail, width)
             .into_iter()
             .map(|line| {
                 line.spans
@@ -871,28 +609,12 @@ mod tests {
     fn detail_lines_disclose_hidden_message_and_evidence_rows() {
         let text = detail_text(None);
 
-        assert!(text.contains("CLAIM"), "{text}");
-        assert!(text.contains("alias: F-0001"), "{text}");
-        assert!(text.contains("STATUS"), "{text}");
-        assert!(text.contains("severity: high"), "{text}");
-        assert!(text.contains("lifecycle status: candidate"), "{text}");
-        assert!(text.contains("evidence state: evidence:1"), "{text}");
-        assert!(text.contains("proof summary: ? unverified"), "{text}");
-        assert!(text.contains("current decision: needs_review"), "{text}");
-        assert!(text.contains("ANALYSIS"), "{text}");
-        assert!(text.contains("static proof: not recorded"), "{text}");
-        assert!(text.contains("VERIFICATION"), "{text}");
-        assert!(
-            text.contains("runtime verification: not verified"),
-            "{text}"
-        );
+        assert!(text.contains("verdict: needs_review"), "{text}");
         assert!(text.contains("DECISION"), "{text}");
         assert!(text.contains("PROVENANCE"), "{text}");
         assert_detail_provenance_lines(&text);
-        assert!(!text.contains("SIGNALS"), "{text}");
-        assert!(!text.contains("TRIAGE"), "{text}");
-        assert!(text.contains("NEXT"), "{text}");
-        assert!(text.contains("validate: `verify F-0001`"), "{text}");
+        assert!(text.contains("REVIEW ACTIONS"), "{text}");
+        assert!(!text.contains("verify F-0001"), "{text}");
         assert!(text.contains("origin: observed capture evidence"), "{text}");
         assert!(
             text.contains("http capture: request body recorded"),
@@ -939,14 +661,10 @@ mod tests {
         assert_sections_in_order(
             &text,
             &[
-                "STATUS",
                 "DECISION",
-                "NEXT",
                 "SOURCE",
                 "EVIDENCE",
-                "VERIFICATION",
-                "ANALYSIS",
-                "CLAIM",
+                "REVIEW ACTIONS",
                 "SCANNER MESSAGE",
                 "PROVENANCE",
             ],
@@ -973,7 +691,7 @@ mod tests {
         assert!(text.contains("guard · src/users.ts:91"), "{text}");
         assert!(text.contains("falsifying evidence · authz gate"), "{text}");
         assert!(text.contains("… 2 more dataflow rows"), "{text}");
-        assert_sections_in_order(&text, &["EVIDENCE", "AUDITED DATAFLOW", "VERIFICATION"]);
+        assert_sections_in_order(&text, &["EVIDENCE", "AUDITED DATAFLOW", "REVIEW ACTIONS"]);
     }
 
     #[test]
@@ -1047,24 +765,11 @@ mod tests {
         detail.decision_history = "latest loaded decision from selected finding".to_string();
         let text = detail_text_for_width(&detail, 120, None);
 
-        assert!(
-            text.contains(
-                "review decision: confirmed · decision score 0.91 · by human · source selected finding"
-            ),
-            "{text}"
-        );
-        assert!(text.contains("proof band:"), "{text}");
-        assert!(!text.contains("confidence:"), "{text}");
-        assert!(text.contains("current decision: confirmed"), "{text}");
-        assert!(
-            text.contains("decision history: latest loaded decision from selected finding"),
-            "{text}"
-        );
-        assert!(
-            text.contains("legacy triage verdict: true_positive"),
-            "{text}"
-        );
-        assert!(text.contains("human review rationale: source and sink are linked"));
+        assert!(text.contains("verdict: confirmed"), "{text}");
+        assert!(text.contains("author: human"), "{text}");
+        assert!(text.contains("source and sink are linked"), "{text}");
+        assert!(!text.contains("decision score"), "{text}");
+        assert!(!text.contains("legacy triage"), "{text}");
     }
 
     #[test]
@@ -1080,28 +785,24 @@ mod tests {
         });
         let text = detail_text_for_width(&detail, 120, None);
 
+        assert!(text.contains("author: auto"), "{text}");
         assert!(
-            text.contains(
-                "automated/model-generated review reasoning: model inferred source and sink are linked"
-            ),
+            text.contains("model inferred source and sink are linked"),
             "{text}"
         );
-        assert!(
-            text.contains("decision score 0.72 (author-reported; not proof)"),
-            "{text}"
-        );
+        assert!(text.contains("author-reported confidence: 0.72"), "{text}");
     }
 
     #[test]
     fn detail_actions_include_report_command_when_available() {
         let text = detail_text(Some(WORKBENCH_REPORT_COMMAND));
 
-        assert!(text.contains("report: `report`"), "{text}");
-        assert!(text.contains("validate: `verify F-0001`"), "{text}");
-        assert!(text.contains("report:"), "{text}");
-        assert!(!text.contains("o open in editor"), "{text}");
-        assert!(!text.contains("proof state:"), "{text}");
-        assert!(!text.contains("actions:"), "{text}");
+        assert!(
+            text.contains("report · export findings and decisions"),
+            "{text}"
+        );
+        assert!(!text.contains("verify F-0001"), "{text}");
+        assert!(!text.contains("before patching"), "{text}");
     }
 
     fn assert_sections_in_order(text: &str, sections: &[&str]) {

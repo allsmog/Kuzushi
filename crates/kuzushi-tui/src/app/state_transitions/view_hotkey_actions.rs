@@ -127,18 +127,17 @@ impl ShellApp {
                 self.open_workbench_focused_viz()
             }
             ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
-            ViewHotkeyAction::WorkbenchPageNext => {
-                let current = crate::ui_view_models::active_workbench_page(self);
-                self.set_workbench_page(current.next())
-            }
-            ViewHotkeyAction::WorkbenchPagePrev => {
-                let current = crate::ui_view_models::active_workbench_page(self);
-                self.set_workbench_page(current.prev())
-            }
+            ViewHotkeyAction::WorkbenchPageNext => self.cycle_investigation_surface(false),
+            ViewHotkeyAction::WorkbenchPagePrev => self.cycle_investigation_surface(true),
+            ViewHotkeyAction::WorkbenchReport => self.open_report_from_current_origin(),
+            ViewHotkeyAction::WorkbenchPlanStudy => self.open_batch_scan_config(None),
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
             ViewHotkeyAction::WorkbenchReviewSearch => self.open_review_search(),
+            ViewHotkeyAction::WorkbenchCompareObservations => {
+                self.open_review_observation_comparison()
+            }
             ViewHotkeyAction::WorkbenchBacklogSeverityCycle => self.cycle_backlog_severity_filter(),
             ViewHotkeyAction::WorkbenchBacklogToolCycle => self.cycle_backlog_tool_filter(),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
@@ -190,8 +189,15 @@ impl ShellApp {
     }
 
     pub(super) fn cycle_workbench_page_mode(&mut self) {
+        self.cycle_investigation_surface(false);
+    }
+
+    fn cycle_investigation_surface(&mut self, previous: bool) {
         let current = crate::ui_view_models::active_workbench_page(self);
-        self.set_workbench_page(current.next());
+        match current.investigation_neighbor(previous) {
+            Some(page) => self.set_workbench_page(page),
+            None => self.open_report_from_current_origin(),
+        }
     }
 
     fn cycle_workbench_pane(&mut self, reverse: bool) {
@@ -368,7 +374,7 @@ impl ShellApp {
         if crate::ui_view_models::visible_finding_at_cursor(self).is_none() {
             return self.open_workbench_finding_or_log();
         }
-        self.open_finding_at_cursor_on_page(WorkbenchPage::Prove)
+        self.open_finding_at_cursor_on_page(WorkbenchPage::Review)
     }
 
     /// Enter on an artifact action opens the Map planner with the relevant
@@ -1278,6 +1284,12 @@ impl ShellApp {
                 self.open_logs_filter();
                 InputUpdate::handled()
             }
+            ViewHotkeyAction::RunDiffToggleSources => {
+                let current = self.router.default_scroll().offset();
+                let restored = self.router.run_diff_mut().toggle_sources(current);
+                self.router.default_scroll_mut().set(restored);
+                InputUpdate::handled()
+            }
             ViewHotkeyAction::PauseScan => self.reduce_hotkey_command(ShellCommand::Pause),
             ViewHotkeyAction::ResumeScan => self.reduce_hotkey_command(ShellCommand::Resume(None)),
             ViewHotkeyAction::OpenNextPhase => self.reduce_hotkey_command(ShellCommand::Next),
@@ -1537,7 +1549,7 @@ mod review_to_prove_identity_tests {
     }
 
     #[test]
-    fn review_open_captures_identity_before_switching_to_prove() {
+    fn review_open_preserves_identity_and_stays_in_review() {
         let target = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         crate::test_support::record_indexed_run(
@@ -1563,7 +1575,7 @@ mod review_to_prove_identity_tests {
 
         app.open_review_queue_finding();
 
-        assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Prove));
+        assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
         assert_eq!(
             app.selected_finding()
                 .as_ref()

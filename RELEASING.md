@@ -5,6 +5,40 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- Finding presence and human review are now separate facts. Existing
+  `finding-disappeared` events remain intact, but no longer derive `fixed` or
+  `removed`. A confirmed finding stays confirmed; an unreviewed finding stays
+  open. Legacy serialized states and filter names remain accepted. Use
+  `state:not_observed` to find recorded gaps from eligible completed scanner
+  comparisons; a nondeterministic miss never establishes a fix.
+  `Finding` adds optional `observationGap` with event sequence/hash and the
+  last-seen/compared run IDs. Missing historical run IDs stay unknown. Ledger
+  reads overwrite producer-supplied gap claims; suppression changes do not
+  erase a gap, and a new observation clears it. Existing events need no rewrite.
+  Workspace exports add `observationGap` and `observationNote`; list-tool JSON
+  uses `observation_gap` and `observation_note`. SARIF carries corresponding
+  `kuzushiObservation*` properties. CSV appends five observation columns after
+  existing columns. Rust struct-literal callers should initialize the optional
+  fields or use `Default`. This does not introduce revision-specific fix
+  adjudication; existing human decisions still lack a SHA/content binding.
+  `FindingListReport` also carries an in-memory `review_decisions` map keyed by
+  fingerprint; Rust callers constructing it directly should initialize an empty
+  map. List output uses these persisted decisions independently of the original
+  scanner triage, and adds `review_decision_author` to JSON. A recorded gap no
+  longer removes a finding from the relevant corpus. Operator identity-policy
+  projections hydrate the same ledger annotations as headless reads.
+
+- Shared tool-run startup preserves an explicit threat-model reference or
+  omission in `run.json`. The existing `threatModelResolvedVia` string gains
+  `explicit-input` and `explicit-omission`; terminal writes retain that starting
+  provenance. Historical summaries are not rewritten: older summaries may name
+  the active model even when `scan-input.json` records another selection.
+  `sast:scan` now writes `findings.json` as a discovery observation array before
+  post-processing and declares it in `data.artifacts.findings`. Its result gains
+  the existing `snapshotHash` and `treeHash` source fields; source drift makes
+  the result partial while preserving observations and consumption. These are
+  additive artifacts and fields, not a change to finding identity or verdicts.
+
 - Supported discovery and triage descriptors accept `threatModelRef` (alias
   `threat_model_ref`). An explicit reference selects and authenticates that
   immutable object without changing or locking the global active model;
@@ -21,6 +55,11 @@ part of every release commit.
   context is unknown, distinct from an explicit omission. These fields augment
   full Git SHA and indexed content identities. Neither changed context nor an
   absent observation establishes that a finding was fixed on either revision.
+  The shell comparison opens on findings and their limitations. `Tab` switches
+  to full source/context references when the composer is empty; typing retains
+  composer completion. Each tab retains its reading position. Plain output
+  includes both projections. Finding categories no longer stop after ten rows,
+  and unchanged observations are available under `SEEN AGAIN`.
 
 - Spend databases add a durable ledger identity and investigation allowance
   revision/reservation tables. Existing dollar rows and operation caps retain
@@ -44,10 +83,9 @@ part of every release commit.
   `campaign:allowance` reads them without creating a spend ledger. Approval is a
   Map preparation action with `phaseResult=false`, not an accepted Map or Scan.
   The shell confirmation shows the model, revision, total calls and protected
-  review allocation. Its current card requires 80×24 before approval; smaller
-  terminals preserve the pending request and support cancellation. A dedicated
-  narrow-terminal allowance editor remains in progress. No jobs start when an
-  allowance is approved.
+  review allocation. The paged card supports the full viewport matrix,
+  including 40×12; approval is available only on the last page. No jobs start
+  when an allowance is approved.
 
 - `campaign:study` compiles the existing scan-batch format without starting
   children, with three passes and one worker by default. Its additive
@@ -63,10 +101,52 @@ part of every release commit.
   counts quota failures against approved attempt limits. Shared dispatch
   verifies the job and atomically claims it before executor entry. These plan
   approvals currently support discovery scan batches; immutable context
-  isolation and review/learning job planning remain in progress. The shell
-  requires 120×36 for the combined work/allowance receipt and preserves the
-  pending request on smaller screens. Older campaign plans retain their
-  existing launch contract.
+  isolation and review/learning job planning remain in progress. The combined
+  work/allowance receipt uses the same paged approval surface. Older campaign
+  plans retain their existing launch contract.
+
+- The shell `scan batch` action now prepares `campaign:study` through shared
+  dispatch, followed by explicit allowance review and a separate job launch.
+  It no longer compiles and immediately starts a legacy batch. `b` on Scan
+  opens the form; `a` in Campaign reopens a saved study and its allowance.
+  `campaign:study` adds optional `investigationId`, persisted in the plan;
+  approval must retain that identity. This keeps spending attached to an
+  investigation when a draft replaces previously approved work. Result JSON
+  adds frozen `scanInput`, requested workers and any worker limitation. Existing
+  plan/result fields and headless legacy batch execution remain compatible.
+  Unsupported scanner names are rejected before publishing a study draft.
+
+- `campaign:context-study` adds a finite, source-only context generation plan.
+  It requires `investigationId` and `contextInput`, and accepts an optional new
+  `campaignId` and `preparationJobs`. Up to one deterministic `context:build`
+  and one `entry-points:extract` job may precede generation, in the reviewed
+  order. The existing campaign `plan.json` gains the additive
+  `kind: "context-study"` form with one frozen `threat-model:build` job. Version-1
+  allowance work plans now also accept these tools and attribute their calls to
+  Context, without access to protected review calls. Context studies allow one
+  attempt; regeneration requires a separate plan approval. Current context is
+  retained until the operator inspects and selects the generated revision.
+  Setup also opens this flow for a Map plan containing threat-model generation
+  and its supported preparation. Other model-backed combinations are refused
+  with an explanation; existing selections are preserved. The CLI enforces
+  one worker for context studies as well as their frozen attempt limits.
+  The TUI opens this flow with `g` in the study context picker and recovers it
+  through `campaign <id>` then `a`; exact options are available with Tab.
+  Existing scan-batch and direct threat-model tool contracts remain compatible.
+
+- `threat-model:read` adds the shared `threatModelRef` option (and
+  `threat_model_ref` alias). An exact reference authenticates and returns the
+  unchanged scanner document; `null` reads explicit omission. This mode rejects
+  scope, output-directory and methodology overlays. Existing reads without the
+  option keep their previous behavior. The study form's Source and context row
+  now opens a revision browser; inspect a revision before accepting it for that
+  study. Selection does not activate the workspace threat model and changing
+  context requires a newly compiled and approved plan with the same accounting.
+  After inspection, `v` opens that exact revision's DFD. Arrows choose elements,
+  Enter reads their full details and linked evidence, and Escape restores context
+  review. This is read-only; generation and study acceptance remain separate.
+  The shared DFD renderer now preserves short vertical arrows and reverse flow
+  direction. Existing artifact formats remain unchanged.
 
 - Source indexing now evaluates ignored directory names relative to the selected
   workspace. Repositories beneath an ancestor named `target`, `dist`,
@@ -882,3 +962,21 @@ partial receipts, missing finding snapshots, and out-of-scope paths cannot prove
 absence. Nondeterministic absence never changes a finding's verdict or establishes
 a fix. Existing deterministic reconciliation remains a separate compatibility
 classification; this change does not add a human-confirmed fix workflow.
+
+### Guided investigation navigation
+
+The default shell journey now stops at Review and offers Report once all ledger
+findings have decisions. Normal phase navigation presents Map, Scan, Review,
+and the separate Report surface; Report is reachable with Navigate `r` or
+`Shift+Tab` from Review. `Esc` restores the exact origin, including a focused
+finding's zoom, scroll, and composer draft. `workbench.report` supports keymap
+overrides. The Review planner's right arrow uses the same Report entry.
+
+The persisted `WorkflowPhase` enum and its legacy aliases/order are unchanged.
+The added `INVESTIGATION_ORDER` defines only supported guided progression.
+Historical Prove/Fix attempts remain stored and available through explicit
+compatibility views but no longer redirect the default journey. `BuildReport`
+is retained for saved-plan decoding and removed from offered phase tasks because
+its executor declares the separate Report surface. Module/manifest and artifact
+schemas are unchanged. Review queue guidance no longer suggests patch work from
+a finding's proof level.

@@ -59,12 +59,17 @@ impl ApprovedWorkPlanV1 {
 }
 
 impl ApprovedWorkItem {
+    pub(super) fn work_category(&self) -> Result<super::InvestigationWork> {
+        match self.tool.as_str() {
+            "sast:scan" => Ok(super::InvestigationWork::Discovery),
+            "threat-model:build" | "context:build" | "entry-points:extract" => Ok(super::InvestigationWork::Context),
+            _ => anyhow::bail!("approved campaign work supports discovery scans and context generation only"),
+        }
+    }
+
     fn validate(&self) -> Result<()> {
         validate_identifier(&self.work_id)?;
-        anyhow::ensure!(
-            self.tool == "sast:scan",
-            "approved campaign work currently supports discovery scan batches only"
-        );
+        self.work_category()?;
         validate_digest(&self.input_sha256)?;
         anyhow::ensure!(
             (1..=10).contains(&self.max_attempts),

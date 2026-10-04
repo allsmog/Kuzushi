@@ -20,9 +20,12 @@ pub struct WorkspaceFindingExportRecord {
     pub priority: String,
     pub lifecycle_status: String,
     pub review_decision: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation_gap: Option<crate::findings::FindingObservationGap>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation_note: Option<String>,
     /// Operator-facing triage-lifecycle state derived from the latest human
-    /// decision. Re-scan-derived `fixed`/`removed` are surfaced by the
-    /// store-backed `findings --state` query, not by this projection.
+    /// decision. Observation presence is separate and never establishes a fix.
     pub triage_state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dismissal: Option<WorkspaceDismissalExportSummary>,

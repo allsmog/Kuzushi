@@ -106,7 +106,7 @@ fn reference_header_matches_hydrated_journey_reality() {
     assert_eq!(journey.current, kuzushi_core::WorkflowPhase::Review);
     assert!(journey
         .next_action
-        .contains("record terminal dispositions for 6 of 6 ledger candidates"));
+        .contains("review 6 remaining findings (6 total)"));
     assert_eq!(cockpit.header.next_action, journey.next_action);
     assert_eq!(cockpit.header.phase_rail, journey.phases);
 }

@@ -3669,6 +3669,7 @@ mod tests {
             Finding::new_semgrep("demo.a", "src/a.ts", 1, Some(1), Severity::High, "a");
         high_early.fingerprint = "aaaa1111".to_string();
         let report = FindingListReport {
+            review_decisions: Default::default(),
             count: 2,
             findings: vec![high_late, high_early],
             aliases: vec![],
@@ -3718,6 +3719,7 @@ mod tests {
             response_blob: Some("RAW RESPONSE BODY".to_string()),
         });
         let report = FindingListReport {
+            review_decisions: Default::default(),
             count: 1,
             findings: vec![finding],
             aliases: vec![],
@@ -4600,7 +4602,7 @@ mod tests {
     }
 
     #[test]
-    fn rescan_marks_vanished_finding_removed_when_tool_reran() {
+    fn rescan_marks_vanished_finding_not_observed_when_tool_reran() {
         let store = FindingStore::open_in_memory().unwrap();
         store
             .record_run_started("run-a", Path::new("/tmp/repo"), "running")
@@ -4618,12 +4620,18 @@ mod tests {
             .unwrap();
         store.record_run_finished("run-b", "completed", 1).unwrap();
 
-        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
         assert_eq!(state_filter_count(&store, "state:fixed"), 0);
+        let stored = store.get_finding_by_fingerprint(&vanished.fingerprint).unwrap().unwrap();
+        let gap = stored.observation_gap.unwrap();
+        assert_eq!(gap.last_seen_run_id.as_deref(), Some("run-a"));
+        assert_eq!(gap.compared_run_id.as_deref(), Some("run-b"));
+        assert!(gap.event_seq > 0);
+        assert!(!gap.event_hash.is_empty());
     }
 
     #[test]
-    fn rescan_marks_confirmed_finding_fixed() {
+    fn rescan_preserves_confirmed_finding_without_inventing_a_fix() {
         let store = FindingStore::open_in_memory().unwrap();
         store
             .record_run_started("run-a", Path::new("/tmp/repo"), "running")
@@ -4653,8 +4661,58 @@ mod tests {
             .unwrap();
         store.record_run_finished("run-b", "completed", 1).unwrap();
 
-        assert_eq!(state_filter_count(&store, "state:fixed"), 1);
+        assert_eq!(state_filter_count(&store, "state:fixed"), 0);
+        assert_eq!(state_filter_count(&store, "state:confirmed"), 1);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
         assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert!(store.finding_is_relevant(&real).unwrap());
+        let filter = FindingListFilter::from_filter_expression("state:not_observed").unwrap();
+        let report = store.list_findings_filtered(&filter).unwrap();
+        let data = report.aliased_rows_json();
+        assert_eq!(data["findings"][0]["review_decision"], "confirmed");
+        assert_eq!(data["findings"][0]["review_decision_author"], "human");
+        assert_eq!(data["findings"][0]["observation_gap"]["comparedRunId"], "run-b");
+        assert!(report.output().contains(" tp "));
+        for policy in [IdentityFoldPolicy::Safe, IdentityFoldPolicy::Legacy, IdentityFoldPolicy::Aggressive] {
+            let operator_report = store.list_findings_filtered_with_identity_policy(&filter, policy).unwrap();
+            assert_eq!(operator_report.count, 1, "{policy:?}");
+            assert!(operator_report.findings[0].observation_gap.is_some());
+        }
+    }
+
+    #[test]
+    fn observation_gap_survives_restart_and_suppression_changes() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let bug = semgrep_finding("demo.gap", 10, "not seen in the later scan");
+        let store = workspace_store(&root);
+        completed_run(&store, "run-a", std::slice::from_ref(&bug));
+        write_scan_scope_receipt(&root, "run-b", &[]);
+        completed_run(&store, "run-b", &[semgrep_finding("demo.other", 20, "present")]);
+        let before = store.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap;
+        assert!(before.is_some());
+        for event_kind in [crate::event_log::EventKind::SuppressionAdded, crate::event_log::EventKind::SuppressionRemoved] {
+            store.append_finding_suppression_event(&bug.fingerprint, SuppressionLifecycleEvent {
+                event_kind, reason: None, rule_id: Some("fixture".to_string()),
+                statement: None, origin: None, expires_at_unix: None, actor: "test".to_string(),
+            }).unwrap();
+            assert_eq!(store.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap, before);
+        }
+        drop(store);
+        let resumed = workspace_store(&root);
+        assert_eq!(resumed.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap, before);
+    }
+
+    #[test]
+    fn observation_gap_from_a_producer_cannot_override_the_ledger() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let mut bug = semgrep_finding("demo.forged-gap", 10, "present");
+        bug.observation_gap = Some(FindingObservationGap {
+            event_seq: 999, event_hash: "producer-claim".to_string(),
+            last_seen_run_id: Some("old".to_string()), compared_run_id: Some("new".to_string()),
+        });
+        completed_run(&store, "run-a", std::slice::from_ref(&bug));
+        assert!(store.get_finding_by_fingerprint(&bug.fingerprint).unwrap().unwrap().observation_gap.is_none());
     }
 
     #[test]
@@ -4687,7 +4745,7 @@ mod tests {
         store.insert_finding("run-b", &codeql).unwrap();
         store.record_run_finished("run-b", "completed", 1).unwrap();
 
-        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 0);
         assert_eq!(state_filter_count(&store, "state:open"), 2);
     }
 
@@ -4710,7 +4768,7 @@ mod tests {
             .unwrap();
         store.record_run_finished("run-b", "failed", 1).unwrap();
 
-        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 0);
     }
 
     #[test]
@@ -4780,7 +4838,7 @@ mod tests {
 
         assert_eq!(state_filter_count(&store, "state:dismissed"), 1);
         assert_eq!(state_filter_count(&store, "state:fixed"), 0);
-        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 0);
     }
 
     #[test]
@@ -4835,7 +4893,7 @@ mod tests {
         store.record_run_finished("run-b", "completed", 1).unwrap();
 
         assert_eq!(
-            state_filter_count(&store, "state:removed"),
+            state_filter_count(&store, "state:not_observed"),
             0,
             "a subdir-scoped re-run must not stale out-of-scope findings"
         );
@@ -4896,9 +4954,9 @@ mod tests {
     }
 
     #[test]
-    fn auto_retriage_after_human_confirm_still_yields_fixed() {
+    fn auto_retriage_and_absence_preserve_human_confirmation() {
         // A human Confirmed followed by a later automated re-triage must not be
-        // masked: on same-scope disappearance the finding is Fixed, not Removed.
+        // masked: disappearance does not erase the confirmation or establish a fix.
         let store = FindingStore::open_in_memory().unwrap();
         store
             .record_run_started("run-a", Path::new("/tmp/repo"), "running")
@@ -4933,9 +4991,10 @@ mod tests {
 
         assert_eq!(
             state_filter_count(&store, "state:fixed"),
-            1,
+            0,
             "human Confirm must survive a later automated re-triage"
         );
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
         assert_eq!(state_filter_count(&store, "state:removed"), 0);
     }
 
@@ -4976,7 +5035,7 @@ mod tests {
             "run-b",
             &[semgrep_finding("demo.other", 20, "still here")],
         );
-        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
 
         // run-c observes the bug again → the reopen must be durable, not a
         // silent status flip.
@@ -4988,7 +5047,7 @@ mod tests {
 
         let reopened = store.reopened_stable_fps_for_run("run-c").unwrap();
         assert_eq!(reopened.len(), 1, "one durable FindingReopened event");
-        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 0);
         assert_eq!(state_filter_count(&store, "state:open"), 2);
     }
 
@@ -5283,14 +5342,14 @@ mod tests {
         store.record_run_finished("run-b", "completed", 1).unwrap();
 
         assert_eq!(
-            state_filter_count(&store, "state:removed"),
+            state_filter_count(&store, "state:not_observed"),
             1,
-            "only the lib/ finding may be retired"
+            "only the lib/ finding has an observation gap"
         );
         assert_eq!(
             state_filter_count(&store, "state:open"),
-            2,
-            "src/ finding stays open: the rescan never re-examined src/"
+            3,
+            "absence never closes an unreviewed finding; src/ was not re-examined"
         );
 
         let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
@@ -5397,7 +5456,7 @@ mod tests {
         store.record_run_finished("run-b", "completed", 1).unwrap();
 
         assert_eq!(
-            state_filter_count(&store, "state:removed"),
+            state_filter_count(&store, "state:not_observed"),
             0,
             "a re-run with no surviving artifacts proves no absence"
         );
@@ -5442,14 +5501,14 @@ mod tests {
     }
 
     #[test]
-    fn a_clean_engine_rerun_recorded_in_the_scan_receipt_retires_vanished_findings() {
+    fn a_clean_engine_rerun_records_absence_without_closing_the_finding() {
         let workspace = tempfile::tempdir().unwrap();
         let root = canonical_root(&workspace);
         let store = workspace_store(&root);
         clean_semgrep_rerun(&root, &store, ScanEngineStageOutcome::Complete);
 
-        assert_eq!(state_filter_count(&store, "state:removed"), 1);
-        assert_eq!(state_filter_count(&store, "state:open"), 0);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
+        assert_eq!(state_filter_count(&store, "state:open"), 1);
     }
 
     #[test]
@@ -5511,7 +5570,7 @@ mod tests {
         let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
         let (class, reason) = comparison_class_of(&comparison, "merged tool finding");
         assert_eq!(class, ScanComparisonClass::Resolved, "{reason:?}");
-        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+        assert_eq!(state_filter_count(&store, "state:not_observed"), 1);
 
         let partial = tempfile::tempdir().unwrap();
         let root = canonical_root(&partial);

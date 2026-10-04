@@ -11,8 +11,9 @@ pub(super) fn confirmation(input: &serde_json::Value) -> PendingConfirm {
         tool: "campaign:approve-allowance".into(),
         target: format!("{id} · revision {current} → {}", current + 1),
         rationale: Some(format!(
-            "Model: {model}\nTotal provider calls: {} · protected review: {}\nIncludes internal turns and retries. Existing commitments remain.\nDollar ceiling: not enforced; charges may be unavailable.\n{}",
+            "Model: {model}\nTotal provider calls: {}\nProtected review calls: {}\nIncludes internal turns and retries. Existing commitments remain.\nDollar ceiling: not enforced; charges may be unavailable.\nReason: {}\n\n{}",
             input["maxProviderCalls"], input["protectedReviewCalls"],
+            input["reason"].as_str().unwrap_or("not provided"),
             work_terms(input),
         )),
         actor: None, allowlist: None, remembered: false,
@@ -27,40 +28,22 @@ fn work_terms(input: &serde_json::Value) -> String {
         input["campaignJobs"], input["maxJobAttempts"], input["campaignPlanSha256"].as_str().unwrap_or("missing"))
 }
 
-/// The generic confirmation card cannot expose these terms on smaller screens.
-/// Keep cancellation available until the dedicated paged allowance editor lands.
+/// Approval is available at the end of the same document the operator sees.
+/// The viewport never hides terms behind an enabled generic confirmation.
 pub(crate) fn approval_visible(app: &ShellApp) -> bool {
-    let Some(confirm) = app.advisory().pending_confirm.as_ref() else {
-        return true;
-    };
-    let Some((columns, rows)) = minimum_viewport(confirm.kind) else {
-        return true;
-    };
     let viewport = app.viewport();
-    viewport.columns >= columns && viewport.rows >= rows
-}
-
-pub(crate) fn minimum_viewport(kind: ConfirmKind) -> Option<(u16, u16)> {
-    match kind {
-        ConfirmKind::InvestigationWork => Some((120, 36)),
-        ConfirmKind::InvestigationAllowance => Some((80, 24)),
-        _ => None,
-    }
-}
-
-pub(crate) fn resize_hint(viewport: Option<(u16, u16)>) -> String {
-    let (columns, rows) = viewport.unwrap_or((80, 24));
-    format!("resize to {columns}×{rows} · Esc cancel")
+    crate::ui_view_models::allowance_review_model(app, viewport.columns, viewport.rows)
+        .is_none_or(|review| review.allows_approval())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::{modules::ModuleRegistry, V2Config};
+    use kuzushi_core::modules::ModuleRegistry;
     use serde_json::json;
 
     #[test]
-    fn finite_work_confirmation_requires_room_for_the_entire_plan_receipt() {
+    fn finite_work_confirmation_names_exact_plan_terms() {
         let input = json!({"investigationId":"study","expectedRevision":0,"model":"openai-codex:gpt-5.5",
             "maxProviderCalls":9,"protectedReviewCalls":3,"campaignId":"finite","campaignJobs":3,
             "maxJobAttempts":1,"campaignPlanSha256":format!("sha256:{}", "a".repeat(64))});
@@ -70,17 +53,6 @@ mod tests {
         let text = confirm.rationale.as_deref().unwrap();
         assert!(text.contains("3 fixed jobs · 1 attempt(s) each"));
         assert!(text.contains(&"a".repeat(64)));
-        for (columns, rows) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
-            let mut app = ShellApp::new(V2Config::default(), None);
-            app.set_viewport(TerminalViewport { columns, rows });
-            app.advisory_mut().pending_confirm = Some(confirm.clone());
-            let visible = columns >= 120 && rows >= 36;
-            assert_eq!(approval_visible(&app), visible);
-            assert_eq!(app.resolve_confirm(true, false).is_some(), visible);
-            if !visible {
-                assert!(app.resolve_confirm(false, false).is_some());
-            }
-        }
     }
 
     #[test]
@@ -95,26 +67,12 @@ mod tests {
         for text in [
             "openai-codex:gpt-5.5",
             "Total provider calls: 9",
-            "protected review: 3",
+            "Protected review calls: 3",
             "not enforced",
             "starts no jobs",
         ] {
             assert!(rationale.contains(text));
         }
         assert!(!confirm.kind.allows_remembered_yes());
-        for (columns, rows) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
-            let mut app = ShellApp::new(V2Config::default(), None);
-            app.set_viewport(TerminalViewport { columns, rows });
-            app.advisory_mut().pending_confirm = Some(confirm.clone());
-            let visible = columns >= 80 && rows >= 24;
-            assert_eq!(approval_visible(&app), visible);
-            assert_eq!(app.resolve_confirm(true, false).is_some(), visible);
-            if !visible {
-                assert!(app.advisory().pending_confirm.is_some());
-                let card = crate::ui_view_models::confirm_card_model(&app).unwrap();
-                assert!(!card.allows_decision);
-                assert!(app.resolve_confirm(false, false).is_some());
-            }
-        }
     }
 }

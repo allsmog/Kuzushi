@@ -33,8 +33,8 @@ pub(super) const CONTRACTS: [PhaseCompositionContract; 5] = [
         page: WorkbenchPage::Review,
         phase: kuzushi_core::WorkflowPhase::Review,
         slug: "review",
-        complete_command: "patch F-0001",
-        compact_command: "patch F-0001",
+        complete_command: "report",
+        compact_command: "report",
     },
     PhaseCompositionContract {
         page: WorkbenchPage::Prove,

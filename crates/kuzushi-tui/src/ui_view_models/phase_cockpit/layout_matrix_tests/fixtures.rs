@@ -135,6 +135,7 @@ fn outcome_label(state: SemanticFixture) -> &'static str {
 fn review_fixture(state: SemanticFixture) -> ReviewPhaseModel {
     let richness = state.richness();
     ReviewPhaseModel {
+        comparison_control: None,
         review: fixture_review_queue(richness > 0),
         finding: (richness >= 1).then(fixture_finding),
         selection_disclosure: None,

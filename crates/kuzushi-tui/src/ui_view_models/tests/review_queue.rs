@@ -987,3 +987,12 @@ fn workflow_groups_map_every_review_decision_without_merging_opposites() {
         ReviewWorkflowGroup::NeedsReview
     );
 }
+
+#[test]
+fn review_guidance_does_not_turn_proof_into_a_patch_recommendation() {
+    let mut observed = finding("source-evidence", Severity::High, 1);
+    observed.verification = Some(crate::test_support::test_empirical_verification(4));
+    assert_eq!(review_next_action_label(&observed, None), "review");
+    let decided = human_confirmed(observed, 0.9);
+    assert_eq!(review_next_action_label(&decided, None), "review complete");
+}

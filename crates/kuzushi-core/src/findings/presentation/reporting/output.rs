@@ -15,6 +15,9 @@ pub struct FindingListReport {
     /// resolves. Empty means the constructor had no whole-ledger view and
     /// display falls back to subset-positional aliases.
     pub aliases: Vec<String>,
+    /// Current decisions keyed by fingerprint, separate from scanner-authored triage.
+    #[serde(skip)]
+    pub review_decisions: std::collections::BTreeMap<String, ReviewDecision>,
 }
 
 impl FindingListReport {
@@ -38,6 +41,16 @@ impl FindingListReport {
     /// the one serialization the CLI `--json` flag and the tool data share.
     pub fn aliased_rows_json(&self) -> Value {
         json!(FindingListToolData::from_report(self))
+    }
+
+    fn review_decision(&self, finding: &Finding) -> Option<&ReviewDecision> {
+        self.review_decisions.get(&finding.fingerprint)
+    }
+
+    fn verdict(&self, finding: &Finding) -> FindingVerdictFilter {
+        self.review_decision(finding)
+            .map(|decision| FindingVerdictFilter::from_review_decision(decision.verdict))
+            .unwrap_or_else(|| FindingVerdictFilter::from_finding(finding))
     }
 
     fn aliased_rows(&self) -> Vec<(String, Finding)> {
@@ -83,7 +96,7 @@ impl FindingListToolData {
             findings: report
                 .aliased_rows()
                 .iter()
-                .map(|(alias, finding)| FindingListToolFinding::from_finding(alias, finding))
+                .map(|(alias, finding)| FindingListToolFinding::from_finding(alias, finding, report.review_decision(finding)))
                 .collect(),
         }
     }
@@ -104,6 +117,11 @@ struct FindingListToolFinding {
     static_proof_state: Option<String>,
     proof_confidence: String,
     review_decision: Option<String>,
+    review_decision_author: Option<TriageAuthor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observation_gap: Option<crate::findings::FindingObservationGap>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    observation_note: Option<String>,
     triaged_by: Option<TriageAuthor>,
     source_signature: Option<String>,
     corroboration_count: u32,
@@ -114,7 +132,7 @@ struct FindingListToolFinding {
 }
 
 impl FindingListToolFinding {
-    fn from_finding(alias: &str, finding: &Finding) -> Self {
+    fn from_finding(alias: &str, finding: &Finding, review: Option<&ReviewDecision>) -> Self {
         Self {
             alias: alias.to_string(),
             fingerprint: finding.fingerprint.clone(),
@@ -130,7 +148,11 @@ impl FindingListToolFinding {
                 .static_proof_state
                 .map(|state| state.as_str().to_string()),
             proof_confidence: ProofConfidence::classify(finding).as_str().to_string(),
-            review_decision: review_decision_label(finding),
+            review_decision: review.map(|decision| decision.verdict.as_str().to_string())
+                .or_else(|| review_decision_label(finding)),
+            review_decision_author: review.map(|decision| decision.author).or(finding.triaged_by),
+            observation_gap: finding.observation_gap.clone(),
+            observation_note: crate::findings::observation_gap_note(finding),
             triaged_by: finding.triaged_by,
             source_signature: finding.source_signature.clone(),
             corroboration_count: finding.corroboration_count,
@@ -206,26 +228,29 @@ struct FindingTableWidths {
 
 fn finding_list_output_lines(report: &FindingListReport) -> Vec<String> {
     let aliased = report.aliased_rows();
-    let widths = finding_table_widths(&aliased, &report.findings);
+    let widths = finding_table_widths(&aliased, report);
     let mut lines = finding_table_header(widths);
     lines.extend(
         aliased
             .iter()
-            .map(|(alias, finding)| finding_table_row(alias, finding, widths)),
+            .map(|(alias, finding)| finding_table_row(alias, finding, report.verdict(finding), widths)),
     );
     lines.push(String::new());
     lines.push(matching_line(report));
+    lines.extend(aliased.iter().filter_map(|(alias, finding)| {
+        crate::findings::observation_gap_note(finding).map(|note| format!("{alias}: {note}"))
+    }));
     lines
 }
 
-fn finding_table_widths(aliased: &[(String, Finding)], findings: &[Finding]) -> FindingTableWidths {
+fn finding_table_widths(aliased: &[(String, Finding)], report: &FindingListReport) -> FindingTableWidths {
     FindingTableWidths {
         alias: max_alias_width(aliased),
         fingerprint: max_fingerprint_width(aliased),
-        severity: max_severity_width(findings),
+        severity: max_severity_width(&report.findings),
         confidence: "unverified".len(),
-        verdict: max_verdict_width(findings),
-        name: max_name_width(findings),
+        verdict: max_verdict_width(report),
+        name: max_name_width(&report.findings),
     }
 }
 
@@ -256,17 +281,9 @@ fn max_severity_width(findings: &[Finding]) -> usize {
         .max(4)
 }
 
-fn max_verdict_width(findings: &[Finding]) -> usize {
-    findings
-        .iter()
-        .map(|finding| {
-            FindingVerdictFilter::from_finding(finding)
-                .as_export_str()
-                .len()
-        })
-        .max()
-        .unwrap_or(5)
-        .max(5)
+fn max_verdict_width(report: &FindingListReport) -> usize {
+    report.findings.iter().map(|finding| report.verdict(finding).as_export_str().len())
+        .max().unwrap_or(5).max(5)
 }
 
 fn max_name_width(findings: &[Finding]) -> usize {
@@ -301,7 +318,7 @@ fn finding_table_header(widths: FindingTableWidths) -> Vec<String> {
     ]
 }
 
-fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths) -> String {
+fn finding_table_row(alias: &str, finding: &Finding, verdict: FindingVerdictFilter, widths: FindingTableWidths) -> String {
     format!(
         "  {}  {}  {}  {}  {}  {}",
         pad(alias, widths.alias),
@@ -312,7 +329,7 @@ fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths)
             widths.confidence
         ),
         pad(
-            FindingVerdictFilter::from_finding(finding).as_export_str(),
+            verdict.as_export_str(),
             widths.verdict
         ),
         finding.title

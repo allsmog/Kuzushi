@@ -5,11 +5,11 @@ phase: scan
 size: 60x20
 ---
 KUZUSHI · Viewing Scan · next required Review · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger
-        candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
 │▸ RECORDED ENGINE OUTCOMES
 │✓ Run SAST scan · complete · r:scan-phase
+│
 │
 │
 │

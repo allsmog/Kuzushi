@@ -428,9 +428,8 @@ fn push_active_phase_header(
 /// letting the title, rail, and status line contradict each other.
 fn phase_position_line(app: &ShellApp, phase: WorkflowPhase) -> String {
     let base = format!(
-        "phase {} of {} — {}",
-        phase.position(),
-        WorkflowPhase::ORDER.len(),
+        "{} — {}",
+        crate::ui_view_models::journey_phase_segment(phase),
         phase.intent()
     );
     let Some(current) = journey_model(app).map(|journey| journey.current) else {
@@ -500,7 +499,7 @@ fn push_phase_segment(spans: &mut Vec<Span<'static>>, index: usize, phase: &Jour
 }
 
 fn fallback_phase_rail_line(current: WorkflowPhase, width: usize) -> Line<'static> {
-    let statuses: Vec<JourneyPhaseStatus> = WorkflowPhase::ORDER
+    let statuses: Vec<JourneyPhaseStatus> = WorkflowPhase::INVESTIGATION_ORDER
         .iter()
         .map(|&phase| JourneyPhaseStatus {
             phase,

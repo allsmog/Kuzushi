@@ -6,7 +6,9 @@
 //! angles between node anchors.
 
 mod dfd;
+mod reverse_connectors;
 mod tree;
+use reverse_connectors::{connector_left, connector_up};
 
 pub(crate) use dfd::{DfdDiagram, DfdSummary};
 pub(crate) use tree::TreeDiagram;
@@ -226,7 +228,7 @@ pub(super) fn connector_v(
     color: Color,
 ) {
     let ((fx, fy), (tx, ty)) = (from, to);
-    if ty <= fy.saturating_add(1) {
+    if ty <= fy {
         return;
     }
     let tip = ty - 1;

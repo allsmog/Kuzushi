@@ -1,10 +1,14 @@
 use super::*;
+mod exact_context;
 
 pub(crate) fn read_threat_model(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     flavor: ReadFlavor,
 ) -> Result<Value> {
+    if let Some(result) = exact_context::read_exact_context(&input, ctx)? {
+        return Ok(result);
+    }
     let Some(output_dir) = read_string(&input, &["outputDir", "output_dir"]) else {
         return read_persistent_fallback(&input, ctx, flavor);
     };

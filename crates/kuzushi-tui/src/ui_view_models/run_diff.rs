@@ -25,7 +25,7 @@ pub(crate) struct RunDiffModel {
     pub(crate) not_seen: Vec<RunDiffFindingRow>,
     pub(crate) changed_findings: Vec<RunDiffChangedRow>,
     pub(crate) uncertain_matches: Vec<RunDiffUncertainMatchRow>,
-    pub(crate) unchanged_count: usize,
+    pub(crate) unchanged_findings: Vec<RunDiffFindingRow>,
     pub(crate) decision_summary: Option<RunDiffDecisionSummary>,
     pub(crate) warnings: Vec<String>,
 }
@@ -116,7 +116,7 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
         not_seen: rows.not_seen,
         changed_findings: rows.changed_findings,
         uncertain_matches: rows.uncertain_matches,
-        unchanged_count: rows.unchanged_count,
+        unchanged_findings: rows.unchanged_findings,
         decision_summary,
         warnings,
     }
@@ -127,7 +127,7 @@ struct ClassifiedRunDiffRows {
     not_seen: Vec<RunDiffFindingRow>,
     changed_findings: Vec<RunDiffChangedRow>,
     uncertain_matches: Vec<RunDiffUncertainMatchRow>,
-    unchanged_count: usize,
+    unchanged_findings: Vec<RunDiffFindingRow>,
 }
 
 fn classified_run_diff_rows(
@@ -142,7 +142,7 @@ fn classified_run_diff_rows(
         not_seen: unmatched_rows(left_findings, right_findings, &uncertain_left_keys),
         changed_findings: changed_findings(left_findings, right_findings),
         uncertain_matches,
-        unchanged_count: unchanged_finding_count(left_findings, right_findings),
+        unchanged_findings: unchanged_findings(left_findings, right_findings),
     }
 }
 
@@ -240,17 +240,18 @@ fn changed_finding_row(
     })
 }
 
-fn unchanged_finding_count(
+fn unchanged_findings(
     left: &BTreeMap<String, RunDiffFindingRow>,
     right: &BTreeMap<String, RunDiffFindingRow>,
-) -> usize {
-    left.iter()
-        .filter(|(key, before)| {
-            right
-                .get(*key)
-                .is_some_and(|after| before.state == after.state)
+) -> Vec<RunDiffFindingRow> {
+    right
+        .iter()
+        .filter(|(key, after)| {
+            left.get(*key)
+                .is_some_and(|before| before.state == after.state)
         })
-        .count()
+        .map(|(_, row)| row.clone())
+        .collect()
 }
 
 fn uncertain_finding_matches(

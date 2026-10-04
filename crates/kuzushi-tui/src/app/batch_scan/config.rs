@@ -3,7 +3,6 @@ use kuzushi_core::RunSummary;
 use std::path::Path;
 
 pub(crate) const DEFAULT_BATCH_TRIALS: usize = 3;
-pub(crate) const BATCH_REVIEW_THRESHOLD: usize = 10;
 pub(crate) const BATCH_HARD_CAP: usize = 50;
 pub(super) const MIN_BATCH_TRIALS: usize = 2;
 pub(super) const MAX_BATCH_WORKERS: usize = 8;
@@ -12,19 +11,36 @@ pub(super) const MAX_BATCH_WORKERS: usize = 8;
 pub(crate) enum BatchScanConfigRow {
     Trials,
     Workers,
+    Context,
+    ProviderCalls,
+    ReviewCalls,
+    Attempts,
     PriorRun,
     Launch,
 }
 
 impl BatchScanConfigRow {
-    const ALL: [Self; 4] = [Self::Trials, Self::Workers, Self::PriorRun, Self::Launch];
+    pub(crate) const ALL: [Self; 8] = [
+        Self::Trials,
+        Self::Workers,
+        Self::Context,
+        Self::ProviderCalls,
+        Self::ReviewCalls,
+        Self::Attempts,
+        Self::PriorRun,
+        Self::Launch,
+    ];
 
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Trials => "Scan trials",
-            Self::Workers => "Parallel workers",
+            Self::Trials => "Discovery passes",
+            Self::Workers => "Workers",
+            Self::Context => "Source and context",
+            Self::ProviderCalls => "Total calls",
+            Self::ReviewCalls => "Protected review",
+            Self::Attempts => "Attempts per job",
             Self::PriorRun => "Cost evidence",
-            Self::Launch => "Review and launch",
+            Self::Launch => "Next action",
         }
     }
 }
@@ -37,6 +53,8 @@ pub(crate) struct BatchPriorRun {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BatchScanConfig {
+    pub(crate) origin: Option<StudyNavigationOrigin>,
+    pub(crate) target: std::path::PathBuf,
     pub(crate) trials: usize,
     pub(crate) requested_workers: usize,
     pub(crate) effective_workers: usize,
@@ -45,9 +63,12 @@ pub(crate) struct BatchScanConfig {
     pub(crate) prior_run_cost_usd: Option<f64>,
     pub(crate) prior_runs: Vec<BatchPriorRun>,
     pub(crate) cursor: usize,
-    pub(crate) review_armed: bool,
+    pub(crate) study: super::study_state::StudyDraftState,
+    pub(crate) detail_scroll: usize,
     pub(crate) notice: Option<String>,
     pub(crate) number_edit: Option<BatchNumberEdit>,
+    pub(crate) context_picker: Option<super::StudyContextPicker>,
+    pub(crate) context_generation: Option<super::context_generation::StudyContextGeneration>,
 }
 
 impl BatchScanConfig {
@@ -58,6 +79,8 @@ impl BatchScanConfig {
             .filter(|_| requested.is_none())
             .map(unavailable_prior_notice);
         Self {
+            origin: None,
+            target: target.to_path_buf(),
             trials: DEFAULT_BATCH_TRIALS,
             requested_workers: 1,
             effective_workers: 1,
@@ -66,9 +89,12 @@ impl BatchScanConfig {
             prior_run_cost_usd: requested.map(|prior| prior.cost_usd),
             prior_runs,
             cursor: 0,
-            review_armed: false,
+            study: super::study_state::StudyDraftState::default(),
+            detail_scroll: 0,
             notice,
             number_edit: None,
+            context_picker: None,
+            context_generation: None,
         }
     }
 
@@ -79,15 +105,14 @@ impl BatchScanConfig {
     pub(crate) fn move_cursor(&mut self, delta: i64) {
         let last = BatchScanConfigRow::ALL.len() as i64 - 1;
         self.cursor = (self.cursor as i64 + delta).clamp(0, last) as usize;
+        self.detail_scroll = 0;
     }
 
     pub(crate) fn activate_selected(&mut self) -> bool {
         match self.selected_row() {
-            row @ (BatchScanConfigRow::Trials | BatchScanConfigRow::Workers) => {
-                self.begin_number_edit(row);
-            }
             BatchScanConfigRow::PriorRun => self.cycle_prior_run(),
             BatchScanConfigRow::Launch => return true,
+            row => self.begin_number_edit(row),
         }
         false
     }
@@ -96,29 +121,12 @@ impl BatchScanConfig {
         let next = next_prior_run(&self.prior_runs, self.prior_run_id.as_deref());
         self.prior_run_id = next.map(|prior| prior.run_id.clone());
         self.prior_run_cost_usd = next.map(|prior| prior.cost_usd);
-        self.disarm_review();
+        self.notice = None;
     }
 
     pub(crate) fn projected_cost_usd(&self) -> Option<f64> {
         self.prior_run_cost_usd
             .map(|per_trial| per_trial * self.trials as f64)
-    }
-
-    pub(crate) fn needs_large_batch_review(&self) -> bool {
-        self.trials > BATCH_REVIEW_THRESHOLD
-    }
-
-    pub(crate) fn arm_review(&mut self) {
-        self.review_armed = true;
-        self.notice = Some(format!(
-            "{} trials exceeds the review threshold of {} — launch again to confirm",
-            self.trials, BATCH_REVIEW_THRESHOLD
-        ));
-    }
-
-    pub(crate) fn disarm_review(&mut self) {
-        self.review_armed = false;
-        self.notice = None;
     }
 
     pub(crate) fn apply_worker_resolution(
@@ -129,6 +137,13 @@ impl BatchScanConfig {
         self.effective_workers = effective_workers.max(1);
         self.worker_clamp_reason = reason;
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StudyNavigationOrigin {
+    pub(crate) view: crate::app::ShellView,
+    pub(crate) mode: crate::app::InputMode,
+    pub(crate) workbench: crate::app::WorkbenchRouteState,
 }
 
 fn exact_prior_scan_runs(target: &Path) -> Vec<BatchPriorRun> {
@@ -182,17 +197,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_and_large_batch_review_are_explicit() {
+    fn defaults_require_an_explicit_allowance() {
         let target = tempfile::tempdir().unwrap();
-        let mut config = BatchScanConfig::load(target.path(), None);
+        let config = BatchScanConfig::load(target.path(), None);
 
         assert_eq!(config.trials, 3);
         assert_eq!(config.projected_cost_usd(), None);
-        config.trials = 11;
-        assert!(config.needs_large_batch_review());
-        assert!(!config.review_armed);
-        config.arm_review();
-        assert!(config.review_armed);
+        assert_eq!(config.study.max_provider_calls, None);
+        assert_eq!(config.study.protected_review_calls, None);
+        assert_eq!(config.study.max_job_attempts, 1);
+        assert!(!config.study.approved());
     }
 
     #[test]

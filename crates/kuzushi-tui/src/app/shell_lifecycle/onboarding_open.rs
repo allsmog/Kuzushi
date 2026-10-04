@@ -244,10 +244,8 @@ impl ShellApp {
         self.log(
             "phase",
             format!(
-                "{} ({} of {}) — {}",
-                phase.label(),
-                phase.position(),
-                crate::app::WorkflowPhase::ORDER.len(),
+                "{} — {}",
+                crate::ui_view_models::journey_phase_segment(phase),
                 phase.intent()
             ),
         );

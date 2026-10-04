@@ -20,6 +20,10 @@ mod shards;
 pub mod snapshot;
 mod status;
 mod study_plan;
+mod study_receipt;
+mod context_study;
+pub use context_study::{execute_context_study, load_context_study, ContextPreparationJob, ContextStudyReceipt};
+pub use study_receipt::{load_study_allowance, load_study_plan_receipt, StudyPlanReceipt};
 #[cfg(test)]
 mod tests;
 mod threats;

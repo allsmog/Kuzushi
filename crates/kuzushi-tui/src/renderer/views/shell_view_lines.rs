@@ -122,10 +122,11 @@ fn threat_run_shell_view_lines(
 
 fn run_diff_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let route = app.router.run_diff();
-    default_scrolled_lines(
-        app,
-        area,
+    pinned_document_viewport_lines(
         run_diff_lines(app, area, route.left(), route.right()),
+        area.height,
+        default_scroll_offset(app),
+        2,
     )
 }
 

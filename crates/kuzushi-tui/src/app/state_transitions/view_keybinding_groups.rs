@@ -2,7 +2,31 @@ use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
 
 pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
-    let mut bindings = vec![
+    let mut bindings = campaign_navigation_keybindings();
+    bindings.extend([
+        bind_char(
+            'a',
+            "a",
+            "plan and allowance",
+            ViewHotkeyAction::CampaignReviewStudy,
+        ),
+        bind_char(
+            'x',
+            "x",
+            "include/exclude",
+            ViewHotkeyAction::CampaignToggleExclude,
+        ),
+        bind_char('w', "w", "workers", ViewHotkeyAction::CampaignCycleWorkers),
+        bind_char('L', "L", "launch", ViewHotkeyAction::CampaignLaunch),
+        bind_char('K', "K", "kill dispatcher", ViewHotkeyAction::CampaignKill),
+        bind_char('e', "e", "prompt", ViewHotkeyAction::CampaignShowPrompt),
+        bind_char('r', "r", "refresh", ViewHotkeyAction::CampaignRefresh),
+    ]);
+    bindings
+}
+
+fn campaign_navigation_keybindings() -> Vec<ViewKeybinding> {
+    vec![
         bind_char(
             'k',
             "j/k",
@@ -34,21 +58,7 @@ pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
             "campaign list",
             ViewHotkeyAction::CampaignBackToList,
         ),
-    ];
-    bindings.extend([
-        bind_char(
-            'x',
-            "x",
-            "include/exclude",
-            ViewHotkeyAction::CampaignToggleExclude,
-        ),
-        bind_char('w', "w", "workers", ViewHotkeyAction::CampaignCycleWorkers),
-        bind_char('L', "L", "launch", ViewHotkeyAction::CampaignLaunch),
-        bind_char('K', "K", "kill dispatcher", ViewHotkeyAction::CampaignKill),
-        bind_char('e', "e", "prompt", ViewHotkeyAction::CampaignShowPrompt),
-        bind_char('r', "r", "refresh", ViewHotkeyAction::CampaignRefresh),
-    ]);
-    bindings
+    ]
 }
 
 pub(super) fn logs_keybindings() -> Vec<ViewKeybinding> {
@@ -184,7 +194,8 @@ pub(super) fn workbench_keybindings_for_plan(
         .and_then(|plan| plan.surface(plan.effective_focus))
         .copied();
     let interaction = focused_surface.map(|surface| surface.interaction);
-    let mut bindings = workbench_pane_cycle_keybindings(available_count);
+    let mut bindings = review_comparison_keybindings(app);
+    bindings.extend(workbench_pane_cycle_keybindings(available_count));
     bindings.extend(workbench_open_keybindings(focused_surface));
     if matches!(
         interaction,
@@ -205,6 +216,20 @@ pub(super) fn workbench_keybindings_for_plan(
     ));
     bindings.extend(workbench_return_keybindings(plan));
     bindings
+}
+
+fn review_comparison_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    app.review_observation_run_pair()
+        .map(|_| {
+            bind_char(
+                'v',
+                "v",
+                "compare scans",
+                ViewHotkeyAction::WorkbenchCompareObservations,
+            )
+        })
+        .into_iter()
+        .collect()
 }
 
 fn guided_workbench_bindings(
@@ -379,17 +404,24 @@ fn workbench_zoom_keybindings() -> [ViewKeybinding; 2] {
 }
 
 fn workbench_page_keybindings() -> Vec<ViewKeybinding> {
-    WorkbenchPage::ALL
+    let mut bindings: Vec<_> = WorkbenchPage::INVESTIGATION
         .iter()
         .map(|page| {
             bind_char(
                 page.page_key(),
-                "1..5",
+                "1..3",
                 "page",
                 ViewHotkeyAction::WorkbenchPage(*page),
             )
         })
-        .collect()
+        .collect();
+    bindings.push(bind_char(
+        'r',
+        "r",
+        "Report",
+        ViewHotkeyAction::WorkbenchReport,
+    ));
+    bindings
 }
 
 fn workbench_open_keybinding() -> ViewKeybinding {
@@ -434,7 +466,12 @@ fn workbench_page_action_keybindings(page: WorkbenchPage, backlog: bool) -> Vec<
             ViewHotkeyAction::WorkbenchReverifyPatch,
         )],
         WorkbenchPage::Map => threat_model_cycle_keybindings(),
-        WorkbenchPage::Scan => Vec::new(),
+        WorkbenchPage::Scan => vec![bind_char(
+            'b',
+            "b",
+            "plan study",
+            ViewHotkeyAction::WorkbenchPlanStudy,
+        )],
     }
 }
 

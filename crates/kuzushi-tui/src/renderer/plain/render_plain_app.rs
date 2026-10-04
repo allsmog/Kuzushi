@@ -31,10 +31,15 @@ pub fn render_plain_command_result(
 
 pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let width = width.max(40);
+    if let Some(lines) = crate::renderer::allowance_review::allowance_review_plain_lines(app, width)
+    {
+        return lines;
+    }
     let mode = plain_render_mode(app);
     let include_run_projection = !matches!(&mode, PlainRenderMode::Activity);
     let mut lines = match mode {
         PlainRenderMode::Activity => plain_line_based_view_lines(app, width, false),
+        PlainRenderMode::RunDiff => plain_run_diff_lines(app, width),
         PlainRenderMode::Options(view) => plain_options_lines(app, width, view),
         PlainRenderMode::SastTasks => plain_sast_tasks_lines(app, width),
         PlainRenderMode::Context => plain_context_lines(app, width),
@@ -87,6 +92,14 @@ fn plain_line_based_view_lines(
     lines.push(String::new());
     lines.extend(body);
     lines
+}
+
+fn plain_run_diff_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
+    crate::renderer::run_diff_document_lines(app, area)
+        .into_iter()
+        .map(line_to_unstyled_text)
+        .collect()
 }
 
 pub(crate) fn render_plain_command_result_lines(

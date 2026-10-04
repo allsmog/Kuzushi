@@ -5,8 +5,8 @@ phase: scan
 size: 96x89
 ---
 KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● LIVE · cost $0.37
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
  run sast:scan {} scan now · next → Review · z open findings heatmap · jobs inspect run receipts
 │▸ RECORDED ENGINE OUTCOMES               │SCAN RECEIPT
 │✓ Run SAST sc… · complete · r:scan-phase │outcome completed · revision not recorded

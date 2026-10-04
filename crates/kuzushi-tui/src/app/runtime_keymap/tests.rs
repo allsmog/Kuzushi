@@ -88,3 +88,32 @@ fn binding_labels_are_the_runtime_dispatch_source() {
         ["ctrl+s", "g s"]
     );
 }
+
+#[test]
+fn observation_comparison_can_be_remapped_or_unbound() {
+    for keys in [vec!["ctrl+s".to_string()], Vec::new()] {
+        let map = RuntimeKeymap::from_config(&[KeybindingOverrideConfig {
+            context: "workbench".into(),
+            action: "compare_observations".into(),
+            bindings: keys.clone(),
+        }]);
+        assert!(map.error().is_none());
+        assert_eq!(
+            map.binding_labels("workbench", "compare_observations", &["v"]),
+            keys
+        );
+        let bindings = map.apply_view_overrides(
+            ShellView::Workbench,
+            vec![ViewKeybinding {
+                trigger: HotkeyTrigger::Char('v'),
+                hint: "v".into(),
+                label: "compare scans".into(),
+                action: ViewHotkeyAction::WorkbenchCompareObservations,
+            }],
+        );
+        assert_eq!(bindings.len(), keys.len());
+        assert!(bindings
+            .iter()
+            .all(|binding| binding.action == ViewHotkeyAction::WorkbenchCompareObservations));
+    }
+}

@@ -277,11 +277,43 @@ truth.
   content. A divergent
   hand-edited compatibility mirror blocks activation until the operator
   explicitly adopts or discards it.
-- `scan batch [--prior-run <run-id>]` opens the repeated-scan configurator.
-  Cost appears only when backed by the named completed `sast:scan` receipt.
-  Launch delegates to the detached campaign dispatcher; `batch <batch-id>`
-  opens its occurrence report and scopes Review, while `batch clear` removes
-  that presentation filter.
+- `scan batch [--prior-run <run-id>]` (or `b` on Scan in Navigate mode)
+  opens the finite study form. Prepare a draft, inspect its frozen source and
+  context, enter total calls and protected review calls explicitly, then review
+  and approve the allowance. Approval starts no jobs. Open approved jobs and
+  press `L` separately to start the detached controller. The form defaults to
+  three discovery passes, one worker and one attempt per job; cost estimates
+  require an exact named prior scan receipt and are never dollar guarantees.
+  `a` in the campaign deck reopens the saved plan and durable allowance after
+  restart. Editing work creates a new draft under the same investigation;
+  consumed calls and unresolved reservations remain. `batch <batch-id>` opens
+  its occurrence report and scopes Review; `batch clear` removes that filter.
+- In the study form, Enter on Source and context opens the immutable revision
+  browser. Arrows choose a revision; Enter reads its exact document; Tab switches
+  between summary and complete document; Page Up/Down scroll the detail. `a`
+  uses the inspected revision, or explicitly omits threat-model context. Escape
+  returns with the study draft unchanged. Selection never changes the active
+  workspace threat model; changed context requires a newly prepared and approved
+  study plan while preserving investigation accounting.
+- After inspecting a revision, `v` opens that revision's data-flow diagram.
+  Arrows select components, flows and trust boundaries; Enter toggles full
+  details with linked context and recorded source evidence. Page Up/Down and
+  Home/End read those details. Escape returns to the same context preview;
+  reopening retains the selected element and reading position. This reader
+  never switches the active Map, selects context for scans, or starts generation.
+  Grounding status remains visible, and small terminals provide a detail-only
+  projection when the graph cannot fit. Plain output includes all elements and
+  the exact context identity, rather than only the selected element.
+- `g` in that context browser opens generation planning. `t` edits total calls,
+  `r` edits the protected review allocation, and Enter prepares one source-only
+  context job. Review the frozen source and selected model; Tab shows formatted
+  exact options. Enter opens the existing allowance approval, then opens the
+  approved job. `L` in the campaign deck starts it. No generation starts from
+  preparation or approval. After completion, `a` reopens review and Enter
+  inspects the exact revision recorded by that run. Selecting it for scans is
+  separate from generation and does not change the active workspace model.
+  `n` opens a new generation draft; approving it retains investigation spending.
+  The initial action is repository-wide with one worker and one attempt.
 - `ask <question>` and `threats ask <question>` answer in the existing inline
   transcript. Threat questions attach the smallest current scene slice;
   `--whole-model` is explicit. Target/model text and assistant history are
@@ -290,9 +322,10 @@ truth.
   An Ask may run beside one scan only after the bridge acknowledges its narrow
   read-only policy, effective tools, and read roots; no acknowledgement means
   no concurrent start.
-- `workbench` opens the five-page Map/Scan/Review/Prove/Fix ring. `Shift+Tab`
-  cycles pages while preserving the shared draft and cursor; Navigate-mode
-  `1..5` selects directly. The selected interaction mode and durable reality
+- `workbench` opens the Map/Scan/Review investigation journey. `Shift+Tab`
+  cycles these pages and Report while preserving the shared draft and cursor;
+  Navigate-mode `1..3` selects the phase directly. Historical Prove/Fix artifacts
+  and exact compatibility dispatch remain outside this guided journey. The selected interaction mode and durable reality
   are disclosed separately, and page navigation never changes workspace
   reality, autonomy, model, permissions, or evidence.
 - Remaining prose on a Workbench page is compiled as intent for that selected
@@ -777,3 +810,18 @@ local binaries, caches, timeouts, or external toolchain integration (for
 example CodeQL, Clang, and rev.ng). Treat those as legacy adapter-boundary
 exceptions: do not add new product behavior env vars, and migrate touched knobs
 toward declared options or config.
+
+### Setup context studies
+
+When the selected Map plan includes model-backed threat-model generation, the
+Allowance row opens the same context-study review as Start Map. The supported
+combination includes the selected repository-context and entry-point preparation
+jobs. Set total calls with `t` and protected review with `r`; Enter prepares the
+fixed plan, and a second Enter opens its explicit approval. Tab shows all frozen
+inputs. Approval starts no job; the campaign's visible `L` action launches them.
+Esc returns to the original Setup row with its selection, draft and investigation
+accounting intact. `n` prepares a separately approved replacement under that same
+investigation. `campaign <id>` and `a` recover a saved plan after restart.
+Unsupported Map combinations are explained before any job starts. Dollar costs
+can be unavailable; the call allowance is distinct from the legacy observed USD
+spending stop used by other interactive work.

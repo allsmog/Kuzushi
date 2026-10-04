@@ -71,6 +71,9 @@ impl FindingDetailReport {
         lines.push(format!("Tool: {}", finding.tool));
         lines.push(format!("Source: {}", source_label(finding)));
         lines.push(format!("Rule: {}", finding.rule_id));
+        if let Some(note) = crate::findings::observation_gap_note(finding) {
+            lines.push(format!("Observation: {note}"));
+        }
     }
 
     fn title_line(&self) -> String {

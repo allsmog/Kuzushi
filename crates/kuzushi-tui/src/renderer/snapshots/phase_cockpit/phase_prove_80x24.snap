@@ -5,8 +5,8 @@ phase: prove
 size: 80x24
 ---
 KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
  v verify displayed · x suppress displayed · z attack path / replay
 │▸ STATUS / NEXT
 │PROOF SUBJECT · finding F-0001

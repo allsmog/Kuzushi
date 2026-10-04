@@ -60,7 +60,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         name if name.starts_with("fleet:") => dispatch_fleet_tool(name, input),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "workspace:import-findings" => Some(workspace_import_findings_tool(input, ctx)),
-        "campaign:plan" | "campaign:status" | "campaign:coverage" | "campaign:approve-allowance" | "campaign:allowance" | "campaign:study" => {
+        "campaign:plan" | "campaign:status" | "campaign:coverage" | "campaign:approve-allowance" | "campaign:allowance" | "campaign:study" | "campaign:context-study" => {
             dispatch_campaign_tool(name, input, ctx)
         }
         "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
@@ -115,6 +115,7 @@ fn dispatch_campaign_tool(
         "campaign:coverage" => Some(campaign::execute_campaign_coverage(input, ctx)),
         "campaign:approve-allowance" => Some(campaign::execute_approve_allowance(input, ctx)),
         "campaign:study" => Some(campaign::execute_study_plan(input, ctx)),
+        "campaign:context-study" => Some(campaign::execute_context_study(input, ctx)),
         "campaign:allowance" => Some(campaign::execute_allowance_status(input, ctx)),
         _ => None,
     }
@@ -321,6 +322,7 @@ pub(in crate::modules) fn list_findings_tool(
         .unzip();
     let count = findings.len();
     Ok(crate::findings::FindingListReport {
+        review_decisions: report.review_decisions,
         count,
         findings: findings.into_iter().take(requested_limit).collect(),
         aliases: aliases.into_iter().take(requested_limit).collect(),

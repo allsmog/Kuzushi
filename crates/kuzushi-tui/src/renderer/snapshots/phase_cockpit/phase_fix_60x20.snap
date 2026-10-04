@@ -5,9 +5,8 @@ phase: fix
 size: 60x20
 ---
 KUZUSHI · Viewing Fix · next required Review · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger
-        candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
 │▸ REMEDIATION
 │STATE  Staged for approval
 │NEXT   patch apply · write reviewed diff
@@ -19,6 +18,7 @@ KUZUSHI · Viewing Fix · next required Review · ● LIVE
 │side effect: preserves the login response schema
 │✓ login_rejects_sqli · payload is inert
 │guardrail: human approval required
+│
 ⛭ autonomy:fix · run route...   6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort

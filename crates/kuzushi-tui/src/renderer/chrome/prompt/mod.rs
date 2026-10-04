@@ -114,6 +114,9 @@ fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::St
 }
 
 fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
+    if app.shell_view() == crate::ShellView::RunDiff {
+        return disabled_prompt_line("SCAN COMPARISON · Tab changes view · Esc back");
+    }
     if app.shell_view() == crate::ShellView::Report {
         return disabled_prompt_line("e edits path · Enter exports · Esc returns");
     }

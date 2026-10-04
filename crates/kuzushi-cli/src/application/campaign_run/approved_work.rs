@@ -140,6 +140,66 @@ mod tests {
     }
 
     #[test]
+    fn context_study_binds_preparation_and_refuses_worker_expansion() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(root.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai-codex:gpt-5.5".into()),
+            ..Default::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = ModuleRegistry::with_v2_builtins();
+        let draft = registry.execute_tool("campaign:context-study", json!({
+            "campaignId":"map-context","investigationId":"map-investigation","contextInput":{},
+            "preparationJobs":[{"tool":"context:build","input":{}},{"tool":"entry-points:extract","input":{}}]
+        }), &ctx).unwrap();
+        assert!(load_plan_jobs(root.path(), "map-context", &[]).is_err());
+        let terms = json!({"investigationId":"map-investigation","expectedRevision":0,"model":"openai-codex:gpt-5.5",
+            "maxProviderCalls":5,"protectedReviewCalls":2,"reason":"Offline Setup context test",
+            "campaignId":"map-context","campaignJobs":3,"maxJobAttempts":1,"campaignPlanSha256":draft["data"]["planSha256"]});
+        let prepared = registry
+            .prepare_dispatch_input("campaign:approve-allowance", terms, &ctx, None)
+            .unwrap()
+            .authorize_explicit_headless();
+        registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+            .unwrap();
+        let loaded = load_plan_jobs(root.path(), "map-context", &[]).unwrap();
+        assert_eq!(
+            loaded
+                .jobs
+                .iter()
+                .map(|job| job.tool.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "context:build",
+                "entry-points:extract",
+                "threat-model:build"
+            ]
+        );
+        let mut settings = standard_batch_dispatch_settings(1).unwrap();
+        assert!(enforce_scan_batch_worker_boundary(&loaded, &settings).is_ok());
+        settings.workers = 2;
+        assert!(enforce_scan_batch_worker_boundary(&loaded, &settings).is_err());
+        assert!(load_plan_jobs(root.path(), "map-context", &["context-001".into()]).is_err());
+        for job in loaded.jobs {
+            let input: Value = serde_json::from_str(&job.input_json).unwrap();
+            assert_eq!(
+                input["allowanceRef"]["workId"],
+                format!("map-context:{}", job.job_id)
+            );
+            assert_eq!(job.approved_attempts, Some(1));
+        }
+    }
+
+    #[test]
     fn quota_failures_consume_finite_attempts_instead_of_retrying_forever() {
         let settings = standard_batch_dispatch_settings(1).unwrap();
         let mut job = plan_job_row(&json!({"jobId":"one","tool":"sast:scan","input":{}})).unwrap();

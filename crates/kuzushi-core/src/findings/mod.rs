@@ -54,7 +54,7 @@ pub use domain::{
     auto_triage_propagation_basis, compute_dedup_key, compute_root_cause_key,
     compute_source_signature, derive_triage_state, extract_cwe, ground_finding_location,
     grounding_prompt_note, is_attack_chain_finding, normalize_cwe, ConfidenceBand, DismissReason,
-    Finding, FindingEvidence, FindingIdentityBasis, FindingSource, FindingTriageState,
+    Finding, FindingEvidence, FindingIdentityBasis, FindingObservationGap, FindingSource, FindingTriageState,
     GroundingStatus, PatchAttempt, PatchAttemptSummary, PatchDetectorReplayOutcome,
     PatchEmpiricalOutcome, PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState,
     PatchProvenance, PatchResult, PatchReverificationCaseKind, PatchReverificationFileHash,
@@ -70,6 +70,7 @@ pub use persistence::{
     ObservationSourceRef, SuppressionLifecycleEvent, ThreatModelVersionRecord,
 };
 pub use presentation::{
+    observation_gap_note,
     compare_findings_by_confidence, dataflow_evidence_rows, finding_lifecycle_status,
     finding_next_action, format_finding_alias, format_stage_note, parse_finding_alias,
     parse_stage_note, proof_ladder_state, proof_state_label, resolve_finding_alias,

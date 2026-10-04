@@ -327,6 +327,12 @@ d_shell() { # host-side setup command (fixture seeding etc.)
   sh -c "$cmd" || fail "shell setup failed: $cmd"
 }
 
+d_require_shell() { # a failed prerequisite must prevent dependent actions
+  local failures_before=$FAIL_N
+  d_shell "$1"
+  [ "$FAIL_N" -eq "$failures_before" ]
+}
+
 launch_cmd() { # assemble `env -u K K=V ... <cmd>`
   local tail=$1 prefix=""
   if [ -n "$ENV_PREFIX" ]; then
@@ -352,6 +358,20 @@ d_launch() { # args appended to the kuzushi binary ('' = bare launch)
   ENV_PREFIX=""
   devex_send_line "$SESSION" "$cmd"
   report step "launch: $(basename "$KUZUSHI_BIN")${args:+ $args}"
+}
+
+d_require_exit() { # bounded proof before a subsequent launch
+  local seconds=${1:-10}
+  case $seconds in ''|*[!0-9]*) devex_die "require-exit: expected 1 to 30 seconds";; esac
+  [ "$seconds" -ge 1 ] && [ "$seconds" -le 30 ] || devex_die "require-exit: expected 1 to 30 seconds"
+  if devex_wait_for_shell "$SESSION" "$seconds"; then
+    pass "TUI exited; harness shell owns the terminal"
+    return 0
+  fi
+  d_live_snap "exit-not-complete" || true
+  local state; state=$(tmux display-message -p -t "$SESSION" '#{alternate_on}:#{pane_current_command}' 2>/dev/null)
+  fail "TUI did not exit within ${seconds}s ($state); refusing to type a relaunch into a live application"
+  return 1
 }
 
 d_launch_raw() { # full shell command line (pipes, --plain, non-TTY checks)
@@ -449,6 +469,7 @@ d_submit() { # literal text + Enter (the common "type a verb" case)
     sleep 0.5
   done
   fail "submit: $1 — draft never rendered intact on the prompt line"
+  return 1
 }
 
 d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
@@ -841,8 +862,10 @@ dispatch() { # <directive> <value>
     require-any-env) d_require_any_env "$2" || return $?;;
     require-wrapper-flow) d_require_wrapper_flow || return $?;;
     shell)           d_shell "$2";;
+    require-shell)   d_require_shell "$2";;
     launch)          d_launch "$2";;
     launch-raw)      d_launch_raw "$2";;
+    require-exit)    d_require_exit "$2";;
     keys)            d_keys "$2";;
     type)            d_type "$2";;
     paste-file)      d_paste_file "$2";;

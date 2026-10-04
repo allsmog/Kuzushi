@@ -115,7 +115,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "scan batch",
         aliases: &["/scan batch", "scan batch --prior-run <runId>"],
         category: ShellCommandCategory::Navigation,
-        description: "configure repeated logical scan trials, optionally costed from a prior run",
+        description: "prepare a finite discovery study, review its allowance, then start its jobs",
     },
     ShellCommandSpec {
         command: "batch <id>",

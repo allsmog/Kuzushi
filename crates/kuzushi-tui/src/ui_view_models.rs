@@ -8,6 +8,13 @@ mod answers;
 pub(crate) use answers::*;
 
 mod active_stage;
+mod allowance_review;
+pub(crate) mod context_generation;
+pub(crate) mod study_config;
+pub(crate) mod study_context;
+pub(crate) use allowance_review::{
+    allowance_review_model, allowance_review_width, AllowanceReviewModel,
+};
 mod activity_dag_rows;
 mod activity_empty_state;
 mod activity_feed_pause;

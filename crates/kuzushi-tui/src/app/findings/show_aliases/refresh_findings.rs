@@ -161,6 +161,7 @@ impl ShellApp {
             .unzip();
         let count = findings.len();
         Ok(FindingListReport {
+            review_decisions: report.review_decisions,
             count,
             findings,
             aliases,
@@ -179,6 +180,7 @@ impl ShellApp {
             count,
             findings,
             aliases,
+            ..
         } = report;
         let decisions = self.load_review_decisions_for_findings(store, &findings);
         let counts = self.journey_ledger_counts(store, policy, &findings, &decisions, count);
@@ -384,6 +386,7 @@ impl ShellApp {
             count,
             findings,
             aliases,
+            ..
         } = report;
         let decisions = self.load_review_decisions_for_findings(store, &findings);
         self.replace_findings(

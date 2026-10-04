@@ -3,6 +3,23 @@ use crate::capabilities::threat_model::{ThreatModelRef, ThreatModelSelection};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(super) fn bind_summary_context(
+    target: &std::path::Path, input: &Value, summary: super::RunSummary,
+) -> anyhow::Result<super::RunSummary> {
+    match ThreatModelSelection::from_input(input)? {
+        ThreatModelSelection::Active => Ok(summary),
+        ThreatModelSelection::None => Ok(summary.with_threat_model_ref(None, None, None)
+            .with_threat_model_provenance(None, Some("explicit-omission".into()))),
+        ThreatModelSelection::Revision(reference) => {
+            let path = crate::capabilities::threat_model::threat_model_object_path(target, &reference.sha256)?;
+            let relative = path.strip_prefix(target)?.to_string_lossy().into_owned();
+            Ok(summary.with_threat_model_ref(Some(reference.model_id.to_string()),
+                Some(reference.revision_id.to_string()), Some(reference.sha256))
+                .with_threat_model_provenance(Some(relative), Some("explicit-input".into())))
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum RunThreatModelContext {
@@ -43,6 +60,32 @@ impl RunThreatModelContext {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn start_and_terminal_receipts_preserve_explicit_context_while_active_model_changes() {
+        use super::super::{ToolRunRecord, try_record_tool_run_started_with_reproducibility,
+            try_record_tool_run_complete, load_run_summary};
+        let root = tempfile::tempdir().unwrap();
+        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "selected-alpha");
+        crate::capabilities::threat_model::commit_test_model(root.path(), "active-beta");
+        for (run, value, expected, via) in [
+            ("selected", json!(first), Some(first.sha256.clone()), "explicit-input"),
+            ("omitted", Value::Null, None, "explicit-omission"),
+        ] {
+            let record = ToolRunRecord::new(root.path(), run, "scan", "sast:scan");
+            try_record_tool_run_started_with_reproducibility(record, &json!({"threatModelRef": value}), None, None, vec![]).unwrap();
+            let started = load_run_summary(root.path(), run).unwrap();
+            assert_eq!(started.threat_model_sha256, expected);
+            assert_eq!(started.threat_model_resolved_via.as_deref(), Some(via));
+            crate::capabilities::threat_model::commit_test_model(root.path(), "later-gamma");
+            try_record_tool_run_complete(record, &json!({"ok": true, "status": "completed", "data": {}})).unwrap();
+            let terminal = load_run_summary(root.path(), run).unwrap();
+            assert_eq!(terminal.threat_model_sha256, expected);
+            assert_eq!(terminal.threat_model_id, started.threat_model_id);
+            assert_eq!(terminal.threat_model_source, started.threat_model_source);
+            assert_eq!(terminal.threat_model_resolved_via.as_deref(), Some(via));
+        }
+    }
 
     #[test]
     fn missing_and_malformed_context_never_become_explicit_absence() {

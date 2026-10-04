@@ -5,8 +5,8 @@ phase: map
 size: 96x89
 ---
 KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● LIVE · cost $0.37
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
  Tab cycle map views · z zoom selected view · next → Review · jobs inspect Map runs
 ◇ SYSTEM SUMMARY · why the system exists and how its parts move data
 views  [summary] · dfd  ·  Tab cycles · z zoom

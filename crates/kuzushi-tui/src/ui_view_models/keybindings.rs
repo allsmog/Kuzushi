@@ -42,20 +42,27 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if super::answers_available(app) && app.agent_chat().is_some() {
         bindings.insert(0, bind("Ctrl+T", "answers"));
     }
-    prioritize_entry_point_paging(&mut bindings, app);
+    prioritize_reader_paging(&mut bindings, app);
     apply_operator_chrome_overrides(bindings, app)
 }
 
-fn prioritize_entry_point_paging(bindings: &mut [FooterKeybinding], app: &ShellApp) {
+fn prioritize_reader_paging(bindings: &mut [FooterKeybinding], app: &ShellApp) {
     if app.shell_view() != crate::ShellView::Workbench {
         return;
     }
-    if app.current_map_viz_page() != crate::scene3d::VizPage::EntryPoints
-        || !workbench::ready_map_gallery_is_visible(app)
-    {
+    if !focused_reader_needs_paging(app) {
         return;
     }
     bindings.sort_by_key(|binding| u8::from(binding.key != "PgUp/PgDn"));
+}
+
+fn focused_reader_needs_paging(app: &ShellApp) -> bool {
+    let page = super::active_workbench_page(app);
+    if page == crate::app::WorkbenchPage::Review {
+        return app.router.workbench().focus_for(page) == super::PhaseSurfaceId::ReviewDetail;
+    }
+    app.current_map_viz_page() == crate::scene3d::VizPage::EntryPoints
+        && workbench::ready_map_gallery_is_visible(app)
 }
 
 fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
@@ -126,8 +133,13 @@ fn insert_prompt_completion_binding(bindings: &mut Vec<FooterKeybinding>, app: &
 }
 
 fn prompt_tab_action(app: &ShellApp) -> &'static str {
+    if !app.input().is_empty() {
+        return "complete";
+    }
+    if app.shell_view() == crate::ShellView::RunDiff {
+        return "findings / sources";
+    }
     if app.shell_view() == crate::ShellView::Workbench
-        && app.input().is_empty()
         && workbench::ready_map_gallery_is_visible(app)
     {
         "map view"
@@ -147,7 +159,7 @@ fn apply_operator_chrome_overrides(
         ("composer", "prompt_mode", "Esc"),
         ("composer", "complete", "Tab"),
     ] {
-        if !app.ui().keymap_overrides_action(context, action) {
+        if !chrome_override_applies(app, context, action) {
             continue;
         }
         let label = bindings
@@ -167,6 +179,13 @@ fn apply_operator_chrome_overrides(
         );
     }
     bindings
+}
+
+fn chrome_override_applies(app: &ShellApp, context: &str, action: &str) -> bool {
+    if action == "complete" && prompt_tab_action(app) != "complete" {
+        return false;
+    }
+    app.ui().keymap_overrides_action(context, action)
 }
 
 fn view_owns_its_input_contract(app: &ShellApp) -> bool {
@@ -267,7 +286,7 @@ fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp)
 }
 
 /// On the Review page the whole findings flow lives behind Navigate mode
-/// (j/k selects, Enter opens Prove), but Prompt mode filters those physical
+/// (j/k selects, Enter opens detail), but Prompt mode filters those physical
 /// keys out of the footer. Name the flow on the doorway itself so the footer
 /// still gives direction instead of a bare "nav mode".
 fn prompt_navigate_label(app: &ShellApp) -> String {
@@ -281,7 +300,7 @@ fn prompt_navigate_label(app: &ShellApp) -> String {
         && super::active_workbench_page(app) == crate::app::WorkbenchPage::Review
         && super::visible_findings_len(app) > 0;
     if review_flow_available {
-        "nav findings · j/k move · Enter prove".to_string()
+        "nav findings · j/k move · Enter detail".to_string()
     } else {
         "nav mode".to_string()
     }
