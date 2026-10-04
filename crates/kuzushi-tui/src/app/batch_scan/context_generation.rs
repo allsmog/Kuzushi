@@ -168,8 +168,10 @@ impl ShellApp {
             return self.prepare_context_generation(&config);
         }
         if generation.approved(&config) {
-            return self.open_context_jobs(generation,
-                "L starts the approved jobs. After completion, a reopens context review.".into());
+            return self.open_context_jobs(
+                generation,
+                "L starts the approved jobs. After completion, a reopens context review.".into(),
+            );
         }
         match context_action_input(&config) {
             Ok((tool, input)) => self.dispatch_context_action(tool, input),
@@ -233,7 +235,11 @@ impl ShellApp {
         self.inspect_study_context()
     }
 
-    fn open_context_jobs(&mut self, generation: &StudyContextGeneration, notice: String) -> InputUpdate {
+    fn open_context_jobs(
+        &mut self,
+        generation: &StudyContextGeneration,
+        notice: String,
+    ) -> InputUpdate {
         let Some(receipt) = &generation.receipt else {
             return InputUpdate::handled();
         };

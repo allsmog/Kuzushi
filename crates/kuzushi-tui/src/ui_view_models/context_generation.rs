@@ -54,18 +54,22 @@ fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
     } else {
         lines.push("Enter freezes source, selected model and bounded generation options. Preparing the draft makes no model request.".into());
     }
-    let preparations = generation
-        .receipt
-        .as_ref()
-        .map(|r| serde_json::to_value(&r.preparation_jobs).unwrap())
-        .unwrap_or_else(|| generation.preparation_jobs.clone());
-    lines.extend(preparation_lines(&preparations));
+    lines.extend(generation_preparation_lines(generation));
     lines.extend(allowance_status_lines(config));
     lines.push("n opens a new draft for separate approval. Previous spending and consumed attempts remain recorded.".into());
     lines
         .into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()
+}
+
+fn generation_preparation_lines(generation: &crate::app::StudyContextGeneration) -> Vec<String> {
+    let preparations = generation
+        .receipt
+        .as_ref()
+        .map(|receipt| serde_json::to_value(&receipt.preparation_jobs).unwrap())
+        .unwrap_or_else(|| generation.preparation_jobs.clone());
+    preparation_lines(&preparations)
 }
 
 fn receipt_lines(
