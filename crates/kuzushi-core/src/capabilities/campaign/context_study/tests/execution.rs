@@ -44,10 +44,10 @@ impl AgentRuntime for OfflineContextRuntime {
 }
 
 fn document(root: &Path) -> Result<Value> {
-    let catalog = crate::capabilities::entry_points::ensure_current_entry_point_catalog(root)?
-        .catalog.context("offline context fixture requires the real source catalog")?;
-    let deprioritized = catalog.entry_points.iter().map(|entry| json!({
-        "entryPointId": entry.surface.id,
+    let surfaces = crate::capabilities::threat_model::grounding_surfaces(root, 100)?;
+    assert!(!surfaces.is_empty(), "offline context fixture requires real source surfaces");
+    let deprioritized = surfaces.iter().map(|surface| json!({
+        "entryPointId": surface.id,
         "reason": "Offline fixture prints a greeting and has no untrusted input",
     })).collect::<Vec<_>>();
     Ok(json!({"version":"2.0","title":"Offline generated context",

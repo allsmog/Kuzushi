@@ -30,7 +30,7 @@ fn setup_fixture() -> (tempfile::TempDir, ShellApp, ContextStudyReceipt) {
 }
 
 fn commit(root: &Path, label: &str, run: Option<&str>, activate: bool) -> ThreatModelRef {
-    let document = json!({"version":"1","title":label,"dfd":{"nodes":[
+    let document = json!({"version":"1","methodology":"stride","title":label,"dfd":{"nodes":[
         {"id":"app","type":"process","name":label,"trustZone":"internal"}],
         "flows":[],"trustBoundaries":[]},"summary":{},"threats":[]});
     commit_threat_model_revision(

@@ -708,12 +708,12 @@ mod tests {
         app.set_input("preserved draft");
         app.set_input_mode(InputMode::Navigate);
 
-        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
 
         assert!(update.handled);
         assert_eq!(
             crate::ui_view_models::active_workbench_page(&app),
-            crate::app::WorkbenchPage::Fix
+            crate::app::WorkbenchPage::Review
         );
         assert_eq!(app.input(), "preserved draft");
         assert_eq!(app.input_mode(), InputMode::Navigate);

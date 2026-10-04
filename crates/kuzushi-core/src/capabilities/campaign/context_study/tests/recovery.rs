@@ -39,7 +39,7 @@ fn queue(root: &Path, state: &str, run: Option<&str>) {
 }
 
 fn commit(root: &Path, run: &str) -> crate::ThreatModelRef {
-    commit_threat_model_revision(root, &json!({"version":"1", "methodology":"stride", "title":"Labeled recovery fixture", "dfd":{"nodes":[],"flows":[],"trustBoundaries":[]},"threats":[],"summary":{}}),
+    commit_threat_model_revision(root, &json!({"version":"1", "methodology":"stride", "title":"Labeled recovery fixture", "dfd":{"nodes":[{"id":"app","type":"process","name":"Recovery fixture","trustZone":"internal"}],"flows":[],"trustBoundaries":[]},"threats":[],"summary":{}}),
         ThreatModelCommit {
             model_id: None, new_model: true, label: "Recovery fixture".into(),
             scope: ScopeRef::legacy_root(root, &format!("sha256:{}", "1".repeat(64))),

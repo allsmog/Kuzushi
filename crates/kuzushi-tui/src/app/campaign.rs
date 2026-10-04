@@ -568,12 +568,15 @@ mod tests {
         app.apply_campaign_hotkey(ViewHotkeyAction::CampaignToggleExclude);
 
         assert!(app.router.campaign().excluded.is_empty());
-        assert!(app
-            .router
-            .campaign()
-            .notice
-            .as_deref()
-            .is_some_and(|notice| notice.contains("immutable")));
+        assert!(
+            app.router
+                .campaign()
+                .notice
+                .as_deref()
+                .is_some_and(
+                    |notice| notice.contains("jobs are fixed") && notice.contains("new plan")
+                )
+        );
     }
 
     #[test]
