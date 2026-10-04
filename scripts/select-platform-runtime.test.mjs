@@ -46,6 +46,16 @@ test("shared dependencies and unknown diff history run every platform suite", ()
   assert.equal(changedPaths("a".repeat(40), tmpdir()), null);
 });
 
+test("unmatched executable paths keep every platform suite enabled", () => {
+  for (const file of [
+    "crates/kuzushi-mcp-codeql/src/tools/snapshot_store/session_root.rs",
+    "crates/kuzushi-mcp-clang/src/clangd/client.rs",
+    "scripts/new-runtime-adapter.mjs",
+  ]) {
+    assert.ok(Object.values(selectPlatformRuntime([file])).every(Boolean), file);
+  }
+});
+
 test("Git diff selection includes deleted files and both sides of renamed paths", (t) => {
   const root = mkdtempSync(path.join(tmpdir(), "kuzushi-platform-selection-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

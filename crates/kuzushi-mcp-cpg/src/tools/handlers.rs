@@ -9,6 +9,9 @@ use kuzushi_cpg::queries;
 use kuzushi_mcp_common::ToolHandler;
 use serde_json::{json, Value};
 
+#[cfg(test)]
+mod tests;
+
 pub fn health_summary() -> Value {
     let root = target_root();
     let (root_display, langs) = match &root {
@@ -84,7 +87,7 @@ fn required_line(args: &Value) -> Result<u32> {
 
 fn method_json(record: &queries::MethodRecord, lang: &str) -> Value {
     json!({
-        "selector": record.selector,
+        "selector": format!("{lang}:{}", record.selector),
         "name": record.name,
         "fullName": record.full_name,
         "signature": record.signature,
@@ -101,9 +104,10 @@ impl ToolHandler for CallersOfTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let function = required_str(&args, "fn")?;
         with_language_projects(move |_, projects| {
-            ensure_unique_function(projects, &function)?;
+            let (projects, function) = method_scope(projects, &function)?;
+            ensure_unique_function(projects, function)?;
             let callers =
-                method_results(projects, |project| queries::callers_of(project, &function))?;
+                method_results(projects, |project| queries::callers_of(project, function))?;
             Ok(json!({"fn": function, "callers": callers}))
         })
         .await
@@ -117,11 +121,12 @@ impl ToolHandler for CalleesOfTool {
     async fn call(&self, args: Value) -> Result<Value> {
         let function = required_str(&args, "fn")?;
         with_language_projects(move |_, projects| {
-            ensure_unique_function(projects, &function)?;
+            let (projects, function) = method_scope(projects, &function)?;
+            ensure_unique_function(projects, function)?;
             let mut callees = Vec::new();
             for (lang, project) in projects {
                 callees.extend(
-                    queries::callees_of(project, &function)
+                    queries::callees_of(project, function)
                         .map_err(anyhow::Error::msg)?
                         .into_iter()
                         .map(|callee| json!({"callee":callee, "language":lang})),
@@ -243,12 +248,13 @@ impl ToolHandler for SliceTool {
         let line = required_line(&args)?;
         let depth = requested_depth(&args)?;
         with_language_projects(move |_, projects| {
-            ensure_unique_function(projects, &method)?;
+            let (projects, method) = method_scope(projects, &method)?;
+            ensure_unique_function(projects, method)?;
             let mut entries = Vec::new();
             let mut truncated = false;
             for (lang, project) in projects {
                 let (records, was_truncated) =
-                    queries::backward_slice_at(project, &method, line, depth)
+                    queries::backward_slice_at(project, method, line, depth)
                         .map_err(anyhow::Error::msg)?;
                 truncated |= was_truncated;
                 entries.extend(records.iter().map(|record| {
@@ -290,6 +296,22 @@ fn method_results(
     Ok(results)
 }
 
+fn method_scope<'a>(
+    projects: &'a [(String, kuzushi_cpg::Project)],
+    name: &'a str,
+) -> Result<(&'a [(String, kuzushi_cpg::Project)], &'a str)> {
+    let Some((language, selector)) = name.split_once(":method:") else {
+        return Ok((projects, name));
+    };
+    let index = projects
+        .iter()
+        .position(|(lang, _)| lang == language)
+        .ok_or_else(|| anyhow::anyhow!("method selector names an unavailable language graph"))?;
+    let bare = &name[language.len() + 1..];
+    anyhow::ensure!(!selector.is_empty(), "method selector is empty");
+    Ok((&projects[index..index + 1], bare))
+}
+
 fn ensure_unique_function(projects: &[(String, kuzushi_cpg::Project)], name: &str) -> Result<()> {
     let candidates = method_results(projects, |project| {
         Ok(queries::methods_named(project, name))
@@ -309,6 +331,10 @@ fn ensure_unique_file(projects: &[(String, kuzushi_cpg::Project)], file: &str) -
             candidates.push(json!({"language":lang,"file":file}));
         }
     }
+    anyhow::ensure!(
+        !candidates.is_empty(),
+        "exact file membership unavailable: requested file is absent from loaded language graphs"
+    );
     anyhow::ensure!(
         candidates.len() <= 1,
         "ambiguous file across language graphs: {}",

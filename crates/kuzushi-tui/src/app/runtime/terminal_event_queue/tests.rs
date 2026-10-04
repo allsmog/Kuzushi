@@ -162,9 +162,16 @@ fn terminal_queue_enforces_aggregate_bytes_and_rejects_oversized_paste_explicitl
     let queue = TerminalEventQueue::default();
     assert!(queue.send(terminal(TermEvent::Paste("x".repeat(PASTE_BYTE_LIMIT + 1)))));
     match queue.try_recv() {
-        Ok(Err(error)) => assert!(error.contains("paste was not accepted")),
+        Ok(Ok(TerminalLoopEvent::InputRejected(error))) => {
+            assert!(error.contains("paste was not accepted"))
+        }
         _ => panic!("oversized paste must be rejected visibly"),
     }
+    assert!(queue.send(key('a')));
+    assert!(matches!(
+        queue.try_recv(),
+        Ok(Ok(TerminalLoopEvent::Terminal(TermEvent::Key(_))))
+    ));
 }
 
 #[test]

@@ -221,6 +221,14 @@ impl EventLog {
     }
 
     fn append_envelope(&self, envelope: &EventEnvelope) -> Result<()> {
+        self.append_envelope_with_sync(envelope, sync_directory)
+    }
+
+    fn append_envelope_with_sync(
+        &self,
+        envelope: &EventEnvelope,
+        sync: impl FnOnce(&Path) -> Result<()>,
+    ) -> Result<()> {
         let mut line = serde_json::to_string(envelope).context("Could not serialize event")?;
         line.push('\n');
         anyhow::ensure!(
@@ -230,11 +238,12 @@ impl EventLog {
         let path = self.segment_path_for_append(line.len() as u64)?;
         let (mut file, created) = open_segment_for_append(&path)?;
         heal_torn_tail(&mut file, &path)?;
+        *self.head.borrow_mut() = None;
         file.write_all(line.as_bytes())
             .context("Could not append event")?;
         file.sync_all().context("Could not fsync event log")?;
         if created {
-            sync_directory(&self.root)?;
+            sync(&self.root)?;
         }
         Ok(())
     }

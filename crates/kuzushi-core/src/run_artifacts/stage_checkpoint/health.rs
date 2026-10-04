@@ -62,7 +62,7 @@ impl StageCheckpointHandle {
             return false;
         };
         health.degraded = true;
-        health.retry_on_next_dispatch = true;
+        health.retry_on_next_dispatch = !health.checkpoint_cleared;
         if health
             .problems
             .iter()
@@ -81,8 +81,9 @@ impl StageCheckpointHandle {
                     "warning",
                     "checkpoint",
                     format!(
-                        "resume degraded: {} failed ({}): {}; recovery retries on next dispatch",
-                        problem.operation, problem.class, problem.message
+                        "resume degraded: {} failed ({}): {}; retry on next dispatch: {}",
+                        problem.operation, problem.class, problem.message,
+                        self.resume_health().retry_on_next_dispatch
                     ),
                 )
                 .with_severity("warning")

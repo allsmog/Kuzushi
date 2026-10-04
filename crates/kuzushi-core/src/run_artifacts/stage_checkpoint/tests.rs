@@ -412,6 +412,23 @@ fn clear_on_completion_removes_the_pending_checkpoint() {
 }
 
 #[test]
+fn cleared_checkpoint_stays_consumed_when_health_receipt_fails() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("research").complete(Vec::new());
+    let receipt = run_dir(temp.path(), "run-1").join("resume-health.json");
+    std::fs::remove_file(&receipt).unwrap();
+    std::fs::create_dir(&receipt).unwrap();
+    handle.clear_checkpoint();
+    assert!(pending_stage_checkpoints(temp.path()).is_empty());
+    let health = handle.resume_health();
+    assert!(health.degraded);
+    assert!(health.checkpoint_cleared);
+    assert!(!health.retry_on_next_dispatch);
+    assert!(health.problems.iter().any(|problem| problem.operation == "health-receipt"));
+}
+
+#[test]
 fn different_operation_fingerprints_do_not_share_checkpoints() {
     let temp = workspace();
     let first_store = StageCheckpointStore::discover(temp.path(), &[7u8; 32]).unwrap();

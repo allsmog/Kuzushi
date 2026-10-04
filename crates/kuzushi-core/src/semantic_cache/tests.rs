@@ -1,4 +1,22 @@
 use super::*;
+
+#[cfg(any(unix, windows))]
+#[test]
+fn hard_linked_database_and_journal_cannot_modify_operator_files() {
+    for name in [database::DATABASE_FILE.to_string(), format!("{}-journal", database::DATABASE_FILE)] {
+        let root = tempfile::tempdir().unwrap();
+        let operator = root.path().join("operator.sqlite");
+        let connection = rusqlite::Connection::open(&operator).unwrap();
+        connection.execute_batch("CREATE TABLE private_data(value TEXT);").unwrap();
+        drop(connection);
+        let before = std::fs::read(&operator).unwrap();
+        let cache = root.path().join("cache");
+        std::fs::create_dir(&cache).unwrap();
+        std::fs::hard_link(&operator, cache.join(name)).unwrap();
+        assert!(SemanticCache::open_at(&cache).is_err());
+        assert_eq!(std::fs::read(&operator).unwrap(), before);
+    }
+}
 use serde_json::json;
 
 fn entry(value: serde_json::Value) -> SemanticCacheEntry {

@@ -123,6 +123,7 @@ fn assert_retained_names_during_swap(authorized: &Path, swapped: &Path) {
     let renamed = std::fs::rename(&swapped, &retained);
     #[cfg(windows)]
     if let Err(error) = &renamed {
+        assert_ne!(authorized, swapped, "retained leaf must permit replacement");
         // NTFS can prevent an ancestor rename while a descendant is retained.
         // The rejected namespace mutation itself preserves the capability.
         assert!(matches!(error.raw_os_error(), Some(5 | 32)), "{error}");

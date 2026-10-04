@@ -27,13 +27,23 @@ const suites = {
 };
 
 export function selectPlatformRuntime(paths) {
-  const all = paths === null || paths.some((file) => matchesAny(file, shared));
+  const all = paths === null || paths.some(requiresAllSuites);
   return Object.fromEntries(
     Object.entries(suites).map(([suite, patterns]) => [
       suite,
       all || paths.some((file) => matchesAny(file, patterns)),
     ]),
   );
+}
+
+function requiresAllSuites(file) {
+  if (matchesAny(file, shared)) return true;
+  if (Object.values(suites).some((patterns) => matchesAny(file, patterns))) return false;
+  return !matchesAny(file, [
+    /^(docs|plans|design)\//,
+    /\.(md|txt)$/,
+    /^crates\/kuzushi-core\/src\/(?:.*\/)?domain\//,
+  ]);
 }
 
 function matchesAny(file, patterns) {

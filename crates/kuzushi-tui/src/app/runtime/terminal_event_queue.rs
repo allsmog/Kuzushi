@@ -235,6 +235,7 @@ fn replaceable_kind(event: &QueuedEvent) -> Option<u8> {
 fn event_bytes(event: &QueuedEvent) -> usize {
     let payload = match event {
         Ok(TerminalLoopEvent::Terminal(TermEvent::Paste(text))) => text.capacity(),
+        Ok(TerminalLoopEvent::InputRejected(message)) => message.capacity(),
         Err(error) => error.capacity(),
         _ => 0,
     };
@@ -251,7 +252,9 @@ fn bounded_event(event: QueuedEvent) -> QueuedEvent {
 
 fn bounded_paste(text: String) -> QueuedEvent {
     if text.len() > PASTE_BYTE_LIMIT {
-        return Err("paste exceeds the 1 MiB input limit; paste was not accepted".into());
+        return Ok(TerminalLoopEvent::InputRejected(
+            "paste exceeds the 1 MiB input limit; paste was not accepted".into(),
+        ));
     }
     let compact = text.into_boxed_str().into_string();
     Ok(TerminalLoopEvent::Terminal(TermEvent::Paste(compact)))

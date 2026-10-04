@@ -305,6 +305,7 @@ impl EditorState {
     }
 
     pub(crate) fn insert_multiline_paste(&mut self, text: &str) -> String {
+        self.reset_completion_cycle();
         self.push_paste_undo();
         self.next_paste_id = self.next_paste_id.wrapping_add(1).max(1);
         let lines = text.split('\n').count();
@@ -429,6 +430,8 @@ impl EditorState {
             return true;
         }
         self.input = cycle.prefix;
+        self.pasted_blocks.clear();
+        self.paste_inspection = None;
         self.cursor = self.char_count();
         self.history_index = None;
         self.touch_completion_preview();

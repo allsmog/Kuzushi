@@ -3,6 +3,38 @@ use crate::app::ShellApp;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::V2Config;
 
+#[test]
+fn paste_resets_completion_and_prefix_restore_clears_stale_spans() {
+    let mut editor = EditorState::default();
+    editor.insert_str_at_cursor("completed command");
+    let cycle = crate::app::CompletionCycle {
+        prefix: "c".into(),
+        candidates: vec!["completed command".into()],
+        index: 0,
+    };
+    editor.set_completion_cycle(cycle.clone());
+    editor.insert_multiline_paste("document\nbody");
+    assert!(editor.completion_cycle().is_none());
+    editor.set_completion_cycle(cycle);
+    assert!(editor.restore_completion_prefix());
+    assert!(!editor.has_pasted_blocks());
+    assert_eq!(editor.take_input(), "c");
+}
+
+#[test]
+fn paste_inspection_leaves_quit_chords_for_shell_dispatch() {
+    for chord in ['c', 'd'] {
+        let mut editor = draft();
+        editor.set_cursor(7);
+        assert!(editor.inspect_paste_at_cursor());
+        assert!(!editor.handle_paste_inspection_key(KeyEvent::new(
+            KeyCode::Char(chord),
+            KeyModifiers::CONTROL
+        )));
+        assert!(editor.paste_inspection().is_some());
+    }
+}
+
 fn draft() -> EditorState {
     let mut editor = EditorState::default();
     editor.insert_str_at_cursor("before ");

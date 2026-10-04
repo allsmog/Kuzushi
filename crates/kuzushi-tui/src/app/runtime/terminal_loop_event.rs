@@ -67,6 +67,7 @@ impl WakeRateState {
 
 pub(crate) enum TerminalLoopEvent {
     Terminal(TermEvent),
+    InputRejected(String),
     Wake,
 }
 
@@ -345,6 +346,11 @@ fn apply_terminal_loop_event(
     outcome: &mut TerminalEventBatchOutcome,
 ) {
     outcome.received_count += 1;
+    if let TerminalLoopEvent::InputRejected(message) = &event {
+        app.set_warn_notice("input", message.clone());
+        outcome.changed = true;
+        return;
+    }
     let TerminalLoopEvent::Terminal(event) = event else {
         return;
     };
@@ -366,6 +372,29 @@ pub(crate) fn entered_running_activity(prior_view: ShellView, app: &ShellApp) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_paste_leaves_shell_and_subsequent_input_available() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let mut outcome = TerminalEventBatchOutcome::default();
+        apply_terminal_loop_event(
+            &mut app,
+            TerminalLoopEvent::InputRejected("paste rejected".into()),
+            &mut outcome,
+        );
+        assert!(outcome.changed);
+        assert!(!outcome.quit_requested);
+        apply_terminal_loop_event(
+            &mut app,
+            TerminalLoopEvent::Terminal(TermEvent::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('a'),
+                crossterm::event::KeyModifiers::NONE,
+            ))),
+            &mut outcome,
+        );
+        assert_eq!(app.editor().input(), "a");
+        assert!(!app.should_quit());
+    }
 
     #[test]
     fn background_wake_allows_one_immediate_tail_then_throttles() {

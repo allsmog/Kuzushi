@@ -1,5 +1,5 @@
 use super::{char_index_to_byte, graphemes, EditorState, PastedBlock, Range};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone)]
 pub(crate) struct PasteInspection {
@@ -85,6 +85,9 @@ impl EditorState {
     }
 
     pub(crate) fn handle_paste_inspection_key(&mut self, key: KeyEvent) -> bool {
+        if key.modifiers == KeyModifiers::CONTROL && matches!(key.code, KeyCode::Char('c' | 'd')) {
+            return false;
+        }
         if !key.modifiers.is_empty() {
             return self.paste_inspection.is_some();
         }

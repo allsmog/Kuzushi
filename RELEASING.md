@@ -198,6 +198,14 @@ part of every release commit.
 
 ### Audit remediation compatibility
 
+- MCP method selectors now include their language graph, for example
+  `cpp:method:<digest>`. This disambiguates shared headers indexed in both C
+  and C++. Existing names and bare selectors remain accepted when unique.
+  A structural query naming an absent file returns an explicit membership
+  error. Semantic cache databases and journals reject multiple hard links
+  before SQLite initialization. An oversized terminal paste reports a notice
+  and leaves the shell available for further input.
+
 - Windows bounded MCP file reads now retain an opening content digest and
   verify both returned bytes and current handle content before accepting a read
   or copy. Read identities always include a content digest on Windows. This adds

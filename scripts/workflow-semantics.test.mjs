@@ -44,6 +44,7 @@ test("every ready PR update has Rust tests and platform runtime jobs", () => {
   const ci = workflow("ci");
   requireAllPullRequestBranches(ci);
   assert.ok(ci.on.pull_request.types.includes("synchronize"));
+  assert.ok(ci.on.pull_request.types.includes("edited"));
   assert.ok(Object.hasOwn(ci.on, "merge_group"));
   assert.equal(
     ci.jobs["rust-tests"].if,

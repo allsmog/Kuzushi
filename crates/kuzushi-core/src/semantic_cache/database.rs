@@ -39,6 +39,7 @@ fn reject_unsafe_file(path: &Path, max_bytes: u64) -> Result<()> {
         metadata.file_type().is_file(),
         "cache database must be a regular file"
     );
+    super::file_links::require_single_link(path, &metadata)?;
     anyhow::ensure!(
         metadata.len() <= max_bytes,
         "cache database exceeds its byte quota"

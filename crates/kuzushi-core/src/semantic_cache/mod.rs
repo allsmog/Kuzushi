@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 mod database;
+mod file_links;
 mod legacy_cleanup;
 mod limits;
 mod maintenance;

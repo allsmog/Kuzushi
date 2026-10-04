@@ -129,8 +129,10 @@ truncation and approximate-position metadata. Unsupported depth limits fail.
 The core `cpg_taint_paths` adapter enforces its advertised `maxPaths` range
 (1–25, default 10); invalid values are errors, never silent clamps.
 Structural queries reject ambiguous file or method identities and return
-candidates. `cpg.definitions` returns a canonical method selector for subsequent
-queries. Reaching definitions require exact AST membership at the requested line;
+candidates. `cpg.definitions` returns a language-scoped selector such as
+`cpp:method:<digest>` for subsequent queries, including shared headers indexed
+by multiple language graphs. Bare selectors remain valid when unambiguous.
+Queries reject absent files explicitly. Reaching definitions require exact AST membership at the requested line;
 they cannot use the approximate nearest-preceding method from `cpg.method_at`.
 Slice depth is an integer in 0–32, checked before graph work.
 
