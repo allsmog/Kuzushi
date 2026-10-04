@@ -1090,6 +1090,12 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
             tool.name
         );
     }
+    validate_dynamic_effect_policy(tool)?;
+    validate_prompt_options(tool, "dynamic tool")?;
+    Ok(())
+}
+
+fn validate_dynamic_effect_policy(tool: &ToolDescriptor) -> Result<()> {
     if tool.effect.needs_operator_approval() && tool.approval != ApprovalPolicy::Explicit {
         anyhow::bail!(
             "dynamic tool {:?} declares {:?} but does not require explicit approval",
@@ -1103,7 +1109,6 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
             tool.name
         );
     }
-    validate_prompt_options(&tool, "dynamic tool")?;
     Ok(())
 }
 

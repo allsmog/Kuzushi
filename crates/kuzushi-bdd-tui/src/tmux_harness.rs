@@ -584,9 +584,14 @@ fn status_footer_line(snapshot: &str) -> Option<&str> {
 
 fn is_status_footer_line(line: &str) -> bool {
     let line = line.trim_start();
+    let route_line = if line.starts_with("⛭ ") {
+        line.split_once(" · ").map_or(line, |(_, route)| route)
+    } else {
+        line
+    };
     let english_route = ["shell", "module", "agent", "plan", "run"]
         .iter()
-        .any(|mode| line.starts_with(&format!("{mode} route ·")));
+        .any(|mode| route_line.starts_with(&format!("{mode} route ·")));
     english_route
         || line.starts_with("route:")
         || line.starts_with("mode:")
@@ -714,6 +719,16 @@ mod tests {
             status_footer_line(snapshot),
             Some("route:shell · 組 map 1/5 · workbench")
         );
+    }
+
+    #[test]
+    fn finds_route_after_autonomy_posture() {
+        let footer = "⛭ autonomy:fix · shell route · Map 1/3 · workbench";
+        let snapshot = format!("body\n{footer}\ncomposer\n");
+
+        assert_eq!(status_footer_line(&snapshot), Some(footer));
+        assert!(interactive_frame_ready(&snapshot));
+        assert_eq!(status_footer_line("⛭ help · use shell route · later"), None);
     }
 
     #[test]

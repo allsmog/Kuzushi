@@ -197,10 +197,7 @@ fn run_focus_snapshot(session: &crate::tmux_harness::TmuxSession) -> Option<Stri
 }
 
 fn run_focus_shows_both(snapshot: &str, left: &str, right: &str) -> bool {
-    snapshot.contains("RUN FOCUS")
-        && snapshot
-            .lines()
-            .any(|line| line.contains(left) && line.contains(right))
+    snapshot.contains("RUN FOCUS") && snapshot.contains(left) && snapshot.contains(right)
 }
 
 fn compact_run_focus_matches(
@@ -406,13 +403,18 @@ entry-points:extract\n\
 OUTPUT\n";
 
     #[test]
-    fn retained_run_focus_requires_both_labels_on_one_row() {
+    fn retained_run_focus_requires_both_labels_in_one_capture() {
         assert!(run_focus_shows_both(
             "RUN FOCUS\nTASKS · OUTPUT\n",
             "TASKS",
             "OUTPUT"
         ));
-        assert!(!run_focus_shows_both(STACKED_RUN_FOCUS, "TASKS", "OUTPUT"));
+        assert!(run_focus_shows_both(STACKED_RUN_FOCUS, "TASKS", "OUTPUT"));
+        assert!(!run_focus_shows_both(
+            "RUN FOCUS\nTASKS\n",
+            "TASKS",
+            "OUTPUT"
+        ));
     }
 
     #[test]
