@@ -64,6 +64,30 @@ function requireAllPullRequestBranches(document) {
   assert.equal(document.on.pull_request["branches-ignore"], undefined);
 }
 
+function requireHostedRustDiskPreparation(document) {
+  const steps = document.jobs["rust-tests"].steps;
+  const cleanup = steps.find((step) => step.name === "Reserve disk for Rust tests");
+  assert.equal(cleanup?.if, "${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}");
+  const restore = steps.findIndex((step) => step.uses?.startsWith("moonrepo/setup-rust@"));
+  assert.ok(restore >= 0 && steps.indexOf(cleanup) < restore);
+}
+
+test("Rust disk preparation excludes owner machines and precedes cache restoration", () => {
+  const ci = workflow("ci");
+  requireHostedRustDiskPreparation(ci);
+  const ownerMachine = structuredClone(ci);
+  const cleanup = ownerMachine.jobs["rust-tests"].steps.find(
+    (step) => step.name === "Reserve disk for Rust tests",
+  );
+  cleanup.if = cleanup.if.replace(" && runner.environment == 'github-hosted'", "");
+  assert.throws(() => requireHostedRustDiskPreparation(ownerMachine));
+  const late = structuredClone(ci);
+  const steps = late.jobs["rust-tests"].steps;
+  const index = steps.findIndex((step) => step.name === "Reserve disk for Rust tests");
+  steps.push(...steps.splice(index, 1));
+  assert.throws(() => requireHostedRustDiskPreparation(late));
+});
+
 function requirePlatformSelection(document) {
   const quality = document.jobs["quality-gauntlet"];
   assert.equal(
