@@ -15,6 +15,25 @@ const CHILD_STOP: &str = "KUZUSHI_TEST_STORAGE_CHILD_STOP";
 const PAUSE_KIND: &str = "KUZUSHI_TEST_STORAGE_PAUSE_EVENT_KIND";
 const PAUSE_MARKER: &str = "KUZUSHI_TEST_STORAGE_PAUSE_MARKER";
 
+struct StorageChild(Child);
+
+impl StorageChild {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.0.kill()
+    }
+
+    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.0.wait()
+    }
+}
+
+impl Drop for StorageChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 #[test]
 fn two_process_writers_survive_kill_between_append_and_projection() {
     let fixture = ProcessFixture::new();
@@ -73,7 +92,7 @@ impl ProcessFixture {
         }
     }
 
-    fn spawn(&self, role: &str, ready: &Path, pause: Option<&Path>) -> Child {
+    fn spawn(&self, role: &str, ready: &Path, pause: Option<&Path>) -> StorageChild {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args([
@@ -89,13 +108,13 @@ impl ProcessFixture {
             .env(CHILD_GO, &self.go)
             .env(CHILD_STOP, &self.stop)
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            .stderr(Stdio::inherit());
         if let Some(marker) = pause {
             command
                 .env(PAUSE_KIND, EventKind::FindingObserved.as_str())
                 .env(PAUSE_MARKER, marker);
         }
-        command.spawn().expect("spawn storage helper")
+        StorageChild(command.spawn().expect("spawn storage helper"))
     }
 
     fn release_when_ready(&self) {
