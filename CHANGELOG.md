@@ -45,6 +45,17 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Full CI's `e2e` lane runs the native CLI again, and a failing smoke run now
+  says why. GitHub's artifact round trip drops the executable bit, so
+  `node22-compat`, `verify-pack`, and `real-semgrep` each restore it after
+  downloading `native/`; `e2e` did not, and because the job pre-sets
+  `KUZUSHI_NATIVE_BIN` it also bypassed the harness's own compensating
+  `chmod`. The wrapper died with `EACCES` — into `wrapper-help.log`, which
+  nothing printed and no step uploaded, so the job failed in 0.18s with no
+  output at all. `tests/e2e/run-smoke.sh` now reports the failing command, its
+  line, and the tail of every captured log on the way out, and a workflow
+  contract asserts every native-artifact job restores the executable bit
+  before handing control to a harness.
 - `cargo deny check advisories` passes again, and the four advisories it was
   holding are gone from the shipped dependency graph. Three of them are
   memory-safety bugs in wasmtime 49.0.1 — the engine behind Kuzushi's plugin
