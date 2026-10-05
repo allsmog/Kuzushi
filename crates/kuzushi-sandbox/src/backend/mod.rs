@@ -50,18 +50,9 @@ pub fn detect_backend(preference: Option<SandboxBackend>) -> SandboxBackend {
     SandboxBackend::Plain
 }
 
-/// PATH-search a binary. Local copy so this crate stays
-/// dependency-light (we don't pull in `kuzushi-mcp-common` just for
-/// `which`).
+/// Resolve a host executable using the shared platform-aware PATH search.
 pub fn which(binary: &str) -> Option<PathBuf> {
-    let path_env = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_env) {
-        let candidate = dir.join(binary);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    kuzushi_mcp_common::doctor::which(binary)
 }
 
 #[cfg(test)]

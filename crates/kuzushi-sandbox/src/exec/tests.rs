@@ -169,6 +169,60 @@ mod supervision_regressions {
         SandboxExecOptions::new(vec!["/bin/sh".into(), "-c".into(), script.into()])
     }
 
+    #[test]
+    fn host_path_executable_preserves_alias_without_inheriting_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let implementation = root.path().join("probe-implementation");
+        std::fs::write(
+            &implementation,
+            "#!/bin/sh\nprintf '%s' \"${0##*/}:${KUZUSHI_SANDBOX_TEST_SECRET-unset}:$PATH\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&implementation, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&implementation, root.path().join("kuzushi-path-probe"))
+            .unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "exec::tests::supervision_regressions::host_path_probe_child",
+                "--nocapture",
+            ])
+            .env("PATH", root.path())
+            .env("KUZUSHI_SANDBOX_PATH_TEST", "1")
+            .env("KUZUSHI_SANDBOX_TEST_SECRET", "labeled-test-secret")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[tokio::test]
+    async fn host_path_probe_child() {
+        if std::env::var_os("KUZUSHI_SANDBOX_PATH_TEST").is_none() {
+            return;
+        }
+        let options = SandboxExecOptions::new(vec!["kuzushi-path-probe".into()]);
+        let result = sandbox_exec(SandboxBackend::Plain, options).await.unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result.stdout,
+            "kuzushi-path-probe:unset:/usr/local/bin:/usr/bin:/bin"
+        );
+        let granted_path = std::env::var("PATH").unwrap();
+        let mut options = SandboxExecOptions::new(vec!["kuzushi-path-probe".into()]);
+        options.env.insert("PATH".into(), granted_path.clone());
+        let result = sandbox_exec(SandboxBackend::Plain, options).await.unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result.stdout,
+            format!("kuzushi-path-probe:unset:{granted_path}")
+        );
+    }
+
     #[tokio::test]
     async fn timeout_prevents_descendant_marker() {
         let dir = tempfile::tempdir().unwrap();
