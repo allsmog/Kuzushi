@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -79,18 +80,20 @@ test("the target selection is explicit and never inferred from the host", () => 
 });
 
 test("cargo output is read from the target-specific release directory", () => {
-  assert.equal(cargoReleaseDir("/repo", {}, undefined), "/repo/target/release");
+  const repo = path.resolve("repo");
+  const shared = path.resolve("shared");
+  assert.equal(cargoReleaseDir(repo, {}, undefined), path.join(repo, "target", "release"));
   assert.equal(
-    cargoReleaseDir("/repo", {}, "x86_64-apple-darwin"),
-    "/repo/target/x86_64-apple-darwin/release",
+    cargoReleaseDir(repo, {}, "x86_64-apple-darwin"),
+    path.join(repo, "target", "x86_64-apple-darwin", "release"),
   );
   assert.equal(
-    cargoReleaseDir("/repo", { CARGO_TARGET_DIR: "/shared" }, undefined),
-    "/shared/release",
+    cargoReleaseDir(repo, { CARGO_TARGET_DIR: shared }, undefined),
+    path.join(shared, "release"),
   );
   assert.equal(
-    cargoReleaseDir("/repo", { CARGO_TARGET_DIR: "out" }, undefined),
-    "/repo/out/release",
+    cargoReleaseDir(repo, { CARGO_TARGET_DIR: "out" }, undefined),
+    path.join(repo, "out", "release"),
   );
 });
 
