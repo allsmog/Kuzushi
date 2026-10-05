@@ -2,6 +2,20 @@ use super::*;
 use crate::run_artifacts::run_history_index::retention::RetentionBuilder;
 
 #[test]
+fn syncing_existing_index_preserves_bytes_and_does_not_create_missing_files() {
+    let target = tempfile::tempdir().unwrap();
+    let path = target.path().join("index.sqlite");
+    std::fs::write(&path, b"existing index bytes").unwrap();
+
+    database::sync_file(&path).unwrap();
+
+    assert_eq!(std::fs::read(&path).unwrap(), b"existing index bytes");
+    let missing = target.path().join("missing.sqlite");
+    assert!(database::sync_file(&missing).is_err());
+    assert!(!missing.exists());
+}
+
+#[test]
 fn compatibility_offsets_are_small_and_cursor_pages_continue() {
     let target = tempfile::tempdir().unwrap();
     let entries = (0..=1_100_u64)

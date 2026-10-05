@@ -278,7 +278,7 @@ fn build_replacement_index(
     metadata.write(&transaction)?;
     transaction.commit()?;
     connection.close().map_err(|(_, error)| error)?;
-    fs::File::open(path)?.sync_all()?;
+    database::sync_file(path)?;
     Ok(())
 }
 

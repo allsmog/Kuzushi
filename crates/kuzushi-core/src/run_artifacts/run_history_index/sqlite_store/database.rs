@@ -144,6 +144,17 @@ fn wide_path(path: &Path) -> Vec<u16> {
 
 pub(super) fn sync_index_file(target: &Path) -> Result<()> {
     let path = checked_run_history_index_path(target)?;
-    fs::File::open(&path)?.sync_all()?;
+    sync_file(&path)?;
     Ok(crate::fs_atomic::sync_parent_dir(&path)?)
+}
+
+pub(super) fn sync_file(path: &Path) -> Result<()> {
+    // Windows FlushFileBuffers requires a handle with write access.
+    fs::OpenOptions::new()
+        .read(true)
+        .write(cfg!(windows))
+        .open(path)
+        .with_context(|| format!("Could not open run-history file for sync {}", path.display()))?
+        .sync_all()
+        .with_context(|| format!("Could not sync run-history file {}", path.display()))
 }

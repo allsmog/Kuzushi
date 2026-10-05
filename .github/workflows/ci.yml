@@ -196,6 +196,7 @@ jobs:
           cargo test -p kuzushi-core --lib fs_atomic:: --locked
           cargo test -p kuzushi-core --lib bounded_file:: --locked
           cargo test -p kuzushi-core --lib storage_v3:: --locked
+          cargo test -p kuzushi-core --lib run_history --locked
           cargo test -p kuzushi-core --lib runtime::application::loop_checkpoint:: --locked
       - name: Terminal input and output contracts
         if: ${{ needs.quality-gauntlet.outputs.platform-terminal == 'true' }}
