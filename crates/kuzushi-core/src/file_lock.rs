@@ -204,9 +204,7 @@ pub(crate) fn windows_final_path(file: &File) -> std::io::Result<std::path::Path
 #[cfg(windows)]
 fn reject_windows_reparse_components(path: &Path) -> std::io::Result<()> {
     use std::os::windows::fs::MetadataExt;
-    let mut prefix = std::path::PathBuf::new();
-    for component in path.components() {
-        prefix.push(component.as_os_str());
+    for prefix in windows_lock_component_paths(path) {
         match std::fs::symlink_metadata(&prefix) {
             Ok(metadata) => reject_windows_reparse_attributes(&prefix, metadata.file_attributes())?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
@@ -214,6 +212,20 @@ fn reject_windows_reparse_components(path: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn windows_lock_component_paths(path: &Path) -> impl Iterator<Item = std::path::PathBuf> + '_ {
+    use std::path::{Component, PathBuf};
+
+    path.components()
+        .scan(PathBuf::new(), |prefix, component| {
+            prefix.push(component.as_os_str());
+            Some((component, prefix.clone()))
+        })
+        .filter_map(|(component, prefix)| {
+            (!matches!(component, Component::Prefix(_))).then_some(prefix)
+        })
 }
 
 #[cfg(windows)]
@@ -298,6 +310,30 @@ mod tests {
 
         assert!(ExclusiveFileLock::acquire(&link).is_err());
         assert_eq!(std::fs::read_to_string(outside).unwrap(), "outside");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_lock_component_paths_keep_complete_roots_and_every_child() {
+        for root in [r"\\?\C:\", r"\\?\UNC\server\share\"] {
+            let root = std::path::PathBuf::from(root);
+            let parent = root.join("state");
+            let leaf = parent.join("ledger.lock");
+            let paths = windows_lock_component_paths(&leaf).collect::<Vec<_>>();
+            assert_eq!(paths, [root, parent, leaf]);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonicalized_windows_lock_paths_support_exclusive_and_shared_guards() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("state.lock");
+        drop(ExclusiveFileLock::acquire(&path).unwrap());
+        let canonical = std::fs::canonicalize(path).unwrap();
+        assert!(canonical.to_string_lossy().starts_with(r"\\?\"));
+        drop(ExclusiveFileLock::acquire(&canonical).unwrap());
+        drop(SharedFileLock::acquire(&canonical).unwrap());
     }
 
     #[cfg(windows)]
