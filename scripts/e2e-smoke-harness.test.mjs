@@ -2,7 +2,7 @@
 // tests/e2e/run-smoke.sh lives here rather than beside the harness it covers.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -21,6 +21,22 @@ async function nonExecutableNativeBin() {
   await chmod(bin, 0o644);
   return { root, bin };
 }
+
+const declaredLogFiles = (source) =>
+  source
+    .match(/^SMOKE_LOG_FILES=\(([^)]*)\)/m)[1]
+    .trim()
+    .split(/\s+/);
+
+// Any path the harness writes but never declares would go undisclosed on a
+// failure, which is the whole defect this guard exists to prevent.
+const writtenLogFiles = (source) => [
+  ...new Set(
+    [...source.matchAll(/\$\{TEST_LOG_DIR\}\/([A-Za-z0-9._-]+\.[A-Za-z0-9]+)/g)].map(
+      (match) => match[1],
+    ),
+  ),
+];
 
 function runSmoke({ root, bin }) {
   return spawnSync("bash", [smokeScript], {
@@ -48,4 +64,26 @@ test("the native smoke harness discloses the step that failed and its captured l
   // The captured log, not just the command, has to reach the run page.
   assert.match(result.stderr, /wrapper-help\.log \(last \d+ lines\)/);
   assert.match(result.stderr, /EACCES/);
+});
+
+test("the native smoke harness neither removes nor discloses files it did not write", async (t) => {
+  const fixture = await nonExecutableNativeBin();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  // TEST_LOG_DIR is caller-supplied, so it can be a directory already holding
+  // something else. The harness owns its own files there and nothing more.
+  const logs = path.join(fixture.root, "logs");
+  const bystander = path.join(logs, "unrelated.log");
+  await mkdir(logs, { recursive: true });
+  await writeFile(bystander, "a neighbour's log\n");
+
+  const result = runSmoke(fixture);
+
+  assert.notEqual(result.status, 0, `smoke unexpectedly passed:\n${result.stdout}`);
+  assert.equal(await readFile(bystander, "utf8"), "a neighbour's log\n");
+  assert.doesNotMatch(result.stderr, /unrelated\.log|a neighbour's log/);
+});
+
+test("every log the smoke harness writes is declared for cleanup and disclosure", async () => {
+  const source = await readFile(smokeScript, "utf8");
+  assert.deepEqual(writtenLogFiles(source).sort(), declaredLogFiles(source).sort());
 });

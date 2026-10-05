@@ -9,16 +9,21 @@ TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 FAKE_BIN_DIR="${TEST_LOG_DIR}/bin"
 DB_PATH="${TEST_APP_DIR}/.kuzushi/v3/index.sqlite3"
 FAILURE_LOG_TAIL=40
+# The only files this harness writes under TEST_LOG_DIR. Both the pre-run
+# clean and the failure disclosure work from this list, so neither reads nor
+# removes anything else the caller keeps in a directory it may share.
+SMOKE_LOG_FILES=(setup.log wrapper-help.log config-show.log scan.json scan.err findings.json)
 
 # Every step below parks its output in TEST_LOG_DIR so a passing run stays
 # quiet. A failing run must not: CI keeps only this script's own stdio, so a
 # log left in place is a failure nobody can diagnose from the run page.
 disclose_smoke_failure() {
-  local status=$1 line=$2 failed_command=$3 log
+  local status=$1 line=$2 failed_command=$3 name log
   echo "native smoke failed at line ${line} (exit ${status}): ${failed_command}" >&2
-  for log in "${TEST_LOG_DIR}"/*; do
-    [[ -f "${log}" ]] || continue
-    echo "--- ${log} (last ${FAILURE_LOG_TAIL} lines) ---" >&2
+  for name in "${SMOKE_LOG_FILES[@]}"; do
+    log="${TEST_LOG_DIR}/${name}"
+    [[ -s "${log}" ]] || continue
+    echo "--- ${name} (last ${FAILURE_LOG_TAIL} lines) ---" >&2
     tail -n "${FAILURE_LOG_TAIL}" "${log}" >&2
   done
 }
@@ -40,9 +45,13 @@ else
   KUZUSHI_CMD_ARR=(cargo run -q -p kuzushi-cli --)
 fi
 
-# A log left behind by an earlier run would be disclosed as this run's own.
-rm -rf "${TEST_LOG_DIR}"
 mkdir -p "${TEST_LOG_DIR}" "${FAKE_BIN_DIR}"
+
+# A log left behind by an earlier run would be disclosed as this run's own, so
+# this harness clears its own files — never the directory holding them.
+for log_name in "${SMOKE_LOG_FILES[@]}"; do
+  rm -f "${TEST_LOG_DIR}/${log_name}"
+done
 
 bash "${SCRIPT_DIR}/setup-test-app.sh" "${TEST_APP_DIR}" >"${TEST_LOG_DIR}/setup.log" 2>&1
 
