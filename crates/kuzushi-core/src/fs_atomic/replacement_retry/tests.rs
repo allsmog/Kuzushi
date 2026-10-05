@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn same_process_replacements_never_overlap() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
+
+    let ready = Barrier::new(16);
+    let active = AtomicUsize::new(0);
+    std::thread::scope(|threads| {
+        for _ in 0..16 {
+            threads.spawn(|| {
+                ready.wait();
+                replace_with_retry(|| {
+                    assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);
+                    std::thread::sleep(Duration::from_millis(2));
+                    assert_eq!(active.fetch_sub(1, Ordering::SeqCst), 1);
+                    Ok(())
+                })
+                .unwrap();
+            });
+        }
+    });
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn successful_replacement_never_waits() {
     replace_with_retry(|| Ok(())).unwrap();
     retry_replacement(

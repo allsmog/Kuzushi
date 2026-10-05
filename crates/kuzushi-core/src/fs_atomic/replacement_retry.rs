@@ -1,5 +1,11 @@
 use std::io;
+use std::sync::Mutex;
 use std::time::Duration;
+
+// Concurrent replacement calls in this process can keep the destination
+// delete-pending until the retry budget expires. Serialize the replacements;
+// the bounded retries still cover contention from other processes.
+static REPLACEMENT_LOCK: Mutex<()> = Mutex::new(());
 
 // MoveFileExW can fail transiently while another replacement has the old
 // destination open/delete-pending. Keep the synced source intact and retry the
@@ -7,6 +13,9 @@ use std::time::Duration;
 const MAX_RETRIES: usize = 10;
 
 pub(super) fn replace_with_retry(replace: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+    let _guard = REPLACEMENT_LOCK
+        .lock()
+        .map_err(|_| io::Error::other("atomic replacement lock poisoned"))?;
     retry_replacement(replace, std::thread::sleep)
 }
 
