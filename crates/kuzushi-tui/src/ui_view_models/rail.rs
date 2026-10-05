@@ -291,7 +291,7 @@ mod tests {
         let sections = rail_sections(&app, 33);
         let cost = sections.last().unwrap();
 
-        assert_eq!(cost.rows[0].to_string(), "$0.00");
+        assert_eq!(cost.rows[0].to_string(), "$0.00 spent");
         assert_eq!(cost.rows[1].to_string(), "budget not enforced");
     }
 

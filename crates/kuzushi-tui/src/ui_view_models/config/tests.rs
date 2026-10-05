@@ -87,7 +87,7 @@ fn config_marks_only_the_exact_canonical_catalog_model() {
 #[test]
 fn config_marks_the_oauth_catalog_row_for_its_codex_spelling() {
     let mut config = V2Config::default();
-    config.model = Some("openai-codex:operator-private-model".to_string());
+    config.model = Some("openai-codex:gpt-5.5".to_string());
     let app = ShellApp::new(config, None);
 
     let model = config_model(&app);
