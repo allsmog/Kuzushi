@@ -352,6 +352,7 @@ jobs:
         with:
           name: ${{ needs.rust-cli.outputs.native-artifact }}
           path: native/
+      - run: chmod -R +x native/
       - name: Run smoke tests against native CLI
         env:
           KUZUSHI_CMD: node bin/kuzushi-rs.mjs

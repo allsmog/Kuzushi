@@ -8,6 +8,23 @@ TEST_APP_DIR="${TEST_APP_DIR:-/tmp/kuzushi-smoke-app}"
 TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 FAKE_BIN_DIR="${TEST_LOG_DIR}/bin"
 DB_PATH="${TEST_APP_DIR}/.kuzushi/v3/index.sqlite3"
+FAILURE_LOG_TAIL=40
+
+# Every step below parks its output in TEST_LOG_DIR so a passing run stays
+# quiet. A failing run must not: CI keeps only this script's own stdio, so a
+# log left in place is a failure nobody can diagnose from the run page.
+disclose_smoke_failure() {
+  local status=$1 line=$2 failed_command=$3 log
+  echo "native smoke failed at line ${line} (exit ${status}): ${failed_command}" >&2
+  for log in "${TEST_LOG_DIR}"/*; do
+    [[ -f "${log}" ]] || continue
+    echo "--- ${log} (last ${FAILURE_LOG_TAIL} lines) ---" >&2
+    tail -n "${FAILURE_LOG_TAIL}" "${log}" >&2
+  done
+}
+
+trap 'disclose_smoke_failure "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
+
 NATIVE_EXE_NAME="$(node -p 'process.platform === "win32" ? "kuzushi.exe" : "kuzushi"')"
 DOWNLOADED_NATIVE_BIN="$(
   find "${REPO_DIR}/native" -type f -name "${NATIVE_EXE_NAME}" -print -quit 2>/dev/null || true
@@ -23,6 +40,8 @@ else
   KUZUSHI_CMD_ARR=(cargo run -q -p kuzushi-cli --)
 fi
 
+# A log left behind by an earlier run would be disclosed as this run's own.
+rm -rf "${TEST_LOG_DIR}"
 mkdir -p "${TEST_LOG_DIR}" "${FAKE_BIN_DIR}"
 
 bash "${SCRIPT_DIR}/setup-test-app.sh" "${TEST_APP_DIR}" >"${TEST_LOG_DIR}/setup.log" 2>&1

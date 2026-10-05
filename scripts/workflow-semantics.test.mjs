@@ -224,3 +224,63 @@ test("real scanner smoke runs on the same host architecture as its native artifa
   assert.equal(full.jobs["real-semgrep"]["runs-on"], full.jobs["rust-cli"]["runs-on"]);
   assert.deepEqual(full.jobs["real-semgrep"].needs, "rust-cli");
 });
+
+// GitHub's artifact round trip drops the executable bit, so every Full CI job
+// that downloads the native CLI has to restore it before handing control to a
+// harness that runs the binary. An invocation line is one whose first word is
+// `pnpm`, `node`, or `bash`: those hand off to a harness, where a bare
+// assignment or export does not.
+function nativeArtifactJobs(document) {
+  return Object.entries(document.jobs).filter(([, job]) =>
+    (job.steps ?? []).some(
+      (step) => step.uses?.includes("actions/download-artifact") && step.with?.path === "native/",
+    ),
+  );
+}
+
+function commandLinesAfterDownload(job) {
+  const steps = job.steps ?? [];
+  const download = steps.findIndex((step) => step.uses?.includes("actions/download-artifact"));
+  return steps
+    .slice(download + 1)
+    .flatMap((step) => (step.run ? step.run.split("\n") : []))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function requireExecutableBitRestored(job, name) {
+  const lines = commandLinesAfterDownload(job);
+  const restored = lines.findIndex((line) => /\bchmod\b[^|;&]*\+x/.test(line));
+  const invoked = lines.findIndex((line) =>
+    ["pnpm", "node", "bash"].includes(line.split(/\s+/)[0]),
+  );
+  assert.notEqual(restored, -1, `${name} must restore the native artifact's executable bit`);
+  assert.ok(
+    invoked === -1 || restored < invoked,
+    `${name} runs "${lines[invoked]}" before restoring the native artifact's executable bit`,
+  );
+}
+
+test("every native-artifact job restores the executable bit before running the CLI", () => {
+  const full = workflow("ci-full");
+  const consumers = nativeArtifactJobs(full);
+  assert.ok(consumers.length >= 4, "Full CI must still consume the native artifact");
+  for (const [name, job] of consumers) {
+    requireExecutableBitRestored(job, name);
+    const stripped = structuredClone(job);
+    stripped.steps = stripped.steps
+      .filter((step) => !/\bchmod\b[^|;&]*\+x/.test(step.run ?? ""))
+      .map((step) =>
+        step.run
+          ? {
+              ...step,
+              run: step.run
+                .split("\n")
+                .filter((line) => !/\bchmod\b[^|;&]*\+x/.test(line))
+                .join("\n"),
+            }
+          : step,
+      );
+    assert.throws(() => requireExecutableBitRestored(stripped, name));
+  }
+});
