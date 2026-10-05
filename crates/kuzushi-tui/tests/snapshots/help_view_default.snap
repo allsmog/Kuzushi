@@ -50,7 +50,7 @@ map - opens a completed phase's page; its planner is interactive TUI only; for s
 scan - opens a completed phase's page; its planner is interactive TUI only; for scripts use `kuzushi scan <target>` or
 `kuzushi --target <target> run sast:scan`
   aliases / examples: /scan, /sc
-scan batch - configure repeated logical scan trials, optionally costed from a prior run
+scan batch - prepare a finite discovery study, review its allowance, then start its jobs
   aliases / examples: /scan batch, scan batch --prior-run <runId>
 batch <id> - open one scan batch's occurrence results and gate receipt
   aliases / examples: /batch <id>
