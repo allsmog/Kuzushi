@@ -51,10 +51,7 @@ pub(in crate::workspace::application) fn findings_to_sarif_with_benchmark_spend(
     if runs.is_empty() {
         runs.push(empty_sarif_run(&metadata, scan_run_id));
     }
-    let mut properties = json!({ "kuzushiExport": metadata });
-    if let Some(spend) = benchmark_spend {
-        properties["kuzushiBenchmark"] = benchmark_spend_value(spend);
-    }
+    let properties = scan_export_properties(metadata, benchmark_spend, scan_run_id);
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -64,10 +61,22 @@ pub(in crate::workspace::application) fn findings_to_sarif_with_benchmark_spend(
     Ok(serde_json::to_string_pretty(&document)?)
 }
 
-fn empty_sarif_run(
-    metadata: &serde_json::Value,
-    scan_run_id: Option<&str>,
+fn scan_export_properties(
+    metadata: serde_json::Value,
+    spend: Option<&SarifBenchmarkSpend>,
+    run_id: Option<&str>,
 ) -> serde_json::Value {
+    let mut properties = json!({ "kuzushiExport": metadata });
+    if let Some(run_id) = run_id {
+        properties["kuzushiScanRunId"] = json!(run_id);
+    }
+    if let Some(spend) = spend {
+        properties["kuzushiBenchmark"] = benchmark_spend_value(spend);
+    }
+    properties
+}
+
+fn empty_sarif_run(metadata: &serde_json::Value, scan_run_id: Option<&str>) -> serde_json::Value {
     let driver = if scan_run_id.is_some() {
         "kuzushi:sast-scan"
     } else {
@@ -156,18 +165,23 @@ fn build_sarif_run(
 /// escape.
 fn workspace_root_uri(workspace: &WorkspaceTarget) -> Result<String> {
     let root = workspace.root();
-    url::Url::from_directory_path(root).map(String::from).map_err(|_| {
-        anyhow::anyhow!(
-            "Could not encode a file URI for the workspace root: {}",
-            root.display()
-        )
-    })
+    url::Url::from_directory_path(root)
+        .map(String::from)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Could not encode a file URI for the workspace root: {}",
+                root.display()
+            )
+        })
 }
 
 fn sarif_rules(records: &[&WorkspaceFindingExportRecord]) -> Vec<serde_json::Value> {
     let mut rules: BTreeMap<&str, Vec<&WorkspaceFindingExportRecord>> = BTreeMap::new();
     for record in records {
-        rules.entry(record.rule_id.as_str()).or_default().push(record);
+        rules
+            .entry(record.rule_id.as_str())
+            .or_default()
+            .push(record);
     }
     rules
         .into_iter()
@@ -179,7 +193,12 @@ fn sarif_rule(rule_id: &str, records: &[&WorkspaceFindingExportRecord]) -> serde
     let record = records
         .iter()
         .copied()
-        .min_by_key(|record| (sarif_severity_rank(&record.severity), record.fingerprint.as_str()))
+        .min_by_key(|record| {
+            (
+                sarif_severity_rank(&record.severity),
+                record.fingerprint.as_str(),
+            )
+        })
         .expect("SARIF rule groups are non-empty");
     let mut tags = vec!["security".to_string()];
     tags.extend(
@@ -312,7 +331,10 @@ fn sarif_artifact_location(file: &str) -> serde_json::Value {
 /// no such ambiguity, which is why it does get an absolute reading here.
 fn absolute_file_uri(file: &str) -> Option<String> {
     if is_windows_drive_absolute(file) {
-        return Some(format!("file:///{}", absolute_uri_path(&file.replace('\\', "/"))));
+        return Some(format!(
+            "file:///{}",
+            absolute_uri_path(&file.replace('\\', "/"))
+        ));
     }
     file.starts_with('/')
         .then(|| format!("file://{}", absolute_uri_path(file)))
@@ -467,10 +489,13 @@ fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::V
         "kuzushiAlias": record.alias,
         "kuzushiIdentityId": record.identity_id,
         "kuzushiKind": record.kind,
+        "kuzushiSeverity": record.severity,
         "kuzushiConfidence": record.confidence,
         "kuzushiPriority": record.priority,
         "kuzushiLifecycleStatus": record.lifecycle_status,
         "kuzushiReviewDecision": record.review_decision,
+        "kuzushiObservationGap": record.observation_gap,
+        "kuzushiObservationNote": record.observation_note,
         "kuzushiReviewDecisionConflict": record.review_decision_conflict,
         "kuzushiReviewDecisionReason": record.review_decision_reason,
         "kuzushiReviewDecisionAuthor": record.review_decision_author,

@@ -69,7 +69,7 @@ impl CapabilityActionSpec {
     fn available(self, app: &ShellApp) -> bool {
         let tool_available = self
             .required_tool
-            .is_none_or(|tool| app.registry().resolve_tool(tool).is_some());
+            .is_none_or(|tool| app.registry().tool_is_discoverable(tool));
         let integration_visible = self.required_visible_module.is_none_or(|id| {
             app.registry()
                 .discoverable_modules()

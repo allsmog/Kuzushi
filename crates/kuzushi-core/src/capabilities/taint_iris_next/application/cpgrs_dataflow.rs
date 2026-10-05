@@ -205,7 +205,10 @@ pub(crate) fn cpgrs_flows_to_linked_stories(flows: &[CpgrsFlow]) -> Vec<TaintIri
 }
 
 fn cpgrs_flow_to_linked_story(flow: &CpgrsFlow) -> TaintIrisNextLinkedStory {
-    let source_id = format!("{}:source:{}:{}", flow.cwe, flow.file_path, flow.source_line);
+    let source_id = format!(
+        "{}:source:{}:{}",
+        flow.cwe, flow.file_path, flow.source_line
+    );
     let sink_id = format!("{}:sink:{}:{}", flow.cwe, flow.file_path, flow.sink_line);
     TaintIrisNextLinkedStory {
         id: format!(
@@ -421,7 +424,10 @@ mod tests {
         assert!(!flows.is_empty(), "expected a req.query -> db.query flow");
         let flow = &flows[0];
         assert_eq!(flow.cwe, "CWE-89");
-        assert_eq!(flow.file_path, "users.ts", "paths must be scan-root relative");
+        assert_eq!(
+            flow.file_path, "users.ts",
+            "paths must be scan-root relative"
+        );
         assert!(!flow.steps.is_empty());
         // The implicit build must have persisted the artifact for reuse.
         assert!(kuzushi_cpg::has_artifacts(temp.path()));
@@ -440,7 +446,9 @@ mod tests {
             vec!["javascript".to_string(), "typescript".to_string()],
         );
 
-        let flows = run_cpgrs_flows(&plan).unwrap().expect("typescript is present");
+        let flows = run_cpgrs_flows(&plan)
+            .unwrap()
+            .expect("typescript is present");
 
         assert!(!flows.is_empty(), "the typescript graph must still run");
     }
@@ -465,8 +473,17 @@ mod tests {
             !subtree.join(".kuzushi").exists(),
             "a targetSubdir hunt must never write state into the scanned subtree"
         );
-        let scoped = temp.path().join(".kuzushi/cpg-rs/scoped/svc");
-        assert!(scoped.is_dir(), "scoped artifact dir missing: {}", scoped.display());
+        let artifact = kuzushi_cpg::scoped_artifact_path(
+            temp.path(),
+            Some(std::path::Path::new("svc")),
+            "typescript",
+        );
+        let scoped = artifact.parent().unwrap();
+        assert!(
+            scoped.is_dir(),
+            "scoped artifact dir missing: {}",
+            scoped.display()
+        );
     }
 
     #[test]

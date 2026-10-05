@@ -35,6 +35,8 @@ pub enum GroundingStatus {
     FileMissing { revision: Option<String> },
     /// Nothing checkable: URL citation or no line anchor.
     NotApplicable,
+    /// The primary anchor could not be checked at the persistence boundary.
+    Unavailable { reason: String },
 }
 
 impl GroundingStatus {
@@ -44,6 +46,7 @@ impl GroundingStatus {
             Self::LineDrift { .. } => "line_drift",
             Self::FileMissing { .. } => "file_missing",
             Self::NotApplicable => "not_applicable",
+            Self::Unavailable { .. } => "unavailable",
         }
     }
 
@@ -155,6 +158,7 @@ fn normalize_grounding_text(value: &str) -> String {
 pub fn grounding_prompt_note(finding: &Finding) -> Option<String> {
     match finding.grounding.as_ref()? {
         GroundingStatus::Grounded { .. } | GroundingStatus::NotApplicable => None,
+        GroundingStatus::Unavailable { reason } => Some(format!("finding primary anchor unavailable: {reason}")),
         GroundingStatus::LineDrift {
             nearest_line,
             revision,

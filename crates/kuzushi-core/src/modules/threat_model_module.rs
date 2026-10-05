@@ -20,7 +20,7 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
         threat_model_build_tool(),
         tool_with_options(
             "threat-model:read",
-            "Read the current threat model artifact.",
+            "Read the active threat model or an exact immutable scanner context.",
             threat_model_read_options(),
         )
         .with_policy(tool_policy(
@@ -436,6 +436,7 @@ fn threat_model_bounds_options() -> Vec<OptionSpec> {
 fn threat_model_read_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
+        bound_threat_model_option(),
         threat_model_scope_option(),
         opt(
             "outputDir",

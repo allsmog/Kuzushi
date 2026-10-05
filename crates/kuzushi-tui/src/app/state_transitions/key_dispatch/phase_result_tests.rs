@@ -33,14 +33,11 @@ fn review_result_controls_name_report_and_own_their_footer_keys() {
 }
 
 #[test]
-fn actionable_review_controls_and_key_reducer_agree_on_prove() {
+fn actionable_review_controls_and_key_reducer_agree_on_report() {
     let mut fixture = review_continuation_fixture(true);
-    assert!(review_result_hint(&fixture.app).contains("Prove"));
+    assert!(review_result_hint(&fixture.app).contains("Report"));
     fixture.press('n');
-    assert_eq!(
-        crate::ui_view_models::active_workbench_page(&fixture.app),
-        WorkbenchPage::Prove
-    );
+    assert_eq!(fixture.app.shell_view(), ShellView::Report);
     assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Review));
 }
 

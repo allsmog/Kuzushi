@@ -22,6 +22,38 @@ trap cleanup EXIT INT TERM
 
 assert_eq 'a\\b\"c\td\re\nf' "$(json_escape "$(printf 'a\\b"c\td\re\nf')")" \
   "json_escape escapes backslash, quote, tab, CR and LF"
+
+# A redraw between separate tmux reads must not produce mismatched evidence.
+(
+  tmux() {
+    if [ "$1" = display-message ]; then printf '1\n'; return; fi
+    printf 'capture\n' >> "$TEST_ROOT/capture-count"
+    case " $* " in
+      *' -e '*) printf '\033[1;38:2::255:255:255mReady 世界\033[0m\n\033]8;;https://example.invalid\033\\link\033]8;;\033\\\n';;
+      *) printf 'A later, different frame\n';;
+    esac
+  }
+  for capture in devex_capture_live devex_capture_saved; do
+    : > "$TEST_ROOT/capture-count"
+    "$capture" fixture "$TEST_ROOT/frame.txt" "$TEST_ROOT/frame.ansi"
+    assert_eq 1 "$(wc -l < "$TEST_ROOT/capture-count" | tr -d ' ')" "one capture per evidence pair"
+    assert_eq $'Ready 世界\nlink' "$(cat "$TEST_ROOT/frame.txt")" "plain text comes from the captured ANSI frame"
+  done
+)
+
+# A restart cannot count a live or saved alternate screen as process exit.
+(
+  tmux() { printf '%s\n' "$EXIT_TEST_STATE"; }
+  for EXIT_TEST_STATE in '0:sh' '0:bash' '0:dash'; do
+    devex_wait_for_shell fixture 0 || { printf 'FAIL: exited shell refused\n' >&2; exit 1; }
+  done
+  for EXIT_TEST_STATE in '1:kuzushi' '0:kuzushi' '1:sh'; do
+    if devex_wait_for_shell fixture 0; then
+      printf 'FAIL: live application accepted as exit\n' >&2; exit 1
+    fi
+  done
+)
+
 assert_eq 0 "$(devex_journey_exit_code 0 0)" "clean journey exit"
 assert_eq 1 "$(devex_journey_exit_code 1 3)" "machine failure wins over review"
 assert_eq 4 "$(devex_journey_exit_code 0 3)" "open review has distinct exit"
@@ -72,10 +104,23 @@ if devex_file_contains_any "$TEST_ROOT/wait-screen.txt" \
 fi
 devex_footer_is_navigate $'Esc prompt\nSCAN VIEW › NAVIGATE' \
   || { printf 'FAIL: Navigate footer was not recognized\n' >&2; exit 1; }
+devex_footer_is_navigate $'last command\nlast notice\nNAVIGATION MODE — view keys active · Esc returns to prompt' \
+  || { printf 'FAIL: generic Navigate footer was not recognized\n' >&2; exit 1; }
 if devex_footer_is_navigate $'Esc prompt\nERROR · Review is locked  Esc dismiss'; then
   printf 'FAIL: dismissible error was mistaken for Navigate readiness\n' >&2
   exit 1
 fi
+
+for prompt in 'kz> report' 'kuzushi> report' 'MAP VIEW › report' 'kz> report  export' 'kuzushi/sast> report' 'kuzushi/sast> report  export' 'kz/sast> report' 'kz/sast> report  export'; do
+  devex_prompt_contains_draft "$prompt" report \
+    || { printf 'FAIL: intact draft was not recognized: %s\n' "$prompt" >&2; exit 1; }
+done
+for prompt in 'kz> reports' 'kz> re' 'kz> report export' 'NAVIGATION MODE' 'kuzushi/sast> reports' 'kuzushi/sast> report export' 'kz/sast> reports' 'kz/sast> report export'; do
+  if devex_prompt_contains_draft "$prompt" report; then
+    printf 'FAIL: absent or changed draft was accepted: %s\n' "$prompt" >&2
+    exit 1
+  fi
+done
 
 TARGET_FIXTURE="$TEST_ROOT/target"
 mkdir -p "$TARGET_FIXTURE"

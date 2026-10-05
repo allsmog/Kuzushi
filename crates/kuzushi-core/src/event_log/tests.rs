@@ -2,6 +2,21 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn retry_after_namespace_sync_failure_reloads_the_written_head() {
+    let source = tempfile::tempdir().unwrap();
+    let envelope = EventLog::open(source.path()).unwrap()
+        .append(EventKind::RunStarted, "test", None, None, json!({})).unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let log = EventLog::open(target.path()).unwrap();
+    assert_eq!(log.head_seq().unwrap(), 0);
+    assert!(log.append_envelope_with_sync(&envelope, |_| anyhow::bail!("directory sync failed")).is_err());
+    let retry = log.append(EventKind::RunStarted, "retry", None, None, json!({})).unwrap();
+    assert_eq!(retry.seq, 2);
+    log.verify_chain().unwrap();
+    EventLog::open(target.path()).unwrap().verify_chain().unwrap();
+}
+
+#[test]
 fn appends_and_verifies_hash_chain() {
     let tmp = tempfile::tempdir().unwrap();
     let log = EventLog::open(tmp.path()).unwrap();
@@ -209,8 +224,14 @@ fn torn_tail_from_a_killed_writer_is_tolerated_and_healed_on_next_append() {
     let path = tmp.path().join("events-000000.jsonl");
     {
         let log = EventLog::open(tmp.path()).unwrap();
-        log.append(EventKind::RunStarted, "writer", Some("r1".into()), None, json!({}))
-            .unwrap();
+        log.append(
+            EventKind::RunStarted,
+            "writer",
+            Some("r1".into()),
+            None,
+            json!({}),
+        )
+        .unwrap();
     }
     // Simulate SIGKILL mid-append: a partial line with no trailing newline,
     // cut inside a multi-byte UTF-8 character for good measure.
@@ -228,12 +249,21 @@ fn torn_tail_from_a_killed_writer_is_tolerated_and_healed_on_next_append() {
 
     // The next append truncates the torn bytes and continues the chain.
     let second = log
-        .append(EventKind::RunCompleted, "writer", Some("r1".into()), None, json!({}))
+        .append(
+            EventKind::RunCompleted,
+            "writer",
+            Some("r1".into()),
+            None,
+            json!({}),
+        )
         .unwrap();
     assert_eq!(second.seq, 2);
     assert_eq!(second.prev_event_hash, Some(events[0].event_hash.clone()));
     let healed = std::fs::read(&path).unwrap();
-    assert!(healed.ends_with(b"\n"), "healed segment must end at a full line");
+    assert!(
+        healed.ends_with(b"\n"),
+        "healed segment must end at a full line"
+    );
     let reopened = EventLog::open(tmp.path()).unwrap();
     assert_eq!(reopened.read_all().unwrap().len(), 2);
     reopened.verify_chain().unwrap();
@@ -347,7 +377,10 @@ fn review_session_started_serde_matches_as_str() {
         let round_tripped: EventKind = serde_json::from_value(serialized).unwrap();
         assert_eq!(round_tripped, kind);
     }
-    assert_eq!(EventKind::ReviewSessionStarted.as_str(), "review-session-started");
+    assert_eq!(
+        EventKind::ReviewSessionStarted.as_str(),
+        "review-session-started"
+    );
 }
 
 /// A recorded session is an appended, chain-linked event like any other.

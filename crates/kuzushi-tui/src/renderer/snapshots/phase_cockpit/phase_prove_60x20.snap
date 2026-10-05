@@ -5,9 +5,8 @@ phase: prove
 size: 60x20
 ---
 KUZUSHI · Viewing Prove · next required Review · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger
-        candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
 │▸ STATUS / NEXT
 │PROOF SUBJECT · finding F-0001
 │F-0001  CRITICAL  ✓ [●●●] · RUNTIME VERIFIED · 1 source(s)
@@ -19,7 +18,8 @@ KUZUSHI · Viewing Prove · next required Review · ● LIVE
 │
 │
 │
-run route · notify:unavailab... 6 findings · 1 C · 2 H · 2 M
+│
+⛭ autonomy:fix · run route...   6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

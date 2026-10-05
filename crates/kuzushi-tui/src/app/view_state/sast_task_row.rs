@@ -266,7 +266,21 @@ impl WorkbenchPage {
     /// the engagement header. Canonical 80x24 therefore has fewer than 20 body
     /// rows and renders the single combined Fix pane.
     pub const FIX_DIAGRAM_MIN_BODY_ROWS: u16 = 20;
+    /// Legacy page order, retained for explicit compatibility consumers.
+    #[allow(dead_code)]
     pub const ALL: [Self; 5] = [Self::Map, Self::Scan, Self::Review, Self::Prove, Self::Fix];
+
+    pub const INVESTIGATION: [Self; 3] = [Self::Map, Self::Scan, Self::Review];
+
+    /// None is the separate Report surface; legacy pages return to the investigation.
+    pub(crate) fn investigation_neighbor(self, previous: bool) -> Option<Self> {
+        match (self, previous) {
+            (Self::Map, false) | (Self::Review, true) => Some(Self::Scan),
+            (Self::Scan, false) | (Self::Prove | Self::Fix, true) => Some(Self::Review),
+            (Self::Scan, true) | (Self::Prove | Self::Fix, false) => Some(Self::Map),
+            _ => None,
+        }
+    }
 
     pub fn from_phase(phase: WorkflowPhase) -> Self {
         match phase {
@@ -312,11 +326,13 @@ impl WorkbenchPage {
         }
     }
 
+    #[allow(dead_code)] // Legacy page cycling; guided navigation uses investigation_neighbor.
     pub fn next(self) -> Self {
         let index = self.index();
         Self::ALL[(index + 1) % Self::ALL.len()]
     }
 
+    #[allow(dead_code)] // Legacy page cycling; guided navigation uses investigation_neighbor.
     pub fn prev(self) -> Self {
         let index = self.index();
         Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
@@ -359,6 +375,7 @@ impl WorkbenchPage {
         }
     }
 
+    #[allow(dead_code)] // Supports the retained legacy page cycling methods.
     fn index(self) -> usize {
         Self::ALL.iter().position(|page| *page == self).unwrap_or(0)
     }
@@ -414,6 +431,34 @@ pub struct HistorySearch {
 #[cfg(test)]
 mod workbench_page_tests {
     use super::*;
+
+    #[test]
+    fn investigation_navigation_has_a_report_boundary_and_no_legacy_pages() {
+        assert_eq!(
+            WorkbenchPage::INVESTIGATION
+                .map(WorkbenchPage::phase)
+                .as_slice(),
+            WorkflowPhase::INVESTIGATION_ORDER
+        );
+        assert_eq!(
+            WorkbenchPage::Map.investigation_neighbor(false),
+            Some(WorkbenchPage::Scan)
+        );
+        assert_eq!(
+            WorkbenchPage::Scan.investigation_neighbor(false),
+            Some(WorkbenchPage::Review)
+        );
+        assert_eq!(WorkbenchPage::Review.investigation_neighbor(false), None);
+        assert_eq!(
+            WorkbenchPage::Review.investigation_neighbor(true),
+            Some(WorkbenchPage::Scan)
+        );
+        assert_eq!(
+            WorkbenchPage::Scan.investigation_neighbor(true),
+            Some(WorkbenchPage::Map)
+        );
+        assert_eq!(WorkbenchPage::Map.investigation_neighbor(true), None);
+    }
 
     #[test]
     fn each_phase_names_its_role_surfaces() {

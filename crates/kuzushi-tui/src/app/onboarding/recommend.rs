@@ -12,7 +12,7 @@ use kuzushi_core::{TargetKind, WorkflowPhase};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-pub const DECOMPOSE_FIRST_FILE_THRESHOLD: u64 = 20_000;
+pub const SCOPE_SUGGESTION_FILE_THRESHOLD: u64 = 20_000;
 
 /// The tasks to pre-check for `phase`, given the target kind. Rows whose
 /// required CLI is missing are never recommended (they can't run).
@@ -23,7 +23,7 @@ pub fn recommended_tasks_for_phase(
 ) -> BTreeSet<PlanningTaskId> {
     rows.iter()
         .filter(|row| row.id.phase() == phase)
-        .filter(|row| row.cli_available)
+        .filter(|row| row.cli_available && row.id != PlanningTaskId::DecomposeModules)
         .filter(|row| should_preselect(row, target))
         .map(|row| row.id)
         .collect()
@@ -48,7 +48,8 @@ pub fn model_recommended_in_phase(
     phase: WorkflowPhase,
 ) -> Vec<PlanningTaskId> {
     rows.iter()
-        .filter(|row| row.id.phase() == phase && row.cli_available && model_tasks.contains(&row.id))
+        .filter(|row| row.id.phase() == phase && row.cli_available)
+        .filter(|row| row.id != PlanningTaskId::DecomposeModules && model_tasks.contains(&row.id))
         .map(|row| row.id)
         .collect()
 }
@@ -62,9 +63,8 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         // 組 KUMI-KATA · map — foundational artifacts when not already cached.
         AttachFiles => false,
         GatherRepoContext | MapEntryPoints => missing_artifact(row),
-        // Decomposition is the honest first move on big monorepos, but the
-        // deterministic profile cannot see repo size here — the Map page's
-        // decompose-first card carries that signal; the row stays opt-in.
+        // Only an operator selection requests subdivision, including retries.
+        // File count and model suggestions never select it automatically.
         DecomposeModules => false,
         // Keep first value fast and predictable. These remain visible as
         // deliberate Deep map work instead of silently starting database or
@@ -118,22 +118,6 @@ fn ledger_preselect(row: &PlanningTaskRow) -> Option<bool> {
         }
         _ => None,
     }
-}
-
-pub(crate) fn large_repository_needs_decomposition(
-    files_indexed: Option<u64>,
-    target: Option<&Path>,
-) -> bool {
-    let Some(target) = target else {
-        return false;
-    };
-    if files_indexed.unwrap_or_default() < DECOMPOSE_FIRST_FILE_THRESHOLD {
-        return false;
-    }
-    kuzushi_core::load_nested_project_scopes(target)
-        .ok()
-        .flatten()
-        .is_none_or(|tree| tree.non_root_scopes().next().is_none())
 }
 
 fn task_applies_to_target(task: PlanningTaskId, target: TargetProfile) -> bool {
@@ -329,12 +313,31 @@ mod tests {
     }
 
     #[test]
-    fn fix_reports_but_does_not_auto_patch() {
+    fn compatibility_fix_picker_has_no_automatic_work_or_report_task() {
         let rows = rows_for(WorkflowPhase::Fix);
         let picked =
             recommended_tasks_for_phase(WorkflowPhase::Fix, profile(TargetKind::Source), &rows);
-        assert!(picked.contains(&PlanningTaskId::BuildReport));
+        assert!(picked.is_empty());
+        assert!(!rows.iter().any(|row| row.id == PlanningTaskId::BuildReport));
         assert!(!picked.contains(&PlanningTaskId::PatchFindings));
+    }
+
+    #[test]
+    fn subdivision_requires_selection_even_after_failure_or_model_recommendation() {
+        let mut rows = rows_for(WorkflowPhase::Map);
+        let decompose = rows
+            .iter_mut()
+            .find(|row| row.id == PlanningTaskId::DecomposeModules)
+            .unwrap();
+        decompose.last_attempt = Some(crate::app::LastAttempt::Failed {
+            resumable: false,
+            resume_from: None,
+        });
+        let selected =
+            recommended_tasks_for_phase(WorkflowPhase::Map, profile(TargetKind::Source), &rows);
+        assert!(!selected.contains(&PlanningTaskId::DecomposeModules));
+        let suggestions = BTreeSet::from([PlanningTaskId::DecomposeModules]);
+        assert!(model_recommended_in_phase(&suggestions, &rows, WorkflowPhase::Map).is_empty());
     }
 
     #[test]

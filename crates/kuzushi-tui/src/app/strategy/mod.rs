@@ -181,11 +181,17 @@ impl ShellApp {
         let Some(cap) = self.session().session_budget_usd() else {
             return false;
         };
-        let estimated = proposal
+        let Some(estimated) = proposal
             .approved_cost_usd
             .or(proposal.expected_cost_usd)
-            .unwrap_or(0.0)
-            .max(0.0);
+            .filter(|amount| amount.is_finite() && *amount >= 0.0)
+        else {
+            self.set_error_notice(
+                "budget",
+                "proposal cost is unknown; review a bounded allowance before launching",
+            );
+            return true;
+        };
         let remaining = self.session().remaining_budget_usd().unwrap_or(cap);
         if estimated <= remaining {
             return false;
@@ -392,4 +398,28 @@ fn approved_runnable_strategy(proposal: &kuzushi_core::StrategyProposal) -> bool
             .is_some_and(|tool| !tool.trim().is_empty())
         && proposal.preflight.status != kuzushi_core::StrategyPreflightStatus::Blocked
         && proposal.resource_risk != kuzushi_core::StrategyResourceRisk::Blocked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_or_invalid_strategy_cost_is_not_treated_as_zero() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.session_mut().set_session_budget_usd(Some(1.0));
+        let mut proposal = kuzushi_core::StrategyProposal::new(
+            kuzushi_core::StrategyPhase::Review,
+            "review evidence",
+            "open question",
+        );
+        for amount in [None, Some(-1.0), Some(f64::NAN), Some(f64::INFINITY)] {
+            proposal.expected_cost_usd = amount;
+            assert!(app.strategy_exceeds_budget(&proposal));
+        }
+        proposal.expected_cost_usd = Some(0.5);
+        assert!(!app.strategy_exceeds_budget(&proposal));
+        proposal.expected_cost_usd = Some(1.5);
+        assert!(app.strategy_exceeds_budget(&proposal));
+    }
 }

@@ -1,0 +1,91 @@
+# Real offline scans and a synthetic human decision; no model or target execution.
+name: Observation gaps preserve the operator's verdict across source revisions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+shell: python3 @REPO/scripts/devex/fixtures/observation_gap.py @TMP_TARGET @ART/fixture
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | shell-ready
+submit: findings filter state:not_observed
+require-live-snap: 30 state:not_observed | gap-queue
+expect-not: unknown command
+nav-mode:
+keys: Enter
+require-live-snap: 30 ▸ FINDING · | gap-detail
+expect: Viewing Review
+expect-not: Enter queue → Prove
+expect-not: Enter prove
+expect: OBSERVATION GAP
+expect: gap-base
+expect: gap-later
+expect: Absence does not establish a fix.
+expect: compare scans
+ask: Does Review distinguish the confirmation from absence in the later scan, with clear run references?
+nav-mode:
+keys: Z
+resize: 80x24
+require-live-snap: 20 ZOOM SELECTED FINDING | gap-detail-80
+expect: OBSERVATION GAP
+ask: Is the focused detail readable at 80x24, with a visible way to scroll and return?
+resize: 60x20
+require-live-snap: 20 compare scans | gap-detail-60
+ask: Is the selected finding and observation uncertainty understandable at 60x20?
+resize: 40x12
+require-live-snap: 20 Not seen; no fix established. | gap-detail-40
+expect: Not seen; no fix established.
+expect: PgUp/PgDn
+expect: compare scans
+keys: NPage
+keys: NPage
+keys: NPage
+live-snap: gap-detail-40-runs
+expect: gap-later
+keys: NPage
+live-snap: gap-detail-40-scroll
+expect: gap-base
+expect: Absence does not establish a fix.
+ask: Can the operator reach the full observation note at 40x12 without losing navigation?
+keys: v
+require-live-snap: 30 Sources & context | compare-from-tiny-detail
+keys: Escape
+require-live-snap: 20 gap-base | return-to-tiny-detail
+expect: Absence does not establish a fix.
+ask: Does Escape return to the same reading position in the tiny finding detail?
+resize: 96x89
+keys: g
+require-live-snap: 20 F-0001 · confirmed | gap-detail-tall
+expect: OBSERVATION GAP
+expect-not: before patching
+expect-not: decision score
+expect-not: legacy triage
+ask: Is the tall detail coherent, with the decision and observation note presented as separate facts?
+resize: 160x48
+require-live-snap: 20 OBSERVATION GAP | gap-detail-wide
+expect: OBSERVATION GAP
+ask: Does the wide detail use space clearly without stretching short labels into a confusing layout?
+keys: v
+require-live-snap: 30 Base source: | gap-source-pair
+expect: Esc back
+expect-not: Esc returns to prompt
+ask: Can the operator inspect both source identities and understand which revision each observation belongs to?
+keys: Tab
+require-live-snap: 30 NOT OBSERVED IN COVERED WORK | gap-comparison
+expect: Absence does not establish a fix.
+keys: Escape
+require-live-snap: 20 OBSERVATION GAP | return-to-wide-detail
+expect: compare scans
+ask: Does the comparison return to the same finding in its focused detail without switching phases?
+keys: C-c
+resize: 120x36
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/fixture/open-command.txt
+keys: Enter
+require-live-snap: 30 describe what to review | restored-gap
+expect: OBSERVATION GAP
+expect: gap-base
+expect: gap-later
+ask: After restart without color, does Review preserve both the recorded decision and the observation gap?
+keys: C-c

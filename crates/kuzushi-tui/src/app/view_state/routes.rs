@@ -1845,12 +1845,25 @@ impl PatchRouteState {
 pub struct RunDiffRouteState {
     left: String,
     right: String,
+    sources_open: bool,
+    other_scroll: u16,
 }
 
 impl RunDiffRouteState {
     pub(crate) fn open(&mut self, left: impl Into<String>, right: impl Into<String>) {
         self.left = left.into();
         self.right = right.into();
+        self.sources_open = false;
+        self.other_scroll = 0;
+    }
+
+    pub(crate) fn sources_open(&self) -> bool {
+        self.sources_open
+    }
+
+    pub(crate) fn toggle_sources(&mut self, current_scroll: u16) -> u16 {
+        self.sources_open = !self.sources_open;
+        std::mem::replace(&mut self.other_scroll, current_scroll)
     }
 
     pub(crate) fn left(&self) -> &str {

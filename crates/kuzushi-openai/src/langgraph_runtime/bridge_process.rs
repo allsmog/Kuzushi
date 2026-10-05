@@ -1,5 +1,7 @@
+use super::bridge_observation::{BridgeObservation, BridgeStream};
 use super::ResponseTextObserver;
 use anyhow::{Context, Result};
+use kuzushi_core::allowance::AllowanceBinding;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -27,11 +29,22 @@ const LEGACY_ERROR_PATTERNS: &[(&[&str], &str)] = &[
     (&["fetch failed", "econnreset"], "transport"),
 ];
 
+#[cfg(test)]
 pub(crate) fn run_next_step_bridge_observed(
     command: &[String],
     request: &NextStepBridgeRequest,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     observer: Option<&ResponseTextObserver>,
+) -> Result<NextStepBridgeResponse> {
+    run_next_step_bridge_admitted(command, request, cancellation, observer, None)
+}
+
+pub(crate) fn run_next_step_bridge_admitted(
+    command: &[String],
+    request: &NextStepBridgeRequest,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+    observer: Option<&ResponseTextObserver>,
+    allowance: Option<&AllowanceBinding>,
 ) -> Result<NextStepBridgeResponse> {
     run_json_bridge(
         command,
@@ -39,7 +52,7 @@ pub(crate) fn run_next_step_bridge_observed(
         "next-step bridge",
         &[],
         cancellation,
-        observer,
+        BridgeObservation::new(observer, allowance),
     )
 }
 
@@ -54,15 +67,16 @@ pub(crate) fn run_next_step_preflight_bridge(
         "next-step preflight bridge",
         &[],
         cancellation,
-        None,
+        BridgeObservation::default(),
     )
 }
 
-pub(crate) fn run_bridge_observed(
+pub(crate) fn run_bridge_admitted(
     command: &[String],
     request: &BridgeRequest,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     observer: Option<&ResponseTextObserver>,
+    allowance: Option<&AllowanceBinding>,
 ) -> Result<BridgeResponse> {
     let extra_env = mcp_artifact_env_for_attachments(&request.tool_policy.mcps_attached);
     run_json_bridge(
@@ -71,7 +85,7 @@ pub(crate) fn run_bridge_observed(
         "LangGraph bridge",
         &extra_env,
         cancellation,
-        observer,
+        BridgeObservation::new(observer, allowance),
     )
 }
 
@@ -85,7 +99,7 @@ pub(crate) fn run_tool_policy_handshake_bridge(
         "tool-policy handshake bridge",
         &[],
         None,
-        None,
+        BridgeObservation::default(),
     )
 }
 
@@ -161,7 +175,8 @@ pub(crate) fn bridge_runtime_failure(
 
 fn runtime_failure_class(class: &str) -> Option<kuzushi_core::runtime::RuntimeFailureClass> {
     use kuzushi_core::runtime::RuntimeFailureClass as Class;
-    const CLASSES: [(&str, Class); 12] = [
+    const CLASSES: [(&str, Class); 13] = [
+        ("allowance_refused", Class::AllowanceRefused),
         ("authentication", Class::Authentication),
         ("bridge_internal", Class::BridgeInternal),
         ("cancelled", Class::Cancelled),
@@ -237,8 +252,9 @@ fn bridge_output<T: Serialize>(
     label: &str,
     extra_env: &[(String, String)],
     cancellation: Option<&kuzushi_core::ScanCancellation>,
-    observer: Option<&ResponseTextObserver>,
+    observation: BridgeObservation,
 ) -> Result<Output> {
+    let request = observed_request(request, &observation)?;
     let (mut cmd, process_group) = configured_bridge_command(command)?;
     for (env, value) in extra_env {
         cmd.env(env, value);
@@ -247,7 +263,6 @@ fn bridge_output<T: Serialize>(
         .spawn()
         .with_context(|| format!("could not start {label} {}", command[0]))?;
 
-    let request = observed_request(request, observer)?;
     write_bridge_request(&mut child, &request, label)?;
     wait_with_output_deadline(
         child,
@@ -255,18 +270,16 @@ fn bridge_output<T: Serialize>(
         label,
         Some(bridge_timeout()?),
         cancellation,
-        observer,
+        observation,
     )
 }
 
 fn observed_request<T: Serialize>(
     request: &T,
-    observer: Option<&ResponseTextObserver>,
+    observation: &BridgeObservation,
 ) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(request).context("could not encode LangGraph request")?;
-    if observer.is_some() {
-        value["responseEvents"] = serde_json::json!("text-v1");
-    }
+    observation.prepare_request(&mut value)?;
     Ok(value)
 }
 
@@ -276,13 +289,20 @@ fn run_json_bridge<T, R>(
     label: &str,
     extra_env: &[(String, String)],
     cancellation: Option<&kuzushi_core::ScanCancellation>,
-    observer: Option<&ResponseTextObserver>,
+    observation: BridgeObservation,
 ) -> Result<R>
 where
     T: Serialize,
     R: DeserializeOwned,
 {
-    let output = bridge_output(command, request, label, extra_env, cancellation, observer)?;
+    let output = bridge_output(
+        command,
+        request,
+        label,
+        extra_env,
+        cancellation,
+        observation,
+    )?;
     parse_bridge_output(output, label)
 }
 
@@ -299,7 +319,14 @@ where
     T: Serialize,
     R: DeserializeOwned,
 {
-    let output = bridge_output(command, request, label, &[], cancellation, None)?;
+    let output = bridge_output(
+        command,
+        request,
+        label,
+        &[],
+        cancellation,
+        BridgeObservation::default(),
+    )?;
     forward_bridge_diagnostics(&output.stderr);
     anyhow::ensure!(
         output.status.success(),
@@ -403,7 +430,7 @@ fn wait_with_output_deadline(
     label: &str,
     timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
-    observer: Option<&ResponseTextObserver>,
+    observation: BridgeObservation,
 ) -> Result<Output> {
     wait_with_output_deadline_observed(
         child,
@@ -413,7 +440,7 @@ fn wait_with_output_deadline(
         cancellation,
         MAX_BRIDGE_STDOUT_BYTES,
         MAX_BRIDGE_STDERR_BYTES,
-        observer,
+        observation,
     )
 }
 
@@ -425,18 +452,22 @@ fn wait_with_output_deadline_observed(
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     stdout_limit: usize,
     stderr_limit: usize,
-    observer: Option<&ResponseTextObserver>,
+    observation: BridgeObservation,
 ) -> Result<Output> {
-    // Match `wait_with_output` semantics: close the child's stdin so a bridge
-    // reading until EOF sees the request end instead of blocking forever.
-    drop(child.stdin.take());
+    // Legacy requests terminate at EOF. Admitted requests keep stdin solely
+    // for replies to provider-call reservations on the framed stdout channel.
+    let admission = observation.admission(child.stdin.take(), cancellation)?;
+    let handshake = admission.as_ref().map(|admission| admission.handshake());
     let pipe_failure = Arc::new(Mutex::new(None));
     let stdout = spawn_pipe_reader(
         child.stdout.take(),
         stdout_limit,
         "stdout",
         Arc::clone(&pipe_failure),
-        observer.cloned(),
+        Some(BridgeStream {
+            text: observation.text,
+            admission,
+        }),
     );
     let stderr = spawn_pipe_reader(
         child.stderr.take(),
@@ -446,7 +477,14 @@ fn wait_with_output_deadline_observed(
         None,
     );
     let registered = register_bridge_child(child, process_group, cancellation)?;
-    let status = wait_status_deadline(&registered, label, timeout, cancellation, &pipe_failure)?;
+    let status = wait_status_deadline(
+        &registered,
+        label,
+        timeout,
+        cancellation,
+        &pipe_failure,
+        handshake.as_ref(),
+    )?;
     Ok(Output {
         status,
         stdout: join_pipe_reader(stdout, "stdout")?,
@@ -470,7 +508,7 @@ fn register_bridge_child(
     registry.register_prepared_child(child, process_group)
 }
 
-type BridgePipeFailure = Arc<Mutex<Option<String>>>;
+type BridgePipeFailure = Arc<Mutex<Option<anyhow::Error>>>;
 type BridgePipeReader = Option<std::thread::JoinHandle<Result<Vec<u8>>>>;
 
 fn spawn_pipe_reader<R: Read + Send + 'static>(
@@ -478,31 +516,43 @@ fn spawn_pipe_reader<R: Read + Send + 'static>(
     limit: usize,
     stream: &'static str,
     failure: BridgePipeFailure,
-    observer: Option<ResponseTextObserver>,
+    observation: Option<BridgeStream>,
 ) -> BridgePipeReader {
     pipe.map(|mut pipe| {
-        std::thread::spawn(
-            move || match read_observed_pipe(&mut pipe, limit, stream, observer) {
+        std::thread::spawn(move || {
+            match read_observed_pipe(&mut pipe, limit, stream, observation) {
                 Ok(bytes) => Ok(bytes),
                 Err(error) => {
                     if let Ok(mut slot) = failure.lock() {
-                        *slot = Some(error.to_string());
+                        *slot = Some(pipe_failure_error(&error));
                     }
                     Err(error)
                 }
-            },
-        )
+            }
+        })
     })
+}
+
+fn pipe_failure_error(error: &anyhow::Error) -> anyhow::Error {
+    match kuzushi_core::runtime::runtime_failure_metadata(error) {
+        Some(metadata) => kuzushi_core::RuntimeFailure::new(metadata).into(),
+        None => anyhow::anyhow!(error.to_string()),
+    }
 }
 
 fn read_observed_pipe(
     reader: &mut impl Read,
     limit: usize,
     stream: &str,
-    observer: Option<ResponseTextObserver>,
+    observation: Option<BridgeStream>,
 ) -> Result<Vec<u8>> {
-    match observer {
-        Some(observer) => super::response_frames::read_response_frames(reader, limit, &observer),
+    match observation {
+        Some(observation) => super::response_frames::read_response_frames_admitted(
+            reader,
+            limit,
+            observation.text.as_ref(),
+            observation.admission,
+        ),
         None => read_bounded_pipe(reader, limit, stream),
     }
 }
@@ -539,17 +589,33 @@ fn wait_status_deadline(
     timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     pipe_failure: &BridgePipeFailure,
+    handshake: Option<&super::provider_admission::AdmissionHandshake>,
 ) -> Result<ExitStatus> {
     let deadline = timeout.map(|timeout| (Instant::now() + timeout, timeout));
     loop {
         kill_cancelled_bridge(child, label, cancellation)?;
         kill_bridge_on_pipe_failure(child, pipe_failure)?;
+        check_admission_handshake(child, handshake)?;
         kill_expired_bridge(child, label, deadline)?;
         if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn check_admission_handshake(
+    child: &kuzushi_core::scan::RegisteredChild,
+    handshake: Option<&super::provider_admission::AdmissionHandshake>,
+) -> Result<()> {
+    let Some(handshake) = handshake else {
+        return Ok(());
+    };
+    if let Err(error) = handshake.check() {
+        kill_child(child);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn kill_bridge_on_pipe_failure(
@@ -559,10 +625,10 @@ fn kill_bridge_on_pipe_failure(
     let failure = failure
         .lock()
         .map_err(|_| anyhow::anyhow!("LangGraph bridge pipe failure state was poisoned"))?
-        .clone();
+        .take();
     if let Some(failure) = failure {
         kill_child(child);
-        anyhow::bail!(failure);
+        return Err(failure);
     }
     Ok(())
 }
@@ -698,8 +764,9 @@ fn write_bridge_request<T: Serialize>(
         .stdin
         .as_mut()
         .with_context(|| format!("could not open {label} stdin"))?;
-    let body =
+    let mut body =
         serde_json::to_vec(request).with_context(|| format!("could not encode {label} request"))?;
+    body.push(b'\n');
     match stdin.write_all(&body) {
         Ok(()) => Ok(()),
         // `BrokenPipe` here means the bridge subprocess closed its stdin
@@ -855,6 +922,6 @@ pub(super) fn wait_with_output_deadline_limits(
         cancellation,
         stdout_limit,
         stderr_limit,
-        None,
+        BridgeObservation::default(),
     )
 }

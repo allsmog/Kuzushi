@@ -60,6 +60,17 @@ pub const fn engine_available() -> bool {
     cfg!(feature = "private-engine")
 }
 
+/// Compile the explicit agent-facing pattern mode before graph work begins.
+pub fn compile_query_pattern(pattern: &str, mode: &str) -> Result<String, String> {
+    match mode {
+        "literal" => Ok(regex::escape(pattern)),
+        "regex" => regex::Regex::new(pattern)
+            .map(|_| pattern.to_string())
+            .map_err(|error| format!("invalid taint regex: {error}")),
+        _ => Err("patternMode must be regex or literal".to_string()),
+    }
+}
+
 /// Stable operator-facing explanation for a deliberately omitted engine.
 pub const fn engine_unavailable_message() -> &'static str {
     "the CPG engine is not compiled into this feature-disabled build; use the default `private-engine` compatibility feature"

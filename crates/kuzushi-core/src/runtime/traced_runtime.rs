@@ -9,12 +9,26 @@ pub use metadata::{
 };
 
 pub struct TracedRuntime<'a> {
-    inner: &'a dyn AgentRuntime,
+    inner: InnerRuntime<'a>,
     trace: TraceHandle,
     /// Every model call's cost report, summed. Engines that reduce spend to
     /// an `(observed, exact)` pair lose the token estimate; the dispatch
     /// boundary recovers it from here.
-    spend: std::sync::Mutex<crate::runtime::RuntimeCostReport>,
+    spend: std::sync::Arc<std::sync::Mutex<crate::runtime::RuntimeCostReport>>,
+}
+
+enum InnerRuntime<'a> {
+    Borrowed(&'a dyn AgentRuntime),
+    Bound(Box<dyn AgentRuntime + 'a>),
+}
+
+impl InnerRuntime<'_> {
+    fn get(&self) -> &dyn AgentRuntime {
+        match self {
+            Self::Borrowed(runtime) => *runtime,
+            Self::Bound(runtime) => runtime.as_ref(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -26,11 +40,11 @@ struct ModelCallLifecycle {
 impl<'a> TracedRuntime<'a> {
     pub fn new(inner: &'a dyn AgentRuntime, trace: TraceHandle) -> Self {
         Self {
-            inner,
+            inner: InnerRuntime::Borrowed(inner),
             trace,
-            spend: std::sync::Mutex::new(crate::runtime::RuntimeCostReport::known(
+            spend: std::sync::Arc::new(std::sync::Mutex::new(crate::runtime::RuntimeCostReport::known(
                 crate::runtime::RuntimeCost::ZERO,
-            )),
+            ))),
         }
     }
 
@@ -38,7 +52,9 @@ impl<'a> TracedRuntime<'a> {
     pub fn observed_spend(&self) -> crate::runtime::RuntimeCostReport {
         self.spend
             .lock()
-            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| *spend)
+            .map_or(crate::runtime::RuntimeCostReport::UNAVAILABLE, |spend| {
+                *spend
+            })
     }
 
     /// An arithmetic failure keeps the observed floor but drops the estimate.
@@ -212,10 +228,9 @@ impl<'a> TracedRuntime<'a> {
         let Some(observation) = self.trace.run_observation() else {
             return Ok(());
         };
-        if succeeded {
-            self.record_model_response_summary(&observation, lifecycle)?;
-        }
-        observation.emit(
+        let summary =
+            succeeded.then(|| self.record_model_response_summary(&observation, lifecycle));
+        observation.emit_and_flush(
             crate::run_lifecycle::RunItemRecord::new(
                 lifecycle.item_id,
                 crate::run_lifecycle::RunItemSource::Runtime,
@@ -233,7 +248,8 @@ impl<'a> TracedRuntime<'a> {
                 },
             )
             .with_call(lifecycle.call_id),
-        )
+        )?;
+        summary.transpose().map(|_| ())
     }
 
     fn record_model_response_summary(
@@ -391,8 +407,26 @@ fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelU
 
 #[async_trait]
 impl AgentRuntime for TracedRuntime<'_> {
+    fn with_allowance_binding(
+        &self,
+        allowance: crate::allowance::AllowanceBinding,
+    ) -> Result<Box<dyn AgentRuntime + '_>> {
+        Ok(Box::new(TracedRuntime {
+            inner: InnerRuntime::Bound(self.inner.get().with_allowance_binding(allowance)?),
+            trace: self.trace.clone(),
+            spend: self.spend.clone(),
+        }))
+    }
+
+    fn semantic_cache_identity(
+        &self,
+        request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner.get().semantic_cache_identity(request)
+    }
+
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
-        self.inner.preflight_model_blocking(model)
+        self.inner.get().preflight_model_blocking(model)
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -417,6 +451,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .query_observed_blocking(request)
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
@@ -457,6 +492,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .query_observed_blocking_controlled(request, control)
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
@@ -490,6 +526,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .triage_finding_observed_blocking(request)
             .and_then(|observed| observed.try_map(TriageOutcome::validate_cost));
         self.record_triage_result(
@@ -502,7 +539,7 @@ impl AgentRuntime for TracedRuntime<'_> {
     }
 
     fn supports_tools(&self) -> bool {
-        self.inner.supports_tools()
+        self.inner.get().supports_tools()
     }
 
     fn next_step_blocking(
@@ -530,6 +567,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .next_step_observed_blocking(request, history)
             .and_then(|observed| observed.try_map(AgentLoopStep::validate_cost));
         self.record_step(
@@ -543,7 +581,7 @@ impl AgentRuntime for TracedRuntime<'_> {
     }
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
-        let result = self.inner.preflight_tool_loop_blocking(request);
+        let result = self.inner.get().preflight_tool_loop_blocking(request);
         match &result {
             Ok(()) => {
                 let _ = self
@@ -567,7 +605,7 @@ impl AgentRuntime for TracedRuntime<'_> {
     }
 
     fn model_for_tier(&self, tier: ModelTier, configured: &str) -> String {
-        self.inner.model_for_tier(tier, configured)
+        self.inner.get().model_for_tier(tier, configured)
     }
 
     fn spawn_subagent_blocking(
@@ -598,6 +636,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         )?;
         let result = self
             .inner
+            .get()
             .spawn_subagent_observed_blocking(role, request)
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(

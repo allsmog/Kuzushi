@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { captureVerificationStep } from "./verification-step.mjs";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
@@ -199,21 +200,9 @@ function writeReceipt(file, receipt) {
   writeFileSync(file, `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
-function runStep(item, summary) {
+async function runStep(item, summary, logDir) {
   process.stderr.write(`verify: ${item.name} (${[item.command, ...item.args].join(" ")})\n`);
-  const started = Date.now();
-  const result = spawnSync(item.command, item.args, {
-    cwd: process.cwd(),
-    stdio: summary ? ["inherit", "ignore", "ignore"] : ["inherit", 2, 2],
-  });
-  return {
-    name: item.name,
-    command: [item.command, ...item.args],
-    durationMs: Date.now() - started,
-    status: result.status,
-    signal: result.signal,
-    error: result.error?.message,
-  };
+  return captureVerificationStep(item, { cwd: process.cwd(), summary, logDir });
 }
 
 function openReceipt(mode, plan) {
@@ -241,22 +230,23 @@ function closeReceipt(receipt, exitCode) {
   };
 }
 
-function runPlan(plan, receipt, summary) {
+async function runPlan(plan, receipt, summary, logDir) {
   for (const item of plan) {
-    const result = runStep(item, summary);
+    const result = await runStep(item, summary, logDir);
     receipt.steps.push(result);
     if (result.status !== 0 || result.signal) return result.status ?? 1;
   }
   return 0;
 }
 
-function main() {
+async function main() {
   const { mode, summary, receipt: receiptOverride } = parseArguments(process.argv.slice(2));
   validatePlans();
   const plan = verificationPlan(mode);
   const receiptPath = receiptOverride ?? defaultReceiptPath();
   const opened = openReceipt(mode, plan);
-  const exitCode = runPlan(plan, opened, summary);
+  const logDir = path.join(path.dirname(receiptPath), "kuzushi-verify-logs", randomUUID());
+  const exitCode = await runPlan(plan, opened, summary, logDir);
   const receipt = closeReceipt(opened, exitCode);
   writeReceipt(receiptPath, receipt);
   process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
@@ -266,7 +256,7 @@ function main() {
 
 if (process.argv[1]?.endsWith("verify-repository.mjs")) {
   try {
-    main();
+    await main();
   } catch (error) {
     process.stderr.write(`repository verification failed: ${error.message}\n`);
     process.exitCode = 1;

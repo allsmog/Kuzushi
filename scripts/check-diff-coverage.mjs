@@ -55,6 +55,9 @@ export function evaluateDiffCoverage(coverage, changed, threshold = DEFAULT_THRE
 }
 
 function evaluateFileCoverage(file, coverage, changedLines) {
+  if (!coverage && changedLines.size > 0) {
+    throw new Error(`missing coverage instrumentation for changed source: ${file}`);
+  }
   if (!coverage) return { covered: 0, measured: 0, uncovered: [] };
   const executable = [...changedLines].filter((line) => coverage.has(line));
   const uncovered = executable
@@ -74,9 +77,26 @@ function normalizedSourcePath(file, root) {
 }
 
 function changedFilePath(line) {
-  const value = line.slice(4).trim();
+  const value = decodeGitPath(line.slice(4));
   if (value === "/dev/null") return undefined;
-  return value.replace(/^b\//, "").replaceAll("\\", "/");
+  return value.replace(/^b\//, "");
+}
+
+function decodeGitPath(value) {
+  if (!value.startsWith('"')) return value;
+  if (!value.endsWith('"')) throw new Error("unterminated quoted Git path");
+  return Buffer.concat(
+    [...value.slice(1, -1).matchAll(/\\([0-7]{1,3}|[abfnrtv"\\])|([^\\]+)|(\\.)/g)].map(
+      gitPathChunk,
+    ),
+  ).toString("utf8");
+}
+
+function gitPathChunk(match) {
+  const escapes = { a: 7, b: 8, f: 12, n: 10, r: 13, t: 9, v: 11, '"': 34, "\\": 92 };
+  if (match[3]) throw new Error(`invalid Git path escape: ${match[3]}`);
+  if (match[2]) return Buffer.from(match[2], "utf8");
+  return Buffer.from([escapes[match[1]] ?? Number.parseInt(match[1], 8)]);
 }
 
 function addHunkLines(lines, header) {

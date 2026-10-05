@@ -27,6 +27,8 @@ pub(in crate::verification::adapters) fn normalize_code_citations(
             "endLine": end_line,
             "snippet": snippet,
             "description": description,
+            "role": read_object_string(citation, &["role"]),
+            "snippetHash": read_object_string(citation, &["snippetHash", "snippet_hash"]),
         }));
     }
     (!out.is_empty()).then(|| json!(out))

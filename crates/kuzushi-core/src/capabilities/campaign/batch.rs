@@ -21,7 +21,7 @@ pub const RECEIPTLESS_ATTEMPT_OUTCOME: &str = "abandoned-before-receipt";
 const SCAN_TOOL: &str = "sast:scan";
 
 mod child_receipt;
-mod equivalence;
+pub(super) mod equivalence;
 mod gate;
 mod validation;
 
@@ -131,19 +131,25 @@ pub fn acquire_scan_batch_threat_model_lease(
 }
 
 pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPlanHandle> {
+    compile_batch_plan(spec, false, None)
+}
+
+pub(super) fn compile_study_plan(spec: ScanBatchPlanSpec<'_>, investigation: Option<&str>) -> Result<CampaignPlanHandle> {
+    compile_batch_plan(spec, true, investigation)
+}
+
+fn compile_batch_plan(spec: ScanBatchPlanSpec<'_>, requires_work_approval: bool, investigation: Option<&str>) -> Result<CampaignPlanHandle> {
     validate_trial_count(spec.trials)?;
     let batch_id = spec.batch_id.clone().unwrap_or_else(generated_batch_id);
     validate_scan_batch_id(&batch_id)?;
-    crate::capabilities::threat_model::open_writable_threat_model_store(spec.root)?;
-    let threat_model_lease =
-        crate::capabilities::threat_model::acquire_threat_model_read_lease(spec.root)?;
     let mut base_input = scan_batch_base_input(spec.prepared_input.clone());
+    let threat_model_lease = acquire_plan_threat_model_lease(spec.root, &spec.prepared_input)?;
     equivalence::force_discovery_only(&mut base_input)?;
     bind_threat_model_ref(&mut base_input, threat_model_lease.model_ref())?;
     let parallel_safety = batch_parallel_safety(&spec, &base_input)?;
     let equivalence_key =
         capture_batch_equivalence(spec.root, &base_input, spec.config, spec.registry)?;
-    let plan = scan_batch_plan_document(
+    let mut plan = scan_batch_plan_document(
         &batch_id,
         spec.trials,
         &base_input,
@@ -151,6 +157,7 @@ pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPl
         &parallel_safety,
         &spec.gate_policy,
     );
+    bind_study_investigation(&mut plan, requires_work_approval, investigation)?;
     let plan_path = campaign_plan_path(spec.root, &batch_id);
     anyhow::ensure!(
         !plan_path.exists(),
@@ -167,6 +174,33 @@ pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPl
         parallel_safety,
         gate_policy: spec.gate_policy,
     })
+}
+
+fn bind_study_investigation(plan: &mut Value, required: bool, investigation: Option<&str>) -> Result<()> {
+    if !required { return Ok(()); }
+    plan["requiresWorkApproval"] = Value::Bool(true);
+    if let Some(id) = investigation {
+        validate_scan_batch_id(id)?;
+        plan["investigationId"] = Value::String(id.into());
+    }
+    Ok(())
+}
+
+fn acquire_plan_threat_model_lease(
+    root: &Path, input: &Value,
+) -> Result<crate::capabilities::threat_model::ThreatModelReadLease> {
+    use crate::capabilities::threat_model::{
+        acquire_exact_threat_model_read_lease, acquire_threat_model_read_lease,
+        open_writable_threat_model_store, ThreatModelSelection,
+    };
+    match ThreatModelSelection::from_input(input)? {
+        ThreatModelSelection::Active => {
+            open_writable_threat_model_store(root)?;
+            acquire_threat_model_read_lease(root)
+        }
+        ThreatModelSelection::None => acquire_exact_threat_model_read_lease(root, None),
+        ThreatModelSelection::Revision(reference) => acquire_exact_threat_model_read_lease(root, Some(&reference)),
+    }
 }
 
 fn batch_parallel_safety(
@@ -192,6 +226,7 @@ fn bind_threat_model_ref(
     let object = input
         .as_object_mut()
         .context("prepared sast:scan input must be an object")?;
+    object.remove("threat_model_ref");
     object.insert(
         "threatModelRef".to_string(),
         serde_json::to_value(model_ref)?,

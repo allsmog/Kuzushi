@@ -5,7 +5,7 @@ scenario: degraded_ledger
 size: 120x36
 ---
 KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not built · model unconfigured · module all
- Map ● · Scan × · Review × · Prove × · Fix ×
+ Map ● · Scan × · Review × · Report
  ▸ NEXT phase result ledger is degraded; repair it before selecting this result
  z open map viz · next → Map · jobs inspect Map runs
 │PROJECT CONTEXT
@@ -36,7 +36,7 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 
 
 
-shell route · 1 result ready · workbench · notify:unavailable · focus unknown · Map 1/5 · ⛭ autonomy:fix...   0 findings
+⛭ autonomy:fix · shell route · 1 result ready · workbench · notify:unavailable · focus unknown · Map 1/3...   0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
 ◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

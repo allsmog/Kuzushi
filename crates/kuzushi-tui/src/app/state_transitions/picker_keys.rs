@@ -364,6 +364,9 @@ impl ShellApp {
             SetupRowId::Credentials => self.open_setup_credentials_editor(),
             SetupRowId::Prompt => self.open_setup_prompt_editor(),
             SetupRowId::Budget => {
+                if let Some(update) = self.review_setup_allowance() {
+                    return update;
+                }
                 let current = self.session().session_budget_usd();
                 self.router.setup_mut().begin_budget_edit(current);
                 InputUpdate::handled()
@@ -1015,16 +1018,12 @@ impl ShellApp {
         let Some(current) = self.engagement.current_phase() else {
             return;
         };
-        let next = if delta < 0 {
-            current.previous()
-        } else {
-            current.next()
-        };
-        let Some(next) = next else {
-            self.log("phase", format!("already at {}", current.label()));
-            return;
-        };
-        self.open_phase_picker(next);
+        let page = WorkbenchPage::from_phase(current);
+        match page.investigation_neighbor(delta < 0) {
+            Some(next) => self.open_phase_picker(next.phase()),
+            None if delta > 0 => self.open_report_from_current_origin(),
+            None => self.log("phase", format!("already at {}", current.label())),
+        }
     }
 
     fn cycle_planning_current_row(&mut self) {
@@ -1081,8 +1080,8 @@ impl ShellApp {
         if plan.is_empty() {
             return InputUpdate::handled_with_effects(self.explain_empty_planning_confirm());
         }
-        if self.open_credentials_for_planning_plan(&plan) {
-            return InputUpdate::handled();
+        if let Some(update) = self.planning_execution_gate(&plan) {
+            return update;
         }
         let labels = plan
             .iter()
@@ -1105,6 +1104,14 @@ impl ShellApp {
                 success_view: Some(PlanningDispatchView::Activity),
             },
         )])
+    }
+
+    fn planning_execution_gate(&mut self, plan: &[PlanningTaskId]) -> Option<InputUpdate> {
+        if let Some(update) = self.review_model_backed_map(plan) {
+            return Some(update);
+        }
+        self.open_credentials_for_planning_plan(plan)
+            .then(InputUpdate::handled)
     }
 
     fn planning_accept_navigation(&mut self) -> Option<InputUpdate> {

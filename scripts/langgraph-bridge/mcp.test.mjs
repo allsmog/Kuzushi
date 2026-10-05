@@ -384,14 +384,21 @@ test("planned artifacts resolve only inside read roots and preserve authenticate
           artifact_path: artifact,
           artifact_identity: "sha256:trusted",
         },
+        {
+          name: "threat-model",
+          artifact_path: artifact,
+          artifact_identity: "sha256:selected-context",
+        },
       ],
     },
   });
 
-  assert.deepEqual(Object.keys(config), ["cpg"]);
+  assert.deepEqual(Object.keys(config), ["cpg", "threat-model"]);
   assert.equal(config.cpg.cwd, realpathSync(root));
   assert.equal(config.cpg.env.KUZUSHI_MCP_CPG_ARTIFACT, realpathSync(artifact));
   assert.equal(config.cpg.env.KUZUSHI_MCP_CPG_ARTIFACT_IDENTITY, "sha256:trusted");
+  assert.equal(config["threat-model"].env.KUZUSHI_MCP_THREAT_MODEL_ARTIFACT_IDENTITY, "sha256:selected-context");
+  assert.equal(config["threat-model"].env.KUZUSHI_MCP_THREAT_MODEL_ARTIFACT, realpathSync(artifact));
   assert.deepEqual(JSON.parse(config.cpg.env.KUZUSHI_MCP_READ_ROOTS), [realpathSync(root)]);
 });
 

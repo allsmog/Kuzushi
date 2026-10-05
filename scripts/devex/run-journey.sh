@@ -249,6 +249,16 @@ d_size() { # COLSxROWS (ignored when --size override is set)
   J_COLS=${1%x*}; J_ROWS=${1#*x}
 }
 
+d_resize() { # Resize a running journey; subsequent captures record the new size.
+  ensure_session
+  [[ "$1" =~ ^[1-9][0-9]*x[1-9][0-9]*$ ]] || devex_die "resize: expected positive COLSxROWS"
+  local cols=${1%x*} rows=${1#*x}
+  tmux resize-window -t "$SESSION" -x "$cols" -y "$rows"
+  J_COLS=$cols
+  J_ROWS=$rows
+  report step "resize: $1"
+}
+
 d_cwd() {
   local dir; dir=$(expand_tokens "$1")
   mkdir -p "$dir"
@@ -317,6 +327,12 @@ d_shell() { # host-side setup command (fixture seeding etc.)
   sh -c "$cmd" || fail "shell setup failed: $cmd"
 }
 
+d_require_shell() { # a failed prerequisite must prevent dependent actions
+  local failures_before=$FAIL_N
+  d_shell "$1"
+  [ "$FAIL_N" -eq "$failures_before" ]
+}
+
 launch_cmd() { # assemble `env -u K K=V ... <cmd>`
   local tail=$1 prefix=""
   if [ -n "$ENV_PREFIX" ]; then
@@ -344,6 +360,20 @@ d_launch() { # args appended to the kuzushi binary ('' = bare launch)
   report step "launch: $(basename "$KUZUSHI_BIN")${args:+ $args}"
 }
 
+d_require_exit() { # bounded proof before a subsequent launch
+  local seconds=${1:-10}
+  case $seconds in ''|*[!0-9]*) devex_die "require-exit: expected 1 to 30 seconds";; esac
+  [ "$seconds" -ge 1 ] && [ "$seconds" -le 30 ] || devex_die "require-exit: expected 1 to 30 seconds"
+  if devex_wait_for_shell "$SESSION" "$seconds"; then
+    pass "TUI exited; harness shell owns the terminal"
+    return 0
+  fi
+  d_live_snap "exit-not-complete" || true
+  local state; state=$(tmux display-message -p -t "$SESSION" '#{alternate_on}:#{pane_current_command}' 2>/dev/null)
+  fail "TUI did not exit within ${seconds}s ($state); refusing to type a relaunch into a live application"
+  return 1
+}
+
 d_launch_raw() { # full shell command line (pipes, --plain, non-TTY checks)
   ensure_target_proof || return $?
   ensure_session
@@ -369,6 +399,19 @@ d_type() { # literal text, no Enter
   ensure_session
   tmux send-keys -t "$SESSION" -l -- "$(expand_tokens "$1")"
   report step "type: $1"
+}
+
+d_paste_file() { # bounded literal bracketed paste, no Enter
+  ensure_session
+  local path bytes buffer
+  path=$(expand_tokens "$1")
+  [ -f "$path" ] || { fail "paste-file requires a regular file: $path"; return 1; }
+  bytes=$(wc -c < "$path")
+  [ "$bytes" -le 65536 ] || { fail "paste-file exceeds 64 KiB: $path"; return 1; }
+  buffer="${SESSION}-paste"
+  tmux load-buffer -b "$buffer" "$path"
+  tmux paste-buffer -d -p -b "$buffer" -t "$SESSION"
+  report step "paste-file: $path ($bytes bytes)"
 }
 
 d_submit() { # literal text + Enter (the common "type a verb" case)
@@ -415,19 +458,18 @@ d_submit() { # literal text + Enter (the common "type a verb" case)
       # A clean draft ends the line, or is followed by a two-space-separated
       # inline completion ghost (e.g. "› findings  export"). A one-character
       # corruption ("› scanj") matches neither form.
-      case $line in
-        *"› $text" | *"kuzushi> $text" \
-        | *"› $text  "* | *"kuzushi> $text  "*)
+      if devex_prompt_contains_draft "$line" "$text"; then
           tmux send-keys -t "$SESSION" Enter
           report step "submit: $1"
-          return 0;;
-      esac
+          return 0
+      fi
       sleep 0.25
     done
     tmux send-keys -t "$SESSION" Escape       # clear the corrupted draft
     sleep 0.5
   done
   fail "submit: $1 — draft never rendered intact on the prompt line"
+  return 1
 }
 
 d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
@@ -812,6 +854,7 @@ dispatch() { # <directive> <value>
     name)            printf '%s\n' "$2" >> "$REPORT";;
     note)            printf '  note: %s\n' "$2" >> "$REPORT";;
     size)            d_size "$2";;
+    resize)          d_resize "$2";;
     cwd)             d_cwd "$2";;
     env)             d_env "$2";;
     env-unset)       d_env_unset "$2";;
@@ -819,10 +862,13 @@ dispatch() { # <directive> <value>
     require-any-env) d_require_any_env "$2" || return $?;;
     require-wrapper-flow) d_require_wrapper_flow || return $?;;
     shell)           d_shell "$2";;
+    require-shell)   d_require_shell "$2";;
     launch)          d_launch "$2";;
     launch-raw)      d_launch_raw "$2";;
+    require-exit)    d_require_exit "$2";;
     keys)            d_keys "$2";;
     type)            d_type "$2";;
+    paste-file)      d_paste_file "$2";;
     submit)          d_submit "$2";;
     nav-mode)        d_nav_mode;;
     phase-result)    d_phase_result "$2";;

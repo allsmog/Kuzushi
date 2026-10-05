@@ -5,9 +5,8 @@ phase: review
 size: 60x20
 ---
 KUZUSHI · Viewing Review · target ./phase-target · ● LIVE
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger
-        candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
 │▸ FINDINGS · 6
 │6 of 6 · [completeness:all]
 │[order: proof band, then severity]
@@ -19,7 +18,8 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE
 │
 │
 │
-run route · notify:unavailab... 6 findings · 1 C · 2 H · 2 M
+│
+⛭ autonomy:fix · run route...   6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

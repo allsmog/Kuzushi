@@ -267,6 +267,34 @@ fn workbench_hydrates_the_map_artifact_state() {
 }
 
 #[test]
+fn comparison_and_origin_artifacts_remain_hydrated_together() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_view_artifact_reader_for_test(Arc::new(CountingReader::default()));
+    app.open_run_diff_for_test("run-left", "run-right");
+    let mut keys = active_view_hydration_keys(&app);
+    // The comparison must coexist with the durable phase's pending result.
+    for leaf in ["run.json", "result.json", "scan-input.json"] {
+        keys.push(ViewHydrationKey::RunArtifactText {
+            run_id: "origin-run".into(),
+            leaf: leaf.into(),
+        });
+    }
+    app.hydrate_view_keys_blocking(workspace.root(), keys.clone());
+    let cache = app.workbench_cache().borrow();
+    for key in keys
+        .iter()
+        .filter(|key| matches!(key, ViewHydrationKey::RunArtifactText { .. }))
+    {
+        assert!(
+            !cache.view_hydration_needed(workspace.root(), key),
+            "evicted active artifact: {key:?}"
+        );
+    }
+}
+
+#[test]
 fn hydration_key_enumeration_skips_phase_result_presentation() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();

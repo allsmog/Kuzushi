@@ -49,6 +49,7 @@ impl ShellApp {
                 Some("select a target to load campaigns".to_string());
             return;
         };
+        self.refresh_findings_preserving_active_filter(false);
         let (campaigns, unreadable) = load_campaign_snapshots(&target);
         let spend = campaign_snapshot_spend(&campaigns, unreadable);
         let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
@@ -83,6 +84,10 @@ impl ShellApp {
     pub(crate) fn apply_campaign_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
         if self.router.campaign().batch_scan_config.is_some() {
             return self.apply_batch_scan_hotkey(action);
+        }
+        if action == ViewHotkeyAction::CampaignReviewStudy {
+            self.review_selected_study();
+            return InputUpdate::handled();
         }
         self.apply_campaign_deck_hotkey(action)
     }
@@ -135,19 +140,19 @@ impl ShellApp {
         let deck = self.router.campaign_mut();
         let frozen = deck
             .selected_campaign()
-            .filter(|campaign| is_scan_batch_snapshot(campaign))
+            .filter(|campaign| super::batch_scan::is_fixed_study_snapshot(campaign))
             .map(|campaign| {
                 (
                     campaign.effective_workers.unwrap_or(1),
                     campaign
                         .parallel_safety_reason
                         .clone()
-                        .unwrap_or_else(|| "frozen by the scan-batch plan".to_string()),
+                        .unwrap_or_else(|| "frozen by the study plan".to_string()),
                 )
             });
         if let Some((workers, reason)) = frozen {
             deck.workers = workers;
-            deck.notice = Some(format!("batch workers stay at {workers} — {reason}"));
+            deck.notice = Some(format!("Study workers stay at {workers} — {reason}"));
         } else {
             deck.cycle_workers();
         }
@@ -156,11 +161,13 @@ impl ShellApp {
 
     fn toggle_campaign_exclusion(&mut self) -> InputUpdate {
         let deck = self.router.campaign_mut();
-        if deck.selected_campaign().is_some_and(is_scan_batch_snapshot) {
+        if deck
+            .selected_campaign()
+            .is_some_and(super::batch_scan::is_fixed_study_snapshot)
+        {
             deck.excluded.clear();
-            deck.notice = Some(
-                "batch trials are immutable — create a new batch to change trial scope".to_string(),
-            );
+            deck.notice =
+                Some("Study jobs are fixed. Prepare a new plan to change their scope.".to_string());
         } else {
             deck.toggle_selected_exclusion();
         }
@@ -183,7 +190,10 @@ impl ShellApp {
         let Some((target, campaign_id, args)) = self.campaign_launch_spec() else {
             return;
         };
-        match spawn_detached_dispatcher(&target, &campaign_id, &args) {
+        let launched = self
+            .check_selected_study_approval(&target, &campaign_id)
+            .and_then(|()| spawn_detached_dispatcher(&target, &campaign_id, &args));
+        match launched {
             Ok(child) => {
                 let pid = child.id();
                 self.runtime_state.set_dispatcher_child(Some(child));
@@ -221,7 +231,7 @@ impl ShellApp {
         let campaign_id = campaign.campaign_id.clone();
         let total_jobs = campaign.jobs.len();
         let batch = is_scan_batch_snapshot(campaign);
-        let included = if batch {
+        let included = if super::batch_scan::is_fixed_study_snapshot(campaign) {
             campaign.jobs.iter().map(|job| job.job_id.clone()).collect()
         } else {
             deck.included_job_ids()
@@ -460,7 +470,7 @@ fn unsupported_platform_kill_dispatcher_process_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::V2Config;
+    use kuzushi_core::{FindingStore, Severity, V2Config};
 
     fn write_fixture_campaign(root: &Path) {
         let plan = serde_json::json!({
@@ -558,12 +568,15 @@ mod tests {
         app.apply_campaign_hotkey(ViewHotkeyAction::CampaignToggleExclude);
 
         assert!(app.router.campaign().excluded.is_empty());
-        assert!(app
-            .router
-            .campaign()
-            .notice
-            .as_deref()
-            .is_some_and(|notice| notice.contains("immutable")));
+        assert!(
+            app.router
+                .campaign()
+                .notice
+                .as_deref()
+                .is_some_and(
+                    |notice| notice.contains("jobs are fixed") && notice.contains("new plan")
+                )
+        );
     }
 
     #[test]
@@ -588,12 +601,38 @@ mod tests {
             [
                 "--plain",
                 "--target",
-                _temp.path().to_str().unwrap(),
+                _temp.path().canonicalize().unwrap().to_str().unwrap(),
                 "campaign",
                 "batch",
                 "batch1"
             ]
         );
+    }
+
+    #[test]
+    fn campaign_refresh_loads_detached_findings_without_changing_projection() {
+        let (temp, mut app) = deck_app();
+        app.open_campaign_view(None);
+        app.refresh_findings_filtered("rank:high");
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("detached-run", workspace.root(), "running")
+            .unwrap();
+        for (rule, severity) in [("high", Severity::High), ("low", Severity::Low)] {
+            let finding = Finding::new_semgrep(rule, "src/main.rs", 1, None, severity, rule);
+            store.insert_finding("detached-run", &finding).unwrap();
+        }
+        app.set_input("preserve this draft");
+        let origin = app.shell_view();
+
+        app.refresh_campaign_deck();
+
+        assert_eq!(app.active_findings_filter().as_deref(), Some("rank:high"));
+        assert_eq!(app.findings().len(), 1);
+        assert_eq!(app.domain().finding_ledger_counts().unwrap().total, 2);
+        assert_eq!(app.shell_view(), origin);
+        assert_eq!(app.input(), "preserve this draft");
     }
 
     #[test]

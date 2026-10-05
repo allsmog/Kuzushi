@@ -7,7 +7,7 @@ use super::bridge_payloads::{
     BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
-    bridge_runtime_failure, run_next_step_bridge_observed, run_next_step_preflight_bridge,
+    bridge_runtime_failure, run_next_step_bridge_admitted, run_next_step_preflight_bridge,
 };
 use super::runtime_config::LangGraphRuntime;
 use super::transport_retry;
@@ -35,11 +35,12 @@ pub(crate) fn next_step_observed_blocking(
     loop {
         attempt += 1;
         ensure_not_cancelled(runtime)?;
-        let outcome = run_next_step_bridge_observed(
+        let outcome = run_next_step_bridge_admitted(
             &runtime.command,
             &bridge_request,
             runtime.cancellation.as_ref(),
             runtime.response_text.as_ref(),
+            runtime.allowance.as_ref(),
         );
         let failure = next_step_transient_failure(&outcome);
         let error = match outcome.and_then(ensure_next_step_response_ok) {

@@ -29,7 +29,7 @@ pub fn scan_batch_base_input(mut input: Value) -> Value {
     input
 }
 
-pub(super) fn force_discovery_only(input: &mut Value) -> Result<()> {
+pub(in crate::capabilities::campaign) fn force_discovery_only(input: &mut Value) -> Result<()> {
     let object = input
         .as_object_mut()
         .context("prepared sast:scan input must be an object")?;
@@ -114,15 +114,7 @@ fn bound_threat_model_ref(root: &Path, input: &Value) -> Result<Option<Value>> {
     if let Some(bound) = input.get("threatModelRef").filter(|value| !value.is_null()) {
         let expected: crate::capabilities::threat_model::ThreatModelRef =
             serde_json::from_value(bound.clone()).context("invalid bound threatModelRef")?;
-        let loaded = crate::capabilities::threat_model::load_threat_model_revision(
-            root,
-            &expected.model_id,
-            Some(&expected.revision_id),
-        )?;
-        anyhow::ensure!(
-            loaded.model_ref == expected,
-            "bound threatModelRef failed immutable object verification"
-        );
+        crate::capabilities::threat_model::load_exact_threat_model(root, &expected)?;
         return Ok(Some(bound.clone()));
     }
     Ok(None)
@@ -234,7 +226,7 @@ fn digest_file_row(root: &Path, path: &Path, size: u64) -> Result<(String, Strin
     ))
 }
 
-pub(super) fn digest_serializable(value: &impl Serialize) -> Result<String> {
+pub(in crate::capabilities::campaign) fn digest_serializable(value: &impl Serialize) -> Result<String> {
     let bytes = canonical_json_bytes(value)?;
     Ok(crate::run_lifecycle::sha256_content_digest(&bytes))
 }

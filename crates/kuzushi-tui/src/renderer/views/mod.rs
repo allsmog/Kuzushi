@@ -46,6 +46,7 @@ mod pwn;
 mod report;
 mod runs;
 mod scene;
+pub(in crate::renderer) use scene::DfdDiagram;
 mod system;
 mod threat;
 mod workbench;

@@ -66,8 +66,10 @@ impl ShellApp {
             self.router.set_overlay_origin(None);
             self.router.set_overlay_input_mode(None);
         }
-        if !matches!(view, ShellView::Workbench | ShellView::Activity)
-            && !contextual_surface_view(view)
+        if !matches!(
+            view,
+            ShellView::Workbench | ShellView::Activity | ShellView::Report
+        ) && !contextual_surface_view(view)
         {
             self.router.workbench_mut().clear_zoom();
         }
@@ -133,11 +135,14 @@ impl ShellApp {
             report.take_origin()
         };
         let Some(origin) = origin else {
-            self.close_report_to_fix_fallback();
+            self.close_report_to_review_fallback();
             return;
         };
         self.set_shell_view(origin.view);
         self.set_input_mode(origin.input_mode);
+        self.router
+            .navigation_mut()
+            .accept_back_transition(origin.view);
     }
 
     fn current_non_nested_origin(&self) -> ReportOrigin {
@@ -157,11 +162,11 @@ impl ShellApp {
         }
     }
 
-    fn close_report_to_fix_fallback(&mut self) {
+    fn close_report_to_review_fallback(&mut self) {
         self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
-            .set_page(Some(WorkbenchPage::Fix));
+            .set_page(Some(WorkbenchPage::Review));
         self.router
             .workbench_mut()
             .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
@@ -620,7 +625,7 @@ impl ShellApp {
     }
 
     pub(crate) fn record_current_phase_skip(&mut self) -> bool {
-        let unresolved = WorkflowPhase::ORDER
+        let unresolved = WorkflowPhase::INVESTIGATION_ORDER
             .iter()
             .copied()
             .find(|phase| self.engagement.unresolved_phase_attempt(*phase).is_some());
@@ -1399,6 +1404,7 @@ pub(crate) fn contextual_surface_view(view: ShellView) -> bool {
             | ShellView::Jobs
             | ShellView::Replay
             | ShellView::Trace
+            | ShellView::RunDiff
             | ShellView::Scene
     )
 }

@@ -3,6 +3,14 @@ use crate::runtime::AgentQueryControl;
 
 #[async_trait]
 impl AgentRuntime for RoutedRuntime<'_> {
+    fn semantic_cache_identity(
+        &self,
+        request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        validate_routed_request_model("cache", &request.model).ok()?;
+        self.inner.semantic_cache_identity(request)
+    }
+
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         validate_routed_request_model("preflight", model)?;
         self.inner.preflight_model_blocking(model)

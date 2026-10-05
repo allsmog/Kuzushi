@@ -956,6 +956,7 @@ mod stage_tests {
             "entryPoints": ["app.py"],
         });
         let inventory = crate::repository_inventory::RepositoryInventory {
+            inspection: None,
             root_name: "monorepo".to_string(),
             languages: vec![
                 crate::repository_inventory::InventoryLanguage {
@@ -1005,6 +1006,7 @@ mod stage_tests {
     fn empty_inventory_keeps_the_sample_language_guess() {
         let mut repo_context = json!({"languages": ["Rust"], "frameworks": []});
         let inventory = crate::repository_inventory::RepositoryInventory {
+            inspection: None,
             root_name: "tiny".to_string(),
             languages: Vec::new(),
             source_files: Vec::new(),

@@ -17,6 +17,13 @@ impl<'a> RuntimeHandle<'a> {
 
 #[async_trait]
 impl<'a> AgentRuntime for RuntimeHandle<'a> {
+    fn semantic_cache_identity(
+        &self,
+        request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner().semantic_cache_identity(request)
+    }
+
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         self.inner().preflight_model_blocking(model)
     }

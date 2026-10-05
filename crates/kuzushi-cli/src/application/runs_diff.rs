@@ -32,6 +32,10 @@ pub(crate) fn runs_diff_command(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RunsDiff {
     pub(crate) comparison: ScanRunComparison,
+    pub(crate) base_source: kuzushi_core::run_artifacts::RunSourceRevision,
+    pub(crate) compare_source: kuzushi_core::run_artifacts::RunSourceRevision,
+    pub(crate) base_context: kuzushi_core::run_artifacts::RunThreatModelContext,
+    pub(crate) compare_context: kuzushi_core::run_artifacts::RunThreatModelContext,
     pub(crate) warnings: Vec<String>,
     pub(crate) decision_summary: Option<RunsDiffDecisionSummary>,
 }
@@ -129,10 +133,38 @@ pub(crate) fn runs_diff(
     append_result_artifact_warning(target, compare_run_id, &mut warnings);
     let decision_summary = decision_summary_from_store(&store, &comparison, &mut warnings);
     Ok(RunsDiff {
+        base_source: run_source_revision(target, base_run_id),
+        compare_source: run_source_revision(target, compare_run_id),
+        base_context: run_threat_model_context(target, base_run_id),
+        compare_context: run_threat_model_context(target, compare_run_id),
         comparison,
         warnings,
         decision_summary,
     })
+}
+
+fn run_source_revision(target: &Path, run: &str) -> kuzushi_core::run_artifacts::RunSourceRevision {
+    let summary = run_artifact_json(target, run, "run.json");
+    let result = run_artifact_json(target, run, "result.json");
+    kuzushi_core::run_artifacts::RunSourceRevision::from_artifacts(
+        summary.as_ref(),
+        result.as_ref(),
+    )
+}
+
+fn run_artifact_json(target: &Path, run: &str, leaf: &str) -> Option<Value> {
+    let RunArtifactRead::Ready { value, .. } = read_run_artifact_text(target, run, leaf) else {
+        return None;
+    };
+    serde_json::from_str(&value).ok()
+}
+
+fn run_threat_model_context(
+    target: &Path,
+    run: &str,
+) -> kuzushi_core::run_artifacts::RunThreatModelContext {
+    let input = run_artifact_json(target, run, "scan-input.json");
+    kuzushi_core::run_artifacts::RunThreatModelContext::from_scan_input(input.as_ref())
 }
 
 fn append_result_artifact_warning(target: &Path, run_id: &str, warnings: &mut Vec<String>) {
@@ -228,6 +260,11 @@ fn runs_diff_json(diff: &RunsDiff) -> Value {
     serde_json::json!({
         "baseRunId": diff.comparison.base_run_id,
         "compareRunId": diff.comparison.compare_run_id,
+        "baseSource": diff.base_source,
+        "compareSource": diff.compare_source,
+        "baseContext": diff.base_context,
+        "compareContext": diff.compare_context,
+        "contextComparison": diff.base_context.comparison_label(&diff.compare_context),
         "baseStatus": diff.base_status(),
         "compareStatus": diff.compare_status(),
         "counts": {
@@ -245,12 +282,23 @@ fn runs_diff_json(diff: &RunsDiff) -> Value {
         "new": diff.keys_of(ScanComparisonClass::New),
         "reopened": diff.keys_of(ScanComparisonClass::Reopened),
         "resolved": diff.keys_of(ScanComparisonClass::Resolved),
+        "absenceCoverage": absence_coverage_json(&diff.comparison),
         "notRescanned": diff.not_rescanned().iter().map(|(key, reason)| {
             serde_json::json!({"findingKey": key, "reason": reason})
         }).collect::<Vec<_>>(),
         "uncertainMatches": diff.comparison.uncertain.iter().map(uncertain_match_json).collect::<Vec<_>>(),
         "changed": changed.iter().map(runs_change_json).collect::<Vec<_>>(),
     })
+}
+
+fn absence_coverage_json(comparison: &ScanRunComparison) -> Vec<Value> {
+    comparison.findings.iter().filter(|row| row.after.is_none()).map(|row| {
+        serde_json::json!({
+            "findingKey": row.stable_key,
+            "status": if row.reassessment_block.is_some() { "not_reassessed" } else { "not_observed" },
+            "reason": row.reassessment_block,
+        })
+    }).collect()
 }
 
 fn decision_summary_json(summary: &RunsDiffDecisionSummary) -> Value {
@@ -290,6 +338,18 @@ fn signature_json(signature: &ScanFindingSignature) -> Value {
 
 fn runs_diff_plain(diff: &RunsDiff) -> String {
     let mut lines = vec![diff_title(diff), diff_status(diff), diff_counts(diff)];
+    lines.push(format!("Base source: {}", diff.base_source.label()));
+    lines.push(format!("Later source: {}", diff.compare_source.label()));
+    lines.push(format!(
+        "Threat model: {}",
+        diff.base_context.comparison_label(&diff.compare_context)
+    ));
+    lines.push(format!("Base threat model: {}", diff.base_context.label()));
+    lines.push(format!(
+        "Later threat model: {}",
+        diff.compare_context.label()
+    ));
+    append_absence_coverage(&mut lines, &diff.comparison);
     append_warnings(&mut lines, &diff.warnings);
     append_decision_summary(&mut lines, diff.decision_summary.as_ref());
     append_named_ids(&mut lines, "New", &diff.keys_of(ScanComparisonClass::New));
@@ -307,6 +367,16 @@ fn runs_diff_plain(diff: &RunsDiff) -> String {
     append_not_rescanned(&mut lines, &diff.not_rescanned());
     append_change_rows(&mut lines, &diff.changed());
     format!("{}\n", lines.join("\n"))
+}
+
+fn append_absence_coverage(lines: &mut Vec<String>, comparison: &ScanRunComparison) {
+    for row in comparison.findings.iter().filter(|row| row.after.is_none()) {
+        let assessment = row
+            .reassessment_block
+            .as_deref()
+            .unwrap_or("covered but not observed; absence alone is not a fix");
+        lines.push(format!("Reassessment {}: {assessment}", row.stable_key));
+    }
 }
 
 fn diff_title(diff: &RunsDiff) -> String {

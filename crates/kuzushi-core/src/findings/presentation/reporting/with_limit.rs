@@ -309,6 +309,7 @@ fn legacy_triage_state_matches(state: FindingTriageStateFilter, finding: &Findin
     match state {
         FindingTriageStateFilter::Untriaged => finding.triage.is_none(),
         FindingTriageStateFilter::Triaged => finding.triage.is_some(),
+        FindingTriageStateFilter::NotObserved => finding.observation_gap.is_some(),
         // Derived states (open/reviewing/confirmed/to_fix/dismissed/fixed/removed)
         // are evaluated in the store layer via the lifecycle fold.
         _ => false,

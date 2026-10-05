@@ -35,7 +35,7 @@ pub use finding_identity::{
 };
 pub use finding_record::{
     compute_class_dedup_key, compute_dedup_key, compute_root_cause_key, compute_source_signature,
-    is_attack_chain_finding, normalize_cwe, Finding, FindingEvidence, FindingSource,
+    is_attack_chain_finding, normalize_cwe, Finding, FindingEvidence, FindingObservationGap, FindingSource,
 };
 pub use from_semgrep::{Severity, VulnSource};
 pub(crate) use grounding::safe_target_path;

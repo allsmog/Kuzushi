@@ -6,6 +6,46 @@ use notify::{
 use std::process::Command;
 
 #[test]
+fn source_identity_exclusions_are_relative_to_the_workspace_not_its_ancestors() {
+    let parent = tempfile::tempdir().unwrap();
+    let reference_root = parent.path().join("reference");
+    fs::create_dir_all(&reference_root).unwrap();
+    fs::write(reference_root.join("main.rs"), "fn main() {}\n").unwrap();
+    let expected = current_workspace_tree_hash(&reference_root).unwrap();
+    for ancestor in ["target", "dist", "node_modules", "bazel-example"] {
+        let root = parent.path().join(ancestor).join("repo");
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(root.join("target/generated.rs"), "ignored build artifact").unwrap();
+        assert_eq!(current_workspace_tree_hash(&root).unwrap(), expected);
+        let workspace = WorkspaceTarget::new(&root).unwrap();
+        assert_eq!(index_workspace_snapshot(&workspace).unwrap().tree_hash, expected);
+        fs::write(root.join("main.rs"), "fn main() { changed(); }\n").unwrap();
+        assert_ne!(current_workspace_tree_hash(&root).unwrap(), expected);
+    }
+}
+
+#[test]
+fn two_dirty_edits_at_one_sha_keep_distinct_content_identities_under_target() {
+    let parent = tempfile::tempdir().unwrap();
+    let root = parent.path().join("target");
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("main.rs");
+    fs::write(&source, "initial\n").unwrap();
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "main.rs"]);
+    git(&root, &["-c", "user.name=Offline fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "source"]);
+    fs::write(&source, "first dirty edit\n").unwrap();
+    let before = current_workspace_resume_identity(&root).unwrap();
+    let before_git = target_git_metadata(&root).unwrap();
+    fs::write(&source, "second dirty edit\n").unwrap();
+    let after = current_workspace_resume_identity(&root).unwrap();
+    assert!(before_git.dirty);
+    assert_eq!(before_git, target_git_metadata(&root).unwrap());
+    assert_ne!(before, after);
+}
+
+#[test]
 fn current_tree_hash_matches_indexed_snapshot_without_creating_state() {
     let target = tempfile::tempdir().unwrap();
     fs::create_dir_all(target.path().join("src")).unwrap();

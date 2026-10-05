@@ -730,6 +730,11 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "export_included_count",
     "export_total_count",
     "format_omitted_fields",
+    "observation_note",
+    "observation_event_seq",
+    "observation_event_hash",
+    "observation_last_seen_run_id",
+    "observation_compared_run_id",
 ];
 
 fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
@@ -816,7 +821,21 @@ fn csv_finding_row(record: &WorkspaceFindingExportRecord, metadata: &[String; 4]
     row.extend(csv_provenance_fields(record));
     row.extend(csv_remediation_fields(record));
     row.extend(metadata.iter().cloned());
+    row.extend(csv_observation_fields(record));
     row
+}
+
+fn csv_observation_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
+    let Some(gap) = record.observation_gap.as_ref() else {
+        return vec![String::new(); 5];
+    };
+    vec![
+        record.observation_note.clone().unwrap_or_default(),
+        gap.event_seq.to_string(),
+        gap.event_hash.clone(),
+        gap.last_seen_run_id.clone().unwrap_or_default(),
+        gap.compared_run_id.clone().unwrap_or_default(),
+    ]
 }
 
 fn csv_remediation_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {

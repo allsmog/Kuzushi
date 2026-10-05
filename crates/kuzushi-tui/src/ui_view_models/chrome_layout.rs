@@ -108,6 +108,7 @@ fn hides_transcript_chrome(view: &ShellView) -> bool {
             | ShellView::Quickstart
             | ShellView::Logs
             | ShellView::Workbench
+            | ShellView::Report
             | ShellView::Keymap
     )
 }
@@ -148,6 +149,14 @@ mod tests {
             transcript_chrome_height(&app_in_view(ShellView::Workbench), 24),
             0
         );
+    }
+
+    #[test]
+    fn report_keeps_reading_space_instead_of_repeating_command_history() {
+        let app = app_in_view(ShellView::Report);
+        for height in [12, 20, 24, 36, 48, 89] {
+            assert_eq!(transcript_chrome_height(&app, height), 0);
+        }
     }
 
     #[test]

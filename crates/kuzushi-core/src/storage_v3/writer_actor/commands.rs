@@ -186,16 +186,21 @@ impl StorageWriterActor {
         let (control_tx, control_rx) = tokio_mpsc::channel(config.control_capacity.max(1));
         let (decision_tx, decision_rx) = tokio_mpsc::channel(config.decision_capacity.max(1));
         let (watcher_tx, watcher_rx) = tokio_mpsc::channel(config.watcher_capacity.max(1));
-        let join = tokio::spawn(run_actor(
-            log_dir.into(),
-            projection_path.into(),
-            config.decision_budget,
-            ActorReceivers {
-                control: control_rx,
-                decisions: decision_rx,
-                watcher: watcher_rx,
-            },
-        ));
+        let log_dir = log_dir.into();
+        let projection_path = projection_path.into();
+        let join = tokio::spawn(async move {
+            run_actor(
+                log_dir,
+                projection_path,
+                config.decision_budget,
+                ActorReceivers {
+                    control: control_rx,
+                    decisions: decision_rx,
+                    watcher: watcher_rx,
+                },
+            )
+            .await
+        });
         StorageWriterActorHandle {
             control_tx,
             decision_tx,

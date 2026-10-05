@@ -129,7 +129,7 @@ const quickCiRequirements = [
   // Clippy and the Rust suite run once per ready PR; the quick gate skips both.
   "rust-tests:",
   "cargo test --workspace --locked",
-  "types: [opened, reopened, ready_for_review, synchronize]",
+  "types: [opened, reopened, ready_for_review, synchronize, edited]",
   "github.event.pull_request.draft == false",
   "workflow_call:",
   "KUZUSHI_CRAP_RISK_BASE_REF",

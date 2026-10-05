@@ -5,13 +5,13 @@ phase: scan
 size: 40x12
 ---
 KUZUSHI · Viewing Scan · next Review
- ▸ NEXT record terminal dispositions for
-        6 of 6 ledger candidates
+ ▸ NEXT review 6 remaining findings (6
+        total)
 │▸ RECORDED ENGINE OUTCOMES
 │✓ Run SAST … · complete · r:scan-phase
 │
 │
-run rout... 6 findings · 1 C · 2 H · 2 M
+⛭ autonomy:fix ·   6 findings · 1 C ·...
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

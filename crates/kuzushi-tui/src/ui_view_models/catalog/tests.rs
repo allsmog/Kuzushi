@@ -143,3 +143,21 @@ fn expert_toggle_keeps_default_surface_small_and_reveals_engines() {
         .iter()
         .any(|group| group.category == "EXPERT"));
 }
+
+#[test]
+fn registered_internal_or_labs_tools_are_not_guided_capability_actions() {
+    let app = ShellApp::new(V2Config::default(), None);
+    for tool in ["fuzz:status", "carlini-threat-hunt:run"] {
+        assert!(app.registry().resolve_tool(tool).is_some());
+        let spec = CapabilityActionSpec {
+            id: "fixture",
+            label: "Fixture",
+            description: "visibility fixture",
+            command: "",
+            category: "EXPERT",
+            required_tool: Some(tool),
+            required_visible_module: None,
+        };
+        assert!(!spec.available(&app));
+    }
+}

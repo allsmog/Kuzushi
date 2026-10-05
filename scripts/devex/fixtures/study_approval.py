@@ -1,0 +1,52 @@
+"""Build review input from the real offline study draft; no model execution."""
+import hashlib
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+
+def approval_command(root, output):
+    plan = json.loads((root / ".kuzushi/v3/campaigns/offline-finite/plan.json").read_text())
+    canonical = json.dumps(plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    approval = {
+        "investigationId": "offline-finite",
+        "expectedRevision": 0,
+        "model": "openai-codex:gpt-5.5",
+        "maxProviderCalls": 9,
+        "protectedReviewCalls": 3,
+        "reason": "Offline TUI approval; no provider execution",
+        "campaignId": "offline-finite",
+        "campaignPlanSha256": "sha256:" + hashlib.sha256(canonical).hexdigest(),
+        "campaignJobs": 3,
+        "maxJobAttempts": 1,
+    }
+    output.write_text("run campaign:approve-allowance " + json.dumps(approval, separators=(",", ":")))
+
+
+def verify_approval(root, output):
+    result = subprocess.run([
+        os.environ["KUZUSHI_NATIVE_BIN"], "--target", str(root), "run", "campaign:allowance", "--input", "-",
+    ], input=json.dumps({"investigationId": "offline-finite"}), text=True,
+        capture_output=True, timeout=30, check=True)
+    receipt = json.loads(result.stdout)["data"]["allowance"]
+    if receipt["revision"] != 1 or receipt["committedCalls"] or receipt["unresolvedCalls"]:
+        raise RuntimeError("Approval must persist one revision without consuming calls")
+    if receipt["limits"] != {"maxProviderCalls": 9, "protectedReviewCalls": 3}:
+        raise RuntimeError("Persisted limits differ from the reviewed allowance")
+    if len(receipt["workPlan"]["jobs"]) != 3:
+        raise RuntimeError("Persisted work differs from the three-job draft")
+    database = root / ".kuzushi/v3/index.sqlite3"
+    with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as connection:
+        attempts = connection.execute("select count(*) from investigation_work_attempts").fetchone()[0]
+    if attempts:
+        raise RuntimeError("Approval must not start discovery jobs")
+    output.write_text(json.dumps({"status": "passed", "allowance": receipt,
+                                 "jobAttempts": attempts, "providerCalls": 0}, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    action = verify_approval if "--verify" in sys.argv[3:] else approval_command
+    action(Path(sys.argv[1]), Path(sys.argv[2]))

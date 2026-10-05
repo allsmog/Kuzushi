@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolClassification {
     Read,
+    Report,
     Phase(WorkflowPhase),
 }
 
@@ -15,7 +16,19 @@ pub fn classify_descriptor(tool: &ToolDescriptor) -> Option<ToolClassification> 
     if tool.effect == ToolEffect::Read {
         return Some(ToolClassification::Read);
     }
+    if tool.phase == ToolPhase::Report {
+        return report_classification(tool.effect);
+    }
     workflow_phase(tool.phase).map(ToolClassification::Phase)
+}
+
+// Report is an exit at any posture, never a way to authorize execution or
+// external actions. File exports retain the descriptor's explicit approval.
+fn report_classification(effect: ToolEffect) -> Option<ToolClassification> {
+    match effect {
+        ToolEffect::WorkspaceWrite | ToolEffect::TargetWrite => Some(ToolClassification::Report),
+        _ => None,
+    }
 }
 
 /// Compatibility lookup for shell presentation. Built-ins are resolved from
@@ -29,7 +42,7 @@ pub fn classify(tool_name: &str) -> Option<ToolClassification> {
 pub fn tool_phase(tool_name: &str) -> Option<WorkflowPhase> {
     match classify(tool_name) {
         Some(ToolClassification::Phase(phase)) => Some(phase),
-        Some(ToolClassification::Read) | None => None,
+        Some(ToolClassification::Read | ToolClassification::Report) | None => None,
     }
 }
 
@@ -74,7 +87,7 @@ fn workflow_phase(phase: ToolPhase) -> Option<WorkflowPhase> {
         ToolPhase::Review => Some(WorkflowPhase::Review),
         ToolPhase::Prove => Some(WorkflowPhase::Prove),
         ToolPhase::Fix => Some(WorkflowPhase::Fix),
-        ToolPhase::Operate => None,
+        ToolPhase::Report | ToolPhase::Operate => None,
     }
 }
 

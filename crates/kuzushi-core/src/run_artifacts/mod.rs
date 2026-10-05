@@ -28,6 +28,11 @@ mod run_retention;
 mod run_summary_store;
 mod running;
 mod scan_stage;
+mod source_revision;
+mod threat_model_context;
+pub use threat_model_context::RunThreatModelContext;
+pub use source_revision::RunSourceRevision;
+pub(crate) use scan_stage::scan_paths_cover_file;
 mod stage_checkpoint;
 mod terminal_intent;
 #[cfg(test)]
@@ -101,7 +106,7 @@ pub use stage_checkpoint::{
     active_stage_checkpoints, checkpoint_coordinates_for_run,
     matching_checkpoint_coordinates_for_run, pending_stage_checkpoints, PendingStageCheckpoint,
     StageCheckpointCoordinates, StageCheckpointHandle, StageCheckpointScope, StageCheckpointStore,
-    StageGuard,
+    StageGuard, StageResumeHealth, StageResumeProblem,
 };
 pub use tool_output_cost::tool_run_output_cost_report;
 pub(crate) use tool_run_record::terminal_result_digest;

@@ -362,11 +362,11 @@ is expected to behave identically and should be filed as a parity bug.
   and must serialize the same view models without inventing another workflow.
 - **Cockpit Spine (`ShellView::{Setup,Workbench,Activity,Report}`)** is the
   canonical interactive workflow:
-  `Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
-  Focus → Fix ↔ Run Focus → Report`. `Workbench` hosts the five durable pages
-  `Map`, `Scan`, `Review`, `Prove`, and `Fix`, not the retired generic four-pane
-  command center. The canonical persisted/core enum is
-  `WorkflowPhase::{Map,Scan,Review,Prove,Fix}`. Legacy `hunt` and `confirm`
+  `Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Report`.
+  `Workbench` defaults to Map, Scan, and Review; Prove/Fix pages remain explicit
+  compatibility readers. Guided progression uses `WorkflowPhase::INVESTIGATION_ORDER`;
+  Report is a separate surface. The persisted/core enum remains
+  `WorkflowPhase::{Map,Scan,Review,Prove,Fix}` for artifact and dispatch compatibility. Legacy `hunt` and `confirm`
   inputs load as deprecated `scan` and `prove` aliases for one major release;
   new artifacts serialize only canonical values. Merely visiting a page never
   advances reality.
@@ -405,12 +405,13 @@ is expected to behave identically and should be filed as a parity bug.
   keeps the full draft → staged → applied → re-verification lifecycle visible
   rather than clearing the proof of application.
 - **Engagement journey spine (`next`, phase rail, phase chip)** derives current
-  Map/Scan/Review/Prove/Fix from durable current-target/current-revision
+  Map/Scan/Review or Report from durable current-target/current-revision
   evidence. Counts come from the unfiltered ledger, so filters and page visits
   never forge completion. Completed attempts require an explicit selection;
-  partial Scan attempts additionally require acknowledgement. Clean Scan,
-  all-rejected Review, and no-proof-backed Prove branches may truthfully offer
-  Report. `workbench` routes to the derived page; `findings` and `open <id>`
+  partial Scan attempts additionally require acknowledgement. Clean Scan or a
+  Review with decisions for every finding offers Report, including confirmed or
+  explicitly deferred findings. Historical Prove/Fix attempts never redirect this
+  guided journey. `workbench` routes to the derived page; `findings` and `open <id>`
   route to Review; `next` runs the current phase planner; a phase verb opens
   its durable page once that phase is complete or passed (the page's hint row
   offers `plan <phase>`) and its planner otherwise; `report` opens the
@@ -547,8 +548,13 @@ is expected to behave identically and should be filed as a parity bug.
   phase-result cards. A typed attention broker projects approvals, questions,
   credential gates, partial acknowledgements, and unresolved results into the
   footer and terminal title. Multiline paste remains one explicit submission:
-  the composer shows a placeholder and expands the complete payload only when
-  Enter is pressed.
+  the composer tracks atomic paste spans and expands their exact payloads on
+  submission. Ctrl+Y opens a read-only preview with expand/remove/cancel actions;
+  Ctrl+_ restores paste edits. Composer and form fields edit whole graphemes and
+  project cursor positions using terminal display widths.
+  The terminal inbox bounds count and bytes, coalesces replaceable state only
+  between ordered actions, and preserves accepted keys/pastes with backpressure.
+  A separate wake slot keeps background service responsive under input load.
 - **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
   and background handoff (`background`/`bg`, Run Focus `b`)** — shell-only.
   `jobs` is a Metasploit-style live control surface over the shared

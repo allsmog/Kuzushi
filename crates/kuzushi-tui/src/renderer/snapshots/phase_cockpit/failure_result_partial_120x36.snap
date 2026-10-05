@@ -5,7 +5,7 @@ scenario: result_partial
 size: 120x36
 ---
 KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
- Map ● · Scan ○ · Review × · Prove × · Fix ×
+ Map ● · Scan ○ · Review × · Report
  ▸ NEXT acknowledge the partial Scan
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts
 │RECORDED ENGINE OUTCOMES
@@ -36,7 +36,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
 
 
-shell route · 1 partial result · workbench · notify:unavailable · focus unknown · Map 1/5 · ⛭...              0 findings
+⛭ autonomy:fix · shell route · 1 partial result · workbench · notify:unavailable · focus unknown · Map...     0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Esc prompt   u Acknowledge & use partial   o Open   n Use & Review   r Run again   Ctrl+C exit
 ▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

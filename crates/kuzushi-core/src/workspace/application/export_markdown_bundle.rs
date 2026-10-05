@@ -357,6 +357,9 @@ fn push_bundle_finding_summary(out: &mut String, record: &WorkspaceFindingExport
         "- **Review decision:** {}\n",
         markdown_inline_text(&record.review_decision)
     ));
+    if let Some(note) = record.observation_note.as_deref() {
+        out.push_str(&format!("- **Observation:** {}\n", markdown_inline_text(note)));
+    }
     if let Some(conflict) = record.review_decision_conflict.as_deref() {
         out.push_str(&format!(
             "- **Decision conflict:** {}\n",
@@ -559,6 +562,8 @@ fn build_manifest_entry(
         "file": record.location.file,
         "startLine": record.location.start_line,
         "reviewDecision": record.review_decision,
+        "observationGap": record.observation_gap,
+        "observationNote": record.observation_note,
         "reviewDecisionConflict": record.review_decision_conflict,
         "lifecycleStatus": record.lifecycle_status,
         "evidenceState": record.evidence.state,

@@ -41,6 +41,7 @@ impl InputUpdate {
         }
     }
 }
+mod allowance_review;
 mod answer_keys;
 mod answer_mouse;
 mod back_navigation;
@@ -63,6 +64,7 @@ mod planning_option_keys;
 mod prereq_prompt_keys;
 mod quit_chord;
 mod report_keys;
+mod review_comparison;
 mod scroll_navigation;
 mod text_input;
 mod ticking;

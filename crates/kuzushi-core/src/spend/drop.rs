@@ -78,11 +78,8 @@ pub(crate) fn total_committed_for(conn: &Connection, op: Operation) -> Result<f6
         )
         .optional()?
         .flatten();
-    crate::runtime::RuntimeCost::from_usd(
-        value.unwrap_or(0.0),
-        "spend ledger committed total",
-    )
-    .map(crate::runtime::RuntimeCost::usd)
+    crate::runtime::RuntimeCost::from_usd(value.unwrap_or(0.0), "spend ledger committed total")
+        .map(crate::runtime::RuntimeCost::usd)
 }
 
 pub(crate) fn total_committed_all(conn: &Connection) -> Result<f64> {

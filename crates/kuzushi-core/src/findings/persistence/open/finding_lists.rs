@@ -61,8 +61,8 @@ impl FindingStore {
     /// A newer scan does not define this set: the durable lifecycle does.
     /// Agentic and otherwise non-deterministic findings therefore remain
     /// relevant when a later run does not rediscover them. Only an explicit
-    /// lifecycle transition (stale, suppressed, or rekeyed) removes a row
-    /// from active triage and chain composition.
+    /// suppression or rekey transition removes a row from active triage.
+    /// A stale observation is a gap, not proof that the finding was fixed.
     pub fn list_relevant_findings(&self) -> Result<Vec<Finding>> {
         let findings = self.v3_all_findings()?;
         let stable_fps = findings.iter().map(finding_stable_key).collect::<Vec<_>>();
@@ -111,7 +111,7 @@ impl FindingStore {
         let generations = self.finding_generations_in_observation_order()?;
         let mut projected = project_finding_generations(generations, policy);
         projected.sort_by(super::v3_finding_reads::finding_list_order);
-        Ok(projected)
+        self.hydrate_v3_findings(projected)
     }
 }
 
@@ -148,11 +148,23 @@ fn collect_filtered_findings(
             aliases.push(alias_by_row[index].clone());
         }
     }
+    let review_decisions = review_decisions_by_fingerprint(&findings, &review_cache);
     Ok(FindingListReport {
+        review_decisions,
         count,
         findings,
         aliases,
     })
+}
+
+fn review_decisions_by_fingerprint(
+    findings: &[Finding],
+    cache: &std::collections::BTreeMap<String, ReviewDecision>,
+) -> std::collections::BTreeMap<String, ReviewDecision> {
+    findings.iter().filter_map(|finding| {
+        let decision = cache.get(&review_cache_key(finding)?)?;
+        Some((finding.fingerprint.clone(), decision.clone()))
+    }).collect()
 }
 
 fn ledger_aliases_by_row_index(rows: &[Finding]) -> Vec<String> {
@@ -232,7 +244,7 @@ fn finding_is_relevant_with_statuses(
     !finding.suppressed
         && statuses
             .get(&finding_stable_key(finding))
-            .is_none_or(|status| status == "open")
+            .is_none_or(|status| matches!(status.as_str(), "open" | "stale"))
 }
 
 #[cfg(test)]

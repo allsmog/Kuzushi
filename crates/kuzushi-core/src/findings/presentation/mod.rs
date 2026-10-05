@@ -3,10 +3,12 @@ use serde::Serialize;
 
 mod detail;
 mod finding_lines;
+mod observation_gap;
 pub mod pr_comment;
 mod reporting;
 
 pub(crate) use finding_lines::top_finding_lines;
+pub use observation_gap::observation_gap_note;
 
 pub use detail::{
     dataflow_evidence_rows, finding_lifecycle_status, finding_next_action, format_stage_note,

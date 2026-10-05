@@ -1077,15 +1077,7 @@ impl ShellApp {
 
     fn open_failure_handoff(&mut self) {
         self.set_shell_view(ShellView::FailureHandoff);
-        if self
-            .agent_chat()
-            .and_then(|agent| agent.failure_context.as_ref())
-            .is_some()
-        {
-            self.log("handoff", "latest bounded failure handoff");
-        } else {
-            self.log("handoff", "no failure handoff is loaded");
-        }
+        self.log("view", "failure details");
     }
 
     fn open_prompts_view(&mut self) {
@@ -1312,7 +1304,7 @@ impl ShellApp {
             )
     }
 
-    fn open_run_diff_view(&mut self, left: String, right: String) {
+    pub(crate) fn open_run_diff_view(&mut self, left: String, right: String) {
         self.router.run_diff_mut().open(left.clone(), right.clone());
         self.set_shell_view(ShellView::RunDiff);
         self.router.default_scroll_mut().reset();

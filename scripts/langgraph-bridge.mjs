@@ -31,19 +31,13 @@ import {
 import { messagesForNextStep } from "./langgraph-bridge/next-step-messages.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
 import { writeBridgePayload, writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
+import { openProviderAdmission, readBridgeRequest, withProviderAdmission } from "./langgraph-bridge/provider-admission.mjs";
 import { invokeWithResponseText, responseStreamFor } from "./langgraph-bridge/response-stream.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
 import {
   acknowledgeToolPolicy,
   authorizeExecutingQuery,
 } from "./langgraph-bridge/tool-policy-handshake.mjs";
-
-async function readStdin() {
-  let data = "";
-  process.stdin.setEncoding("utf8");
-  for await (const chunk of process.stdin) data += chunk;
-  return data;
-}
 
 // Agentic tool loops need room beyond langgraph's default recursion limit
 // of 25: one model step plus one tool step per hop halves the effective
@@ -164,7 +158,7 @@ function callModelNode(model, request, system, progress) {
 async function invokeThroughQuotaWindows(model, messages, request) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      return await invokeWithResponseText(model, messages, request);
+      return await withProviderAdmission(request, () => invokeWithResponseText(model, messages, request), usageFromMessage);
     } catch (error) {
       if (attempt >= QUOTA_WINDOW_RETRIES || !isRateLimitError(error)) throw error;
       await sleep(quotaWaitMs(error));
@@ -263,10 +257,10 @@ async function handleNextStep(request) {
   const baseModel = modelForRequest(request);
   const model = tools.length ? baseModel.bindTools(tools) : baseModel;
   const system = request.systemPrompt ?? request.system_prompt ?? "";
-  const response = await invokeWithResponseText(model, [
+  const response = await withProviderAdmission(request, () => invokeWithResponseText(model, [
     systemMessageForRequest(request, system),
     ...messagesForNextStep(request.messages),
-  ], request);
+  ], request), usageFromMessage);
   debugDumpBridgeCall("next-step", request, tools, system, response);
   return nextStepResultFromResponse(response);
 }
@@ -299,10 +293,10 @@ function nextStepResultFromResponse(response) {
 async function handlePing(request) {
   const start = Date.now();
   const model = modelForRequest(request);
-  const response = await model.invoke([
+  const response = await withProviderAdmission(request, () => model.invoke([
     systemMessageForRequest(request, "You are an auth ping probe. Reply with ok."),
     new HumanMessage("ok"),
-  ]);
+  ]), usageFromMessage);
   const usage = usageFromMessage(response);
   return {
     ok: true,
@@ -352,8 +346,9 @@ async function main() {
     process.exitCode = await runOauthLogin(oauthArgs);
     return;
   }
-  const request = validateBridgeRequest(JSON.parse(await readStdin()));
+  const request = validateBridgeRequest(await readBridgeRequest(process.stdin));
   responseStream = responseStreamFor(request, writeBridgePayload);
+  await openProviderAdmission(request, writeBridgePayload);
   await finishResponse(await dispatch(request), 0);
 }
 

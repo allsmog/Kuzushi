@@ -92,6 +92,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn omitted_arguments_are_empty_while_explicit_null_is_rejected() {
+        let omitted = drive(
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"echo\"}}\n",
+        ).await;
+        assert!(omitted.contains("\"isError\":false"));
+        assert!(omitted.contains("\"echoed\":{}"));
+        let null = drive(
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"echo\",\"arguments\":null}}\n",
+        ).await;
+        assert!(null.contains("\"isError\":true"));
+    }
+
+    #[tokio::test]
     async fn unknown_tool_returns_method_not_found() {
         let out = drive(
             "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"missing\"}}\n",

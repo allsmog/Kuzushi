@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   cpSync,
@@ -25,6 +26,8 @@ const matchReport = (costUsd) => ({
   hits: 1,
   misses: 0,
   precision: 1,
+  oracle_hit_yield: 1,
+  expected_min_recall: 0,
   recall: { exact_line: 1, pm_lines: 1, function: 1, file_only: 1 },
   cost_usd: costUsd,
   wall_seconds: 2,
@@ -70,11 +73,23 @@ function withScoreHarness(reports, assertion) {
     mkdirSync(path.dirname(script), { recursive: true });
     mkdirSync(reportDir, { recursive: true });
     cpSync(sourceScript, script);
+    mkdirSync(path.join(directory, "scripts"), { recursive: true });
+    cpSync(
+      path.join(repo, "scripts/recall-run-receipt.mjs"),
+      path.join(directory, "scripts/recall-run-receipt.mjs"),
+    );
     chmodSync(script, 0o755);
     for (const [slice, report] of reports) {
       const sliceDir = path.join(reportDir, slice);
       mkdirSync(sliceDir, { recursive: true });
       writeFileSync(path.join(sliceDir, "match.json"), JSON.stringify(report));
+      writeFileSync(path.join(sliceDir, "findings.json"), "{}");
+      writeFileSync(path.join(sliceDir, "scan.json"), "{}");
+      const digest = createHash("sha256").update("{}").digest("hex");
+      writeFileSync(
+        path.join(sliceDir, "validity.json"),
+        JSON.stringify({ status: "valid", findingsSha256: digest, scanSha256: digest }),
+      );
     }
     assert.equal(spawnSync("git", ["init", "-q"], { cwd: directory }).status, 0);
     const result = spawnSync("bash", [script, reportDir], {

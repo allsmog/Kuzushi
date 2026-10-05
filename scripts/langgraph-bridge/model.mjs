@@ -8,6 +8,7 @@ import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/
 import { ChatOpenAI } from "@langchain/openai";
 import { BridgePublicError } from "./errors.mjs";
 import { oauthModelForRequest } from "./oauth-models.mjs";
+import { providerAdmissionEnabled } from "./provider-admission.mjs";
 
 export const DEFAULT_MAX_MODEL_TURNS = 12;
 const OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -344,7 +345,7 @@ function temperatureLockedModel(request) {
 const MODEL_MAX_RETRIES = 8;
 
 export function modelOptions(request) {
-  const options = { maxRetries: MODEL_MAX_RETRIES };
+  const options = { maxRetries: providerAdmissionEnabled(request) ? 0 : MODEL_MAX_RETRIES };
   const temperature = numericTemperature(request);
   const maxTokens = request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens;
   if (temperature !== undefined && !temperatureLockedModel(request)) {

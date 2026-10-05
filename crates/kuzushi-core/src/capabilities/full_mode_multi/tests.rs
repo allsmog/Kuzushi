@@ -622,6 +622,10 @@ mod tests {
         }
     }
     impl AgentRuntime for ScriptedRuntimeMixed {
+        fn semantic_cache_identity(&self, _request: &AgentQueryRequest) -> Option<crate::identity::Blake3Hash> {
+            Some(crate::identity::hash_parts("scripted-full-mode:v1", &[]))
+        }
+
         fn query_blocking(&self, _: AgentQueryRequest) -> Result<AgentQueryResponse> {
             let mut q = self.items.lock().unwrap();
             anyhow::ensure!(!q.is_empty(), "scripted runtime exhausted");

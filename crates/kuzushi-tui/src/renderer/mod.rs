@@ -27,8 +27,13 @@ pub(crate) use views::workbench_phase_plan_for_app;
 pub(in crate::renderer) use views::*;
 pub(crate) use views::{activity_output_scroll, ActivityOutputScroll};
 pub(crate) use views::{run_artifact_max_scroll, run_artifact_page_rows};
+mod allowance_review;
 mod answers;
 mod chrome;
+mod context_generation;
+mod paste_inspection;
+mod study_config;
+mod study_context;
 pub(crate) use answers::{
     answer_body_area, answer_plain_lines, render_answer_prompt, render_answers,
 };

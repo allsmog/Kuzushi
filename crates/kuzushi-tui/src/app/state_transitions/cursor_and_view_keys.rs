@@ -12,6 +12,9 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
+        if self.run_diff_owns_tab(key, modifiers) {
+            return self.handle_view_hotkey(key);
+        }
         let scene_update = self.handle_scene_view_key(key, modifiers);
         if scene_update.handled {
             return scene_update;
@@ -21,6 +24,13 @@ impl ShellApp {
         };
         handler(self);
         InputUpdate::handled()
+    }
+
+    fn run_diff_owns_tab(&self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        self.shell_view() == ShellView::RunDiff
+            && self.input().is_empty()
+            && modifiers.plain
+            && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
     }
 
     pub(super) fn handle_empty_input_view_key(
@@ -698,12 +708,12 @@ mod tests {
         app.set_input("preserved draft");
         app.set_input_mode(InputMode::Navigate);
 
-        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE));
 
         assert!(update.handled);
         assert_eq!(
             crate::ui_view_models::active_workbench_page(&app),
-            crate::app::WorkbenchPage::Fix
+            crate::app::WorkbenchPage::Review
         );
         assert_eq!(app.input(), "preserved draft");
         assert_eq!(app.input_mode(), InputMode::Navigate);

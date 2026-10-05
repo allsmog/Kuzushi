@@ -1,6 +1,9 @@
+use super::terminal_event_queue::{TerminalEventQueue, TerminalEventReceiver};
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
+#[cfg(test)]
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -64,18 +67,21 @@ impl WakeRateState {
 
 pub(crate) enum TerminalLoopEvent {
     Terminal(TermEvent),
+    InputRejected(String),
     Wake,
 }
 
 pub(crate) struct TerminalLoopInbox {
-    rx: Receiver<Result<TerminalLoopEvent, String>>,
+    rx: TerminalEventReceiver,
+    reader: Option<thread::JoinHandle<()>>,
+    pressure_reported: AtomicBool,
     wake_pending: Arc<AtomicBool>,
     rate: Arc<Mutex<WakeRateState>>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct TerminalLoopWake {
-    tx: Sender<Result<TerminalLoopEvent, String>>,
+    queue: Arc<TerminalEventQueue>,
     pending: Arc<AtomicBool>,
     rate: Arc<Mutex<WakeRateState>>,
 }
@@ -98,7 +104,7 @@ impl TerminalLoopWake {
             return;
         }
         drop(rate);
-        if self.tx.send(Ok(TerminalLoopEvent::Wake)).is_err() {
+        if !self.queue.notify() {
             self.pending.store(false, Ordering::Release);
         }
     }
@@ -106,25 +112,26 @@ impl TerminalLoopWake {
 
 impl TerminalLoopInbox {
     pub(crate) fn spawn_crossterm_reader() -> (Self, TerminalLoopWake) {
-        let (tx, rx) = mpsc::channel();
+        let (mut inbox, wake) = Self::bounded_channel();
+        let queue = wake.queue.clone();
+        inbox.reader = Some(thread::spawn(move || read_terminal_events(queue)));
+        (inbox, wake)
+    }
+
+    fn bounded_channel() -> (Self, TerminalLoopWake) {
+        let queue = Arc::new(TerminalEventQueue::default());
         let wake_pending = Arc::new(AtomicBool::new(false));
         let rate = Arc::new(Mutex::new(WakeRateState::default()));
         let wake = TerminalLoopWake {
-            tx: tx.clone(),
+            queue: queue.clone(),
             pending: wake_pending.clone(),
             rate: rate.clone(),
         };
-        thread::spawn(move || loop {
-            let event = event::read()
-                .map(terminal_loop_event_from_crossterm)
-                .map_err(|error| error.to_string());
-            if tx.send(event).is_err() {
-                break;
-            }
-        });
         (
             Self {
-                rx,
+                rx: TerminalEventReceiver::Bounded(queue),
+                reader: None,
+                pressure_reported: AtomicBool::new(false),
                 wake_pending,
                 rate,
             },
@@ -135,7 +142,9 @@ impl TerminalLoopInbox {
     #[cfg(test)]
     pub(crate) fn from_receiver(rx: Receiver<Result<TerminalLoopEvent, String>>) -> Self {
         Self {
-            rx,
+            rx: TerminalEventReceiver::Scripted(rx),
+            reader: None,
+            pressure_reported: AtomicBool::new(false),
             wake_pending: Arc::new(AtomicBool::new(false)),
             rate: Arc::new(Mutex::new(WakeRateState::default())),
         }
@@ -143,22 +152,18 @@ impl TerminalLoopInbox {
 
     #[cfg(test)]
     pub(crate) fn channel_for_test() -> (Self, TerminalLoopWake) {
-        let (tx, rx) = mpsc::channel();
-        let wake_pending = Arc::new(AtomicBool::new(false));
-        let rate = Arc::new(Mutex::new(WakeRateState::default()));
-        let wake = TerminalLoopWake {
-            tx,
-            pending: wake_pending.clone(),
-            rate: rate.clone(),
-        };
-        (
-            Self {
-                rx,
-                wake_pending,
-                rate,
-            },
-            wake,
-        )
+        Self::bounded_channel()
+    }
+
+    pub(crate) fn report_pressure(&self, app: &mut ShellApp) {
+        let stats = self.rx.stats();
+        if stats.blocked == 0 || self.pressure_reported.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        app.log("input", format!(
+            "terminal input backpressure: {} queued / {} bytes, peak {}, {} state events coalesced; ordered input is preserved",
+            stats.queued, stats.bytes, stats.peak, stats.coalesced
+        ));
     }
 
     /// Waits the caller's full timeout, except that a suppressed background
@@ -228,6 +233,35 @@ impl TerminalLoopInbox {
         }
         Ok(event)
     }
+}
+
+impl Drop for TerminalLoopInbox {
+    fn drop(&mut self) {
+        self.rx.close();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+fn read_terminal_events(queue: Arc<TerminalEventQueue>) {
+    while !queue.is_closed() {
+        let event = match next_terminal_event() {
+            Ok(Some(event)) => Ok(terminal_loop_event_from_crossterm(event)),
+            Ok(None) => continue,
+            Err(error) => Err(error.to_string()),
+        };
+        if !queue.send(event) {
+            break;
+        }
+    }
+}
+
+fn next_terminal_event() -> io::Result<Option<Event>> {
+    if !event::poll(Duration::from_millis(25))? {
+        return Ok(None);
+    }
+    event::read().map(Some)
 }
 
 fn terminal_loop_event_from_crossterm(event: Event) -> TerminalLoopEvent {
@@ -312,6 +346,11 @@ fn apply_terminal_loop_event(
     outcome: &mut TerminalEventBatchOutcome,
 ) {
     outcome.received_count += 1;
+    if let TerminalLoopEvent::InputRejected(message) = &event {
+        app.set_warn_notice("input", message.clone());
+        outcome.changed = true;
+        return;
+    }
     let TerminalLoopEvent::Terminal(event) = event else {
         return;
     };
@@ -333,6 +372,29 @@ pub(crate) fn entered_running_activity(prior_view: ShellView, app: &ShellApp) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_paste_leaves_shell_and_subsequent_input_available() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let mut outcome = TerminalEventBatchOutcome::default();
+        apply_terminal_loop_event(
+            &mut app,
+            TerminalLoopEvent::InputRejected("paste rejected".into()),
+            &mut outcome,
+        );
+        assert!(outcome.changed);
+        assert!(!outcome.quit_requested);
+        apply_terminal_loop_event(
+            &mut app,
+            TerminalLoopEvent::Terminal(TermEvent::Key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('a'),
+                crossterm::event::KeyModifiers::NONE,
+            ))),
+            &mut outcome,
+        );
+        assert_eq!(app.editor().input(), "a");
+        assert!(!app.should_quit());
+    }
 
     #[test]
     fn background_wake_allows_one_immediate_tail_then_throttles() {

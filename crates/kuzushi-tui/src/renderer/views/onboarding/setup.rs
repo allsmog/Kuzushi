@@ -168,7 +168,7 @@ fn setup_refresh_disclosure_lines(
     model: &crate::ui_view_models::SetupReadinessModel,
     width: usize,
 ) -> Vec<Line<'static>> {
-    if model.runnable_tasks == 0 {
+    if model.runnable_tasks == 0 || model.selected_model_tasks > 0 {
         return Vec::new();
     }
     wrapped_lines(

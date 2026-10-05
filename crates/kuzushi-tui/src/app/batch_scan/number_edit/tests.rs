@@ -29,7 +29,7 @@ fn enter_opens_direct_trial_input_and_saves_fifty_without_launching() {
     let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
     assert_eq!(config.trials, 50);
     assert!(config.number_edit.is_none());
-    assert!(!config.review_armed);
+    assert!(!config.study.approved());
     assert_eq!(app.input(), "reserved shell draft");
     assert!(!target.path().join(".kuzushi/v3/campaigns").exists());
 }
@@ -115,12 +115,14 @@ fn saving_a_number_disarms_review_and_never_silently_clamps() {
     let target = tempfile::tempdir().unwrap();
     let mut config = BatchScanConfig::load(target.path(), None);
     config.trials = 11;
-    config.arm_review();
+    config.study.campaign_id = Some("old-draft".into());
+    let investigation = config.study.investigation_id.clone();
     config.begin_number_edit(BatchScanConfigRow::Trials);
     config.number_edit.as_mut().unwrap().field.insert("50");
     assert!(config.save_number_edit());
-    assert!(!config.review_armed);
-    assert!(config.needs_large_batch_review());
+    assert!(!config.study.approved());
+    assert!(config.study.campaign_id.is_none());
+    assert_eq!(config.study.investigation_id, investigation);
     config.begin_number_edit(BatchScanConfigRow::Workers);
     config.number_edit.as_mut().unwrap().field.insert("9");
     assert!(!config.save_number_edit());
@@ -128,11 +130,20 @@ fn saving_a_number_disarms_review_and_never_silently_clamps() {
 }
 
 #[test]
-fn cancel_from_the_config_list_closes_the_form_without_changing_input_mode() {
+fn cancel_from_the_config_list_restores_its_origin() {
     let target = tempfile::tempdir().unwrap();
     let mut app = app_with_config(target.path());
+    let origin = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .unwrap()
+        .origin
+        .clone()
+        .unwrap();
     press(&mut app, KeyCode::Esc);
     assert!(!app.batch_config_open());
-    assert_eq!(app.shell_view(), ShellView::Campaign);
-    assert_eq!(app.input_mode(), InputMode::Navigate);
+    assert_eq!(app.shell_view(), origin.view);
+    assert_eq!(app.input_mode(), origin.mode);
 }

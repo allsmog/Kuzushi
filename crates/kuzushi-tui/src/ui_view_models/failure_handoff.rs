@@ -74,7 +74,10 @@ fn failure_context_rows(context: &FailureToLlmContext) -> Vec<FailureHandoffRow>
             "next",
             failure_list(&context.next_files_or_artifacts_to_inspect),
         ),
-        failure_row("recovery", failure_list(&context.recovery_options)),
+        failure_row(
+            "recovery",
+            failure_list_joined(&context.recovery_options, "\n"),
+        ),
         failure_row("forbidden", failure_list(&context.claims_forbidden)),
         failure_row("prompt", bounded_failure_text(&context.fallback_prompt)),
     ]
@@ -95,6 +98,10 @@ fn failure_text(value: &str, fallback: &str) -> String {
 }
 
 fn failure_list(values: &[String]) -> String {
+    failure_list_joined(values, ", ")
+}
+
+fn failure_list_joined(values: &[String], separator: &str) -> String {
     if values.is_empty() {
         return "none".to_string();
     }
@@ -106,7 +113,7 @@ fn failure_list(values: &[String]) -> String {
     if values.len() > FAILURE_MODEL_LIST_LIMIT {
         rendered.push(format!("+{} more", values.len() - FAILURE_MODEL_LIST_LIMIT));
     }
-    rendered.join(", ")
+    rendered.join(separator)
 }
 
 fn artifact_noun(count: usize) -> &'static str {
@@ -353,7 +360,7 @@ mod tests {
                 failure_row("available", "1 artifact".to_string()),
                 failure_row("missing", "findings.json".to_string()),
                 failure_row("next", failures_artifact_leaf().to_string()),
-                failure_row("recovery", "Install semgrep., Rerun scan.".to_string()),
+                failure_row("recovery", "Install semgrep.\nRerun scan.".to_string()),
                 failure_row("forbidden", "none".to_string()),
                 failure_row("prompt", "Continue the failed Kuzushi run.".to_string()),
             ]

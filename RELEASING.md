@@ -5,6 +5,320 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- Finding presence and human review are now separate facts. Existing
+  `finding-disappeared` events remain intact, but no longer derive `fixed` or
+  `removed`. A confirmed finding stays confirmed; an unreviewed finding stays
+  open. Legacy serialized states and filter names remain accepted. Use
+  `state:not_observed` to find recorded gaps from eligible completed scanner
+  comparisons; a nondeterministic miss never establishes a fix.
+  `Finding` adds optional `observationGap` with event sequence/hash and the
+  last-seen/compared run IDs. Missing historical run IDs stay unknown. Ledger
+  reads overwrite producer-supplied gap claims; suppression changes do not
+  erase a gap, and a new observation clears it. Existing events need no rewrite.
+  Workspace exports add `observationGap` and `observationNote`; list-tool JSON
+  uses `observation_gap` and `observation_note`. SARIF carries corresponding
+  `kuzushiObservation*` properties. CSV appends five observation columns after
+  existing columns. Rust struct-literal callers should initialize the optional
+  fields or use `Default`. This does not introduce revision-specific fix
+  adjudication; existing human decisions still lack a SHA/content binding.
+  `FindingListReport` also carries an in-memory `review_decisions` map keyed by
+  fingerprint; Rust callers constructing it directly should initialize an empty
+  map. List output uses these persisted decisions independently of the original
+  scanner triage, and adds `review_decision_author` to JSON. A recorded gap no
+  longer removes a finding from the relevant corpus. Operator identity-policy
+  projections hydrate the same ledger annotations as headless reads.
+
+- Shared tool-run startup preserves an explicit threat-model reference or
+  omission in `run.json`. The existing `threatModelResolvedVia` string gains
+  `explicit-input` and `explicit-omission`; terminal writes retain that starting
+  provenance. Historical summaries are not rewritten: older summaries may name
+  the active model even when `scan-input.json` records another selection.
+  `sast:scan` now writes `findings.json` as a discovery observation array before
+  post-processing and declares it in `data.artifacts.findings`. Its result gains
+  the existing `snapshotHash` and `treeHash` source fields; source drift makes
+  the result partial while preserving observations and consumption. These are
+  additive artifacts and fields, not a change to finding identity or verdicts.
+
+- Supported discovery and triage descriptors accept `threatModelRef` (alias
+  `threat_model_ref`). An explicit reference selects and authenticates that
+  immutable object without changing or locking the global active model;
+  explicit `null` omits threat-model context. Missing options retain legacy
+  active-model behavior. Missing or corrupt selected objects fail without
+  fallback. Campaign compilation preserves an explicit selection. Descriptor
+  changes can invalidate frozen plan equivalence; draft and approve a new plan
+  instead of modifying an approved plan. Auxiliary context is not yet frozen.
+  `DeepAuditConfig` adds `threat_model_context`; Rust struct-literal callers
+  should use `None` to preserve legacy behavior.
+
+- Run comparison JSON adds `baseContext`, `compareContext` and
+  `contextComparison`, derived from recorded scan input. Missing historical
+  context is unknown, distinct from an explicit omission. These fields augment
+  full Git SHA and indexed content identities. Neither changed context nor an
+  absent observation establishes that a finding was fixed on either revision.
+  The shell comparison opens on findings and their limitations. `Tab` switches
+  to full source/context references when the composer is empty; typing retains
+  composer completion. Each tab retains its reading position. Plain output
+  includes both projections. Finding categories no longer stop after ten rows,
+  and unchanged observations are available under `SEEN AGAIN`.
+
+- Spend databases add a durable ledger identity and investigation allowance
+  revision/reservation tables. Existing dollar rows and operation caps retain
+  their meaning. Deposits now read current operation caps and reserve within a
+  SQLite write transaction across workers. Stage failures or incomplete cost
+  receipts no longer refund context-generation deposits as zero. These are
+  estimated commitments, not guaranteed maximum provider charges.
+  The additive `kuzushi_core::allowance` API uses version-1 approval/snapshot
+  documents with explicit model, call limits, protected review and revision
+  checks. `AgentRuntime::with_allowance_binding` opts a runtime into host-bound
+  accounting. The bundled LangGraph bridge reserves each provider attempt,
+  including internal turns and transport retries, and disables hidden SDK
+  retries in this mode. Tracing preserves the binding. Other adapters reject
+  binding unless they implement this contract. Supported built-in descriptors
+  expose the additive JSON `allowanceRef` option. Shared prepared dispatch
+  validates it and binds the runtime before preflight; nested dispatch cannot
+  replace inherited accounting. Ordinary unbound calls retain their existing
+  behavior. This API does not itself approve an investigation or job list.
+
+- `campaign:approve-allowance` records exact limits under explicit authorization;
+  `campaign:allowance` reads them without creating a spend ledger. Approval is a
+  Map preparation action with `phaseResult=false`, not an accepted Map or Scan.
+  The shell confirmation shows the model, revision, total calls and protected
+  review allocation. The paged card supports the full viewport matrix,
+  including 40×12; approval is available only on the last page. No jobs start
+  when an allowance is approved.
+
+- `campaign:study` compiles the existing scan-batch format without starting
+  children, with three passes and one worker by default. Its additive
+  `requiresWorkApproval` marker blocks launch until exact plan approval.
+  `campaign:approve-allowance` optionally accepts `campaignId`,
+  `campaignPlanSha256`, `campaignJobs` and `maxJobAttempts` to bind those jobs.
+  Approval/snapshot version 1 gains an optional `workPlan`; Rust struct-literal
+  callers should set it to `None` for legacy allowance-only behavior. The
+  additive SQLite `investigation_work_attempts` table preserves failed,
+  canceled and interrupted starts. Revised approvals cannot erase consumed
+  attempts or reuse their identities for changed input/source/configuration.
+  The campaign dispatcher attaches allowance references automatically and
+  counts quota failures against approved attempt limits. Shared dispatch
+  verifies the job and atomically claims it before executor entry. These plan
+  approvals currently support discovery scan batches; immutable context
+  isolation and review/learning job planning remain in progress. The combined
+  work/allowance receipt uses the same paged approval surface. Older campaign
+  plans retain their existing launch contract.
+
+- The shell `scan batch` action now prepares `campaign:study` through shared
+  dispatch, followed by explicit allowance review and a separate job launch.
+  It no longer compiles and immediately starts a legacy batch. `b` on Scan
+  opens the form; `a` in Campaign reopens a saved study and its allowance.
+  `campaign:study` adds optional `investigationId`, persisted in the plan;
+  approval must retain that identity. This keeps spending attached to an
+  investigation when a draft replaces previously approved work. Result JSON
+  adds frozen `scanInput`, requested workers and any worker limitation. Existing
+  plan/result fields and headless legacy batch execution remain compatible.
+  Unsupported scanner names are rejected before publishing a study draft.
+
+- `campaign:context-study` adds a finite, source-only context generation plan.
+  It requires `investigationId` and `contextInput`, and accepts an optional new
+  `campaignId` and `preparationJobs`. Up to one deterministic `context:build`
+  and one `entry-points:extract` job may precede generation, in the reviewed
+  order. The existing campaign `plan.json` gains the additive
+  `kind: "context-study"` form with one frozen `threat-model:build` job. Version-1
+  allowance work plans now also accept these tools and attribute their calls to
+  Context, without access to protected review calls. Context studies allow one
+  attempt; regeneration requires a separate plan approval. Current context is
+  retained until the operator inspects and selects the generated revision.
+  Setup also opens this flow for a Map plan containing threat-model generation
+  and its supported preparation. Other model-backed combinations are refused
+  with an explanation; existing selections are preserved. The CLI enforces
+  one worker for context studies as well as their frozen attempt limits.
+  The TUI opens this flow with `g` in the study context picker and recovers it
+  through `campaign <id>` then `a`; exact options are available with Tab.
+  Existing scan-batch and direct threat-model tool contracts remain compatible.
+
+- `threat-model:read` adds the shared `threatModelRef` option (and
+  `threat_model_ref` alias). An exact reference authenticates and returns the
+  unchanged scanner document; `null` reads explicit omission. This mode rejects
+  scope, output-directory and methodology overlays. Existing reads without the
+  option keep their previous behavior. The study form's Source and context row
+  now opens a revision browser; inspect a revision before accepting it for that
+  study. Selection does not activate the workspace threat model and changing
+  context requires a newly compiled and approved plan with the same accounting.
+  After inspection, `v` opens that exact revision's DFD. Arrows choose elements,
+  Enter reads their full details and linked evidence, and Escape restores context
+  review. This is read-only; generation and study acceptance remain separate.
+  The shared DFD renderer now preserves short vertical arrows and reverse flow
+  direction. Existing artifact formats remain unchanged.
+
+- Source indexing now evaluates ignored directory names relative to the selected
+  workspace. Repositories beneath an ancestor named `target`, `dist`,
+  `node_modules` or `bazel-*` are no longer silently hashed as empty. Recompute
+  older identities from affected paths before claiming unchanged dirty content;
+  previously frozen study keys may correctly require a new plan.
+
+- Runtime failure metadata adds `allowance_refused` to `run.items.schema.json`
+  and `run.failures.schema.json`. Exhaustive consumers must accept this category.
+  The optional `stdio-v1` provider-admission channel requires a startup
+  acknowledgement within ten seconds; missing acknowledgement never falls
+  back to an unaccounted call. Legacy bridge requests without an allowance keep
+  their existing protocol. Unresolved reservations persist after cancellation,
+  and absent dollar receipts remain unknown. Call limits do not promise a
+  strict dollar ceiling. Failure handoffs offer reporting and explicit allowance
+  review instead of recommending automatic stage resumption for this category.
+
+- Tool descriptors add the `report` phase. `report:build` and `report:sarif`
+  move from `fix` to `report`; tool names, outputs, saved workflow phases and
+  historical receipts retain their meaning. Consumers with exhaustive phase
+  enums must accept `report`. Re-approve local KWP descriptors when changing
+  their phase. Reports are available at any autonomy posture and do not advance
+  the persisted workflow; explicit export authorization still applies.
+  Repository execution and external actions cannot use the Report phase.
+
+- Repository size and model recommendations no longer preselect subdivision.
+  The Map planner retains whole-repository work and an explicit scope action,
+  including after a failed subdivision attempt.
+
+- Repository inventory adds an optional `inspection` receipt with enumeration
+  mode, entry/byte limits, omitted paths, and files inspected only as prefixes.
+  Missing receipts in older artifacts mean the inspection extent is unknown.
+  Prefix inspection now marks the inventory partial. Existing inventory fields
+  retain their types, and existing artifacts are not rewritten.
+
+- `pack:suggest-shards` derives at most eight candidates from one bounded
+  inventory. Small repositories and parents with loose files can remain whole.
+  New drafts rank extracted entry points (`signals.entrypoints`) rather than
+  substring hits. New candidate IDs include a path digest to avoid slug
+  collisions; saved shard manifests and scope trees are unchanged until the
+  operator explicitly replaces them. Review scope references when accepting a
+  new tree. `emitScopes` refuses incomplete inventory; the draft remains for
+  inspection. Child scopes inherit parent context and threat-model sections.
+
+- The interactive cost-halt action opens a cap editor instead of doubling the
+  cap. Editing and cancellation preserve the halt; a specific amount above
+  observed spend must be approved to continue. Unknown proposal estimates no
+  longer pass a configured budget check as zero-cost work.
+
+### Audit remediation compatibility
+
+- MCP method selectors now include their language graph, for example
+  `cpp:method:<digest>`. This disambiguates shared headers indexed in both C
+  and C++. Existing names and bare selectors remain accepted when unique.
+  A structural query naming an absent file returns an explicit membership
+  error. Semantic cache databases and journals reject multiple hard links
+  before SQLite initialization. An oversized terminal paste reports a notice
+  and leaves the shell available for further input.
+
+- Windows bounded MCP file reads now retain an opening content digest and
+  verify both returned bytes and current handle content before accepting a read
+  or copy. Read identities always include a content digest on Windows. This adds
+  bounded streaming reads; same-size writes and restored timestamps cannot reuse
+  a stale content identity. Loop checkpoint owners explicitly unlock on drop,
+  including error paths, before concurrent spawned processes finish exec.
+
+- Shell composer and form fields move and delete by extended Unicode graphemes.
+  Cursor projections and clipping use terminal display widths, including emoji
+  sequences and combining accents. Existing scalar-offset view-model interfaces
+  remain compatible; interior offsets snap to a complete character boundary.
+- Collapsed multiline pastes are tracked editor spans. Arrows, word movement,
+  Backspace and Delete cannot damage a marker. Ctrl+Y opens the adjacent block's
+  read-only preview; Enter/e expands it, Delete removes it and Esc cancels.
+  Ctrl+_ or Ctrl+/ restores paste edits or a cleared draft, including all payload
+  bytes. Paste undo lasts until submission or intentional clearing. Completion
+  waits until pasted blocks are expanded. Literal copies of marker text never
+  acquire a document payload.
+- The interactive terminal inbox is limited to 256 queued events and 4 MiB of
+  event data. Resize, pointer-move and focus updates coalesce without crossing
+  ordered input. Keys, pointer actions and accepted pastes apply backpressure;
+  a paste over 1 MiB is rejected explicitly. Background wakes have a separate
+  coalesced slot, and saturation produces one bounded input diagnostic.
+- Semantic query keys now include generation settings and an attested runtime
+  identity. Legacy keys safely miss. Runtime adapters opt in through
+  `AgentRuntime::semantic_cache_identity`; unauthenticated external bridges,
+  including the current LangGraph adapter, execute live. This can increase model
+  spend compared with earlier cache replay. Credentials and transport diagnostics
+  are excluded, and tracing/routing wrappers preserve the inner attestation.
+- Semantic responses now use an indexed SQLite cache with defaults of 10,000
+  entries and 64 MiB of database pages. Set `operator.semantic_cache.max_entries`
+  and `max_bytes` in global config; target config cannot raise quotas. Half the
+  page budget is reserved for response payload and the rest for index overhead.
+  A rollback journal can temporarily add up to one database's size. Oversized
+  entries and quota pressure skip caching. Legacy JSON entries safely miss and
+  are reclaimed in resumable batches of at most 64 directory entries per open;
+  indexed expiry also visits at most 64 entries per pass. `maintain()` reports
+  reclaimed bytes, quota pressure and pending work. Lowering the byte budget below
+  an existing database's size disables that cache until it is cleared; it never
+  admits new writes above the new budget.
+- Run-item writers reserve a bounded model completion receipt before each model
+  start and preserve a terminal outcome slot. At most eight calls may be in flight
+  in one run stream; a start without available receipt capacity fails before
+  provider dispatch. Model start/finish emission is synchronous and durable,
+  including through the ordinary `emit` API. Completed usage/cost receipts remain
+  admissible after ordinary log capacity is exhausted; the run still ends degraded.
+- Sandbox children receive an explicit minimal environment. Callers must grant
+  required variables through `SandboxExecOptions.env`; stdin and each output
+  stream are limited to 1 MiB. `output_limit_exceeded` is a new terminal outcome.
+  Cancellation owns the process group/Windows Job Object and kills descendants.
+- MCP tool arguments are validated against their advertised JSON Schema before
+  execution. Invalid input now returns a protocol error without invoking the
+  handler. The server limits concurrent requests to eight and honors cancellation
+  and shutdown; clients must not depend on acceptance after shutdown.
+- Loop checkpoint protocol 3 binds the executable digest and uses full request
+  fingerprints. Old checkpoints are not resumed. A kernel lease excludes a second
+  owner; an unfinished tool intent requires explicit effect reconciliation before
+  retry. Checkpoints over 8 MiB or 512 transcript entries fail visibly. Historical
+  files are not rewritten and spend from failed turns remains unresolved.
+- Loop and stage checkpoints now admit at most 512 records, 1 MiB per encoded
+  record and 8 MiB per checkpoint. Readers validate raw record length before
+  allocating structured records and retain the JSON nesting limit. Stage payload
+  publication also stops at 8 MiB, including its newline. Oversized legacy
+  checkpoints require inspection instead of implicit recovery; bounded serializers
+  borrow transcripts and stage receipts instead of cloning the completed history.
+- Staged tools expose `resumeHealth` separately from execution success, persist
+  `resume-health.json` when storage permits, and emit one warning per failure
+  class and operation. The receipt names the last durable stage and source run.
+  A load, payload, receipt or save failure stops checkpoint advancement for that
+  dispatch while paid execution may continue; recovery retries on the next
+  dispatch. A failed clear is visible. Embedders must handle the new `Result`
+  returned by `StageCheckpointStore::clear`.
+- Finding anchors are grounded even without evidence. `unavailable` is distinct
+  from invalid source evidence; claimed coordinates are preserved. Cross-producer
+  evidence is merged independently of severity. Static verification requires exact
+  bounded source citations; missing or invalid citations produce an inconclusive
+  result. Raw model confidence remains explicitly uncalibrated.
+- Core `cpg_taint_paths.maxPaths` accepts integers from 1 through 25, with a
+  default of 10. Invalid or larger values now return an explicit error instead of
+  silently using a clamped value. The MCP query retains its separately advertised
+  output range and discloses the engine flow cap.
+- CPG structural queries now return explicit ambiguity errors for duplicate
+  suffix paths, method names, start positions or language-graph matches. Use the
+  canonical `selector` returned by `cpg.definitions` for overloaded methods.
+  Rust query helpers now return `QueryResult`; callers must handle resolution
+  errors. Reaching definitions require an unambiguous AST node at the requested
+  line, so blank lines and inter-method gaps return an unavailable-membership
+  error. `method_at` remains explicitly approximate. Slice depth is checked in
+  the advertised 0–32 range; depth zero retains intra-method behavior.
+- CPG caches use source-content and implementation identities; existing caches
+  rebuild. `maxCallDepth` is rejected until the engine can enforce it. Regex and
+  literal matching are explicit; limits and approximate method positions are
+  disclosed in results. Queries with failed language coverage return an error.
+- History uses a versioned JSON record format to preserve multiline commands;
+  legacy records are imported on read. Evaluations require complete run-bound
+  receipts, distinguish unjudged output, and enforce recall thresholds only when
+  requested. Historical score files do not acquire provenance retroactively.
+- Publication uses the `candidate` npm dist-tag. The exact-version public-install
+  matrix must pass before promotion of platform tags and finally the root `latest`
+  tag, followed by GitHub release visibility. Rerunning promotion verifies registry
+  integrity before changing any tag. If interrupted, the root launcher remains on
+  the previous version until its final tag operation; rerun the same candidate
+  after correcting the failure. To roll back a completed promotion, move the root
+  `latest` tag to the previously verified exact version and then restore platform
+  tags; never republish different bytes under an existing version.
+- Full-quality runs compare with the latest successful ancestral full run, not
+  the previous commit. The initial run requires `quality_base_ref`; failures to
+  resolve a baseline fail the gate rather than silently narrowing the interval.
+
+See [the audit ledger](docs/quality/audit-remediation-2026-09-30.md) for acceptance
+work that remains open; these changes are not an all-items completion claim.
+
+
 - Static `verify:finding` results now use `exploitable: null` for incomplete
   evidence, unsupported language, or an unresolved panel. These outcomes have
   `status: partial` and cannot replace selected proof. Consumers must handle
@@ -756,3 +1070,36 @@ while retaining raw v1/v2 events and canonical run history. Unknown historical
 tools retain existing validation and visibility. This migration does not accept,
 discard, delete or rewrite old attempts and does not select another proof.
 The package/file module manifest schema is unchanged.
+
+### Revision comparison disclosure
+
+Run comparison adds `baseSource`, `compareSource`, and `absenceCoverage` to CLI
+JSON. Existing classification fields remain compatible. Source metadata includes
+the complete recorded Git SHA, branch, dirty state, and available indexed-content
+and snapshot hashes. Legacy hashes remain unknown; a dirty flag alone does not
+identify a working tree. Hash equality does not establish complete scan coverage.
+
+The shell and CLI use the same coverage check to separate absent findings covered
+by a completed engine receipt from findings that were not reassessed. Missing or
+partial receipts, missing finding snapshots, and out-of-scope paths cannot prove
+absence. Nondeterministic absence never changes a finding's verdict or establishes
+a fix. Existing deterministic reconciliation remains a separate compatibility
+classification; this change does not add a human-confirmed fix workflow.
+
+### Guided investigation navigation
+
+The default shell journey now stops at Review and offers Report once all ledger
+findings have decisions. Normal phase navigation presents Map, Scan, Review,
+and the separate Report surface; Report is reachable with Navigate `r` or
+`Shift+Tab` from Review. `Esc` restores the exact origin, including a focused
+finding's zoom, scroll, and composer draft. `workbench.report` supports keymap
+overrides. The Review planner's right arrow uses the same Report entry.
+
+The persisted `WorkflowPhase` enum and its legacy aliases/order are unchanged.
+The added `INVESTIGATION_ORDER` defines only supported guided progression.
+Historical Prove/Fix attempts remain stored and available through explicit
+compatibility views but no longer redirect the default journey. `BuildReport`
+is retained for saved-plan decoding and removed from offered phase tasks because
+its executor declares the separate Report surface. Module/manifest and artifact
+schemas are unchanged. Review queue guidance no longer suggests patch work from
+a finding's proof level.

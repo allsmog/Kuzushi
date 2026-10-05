@@ -1217,6 +1217,48 @@ export default {
         assert!(!registry.loaded_module_specifiers().contains(&specifier));
     }
 
+    fn write_dynamic_report_fixture(target: &Path, effect: &str, approval: &str) -> String {
+        let source = r#"
+export default {
+  id: "dynreport", displayName: "Dynamic Report", category: "internal",
+  description: "offline report descriptor fixture",
+  tools: [{
+    name: "dynreport:export", description: "export fixture receipt", headless: true,
+    phase: "report", effect: "EFFECT", approval: "APPROVAL", workspaceRequirement: "required",
+    options: [], run() { return { status: "completed", data: { receipt: "offline" } }; }
+  }]
+};
+"#;
+        let path = target.join("report-module.mjs");
+        fs::write(&path, source.replace("EFFECT", effect).replace("APPROVAL", approval)).unwrap();
+        format!("file://{}", path.display())
+    }
+
+    #[test]
+    fn dynamic_report_phase_dispatches_under_review_through_prepared_input() {
+        let tmp = tempfile::tempdir().unwrap();
+        let specifier = write_dynamic_report_fixture(tmp.path(), "workspace-write", "none");
+        let registry = approve_and_load_kwp_module(&specifier, Grant::default(), &tmp.path().join("kuzushi.lock"));
+        let config = V2Config { autonomy: autonomy::AutonomyPosture::Review, ..V2Config::default() };
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let ctx = kwp_context(&config, Some(&workspace), None, None);
+        let prepared = registry.prepare_dispatch_input("dynreport:export", json!({}), &ctx, None).unwrap();
+        let output = registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None).unwrap();
+        assert_eq!(output.pointer("/data/receipt"), Some(&json!("offline")));
+        assert_eq!(registry.resolve_tool("dynreport:export").unwrap().phase, ToolPhase::Report);
+    }
+
+    #[test]
+    fn dynamic_report_phase_rejects_execution_effects_during_approval() {
+        for effect in ["repository-execute", "external-action"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let specifier = write_dynamic_report_fixture(tmp.path(), effect, "explicit");
+            let error = approve_dynamic_module(&specifier, Grant::default(), "0.0.0", &tmp.path().join("kuzushi.lock"))
+                .unwrap_err().to_string();
+            assert!(error.contains("report") && error.contains(effect), "{error}");
+        }
+    }
+
     #[test]
     fn dynamic_js_probe_and_worker_do_not_inherit_host_secrets() {
         if !crate::modules::dynamic_loader::kwp_node_execution_available() {
@@ -3172,6 +3214,20 @@ process.stdin.on("end", () => {
     }
 
     #[test]
+    fn guided_discovery_uses_the_same_core_visibility_as_the_catalog() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        assert!(registry.tool_is_discoverable("report:build"));
+        for name in ["fuzz:status", "systems-hunt:systems-hunt", "carlini-threat-hunt:run"] {
+            assert!(registry.resolve_tool(name).is_some(), "exact dispatch remains registered: {name}");
+            assert!(!registry.tool_is_discoverable(name), "not a guided default: {name}");
+        }
+        assert!(!registry.tool_is_discoverable("missing:tool"));
+        for tool in registry.discoverable_tools() {
+            assert!(registry.tool_is_discoverable(&tool.name));
+        }
+    }
+
+    #[test]
     fn builtin_dispatch_policy_inventory_is_reviewed_as_one_contract() {
         let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
         let rows = registry
@@ -3184,7 +3240,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "091f95805ac0a4530999704767bad8274532875d9980b53518c0644df1ce15f9",
+            "a40ef1bc50c97c385fe52941ebf6b02d4e60146aa67b503663ea24801c060223",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }

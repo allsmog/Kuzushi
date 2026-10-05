@@ -15,14 +15,27 @@ pub(crate) fn score(
 ) -> MatchReport {
     let cwe_re = Regex::new(r"CWE-(\d+)").expect("regex compiles");
     let best_per_oracle = best_matches_by_oracle(oracle, findings, target, &cwe_re);
-    let oracle_n = oracle.ground_truth.len().max(1);
     let scored = summarize_oracle_matches(oracle, &best_per_oracle, &cwe_re);
+    let distinct_findings = findings
+        .findings
+        .iter()
+        .map(|finding| &finding.fingerprint)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
+    scored_report(cli, oracle, scored, distinct_findings)
+}
 
+fn scored_report(
+    cli: &Cli,
+    oracle: &Oracle,
+    scored: ScoredMatches,
+    distinct_findings: usize,
+) -> MatchReport {
     let hits = scored.counts_by_tol[1];
     let misses = oracle.ground_truth.len() - hits;
     let near_misses = scored.counts_by_tol[3].saturating_sub(scored.counts_by_tol[1]);
-    let recall = recall_by_tolerance(scored.counts_by_tol, oracle_n);
-    let precision = precision_for_hits(hits, findings.findings.len());
+    let recall = recall_by_tolerance(scored.counts_by_tol, oracle.ground_truth.len().max(1));
+    let precision = precision_for_hits(hits, distinct_findings);
     let (proof_state_breakdown, vuln_source_breakdown) =
         primary_hit_breakdowns(&scored.matches_out);
     let label_accuracy = label_accuracy(&scored.matches_out);
@@ -32,11 +45,14 @@ pub(crate) fn score(
         oracle_cve: oracle.cve.clone(),
         oracle_name: oracle.name.clone(),
         oracle_commit: oracle.commit.clone(),
-        findings_total: findings.findings.len(),
+        findings_total: distinct_findings,
         hits,
         misses,
         near_misses,
         precision,
+        oracle_hit_yield: precision,
+        unjudged_findings: distinct_findings.saturating_sub(hits),
+        metric_semantics: "one-to-one positive-oracle yield; precision is a deprecated alias, unmatched findings are unjudged",
         recall,
         proof_state_breakdown,
         vuln_source_breakdown,

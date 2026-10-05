@@ -11,6 +11,8 @@ pub struct AdvisoryState {
     /// confirm gate (network egress, fs:write outside `.kuzushi/`,
     /// destructive verb).  See `design/mockups/confirm-dialog.jsx`.
     pub pending_confirm: Option<PendingConfirm>,
+    /// Wrapped disclosure offset, reset for each distinct approval request.
+    pub(crate) confirm_scroll: usize,
     /// One-shot launch payload parked behind `pending_confirm`. This is kept
     /// separate from the rendered confirmation copy so non-run confirmations
     /// do not grow extra UI-facing fields.

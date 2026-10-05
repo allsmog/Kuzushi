@@ -13,6 +13,8 @@ use crate::runtime::domain::McpAttachment;
 use crate::workspace::artifact_state_within;
 use anyhow::Result;
 use std::path::Path;
+mod threat_model;
+pub(crate) use threat_model::bind_selected_threat_model_attachment;
 
 /// One row of [`MCP_ARTIFACT_TABLE`]. Static for simplicity — the set of
 /// artifact-backed MCP servers is fixed at compile time.

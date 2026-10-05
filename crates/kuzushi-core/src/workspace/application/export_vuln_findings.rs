@@ -39,6 +39,8 @@ fn vuln_finding_row(record: &WorkspaceFindingExportRecord) -> serde_json::Value 
         // for backfill joins): the durable kuzushi identifiers and verdict.
         "fingerprint": record.fingerprint,
         "triage_verdict": record.triage_verdict,
+        "observation_gap": record.observation_gap,
+        "observation_note": record.observation_note,
         "tool": record.tool,
     })
 }

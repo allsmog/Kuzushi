@@ -237,6 +237,9 @@ fn grounding_annotation(status: &GroundingStatus) -> Option<String> {
     };
     match status {
         GroundingStatus::Grounded { .. } | GroundingStatus::NotApplicable => None,
+        GroundingStatus::Unavailable { reason } => {
+            Some(format!("grounding: unavailable ({reason})"))
+        }
         GroundingStatus::LineDrift {
             nearest_line,
             revision: rev,
@@ -427,11 +430,7 @@ mod tests {
         let mut source = vec![""; 717];
         source[146] = "popen(first_command);";
         source[716] = "popen(second_command);";
-        std::fs::write(
-            temp.path().join("src/informix.cpp"),
-            source.join("\n"),
-        )
-        .unwrap();
+        std::fs::write(temp.path().join("src/informix.cpp"), source.join("\n")).unwrap();
         let ledger = write_ledger(
             temp.path(),
             concat!(

@@ -13,27 +13,65 @@ pub(crate) fn best_matches_by_oracle<'a>(
     target: &Path,
     cwe_re: &Regex,
 ) -> Vec<Option<OracleBestMatch<'a>>> {
-    let mut best_per_oracle = vec![None; oracle.ground_truth.len()];
+    let mut distinct = std::collections::BTreeMap::new();
     for finding in &findings.findings {
-        update_best_matches_for_finding(finding, oracle, target, cwe_re, &mut best_per_oracle);
+        distinct
+            .entry(&finding.fingerprint)
+            .or_insert_with(Vec::new)
+            .push(finding);
     }
-    best_per_oracle
+    let candidates: Vec<Vec<_>> = oracle
+        .ground_truth
+        .iter()
+        .map(|entry| {
+            distinct
+                .values()
+                .map(|group| best_group_match(group, entry, target, cwe_re))
+                .collect()
+        })
+        .collect();
+    let base = oracle.ground_truth.len() as i128 + 1;
+    let weights: Vec<Vec<_>> = candidates
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|candidate| candidate.map_or(0, |(tol, ..)| match_weight(tol, base)))
+                .collect()
+        })
+        .collect();
+    crate::assignment::maximum_weight_assignment(&weights)
+        .iter()
+        .enumerate()
+        .map(|(row, column)| column.and_then(|col| candidates[row][col]))
+        .collect()
 }
 
-fn update_best_matches_for_finding<'a>(
-    finding: &'a FindingRow,
-    oracle: &Oracle,
+fn best_group_match<'a>(
+    group: &[&'a FindingRow],
+    entry: &OracleEntry,
     target: &Path,
     cwe_re: &Regex,
-    best_per_oracle: &mut [Option<OracleBestMatch<'a>>],
-) {
-    let rel = relativise(&finding.file_path, target);
-    let finding_cwes = extract_cwes(cwe_re, finding);
-    for (idx, entry) in oracle.ground_truth.iter().enumerate() {
-        let Some(candidate) = match_oracle_entry(finding, &finding_cwes, &rel, entry) else {
-            continue;
-        };
-        best_per_oracle[idx] = Some(choose_better_match(best_per_oracle[idx].take(), candidate));
+) -> Option<OracleBestMatch<'a>> {
+    group
+        .iter()
+        .filter_map(|finding| {
+            let rel = relativise(&finding.file_path, target);
+            let cwes = extract_cwes(cwe_re, finding);
+            match_oracle_entry(finding, &cwes, &rel, entry)
+        })
+        .fold(None, |best, candidate| {
+            Some(choose_better_match(best, candidate))
+        })
+}
+
+fn match_weight(tolerance: Tolerance, base: i128) -> i128 {
+    // Lexicographic objective: primary hits, exact hits, function hits, file hits.
+    // One stronger component outweighs every possible weaker component.
+    match tolerance {
+        Tolerance::ExactLine => base.pow(3) + base.pow(2) + base + 1,
+        Tolerance::PmLines => base.pow(3) + base + 1,
+        Tolerance::Function => base + 1,
+        Tolerance::FileOnly => 1,
     }
 }
 

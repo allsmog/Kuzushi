@@ -1204,7 +1204,8 @@ OUT
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result.get("status").and_then(Value::as_str),
-            Some("completed")
+            Some("completed"),
+            "result: {result}"
         );
         assert!(result
             .get("summary")
@@ -1892,7 +1893,7 @@ OUT
         assert!(context
             .options
             .iter()
-            .all(|option| option.option_type != OptionType::Json));
+            .all(|option| option.option_type != OptionType::Json || option.name == "allowanceRef"));
         assert!(context_lite
             .options
             .iter()
@@ -2844,7 +2845,8 @@ OUT
 
         assert_eq!(
             result.get("status").and_then(Value::as_str),
-            Some("completed")
+            Some("completed"),
+            "result: {result}"
         );
         assert!(result
             .get("summary")
@@ -4942,7 +4944,7 @@ OUT
         write_run_summary(workspace.root(), &source).unwrap();
 
         let registry = ModuleRegistry::with_v2_builtins();
-        let config = V2Config::default();
+        let config = V2Config { autonomy: autonomy::AutonomyPosture::Review, ..V2Config::default() };
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -4951,14 +4953,16 @@ OUT
             cancellation: None,
             authorization: Default::default(),
         };
-        let result = registry
-            .execute_tool("report:build", json!({"runId": "run-report-source"}), &ctx)
+        let prepared = registry
+            .prepare_dispatch_input("report:build", json!({"runId": "run-report-source"}), &ctx, None)
             .unwrap();
+        let result = registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None).unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result.get("status").and_then(Value::as_str),
-            Some("completed")
+            Some("completed"),
+            "result: {result}"
         );
         assert!(result
             .get("summary")
@@ -4989,6 +4993,17 @@ OUT
     #[test]
     fn dispatches_triage_run_with_runtime_and_persists_outcomes() {
         let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/db.ts"),
+            "db.query(input);\n".repeat(9),
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/debug.ts"),
+            "console.log(input);\n".repeat(2),
+        )
+        .unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
@@ -5286,7 +5301,9 @@ OUT
             "a parse failure must not be reported as a score: {result}"
         );
         assert_eq!(
-            result.pointer("/data/parseDegraded").and_then(Value::as_bool),
+            result
+                .pointer("/data/parseDegraded")
+                .and_then(Value::as_bool),
             Some(true)
         );
         assert_eq!(
@@ -6072,7 +6089,8 @@ OUT
     fn assert_completed_result_envelope(result: &Value, summary_prefix: &str) {
         assert_eq!(
             result.get("status").and_then(Value::as_str),
-            Some("completed")
+            Some("completed"),
+            "result: {result}"
         );
         assert!(result
             .get("summary")

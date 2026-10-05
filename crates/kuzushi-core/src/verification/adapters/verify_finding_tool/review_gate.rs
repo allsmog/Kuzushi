@@ -27,7 +27,10 @@ fn unconfirmed_finding_response(fingerprint: &str) -> Value {
         "[-] Finding '{fingerprint}' has no triage verdict and no confirming review decision. {}",
         crate::findings::MISSING_CONFIRMATION_GUIDANCE
     );
-    refused_verify_response(json!({ "fingerprint": fingerprint, "reason": "missing-triage" }), output)
+    refused_verify_response(
+        json!({ "fingerprint": fingerprint, "reason": "missing-triage" }),
+        output,
+    )
 }
 
 fn dismissed_finding_response(fingerprint: &str, decision: &ReviewDecision) -> Value {

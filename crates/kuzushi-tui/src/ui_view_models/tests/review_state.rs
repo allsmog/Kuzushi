@@ -202,6 +202,19 @@ fn human_identity_decision_dominates_a_newer_automatic_decision() {
     assert_eq!(decision.rationale(), "operator confirmed the source");
     assert_eq!(decision.source_label(), "durable identity");
     assert_eq!(review_decision_history_for(&rerun, &records).len(), 2);
+    let mut app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_findings(vec![rerun.clone()]);
+    app.set_review_decisions(records);
+    let detail = crate::ui_view_models::finding_detail_model_for_projection(&app, None, &rerun);
+    assert_eq!(
+        detail.current_decision.as_ref().unwrap().verdict,
+        "confirmed"
+    );
+    assert_eq!(detail.current_decision.as_ref().unwrap().author, "operator");
+    assert_eq!(
+        detail.decision_history_rows[0].verdict,
+        "rejected_false_positive"
+    );
 }
 
 #[test]

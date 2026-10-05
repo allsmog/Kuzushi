@@ -10,6 +10,8 @@ pub enum ConfirmKind {
     /// A credential choice that would change the model. Never remembered:
     /// each switch is its own explicit operator decision.
     ModelSwitch,
+    InvestigationAllowance,
+    InvestigationWork,
 }
 
 impl ConfirmKind {
@@ -21,6 +23,8 @@ impl ConfirmKind {
             ConfirmKind::PwnCandidateAttempt => "CONFIRM · pwn candidate attempts",
             ConfirmKind::DescriptorEffect => "CONFIRM · descriptor-declared effect",
             ConfirmKind::ModelSwitch => "CONFIRM · model switch",
+            ConfirmKind::InvestigationAllowance => "CONFIRM · investigation allowance",
+            ConfirmKind::InvestigationWork => "CONFIRM · finite investigation work",
         }
     }
 
@@ -77,6 +81,7 @@ impl ShellApp {
     pub fn request_confirm(&mut self, request: PendingConfirm) {
         let advisory = self.advisory_mut();
         advisory.pending_confirm = Some(request);
+        advisory.confirm_scroll = 0;
         advisory.pending_confirm_launch = None;
         advisory.pending_confirm_model_switch = None;
     }
@@ -93,6 +98,9 @@ impl ShellApp {
     pub fn resolve_confirm(&mut self, outcome: bool, remember: bool) -> Option<PendingConfirm> {
         let pending = self.advisory().pending_confirm.as_ref()?;
         if !pending.kind.allows_action(outcome, remember) {
+            return None;
+        }
+        if outcome && !super::allowance::approval_visible(self) {
             return None;
         }
         let mut request = self.advisory_mut().pending_confirm.take()?;

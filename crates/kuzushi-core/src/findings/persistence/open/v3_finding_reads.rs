@@ -242,7 +242,19 @@ impl FindingStore {
 
     fn hydrate_v3_findings_in_place(&self, findings: &mut [Finding]) -> Result<()> {
         self.attach_latest_verifications_to_findings(findings)?;
+        self.hydrate_observation_gaps(findings)?;
         self.hydrate_suppressed_flag(findings)
+    }
+
+    fn hydrate_observation_gaps(&self, findings: &mut [Finding]) -> Result<()> {
+        let stable_fps = findings.iter().map(finding_stable_fp).collect::<Vec<_>>();
+        let gaps = self.current_observation_gaps_for(&stable_fps)?;
+        for finding in findings {
+            // Presence comes from the ledger, never from producer-supplied JSON
+            // or a gap retained in an earlier exported observation.
+            finding.observation_gap = gaps.get(&finding_stable_fp(finding)).cloned();
+        }
+        Ok(())
     }
 
     /// Project `stable_findings.current_status` onto `Finding.suppressed`.

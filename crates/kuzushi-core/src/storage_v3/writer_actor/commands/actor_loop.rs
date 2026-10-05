@@ -1,5 +1,5 @@
 use super::{same_watcher_key, ControlCommand, WriteLane, WriterCommand};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
@@ -36,7 +36,11 @@ pub(super) async fn run_actor(
     decision_budget: usize,
     mut rx: ActorReceivers,
 ) -> Result<()> {
-    let writer = super::super::StorageWriter::open(log_dir, projection_path)?;
+    let writer = tokio::task::spawn_blocking(move || {
+        super::super::StorageWriter::open(log_dir, projection_path)
+    })
+    .await
+    .context("storage writer open worker panicked")??;
     RunningActor::new(writer, decision_budget)
         .run(&mut rx)
         .await
@@ -55,20 +59,44 @@ impl RunningActor {
         }
     }
 
-    async fn run(&mut self, rx: &mut ActorReceivers) -> Result<()> {
-        while self.advance(rx).await {}
-        Ok(())
+    async fn run(mut self, rx: &mut ActorReceivers) -> Result<()> {
+        loop {
+            self = match self.advance(rx).await? {
+                Some(next) => next,
+                None => return Ok(()),
+            };
+        }
     }
 
-    async fn advance(&mut self, rx: &mut ActorReceivers) -> bool {
+    async fn advance(mut self, rx: &mut ActorReceivers) -> Result<Option<Self>> {
         drain_ready(rx, &mut self.queues);
-        if self.process_ready_batch() {
-            return true;
+        let (mut actor, worked, stopped) = tokio::task::spawn_blocking(move || self.flush())
+            .await
+            .context("storage writer batch worker panicked")?;
+        if stopped {
+            return Ok(None);
         }
-        if self.finish_if_shutdown_ready() {
-            return false;
+        if worked {
+            return Ok(Some(actor));
         }
-        self.receive_or_finish(rx).await
+        match receive_next(rx).await {
+            Some(envelope) => {
+                actor.queues.push(envelope);
+                Ok(Some(actor))
+            }
+            None => {
+                tokio::task::spawn_blocking(move || actor.finish_shutdown())
+                    .await
+                    .context("storage writer shutdown worker panicked")?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn flush(mut self) -> (Self, bool, bool) {
+        let worked = self.process_ready_batch();
+        let stopped = !worked && self.finish_if_shutdown_ready();
+        (self, worked, stopped)
     }
 
     fn process_ready_batch(&mut self) -> bool {
@@ -87,15 +115,6 @@ impl RunningActor {
             return false;
         }
         self.finish_shutdown();
-        true
-    }
-
-    async fn receive_or_finish(&mut self, rx: &mut ActorReceivers) -> bool {
-        let Some(envelope) = receive_next(rx).await else {
-            self.finish_shutdown();
-            return false;
-        };
-        self.queues.push(envelope);
         true
     }
 
@@ -214,13 +233,21 @@ fn reject_coalesced_watcher(envelope: ActorEnvelope) {
 }
 
 fn drain_ready(rx: &mut ActorReceivers, queues: &mut ActorQueues) {
-    drain_lane(&mut rx.control, queues);
-    drain_lane(&mut rx.decisions, queues);
-    drain_lane(&mut rx.watcher, queues);
+    let queued = queues.control.len();
+    drain_lane(&mut rx.control, queues, queued);
+    let queued = queues.decisions.len();
+    drain_lane(&mut rx.decisions, queues, queued);
+    let queued = queues.watcher.len();
+    drain_lane(&mut rx.watcher, queues, queued);
 }
 
-fn drain_lane(lane: &mut tokio_mpsc::Receiver<ActorEnvelope>, queues: &mut ActorQueues) {
-    while let Ok(envelope) = lane.try_recv() {
+fn drain_lane(
+    lane: &mut tokio_mpsc::Receiver<ActorEnvelope>,
+    queues: &mut ActorQueues,
+    queued: usize,
+) {
+    for _ in 0..lane.max_capacity().saturating_sub(queued) {
+        let Ok(envelope) = lane.try_recv() else { break };
         queues.push(envelope);
     }
 }

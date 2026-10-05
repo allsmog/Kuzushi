@@ -76,6 +76,7 @@ fn append_view_hydration_keys(
         ShellView::Health => append_health_keys(app, keys),
         ShellView::ProjectModel => append_project_model_keys(app, keys),
         ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
+        ShellView::Campaign => keys.push(ViewHydrationKey::ThreatModelStore),
         ShellView::FailureHandoff => {
             append_latest_run_keys(app, keys);
         }
@@ -405,6 +406,11 @@ fn append_run_json_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     }
     keys.push(run_artifact_key(run_id, "run.json"));
     keys.push(run_artifact_key(run_id, "findings.json"));
+    keys.push(run_artifact_key(run_id, "result.json"));
+    keys.push(run_artifact_key(run_id, "scan-input.json"));
+    keys.push(ViewHydrationKey::ScanStageReceipt {
+        run_id: run_id.to_string(),
+    });
 }
 
 fn append_replay_keys(_app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {

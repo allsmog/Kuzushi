@@ -244,10 +244,8 @@ impl ShellApp {
         self.log(
             "phase",
             format!(
-                "{} ({} of {}) — {}",
-                phase.label(),
-                phase.position(),
-                crate::app::WorkflowPhase::ORDER.len(),
+                "{} — {}",
+                crate::ui_view_models::journey_phase_segment(phase),
                 phase.intent()
             ),
         );
@@ -442,6 +440,9 @@ impl ShellApp {
     ) -> (Vec<PlanningTaskRow>, BTreeSet<PlanningTaskId>) {
         let mut rows = crate::app::applicable_tasks_for_phase(phase, profile)
             .into_iter()
+            .filter(|task| {
+                task.is_inline_action() || self.registry().tool_is_discoverable(task.tool_name())
+            })
             .map(|task| PlanningTaskRow::for_task(task, target_root))
             .collect::<Vec<_>>();
         let operations = self.planning_operations(&rows, target_root);
@@ -451,10 +452,6 @@ impl ShellApp {
         } else {
             phase_preselection(phase, profile, &rows)
         };
-        if phase == crate::app::WorkflowPhase::Map && self.large_repository_needs_decomposition() {
-            selected.insert(PlanningTaskId::DecomposeModules);
-            selected.insert(PlanningTaskId::GatherRepoContext);
-        }
         self.merge_model_recommendations(phase, &rows, &mut selected);
         if !fresh {
             self.drop_failed_dependents(&mut selected);
@@ -496,13 +493,6 @@ impl ShellApp {
             prepared_input: prepared.value().clone(),
             operation_fingerprint: prepared.operation_fingerprint().as_str().to_string(),
         })
-    }
-
-    fn large_repository_needs_decomposition(&self) -> bool {
-        crate::app::large_repository_needs_decomposition(
-            self.domain().context_view().files_indexed,
-            self.target(),
-        )
     }
 
     pub(crate) fn apply_ready_target_profile(&mut self) {
@@ -810,7 +800,7 @@ mod tests {
 
         wait_for_profile_refresh(&mut app);
 
-        assert!(app
+        assert!(!app
             .engagement
             .planning_picker()
             .tasks()
@@ -824,7 +814,37 @@ mod tests {
     }
 
     #[test]
-    fn large_undecomposed_repo_preselects_decomposition_before_threat_modeling() {
+    fn guided_phase_rows_use_only_visible_core_tools() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        for phase in [
+            crate::app::WorkflowPhase::Map,
+            crate::app::WorkflowPhase::Scan,
+            crate::app::WorkflowPhase::Review,
+        ] {
+            let (rows, selected) =
+                app.phase_picker_input(phase, c_target_profile(), target.path(), true);
+            for row in &rows {
+                assert!(
+                    row.id.is_inline_action() || app.registry().tool_is_discoverable(row.tool_name),
+                    "{}",
+                    row.tool_name
+                );
+            }
+            assert!(selected
+                .iter()
+                .all(|id| rows.iter().any(|row| row.id == *id)));
+        }
+        assert!(app.registry().resolve_tool("fuzz:run").is_some());
+        assert!(app
+            .registry()
+            .resolve_tool("systems-hunt:systems-hunt")
+            .is_some());
+    }
+
+    #[test]
+    fn large_undecomposed_repo_keeps_decomposition_available_but_unselected() {
         let target = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
@@ -833,7 +853,7 @@ mod tests {
         app.open_phase_picker(crate::app::WorkflowPhase::Map);
 
         let picker = app.engagement.planning_picker();
-        assert!(picker
+        assert!(!picker
             .selected()
             .contains(&PlanningTaskId::DecomposeModules));
         let decompose = picker

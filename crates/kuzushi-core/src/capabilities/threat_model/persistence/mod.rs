@@ -7,9 +7,13 @@ pub(crate) use model_store::{
 #[cfg(test)]
 pub(crate) use model_store::threat_model_store_accepts_commits;
 pub(crate) use store::*;
+pub(crate) use selection::{load_exact_threat_model, load_selected_threat_model, ThreatModelSelection};
+#[cfg(test)]
+pub(crate) use selection::tests::commit_test_model;
 
 mod model_store;
 mod registry;
+mod selection;
 mod store;
 mod versions;
 

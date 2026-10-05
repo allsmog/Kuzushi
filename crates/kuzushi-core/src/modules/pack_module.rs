@@ -24,9 +24,9 @@ pub(crate) fn pack_module() -> BuiltinModule {
 fn suggest_shards_tool() -> ToolDescriptor {
     tool_with_options(
         "pack:suggest-shards",
-        "Propose trust-boundary shard candidates for the active target from \
-         deterministic signals only (directory file counts, language mix, \
-         entry-point identifier density, test-vs-shipped heuristics). Writes \
+        "Propose at most eight shard candidates from one bounded repository \
+         inventory (file counts, language mix, and extracted entry points). \
+         Keeps parent files covered and discloses incomplete inventory. Writes \
          a commented DRAFT shards.toml under the workspace state dir for an \
          operator to edit — never installs it. No model calls.",
         vec![

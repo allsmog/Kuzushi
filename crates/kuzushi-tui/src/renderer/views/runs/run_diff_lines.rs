@@ -4,18 +4,54 @@ use crate::ui_view_models::{
     RunDiffUncertainMatchRow,
 };
 
-const DIFF_ROW_LIMIT: usize = 10;
-
 pub(crate) fn run_diff_lines(
     app: &ShellApp,
     area: Rect,
     left: &str,
     right: &str,
 ) -> Vec<Line<'static>> {
-    let mut lines = context_strip(app, area);
+    let mut lines = vec![divider("RUN DIFF", area.width), comparison_tabs(app)];
     let model = run_diff_model(app, left, right);
+    if app.router.run_diff().sources_open() {
+        append_run_pair(&mut lines, &model);
+        append_sources(&mut lines, &model);
+    } else {
+        append_findings(&mut lines, &model);
+    }
+    wrap_document_lines(lines, area.width)
+}
+
+pub(crate) fn run_diff_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let route = app.router.run_diff();
+    let model = run_diff_model(app, route.left(), route.right());
+    let mut lines = vec![divider("RUN DIFF", area.width)];
+    append_findings(&mut lines, &model);
     lines.push(blank());
-    lines.push(divider("RUN DIFF", area.width));
+    append_sources(&mut lines, &model);
+    wrap_document_lines(lines, area.width)
+}
+
+fn comparison_tabs(app: &ShellApp) -> Line<'static> {
+    let (findings, sources) = if app.router.run_diff().sources_open() {
+        (
+            Span::styled(" Findings ", theme::muted()),
+            Span::styled("[Sources & context]", theme::selection()),
+        )
+    } else {
+        (
+            Span::styled("[Findings]", theme::selection()),
+            Span::styled(" Sources & context ", theme::muted()),
+        )
+    };
+    Line::from(vec![
+        findings,
+        Span::raw(" "),
+        sources,
+        Span::styled(" · Tab", theme::muted()),
+    ])
+}
+
+fn append_run_pair(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models::RunDiffModel) {
     lines.push(Line::from(format!(
         "{} ({})  ->  {} ({})",
         model.left_run, model.left_revision, model.right_run, model.right_revision
@@ -24,26 +60,88 @@ pub(crate) fn run_diff_lines(
         format!("status: {} -> {}", model.left_status, model.right_status),
         theme::muted(),
     ));
+}
+
+fn append_sources(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models::RunDiffModel) {
+    lines.push(Line::styled(
+        "FULL SOURCE & CONTEXT REFERENCES",
+        theme::accent(),
+    ));
+    lines.push(Line::from(format!("Base source: {}", model.left_source)));
+    lines.push(Line::from(format!("Later source: {}", model.right_source)));
+    lines.push(Line::styled(
+        format!("Threat model: {}", model.context_status),
+        theme::accent(),
+    ));
     lines.push(Line::from(format!(
-        "+{} new   ~{} changed   ?{} uncertain   -{} not seen   ={} unchanged",
+        "Base threat model: {}",
+        model.left_context
+    )));
+    lines.push(Line::from(format!(
+        "Later threat model: {}",
+        model.right_context
+    )));
+    lines.push(Line::styled(
+        "Unknown content cannot distinguish dirty revisions.",
+        theme::muted(),
+    ));
+}
+
+fn append_findings(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models::RunDiffModel) {
+    append_finding_counts(lines, model);
+    lines.push(Line::styled(
+        "Absence does not establish a fix.",
+        theme::muted(),
+    ));
+    lines.push(Line::styled(
+        format!("Threat model: {}", model.context_status),
+        theme::accent(),
+    ));
+    append_warnings(lines, &model.warnings);
+    append_run_pair(lines, model);
+    append_decision_summary(lines, model.decision_summary.as_ref());
+    append_section(lines, "NEW IN RIGHT", '+', &model.new_findings);
+    append_changed_section(lines, &model.changed_findings);
+    append_uncertain_section(lines, &model.uncertain_matches);
+    append_absence_sections(lines, &model.not_seen);
+    append_section(lines, "SEEN AGAIN", '=', &model.unchanged_findings);
+}
+
+fn append_finding_counts(
+    lines: &mut Vec<Line<'static>>,
+    model: &crate::ui_view_models::RunDiffModel,
+) {
+    let not_assessed = model
+        .not_seen
+        .iter()
+        .filter(|row| row.reassessment_block.is_some())
+        .count();
+    lines.push(Line::from(format!(
+        "+{} new · ~{} changed · {} seen again",
         model.new_findings.len(),
         model.changed_findings.len(),
-        model.uncertain_matches.len(),
-        model.not_seen.len(),
-        model.unchanged_count
+        model.unchanged_findings.len() + model.changed_findings.len(),
     )));
-    append_decision_summary(&mut lines, model.decision_summary.as_ref());
-    append_warnings(&mut lines, &model.warnings);
-    append_section(&mut lines, "NEW IN RIGHT", '+', &model.new_findings);
-    append_changed_section(&mut lines, &model.changed_findings);
-    append_uncertain_section(&mut lines, &model.uncertain_matches);
-    append_section(&mut lines, "NOT SEEN IN RIGHT", '-', &model.not_seen);
-    lines.push(blank());
-    lines.push(command_list_line(
-        &["runs", "replay <runId>", "trace <runId>", "back"],
-        area.width as usize,
-    ));
-    lines
+    lines.push(Line::from(format!(
+        "{} not observed · {} not reassessed",
+        model.not_seen.len() - not_assessed,
+        not_assessed,
+    )));
+    if !model.uncertain_matches.is_empty() {
+        lines.push(Line::styled(
+            format!("?{} uncertain matches", model.uncertain_matches.len()),
+            theme::warn(),
+        ));
+    }
+}
+
+fn append_absence_sections(lines: &mut Vec<Line<'static>>, rows: &[RunDiffFindingRow]) {
+    let (not_assessed, not_observed): (Vec<_>, Vec<_>) = rows
+        .iter()
+        .cloned()
+        .partition(|row| row.reassessment_block.is_some());
+    append_section(lines, "NOT OBSERVED IN COVERED WORK", '-', &not_observed);
+    append_section(lines, "NOT REASSESSED IN RIGHT", '?', &not_assessed);
 }
 
 fn append_warnings(lines: &mut Vec<Line<'static>>, warnings: &[String]) {
@@ -51,7 +149,7 @@ fn append_warnings(lines: &mut Vec<Line<'static>>, warnings: &[String]) {
         return;
     }
     lines.push(blank());
-    for warning in warnings.iter().take(3) {
+    for warning in warnings {
         lines.push(Line::styled(format!("! {warning}"), theme::warn()));
     }
 }
@@ -81,20 +179,20 @@ fn append_section(
     marker: char,
     rows: &[RunDiffFindingRow],
 ) {
-    lines.push(blank());
-    lines.push(Line::styled(title.to_string(), theme::accent()));
     if rows.is_empty() {
-        lines.push(Line::styled("  none".to_string(), theme::muted()));
         return;
     }
-    for row in rows.iter().take(DIFF_ROW_LIMIT) {
+    lines.push(blank());
+    lines.push(Line::styled(title.to_string(), theme::accent()));
+    for row in rows {
         lines.push(run_diff_row(marker, row));
+        append_reassessment_reason(lines, row);
     }
-    if rows.len() > DIFF_ROW_LIMIT {
-        lines.push(Line::styled(
-            format!("  +{} more", rows.len() - DIFF_ROW_LIMIT),
-            theme::muted(),
-        ));
+}
+
+fn append_reassessment_reason(lines: &mut Vec<Line<'static>>, row: &RunDiffFindingRow) {
+    if let Some(reason) = &row.reassessment_block {
+        lines.push(Line::styled(format!("    {reason}"), theme::muted()));
     }
 }
 
@@ -109,45 +207,31 @@ fn run_diff_row(marker: char, row: &RunDiffFindingRow) -> Line<'static> {
 }
 
 fn append_changed_section(lines: &mut Vec<Line<'static>>, rows: &[RunDiffChangedRow]) {
+    if rows.is_empty() {
+        return;
+    }
     lines.push(blank());
     lines.push(Line::styled(
         "CHANGED IN RIGHT".to_string(),
         theme::accent(),
     ));
-    if rows.is_empty() {
-        lines.push(Line::styled("  none".to_string(), theme::muted()));
-        return;
-    }
-    for row in rows.iter().take(DIFF_ROW_LIMIT) {
+    for row in rows {
         lines.push(run_diff_changed_row(row));
-    }
-    if rows.len() > DIFF_ROW_LIMIT {
-        lines.push(Line::styled(
-            format!("  +{} more", rows.len() - DIFF_ROW_LIMIT),
-            theme::muted(),
-        ));
     }
 }
 
 fn append_uncertain_section(lines: &mut Vec<Line<'static>>, rows: &[RunDiffUncertainMatchRow]) {
+    if rows.is_empty() {
+        return;
+    }
     lines.push(blank());
     lines.push(Line::styled(
         "UNCERTAIN MATCHES".to_string(),
         theme::accent(),
     ));
-    if rows.is_empty() {
-        lines.push(Line::styled("  none".to_string(), theme::muted()));
-        return;
-    }
-    for row in rows.iter().take(DIFF_ROW_LIMIT) {
+    for row in rows {
         lines.push(run_diff_uncertain_row(row));
         lines.push(Line::styled(format!("    {}", row.reason), theme::muted()));
-    }
-    if rows.len() > DIFF_ROW_LIMIT {
-        lines.push(Line::styled(
-            format!("  +{} more", rows.len() - DIFF_ROW_LIMIT),
-            theme::muted(),
-        ));
     }
 }
 

@@ -1362,31 +1362,27 @@ mod tests {
             (
                 "tree_sitter:node_at",
                 json!({"file": path, "language": "c", "line": u64::MAX}),
-                "between 1",
             ),
             (
                 "tree_sitter:node_at",
                 json!({"file": path, "language": "c", "line": 1, "column": u64::MAX}),
-                "between 1",
             ),
             (
                 "tree_sitter:node_at",
                 json!({"file": path, "language": "c", "line": 1, "surprise": true}),
-                "unknown tool argument",
             ),
             (
                 "tree_sitter:query",
                 json!({"file": path, "language": "c", "query": "(_) @node", "limit": "many"}),
-                "positive integer",
             ),
-            ("tree_sitter:callers", json!([]), "JSON object"),
+            ("tree_sitter:callers", json!([])),
         ];
 
-        for (tool, arguments, expected) in cases {
+        for (tool, arguments) in cases {
             let error = registry.call(tool, arguments).await.unwrap_err();
             assert!(
-                error.to_string().contains(expected),
-                "expected `{expected}` in `{error}`"
+                error.to_string().contains("advertised input schema"),
+                "schema-invalid arguments for {tool} reached the handler: {error}"
             );
         }
     }
@@ -1424,7 +1420,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(query_error.to_string().contains("65536-byte limit"));
+        assert!(query_error.to_string().contains("advertised input schema"));
         assert!(column_error.to_string().contains("past end of line"));
         assert!(capture_error
             .to_string()

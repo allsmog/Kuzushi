@@ -1,5 +1,6 @@
 use super::*;
 use crate::findings::domain::safe_target_path;
+use crate::findings::{ground_finding_location, GroundingStatus};
 use std::path::{Path, PathBuf};
 
 const TARGET_ROOT_UNAVAILABLE_NOTE: &str =
@@ -12,7 +13,6 @@ const LINE_OUT_OF_RANGE_NOTE: &str =
     "citation-unverified: line was outside the source file at insertion time";
 const SNIPPET_MISMATCH_NOTE: &str =
     "citation-unverified: snippet was not found on disk at insertion time";
-const LIVE_CHAIN_STEP_KIND: &str = "live-chain-step";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CitationVerification {
@@ -33,6 +33,7 @@ enum CitationFailureReason {
     UnsafePath,
     LineOutOfRange,
     SnippetMismatch,
+    MixedShape,
 }
 
 impl CitationVerification {
@@ -48,6 +49,9 @@ impl CitationVerification {
             Self::Failed(CitationFailureReason::UnsafePath) => Some(UNSAFE_PATH_NOTE),
             Self::Failed(CitationFailureReason::LineOutOfRange) => Some(LINE_OUT_OF_RANGE_NOTE),
             Self::Failed(CitationFailureReason::SnippetMismatch) => Some(SNIPPET_MISMATCH_NOTE),
+            Self::Failed(CitationFailureReason::MixedShape) => {
+                Some("citation-unverified: source citation contains unrelated HTTP blobs")
+            }
         }
     }
 }
@@ -81,6 +85,34 @@ fn scan_target_root(tx: &Connection, scan_id: &str) -> Result<Option<PathBuf>> {
     Ok(root.is_dir().then_some(root))
 }
 
+pub(super) fn ground_primary_anchor(
+    tx: &Connection,
+    scan_id: &str,
+    finding: &Finding,
+) -> Result<GroundingStatus> {
+    let Some(root) = scan_target_root(tx, scan_id)? else {
+        return Ok(GroundingStatus::Unavailable {
+            reason: "target root unavailable at insertion".into(),
+        });
+    };
+    let snippet = finding
+        .evidence
+        .iter()
+        .find(|item| {
+            item.file_path == finding.file_path
+                && item.line == finding.start_line
+                && !item.kind.eq_ignore_ascii_case("reasoning")
+        })
+        .map_or("", |item| item.snippet.as_str());
+    Ok(ground_finding_location(
+        &root,
+        &finding.file_path,
+        finding.start_line,
+        snippet,
+        None,
+    ))
+}
+
 fn verify_finding_evidence_for_insert(
     target_root: Option<&Path>,
     evidence: &[FindingEvidence],
@@ -91,10 +123,7 @@ fn verify_finding_evidence_for_insert(
         .collect()
 }
 
-fn verify_evidence_item(
-    target_root: Option<&Path>,
-    evidence: &FindingEvidence,
-) -> FindingEvidence {
+fn verify_evidence_item(target_root: Option<&Path>, evidence: &FindingEvidence) -> FindingEvidence {
     let Some(note) = citation_verification(target_root, evidence).downgrade_note() else {
         return evidence.clone();
     };
@@ -112,6 +141,9 @@ fn citation_verification(
 ) -> CitationVerification {
     if !is_target_source_citation(evidence) {
         return CitationVerification::NotApplicable;
+    }
+    if evidence.request_blob.is_some() || evidence.response_blob.is_some() {
+        return CitationVerification::Failed(CitationFailureReason::MixedShape);
     }
     let Some(target_root) = target_root else {
         return CitationVerification::Unavailable(CitationUnavailableReason::TargetRoot);
@@ -143,15 +175,10 @@ fn citation_verification(
 /// citation contract, matching `ground_finding_location`; runtime, URL, HTTP,
 /// and reasoning evidence remain outside the filesystem trust boundary.
 fn is_target_source_citation(evidence: &FindingEvidence) -> bool {
-    let kind = evidence.kind.trim();
-    let file_path = evidence.file_path.trim();
-    !kind.eq_ignore_ascii_case("reasoning")
-        && !kind.eq_ignore_ascii_case(LIVE_CHAIN_STEP_KIND)
-        && evidence.request_blob.is_none()
-        && evidence.response_blob.is_none()
-        && !file_path.is_empty()
-        && !file_path.contains("://")
-        && evidence.line > 0
+    !matches!(
+        evidence.kind.trim().to_ascii_lowercase().as_str(),
+        "reasoning" | "live-chain-step" | "http-request" | "external-reference" | "trace-summary"
+    )
 }
 
 fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
@@ -185,6 +212,49 @@ fn append_citation_note(rationale: &str, note: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_evidence_cannot_escape_validation_with_zero_lines_or_http_blobs() {
+        let root = fixture_root();
+        let zero = source_evidence("src/app.rs", 0, "sink(user_input)");
+        let mut mixed = source_evidence("src/app.rs", 2, "sink(user_input)");
+        mixed.request_blob = Some("unrelated request".into());
+        for item in [zero, mixed] {
+            let checked = verify_finding_evidence_for_insert(Some(root.path()), &[item]);
+            assert_eq!(checked[0].kind, "reasoning");
+            assert!(checked[0].confidence <= 25);
+        }
+    }
+
+    #[test]
+    fn evidence_free_primary_anchors_are_grounded_at_insert() {
+        let root = fixture_root();
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("anchors", root.path(), "running")
+            .unwrap();
+        for (rule, line) in [("valid", 2), ("invalid", 900)] {
+            let finding = Finding::new_tool(
+                "import",
+                rule,
+                "src/app.rs",
+                line,
+                None,
+                Severity::High,
+                "untrusted primary location",
+            );
+            store.insert_finding("anchors", &finding).unwrap();
+            let saved = store
+                .get_finding_by_fingerprint(&finding.fingerprint)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                saved.start_line, line,
+                "the claimed coordinate must survive"
+            );
+            assert_eq!(saved.grounding.unwrap().is_grounded(), rule == "valid");
+        }
+    }
     use crate::findings::{Finding, FindingStore, Severity};
 
     fn source_evidence(file_path: &str, line: u32, snippet: &str) -> FindingEvidence {
@@ -235,11 +305,7 @@ mod tests {
             Severity::High,
             "SQL injection reaches a query sink, CWE-89",
         )
-        .with_evidence(vec![source_evidence(
-            "src/app.rs",
-            2,
-            "sink(user_input)",
-        )]);
+        .with_evidence(vec![source_evidence("src/app.rs", 2, "sink(user_input)")]);
 
         store.insert_finding(run_id, &finding).unwrap();
 
@@ -292,7 +358,7 @@ mod tests {
     #[test]
     fn unavailable_target_preserves_empirical_live_chain_evidence() {
         let runtime = FindingEvidence {
-            kind: LIVE_CHAIN_STEP_KIND.to_string(),
+            kind: "live-chain-step".to_string(),
             file_path: "box.htb".to_string(),
             // Protect the runtime kind explicitly even if a future producer
             // adds an executed-step ordinal that looks like a source line.
@@ -359,10 +425,7 @@ mod tests {
             CitationVerification::Verified
         );
         assert_eq!(
-            verify_finding_evidence_for_insert(
-                Some(root.path()),
-                std::slice::from_ref(&evidence),
-            ),
+            verify_finding_evidence_for_insert(Some(root.path()), std::slice::from_ref(&evidence),),
             vec![evidence.clone()]
         );
 
@@ -439,10 +502,8 @@ mod tests {
             citation_verification(Some(root.path()), &evidence),
             CitationVerification::Verified
         );
-        let verified = verify_finding_evidence_for_insert(
-            Some(root.path()),
-            std::slice::from_ref(&evidence),
-        );
+        let verified =
+            verify_finding_evidence_for_insert(Some(root.path()), std::slice::from_ref(&evidence));
         assert_eq!(verified, vec![evidence]);
     }
 

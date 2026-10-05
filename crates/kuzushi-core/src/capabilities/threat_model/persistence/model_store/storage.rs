@@ -88,7 +88,7 @@ pub(super) fn validate_ref_in_manifest(
     Ok(())
 }
 
-pub(super) fn validate_sha256(value: &str) -> Result<()> {
+pub(in crate::capabilities::threat_model::persistence) fn validate_sha256(value: &str) -> Result<()> {
     let digest = value
         .strip_prefix("sha256:")
         .context("threat-model digest must start with sha256:")?;

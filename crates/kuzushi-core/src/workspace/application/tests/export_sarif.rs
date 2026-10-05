@@ -130,7 +130,10 @@ fn relative_paths_needing_escapes_become_valid_uri_references() {
         "docs/My%20Notes.md"
     );
     assert_eq!(relative_uri_reference("src/a#b%c.rs"), "src/a%23b%25c.rs");
-    assert_eq!(relative_uri_reference("src/caf\u{e9}.rs"), "src/caf%C3%A9.rs");
+    assert_eq!(
+        relative_uri_reference("src/caf\u{e9}.rs"),
+        "src/caf%C3%A9.rs"
+    );
     assert_eq!(relative_uri_reference("src?q=1.rs"), "src%3Fq%3D1.rs");
 }
 
@@ -257,7 +260,10 @@ fn workspace_root_base_uri_is_an_encoded_file_uri_with_a_trailing_slash() {
         uri.contains("kuzushi%20export%20"),
         "space must be percent-encoded: {uri}"
     );
-    assert!(!uri.contains(' '), "base uri must contain no raw space: {uri}");
+    assert!(
+        !uri.contains(' '),
+        "base uri must contain no raw space: {uri}"
+    );
 }
 
 fn sarif_record(rule_id: &str, severity: &str, fingerprint: &str) -> WorkspaceFindingExportRecord {
@@ -284,17 +290,11 @@ fn security_rules_carry_stable_help_tags_and_distinct_security_severity() {
         rule("demo.critical")["properties"]["security-severity"],
         "9.1"
     );
-    assert_eq!(
-        rule("demo.high")["properties"]["security-severity"],
-        "8.0"
-    );
+    assert_eq!(rule("demo.high")["properties"]["security-severity"], "8.0");
     assert!(rule("demo.unknown")["properties"]
         .get("security-severity")
         .is_none());
-    assert_eq!(
-        rule("demo.high")["properties"]["tags"],
-        json!(["security"])
-    );
+    assert_eq!(rule("demo.high")["properties"]["tags"], json!(["security"]));
     assert_eq!(
         rule("demo.high")["help"]["text"],
         "Inspect the result message, proof band, evidence properties, and recommended change before remediation."
@@ -339,7 +339,10 @@ fn finding_specific_guidance_stays_on_results_not_shared_rules() {
         result["properties"]["kuzushiRecommendation"],
         "Use a parameterized query"
     );
-    assert_eq!(result["properties"]["kuzushiImpact"], "Private rows can be read");
+    assert_eq!(
+        result["properties"]["kuzushiImpact"],
+        "Private rows can be read"
+    );
     assert_eq!(result["properties"]["kuzushiCategory"], "injection");
     assert_eq!(
         result["properties"]["kuzushiPreconditions"],

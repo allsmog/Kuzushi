@@ -6,6 +6,25 @@ use crate::findings::{
 use std::collections::HashMap;
 
 #[test]
+fn observation_gap_export_preserves_confirmation_and_comparison_provenance() {
+    let mut finding = reviewed_source_linked_finding();
+    finding.observation_gap = Some(crate::findings::FindingObservationGap {
+        event_seq: 17,
+        event_hash: "event-hash".to_string(),
+        last_seen_run_id: Some("older-scan".to_string()),
+        compared_run_id: Some("later-scan".to_string()),
+    });
+    let records = workspace_finding_export_records_with_reviews(&[finding.clone()], &[]);
+    let record = &records[0];
+    assert_eq!(record.review_decision, "confirmed");
+    assert_eq!(record.triage_state, "confirmed");
+    assert_eq!(record.observation_gap, finding.observation_gap);
+    let note = record.observation_note.as_deref().unwrap();
+    assert!(note.contains("Absence does not establish a fix."));
+    assert!(note.contains("older-scan") && note.contains("later-scan"));
+}
+
+#[test]
 fn export_record_separates_review_proof_and_evidence_fields() {
     let mut finding = reviewed_source_linked_finding();
     finding.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());

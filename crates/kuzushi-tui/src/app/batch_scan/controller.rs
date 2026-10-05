@@ -1,4 +1,4 @@
-use super::launch::{prepare_batch_launch, resolve_config_workers, PreparedBatchLaunch};
+use super::launch::resolve_config_workers;
 use super::worker_resolution::BatchWorkerResolution;
 use super::{BatchScanConfig, BatchScanConfigRow};
 use crate::app::state_transitions::{InputUpdate, ViewHotkeyAction};
@@ -12,11 +12,8 @@ impl ShellApp {
             return;
         };
         self.refresh_campaign_deck();
-        self.router.campaign_mut().batch_scan_config =
-            Some(BatchScanConfig::load(&target, prior_run_id));
+        self.show_study_form(BatchScanConfig::load(&target, prior_run_id));
         self.refresh_batch_worker_resolution();
-        self.set_shell_view(ShellView::Campaign);
-        self.set_input_mode(crate::app::InputMode::Navigate);
         self.log("batch", "scan-batch configurator");
     }
 
@@ -72,6 +69,15 @@ impl ShellApp {
     }
 
     fn activate_batch_config_row(&mut self) -> InputUpdate {
+        if self
+            .router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .is_some_and(|config| config.selected_row() == BatchScanConfigRow::Context)
+        {
+            return self.open_study_context_picker();
+        }
         let launch = self
             .router
             .campaign_mut()
@@ -85,56 +91,38 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn launch_batch_from_config(&mut self) -> InputUpdate {
-        let Some(config) = self.confirmed_batch_config() else {
-            return InputUpdate::handled();
-        };
-        let Some(target) = self.target_owned() else {
-            self.set_batch_config_notice("scan batch requires an active target");
-            return InputUpdate::handled();
-        };
-        match prepare_batch_launch(self, &target, &config) {
-            Ok(launch) => self.start_compiled_batch(launch),
-            Err(error) => self.set_batch_config_notice(format!("batch plan failed: {error:#}")),
-        }
-        InputUpdate::handled()
-    }
-
-    fn confirmed_batch_config(&mut self) -> Option<BatchScanConfig> {
-        let config = self.router.campaign_mut().batch_scan_config.as_mut()?;
-        if config.number_edit.is_some() {
-            return None;
-        }
-        if config.needs_large_batch_review() && !config.review_armed {
-            config.arm_review();
-            return None;
-        }
-        Some(config.clone())
-    }
-
-    fn start_compiled_batch(&mut self, launch: PreparedBatchLaunch) {
-        let batch_id = launch.plan.campaign_id.clone();
-        self.router.campaign_mut().batch_scan_config = None;
-        self.router.campaign_mut().active_batch_id = Some(batch_id.clone());
-        self.open_campaign_view(Some(batch_id.clone()));
-        let deck = self.router.campaign_mut();
-        deck.detail = true;
-        deck.workers = launch.effective_workers;
-        deck.notice = launch.clamp_reason;
-        self.refresh_active_batch_report();
-        self.launch_selected_campaign();
-    }
-
-    fn set_batch_config_notice(&mut self, notice: impl Into<String>) {
+    pub(super) fn set_batch_config_notice(&mut self, notice: impl Into<String>) {
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
             config.notice = Some(notice.into());
         }
     }
 
     pub(super) fn close_batch_config(&mut self) -> InputUpdate {
-        self.router.campaign_mut().batch_scan_config = None;
-        self.open_campaign_view(None);
+        let origin = self
+            .router
+            .campaign_mut()
+            .batch_scan_config
+            .take()
+            .and_then(|config| config.origin);
+        if let Some(origin) = origin {
+            self.set_shell_view(origin.view);
+            self.set_input_mode(origin.mode);
+            *self.router.workbench_mut() = origin.workbench;
+        } else {
+            self.open_campaign_view(None);
+        }
         InputUpdate::handled()
+    }
+
+    pub(super) fn show_study_form(&mut self, mut config: BatchScanConfig) {
+        config.origin = Some(super::config::StudyNavigationOrigin {
+            view: self.shell_view(),
+            mode: self.input_mode(),
+            workbench: self.router.workbench().clone(),
+        });
+        self.router.campaign_mut().batch_scan_config = Some(config);
+        self.set_shell_view(ShellView::Campaign);
+        self.set_input_mode(crate::app::InputMode::Navigate);
     }
 
     fn refresh_batch_config(&mut self) -> InputUpdate {
@@ -142,11 +130,12 @@ impl ShellApp {
         let Some((target, previous)) = self.target_owned().zip(previous) else {
             return InputUpdate::handled();
         };
-        let mut refreshed = BatchScanConfig::load(&target, previous.prior_run_id.as_deref());
-        refreshed.trials = previous.trials;
-        refreshed.requested_workers = previous.requested_workers;
-        refreshed.cursor = previous.cursor;
-        self.router.campaign_mut().batch_scan_config = Some(refreshed);
+        let prior = BatchScanConfig::load(&target, previous.prior_run_id.as_deref());
+        if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
+            config.prior_runs = prior.prior_runs;
+            config.prior_run_cost_usd = prior.prior_run_cost_usd;
+        }
+        self.refresh_study_allowance();
         self.refresh_batch_worker_resolution();
         InputUpdate::handled()
     }
@@ -221,34 +210,5 @@ impl ShellApp {
                 deck.notice = Some(format!("batch {batch_id} report unavailable: {error:#}"));
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use kuzushi_core::V2Config;
-
-    #[test]
-    fn prelaunch_refresh_projects_planned_trials_instead_of_an_unavailable_report() {
-        let target = tempfile::tempdir().unwrap();
-        std::fs::write(target.path().join("source.rs"), "fn main() {}\n").unwrap();
-        let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_target(Some(target.path().to_path_buf()));
-        let config = BatchScanConfig::load(target.path(), None);
-        let launch = prepare_batch_launch(&app, target.path(), &config).unwrap();
-        let batch_id = launch.plan.campaign_id;
-        app.router.campaign_mut().active_batch_id = Some(batch_id);
-
-        app.refresh_active_batch_report();
-
-        let deck = app.router.campaign();
-        let report = deck.active_batch_report().expect("prelaunch report");
-        assert_eq!((report.planned, report.completed), (config.trials, 0));
-        assert_eq!((report.failed, report.pending), (0, config.trials));
-        assert!(deck
-            .notice
-            .as_deref()
-            .is_none_or(|notice| !notice.contains("report unavailable")));
     }
 }

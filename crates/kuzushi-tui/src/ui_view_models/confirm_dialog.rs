@@ -86,6 +86,9 @@ fn default_body_rows(app: &ShellApp) -> Vec<String> {
 
 fn confirm_dialog_action_row(confirm: &super::ConfirmCardModel) -> String {
     if !confirm.allows_decision {
+        if !confirm.header_danger {
+            return "   PgUp/PgDn review terms · Esc cancel".to_string();
+        }
         return "   this request is refused unconditionally".to_string();
     }
     if confirm.allows_remembered_yes {

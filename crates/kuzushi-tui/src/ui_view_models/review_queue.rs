@@ -12,10 +12,7 @@ use super::review_state::{
 use super::{finding_facet_values, FindingSearch, SeverityTone};
 use crate::{ReviewQueueCacheKey, ShellApp};
 use kuzushi_core::findings::{ReviewDecisionConflict, ReviewDecisionVerdict};
-use kuzushi_core::{
-    finding_next_action, project_finding, Finding, FindingNextAction, PersistedVerification,
-    ProofConfidence,
-};
+use kuzushi_core::{project_finding, Finding, PersistedVerification, ProofConfidence};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -627,16 +624,10 @@ fn review_next_action_label(
     finding: &Finding,
     decision: Option<&EffectiveReviewDecision>,
 ) -> String {
-    match (
-        review_verdict(finding, decision),
-        finding_next_action(finding, None),
-    ) {
-        (decision, _) if decision.is_terminal() => "review complete".to_string(),
-        (_, FindingNextAction::Validate) => "validate".to_string(),
-        (_, FindingNextAction::Patch) => "patch".to_string(),
-        (_, FindingNextAction::Suppress) => "review_rejection".to_string(),
-        (_, FindingNextAction::Review) => "review".to_string(),
+    if review_verdict(finding, decision).is_terminal() {
+        return "review complete".to_string();
     }
+    "review".to_string()
 }
 
 fn review_verdict(

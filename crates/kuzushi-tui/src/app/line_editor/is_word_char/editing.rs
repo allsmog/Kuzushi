@@ -1,6 +1,10 @@
 use super::*;
 
 impl ShellApp {
+    pub(crate) fn inspect_paste_at_cursor(&mut self) {
+        self.editor_mut().inspect_paste_at_cursor();
+    }
+
     pub fn insert_str_at_cursor(&mut self, s: &str) {
         self.editor_mut().insert_str_at_cursor(s);
     }

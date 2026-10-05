@@ -287,3 +287,22 @@ fn status_footer_hides_notification_warning_when_focus_is_known_or_alerts_are_of
         .iter()
         .any(|segment| segment.starts_with("notify:")));
 }
+
+#[test]
+fn operator_ceiling_leads_full_and_compact_footers() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(PathBuf::from("/tmp/footer-policy-fixture")));
+    app.config_mut().autonomy = kuzushi_core::modules::autonomy::AutonomyPosture::Review;
+    app.set_shell_view(ShellView::Report);
+    let model = status_footer_model(&app);
+    for segments in [model.left_segments, model.compact_left_segments] {
+        assert_eq!(
+            segments.first().map(String::as_str),
+            Some("⛭ autonomy:review")
+        );
+        assert_eq!(
+            segments.iter().filter(|s| s.contains("autonomy:")).count(),
+            1
+        );
+    }
+}

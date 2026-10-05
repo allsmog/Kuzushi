@@ -1,5 +1,10 @@
 # Kuzushi modules
 
+Windows MCP file capabilities bind an opening content digest and verify the
+returned bytes against it before accepting reads or copies. Verification uses
+bounded streaming passes and restores the retained file cursor. Timestamp and
+file-ID metadata alone do not authorize reuse of changed content.
+
 This document describes the module surfaces implemented by the current Rust
 product. Kuzushi has two authoring paths:
 
@@ -19,6 +24,51 @@ for legacy aliases and route compatibility; [`module-maturity.md`](./module-matu
 for Core, Labs, and Compatibility discovery policy;
 [`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
 for the historical SDK audit that shaped the current surface.
+
+## Guided source investigation
+
+The guided shell follows **Map → Scan → Review → Report**. Review completion is
+based on durable decisions, including explicit deferral; it does not require
+proof execution or patch work. Report can also be opened before completion and
+exports the selected completeness policy without changing any finding verdict.
+
+Workbench navigation offers `1` Map, `2` Scan, `3` Review, and `r` Report in
+Navigate mode. `Shift+Tab` and next-page navigation from Review open Report;
+`Esc` returns to the same page, finding, focus, zoom, scroll and input draft.
+The Report shortcut is configurable as `workbench.report`. Draft text owns
+ordinary letter keys. The Review planner's right arrow also opens Report.
+
+The persisted five-value `WorkflowPhase` enum, legacy names, historical receipts,
+and explicit compatibility commands remain readable. Their presence does not
+add Prove/Fix steps to the guided journey. An unresolved historical Prove/Fix
+attempt cannot redirect that journey. Report is a separate descriptor surface;
+`BuildReport` is retained as a saved-plan identifier but is no longer offered as
+a Fix planning task. No public module executor is removed.
+
+## Report surface
+
+`report:build` and `report:sarif` declare `phase: report`, a catalog and dispatch
+surface separate from the persisted Map/Scan/Review/Prove/Fix workflow. Reports
+export existing evidence at any autonomy posture and never advance a workflow
+phase. File exports retain descriptor authorization. The Report phase permits
+read, workspace-write and target-write effects; repository-execute and
+external-action descriptors are rejected. Phase metadata never schedules work.
+
+## Bounded shard proposals
+
+`pack:suggest-shards` uses one repository inventory and proposes at most eight
+scopes. It keeps small repositories whole and retains a parent when splitting
+would omit loose files. The result adds `inventoryComplete`,
+`inventoryPartialReason`, `maxProposedScopes`, and `inspection`; `inspection`
+records enumeration mode, resource limits, omitted paths, and prefix-only file
+inspection. A Git-index inventory covers tracked working copies, not untracked
+files. A partial inventory cannot establish full repository coverage.
+
+`signals.entrypoints` counts inventory-derived entry points. Candidate IDs have
+a stable path digest suffix. Existing saved manifests are not changed by
+generating a draft. Explicit `emitScopes` keeps its existing scope-tree output,
+but refuses partial inventory; emitted child scopes inherit parent context and
+threat-model sections. No proposal launches a scan or performs model calls.
 
 ## Source-bound model Scan results
 
@@ -41,6 +91,73 @@ receipt's watermark records the gap and the shell labels the count
 `findings unmeasured` (or `partly unmeasured`) instead of a measured `+0`. Older runs without
 source receipts remain inspectable and require a new run before acceptance on
 an unversioned or dirty target; their historical records are not rewritten.
+
+## Audit remediation contracts
+
+Shell composer and form fields share grapheme-aware cursor movement and deletion.
+Their renderers retain whole graphemes and measure terminal cells; vertical field
+navigation preserves display columns. This changes shell presentation only.
+Collapsed pastes have tracked spans and undoable whole-block edits. Ctrl+Y opens
+a read-only preview with expand/remove/cancel controls; Ctrl+_ restores paste
+edits. Preview captures keys, pointer events and pasted input until it closes.
+The terminal inbox admits at most 256 events and 4 MiB of event data, with a
+1 MiB limit per accepted paste. Replaceable resize, pointer-move and focus states
+coalesce only between ordered actions. Keys and pastes wait for capacity instead
+of being dropped. Background wakes remain deliverable while input is saturated;
+the shell records queue pressure once and joins the reader during shutdown.
+Payloads stay in memory and are expanded exactly when the draft is submitted;
+marker text typed by an operator never resolves to a hidden payload.
+
+Semantic response reuse requires a closed-world tool policy and a runtime
+attestation binding effective backend settings and implementation revisions.
+Adapters without `semantic_cache_identity` execute live; the current external
+LangGraph bridge does not attest its installed dependency closure. Generation
+settings participate in versioned keys; credentials and diagnostics do not.
+The cache applies global `operator.semantic_cache` byte/entry quotas inside an
+immediate transaction. `SemanticCache::maintain()` reports bounded eviction and
+legacy-cleanup progress. Interrupted cleanup retries its unfinished shard on the
+next pass; successful-prune timestamps are recorded only after pending work ends.
+Model lifecycle producers must persist `ModelCallStarted` before provider
+dispatch. The writer reserves completion space, rejects starts beyond its eight
+in-flight slots, and commits model receipts synchronously. Normal log exhaustion
+does not erase completed usage/cost or permit a healthy terminal outcome.
+
+MCP servers validate arguments against registered schemas before dispatch. Clients
+must handle invalid-argument, capacity, cancellation and shutdown responses.
+CPG callers must select regex or literal query semantics and check coverage,
+truncation and approximate-position metadata. Unsupported depth limits fail.
+The core `cpg_taint_paths` adapter enforces its advertised `maxPaths` range
+(1–25, default 10); invalid values are errors, never silent clamps.
+Structural queries reject ambiguous file or method identities and return
+candidates. `cpg.definitions` returns a language-scoped selector such as
+`cpp:method:<digest>` for subsequent queries, including shared headers indexed
+by multiple language graphs. Bare selectors remain valid when unambiguous.
+Queries reject absent files explicitly. Reaching definitions require exact AST membership at the requested line;
+they cannot use the approximate nearest-preceding method from `cpg.method_at`.
+Slice depth is an integer in 0–32, checked before graph work.
+
+Persisted findings retain their original primary coordinates alongside grounding.
+Source-independent evidence has an explicit kind; a code citation must identify
+real source lines. Static verification accepts substantive verdicts only with
+source-checked source/sink or control/reachability citations. Consensus receipts retain
+individual assessments and label raw confidence as uncalibrated.
+
+Resumable tool loops journal intent before a handler runs and refuse to replay an
+unresolved intent automatically. Checkpoint IO/size/ownership failures are errors;
+known paid work remains recorded even when a later turn fails. Module authors must
+not interpret unresolved spend as zero or an inconclusive static review as an
+empirical proof. See [migration notes](../RELEASING.md#audit-remediation-compatibility)
+and the [itemized ledger](quality/audit-remediation-2026-09-30.md).
+
+Loop and stage checkpoint codecs enforce 512 records, 1 MiB per encoded record,
+8 MiB in total and the JSON nesting limit. Stage payload writers use the same
+8 MiB budget before publishing an artifact. Staged tools return `resumeHealth`
+and retain a bounded `resume-health.json` receipt when storage permits. Recovery
+durability is separate from execution status: degradation preserves the last
+durable recovery point, warns once per operation/failure class and stops further
+checkpoint advancement until the next dispatch. An absent or stale receipt during a disk
+failure must not be interpreted as healthy recovery; live diagnostics and result
+metadata carry the in-memory state.
 
 ## Sources of truth
 
@@ -292,6 +409,134 @@ execution policy is resolved, missing or incompatible runtime/model selection
 is an error. A tool must not add a literal default model, a provider fallback
 chain, or a target-local model override.
 
+### Provider-call allowances
+
+`AgentRuntime::with_allowance_binding` accepts host-approved investigation,
+revision, run, work and model attribution. The bundled LangGraph runtime uses
+the durable allowance ledger before each underlying provider attempt. This
+includes internal model turns and transport retries; the admitted model disables
+hidden SDK retries. The tracing wrapper forwards the binding and retains the
+normal model-call lifecycle. Adapters that do not implement the contract refuse
+binding rather than running without accounting.
+
+The optional bridge channel is `providerAdmission: "stdio-v1"`. The host sends
+one newline-terminated request, keeps stdin for admission replies, and reads
+framed `provider_admission` messages from stdout. A version-1 hello precedes
+reservations. The host mints each request identity, persists it before granting
+transport, and acknowledges its receipt after settlement. A missing hello stops
+the bridge after ten seconds. Cancellation or broken receipt exchange retains
+the reservation. Missing dollar usage is unknown, even when a call failed.
+Neither this channel nor the existing retrospective dollar stop guarantees a
+strict dollar ceiling.
+
+This is an opt-in dispatch contract under implementation. Eligible built-ins
+declare `allowanceRef` as a JSON option containing `schemaVersion: 1`,
+`investigationId`, the approved `revision`, and `workId`. Shared prepared
+dispatch checks the reference and selected model before runtime preflight.
+The tool descriptor supplies its work category; input cannot label discovery
+as review to spend the protected allocation. Governance fields are removed
+before engine parsing or model prompting, while the prepared operation retains
+their identity. Nested tools inherit the bound runtime and cannot replace it.
+
+`campaign:approve-allowance` requires explicit operator authorization and exact
+model, total-call, protected-review and expected-revision values. Approval
+preserves previous commitments and starts no jobs. `campaign:allowance` reads
+the durable state without initializing a ledger. Neither tool requires provider
+credentials. The shell opens a full-frame review of the exact terms. Page Up /
+Page Down scroll the document at every supported terminal size; approval is
+available on its final page. Escape cancels and preserves the composer and
+navigation origin. Plain output includes the complete terms.
+
+`campaign:study` drafts an immutable discovery batch using the existing campaign
+compiler. It starts no children. The optional `campaignId`,
+`campaignPlanSha256`, `campaignJobs` and `maxJobAttempts` approval options bind
+that exact batch to the allowance. Each child receives its host-selected work
+reference; shared dispatch verifies prepared input, source identity and config
+before atomically consuming a job attempt. Cancellation and restart do not
+refund attempts. Quota failures count against the finite attempt limit. The
+combined shell review uses the same paged disclosure, including the complete
+plan digest, job count and attempt limit. Resizing reflows the terms and
+rechecks whether the final page is visible before allowing approval.
+The approval/snapshot contract adds optional `workPlan` and the spend database
+adds `investigation_work_attempts`; legacy records omit this field.
+
+`campaign:context-study` drafts one `threat-model:build` job in the same campaign
+format and ledger. It requires `investigationId` and `contextInput`; an optional
+`campaignId` names the new immutable draft. Shared preparation freezes the
+selected model, source identity, config and generation options. This initial
+action is repository-wide, source-only, fresh, single-stage and non-activating.
+It requires one attempt; regeneration needs a new draft and explicit approval.
+Provider turns and retries within that attempt still consume the shared call
+allowance. The existing campaign dispatcher executes the approved job. Context
+calls cannot consume protected Review/Report calls. A subsequent scan study uses
+the same investigation id and a revised work approval, retaining prior consumption.
+
+The shell exposes this flow through `g` in the study context picker. Generated
+revisions remain immutable drafts; `a` on the completed campaign reopens review,
+and Enter reads its exact run-associated revision before selection. A completion
+without usable context remains available as a job outcome. Legacy context actions,
+review and learning still need guided allowance integration before every model
+action is bound automatically.
+Setup routes a model-backed Map plan through this study instead of starting its
+legacy planning queue. Optional `preparationJobs` freezes at most one
+`context:build` and one `entry-points:extract`, including their canonical inputs.
+They must remain deterministic and bound to the same repository. All jobs run
+in the reviewed order with one worker and one attempt each. The context engine
+still owns its own source grounding; this does not introduce DAG dependency
+execution or imply that every preparation artifact is required by synthesis.
+Preparation failures remain individual campaign outcomes. Other Map combinations
+and conflicting context options produce an explicit unsupported-plan error;
+they are never silently removed or substituted. These restrictions apply to the
+guided study, preserving direct public tool compatibility.
+
+An allowance reference does not approve additional jobs, retries beyond the
+approved limits, or a new context experiment. Existing unbound bridge calls
+keep their public contract. Dynamic adapters are not certified by these
+built-in descriptor changes.
+
+### Recorded threat-model selection
+
+Supported discovery and triage tools declare the advanced JSON option
+`threatModelRef`, with compatibility alias `threat_model_ref`. A reference
+contains `modelId`, `revisionId` and `sha256`; explicit `null` omits threat-model
+context. With no option, legacy direct calls still select the active model.
+Campaign compilation records the selected revision or omission in each scan
+input and preserves a caller's explicit selection.
+
+`threat-model:read` also declares this option. An explicit reference returns the
+exact authenticated document in `data.document`, its identity in `data.modelRef`,
+and `data.resolvedFrom = "exact-context"`. Explicit omission returns null document
+and reference. Scope, output-directory and methodology overrides are rejected in
+this mode so the preview cannot differ from the selected scanner document.
+Unbound reads retain their existing persistent/scoped behavior. The study TUI
+uses this shared path to inspect revisions before accepting one for a plan.
+Its `v` diagram reader derives the existing DFD view model from the authenticated
+document returned by that read, retaining the selected revision's grounding
+status. Component, flow and boundary inspection cannot activate context or
+dispatch generation. Linked source evidence is readable in full, and plain
+output includes all elements with the exact context identity. Selecting the
+revision for a study remains a separate action in the context browser.
+
+Bound readers authenticate that immutable object without changing the active
+pointer. Missing objects, invalid references and digest mismatches fail without
+falling back to a different model. Agentic SAST, Carlini, taint planning, static
+ranking and standard/deep triage consume the selected context in their relevant
+prompt or artifact paths. Supported whitebox MCP attachments point to the same
+object; the threat-model server checks its digest on each query. Explicit
+omission removes that attachment. Model context guides inspection and impact
+assessment; it never establishes a finding verdict.
+
+Shared tool-run startup copies an explicit revision or omission into the
+summary's threat-model provenance before execution. Terminal updates retain
+that initial selection. Existing historical summaries are not repaired merely
+by reading them; their scan input remains the recorded selection when the old
+summary captured the active model instead.
+
+This binds threat-model context only. Auxiliary context snapshots, other
+knowledge artifacts, attachments and reviewed lessons still need the complete
+immutable context-bundle contract. Descriptor option changes can require a new
+explicitly approved plan when checking an older frozen equivalence key.
+
 ## Dynamic KWP modules
 
 Local KWP modules are self-contained `.mjs` files. They export a plain module
@@ -362,7 +607,7 @@ them.
 | `description` | optional | Operator/model-facing summary. |
 | `headless` | required | Whether `kuzushi run` may invoke the tool. |
 | `runtimeRequirement` | optional | `never` or `always`; defaults to `never`. |
-| `phase` | required for effectful tools | `map`, `scan`, `review`, `prove`, `fix`, or `operate`. Deprecated `hunt` and `confirm` inputs normalize to `scan` and `prove`. |
+| `phase` | required for effectful tools | `map`, `scan`, `review`, `prove`, `fix`, `report`, or `operate`. Deprecated `hunt` and `confirm` inputs normalize to `scan` and `prove`. |
 | `effect` | required | `read`, `workspace-write`, `target-write`, `repository-execute`, or `external-action`. |
 | `approval` | required | `none` or `explicit`. Target writes, repository execution, and external actions require `explicit`. |
 | `workspaceRequirement` | required | `optional` or `required`. |
@@ -687,3 +932,51 @@ Trace run artifacts and raw workflow events remain available as history; they
 are excluded from active phase selection. Unknown historical tool identities
 retain the existing checks and are never silently removed. See `RELEASING.md`
 for the Rust descriptor migration.
+
+Revision comparison reads the complete recorded Git SHA and available indexed
+content hashes from run artifacts. CLI JSON adds `baseSource`, `compareSource`
+and `absenceCoverage`; the shell wraps values without removing hash characters.
+Missing legacy hashes remain unknown. Covered but absent findings are separate
+from work that was not reassessed. Neither a nondeterministic miss nor a missing
+snapshot establishes a fix.
+
+Comparison also reads each run's recorded `scan-input.json`, adding
+`baseContext`, `compareContext` and `contextComparison` to CLI JSON. The shell
+shows full model/revision/digest references separately from source identity.
+Changed context is labeled as changed scan conditions. Unavailable historical
+context cannot be equated with an explicit omission or the currently active
+model. These comparisons do not adjudicate a fix for a revision or branch.
+
+`sast:scan` writes a per-run `findings.json` array of discovery observations
+before optional post-processing. Reports and comparisons can read that saved
+array without querying the later state of the findings ledger. The result
+records the indexed starting `treeHash` and `snapshotHash`; a changed or
+unverifiable source makes it partial while retaining its evidence and spend.
+Index identity is bounded and does not prove complete repository coverage.
+Earlier runs without snapshots or content identities remain unknown.
+
+### Finding observation gaps
+
+`findings:list` accepts `state: ["not_observed"]` through the shared prepared
+input path. The shell equivalent is `findings filter state:not_observed`; CLI findings
+also accepts `--state not_observed`. A gap identifies the last observed run and
+the completed comparison run when the ledger has eligible scanner and scope
+evidence. Unknown historical references remain explicitly unknown.
+
+An observation gap preserves the human verdict. It does not close an open
+finding or establish that a confirmed finding was fixed. Re-observation clears
+the current gap; review and suppression changes preserve the separate scan
+history. Review detail and workspace exports carry this distinction. Full
+revision-specific fix assessment remains separate, unfinished work.
+
+Review's Enter action opens finding details within Review. When a gap contains
+both run references, **compare scans** opens Sources & context for that exact
+pair: `v` in Navigate mode, or `Esc` then `v` from an empty Prompt. The control
+uses the configurable `workbench.compare_observations` key binding. Escape
+returns to the same finding, filter, zoom and reading position. A composer
+draft owns typing; the comparison action does not overwrite it.
+
+The detail leads with the effective saved decision and source evidence.
+Other decisions remain in history, including newer automated decisions that
+do not override a human verdict. Comparison reports source and context
+differences without claiming that absence proves remediation.

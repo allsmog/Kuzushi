@@ -77,10 +77,25 @@ pub struct FindingSource {
     pub last_seen_at: String,
 }
 
+/// Provenance of the latest ledger event that did not observe this finding.
+/// Run references identify the evidence to inspect; absence is not resolution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingObservationGap {
+    pub event_seq: u64,
+    pub event_hash: String,
+    pub last_seen_run_id: Option<String>,
+    pub compared_run_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Finding {
     pub id: Option<i64>,
     pub scan_id: Option<String>,
+    /// Latest ledger disappearance event, separate from the review verdict.
+    /// A gap does not establish a fix or coverage at another source revision.
+    #[serde(default, rename = "observationGap", skip_serializing_if = "Option::is_none")]
+    pub observation_gap: Option<FindingObservationGap>,
     #[serde(
         default,
         rename = "identityId",

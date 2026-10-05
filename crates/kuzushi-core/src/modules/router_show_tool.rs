@@ -370,6 +370,7 @@ fn auto_triage_config(
         passes: DEFAULT_PASSES,
         taint_tools: crate::capabilities::deep_auditor::TaintToolPolicy::Available,
         reviewed_refutation_context: None,
+        threat_model_context: None,
     }
 }
 

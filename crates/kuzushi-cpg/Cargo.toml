@@ -21,14 +21,15 @@ private-engine = [
 ]
 
 [dependencies]
+blake3.workspace = true
 cpg-analysis = { workspace = true, optional = true }
 cpg-cli = { workspace = true, optional = true }
 cpg-core = { workspace = true, optional = true }
 cpg-incremental = { workspace = true, optional = true }
 regex = "1"
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 
 [lints]
 workspace = true

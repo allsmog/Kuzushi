@@ -47,11 +47,18 @@ fn current_primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
 }
 
 pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
+    if super::paste_inspection::render(frame, app) {
+        return;
+    }
+    render_shell_app(frame, app);
+}
+
+fn render_shell_app(frame: &mut Frame<'_>, app: &ShellApp) {
     let full = frame.area();
     if full.height == 0 || full.width == 0 {
         return;
     }
-    if render_compact_quit(frame, app) {
+    if render_priority_overlay(frame, app) {
         return;
     }
 
@@ -70,6 +77,12 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         .split(area);
     render_primary_layer(frame, chunks[0], app, primary);
     render_lower_chrome(frame, app, area, &chunks, sections);
+}
+
+fn render_priority_overlay(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
+    render_compact_quit(frame, app)
+        || super::allowance_review::render_allowance_review(frame, app)
+        || super::study_config::render_study_config(frame, app)
 }
 
 /// Splits the full frame into (body, rail): the context rail takes a

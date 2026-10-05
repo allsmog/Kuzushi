@@ -12,22 +12,28 @@ pub struct TaintPathsTool;
 #[async_trait]
 impl ToolHandler for TaintPathsTool {
     async fn call(&self, args: Value) -> Result<Value> {
-        let source = required(&args, "source")?;
-        let sink = required(&args, "sink")?;
-        let max_paths = args.get("maxPaths").and_then(Value::as_u64).unwrap_or(50) as usize;
-        let max_call_depth = args.get("maxCallDepth").and_then(Value::as_u64);
+        let source = pattern_argument(&args, "source")?;
+        let sink = pattern_argument(&args, "sink")?;
+        let max_paths = path_limit(&args)?;
+        anyhow::ensure!(
+            args.get("maxCallDepth").is_none(),
+            "maxCallDepth is unsupported by the summaries-first engine; omit it"
+        );
         with_language_projects(move |_, projects| {
             let mut envelope = FlowEnvelope::default();
             for (lang, project) in projects {
-                collect_language_flows(&mut envelope, lang, project, &source, &sink, max_paths);
+                collect_language_flows(&mut envelope, lang, project, &source, &sink, max_paths)?;
             }
             envelope.flows.truncate(max_paths);
             Ok(json!({
                 "source": source,
                 "sink": sink,
                 "maxPaths": max_paths,
-                "maxCallDepth": max_call_depth,
+                "callDepthPolicy": "engine-unbounded",
                 "engine": "cpg-rs",
+                "truncated": envelope.truncated,
+                "languageCoverage": envelope.coverage,
+                "effectivePerLanguageFlowLimit": max_paths.min(kuzushi_cpg::MAX_FLOWS_PER_QUERY),
                 "paths": {
                     "sourceCounts": {
                         "calls": envelope.source_calls,
@@ -49,6 +55,8 @@ struct FlowEnvelope {
     entry_methods: usize,
     sink_calls: usize,
     flows: Vec<Value>,
+    truncated: bool,
+    coverage: Vec<Value>,
 }
 
 fn collect_language_flows(
@@ -58,20 +66,64 @@ fn collect_language_flows(
     source: &str,
     sink: &str,
     max_paths: usize,
-) {
+) -> Result<()> {
     if envelope.flows.len() >= max_paths {
-        return;
+        envelope.truncated = true;
+        envelope
+            .coverage
+            .push(json!({"language": lang, "queried": false, "reason": "maxPaths"}));
+        return Ok(());
     }
-    let harvested = kuzushi_cpg::harvest_regex_spec(project, source, sink);
+    let harvested =
+        kuzushi_cpg::harvest_regex_spec(project, source, sink).map_err(anyhow::Error::msg)?;
     envelope.source_calls += harvested.source_call_matches;
     envelope.entry_methods += harvested.entry_methods.len();
     envelope.sink_calls += harvested.sink_call_matches;
-    let (findings, _stats) = kuzushi_cpg::run_taint_query(project, &harvested);
+    let (findings, stats) = kuzushi_cpg::run_taint_query(project, &harvested);
+    record_query_coverage(envelope, lang, &stats);
     for finding in &findings {
         if envelope.flows.len() >= max_paths {
+            envelope.truncated = true;
             break;
         }
         envelope.flows.push(flow_json(lang, finding));
+    }
+    Ok(())
+}
+
+fn record_query_coverage(
+    envelope: &mut FlowEnvelope,
+    lang: &str,
+    stats: &kuzushi_cpg::CpgFlowQueryStats,
+) {
+    let flow_cap_hit = stats.flow_count_before_cap > stats.flow_count;
+    envelope.truncated |= flow_cap_hit || !stats.truncated_categories.is_empty();
+    envelope
+        .coverage
+        .push(json!({"language": lang, "queried": true,
+        "flowCandidates": stats.flow_count_before_cap, "flowCapHit": flow_cap_hit,
+        "harvestCapsHit": stats.truncated_categories,
+        "harvestNameLimit": kuzushi_cpg::MAX_HARVESTED_NAMES,
+        "engineFlowLimit": kuzushi_cpg::MAX_FLOWS_PER_QUERY}));
+}
+
+fn pattern_argument(args: &Value, key: &'static str) -> Result<String> {
+    let mode = args.get("patternMode").map_or(Ok("regex"), |value| {
+        value
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("patternMode must be a string"))
+    })?;
+    kuzushi_cpg::compile_query_pattern(&required(args, key)?, mode).map_err(anyhow::Error::msg)
+}
+
+fn path_limit(args: &Value) -> Result<usize> {
+    match args.get("maxPaths") {
+        None => Ok(50),
+        Some(value) => value
+            .as_u64()
+            .filter(|limit| (1..=1000).contains(limit))
+            .map(|limit| limit as usize)
+            .ok_or_else(|| anyhow::anyhow!("maxPaths must be an integer in 1..=1000")),
     }
 }
 
@@ -106,6 +158,20 @@ fn required(args: &Value, key: &'static str) -> Result<String> {
 mod tests {
     use super::*;
     use crate::engine::ARTIFACT_ENV;
+
+    #[tokio::test]
+    async fn invalid_options_fail_before_graph_access() {
+        for args in [
+            json!({"source":"[","sink":"query"}),
+            json!({"source":"req","sink":"query","maxCallDepth":2}),
+            json!({"source":"req","sink":"query","maxPaths":4294967296_u64}),
+        ] {
+            assert!(TaintPathsTool.call(args).await.is_err());
+        }
+        let literal =
+            pattern_argument(&json!({"source":"[", "patternMode":"literal"}), "source").unwrap();
+        assert_eq!(literal, "\\[");
+    }
 
     #[tokio::test]
     async fn taint_paths_returns_the_joern_compatible_envelope() {

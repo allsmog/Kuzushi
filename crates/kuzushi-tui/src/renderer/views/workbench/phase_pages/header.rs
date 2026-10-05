@@ -601,6 +601,7 @@ fn phase_rail_line(statuses: &[JourneyPhaseStatus], width: usize) -> Option<Line
         spans.push(Span::styled(status.phase_label.to_string(), style));
         spans.push(Span::styled(status.navigation_symbol().to_string(), style));
     }
+    spans.push(Span::styled(" · Report", theme::muted()));
     let line = Line::from(spans);
     (line.width() <= width).then_some(line)
 }

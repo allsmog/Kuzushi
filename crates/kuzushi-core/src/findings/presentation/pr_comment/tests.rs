@@ -5,6 +5,7 @@ mod tests {
 
     fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         Finding {
+            observation_gap: None,
             impact: None,
             category: None,
             exploit_scenario: None,

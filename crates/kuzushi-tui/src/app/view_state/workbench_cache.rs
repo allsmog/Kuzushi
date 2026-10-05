@@ -30,7 +30,9 @@ use view_model_fragments::ViewModelFragmentCache;
 
 const MAX_PATH_CACHE_ENTRIES: usize = 128;
 const MAX_RUN_CACHE_ENTRIES: usize = 32;
-const MAX_LARGE_RUN_CACHE_ENTRIES: usize = 8;
+// A two-run comparison and its navigation origin need more than eight artifacts.
+// The shared byte ceiling still bounds retained payloads independently of count.
+const MAX_LARGE_RUN_CACHE_ENTRIES: usize = MAX_RUN_CACHE_ENTRIES;
 const MAX_LARGE_RUN_CACHE_BYTES: usize = kuzushi_core::MAX_RUN_ARTIFACT_READ_BYTES as usize;
 const MAX_FINDING_TRUTH_CACHE_ENTRIES: usize = 256;
 const MAX_STATUS_CACHE_ENTRIES: usize = 32;

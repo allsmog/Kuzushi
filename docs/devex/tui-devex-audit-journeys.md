@@ -629,3 +629,124 @@ Exercise resize through the real reducer/render-geometry regression; do not
 claim live resizing from separate fixed-size launches. No new model call, result selection or target change is required.
 
 At 40 columns, the generic `submit:` helper cannot validate a long run-id command on one visible prompt row. For this saved-run checkpoint, require the fresh Prompt cue, type the exact command, require its unique visible suffix, then press Enter. Preserve the failed setup trial and require the healthy Replay projection before judging reader behavior.
+
+### J62 — Observation gaps preserve human review
+
+- **Persona:** operator comparing two source revisions after a previously confirmed finding is absent from a later scan.
+- **Fixture:** two real offline `secret-scan` jobs, a labeled human confirmation, distinct Git commits, and seven export paths. No provider calls or target-code execution.
+- **Journey:** filter to `state:not_observed`, inspect the selected Review detail, zoom and resize, compare the two runs, then restart and revisit the same finding.
+- **Verify:** the original confirmation survives; no `fixed` or `removed` result is inferred. The gap carries both real run references and event provenance into reports. Keyboard controls, scroll and source navigation remain readable across the viewport matrix.
+- **Judge:** absence must never look like proof of a fix. Small terminals must offer a readable detail surface, and returning from comparison must not lose the finding.
+
+### J63 — Review completes at Report
+
+- **Persona:** operator finishing review and exporting a source-analysis investigation.
+- **Fixture:** J62's two real offline scans and seeded confirmation; a second decision is entered through the real TUI. No provider calls or target-code execution.
+- **Journey:** open the remaining finding, record a deferral, open Report with `r`, return to the same zoom, use `next`, select JSON, inspect all six viewports, export, then restart without color.
+- **Verify:** Review ends at Report; completed review does not add proof or patch work. JSON retains both decisions and the cross-revision observation-gap receipt. The 40-column capture must show the actual destination, not merely its label. Session spending is separate from unknown workspace total.
+- **Judge:** the export population, destination, result and return controls must be understandable; opening Report must preserve the reading position and draft. Raw timestamps and diagnostic clutter remain product-quality work even when this bounded journey passes.
+
+### J60 — Paged allowance review (current recipe)
+
+- **Fixture:** a real offline three-job study and durable allowance, with no provider requests or discovery execution.
+- **Journey:** inspect the draft, open its approval, read all six sizes, attempt approval before the last page, cancel, reopen, approve at 40×12, then restart without color and inspect the saved status in Logs.
+- **Verify:** the exact terms and full plan digest remain reachable; paging and Escape are always visible. Cancellation starts no work. Only the final-page `y` approves. The persisted ledger contains one revision, three jobs, zero attempts and zero calls.
+- **Judge:** model, limits, protected review, dollar uncertainty and the distinction between approval and execution must be clear. Status discoverability and the full study editor remain separate product gaps.
+
+Capture adapters derive plain text from one ANSI capture so a redraw cannot pair
+the text of one screen with the appearance of another. Failed captures remain
+preserved; passing machine predicates still require recorded screen review.
+
+
+### J64 — Finite study form and saved allowance
+
+- **Fixture:** a real three-pass `secret-scan` study under the selected model's
+  configuration. Only deterministic source scanning runs; no provider calls or
+  target-code execution.
+- **Journey:** choose scan options, prepare the study, inspect the source/context
+  receipt at all six sizes, enter call limits, approve at 40×12, open jobs, start
+  separately, inspect completion, then restart without color and reopen with `a`.
+- **Verify:** draft and approval start no jobs; the exact plan executes three
+  attempts, keeps zero provider reservations, and restores the same investigation
+  and limits. Required artifact checks stop the journey before dependent actions.
+- **Judge:** visible actions, selected-row visibility, scope/context readability,
+  spending uncertainty, the distinction between approval and execution, and
+  direct access to saved status. This proves the offline study path, not live
+  model quality or the entire context/scoping/learning roadmap.
+
+### J65 — Immutable context selection within a study
+
+- **Fixture:** two labeled imported threat-model revisions; deterministic reads
+  and study compilation only. No provider calls, job starts or target execution.
+- **Journey:** open the study's context browser, inspect the inactive revision,
+  page through summary and complete document at all six viewports, accept it,
+  compile a study, then explicitly omit context and compile a replacement draft.
+- **Verify:** inspection is required before using a revision; each plan binds
+  the selected reference or explicit omission; the active workspace context and
+  investigation identity remain unchanged. Shared prepared dispatch reads the
+  same authenticated document used by scanners.
+- **Judge:** context identity, source limitations, selection, paging, acceptance,
+  cancellation and fresh-plan approval remain understandable. This journey
+  does not validate model-backed context generation or editing.
+
+### J66 — Context generation plan and allowance
+
+- **Fixture:** labeled imported contexts; real source-only planning and approval.
+  This journey deliberately starts no model-backed job and admits no provider call.
+- **Journey:** open generation from the context picker, set total/protected calls,
+  prepare one fixed job, inspect summary and exact options across all six
+  viewports, approve through the paged terms, then reopen the approved plan after
+  restart with no color. The separate launch control remains unpressed.
+- **Verify:** one job, one worker, one attempt, exact model and source identity,
+  retained active context, durable limits and zero starts/provider calls.
+- **Judge:** planning, approval and launch are distinct; budget fields, paging,
+  exact options and back controls stay visible; approval reveals the next action.
+  Core integration tests exercise the real generator and subsequent scan study
+  with a mocked provider; this journey does not establish live model quality.
+
+### J67 — Setup opens the approved context workflow
+
+- **Fixture:** a fresh repository, two deterministic preparation selections and
+  one source-only context job. Planning and local approval only; no model calls.
+- **Journey:** select context generation in Setup, open Allowance, set limits,
+  prepare a draft, go Back and reopen it, inspect all six viewports and exact
+  inputs, approve the fixed plan and open its three named jobs. Confirm session
+  exit, require the harness shell to own the terminal, then restart without color.
+- **Verify:** selected tasks, draft identity, source/model, five total calls and
+  two protected review calls survive Back and restart. The ledger admits exactly
+  three jobs with one attempt each, but records zero starts and provider calls.
+  ANSI inspection rejects colors in the recovered no-color screen.
+- **Judge:** preparation, generation, allowance approval and launch have distinct
+  states and visible actions. Small screens retain the action and paging; full
+  terms and both preparation tools remain reachable. The quit prompt identifies
+  volatile Setup choices without implying the saved plan or active work is lost.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20260910-041224/J67/`
+  records 35 machine checks and 16 manual screen judgments passing. Earlier
+  failed runs remain retained, including invalid restart evidence caught by ANSI
+  review. A launch command typed into a still-running application is not restart
+  evidence; `require-exit` now prevents that error.
+
+### J68 — Inspect the selected context's data-flow diagram
+
+- **Fixture:** two explicitly labeled, imported contexts with distinct diagrams;
+  the selected revision differs from the active workspace revision. Real offline
+  reads and three-pass study compilation only; no provider requests or scans.
+- **Journey:** require inspection before `v`, open the selected diagram, read
+  component evidence, inspect flows and boundaries across all six viewports,
+  return and reopen at the same element, select context for the study, then
+  prove process exit before recovering the saved study in a no-color session.
+- **Verify:** diagram keys dispatch no generation or scan work. The compiled
+  plan binds the inspected revision; the active model stays unchanged. Every
+  component, flow and boundary remains reachable, including full evidence at
+  40×12. Internal and reverse arrow direction has focused shared-renderer tests.
+- **Judge:** revision identity, grounding status, real direction, evidence,
+  paging, Back and acceptance remain clear. The recipe separates Escape from
+  the next character key so the terminal cannot interpret them as an Alt chord.
+  This is context inspection, not the remaining accepted Map/DFD bridge or full
+  context editing workflow.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20260910-044815/J68/`
+  records 29 machine checks and all 12 manual judgments passing. The earlier
+  `044356` run remains manually failed despite green machine checks: its
+  boundary context count disagreed with the full detail reader. Both now use
+  the same selected-context lookup. Earlier recipe and arrow failures remain
+  retained as failed evidence too.

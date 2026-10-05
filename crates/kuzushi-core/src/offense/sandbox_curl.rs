@@ -40,7 +40,7 @@ impl PlayTransport for SandboxCurlTransport {
     fn send(&self, target: &ScopeTarget, request: &PlayRequest) -> Result<PlayResponse, String> {
         ensure_transport_isolation(self.backend, target)?;
         let options = SandboxExecOptions {
-            cmd: build_curl_argv(target, request, self.timeout_ms),
+            cmd: build_curl_argv(target, request, self.timeout_ms)?,
             stdin: None,
             timeout_ms: self.timeout_ms,
             memory_mb: None,
@@ -51,7 +51,7 @@ impl PlayTransport for SandboxCurlTransport {
             read_write_mounts: Vec::new(),
         };
         let result = block_on_sandbox_exec(self.backend, options)?;
-        parse_curl_response(&result.stdout, result.duration_ms)
+        completed_response(&result)
     }
 }
 
@@ -59,10 +59,7 @@ impl PlayTransport for SandboxCurlTransport {
 /// useful for loopback labs, but live traffic to any other target must have an
 /// isolating backend so a missing local dependency cannot silently weaken the
 /// offense boundary.
-fn ensure_transport_isolation(
-    backend: SandboxBackend,
-    target: &ScopeTarget,
-) -> Result<(), String> {
+fn ensure_transport_isolation(backend: SandboxBackend, target: &ScopeTarget) -> Result<(), String> {
     if backend != SandboxBackend::Plain || is_loopback_target(target) {
         return Ok(());
     }
@@ -106,25 +103,64 @@ fn block_on_sandbox_exec(
 }
 
 /// The URL a request targets: `scheme://host[:port]/path`.
-fn target_url(target: &ScopeTarget, request: &PlayRequest) -> String {
-    let authority = match request.port {
-        Some(port) => format!("{target}:{port}"),
-        None => target.to_string(),
+fn target_url(target: &ScopeTarget, request: &PlayRequest) -> Result<String, String> {
+    target.validate()?;
+    if !matches!(request.scheme.as_str(), "http" | "https") {
+        return Err("offense requires an http or https scheme".into());
+    }
+    if request
+        .path
+        .chars()
+        .any(|ch| ch.is_control() || ch == '\\' || ch == '#')
+    {
+        return Err("offense path contains a control, backslash, or fragment".into());
+    }
+    let authority = match target {
+        ScopeTarget::Ip(std::net::IpAddr::V6(ip)) => format!("[{ip}]"),
+        _ => target.to_string(),
     };
-    let path = if request.path.starts_with('/') {
-        request.path.clone()
-    } else {
-        format!("/{}", request.path)
+    let mut url = url::Url::parse(&format!("{}://{authority}/", request.scheme))
+        .map_err(|error| format!("invalid offense URL: {error}"))?;
+    url.set_port(request.port)
+        .map_err(|_| "invalid offense port")?;
+    let (path, query) = request
+        .path
+        .split_once('?')
+        .map_or((request.path.as_str(), None), |(path, query)| {
+            (path, Some(query))
+        });
+    url.set_path(path);
+    url.set_query(query);
+    let parsed = match url.host().ok_or("offense URL has no authority")? {
+        url::Host::Domain(host) => ScopeTarget::parse(host),
+        url::Host::Ipv4(ip) => ScopeTarget::Ip(ip.into()),
+        url::Host::Ipv6(ip) => ScopeTarget::Ip(ip.into()),
     };
-    format!("{}://{}{}", request.scheme, authority, path)
+    if &parsed != target || !url.username().is_empty() || url.password().is_some() {
+        return Err("offense URL authority differs from the authorized target".into());
+    }
+    Ok(url.into())
 }
 
 /// Build the `curl` argv. `-i` includes response headers so the response can
 /// be parsed; `-s -S` quiet the progress meter but keep errors. TLS
 /// verification is left on by default.
-fn build_curl_argv(target: &ScopeTarget, request: &PlayRequest, timeout_ms: u64) -> Vec<String> {
+fn build_curl_argv(
+    target: &ScopeTarget,
+    request: &PlayRequest,
+    timeout_ms: u64,
+) -> Result<Vec<String>, String> {
     let mut argv = vec![
         "curl".to_string(),
+        "--disable".to_string(),
+        "--globoff".to_string(),
+        "--proxy".to_string(),
+        String::new(),
+        "--noproxy".to_string(),
+        "*".to_string(),
+        "--suppress-connect-headers".to_string(),
+        "--proto".to_string(),
+        "=http,https".to_string(),
         "-i".to_string(),
         "-s".to_string(),
         "-S".to_string(),
@@ -141,8 +177,9 @@ fn build_curl_argv(target: &ScopeTarget, request: &PlayRequest, timeout_ms: u64)
         argv.push("--data-raw".to_string());
         argv.push(body.clone());
     }
-    argv.push(target_url(target, request));
-    argv
+    argv.push("--".to_string());
+    argv.push(target_url(target, request)?);
+    Ok(argv)
 }
 
 fn timeout_seconds(timeout_ms: u64) -> u64 {
@@ -151,41 +188,64 @@ fn timeout_seconds(timeout_ms: u64) -> u64 {
 
 /// Parse `curl -i` output (which may contain redirect/continue header blocks)
 /// into the final response.
-fn parse_curl_response(stdout: &str, elapsed_ms: u64) -> Result<PlayResponse, String> {
-    let normalized = stdout.replace("\r\n", "\n");
-    let block_start = last_status_block_start(&normalized)
-        .ok_or_else(|| "curl produced no HTTP status line".to_string())?;
-    let block = &normalized[block_start..];
-    let (head, body) = match block.split_once("\n\n") {
-        Some((head, body)) => (head, body.to_string()),
-        None => (block, String::new()),
-    };
-    let mut lines = head.lines();
-    let status = parse_status_line(lines.next().unwrap_or_default())?;
-    let headers = parse_headers(lines);
-    Ok(PlayResponse {
-        status,
-        headers,
-        body,
-        elapsed_ms,
-    })
+fn completed_response(result: &kuzushi_sandbox::SandboxExecResult) -> Result<PlayResponse, String> {
+    if result.outcome != kuzushi_sandbox::ExitOutcome::Exited
+        || result.exit_code != Some(0)
+        || result.stdout_truncated
+        || result.stderr_truncated
+    {
+        return Err(format!("incomplete HTTP transfer: outcome={:?}, exit={:?}, signal={:?}, stdoutTruncated={}, stderrTruncated={}",
+            result.outcome, result.exit_code, result.signal, result.stdout_truncated, result.stderr_truncated));
+    }
+    parse_curl_response(&result.stdout, result.duration_ms)
 }
 
-/// Index of the last status line. Only `HTTP/` at a line start counts, so a
-/// `Server: BaseHTTP/0.6 …` header value is not mistaken for the status line.
-fn last_status_block_start(normalized: &str) -> Option<usize> {
-    normalized
-        .match_indices("HTTP/")
-        .filter(|(idx, _)| *idx == 0 || normalized.as_bytes()[idx - 1] == b'\n')
-        .map(|(idx, _)| idx)
-        .last()
+fn parse_curl_response(mut stdout: &str, elapsed_ms: u64) -> Result<PlayResponse, String> {
+    loop {
+        let (head, body) = split_http_headers(stdout)?;
+        let mut lines = head.lines();
+        let status = parse_status_line(lines.next().unwrap_or_default())?;
+        if (100..200).contains(&status) {
+            if status == 101 {
+                return Err("HTTP protocol upgrade is unsupported".into());
+            }
+            stdout = body;
+            continue;
+        }
+        return Ok(PlayResponse {
+            status,
+            headers: parse_headers(lines),
+            body: body.to_string(),
+            elapsed_ms,
+        });
+    }
+}
+
+fn split_http_headers(response: &str) -> Result<(&str, &str), String> {
+    let boundary = response
+        .find("\r\n\r\n")
+        .map(|index| (index, 4))
+        .into_iter()
+        .chain(response.find("\n\n").map(|index| (index, 2)))
+        .min_by_key(|(index, _)| *index);
+    let (index, width) = boundary.ok_or("curl produced incomplete HTTP headers")?;
+    Ok((&response[..index], &response[index + width..]))
 }
 
 fn parse_status_line(line: &str) -> Result<u16, String> {
-    line.split_whitespace()
-        .nth(1)
+    let mut parts = line.split_whitespace();
+    if !matches!(
+        parts.next(),
+        Some("HTTP/1.0" | "HTTP/1.1" | "HTTP/2" | "HTTP/3")
+    ) {
+        return Err("curl produced no valid HTTP status line".into());
+    }
+    parts
+        .next()
+        .filter(|code| code.len() == 3)
         .and_then(|code| code.parse::<u16>().ok())
-        .ok_or_else(|| format!("could not parse HTTP status from {line:?}"))
+        .filter(|code| (100..=599).contains(code))
+        .ok_or_else(|| "invalid HTTP status code".into())
 }
 
 fn parse_headers<'a>(lines: impl Iterator<Item = &'a str>) -> Vec<(String, String)> {
@@ -210,7 +270,7 @@ mod tests {
             ..PlayRequest::get("admin")
         };
         assert_eq!(
-            target_url(&target(), &request),
+            target_url(&target(), &request).unwrap(),
             "https://box.htb:8443/admin"
         );
     }
@@ -224,7 +284,7 @@ mod tests {
         request
             .headers
             .push(("X-Test".to_string(), "1".to_string()));
-        let argv = build_curl_argv(&target(), &request, 5_000);
+        let argv = build_curl_argv(&target(), &request, 5_000).unwrap();
         assert!(argv.contains(&"-X".to_string()) && argv.contains(&"POST".to_string()));
         assert!(argv.contains(&"X-Test: 1".to_string()));
         assert!(
@@ -273,11 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_final_response_after_a_redirect() {
+    fn redirect_body_cannot_impersonate_a_second_response() {
         let raw = "HTTP/1.1 302 Found\nLocation: /next\n\nHTTP/1.1 200 OK\nContent-Type: text/plain\n\nfinal body";
         let response = parse_curl_response(raw, 1).unwrap();
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, "final body");
+        assert_eq!(response.status, 302);
+        assert!(response.body.starts_with("HTTP/1.1 200 OK"));
     }
 
     #[test]
@@ -293,5 +353,71 @@ mod tests {
         let response = parse_curl_response(raw, 3).unwrap();
         assert_eq!(response.status, 200);
         assert!(response.contains("uid=0(root)"));
+    }
+}
+
+#[cfg(test)]
+mod audit_regressions {
+    use super::*;
+    #[test]
+    fn malicious_authorities_and_schemes_are_rejected() {
+        for host in [
+            "outside.example/?x=.allowed.example",
+            "user@allowed.example",
+            "allowed.example#x",
+            "allowed.example:443",
+            "127.1",
+        ] {
+            assert!(
+                target_url(&ScopeTarget::parse(host), &PlayRequest::get("/")).is_err(),
+                "{host}"
+            );
+        }
+        let mut request = PlayRequest::get("/");
+        request.scheme = "https://outside.example/?ignored=".into();
+        assert!(target_url(&ScopeTarget::parse("allowed.example"), &request).is_err());
+    }
+    #[test]
+    fn ipv6_and_literal_globs_have_one_explicit_transport_request() {
+        let request = PlayRequest::get("/a[1-9]/{x,y}?q=1");
+        let args = build_curl_argv(&ScopeTarget::parse("::1"), &request, 1000).unwrap();
+        assert_eq!(args[1], "--disable");
+        assert!(args.iter().any(|a| a == "--globoff"));
+        assert_eq!(args[args.len() - 2], "--");
+        assert!(args.last().unwrap().starts_with("https://[::1]/"));
+    }
+    #[test]
+    fn response_body_is_not_protocol_and_retains_crlf() {
+        let body = "denied\r\nHTTP/1.1 200 OK\r\n\r\nforged";
+        let response =
+            parse_curl_response(&format!("HTTP/1.1 403 Forbidden\r\n\r\n{body}"), 0).unwrap();
+        assert_eq!(response.status, 403);
+        assert_eq!(response.body, body);
+        assert_eq!(
+            parse_curl_response(
+                "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\n\r\nok",
+                0
+            )
+            .unwrap()
+            .status,
+            201
+        );
+    }
+    #[test]
+    fn unsuccessful_and_truncated_transfers_cannot_be_successes() {
+        for (exit, truncated) in [(Some(18), false), (Some(0), true)] {
+            let result = kuzushi_sandbox::SandboxExecResult {
+                backend: SandboxBackend::Plain,
+                outcome: kuzushi_sandbox::ExitOutcome::Exited,
+                exit_code: exit,
+                signal: None,
+                stdout: "HTTP/1.1 200 OK\r\n\r\npartial".into(),
+                stderr: String::new(),
+                stdout_truncated: truncated,
+                stderr_truncated: false,
+                duration_ms: 0,
+            };
+            assert!(completed_response(&result).is_err());
+        }
     }
 }

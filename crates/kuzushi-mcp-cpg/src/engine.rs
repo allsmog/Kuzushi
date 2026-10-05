@@ -70,9 +70,8 @@ where
     .context("cpg engine task panicked")?
 }
 
-/// Load or build each language. One language that cannot build (for example
-/// detected sources that the build excludes) is reported on stderr and
-/// skipped; the call fails only when no language loads.
+/// A missing language graph makes the query incomplete. Refuse the result
+/// instead of presenting a partial empty answer as complete repository coverage.
 fn load_language_projects(root: &Path, languages: Vec<String>) -> Result<Vec<(String, Project)>> {
     let mut projects = Vec::new();
     let mut failures = Vec::new();
@@ -88,19 +87,36 @@ fn load_language_projects(root: &Path, languages: Vec<String>) -> Result<Vec<(St
 
 fn report_skipped_languages(projects: &[(String, Project)], failures: &[String]) -> Result<()> {
     anyhow::ensure!(
+        failures.is_empty(),
+        "cpg-rs query coverage incomplete: {}",
+        failures.join("; ")
+    );
+    anyhow::ensure!(
         !projects.is_empty(),
         "cpg-rs graph unavailable: {}",
         failures.join("; ")
     );
-    for failure in failures {
-        eprintln!("kuzushi-mcp-cpg: skipped language graph ({failure})");
-    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_language_cannot_be_reported_as_a_complete_empty_query() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("main.go"),
+            "package main\nfunc main() {}\n",
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("broken.py"), [0xff, 0xfe]).unwrap();
+        let result = load_language_projects(temp.path(), vec!["go".into(), "python".into()]);
+        let error = result.err().expect("partial language coverage must refuse");
+        assert!(error.to_string().contains("coverage incomplete"));
+        assert!(error.to_string().contains("python"));
+    }
 
     #[test]
     fn query_languages_add_detected_languages_to_persisted_graphs() {

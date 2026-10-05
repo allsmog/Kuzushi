@@ -67,6 +67,8 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchTogglePaneZoom,
     WorkbenchOpen,
     WorkbenchPageNext,
+    WorkbenchPlanStudy,
+    WorkbenchReport,
     WorkbenchPagePrev,
     WorkbenchPage(WorkbenchPage),
     WorkbenchValidate,
@@ -82,8 +84,10 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchBacklogToggle,
     /// `/` on Review: open the incremental findings search capture.
     WorkbenchReviewSearch,
+    WorkbenchCompareObservations,
     /// `/` on Logs: open the incremental transcript filter capture.
     LogsFilter,
+    RunDiffToggleSources,
     /// One-key backlog decision; payload is the review verdict keyword fed
     /// through the ordinary `decision <verdict> <reason>` path.
     WorkbenchBacklogDecide(&'static str),
@@ -145,6 +149,7 @@ pub(crate) enum ViewHotkeyAction {
     CampaignToggleExclude,
     CampaignCycleWorkers,
     CampaignLaunch,
+    CampaignReviewStudy,
     CampaignKill,
     CampaignShowPrompt,
     CampaignRefresh,

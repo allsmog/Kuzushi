@@ -5,11 +5,11 @@ phase: map
 size: 160x48
 ---
 KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context   │ ENGAGEMENT
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○                                                                                │ phase-target
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates                                                           │ scope: F-0001 · Review
+ Map ✓ · Scan ✓ · Review ● · Report                                                                                         │ phase-target
+ ▸ NEXT review 6 remaining findings (6 total)                                                                               │ scope: F-0001 · Review
  Tab cycle map views · z zoom selected view · next → Review · jobs inspect Map runs · report open Report                    │
 ◇ SYSTEM SUMMARY · why the system exists and how its parts move data                                                        │ JOURNEY
-views  [summary] · dfd  ·  Tab cycles · z zoom                                                                              │ Review 3/5
+views  [summary] · dfd  ·  Tab cycles · z zoom                                                                              │ Review 3/3
 ┌EXECUTIVE SUMMARY ─────────────────────────────────────┐ ┌OVERALL DATA FLOW ──────────────────────────────────────────────┐│ ⛭ autonomy:fix
 │phase-target: purpose not recorded in this threat model. │ │external → application · 1 flow · boundary                      ││
 │The primary process component is API. 3 components     │ │application → data · 1 flow · boundary                          ││ IN FLIGHT
@@ -17,9 +17,9 @@ views  [summary] · dfd  ·  Tab cycles · z zoom                               
 │flows cross a declared boundary. Rebuild to add a      │ │                                                                ││
 │source-grounded product summary.                       │ │                                                                ││ FINDINGS
 │                                                       │ │                                                                ││ 6 findings · 1 C · 2 H · 2 M
-│shape · 1 entities · 1 processes · 1 stores            │ │                                                                ││ 0/6 reviewed · 0 proven
+│shape · 1 entities · 1 processes · 1 stores            │ │                                                                ││ 0/6 reviewed · 0 confirmed
 └───────────────────────────────────────────────────────┘ └────────────────────────────────────────────────────────────────┘│
-┌COMPONENT TREE · external · 1/3 · ↑/↓ select · Enter DFD · PgUp/PgDn scroll ──────────────────────────────────────────────┐│ COST
+┌COMPONENT TREE · external · 1/3 · ↑/↓ select · Enter DFD · PgUp/PgDn scroll ──────────────────────────────────────────────┐│ SESSION COST
 │◇ phase-target · 3 components                                                                                               ││ $0.37 of $2.00
 │├─ external · 1 component                                                                                                 ││ 19% of budget
 ││  └─ › ◇ Client · entity · in 0 · out 1                                                                                  ││
@@ -48,7 +48,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom                               
 │                                                                                                                          ││
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
 ./phase-target · rev:unknown · context:current · threat-model:unverified · indexed=3 total=3 · 3 nodes · 2 flows              │
-run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...       6 findings / 1 crit / 2 high / 2 med│
+⛭ autonomy:fix · run route · ⠋ context:build · 42s · 1/2 · notify:unavailable ·...      6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │
 ◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom · Esc prompt                     │

@@ -1,0 +1,109 @@
+# First-time Setup planning only. No context job or provider call is launched.
+name: Setup preserves a finite context plan and shared allowance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | setup
+keys: Down Enter
+require-live-snap: 20 Build threat model | map-selection
+ask: Does the Map selection show which preparation tasks are selected and distinguish optional model-backed context work?
+keys: Down Down Down Space Enter
+require-live-snap: 20 READY THE MAP RUN | setup-with-context
+expect: Allowance
+expect: APPROVAL NEXT
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 GENERATE STUDY CONTEXT | context-from-setup
+expect: 3 fixed jobs
+expect: set explicitly
+ask: Does Setup open the same bounded context flow, with both preparation jobs included and no work already running?
+keys: t
+type: 5
+keys: Enter r
+type: 2
+keys: Enter Enter
+require-live-snap: 30 Draft ready | prepared-map
+require-shell: python3 @REPO/scripts/devex/fixtures/setup_context_study.py @TMP_TARGET @ART draft
+keys: Escape
+require-live-snap: 20 READY THE MAP RUN | back-to-setup
+expect: APPROVAL NEXT
+ask: Does Back retain the selected Map work and return to the same Setup row?
+keys: Enter
+require-live-snap: 20 GENERATE STUDY CONTEXT | reopened-map
+expect: Total calls: 5
+expect: Protected review: 2
+expect: Review plan and allowance
+require-shell: python3 @REPO/scripts/devex/fixtures/setup_context_study.py @TMP_TARGET @ART reopened
+resize: 80x24
+live-snap: map-plan-80
+ask: Is the three-job workload and shared allowance readable at 80x24?
+resize: 60x20
+live-snap: map-plan-60
+ask: Does the 60x20 layout keep the main action, fixed workload and navigation understandable?
+resize: 40x12
+live-snap: map-plan-40
+ask: Does the smallest layout retain the full next action and visible paging and Back controls?
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+keys: PPage
+live-snap: map-plan-40-preparation
+ask: Can the operator read the ordered preparation tools using the paging controls at the smallest size?
+keys: NPage
+live-snap: map-plan-40-last
+ask: Does the last page preserve investigation identity and explain that new drafts retain past spending?
+resize: 96x89
+live-snap: map-plan-tall
+ask: Does the tall layout clearly separate selected jobs, allowance, model and source identity?
+keys: Tab
+live-snap: map-options
+expect: context:build
+expect: entry-points:extract
+ask: Does the options view show the frozen inputs for every selected task, including preparation?
+keys: Tab
+resize: 160x48
+live-snap: map-plan-wide
+ask: Does the wide layout maintain a comfortable reading width and visible controls?
+resize: 40x12
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | map-approval
+keys: y
+require-live-snap: 15 Read remaining terms | map-approval-gated
+resize: 80x36
+live-snap: map-approval-complete
+expect: 3 fixed jobs
+expect: attempt(s) each
+ask: Does the complete approval disclose all three jobs, their attempt limit, retained spending and uncertain dollar costs?
+resize: 40x12
+keys: End
+require-live-snap: 15 y approve | map-approval-last
+ask: Does the final approval state that cancellation consumes attempts and approval starts no work?
+keys: y
+require-live-snap: 30 Open approved Map jobs | approved-map
+require-shell: python3 @REPO/scripts/devex/fixtures/setup_context_study.py @TMP_TARGET @ART approved
+keys: Enter
+resize: 120x36
+require-live-snap: 20 L starts the approved jobs | map-jobs
+expect: context:build
+expect: entry-points:extract
+expect: threat-model:build
+ask: Are all selected jobs visible and planned, with a distinct explicit launch action?
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | quit-review
+ask: Does exit distinguish unsaved Setup selections from the already persisted plan and avoid implying active work?
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 20 GENERATE STUDY CONTEXT | recovered-map
+expect: Open approved Map jobs
+expect: 3 fixed jobs
+expect: Total calls: 5
+expect: Protected review: 2
+require-shell: python3 @REPO/scripts/devex/fixtures/setup_context_study.py @TMP_TARGET @ART resumed
+ask: Does restart preserve the exact plan and shared allowance in plain color mode, with no implicit launch or new allowance?
+keys: Escape Escape Escape C-c

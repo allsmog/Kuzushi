@@ -677,7 +677,7 @@ fn inspecting_another_page_does_not_forge_the_next_action() {
         model
             .header
             .next_action
-            .contains("record terminal dispositions"),
+            .contains("review 1 remaining findings"),
         "{}",
         model.header.next_action
     );

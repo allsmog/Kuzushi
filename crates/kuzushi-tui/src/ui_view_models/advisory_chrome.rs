@@ -68,7 +68,7 @@ impl CostCapHaltModel {
                 "■ COST CAP HALT · spent ${:.4} / cap ${:.4}",
                 halt.spent_usd, halt.limit_usd
             ),
-            compact: "COST CAP: c=continue · a=abort",
+            compact: "COST CAP: c=review cap · a=abort",
         }
     }
 }

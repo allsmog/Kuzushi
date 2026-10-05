@@ -177,7 +177,8 @@
         "sdk_client_validation",
         "timeout",
         "transport",
-        "runtime_error"
+        "runtime_error",
+        "allowance_refused"
       ]
     },
     "runtimeFailure": {

@@ -674,6 +674,16 @@ mod tests {
     }
 
     #[test]
+    fn tiny_queue_keeps_source_count_beside_finding_identity() {
+        let text = lines_text(populated_review_queue_pane_lines(
+            &review_model(vec![review_row()]),
+            Rect::new(0, 0, 40, 3),
+        ));
+        assert!(text.contains("F-0001"), "{text}");
+        assert!(text.contains("runtime verified s2"), "{text}");
+    }
+
+    #[test]
     fn row_names_reappeared_rejection_conflict() {
         let mut row = review_row();
         row.decision = "rejected_false_positive".to_string();

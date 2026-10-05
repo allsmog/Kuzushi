@@ -37,6 +37,7 @@ pub use build_repository_inventory::{
 };
 pub use repository_inventory::InventoryEntrypoint;
 pub use repository_inventory::InventoryFile;
+pub use repository_inventory::InventoryInspection;
 pub use repository_inventory::InventoryFramework;
 pub use repository_inventory::InventoryLanguage;
 pub use repository_inventory::InventoryPathClassification;

@@ -65,8 +65,8 @@ fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(St
 fn wrapped_binding_priority(binding: (&str, &str)) -> u8 {
     match binding {
         ("j/k", "select") => 0,
-        ("Ctrl+C" | "Ctrl+G" | "Esc" | "Esc/q" | "q", _) => 0,
-        ("Enter" | "PgUp/PgDn" | "Tab" | "Shift+Tab", _) => 1,
+        ("Ctrl+C" | "Ctrl+G" | "Esc" | "Esc/q" | "q" | "PgUp/PgDn", _) => 0,
+        ("Enter" | "Tab" | "Shift+Tab", _) => 1,
         (key, _) if looks_like_typed_command(key) => 3,
         _ => 2,
     }
@@ -377,6 +377,25 @@ mod tests {
         for key in ["Ctrl+C", "Ctrl+G", "Esc"] {
             assert!(rendered.contains(key), "missing {key}: {rendered}");
         }
+    }
+
+    #[test]
+    fn wrapped_footer_keeps_prioritized_reader_paging_at_40_columns() {
+        let mut bindings = vec![
+            ("PgUp/PgDn", "scroll"),
+            ("Esc", "prompt"),
+            ("Ctrl+G", "palette"),
+            ("q", "review list"),
+            ("Tab", "pane"),
+        ];
+        bindings.sort_by_key(|binding| wrapped_binding_priority(*binding));
+        let (top, bottom) = distribute_wrapped_bindings(bindings);
+        let (top, overflow) = keybindings_line_for_wrapped_row(top, 40, OverflowHint::Defer);
+        let (bottom, _) =
+            keybindings_line_for_wrapped_row(bottom, 40, OverflowHint::ShowIf(overflow));
+        let text = [line_text(&top), line_text(&bottom)].join("\n");
+        assert!(text.contains("PgUp/PgDn scroll"), "{text}");
+        assert!(text.contains("Esc prompt"), "{text}");
     }
 
     fn line_text(line: &Line<'_>) -> String {

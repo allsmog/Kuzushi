@@ -50,7 +50,10 @@ async fn call_tool(
         .as_ref()
         .ok_or((ERROR_INVALID_PARAMS, "missing params".to_string()))?;
     let name = tool_name(params)?;
-    let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     if !registry.contains(name) {
         return Err((ERROR_METHOD_NOT_FOUND, format!("unknown tool: {name}")));

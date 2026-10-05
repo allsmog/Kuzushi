@@ -15,8 +15,7 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let deck = app.router.campaign();
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    if let Some(config) = deck.batch_scan_config.as_ref() {
-        append_batch_scan_config(&mut lines, config, area);
+    if append_study_surfaces(&mut lines, app, area) {
         return lines;
     }
     match deck.selected_campaign().filter(|_| deck.detail) {
@@ -25,6 +24,26 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     append_deck_footer(&mut lines, deck, area);
     lines
+}
+
+fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
+    if app.context_generation().is_some() {
+        lines.extend(
+            crate::ui_view_models::context_generation::generation_lines(app, area.width as usize)
+                .into_iter()
+                .map(|text| Line::styled(text, theme::primary())),
+        );
+        return true;
+    }
+    if app.study_context_picker().is_some() {
+        super::batch_scan_config_lines::append_study_context(lines, app, area);
+        return true;
+    }
+    if let Some(config) = app.router.campaign().batch_scan_config.as_ref() {
+        append_batch_scan_config(lines, config, area);
+        return true;
+    }
+    false
 }
 
 fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
@@ -135,6 +154,25 @@ fn append_campaign_detail(
     lines.push(detail_summary_line(deck, campaign));
     append_campaign_operational_detail(lines, campaign);
     lines.push(blank());
+    append_campaign_jobs(lines, deck, campaign, area);
+    if let Some(report) = deck
+        .active_batch_report()
+        .filter(|report| report.batch_id == campaign.campaign_id)
+    {
+        append_batch_occurrence(lines, report, area);
+    }
+}
+
+fn append_campaign_jobs(
+    lines: &mut Vec<Line<'static>>,
+    deck: &CampaignRouteState,
+    campaign: &CampaignSnapshot,
+    area: Rect,
+) {
+    if campaign.kind.as_deref() == Some("context-study") {
+        super::context_study_lines::append_context_jobs(lines, deck, campaign, area.width as usize);
+        return;
+    }
     let widths = job_list_widths(area);
     lines.push(aligned_header(
         &[
@@ -152,12 +190,6 @@ fn append_campaign_detail(
     ));
     for (index, job) in campaign.jobs.iter().enumerate() {
         lines.push(job_row_line(deck, job, index == deck.selected_job, &widths));
-    }
-    if let Some(report) = deck
-        .active_batch_report()
-        .filter(|report| report.batch_id == campaign.campaign_id)
-    {
-        append_batch_occurrence(lines, report, area);
     }
 }
 
@@ -319,7 +351,7 @@ fn job_findings_label(job: &CampaignJobSnapshot) -> String {
         .unwrap_or_else(|| "—".to_string())
 }
 
-fn job_cost_label(job: &CampaignJobSnapshot) -> String {
+pub(super) fn job_cost_label(job: &CampaignJobSnapshot) -> String {
     job.cost_usd
         .map(|cost| {
             if job.provider_spend_unresolved {
@@ -428,11 +460,12 @@ fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState,
     lines.push(blank());
     let batch_detail = deck
         .selected_campaign()
-        .is_some_and(crate::app::is_scan_batch_snapshot);
+        .is_some_and(crate::app::is_fixed_study_snapshot);
     let commands: &[&str] = if deck.detail && batch_detail {
         &[
             "j/k",
-            "trials frozen",
+            "a plan/allowance",
+            "jobs frozen",
             "workers frozen",
             "L launch",
             "K kill",
@@ -559,9 +592,9 @@ mod tests {
 
         let text = rendered_text(&app);
 
-        assert!(text.contains("SCAN BATCH"), "{text}");
-        assert!(text.contains("cost not estimated"), "{text}");
-        assert!(text.contains("requested 1 · using 1"), "{text}");
+        assert!(text.contains("PLAN A STUDY"), "{text}");
+        assert!(text.contains("Cost not estimated"), "{text}");
+        assert!(text.contains("Requested 1 workers; 1 permitted"), "{text}");
     }
 
     #[test]
@@ -583,8 +616,50 @@ mod tests {
             text.contains("gate failed · operational complete · security failed · blocking 1"),
             "{text}"
         );
-        assert!(text.contains("trials frozen"), "{text}");
+        assert!(text.contains("jobs frozen"), "{text}");
         assert!(!text.contains("x include/exclude"), "{text}");
+    }
+
+    #[test]
+    fn context_study_names_every_tool_and_keeps_selected_attempt_details() {
+        let mut campaign = sample_campaign();
+        campaign.kind = Some("context-study".into());
+        campaign.jobs = [
+            "context:build",
+            "entry-points:extract",
+            "threat-model:build",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, tool)| {
+            let mut job = sample_job(&format!("job-{index}"), "planned");
+            job.tool = Some(tool.into());
+            job
+        })
+        .collect();
+        let mut deck = CampaignRouteState::default();
+        deck.selected_job = 2;
+        for width in [40, 60, 80, 96, 120, 160] {
+            let mut lines = Vec::new();
+            append_campaign_jobs(&mut lines, &deck, &campaign, Rect::new(0, 0, width, 12));
+            let text = lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            for tool in [
+                "context:build",
+                "entry-points:extract",
+                "threat-model:build",
+            ] {
+                assert!(text.contains(tool), "{text}");
+            }
+            assert!(
+                text.contains("job-2") && text.contains("0 attempt(s)"),
+                "{text}"
+            );
+            assert!(lines.len() <= 6, "{text}");
+        }
     }
 
     fn sample_job(job_id: &str, state: &str) -> CampaignJobSnapshot {

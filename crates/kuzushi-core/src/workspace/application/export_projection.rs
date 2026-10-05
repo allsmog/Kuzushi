@@ -153,8 +153,14 @@ fn base_export_record(
         provenance,
         ..WorkspaceFindingExportRecord::default()
     };
+    apply_observation_receipt(&mut record, &finding);
     apply_hunt_enrichment(&mut record, &finding);
     record
+}
+
+fn apply_observation_receipt(record: &mut WorkspaceFindingExportRecord, finding: &Finding) {
+    record.observation_gap = finding.observation_gap.clone();
+    record.observation_note = crate::findings::observation_gap_note(finding);
 }
 
 /// The hunt-authored plain-language fields (recommendation from remediation,

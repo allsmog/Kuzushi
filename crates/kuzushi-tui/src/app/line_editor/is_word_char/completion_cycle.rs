@@ -2,6 +2,9 @@ use super::*;
 
 impl ShellApp {
     pub fn completion_candidates(&self, input: &str) -> Vec<String> {
+        if self.editor().has_pasted_blocks() {
+            return Vec::new();
+        }
         let request = CompletionRequest::parse(input);
         if let Some(prefix) = request.command_prefix() {
             return command_completion_candidates(prefix, request.slash);

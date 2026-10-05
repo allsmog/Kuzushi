@@ -107,13 +107,16 @@ line-oriented directives — data, not code. Example:
 # comment
 name: What this journey audits
 size: 110x32                       # optional; --size overrides
+resize: 80x24                      # after launch: resize the live window and capture dimensions
 cwd: @TMP_TARGET                   # working dir for the session
 env: HOME=@TMP_HOME K=V            # env for the NEXT launch only
 env-unset: ANTHROPIC_API_KEY       # unset for the NEXT launch only
 require-any-env: ANTHROPIC_API_KEY OPENAI_API_KEY   # else SKIP (require-env = all)
 require-wrapper-flow:                # if KUZUSHI_NATIVE_BIN is set, require kz
 shell: printf 'x' > @ART/seed.txt  # host-side setup command
+require-shell: test -s @ART/seed.txt # stop before later actions if prerequisite fails
 launch: --target @TARGET           # kuzushi <args>; empty = bare launch
+require-exit: 10                  # prove the TUI exited before relaunching (1–30s)
 launch-raw: @KUZUSHI demo | cat    # full shell line (pipes, --plain)
 wait: 2                            # fixed sleep (seconds)
 wait-for: 25 CHOOSE A TARGET       # poll pane for substring; [timeout] first
@@ -121,6 +124,7 @@ wait-snap: 5 RUN FOCUS | run-focus # match and capture one transient frame
 wait-live-snap: 5 VIEW MAP | map   # match only while alternate_on=1
 keys: Enter                        # raw tmux send-keys (Escape, C-c, C-Up, d…)
 type: sc                           # literal text, no Enter
+paste-file: @ART/command.txt        # literal bracketed paste, max 64 KiB, no Enter
 submit: findings                   # literal text + Enter
 snap: target-gate                  # capture pane + provenance (legacy fallback)
 live-snap: map                     # fail unless the live alternate screen owns the pane

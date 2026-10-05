@@ -1,0 +1,92 @@
+# Real offline study draft + durable approval. No discovery or model launch.
+name: Paged finite study approval, cancel, resize and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+type: run campaign:study {"campaignId":"offline-finite","scanInput":{"taskMode":"manual","tasks":["secret-scan"]}}
+keys: Enter
+require-live-snap: 30 run receipt · completed | draft-completed
+submit: logs
+require-live-snap: 20 Study draft: offline-finite | draft-receipt
+expect: 3 discovery jobs
+expect: 1 worker
+expect: No jobs started
+ask: Does the draft disclose the fixed work and source identity while making review and approval the next step?
+shell: python3 @REPO/scripts/devex/fixtures/study_approval.py @TMP_TARGET @ART/approval-command.txt
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 20 REVIEW PLAN & ALLOWANCE | work-terms
+expect: Total provider calls: 9
+expect: Protected review calls: 3
+expect: 3 fixed jobs
+expect: 1 attempt(s) each
+expect: Plan digest: sha256:
+expect: cancellation consume attempts
+expect: starts no jobs
+ask: Are the job count, attempt limits, full plan digest, model and allowance readable before approval?
+resize: 80x24
+require-live-snap: 20 REVIEW PLAN & ALLOWANCE | work-80
+ask: At 80x24, are all approval terms reachable with visible paging and cancellation?
+resize: 60x20
+require-live-snap: 20 REVIEW PLAN & ALLOWANCE | work-60
+keys: End
+require-live-snap: 20 y approve | work-60-final
+expect: starts no jobs
+ask: At 60x20, does the last page keep the final terms and decision controls readable?
+resize: 40x12
+keys: Home
+require-live-snap: 20 Read remaining terms to approve | work-40-first
+keys: y
+live-snap: hidden-work-cannot-approve
+expect: REVIEW PLAN & ALLOWANCE
+expect-not: y approve
+expect: PgUp/PgDn read · Esc cancel
+ask: Does the narrow first page make further reading and cancellation clear without enabling approval?
+keys: NPage
+require-live-snap: 20 Dollar ceiling | work-40-middle
+ask: Are the spending limits and uncertainty readable at 40x12?
+keys: Escape
+require-live-snap: 20 denied once | approval-canceled
+ask: Does cancellation return to the prior surface without starting work?
+paste-file: @ART/approval-command.txt
+keys: Enter
+require-live-snap: 20 Read remaining terms to approve | reopened-first-page
+expect: offline-finite
+resize: 96x89
+require-live-snap: 20 Total provider calls: 9 | work-tall
+expect: Plan digest: sha256:
+expect: y approve
+ask: Is the complete approval readable at 96x89 without buried terms or misleading spending claims?
+resize: 160x48
+require-live-snap: 20 Total provider calls: 9 | work-wide
+expect: Protected review calls: 3
+ask: Does the wide layout keep a comfortable reading width and clear decision controls?
+resize: 40x12
+keys: End
+require-live-snap: 20 y approve | work-40-final
+expect: starts no jobs
+ask: Can the operator approve the finite plan from the final page at 40x12?
+keys: y
+resize: 120x36
+require-live-snap: 25 Approved campaign: offline-finite | approved-work-receipt
+expect: 3 fixed jobs
+expect: 0/9
+expect: no jobs started
+ask: Does the durable receipt distinguish approved work from executed work and retain exact source provenance?
+keys: C-c
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: run campaign:allowance {"investigationId":"offline-finite"}
+require-live-snap: 25 run receipt · completed | status-completed
+submit: logs
+require-live-snap: 25 Approved campaign: offline-finite | restored-work-receipt
+expect: revision 1
+expect: Unresolved calls: 0
+expect: 0/9
+ask: After restart without color, are the approved limits and unstarted work still inspectable?
+shell: python3 @REPO/scripts/devex/fixtures/study_approval.py @TMP_TARGET @ART/approval-check.json --verify
+keys: C-c

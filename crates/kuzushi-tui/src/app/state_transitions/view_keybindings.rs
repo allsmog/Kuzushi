@@ -52,6 +52,20 @@ impl ShellApp {
     fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
         match view {
             ShellView::Campaign => campaign_keybindings(),
+            ShellView::RunDiff => vec![
+                bind(
+                    HotkeyTrigger::Tab,
+                    "Tab",
+                    "findings / sources",
+                    ViewHotkeyAction::RunDiffToggleSources,
+                ),
+                bind(
+                    HotkeyTrigger::BackTab,
+                    "Shift+Tab",
+                    "findings / sources",
+                    ViewHotkeyAction::RunDiffToggleSources,
+                ),
+            ],
             ShellView::Catalog => catalog_keybindings(),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(self),

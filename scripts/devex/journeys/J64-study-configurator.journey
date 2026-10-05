@@ -1,0 +1,99 @@
+# Real finite study through the form. Only the deterministic secret scanner runs.
+name: Study form, explicit allowance, separate launch and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use sast
+require-live-snap: 20 TOOLS | selected-module
+submit: options sast:scan
+require-live-snap: 20 sast:scan | selected-options
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study-form
+expect: Discovery passes
+expect: set explicitly
+expect: L next
+ask: Does the form make the repository, three-pass default, single worker and explicit allowance understandable?
+keys: L
+require-live-snap: 30 Draft ready | prepared-study
+expect: No jobs started
+require-shell: python3 @REPO/scripts/devex/fixtures/study_form.py @TMP_TARGET @ART/draft-check.json draft
+keys: Down Down
+require-live-snap: 20 Source content | frozen-context
+expect: Git SHA
+expect: explicitly omitted
+expect: Exact scan options
+ask: Can the operator inspect the source identity and actual frozen scanner context before approval?
+resize: 80x24
+live-snap: study-80
+ask: Is the source detail readable with visible paging at 80x24?
+resize: 60x20
+live-snap: study-60
+ask: Does the stacked layout retain selection and useful source detail at 60x20?
+resize: 40x12
+live-snap: study-40
+expect: Source and context
+expect: Esc back
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 fixed. | study-40-paged
+ask: At 40x12, can the operator read the complete source/context receipt without losing the controls?
+resize: 96x89
+live-snap: study-tall
+ask: Does the tall layout keep the form coherent and its next action clear?
+resize: 160x48
+live-snap: study-wide
+ask: Does the wide layout use list/detail space well without stretching text excessively?
+resize: 40x12
+keys: Down Enter
+require-live-snap: 15 Total calls | calls-editor
+type: 9
+keys: Enter Down Enter
+require-live-snap: 15 Protected review | review-editor
+type: 3
+keys: Enter Down Down Down
+require-live-snap: 15 Next action | next-step
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval-first-page
+keys: y
+live-snap: approval-before-reading
+expect: Read remaining terms
+keys: End
+require-live-snap: 15 y approve | approval-last-page
+ask: Are the complete plan terms readable before an explicit approval, even in the smallest supported terminal?
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-study
+expect: Open approved jobs
+require-shell: python3 @REPO/scripts/devex/fixtures/study_form.py @TMP_TARGET @ART/approved-check.json approved
+resize: 120x36
+live-snap: approved-status
+expect: 0 committed / 9 total
+expect: 3 protected review
+ask: Does approval return to the study with durable consumption and a separate Open approved jobs action?
+keys: L
+require-live-snap: 20 L starts its fixed jobs | jobs-before-launch
+require-shell: python3 @REPO/scripts/devex/fixtures/study_form.py @TMP_TARGET @ART/unstarted-check.json approved
+keys: L
+require-live-snap: 20 dispatcher pid | dispatcher-started
+require-shell: python3 @REPO/scripts/devex/fixtures/study_form.py @TMP_TARGET @ART/finished-check.json finished
+keys: r
+require-live-snap: 20 completed 3 / planned 3 | completed-study
+expect-not: 0 findings
+ask: Does the job view truthfully show the outcome of exactly the three approved deterministic passes?
+keys: C-c
+env: NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restart
+paste-file: @ART/resume-command.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | restored-study
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 0 committed / 9 total | restored-allowance
+expect: 3 protected review
+ask: After restart without color, are the same plan and allowance available directly without searching Logs?
+keys: Escape C-c

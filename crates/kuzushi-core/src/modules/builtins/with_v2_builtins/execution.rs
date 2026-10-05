@@ -5,6 +5,8 @@ use crate::modules::autonomy::WorkflowPhase;
 
 mod lifecycle_observation;
 mod prompt_input_limits;
+#[cfg(test)]
+mod resume_health_tests;
 use lifecycle_observation::DispatchLifecycle;
 pub use lifecycle_observation::{ApplicationToolCall, PendingToolCallCompletion, ToolCallIdentity};
 use prompt_input_limits::validate_tool_prompt_inputs;
@@ -322,6 +324,7 @@ impl ModuleRegistry {
             return Ok(input);
         };
         let input = validate_tool_input_options(tool, input)?;
+        crate::modules::allowance_dispatch::validate_reference(&input)?;
         validate_tool_prompt_inputs(tool, &input)?;
         Ok(input)
     }
@@ -389,6 +392,13 @@ impl ModuleRegistry {
             require_observation,
         )?;
         let operation_binding = prepared.binding.operation_fingerprint;
+        let allowance_runtime = match crate::modules::allowance_dispatch::bind_runtime(
+            descriptor, &prepared.value, ctx, runtime,
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => return lifecycle.rejected(error),
+        };
+        let runtime = allowance_runtime.as_deref().or(runtime);
         let mut input = prepared.value;
         let authorized_ctx = tool_context_with_authorization(ctx, prepared.authorization);
         if let Err(error) = authorize_prepared_execution(
@@ -450,8 +460,7 @@ impl ModuleRegistry {
             self.stage_checkpoint_handle(name, &operation_binding, execution_ctx);
         let _stage_scope =
             crate::run_artifacts::StageCheckpointScope::install(stage_checkpoints.clone());
-        let result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);
-        let completion = lifecycle.pending_completion(&result);
+        let mut result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);
         if result
             .as_ref()
             .is_ok_and(|output| tool_result_status(output).is_completed())
@@ -459,6 +468,8 @@ impl ModuleRegistry {
             clear_completed_stage_checkpoint(stage_checkpoints.as_deref());
             self.record_recent_tool_use(name, authorized_ctx);
         }
+        attach_resume_health(&mut result, stage_checkpoints.as_deref());
+        let completion = lifecycle.pending_completion(&result);
         Ok(ObservedDispatchOutcome {
             execution: result,
             completion,
@@ -482,7 +493,8 @@ impl ModuleRegistry {
         let store =
             crate::run_artifacts::StageCheckpointStore::discover(&target, operation_binding)?;
         Some(std::sync::Arc::new(
-            crate::run_artifacts::StageCheckpointHandle::open(store, &target, &run_id, name),
+            crate::run_artifacts::StageCheckpointHandle::open(store, &target, &run_id, name)
+                .with_trace(ctx.trace.cloned()),
         ))
     }
 
@@ -551,7 +563,8 @@ impl ModuleRegistry {
         let executor = self.executors.get(name).with_context(|| {
             format!("registered tool or DAG node {name:?} has no Rust executor mapping")
         })?;
-        let mut output = executor(self, name, input, ctx, runtime)
+        let input = crate::modules::allowance_dispatch::executor_input(input);
+        let mut output = executor(self, name, &input, ctx, runtime)
             .map(|output| normalize_tool_output_contract(name, output))?;
         if let Some(traced) = traced_runtime.as_ref() {
             crate::module_result::backfill_estimated_cost(&mut output, traced.observed_spend());
@@ -651,7 +664,8 @@ fn authorize_prepared_execution(
     enforce_descriptor_approval(descriptor, ctx, operation_binding)?;
     registry.enforce_runtime_requirement(name, input, runtime)?;
     preflight_execution_model(registry, name, input, ctx, runtime)?;
-    enforce_descriptor_finding_store(descriptor, ctx)
+    enforce_descriptor_finding_store(descriptor, ctx)?;
+    crate::modules::allowance_dispatch::claim_work(input, name, ctx)
 }
 
 /// Reject unusable model credentials before the executor starts.
@@ -1667,6 +1681,21 @@ fn clear_completed_stage_checkpoint(handle: Option<&crate::run_artifacts::StageC
     }
 }
 
+fn attach_resume_health(
+    result: &mut Result<Value>,
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+) {
+    let Some(handle) = handle else {
+        return;
+    };
+    let Ok(Value::Object(output)) = result else {
+        return;
+    };
+    if let Ok(health) = serde_json::to_value(handle.resume_health()) {
+        output.insert("resumeHealth".into(), health);
+    }
+}
+
 fn scoped_tool_trace(
     ctx: &ToolExecutionContext<'_>,
     name: &str,
@@ -1952,13 +1981,12 @@ mod prompt_file_default_tests {
         let still_bound: crate::capabilities::threat_model::ThreatModelRef =
             serde_json::from_value(prepared["threatModelRef"].clone()).unwrap();
         assert_eq!(still_bound, expected);
-        let error = crate::capabilities::threat_model::acquire_exact_threat_model_read_lease(
+        let lease = crate::capabilities::threat_model::acquire_exact_threat_model_read_lease(
             temp.path(),
             Some(&still_bound),
         )
-        .err()
-        .expect("a pointer change must invalidate the prepared scan");
-        assert!(error.to_string().contains("active threat model changed"));
+        .expect("changing the active pointer must preserve an immutable prepared reference");
+        assert_eq!(lease.model_ref(), Some(&expected));
     }
 
     #[test]

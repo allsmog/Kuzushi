@@ -18,6 +18,7 @@ impl TaintIrisNextInput {
         let system_prompt = optional_taint_next_string(input, &["TAINT_IRIS_NEXT_PROMPT"])?
             .unwrap_or_else(taint_iris_next_system_prompt);
         Ok(Self {
+            threat_model: crate::capabilities::threat_model::ThreatModelSelection::from_input(input)?,
             mode,
             backend,
             languages,

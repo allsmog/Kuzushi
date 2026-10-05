@@ -54,6 +54,7 @@ pub(crate) use read_lease::threat_model_store_accepts_commits;
 use recovery::*;
 use revision::*;
 use storage::*;
+pub(super) use storage::validate_sha256;
 pub use types::*;
 
 pub fn threat_model_store_path(root: &Path) -> PathBuf {

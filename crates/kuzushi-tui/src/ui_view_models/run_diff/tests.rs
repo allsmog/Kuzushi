@@ -9,6 +9,46 @@ fn hydrate_diff(app: &mut ShellApp, left: &str, right: &str) {
 }
 
 #[test]
+fn run_diff_hydrates_recorded_context_and_distinguishes_missing_from_omitted() {
+    let temp = tempfile::tempdir().unwrap();
+    write_run(temp.path(), "context-left", "a", json!([]));
+    write_run(temp.path(), "context-right", "a", json!([]));
+    let reference = json!({"modelId": format!("tm_{}", "a".repeat(32)),
+        "revisionId": format!("tmr_{}", "b".repeat(32)), "sha256": format!("sha256:{}", "c".repeat(64))});
+    let runs = temp.path().join(".kuzushi/v3/runs");
+    std::fs::write(
+        runs.join("context-left/scan-input.json"),
+        json!({"threatModelRef": reference}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        runs.join("context-right/scan-input.json"),
+        json!({"threatModelRef": null}).to_string(),
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_diff(&mut app, "context-left", "context-right");
+    let model = run_diff_model(&app, "context-left", "context-right");
+    assert!(model
+        .left_context
+        .contains(reference["revisionId"].as_str().unwrap()));
+    assert!(model
+        .left_context
+        .contains(reference["sha256"].as_str().unwrap()));
+    assert_eq!(model.right_context, "explicitly no threat-model context");
+    assert_eq!(
+        run_diff_model(&app, "unrecorded", "unrecorded").context_status,
+        "loading recorded contexts"
+    );
+    hydrate_diff(&mut app, "unrecorded", "unrecorded");
+    assert_eq!(
+        run_diff_model(&app, "unrecorded", "unrecorded").left_context,
+        "not recorded or unreadable"
+    );
+}
+
+#[test]
 fn run_diff_model_compares_findings_by_stable_identity() {
     let temp = tempfile::tempdir().unwrap();
     write_run(
@@ -88,7 +128,7 @@ fn run_diff_model_compares_findings_by_stable_identity() {
     assert_eq!(model.right_revision, "rev:1234567");
     assert_eq!(model.left_status, "completed");
     assert_eq!(model.right_status, "completed");
-    assert_eq!(model.unchanged_count, 1);
+    assert_eq!(model.unchanged_findings.len(), 1);
     assert_eq!(model.changed_findings.len(), 1);
     assert_eq!(model.changed_findings[0].title, "changed item");
     assert_eq!(model.changed_findings[0].before.severity, "medium");
@@ -498,4 +538,100 @@ fn finding_with_identity_and_rule(
     let mut value = finding_with_rule(fingerprint, rule_id, title, severity, file_path, line, tool);
     value["identityId"] = serde_json::Value::String(identity_id.to_string());
     value
+}
+
+#[test]
+fn run_diff_distinguishes_reassessed_agentic_absence_from_uncovered_files() {
+    let temp = tempfile::tempdir().unwrap();
+    write_run(
+        temp.path(),
+        "run-left",
+        "same-sha",
+        json!([
+            finding("inside", "inside", "high", "src/a.rs", 1, "agentic-sast"),
+            finding(
+                "outside",
+                "outside",
+                "high",
+                "other/a.rs",
+                1,
+                "agentic-sast"
+            )
+        ]),
+    );
+    write_run(temp.path(), "run-right", "same-sha", json!([]));
+    write_scan_receipt(temp.path(), "run-right");
+    for (run, hash) in [("run-left", "a".repeat(64)), ("run-right", "b".repeat(64))] {
+        let path = crate::ui_view_models::ui_run_dir(Some(temp.path()), run).join("result.json");
+        std::fs::write(path, json!({"data":{"treeHash":hash}}).to_string()).unwrap();
+    }
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_diff(&mut app, "run-left", "run-right");
+    let model = run_diff_model(&app, "run-left", "run-right");
+    assert_eq!(model.left_revision, model.right_revision);
+    assert_ne!(model.left_source, model.right_source);
+    assert!(model.left_source.contains(&"a".repeat(64)));
+    let inside = model
+        .not_seen
+        .iter()
+        .find(|row| row.key == "inside")
+        .unwrap();
+    assert!(inside.reassessment_block.is_none());
+    let outside = model
+        .not_seen
+        .iter()
+        .find(|row| row.key == "outside")
+        .unwrap();
+    assert!(outside
+        .reassessment_block
+        .as_ref()
+        .unwrap()
+        .contains("outside"));
+}
+
+fn write_scan_receipt(root: &std::path::Path, run: &str) {
+    let receipt = json!({
+        "phase":"scan", "outcome":"completed", "runRefs":[run], "scan": {
+            "scope":{"target":root.to_str().unwrap(), "paths":["src"]},
+            "plan":{"selection":"explicit", "engines":["agentic-sast"]},
+            "engines":[{"engine":"agentic-sast", "outcome":"complete"}],
+            "findingDelta":{"added":0,"updated":0}, "durationMs":1,
+            "targetSnapshot":{"target":root.to_str().unwrap(),"revision":"same-sha","dirty":true}
+        }
+    });
+    let path = crate::ui_view_models::ui_run_dir(Some(root), run).join("phase-stages.jsonl");
+    std::fs::write(path, format!("{receipt}\n")).unwrap();
+}
+
+#[test]
+fn run_diff_never_infers_absence_from_a_missing_findings_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    write_run(
+        temp.path(),
+        "run-left",
+        "a",
+        json!([finding(
+            "inside",
+            "inside",
+            "high",
+            "src/a.rs",
+            1,
+            "agentic-sast"
+        )]),
+    );
+    write_run(temp.path(), "run-right", "b", json!([]));
+    write_scan_receipt(temp.path(), "run-right");
+    let path =
+        crate::ui_view_models::ui_run_dir(Some(temp.path()), "run-right").join("findings.json");
+    std::fs::remove_file(path).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_diff(&mut app, "run-left", "run-right");
+    let model = run_diff_model(&app, "run-left", "run-right");
+    assert!(model.not_seen[0]
+        .reassessment_block
+        .as_ref()
+        .unwrap()
+        .contains("snapshot"));
 }

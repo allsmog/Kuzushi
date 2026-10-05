@@ -24,7 +24,7 @@ const checks = [
     file: "crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs",
     tokens: [
       "use super::output_contract::normalize_tool_output_contract;",
-      "let result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);",
+      "self.invoke_prepared_executor(name, &input, execution_ctx, runtime);",
       "fn invoke_prepared_executor(",
       ".map(|output| normalize_tool_output_contract(name, output))",
       "registered tool or DAG node {name:?} has no Rust executor mapping",

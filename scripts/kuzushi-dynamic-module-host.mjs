@@ -1081,13 +1081,22 @@ function normalizeKind(kind) {
 
 function normalizePhase(phase, effect, name) {
   const value = phase ?? (effect === "read" ? "operate" : undefined);
-  if (!["map", "scan", "hunt", "review", "prove", "confirm", "fix", "operate"].includes(value)) {
+  if (
+    !["map", "scan", "hunt", "review", "prove", "confirm", "fix", "report", "operate"].includes(
+      value,
+    )
+  ) {
     throw new Error(
-      `${name}.phase must be map, scan, review, prove, fix, or operate (hunt and confirm are deprecated aliases)`,
+      `${name}.phase must be map, scan, review, prove, fix, report, or operate (hunt and confirm are deprecated aliases)`,
     );
   }
   if (effect !== "read" && value === "operate") {
-    throw new Error(`${name}.phase must be map, scan, review, prove, or fix for effect ${effect}`);
+    throw new Error(
+      `${name}.phase must be map, scan, review, prove, fix, or report for effect ${effect}`,
+    );
+  }
+  if (value === "report" && ["repository-execute", "external-action"].includes(effect)) {
+    throw new Error(`${name}.phase report cannot declare effect ${effect}`);
   }
   return value;
 }

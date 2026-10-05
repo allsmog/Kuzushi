@@ -53,7 +53,7 @@ fn append_workbench_commands(bindings: &mut Vec<FooterKeybinding>, app: &ShellAp
     bindings.push(bind("Ctrl+G", "palette"));
     if active_workbench_page(app) != WorkbenchPage::Map {
         bindings.push(bind("scan", "Scan phase planner"));
-        bindings.push(bind("run sast:scan {}", "rescan now"));
+        bindings.push(bind("scan batch", "plan study and allowance"));
     }
     if !app.findings().is_empty() {
         bindings.push(bind(WORKBENCH_REPORT_COMMAND, "open Report"));
@@ -121,12 +121,13 @@ fn guided_workbench_keybindings(
     })
 }
 
-const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..5", "Tab", "[", "]", "Z", "z", "Enter"];
-const REVIEW_KEYS: [&str; 17] = [
+const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..3", "Tab", "[", "]", "Z", "z", "Enter"];
+const REVIEW_KEYS: [&str; 18] = [
     "Enter",
     "j/k/↑/↓",
     "PgUp/PgDn",
     "q",
+    "r",
     "Shift+Tab",
     "v",
     "x",
@@ -134,7 +135,7 @@ const REVIEW_KEYS: [&str; 17] = [
     "i",
     "n/N",
     "Tab",
-    "1..5",
+    "1..3",
     "[",
     "]",
     "Z",
@@ -185,7 +186,7 @@ fn focused_enter_binding(
     }
     (surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable).then(|| {
         if page == WorkbenchPage::Review {
-            bind("Enter", "open Prove")
+            bind("Enter", "open detail")
         } else {
             bind("Enter", "open")
         }

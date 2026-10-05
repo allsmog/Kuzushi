@@ -5,8 +5,8 @@ phase: map
 size: 120x36
 ---
 KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Map ✓ · Scan ✓ · Review ● · Report
+ ▸ NEXT review 6 remaining findings (6 total)
  Tab cycle map views · z zoom selected view · next → Review · jobs inspect Map runs · report open Report
 ◇ SYSTEM SUMMARY · why the system exists and how its parts move data
 views  [summary] · dfd  ·  Tab cycles · z zoom
@@ -36,7 +36,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │      ├─ does · not recorded in the threat model                                                                      │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ./phase-target · rev:unknown · context:current · threat-model:unverified · indexed=3 total=3 · 3 nodes · 2 flows
-run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...   6 findings / 1 crit / 2 high / 2 med
+⛭ autonomy:fix · run route · ⠋ context:build · 42s · 1/2 · notify:unavailable ·...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom · Esc prompt

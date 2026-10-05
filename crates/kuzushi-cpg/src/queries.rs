@@ -8,9 +8,13 @@ use cpg_core::{EdgeKind, NodeKind, Query};
 use cpg_incremental::Project;
 use std::collections::BTreeSet;
 
+mod resolution;
+pub type QueryResult<T> = Result<T, String>;
+
 /// One method, projected for tool output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodRecord {
+    pub selector: String,
     pub name: String,
     pub full_name: Option<String>,
     pub signature: Option<String>,
@@ -22,17 +26,20 @@ pub struct MethodRecord {
 /// user-supplied `file` argument — exact, or suffix at a path boundary so
 /// relative arguments match absolute stored paths.
 pub fn file_matches(graph_path: &str, file: &str) -> bool {
+    let graph_path = graph_path.replace('\\', "/");
+    let file = file.replace('\\', "/");
     if graph_path == file {
         return true;
     }
     graph_path
-        .strip_suffix(file)
+        .strip_suffix(&file)
         .is_some_and(|prefix| prefix.ends_with('/'))
 }
 
 fn method_record(project: &Project, method: cpg_core::NodeId) -> MethodRecord {
     let cpg = &project.cpg;
     MethodRecord {
+        selector: resolution::method_selector(project, method),
         name: cpg.name_of(method).unwrap_or_default().to_string(),
         full_name: cpg.full_name_of(method).map(str::to_string),
         signature: cpg.signature_of(method).map(str::to_string),
@@ -43,20 +50,18 @@ fn method_record(project: &Project, method: cpg_core::NodeId) -> MethodRecord {
 
 /// Exact-name method definitions.
 pub fn methods_named(project: &Project, name: &str) -> Vec<MethodRecord> {
-    project
-        .cpg
-        .method_named(name)
+    resolution::matching_methods(project, name)
         .into_iter()
         .map(|m| method_record(project, m))
         .collect()
 }
 
 /// Methods containing a call to `name`, deduped.
-pub fn callers_of(project: &Project, name: &str) -> Vec<MethodRecord> {
-    let cpg = &project.cpg;
+pub fn callers_of(project: &Project, name: &str) -> QueryResult<Vec<MethodRecord>> {
+    let selected = resolution::unique_method(project, name)?;
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
-    for call in cpg.calls_named(name) {
+    for call in selected_calls(project, name, selected) {
         let Some(method) = enclosing_method(project, call) else {
             continue;
         };
@@ -65,7 +70,26 @@ pub fn callers_of(project: &Project, name: &str) -> Vec<MethodRecord> {
             out.push(record);
         }
     }
-    out
+    Ok(out)
+}
+
+fn selected_calls(
+    project: &Project,
+    name: &str,
+    selected: Option<cpg_core::NodeId>,
+) -> Vec<cpg_core::NodeId> {
+    let Some(method) = selected else {
+        return project.cpg.calls_named(name);
+    };
+    if project.cpg.name_of(method) == Some(name) {
+        return project.cpg.calls_named(name);
+    }
+    project
+        .cpg
+        .calls()
+        .into_iter()
+        .filter(|call| project.cpg.call_targets(*call).contains(&method))
+        .collect()
 }
 
 fn enclosing_method(project: &Project, node: cpg_core::NodeId) -> Option<cpg_core::NodeId> {
@@ -75,55 +99,60 @@ fn enclosing_method(project: &Project, node: cpg_core::NodeId) -> Option<cpg_cor
         if cpg.kind_of(current) == NodeKind::Method {
             return Some(current);
         }
-        current = cpg.in_kind(current, EdgeKind::Ast).next()?;
+        let mut parents = cpg.in_kind(current, EdgeKind::Ast);
+        current = parents.next()?;
+        if parents.next().is_some() {
+            return None;
+        }
     }
     None
 }
 
 /// Call names appearing inside the named method's body (resolved to callee
 /// full names where the call graph has a target, bare names otherwise).
-pub fn callees_of(project: &Project, name: &str) -> Vec<String> {
+pub fn callees_of(project: &Project, name: &str) -> QueryResult<Vec<String>> {
     let cpg = &project.cpg;
+    let Some(method) = resolution::unique_method(project, name)? else {
+        return Ok(Vec::new());
+    };
     let mut out = BTreeSet::new();
-    for method in cpg.method_named(name) {
-        for node in cpg_analysis::pass::ast_descendants(cpg, method) {
-            if cpg.kind_of(node) != NodeKind::Call {
-                continue;
-            }
-            if let Some(callee) = callee_label(project, node) {
-                out.insert(callee);
-            }
+    for node in cpg_analysis::pass::ast_descendants(cpg, method) {
+        if is_call_in_method(project, node, method) {
+            out.extend(callee_labels(project, node));
         }
     }
-    out.into_iter().collect()
+    Ok(out.into_iter().collect())
 }
 
-fn callee_label(project: &Project, call: cpg_core::NodeId) -> Option<String> {
+fn is_call_in_method(project: &Project, node: cpg_core::NodeId, method: cpg_core::NodeId) -> bool {
+    project.cpg.kind_of(node) == NodeKind::Call && enclosing_method(project, node) == Some(method)
+}
+
+fn callee_labels(project: &Project, call: cpg_core::NodeId) -> Vec<String> {
     let cpg = &project.cpg;
-    let target = cpg
-        .call_target(call)
-        .and_then(|m| cpg.full_name_of(m).or(cpg.name_of(m)));
-    target.or(cpg.name_of(call)).map(str::to_string)
+    let targets = cpg.call_targets(call);
+    if targets.is_empty() {
+        return cpg.name_of(call).map(str::to_string).into_iter().collect();
+    }
+    targets
+        .into_iter()
+        .filter_map(|method| cpg.full_name_of(method).or(cpg.name_of(method)))
+        .map(str::to_string)
+        .collect()
 }
 
 /// The method whose start line is the closest at-or-before `line` in `file`.
 /// APPROXIMATE: the graph has no method end lines, so a line after the last
 /// method of a file maps to that method even when it falls outside it.
-pub fn method_at(project: &Project, file: &str, line: u32) -> Option<MethodRecord> {
-    let cpg = &project.cpg;
-    cpg.methods()
-        .into_iter()
-        .filter(|m| {
-            cpg.path_of(cpg.file_of(*m))
-                .is_some_and(|path| file_matches(path, file))
-        })
-        .filter_map(|m| {
-            cpg.line_of(m)
-                .filter(|start| *start <= line)
-                .map(|s| (s, m))
-        })
-        .max_by_key(|(start, _)| *start)
-        .map(|(_, m)| method_record(project, m))
+pub fn method_at(project: &Project, file: &str, line: u32) -> QueryResult<Option<MethodRecord>> {
+    Ok(resolution::nearest_method(project, file, line)?
+        .map(|method| method_record(project, method)))
+}
+
+/// Canonical graph path, or an explicit ambiguity when a suffix matches several files.
+pub fn resolved_file(project: &Project, file: &str) -> QueryResult<Option<String>> {
+    Ok(resolution::unique_file(project, file)?
+        .and_then(|id| project.cpg.path_of(id).map(str::to_string)))
 }
 
 /// One reaching-definition edge, projected for tool output.
@@ -142,12 +171,12 @@ pub fn reaching_defs(
     file: &str,
     line: u32,
     var: &str,
-) -> Vec<ReachingDefRecord> {
+) -> QueryResult<Vec<ReachingDefRecord>> {
     let cpg = &project.cpg;
-    let Some(method) = method_node_at(project, file, line) else {
-        return Vec::new();
+    let Some(method) = resolution::exact_method(project, file, line)? else {
+        return Ok(Vec::new());
     };
-    reaching_def_flows(cpg, method)
+    Ok(reaching_def_flows(cpg, method)
         .into_iter()
         .filter(|flow| flow.var == var)
         .map(|flow| ReachingDefRecord {
@@ -157,24 +186,7 @@ pub fn reaching_defs(
             use_line: cpg.line_of(flow.dst),
             use_code: cpg.code_of(flow.dst).map(str::to_string),
         })
-        .collect()
-}
-
-fn method_node_at(project: &Project, file: &str, line: u32) -> Option<cpg_core::NodeId> {
-    let cpg = &project.cpg;
-    cpg.methods()
-        .into_iter()
-        .filter(|m| {
-            cpg.path_of(cpg.file_of(*m))
-                .is_some_and(|path| file_matches(path, file))
-        })
-        .filter_map(|m| {
-            cpg.line_of(m)
-                .filter(|start| *start <= line)
-                .map(|s| (s, m))
-        })
-        .max_by_key(|(start, _)| *start)
-        .map(|(_, m)| m)
+        .collect())
 }
 
 /// One backward-slice entry, projected for tool output.
@@ -195,9 +207,15 @@ pub fn backward_slice_at(
     method_name: &str,
     line: u32,
     depth: usize,
-) -> (Vec<SliceRecord>, bool) {
+) -> QueryResult<(Vec<SliceRecord>, bool)> {
     let cpg = &project.cpg;
-    let criteria = cpg_cli::slice::criterion_location(cpg, method_name, line);
+    let Some(method) = resolution::unique_method(project, method_name)? else {
+        return Ok((Vec::new(), false));
+    };
+    let criteria: Vec<_> = cpg_analysis::pass::ast_descendants(cpg, method)
+        .into_iter()
+        .filter(|node| slice_criterion(project, method, *node, line))
+        .collect();
     let (entries, truncated) =
         cpg_cli::slice::backward_slice(cpg, &criteria, depth, SLICE_MAX_NODES);
     let records = entries
@@ -210,7 +228,22 @@ pub fn backward_slice_at(
             hops: entry.hops,
         })
         .collect();
-    (records, truncated)
+    Ok((records, truncated))
+}
+
+fn slice_criterion(
+    project: &Project,
+    method: cpg_core::NodeId,
+    node: cpg_core::NodeId,
+    line: u32,
+) -> bool {
+    let cpg = &project.cpg;
+    cpg.line_of(node) == Some(line)
+        && matches!(
+            cpg.kind_of(node),
+            NodeKind::Call | NodeKind::Identifier | NodeKind::Return
+        )
+        && enclosing_method(project, node) == Some(method)
 }
 
 /// Node/method/call/summary counts for one graph.
@@ -250,11 +283,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let project = fixture_project(temp.path());
 
-        let callers = callers_of(&project, "run");
+        let callers = callers_of(&project, "run").unwrap();
         assert_eq!(callers.len(), 1, "{callers:?}");
         assert_eq!(callers[0].name, "handler");
 
-        let callees = callees_of(&project, "handler");
+        let callees = callees_of(&project, "handler").unwrap();
         assert!(callees.iter().any(|c| c.contains("run")), "{callees:?}");
         assert!(
             callees.iter().any(|c| c.contains("sanitize")),
@@ -270,11 +303,75 @@ mod tests {
     fn method_at_maps_lines_to_the_enclosing_method() {
         let temp = tempfile::tempdir().unwrap();
         let project = fixture_project(temp.path());
-        let record = method_at(&project, "main.go", 5).expect("line 5 is inside handler");
+        let record = method_at(&project, "main.go", 5)
+            .unwrap()
+            .expect("line 5 is inside handler");
         assert_eq!(record.name, "handler");
-        let record = method_at(&project, "main.go", 9).expect("line 9 is inside run");
+        let record = method_at(&project, "main.go", 9)
+            .unwrap()
+            .expect("line 9 is inside run");
         assert_eq!(record.name, "run");
-        assert!(method_at(&project, "absent.go", 5).is_none());
+        assert!(method_at(&project, "absent.go", 5).unwrap().is_none());
+    }
+
+    #[test]
+    fn reaching_definitions_require_ast_membership_instead_of_nearest_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = fixture_project(temp.path());
+        assert!(reaching_defs(&project, "main.go", 5, "input").is_ok());
+        for line in [7, 11, 30] {
+            assert!(reaching_defs(&project, "main.go", line, "input")
+                .unwrap_err()
+                .contains("exact method membership unavailable"));
+        }
+        assert_eq!(
+            method_at(&project, "main.go", 7).unwrap().unwrap().name,
+            "handler"
+        );
+        assert_eq!(
+            method_at(&project, "main.go", 30).unwrap().unwrap().name,
+            "sanitize"
+        );
+    }
+
+    #[test]
+    fn duplicate_files_and_methods_require_unambiguous_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        for (package, callee) in [("one", "first"), ("two", "second")] {
+            let directory = temp.path().join(package);
+            std::fs::create_dir(&directory).unwrap();
+            std::fs::write(
+                directory.join("shared.go"),
+                format!(
+                    "package {package}\nfunc duplicate(input string) {{\n  {callee}(input)\n}}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let project = crate::engine::ensure_project(temp.path(), "go").unwrap().0;
+        assert!(method_at(&project, "shared.go", 3)
+            .unwrap_err()
+            .contains("ambiguous file"));
+        assert!(method_at(&project, "one/shared.go", 3).unwrap().is_some());
+        assert!(callees_of(&project, "duplicate")
+            .unwrap_err()
+            .contains("ambiguous method"));
+        assert!(callers_of(&project, "duplicate").is_err());
+        assert!(backward_slice_at(&project, "duplicate", 3, 2).is_err());
+        let definitions = methods_named(&project, "duplicate");
+        assert_eq!(definitions.len(), 2);
+        assert_ne!(definitions[0].selector, definitions[1].selector);
+        for record in definitions {
+            let callees = callees_of(&project, &record.selector).unwrap();
+            assert_eq!(callees.len(), 1);
+            let expected = if record.file.unwrap().contains("one/") {
+                "first"
+            } else {
+                "second"
+            };
+            assert!(callees[0].contains(expected), "{callees:?}");
+            assert!(backward_slice_at(&project, &record.selector, 3, 2).is_ok());
+        }
     }
 
     #[test]
@@ -288,10 +385,50 @@ mod tests {
     }
 
     #[test]
+    fn overloaded_methods_in_one_file_have_distinct_selectors() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("Example.java"),
+            "class Example {\n void work(int x) { first(); }\n void work(String x) { second(); }\n}\n").unwrap();
+        let project = crate::engine::ensure_project(temp.path(), "java")
+            .unwrap()
+            .0;
+        let definitions = methods_named(&project, "work");
+        assert_eq!(definitions.len(), 2);
+        assert_ne!(definitions[0].selector, definitions[1].selector);
+        assert!(callees_of(&project, "work").is_err());
+        for record in definitions {
+            assert!(!callees_of(&project, &record.selector).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn nested_method_calls_are_not_attributed_to_the_outer_body() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("nested.ts"),
+            "function outer() {\n function nested() { hidden(); }\n visible();\n}\n",
+        )
+        .unwrap();
+        let project = crate::engine::ensure_project(temp.path(), "typescript")
+            .unwrap()
+            .0;
+        let calls = callees_of(&project, "outer").unwrap();
+        assert!(
+            calls.iter().any(|name| name.contains("visible")),
+            "{calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|name| name.contains("hidden")),
+            "{calls:?}"
+        );
+    }
+
+    #[test]
     fn file_matching_requires_a_path_boundary() {
         assert!(file_matches("/repo/src/users.ts", "src/users.ts"));
         assert!(file_matches("src/users.ts", "src/users.ts"));
         assert!(!file_matches("/repo/src/xusers.ts", "users.ts"));
         assert!(file_matches("/repo/src/users.ts", "users.ts"));
+        assert!(file_matches("C:\\repo\\src\\users.ts", "src/users.ts"));
     }
 }

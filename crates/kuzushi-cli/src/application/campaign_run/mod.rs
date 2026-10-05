@@ -7,6 +7,7 @@
 //! `campaign:status` and the cockpit fold over the plan. Deterministic by
 //! construction: the dispatcher itself never calls a model.
 
+mod approved_work;
 mod budget;
 mod child;
 mod policy;
@@ -182,9 +183,11 @@ struct PlanJob {
     tool: String,
     input_json: String,
     job_budget_usd: Option<f64>,
+    approved_attempts: Option<u32>,
 }
 
 struct LoadedPlan {
+    context_study: bool,
     jobs: Vec<PlanJob>,
     batch_guard: Option<ScanBatchGuard>,
 }
@@ -240,12 +243,17 @@ fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result
         .and_then(Value::as_array)
         .with_context(|| format!("{} has no jobs array", plan_path.display()))?;
     let jobs = rows.iter().map(plan_job_row).collect::<Result<Vec<_>>>()?;
-    let jobs = if batch_guard.is_some() {
+    let mut jobs = if batch_guard.is_some() {
         jobs
     } else {
         filtered_jobs(jobs, filter)?
     };
-    Ok(LoadedPlan { jobs, batch_guard })
+    approved_work::bind_approved_work(target, campaign_id, &plan, &mut jobs)?;
+    Ok(LoadedPlan {
+        jobs,
+        batch_guard,
+        context_study: plan["kind"] == "context-study",
+    })
 }
 
 fn scan_batch_guard(
@@ -278,6 +286,9 @@ fn enforce_scan_batch_worker_boundary(
     plan: &LoadedPlan,
     settings: &DispatchSettings,
 ) -> Result<()> {
+    if plan.context_study {
+        enforce_frozen_worker_count(1, settings.workers)?;
+    }
     if let Some(guard) = &plan.batch_guard {
         enforce_frozen_worker_count(guard.effective_workers, settings.workers)?;
     }
@@ -287,7 +298,7 @@ fn enforce_scan_batch_worker_boundary(
 fn enforce_frozen_worker_count(expected: usize, received: usize) -> Result<()> {
     anyhow::ensure!(
         received == expected,
-        "scan-batch plan freezes effective workers at {expected}; dispatcher received {received}"
+        "study plan freezes effective workers at {expected}; dispatcher received {received}"
     );
     Ok(())
 }
@@ -312,6 +323,7 @@ fn plan_job_row(row: &Value) -> Result<PlanJob> {
         tool,
         input_json: input.to_string(),
         job_budget_usd: row.get("jobBudgetUsd").and_then(Value::as_f64),
+        approved_attempts: None,
     })
 }
 
@@ -568,12 +580,12 @@ impl Dispatcher {
             .job(job_id)
             .map(|entry| entry.attempts)
             .unwrap_or(1);
-        let transition = transition_for(
+        let transition = approved_work::job_transition(
+            self.plan_jobs.iter().find(|job| job.job_id == job_id),
             report.outcome,
             rate_limited,
             attempts,
-            self.settings.max_attempts,
-            self.settings.retry_backoff_secs,
+            &self.settings,
         );
         self.apply_transition(
             job_id,

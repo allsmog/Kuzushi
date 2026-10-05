@@ -43,6 +43,7 @@ pub struct HarvestedSpec {
     pub entry_methods: Vec<String>,
     pub source_call_matches: usize,
     pub sink_call_matches: usize,
+    pub truncated_categories: Vec<&'static str>,
 }
 
 /// Outcome counts for the query envelope.
@@ -53,6 +54,8 @@ pub struct CpgFlowQueryStats {
     pub source_call_matches: usize,
     pub sink_call_matches: usize,
     pub flow_count: usize,
+    pub flow_count_before_cap: usize,
+    pub truncated_categories: Vec<&'static str>,
 }
 
 /// One linear scan over the graph's calls and methods, harvesting the names
@@ -61,14 +64,40 @@ pub fn harvest_spec(project: &Project, signals: &SignalSpec) -> HarvestedSpec {
     let mut harvest = CallHarvest::default();
     scan_calls(project, signals, &mut harvest);
     let entry_methods = harvest_entry_methods(project, signals.sources);
+    finish_harvest(
+        harvest,
+        source_idents_from_signals(signals.sources),
+        entry_methods,
+    )
+}
+
+fn finish_harvest(
+    harvest: CallHarvest,
+    source_idents: Vec<String>,
+    entries: BTreeSet<String>,
+) -> HarvestedSpec {
+    let truncated_categories = [
+        ("sourceNames", harvest.source_names.len()),
+        ("sinkNames", harvest.sink_names.len()),
+        ("sanitizerNames", harvest.sanitizer_names.len()),
+        ("entryMethods", entries.len()),
+        ("sourceIdentifiers", source_idents.len()),
+    ]
+    .into_iter()
+    .filter_map(|(name, count)| (count > MAX_HARVESTED_NAMES).then_some(name))
+    .collect();
     HarvestedSpec {
         source_names: capped(harvest.source_names),
         sink_names: capped(harvest.sink_names),
         sanitizer_names: capped(harvest.sanitizer_names),
-        source_idents: source_idents_from_signals(signals.sources),
-        entry_methods,
+        source_idents: source_idents
+            .into_iter()
+            .take(MAX_HARVESTED_NAMES)
+            .collect(),
+        entry_methods: capped(entries),
         source_call_matches: harvest.source_call_matches,
         sink_call_matches: harvest.sink_call_matches,
+        truncated_categories,
     }
 }
 
@@ -135,7 +164,7 @@ fn source_idents_from_signals(sources: &[String]) -> Vec<String> {
     idents.into_iter().collect()
 }
 
-fn harvest_entry_methods(project: &Project, sources: &[String]) -> Vec<String> {
+fn harvest_entry_methods(project: &Project, sources: &[String]) -> BTreeSet<String> {
     let cpg = &project.cpg;
     let names: BTreeSet<String> = cpg
         .methods()
@@ -148,7 +177,7 @@ fn harvest_entry_methods(project: &Project, sources: &[String]) -> Vec<String> {
         })
         .map(str::to_string)
         .collect();
-    capped(names)
+    names
 }
 
 fn capped(names: BTreeSet<String>) -> Vec<String> {
@@ -156,8 +185,7 @@ fn capped(names: BTreeSet<String>) -> Vec<String> {
 }
 
 /// Harvest a spec from REGEX source/sink patterns (the agent-facing
-/// `taint_paths` contract). A pattern that fails to compile is treated as a
-/// literal substring. A call's name is harvested when the pattern matches
+/// `taint_paths` contract). Invalid patterns return an error. A call's name is harvested when the pattern matches
 /// the name itself, or matches the call's code while the name is
 /// identifier-like (keeping enclosing `=` statement calls out, same as the
 /// literal harvest).
@@ -165,22 +193,12 @@ pub fn harvest_regex_spec(
     project: &Project,
     source_pattern: &str,
     sink_pattern: &str,
-) -> HarvestedSpec {
-    let source = PatternMatcher::new(source_pattern);
-    let sink = PatternMatcher::new(sink_pattern);
+) -> Result<HarvestedSpec, String> {
+    let source = PatternMatcher::new(source_pattern)?;
+    let sink = PatternMatcher::new(sink_pattern)?;
     let cpg = &project.cpg;
     let mut harvest = CallHarvest::default();
-    for call in cpg.calls() {
-        let (Some(code), Some(name)) = (cpg.code_of(call), cpg.name_of(call)) else {
-            continue;
-        };
-        if harvest_regex_name(&source, code, name, &mut harvest.source_names) {
-            harvest.source_call_matches += 1;
-        }
-        if harvest_regex_name(&sink, code, name, &mut harvest.sink_names) {
-            harvest.sink_call_matches += 1;
-        }
-    }
+    scan_regex_calls(project, &source, &sink, &mut harvest);
     let entry_methods: BTreeSet<String> = cpg
         .methods()
         .into_iter()
@@ -188,14 +206,23 @@ pub fn harvest_regex_spec(
         .filter(|name| source.matches(name))
         .map(str::to_string)
         .collect();
-    HarvestedSpec {
-        source_names: capped(harvest.source_names),
-        sink_names: capped(harvest.sink_names),
-        sanitizer_names: Vec::new(),
-        source_idents: Vec::new(),
-        entry_methods: capped(entry_methods),
-        source_call_matches: harvest.source_call_matches,
-        sink_call_matches: harvest.sink_call_matches,
+    Ok(finish_harvest(harvest, Vec::new(), entry_methods))
+}
+
+fn scan_regex_calls(
+    project: &Project,
+    source: &PatternMatcher,
+    sink: &PatternMatcher,
+    harvest: &mut CallHarvest,
+) {
+    let cpg = &project.cpg;
+    for call in cpg.calls() {
+        if let (Some(code), Some(name)) = (cpg.code_of(call), cpg.name_of(call)) {
+            harvest.source_call_matches +=
+                harvest_regex_name(source, code, name, &mut harvest.source_names) as usize;
+            harvest.sink_call_matches +=
+                harvest_regex_name(sink, code, name, &mut harvest.sink_names) as usize;
+        }
     }
 }
 
@@ -219,24 +246,17 @@ fn is_identifier_like(name: &str) -> bool {
             .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
 }
 
-enum PatternMatcher {
-    Regex(regex::Regex),
-    Literal(String),
-}
+struct PatternMatcher(regex::Regex);
 
 impl PatternMatcher {
-    fn new(pattern: &str) -> Self {
-        match regex::Regex::new(pattern) {
-            Ok(re) => Self::Regex(re),
-            Err(_) => Self::Literal(pattern.to_string()),
-        }
+    fn new(pattern: &str) -> Result<Self, String> {
+        regex::Regex::new(pattern)
+            .map(Self)
+            .map_err(|error| format!("invalid taint regex: {error}"))
     }
 
     fn matches(&self, text: &str) -> bool {
-        match self {
-            Self::Regex(re) => re.is_match(text),
-            Self::Literal(literal) => text.contains(literal),
-        }
+        self.0.is_match(text)
     }
 }
 
@@ -252,6 +272,7 @@ pub fn run_taint_query(
     findings.sort_by(|a, b| {
         (&a.sink_file, a.sink_line, &a.method).cmp(&(&b.sink_file, b.sink_line, &b.method))
     });
+    let flow_count_before_cap = findings.len();
     findings.truncate(MAX_FLOWS_PER_QUERY);
     let stats = CpgFlowQueryStats {
         source_names: harvested.source_names.len(),
@@ -259,6 +280,8 @@ pub fn run_taint_query(
         source_call_matches: harvested.source_call_matches,
         sink_call_matches: harvested.sink_call_matches,
         flow_count: findings.len(),
+        flow_count_before_cap,
+        truncated_categories: harvested.truncated_categories.clone(),
     };
     (findings, stats)
 }
@@ -375,5 +398,37 @@ mod tests {
         assert!(name_relates_to_signal("PG_GETARG_TEXT_PP", "PG_GETARG"));
         assert!(!name_relates_to_signal("=", "req.query"));
         assert!(!name_relates_to_signal("run", ".execute("));
+    }
+
+    #[test]
+    fn all_harvest_caps_are_disclosed() {
+        let names: BTreeSet<String> = (0..201).map(|i| format!("name_{i}")).collect();
+        let harvest = CallHarvest {
+            source_names: names.clone(),
+            sink_names: names.clone(),
+            sanitizer_names: names.clone(),
+            ..Default::default()
+        };
+        let result = finish_harvest(harvest, names.iter().cloned().collect(), names);
+        assert_eq!(result.source_names.len(), 200);
+        assert_eq!(result.entry_methods.len(), 200);
+        assert_eq!(result.truncated_categories.len(), 5);
+    }
+
+    #[test]
+    fn excess_real_flows_report_the_pre_cap_count() {
+        let temp = tempfile::tempdir().unwrap();
+        let source: String = (0..30)
+            .map(|i| {
+                format!("function handler{i}(req) {{ const id = req.query.id; db.query(id); }}\n")
+            })
+            .collect();
+        std::fs::write(temp.path().join("many.ts"), source).unwrap();
+        let (project, _) = crate::engine::ensure_project(temp.path(), "typescript").unwrap();
+        let harvested = harvest_regex_spec(&project, "handler", "query").unwrap();
+        let (flows, stats) = run_taint_query(&project, &harvested);
+        assert_eq!(flows.len(), 25);
+        assert!(stats.flow_count_before_cap >= 30, "{stats:?}");
+        assert!(harvest_regex_spec(&project, "[", "query").is_err());
     }
 }

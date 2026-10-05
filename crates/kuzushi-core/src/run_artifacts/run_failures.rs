@@ -227,7 +227,7 @@ fn failure_to_llm_context(
         cause: error.to_string(),
         what_failed: format!("{tool} did not complete successfully: {error}"),
         artifacts_available: available_failure_artifacts(target, run_id, artifacts),
-        recovery_options: failure_recovery_options(tool, &missing_artifacts, coordinates.as_ref()),
+        recovery_options: failure_recovery_options(tool, &missing_artifacts, coordinates.as_ref(), model_failure),
         missing_artifacts,
         allowed_proof_level: "artifact-review-only; runtime verification did not run".to_string(),
         next_files_or_artifacts_to_inspect: next_failure_artifacts(target, run_id, artifacts),
@@ -452,7 +452,15 @@ fn failure_recovery_options(
     tool: &str,
     missing_artifacts: &[String],
     coordinates: Option<&super::StageCheckpointCoordinates>,
+    model_failure: Option<&FailedModelCall>,
 ) -> Vec<String> {
+    if model_failure.is_some_and(|failure| failure.metadata.error_class == crate::runtime::RuntimeFailureClass::AllowanceRefused) {
+        return vec![
+            "Finish and report the completed and partial work.".to_string(),
+            "Review remaining work and approve a specific allowance revision before another model request.".to_string(),
+            "Preserve unresolved reservations; this failure does not establish zero cost.".to_string(),
+        ];
+    }
     let mut options = vec![rerun_recovery_option(tool, coordinates)];
     if !missing_artifacts.is_empty() {
         options.push("Create or inspect the missing canonical artifacts before escalating.".into());

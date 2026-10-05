@@ -113,13 +113,13 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     assert!(prompt.contains(&bind("Tab", "complete")));
     assert!(prompt.contains(&bind("Shift+Tab", "next phase")));
     // Review with findings: the Esc doorway must teach the findings flow the
-    // Prompt-mode filter otherwise hides (j/k select, Enter opens Prove).
-    assert!(prompt.contains(&bind("Esc", "nav findings · j/k move · Enter prove")));
+    // Prompt-mode filter otherwise hides (j/k select, Enter opens detail).
+    assert!(prompt.contains(&bind("Esc", "nav findings · j/k move · Enter detail")));
     assert!(prompt.contains(&bind("scan", "Scan phase planner")));
-    assert!(prompt.contains(&bind("run sast:scan {}", "rescan now")));
+    assert!(prompt.contains(&bind("scan batch", "plan study and allowance")));
     assert!(prompt.contains(&bind("Ctrl+C", "exit")));
     assert!(!prompt.contains(&bind("n/N", "page")));
-    assert!(!prompt.contains(&bind("1..5", "page")));
+    assert!(!prompt.contains(&bind("1..3", "page")));
     assert!(!prompt.iter().any(|binding| binding.key == "Enter"));
 
     app.set_input_mode(crate::InputMode::Navigate);
@@ -127,11 +127,11 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     assert!(navigate.contains(&bind("Esc", "prompt")));
     assert!(navigate.contains(&bind("Shift+Tab", "next phase")));
     assert!(navigate.contains(&bind("n/N", "page")));
-    assert!(navigate.contains(&bind("1..5", "page")));
+    assert!(navigate.contains(&bind("1..3", "page")));
     assert!(navigate.contains(&bind("[", "pane back")));
     assert!(navigate.contains(&bind("]", "pane")));
     assert!(!navigate.contains(&bind("scan", "Scan phase planner")));
-    assert!(!navigate.contains(&bind("run sast:scan {}", "rescan now")));
+    assert!(!navigate.contains(&bind("scan batch", "plan study and allowance")));
     assert!(!navigate.contains(&bind("Tab", "complete")));
 }
 
@@ -175,6 +175,7 @@ fn workbench_navigation_controls_follow_the_active_page_and_focus() {
     assert!(footer_keybindings(&app)
         .iter()
         .any(|binding| binding.key == "q"));
+    assert_eq!(footer_keybindings(&app)[0].key, "PgUp/PgDn");
 
     app.router
         .workbench_mut()
@@ -230,7 +231,7 @@ fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
     app.router
         .workbench_mut()
         .set_focus(PhaseSurfaceId::ReviewQueue);
-    assert!(footer_keybindings(&app).contains(&bind("Enter", "open Prove")));
+    assert!(footer_keybindings(&app).contains(&bind("Enter", "open detail")));
     app.router
         .workbench_mut()
         .set_focus(PhaseSurfaceId::ReviewDetail);
@@ -274,7 +275,7 @@ fn prompt_esc_label_teaches_the_findings_flow_only_where_it_exists() {
     *app.findings_mut() = vec![workbench_finding()];
     let review = footer_keybindings(&app);
     assert!(
-        review.contains(&bind("Esc", "nav findings · j/k move · Enter prove")),
+        review.contains(&bind("Esc", "nav findings · j/k move · Enter detail")),
         "{review:?}"
     );
 }
@@ -391,7 +392,7 @@ fn findings_navigation_precedes_secondary_workbench_controls() {
         .expect("movement binding");
     let page_index = bindings
         .iter()
-        .position(|binding| binding.key == "1..5")
+        .position(|binding| binding.key == "1..3")
         .expect("phase page binding");
 
     assert!(move_index < page_index, "{bindings:?}");

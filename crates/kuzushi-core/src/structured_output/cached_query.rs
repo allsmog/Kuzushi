@@ -1,6 +1,5 @@
 use super::*;
-use crate::runtime::AgentToolPolicy;
-use crate::semantic_cache::{cache_entry_now, structured_query_cache_key, SemanticCache};
+use crate::semantic_cache::{cache_entry_now, execution_query_cache_key, SemanticCache};
 use std::cell::RefCell;
 
 pub(crate) struct CachedStructuredJson<T> {
@@ -24,12 +23,11 @@ pub(crate) fn query_cached_structured_json_with_cost<T>(
     contract: StructuredJsonContract,
     validate: impl Fn(Value) -> Result<T>,
 ) -> Result<CachedStructuredJson<T>> {
-    let cache = cache.filter(|_| request.tool_policy == AgentToolPolicy::default());
-    let key = cache.map(|_| {
-        structured_query_cache_key(
-            &request.model,
-            &request.system_prompt,
-            &request.prompt,
+    let key = cache.and_then(|_| {
+        execution_query_cache_key(
+            runtime,
+            &request,
+            &contract.tool_name,
             &contract.schema_name,
             &contract.schema,
         )
@@ -79,16 +77,26 @@ fn cached_hit<T>(
 mod tests {
     use super::*;
     use crate::findings::TriageOutcome;
-    use crate::runtime::{AgentQueryResponse, TriageRequest};
+    use crate::runtime::{AgentQueryResponse, AgentToolPolicy, TriageRequest};
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct CountingRuntime {
         calls: AtomicUsize,
         value: Value,
+        revision: AtomicUsize,
     }
 
     impl AgentRuntime for CountingRuntime {
+        fn semantic_cache_identity(
+            &self,
+            _request: &AgentQueryRequest,
+        ) -> Option<crate::identity::Blake3Hash> {
+            let revision = self.revision.load(Ordering::SeqCst);
+            (revision > 0)
+                .then(|| crate::identity::hash_parts("test-runtime", &[&revision.to_be_bytes()]))
+        }
+
         fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(AgentQueryResponse {
@@ -124,6 +132,7 @@ mod tests {
         let cache = SemanticCache::open_at(tmp.path()).unwrap();
         let runtime = CountingRuntime {
             calls: AtomicUsize::new(0),
+            revision: AtomicUsize::new(1),
             value: json!([1, 2]),
         };
 
@@ -159,6 +168,7 @@ mod tests {
         let cache = SemanticCache::open_at(tmp.path()).unwrap();
         let runtime = CountingRuntime {
             calls: AtomicUsize::new(0),
+            revision: AtomicUsize::new(1),
             value: json!([]),
         };
         let open_world = || {
@@ -183,26 +193,113 @@ mod tests {
     }
 
     #[test]
+    fn each_generation_setting_and_runtime_revision_forces_a_live_call() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = SemanticCache::open_at(tmp.path()).unwrap();
+        let runtime = CountingRuntime {
+            calls: AtomicUsize::new(0),
+            revision: AtomicUsize::new(1),
+            value: json!([]),
+        };
+        let query = |request| {
+            query_cached_structured_json_with_cost(Some(&cache), &runtime, request, contract(), Ok)
+                .unwrap()
+                .from_cache
+        };
+        assert!(!query(request()));
+        assert!(query(request()));
+        let changes: [fn(&mut AgentQueryRequest); 6] = [
+            |r| r.thinking_level = Some("high".into()),
+            |r| r.max_output_tokens = Some(700),
+            |r| r.temperature = Some(0.3),
+            |r| {
+                r.runtime_options = Some(crate::runtime::AgentRuntimeOptions {
+                    max_model_turns: Some(2),
+                    ..Default::default()
+                })
+            },
+            |r| {
+                r.runtime_options = Some(crate::runtime::AgentRuntimeOptions {
+                    observed_spend_stop_usd: Some(0.8),
+                    ..Default::default()
+                })
+            },
+            |r| r.model = "other-model".into(),
+        ];
+        for change in changes {
+            let mut changed = request();
+            change(&mut changed);
+            assert!(!query(changed.clone()));
+            assert!(query(changed));
+        }
+        runtime.revision.store(2, Ordering::SeqCst);
+        assert!(!query(request()));
+        assert!(query(request()));
+        runtime.revision.store(0, Ordering::SeqCst);
+        assert!(!query(request()));
+        assert!(!query(request()));
+        assert_eq!(runtime.calls.load(Ordering::SeqCst), 10);
+    }
+
+    #[test]
+    fn transport_diagnostics_and_credentials_do_not_enter_cache_identity_or_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = SemanticCache::open_at(tmp.path()).unwrap();
+        let runtime = CountingRuntime {
+            calls: AtomicUsize::new(0),
+            revision: AtomicUsize::new(1),
+            value: json!([]),
+        };
+        let query = |request| {
+            query_cached_structured_json_with_cost(Some(&cache), &runtime, request, contract(), Ok)
+                .unwrap()
+        };
+        assert!(!query(request()).from_cache);
+        let diagnostic = request().with_runtime_options(crate::runtime::AgentRuntimeOptions {
+            bridge_verbose: Some(true),
+            bridge_log_path: Some("synthetic-secret-log-path".into()),
+            mcp_environment: [("API_KEY".into(), "synthetic-secret-token".into())].into(),
+            mcp_tool_timeout_ms: Some(20),
+            ..Default::default()
+        });
+        assert!(query(diagnostic).from_cache);
+        let contract = contract();
+        let key = execution_query_cache_key(
+            &runtime,
+            &request(),
+            &contract.tool_name,
+            &contract.schema_name,
+            &contract.schema,
+        )
+        .unwrap();
+        let metadata = serde_json::to_string(&cache.get(&key).unwrap()).unwrap();
+        assert!(!metadata.contains("synthetic-secret"));
+    }
+
+    #[test]
     fn stale_entries_the_validator_rejects_fall_through_to_a_live_call() {
         let tmp = tempfile::tempdir().unwrap();
         let cache = SemanticCache::open_at(tmp.path()).unwrap();
-        let key = structured_query_cache_key(
-            "test-model",
-            "sys",
-            "prompt",
-            "CacheTest",
-            &json!({"type": "array"}),
-        );
+        let runtime = CountingRuntime {
+            calls: AtomicUsize::new(0),
+            revision: AtomicUsize::new(1),
+            value: json!([3]),
+        };
+        let contract = contract();
+        let key = execution_query_cache_key(
+            &runtime,
+            &request(),
+            &contract.tool_name,
+            &contract.schema_name,
+            &contract.schema,
+        )
+        .unwrap();
         cache
             .put(
                 &key,
                 &cache_entry_now("cache-test", "test-model", 0.1, json!("legacy shape")),
             )
             .unwrap();
-        let runtime = CountingRuntime {
-            calls: AtomicUsize::new(0),
-            value: json!([3]),
-        };
         let validate = |value: Value| {
             value
                 .as_array()
@@ -214,7 +311,7 @@ mod tests {
             Some(&cache),
             &runtime,
             request(),
-            contract(),
+            contract,
             validate,
         )
         .unwrap();

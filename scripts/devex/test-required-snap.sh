@@ -39,3 +39,24 @@ check_journey saved require-live-snap saved Ready 1 no
 check_journey ready require-live-snap live Ready 0 yes
 check_journey diagnostic wait-live-snap live Waiting 1 yes
 printf 'PASS: required live state stops later actions; success and diagnostic waits retain continuation\n'
+
+recipe="$TEST_ROOT/shell-failure.journey"
+marker="$TEST_ROOT/shell-failure.ran"
+printf 'require-shell: false\nshell: touch %s\n' "$marker" > "$recipe"
+rc=0
+run_journey "$recipe" "$TEST_ROOT/runs" > "$TEST_ROOT/shell-failure.log" || rc=$?
+[ "$rc" -eq 1 ] && [ ! -e "$marker" ] || { cat "$TEST_ROOT/shell-failure.log"; exit 1; }
+printf 'PASS: failed required shell prerequisite prevents later actions\n'
+
+# The real submit directive must stop after an unreadable/corrupted draft.
+(
+  tmux() { [ "$1" != capture-pane ] || printf 'kz/sast> corrupted\n'; }
+  sleep() { :; }
+  recipe="$TEST_ROOT/submit-failure.journey"
+  marker="$TEST_ROOT/submit-failure.ran"
+  printf 'submit: options sast:scan\nshell: touch %s\n' "$marker" > "$recipe"
+  rc=0
+  run_journey "$recipe" "$TEST_ROOT/runs" > "$TEST_ROOT/submit-failure.log" || rc=$?
+  [ "$rc" -eq 1 ] && [ ! -e "$marker" ] || { cat "$TEST_ROOT/submit-failure.log"; exit 1; }
+)
+printf 'PASS: failed submit prevents dependent actions\n'
