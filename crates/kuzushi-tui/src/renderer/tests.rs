@@ -3587,29 +3587,21 @@ fn recommend_view_renders_latest_recommendations_artifact() {
 
 #[test]
 fn renders_shell_module_plan_and_run_routing_modes() {
-    let cases = [
-        {
-            let app = ShellApp::new(V2Config::default(), None);
-            (app, "shell route", "kuzushi>")
-        },
-        {
-            let mut app = ShellApp::new(V2Config::default(), None);
+    let cases: [(&str, &str, fn(&mut ShellApp)); 6] = [
+        ("shell route", "kuzushi>", |_| {}),
+        ("module route", "kuzushi/sast>", |app| {
             app.set_focused_module(Some("sast".to_string()));
             app.set_shell_view(ShellView::Module);
-            (app, "module route", "kuzushi/sast>")
-        },
-        {
-            let mut app = ShellApp::new(V2Config::default(), None);
+        }),
+        ("plan route", "kuzushi/plan>", |app| {
             app.set_pending_plan(crate::app::PlanProposal {
                 goal: "tighten SAST options".to_string(),
                 summary: "set scanner controls".to_string(),
                 changes: Vec::new(),
                 unsupported: Vec::new(),
             });
-            (app, "plan route", "kuzushi/plan>")
-        },
-        {
-            let mut app = ShellApp::new(V2Config::default(), None);
+        }),
+        ("run route", "kuzushi/run>", |app| {
             app.set_scan_panel(Some(crate::app::ScanPanelState {
                 run_id: Some("run-1".to_string()),
                 target: std::path::PathBuf::from("."),
@@ -3620,24 +3612,21 @@ fn renders_shell_module_plan_and_run_routing_modes() {
                 error: None,
             }));
             app.set_shell_view(ShellView::ModuleRun);
-            (app, "run route", "kuzushi/run>")
-        },
-        {
-            let mut app = ShellApp::new(V2Config::default(), None);
+        }),
+        ("module route", "kuzushi/context>", |app| {
             app.set_focused_module(Some("context".to_string()));
             app.set_shell_view(ShellView::ModuleRun);
-            (app, "module route", "kuzushi/context>")
-        },
-        {
-            let mut app = ShellApp::new(V2Config::default(), None);
+        }),
+        ("run route", "kuzushi/context/run>", |app| {
             app.set_focused_module(Some("context".to_string()));
             app.set_running_tool_for_test("context:build");
             app.set_shell_view(ShellView::ModuleRun);
-            (app, "run route", "kuzushi/context/run>")
-        },
+        }),
     ];
 
-    for (app, mode, prompt) in cases {
+    for (mode, prompt, configure) in cases {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        configure(&mut app);
         let backend = TestBackend::new(96, 24);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| render_app(frame, &app)).unwrap();

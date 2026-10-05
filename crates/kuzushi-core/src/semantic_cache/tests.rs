@@ -151,6 +151,11 @@ fn concurrent_connections_enforce_entry_and_disk_quotas() {
     };
     let left = SemanticCache::open_at_with_limits(tmp.path(), limits).unwrap();
     let right = SemanticCache::open_at_with_limits(tmp.path(), limits).unwrap();
+    // Give concurrent writers time to acquire the lock on loaded test hosts.
+    for cache in [&left, &right] {
+        cache.connection().unwrap()
+            .busy_timeout(std::time::Duration::from_secs(5)).unwrap();
+    }
     std::thread::scope(|scope| {
         for (cache, start) in [(&left, 0), (&right, 100)] {
             scope.spawn(move || {

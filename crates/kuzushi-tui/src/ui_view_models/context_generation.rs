@@ -27,7 +27,9 @@ pub(crate) fn generation_lines(app: &ShellApp, width: usize) -> Vec<String> {
 }
 
 fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+    let Some(generation) = config.context_generation.as_ref() else {
+        return Vec::new();
+    };
     let mut lines = vec![
         generation.action(config).into(),
         workload_line(generation.preparation_count()),
@@ -49,11 +51,7 @@ fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         "Context and scans share these limits. Internal turns and retries consume calls; Review and Report keep their reserved calls.".into(),
         "Dollar estimate: unavailable. No dollar ceiling is enforced.".into(),
     ]);
-    if let Some(receipt) = &generation.receipt {
-        lines.extend(receipt_lines(receipt));
-    } else {
-        lines.push("Enter freezes source, selected model and bounded generation options. Preparing the draft makes no model request.".into());
-    }
+    lines.extend(generation_plan_lines(config));
     lines.extend(generation_preparation_lines(config));
     lines.extend(allowance_status_lines(config));
     lines.push("n opens a new draft for separate approval. Previous spending and consumed attempts remain recorded.".into());
@@ -64,13 +62,24 @@ fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
 }
 
 fn generation_preparation_lines(config: &crate::app::BatchScanConfig) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
-    let preparations = generation
-        .receipt
-        .as_ref()
-        .map(|receipt| serde_json::to_value(&receipt.preparation_jobs).unwrap())
-        .unwrap_or_else(|| generation.preparation_jobs.clone());
+    let Some(generation) = config.context_generation.as_ref() else {
+        return Vec::new();
+    };
+    let preparations = match generation.receipt.as_ref() {
+        Some(receipt) => match serde_json::to_value(&receipt.preparation_jobs) {
+            Ok(jobs) => jobs,
+            Err(error) => return vec![format!("Preparation jobs unavailable: {error}")],
+        },
+        None => generation.preparation_jobs.clone(),
+    };
     preparation_lines(&preparations)
+}
+
+fn generation_plan_lines(config: &crate::app::BatchScanConfig) -> Vec<String> {
+    config.context_generation.as_ref()
+        .and_then(|generation| generation.receipt.as_ref())
+        .map(receipt_lines)
+        .unwrap_or_else(|| vec!["Enter freezes source, selected model and bounded generation options. Preparing the draft makes no model request.".into()])
 }
 
 fn receipt_lines(

@@ -1162,18 +1162,7 @@ case "$request" in
     exit 1
     ;;
 esac
-case "$request" in
-  *'"type":"next-step"'*)
-    case "$request" in
-      *'What should I run first?'*)
-        printf '%s' '{"ok":true,"step":"final","text":"Run context build, then next","costUsd":0.034}'
-        exit 0
-        ;;
-    esac
-    ;;
-esac
-printf '%s' '{"ok":false,"error":"unexpected ask request"}'
-exit 1
+exit 0
 "#,
     )
     .unwrap();
