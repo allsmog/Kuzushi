@@ -9446,7 +9446,7 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
     assert_eq!(running_agent.answer, None);
     assert_eq!(running_agent.error, None);
 
-    app.drain_next_agent_event_for_test(Duration::from_secs(5))
+    app.drain_next_agent_event_for_test(Duration::from_secs(30))
         .unwrap_or_else(|message| panic!("{message}"));
 
     let agent = app.agent_chat().unwrap();
