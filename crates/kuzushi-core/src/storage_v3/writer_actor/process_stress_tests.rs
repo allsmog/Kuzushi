@@ -195,12 +195,14 @@ fn storage_process_child() {
 
 fn write_trial(root: &Path, role: &str) {
     let workspace = WorkspaceTarget::new(root).unwrap();
+    eprintln!("{role}: opening findings store");
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let (run_id, line) = if role == "writer-a" {
         ("run-a", 11)
     } else {
         ("run-b", 29)
     };
+    eprintln!("{role}: recording run start");
     store.record_run_started(run_id, root, "running").unwrap();
     let finding = Finding::new_tool(
         "semgrep",
@@ -211,7 +213,9 @@ fn write_trial(root: &Path, role: &str) {
         Severity::High,
         format!("SQL injection found by {role}"),
     );
+    eprintln!("{role}: recording finding");
     store.insert_finding(run_id, &finding).unwrap();
+    eprintln!("{role}: recording run completion");
     store.record_run_finished(run_id, "completed", 1).unwrap();
 }
 
