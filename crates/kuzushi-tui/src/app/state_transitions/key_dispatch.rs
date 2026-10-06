@@ -7,6 +7,9 @@ use anyhow::Context;
 use kuzushi_core::modules::OptionType;
 use serde_json::Value;
 
+mod catalog_picker;
+mod pending_result_reader;
+
 #[derive(Clone, Copy)]
 enum JourneyPhaseEntry {
     Workbench,
@@ -71,6 +74,17 @@ impl ShellApp {
     }
 
     fn reduce_priority_non_modal_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> Option<InputUpdate> {
+        if let Some(update) = self.reduce_pending_result_reading_key(key) {
+            return Some(update);
+        }
+        self.reduce_question_or_shell_key(key, modifiers)
+    }
+
+    fn reduce_question_or_shell_key(
         &mut self,
         key: KeyEvent,
         modifiers: KeyModifierState,
@@ -877,6 +891,13 @@ impl ShellApp {
         if self.advisory().pending_confirm.is_some() {
             return Some(self.handle_confirm_key(key));
         }
+        self.handle_owned_surface_key(key)
+    }
+
+    fn handle_owned_surface_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if let Some(update) = self.handle_scope_review_key(key) {
+            return Some(update);
+        }
         if self.handle_contextual_surface_key(key) {
             return Some(InputUpdate::handled());
         }
@@ -1361,11 +1382,14 @@ impl ShellApp {
         if key.code == KeyCode::Esc {
             return self.collapse_dfd_focus_or_restore_contextual_origin();
         }
-        self.handle_catalog_expert_key(key)
+        self.handle_catalog_picker_key(key)
     }
 
     fn contextual_navigation_owns_keys(&self) -> bool {
-        if self.batch_config_open() {
+        if self.batch_config_open()
+            || self.catalog_composer_owns_input()
+            || self.input_capture_is_active()
+        {
             return false;
         }
         matches!(
@@ -1387,19 +1411,6 @@ impl ShellApp {
             return true;
         }
         self.restore_contextual_surface_origin()
-    }
-
-    /// Catalog `e` toggles expert engines from BOTH input modes; a
-    /// non-empty Prompt draft always wins so typing stays normal.
-    fn handle_catalog_expert_key(&mut self, key: KeyEvent) -> bool {
-        if self.shell_view() != ShellView::Catalog
-            || key.code != KeyCode::Char('e')
-            || !self.input().is_empty()
-        {
-            return false;
-        }
-        self.apply_view_hotkey(ViewHotkeyAction::CatalogToggleExpert)
-            .handled
     }
 
     fn handle_run_focus_steer_editor_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -1441,6 +1452,12 @@ impl ShellApp {
             }
             _ => {}
         }
+    }
+
+    /// A capture opened over a contextual surface owns its keys until it
+    /// closes: Ctrl+R search and a pending plan question both answer Enter.
+    fn input_capture_is_active(&self) -> bool {
+        self.history_search().is_some() || self.engagement.has_pending_plan()
     }
 
     /// Command palette and Ctrl+R reverse search both fully capture input while

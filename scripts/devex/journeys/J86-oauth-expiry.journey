@@ -1,0 +1,79 @@
+# Offline authentication failure with real dispatch; no model response is mocked.
+name: Expired OAuth refuses inference and preserves investigation accounting
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_MODEL
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-6-luna
+require-shell: python3 -B @REPO/scripts/devex/fixtures/oauth_expiry.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | study
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | context-picker
+keys: g
+require-live-snap: 20 GENERATE STUDY CONTEXT | context-form
+keys: t
+require-live-snap: 15 Total calls | total-editor
+type: 8
+keys: Enter
+keys: r
+require-live-snap: 15 Protected review | review-editor
+type: 2
+keys: Enter
+keys: Enter
+require-live-snap: 25 Draft ready | context-draft
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+keys: End
+require-live-snap: 15 y approve | approval-end
+expect: Total provider calls: 8
+keys: y
+require-live-snap: 25 approved | approved-context
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | unstarted-job
+keys: L
+require-live-snap: 20 dispatcher pid | started-dispatcher
+wait: 3
+keys: r
+require-live-snap: 25 threat-model:build · failed | failed-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/oauth_expiry.py @TMP_TARGET @ART verify
+ask: Does failed authentication stay separate from a completed context job, with no claim of a generated Map?
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | result
+expect: Provider authentication failed.
+ask: Does the context result explain the authentication failure and preserve the source job and its unconsumed call allowance?
+resize: 160x48
+live-snap: result-160x48
+resize: 96x89
+live-snap: result-96x89
+resize: 80x24
+live-snap: result-80x24
+resize: 60x20
+live-snap: result-60x20
+resize: 40x12
+keys: NPage NPage NPage NPage NPage
+live-snap: result-small-paged
+ask: Are failure evidence and recovery controls reachable at 40x12 without launching another attempt?
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 remain recorded. | result-small-last
+ask: Can the complete result be read to its final retained-spending guidance while keeping the recovery controls visible?
+resize: 120x36
+keys: Escape
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | exit-confirmation
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-6-luna
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-context.txt
+keys: Enter
+require-live-snap: 25 threat-model:build · failed | restored-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | restored-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/oauth_expiry.py @TMP_TARGET @ART verify
+ask: Does a real no-color restart retain the failed attempt and unused allowance without retrying authentication or creating a Map?
+keys: C-c
+require-exit: 10

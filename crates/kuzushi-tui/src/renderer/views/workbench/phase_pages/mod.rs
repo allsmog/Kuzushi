@@ -105,16 +105,38 @@ pub(super) fn render_lines_pane(
     state: PhaseRenderState,
 ) {
     let focused = state.focused(surface);
+    let title = title.into();
     let block = cockpit_pane_block(
-        Line::from(Span::styled(title.into(), cockpit_title_style(focused))),
+        Line::from(Span::styled(title.clone(), cockpit_title_style(focused))),
         focused,
     );
     let inner = block.inner(area);
-    frame.render_widget(block, area);
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     let visual_rows = paragraph.line_count(inner.width);
     let scroll = clamped_scroll(state.scroll(surface), visual_rows, inner.height);
+    let title = scan_scroll_title(&title, surface, visual_rows, scroll, inner);
+    frame.render_widget(
+        cockpit_pane_block(Line::styled(title, cockpit_title_style(focused)), focused),
+        area,
+    );
     frame.render_widget(paragraph.scroll((scroll, 0)), inner);
+}
+
+fn scan_scroll_title(
+    title: &str,
+    surface: PhaseSurfaceId,
+    rows: usize,
+    scroll: u16,
+    inner: Rect,
+) -> String {
+    if surface != PhaseSurfaceId::ScanEngines || rows <= inner.height as usize {
+        return title.to_string();
+    }
+    let first = scroll as usize + 1;
+    let last = (scroll as usize + inner.height as usize).min(rows);
+    let hint = format!("{first}-{last}/{rows} PgUp/PgDn");
+    let title_width = (inner.width as usize).saturating_sub(hint.len() + 1);
+    format!("{} {hint}", fit(title, title_width))
 }
 
 pub(super) fn render_diagram_pane(
@@ -231,5 +253,23 @@ mod tests {
 
         assert!(rows >= 4, "expected visual wrapping, got {rows} row(s)");
         assert!(clamped_scroll(u16::MAX, rows, 2) >= 2);
+    }
+
+    #[test]
+    fn native_engine_overflow_discloses_its_range_and_paging_control() {
+        let inner = Rect::new(1, 2, 38, 3);
+        let title = scan_scroll_title(
+            "RECORDED ENGINE OUTCOMES",
+            PhaseSurfaceId::ScanEngines,
+            14,
+            6,
+            inner,
+        );
+        assert!(title.contains("7-9/14 PgUp/PgDn"), "{title}");
+        assert!(title.chars().count() <= 38, "{title}");
+        assert_eq!(
+            scan_scroll_title("OUTCOMES", PhaseSurfaceId::ScanEngines, 3, 0, inner),
+            "OUTCOMES"
+        );
     }
 }

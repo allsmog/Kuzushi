@@ -7,6 +7,7 @@ pub(crate) fn parse_build_input(
 ) -> Result<BuildInput> {
     let mut build = parse_generation_build_input(input)?;
     apply_target_build_input(&mut build, input, ctx, flavor)?;
+    super::super::application::rejected_output::validate(&build, ctx)?;
     Ok(build)
 }
 
@@ -19,6 +20,11 @@ fn parse_generation_build_input(input: &Value) -> Result<BuildInput> {
         max_elements: read_usize(input, &["maxElements", "max_elements"], 40, 5),
         max_threats: read_usize(input, &["maxThreats", "max_threats"], 30, 1),
         max_output_tokens: read_max_output_tokens(input),
+        save_rejected_output: read_bool(
+            input,
+            &["saveRejectedOutput", "save_rejected_output"],
+            false,
+        ),
         emit_findings: read_bool(input, &["emitFindings", "emit_findings"], false),
         preserve_user_edits: read_bool(input, &["preserveUserEdits", "preserve_user_edits"], true),
         pipeline: read_pipeline(input)?,
@@ -405,7 +411,10 @@ fn read_budget_usd(input: &Value) -> Result<Option<f64>> {
 const DEFAULT_MIN_COVERAGE: f64 = 0.5;
 
 fn read_min_coverage(input: &Value) -> Result<f64> {
-    let Some(value) = input.get("minCoverage").or_else(|| input.get("min_coverage")) else {
+    let Some(value) = input
+        .get("minCoverage")
+        .or_else(|| input.get("min_coverage"))
+    else {
         return Ok(DEFAULT_MIN_COVERAGE);
     };
     let floor = value

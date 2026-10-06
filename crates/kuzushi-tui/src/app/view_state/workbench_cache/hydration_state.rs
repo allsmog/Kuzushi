@@ -5,6 +5,7 @@ impl WorkbenchCache {
         match hydration_group(key) {
             HydrationGroup::Completion => self.completion_hydration_needed(target, key),
             HydrationGroup::Run => self.run_hydration_needed(target, key),
+            HydrationGroup::StudyUsage => self.study_usage_hydration_needed(target, key),
             HydrationGroup::Project => self.project_hydration_needed(target, key),
             HydrationGroup::Workspace => self.workspace_hydration_needed(target, key),
             HydrationGroup::Status => self.status_hydration_needed(target, key),
@@ -24,6 +25,7 @@ impl WorkbenchCache {
         for failure in failures {
             self.hydrating_view_data
                 .remove(&(failure.target.clone(), failure.key.clone()));
+            self.record_failed_study_usage(failure);
         }
     }
 
@@ -34,6 +36,7 @@ impl WorkbenchCache {
         match hydration_group(&key) {
             HydrationGroup::Completion => self.apply_completion_hydration(target, key, value),
             HydrationGroup::Run => self.apply_run_hydration(target, key, value),
+            HydrationGroup::StudyUsage => self.apply_study_usage_hydration(target, key, value),
             HydrationGroup::Project => self.apply_project_hydration(target, key, value),
             HydrationGroup::Workspace => self.apply_workspace_hydration(target, key, value),
             HydrationGroup::Status => self.apply_status_hydration(target, key, value),
@@ -42,6 +45,9 @@ impl WorkbenchCache {
 
     fn run_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
+            ViewHydrationKey::InvestigationReport { run_refs } => self
+                .cached_investigation_report(Some(target), run_refs)
+                .is_not_requested(),
             ViewHydrationKey::LatestRunPointer => self
                 .cached_latest_run_pointer(Some(target))
                 .is_not_requested(),
@@ -78,6 +84,9 @@ impl WorkbenchCache {
                 .is_not_requested(),
             ViewHydrationKey::ThreatModelStore => self
                 .cached_threat_model_store(Some(target))
+                .is_not_requested(),
+            ViewHydrationKey::MapRunContext { run_refs } => self
+                .cached_map_run_context(target, run_refs)
                 .is_not_requested(),
             ViewHydrationKey::ProjectModelDocument { scope_id, revision } => self
                 .cached_project_model_document(Some(target), scope_id, revision.as_deref())
@@ -185,6 +194,12 @@ impl WorkbenchCache {
         value: ViewHydrationValue,
     ) {
         match (key, value) {
+            (
+                ViewHydrationKey::InvestigationReport { run_refs },
+                ViewHydrationValue::InvestigationReport(state),
+            ) => {
+                self.investigation_report = Some((target, run_refs, state));
+            }
             (ViewHydrationKey::LatestRunPointer, ViewHydrationValue::LatestRunPointer(state)) => {
                 self.store_latest_run_pointer(target, state)
             }
@@ -333,6 +348,12 @@ impl WorkbenchCache {
             }
             (ViewHydrationKey::ThreatModelStore, ViewHydrationValue::ThreatModelStore(state)) => {
                 self.threat_model_store = Some((target, state))
+            }
+            (
+                ViewHydrationKey::MapRunContext { run_refs },
+                ViewHydrationValue::MapRunContext(state),
+            ) => {
+                self.map_run_context.insert((target, run_refs), state);
             }
             (
                 ViewHydrationKey::ProjectModelDocument { scope_id, revision },
@@ -582,6 +603,7 @@ impl WorkbenchCache {
 enum HydrationGroup {
     Completion,
     Run,
+    StudyUsage,
     Project,
     Workspace,
     Status,
@@ -589,10 +611,14 @@ enum HydrationGroup {
 
 fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
     match key {
+        ViewHydrationKey::StudyUsageCatalogue | ViewHydrationKey::StudyUsageRun { .. } => {
+            HydrationGroup::StudyUsage
+        }
         ViewHydrationKey::FileCompletionValues
         | ViewHydrationKey::FindingCompletionValues
         | ViewHydrationKey::RunIdCompletionValues => HydrationGroup::Completion,
         ViewHydrationKey::LatestRunPointer
+        | ViewHydrationKey::InvestigationReport { .. }
         | ViewHydrationKey::RunSummaryEntries
         | ViewHydrationKey::RunArtifactText { .. }
         | ViewHydrationKey::RunProjection { .. }
@@ -602,6 +628,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::RevisionRelationship { .. }
         | ViewHydrationKey::ProjectScopeTree
         | ViewHydrationKey::ThreatModelStore
+        | ViewHydrationKey::MapRunContext { .. }
         | ViewHydrationKey::ProjectModelDocument { .. }
         | ViewHydrationKey::StrategyQueue
         | ViewHydrationKey::PromptMutations

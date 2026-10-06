@@ -1,0 +1,59 @@
+# Existing real OAuth receipts only. No model or discovery launch controls used.
+name: Live OAuth failures and protected review calls survive restart
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_receipts.py @TARGET @ART seed @TMP_HOME
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 1 failed | failed-live-context
+ask: Does the real failed context stay failed with unknown cost and its original run identity, without offering a successful context to accept?
+nav-mode:
+keys: a
+require-live-snap: 25 schema after one repair | recorded-context-failure
+ask: Can the operator understand the recorded validation failure and choose inspection or a separately approved replacement without automatic work?
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: failure-accounting-tail
+keys: Enter
+require-live-snap: 20 CAMPAIGN live-luna-context-approved | failed-job-inspection
+keys: Escape
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-live-snap: 25 1 completed, 2 failed | incomplete-live-study
+expect: 2 failed
+expect-not: completed 3 / planned 3
+expect-not: L launch
+expect-not: K kill
+ask: Does the real incomplete study distinguish one completed pass from two failures and avoid treating zero findings as a clean repository?
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | recorded-live-allowance
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 6 committed / 8 total | protected-review-remains
+expect: 0 context/scan · 2 protected review
+ask: Are all six requests retained with two protected Review calls, no dollar ceiling and no silent increase?
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-live-snap: 25 1 completed, 2 failed | recorded-study-after-restart
+expect: 2 failed
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | restored-live-allowance
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 6 committed / 8 total | restored-protected-review
+expect: 0 context/scan · 2 protected review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_receipts.py @TARGET @ART verify
+ask: After actual restart without color, are work, failure and accounting receipts intact with no new requests or attempts?
+keys: Escape
+require-live-snap: 15 BATCH live-luna-three-passes | before-final-exit
+keys: C-c
+require-exit: 10

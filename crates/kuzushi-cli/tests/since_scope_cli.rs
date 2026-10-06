@@ -1,7 +1,7 @@
 //! `kuzushi scan --since <ref>` end to end: it refuses an empty scope instead
 //! of widening to the whole target, and a real scope reaches the canonical
-//! `sast:scan` input so every engine is narrowed, not just the ones that read
-//! `since.txt`.
+//! `sast:scan` input. Engines that read exact files scan only the changed
+//! files; directory-only engines refuse rather than scanning a parent.
 
 #![cfg(unix)]
 
@@ -164,10 +164,13 @@ fn since_intersected_to_nothing_by_paths_refuses_and_records_no_run() {
 }
 
 #[test]
-fn since_narrows_the_canonical_scan_input_for_every_engine() {
+fn since_narrows_the_canonical_scan_input_for_exact_file_engines() {
     let (home, path, repo, base) = committed_repo();
     std::fs::write(repo.path().join("app.py"), "print('changed')\n").unwrap();
 
+    // Changed files are file scopes. An engine that reads exact files runs on
+    // exactly them; directory-only engines refuse (see below) instead of
+    // silently widening to the parent directory.
     let output = kuzushi(home.path(), path.path())
         .arg("scan")
         .arg(repo.path())
@@ -175,8 +178,8 @@ fn since_narrows_the_canonical_scan_input_for_every_engine() {
             "--since",
             &base,
             "--include-worktree",
-            "--mode",
-            "standard",
+            "--tasks",
+            "secret-scan",
             "--ci",
         ])
         .output()
@@ -212,4 +215,29 @@ fn since_narrows_the_canonical_scan_input_for_every_engine() {
         vec!["app.py"],
         "since.txt must carry the same effective scope"
     );
+}
+
+#[test]
+fn since_file_scope_refuses_directory_only_engines_without_widening() {
+    let (home, path, repo, base) = committed_repo();
+    std::fs::write(repo.path().join("app.py"), "print('changed')\n").unwrap();
+
+    let output = kuzushi(home.path(), path.path())
+        .arg("scan")
+        .arg(repo.path())
+        .args([
+            "--since",
+            &base,
+            "--include-worktree",
+            "--mode",
+            "standard",
+            "--ci",
+        ])
+        .output()
+        .unwrap();
+    let text = output_text(&output);
+
+    assert!(!output.status.success(), "{text}");
+    assert!(text.contains("requires directory scopes"), "{text}");
+    assert!(text.contains("No scan started"), "{text}");
 }

@@ -95,6 +95,7 @@ fn export_scan_findings_sarif_inner(
         output_path: output_path.to_path_buf(),
         format: WorkspaceExportFormat::Sarif,
         count: prepared.records.len(),
+        investigation_receipt_path: None,
     })
 }
 
@@ -225,20 +226,26 @@ pub fn export_workspace_findings_with_options(
     let prepared = prepare_workspace_findings_export(workspace, &options)?;
     ensure_empty_export_is_allowed(&prepared.records, &options)?;
     ensure_workspace_export_parent(output_path)?;
-    write_workspace_findings_export(
-        workspace,
-        &prepared.findings,
-        &prepared.records,
+    let receipt_path = prepared
+        .investigation
+        .as_ref()
+        .map(|_| {
+            super::export_investigation_receipt::receipt_output_path(workspace, output_path, format)
+        })
+        .transpose()?;
+    let receipt = receipt_path.as_deref().zip(prepared.investigation.as_ref());
+    let target = ExportTarget {
         format,
         output_path,
         options,
-        prepared.total_count,
-    )?;
+    };
+    write_export_with_receipt(workspace, &prepared, &target, receipt)?;
 
     Ok(WorkspaceFindingsExport {
         output_path: output_path.to_path_buf(),
         format,
         count: prepared.records.len(),
+        investigation_receipt_path: receipt_path,
     })
 }
 
@@ -250,6 +257,7 @@ pub struct WorkspaceFindingsExportPreview {
     pub total_count: usize,
     pub omitted_fields: Vec<&'static str>,
     pub body: String,
+    pub investigation: Option<serde_json::Value>,
 }
 
 pub fn preview_workspace_findings_export(
@@ -257,15 +265,7 @@ pub fn preview_workspace_findings_export(
     format: WorkspaceExportFormat,
     options: &WorkspaceExportOptions,
 ) -> Result<WorkspaceFindingsExportPreview> {
-    if format == WorkspaceExportFormat::MarkdownBundle {
-        anyhow::bail!(
-            "markdown-bundle preview is directory-shaped; use json, jsonl, sarif, or csv preview"
-        );
-    }
-    let options = WorkspaceExportOptions {
-        format: Some(format),
-        ..options.clone()
-    };
+    let options = preview_export_options(format, options)?;
     let prepared = prepare_workspace_findings_export(workspace, &options)?;
     ensure_empty_export_is_allowed(&prepared.records, &options)?;
     let body = render_workspace_findings_export(
@@ -275,6 +275,11 @@ pub fn preview_workspace_findings_export(
         &options,
         prepared.total_count,
     )?;
+    let body = super::export_investigation_receipt::attach_receipt(
+        body,
+        format,
+        prepared.investigation.as_ref(),
+    )?;
     Ok(WorkspaceFindingsExportPreview {
         format,
         completeness: options.completeness,
@@ -282,6 +287,25 @@ pub fn preview_workspace_findings_export(
         total_count: prepared.total_count,
         omitted_fields: workspace_export_omitted_fields(format),
         body,
+        investigation: prepared
+            .investigation
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()?,
+    })
+}
+
+fn preview_export_options(
+    format: WorkspaceExportFormat,
+    options: &WorkspaceExportOptions,
+) -> Result<WorkspaceExportOptions> {
+    anyhow::ensure!(
+        format != WorkspaceExportFormat::MarkdownBundle,
+        "markdown-bundle preview is directory-shaped; use json, jsonl, sarif, or csv preview"
+    );
+    Ok(WorkspaceExportOptions {
+        format: Some(format),
+        ..options.clone()
     })
 }
 
@@ -289,6 +313,7 @@ struct PreparedWorkspaceFindingsExport {
     findings: Vec<Finding>,
     records: Vec<WorkspaceFindingExportRecord>,
     total_count: usize,
+    investigation: Option<super::investigation_report::InvestigationReportReceipt>,
 }
 
 struct FilteredWorkspaceFindings {
@@ -301,6 +326,14 @@ fn prepare_workspace_findings_export(
     workspace: &WorkspaceTarget,
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
+    if let Some(campaign) = options.campaign_id.as_deref() {
+        let investigation =
+            super::investigation_report::load_investigation_report(workspace, campaign)?;
+        let mut prepared =
+            prepare_scan_findings_export(workspace, &investigation.observation_run_refs, options)?;
+        prepared.investigation = Some(investigation);
+        return Ok(prepared);
+    }
     let store = FindingStore::open(workspace.findings_db_path())?;
     let all_findings = store.list_all_findings()?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
@@ -316,10 +349,16 @@ fn prepare_workspace_findings_export(
         &filtered.positions,
     );
     attach_remediation_records(&store, &mut records)?;
+    super::export_decision_basis::attach_review_decision_basis(
+        &store,
+        &filtered.findings,
+        &mut records,
+    )?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
         total_count,
+        investigation: None,
     })
 }
 
@@ -343,10 +382,16 @@ fn prepare_scan_findings_export(
         &filtered.positions,
     );
     attach_remediation_records(&store, &mut records)?;
+    super::export_decision_basis::attach_review_decision_basis(
+        &store,
+        &filtered.findings,
+        &mut records,
+    )?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
         total_count,
+        investigation: None,
     })
 }
 
@@ -474,27 +519,77 @@ fn ensure_workspace_export_parent(output_path: &Path) -> Result<()> {
     Ok(())
 }
 
+struct ExportTarget<'a> {
+    format: WorkspaceExportFormat,
+    output_path: &'a Path,
+    options: &'a WorkspaceExportOptions,
+}
+
+/// A failed write must never leave a new export beside a stale or missing
+/// receipt. Single-file exports write the receipt first; the bundle owns its
+/// directory, so its receipt follows the bundle. Each file is replaced
+/// atomically.
+fn write_export_with_receipt(
+    workspace: &WorkspaceTarget,
+    prepared: &PreparedWorkspaceFindingsExport,
+    target: &ExportTarget<'_>,
+    receipt: Option<(
+        &Path,
+        &super::investigation_report::InvestigationReportReceipt,
+    )>,
+) -> Result<()> {
+    use super::export_investigation_receipt::{attach_bundle_receipt, write_receipt};
+    let write_export = || {
+        write_workspace_findings_export(
+            workspace,
+            prepared,
+            target.format,
+            target.output_path,
+            target.options,
+        )
+    };
+    let Some((path, receipt)) = receipt else {
+        return write_export();
+    };
+    if target.format != WorkspaceExportFormat::MarkdownBundle {
+        write_receipt(path, receipt)?;
+        return write_export();
+    }
+    write_export()?;
+    write_receipt(path, receipt)?;
+    attach_bundle_receipt(target.output_path, receipt)
+}
+
 fn write_workspace_findings_export(
     workspace: &WorkspaceTarget,
-    findings: &[Finding],
-    records: &[WorkspaceFindingExportRecord],
+    prepared: &PreparedWorkspaceFindingsExport,
     format: WorkspaceExportFormat,
     output_path: &Path,
     options: &WorkspaceExportOptions,
-    total_count: usize,
 ) -> Result<()> {
     if format == WorkspaceExportFormat::MarkdownBundle {
         return write_markdown_bundle(
             workspace,
-            findings,
-            records,
+            &prepared.findings,
+            &prepared.records,
             output_path,
             options,
-            total_count,
+            prepared.total_count,
         );
     }
-    let body = render_workspace_findings_export(workspace, records, format, options, total_count)?;
-    fs::write(output_path, body)
+    let body = render_workspace_findings_export(
+        workspace,
+        &prepared.records,
+        format,
+        options,
+        prepared.total_count,
+    )?;
+    let body = super::export_investigation_receipt::attach_receipt(
+        body,
+        format,
+        prepared.investigation.as_ref(),
+    )?;
+    crate::fs_atomic::write_atomic(output_path, &body)
         .with_context(|| format!("Could not write {}", output_path.display()))
 }
 
@@ -575,6 +670,30 @@ fn effective_review_contexts(
         .iter()
         .map(|finding| effective_review_context(store, finding, &mut identity_reviews))
         .collect()
+}
+
+pub(super) fn investigation_review_counts(
+    store: &FindingStore,
+    findings: &[Finding],
+) -> Result<(usize, usize)> {
+    let reviews = effective_review_contexts(store, findings)?;
+    let terminal = findings
+        .iter()
+        .zip(&reviews)
+        .filter_map(|(finding, review)| {
+            review
+                .as_ref()
+                .filter(|review| review.is_terminal_for_finding(finding))
+        });
+    let mut reviewed = 0;
+    let mut confirmed = 0;
+    for review in terminal {
+        reviewed += 1;
+        if review.triage_verdict == Some(crate::findings::TriageVerdict::TruePositive) {
+            confirmed += 1;
+        }
+    }
+    Ok((reviewed, confirmed))
 }
 
 fn finding_matches_export_completeness(

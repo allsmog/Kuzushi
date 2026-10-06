@@ -18,6 +18,8 @@ mod projection_rekey;
 mod projection_review;
 mod projection_runs;
 mod projection_schema;
+mod schema_version;
+pub(crate) use schema_version::require_initialized_schema;
 pub mod writer_actor;
 
 use projection_event_store::{clear_projection_tables, insert_event_row};
@@ -433,6 +435,7 @@ fn configure_projection_connection(conn: &Connection) -> Result<()> {
 }
 
 pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
+    schema_version::require_supported_schema(conn)?;
     conn.execute_batch(PROJECTION_SCHEMA)?;
     migrate_review_decision_dismissal_columns(conn)?;
     migrate_review_decision_provenance_columns(conn)?;
@@ -445,6 +448,7 @@ pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     migrate_patch_cost_columns(conn)?;
     migrate_patch_lifecycle_columns(conn)?;
     create_optional_fts(conn)?;
+    schema_version::mark_initialized_schema(conn)?;
     Ok(())
 }
 

@@ -2,18 +2,22 @@ mod config;
 mod context_generation;
 mod controller;
 mod launch;
+mod map_allowance;
 mod number_edit;
 mod study_actions;
 mod study_context;
+mod study_engines;
 mod study_keys;
 mod study_recovery;
 mod study_state;
+mod usage_hydration;
 mod worker_resolution;
 
 pub(crate) use config::{
     BatchScanConfig, BatchScanConfigRow, BATCH_HARD_CAP, DEFAULT_BATCH_TRIALS,
 };
 pub(crate) use study_context::StudyContextPicker;
+pub(crate) use study_engines::StudyEnginePicker;
 pub(crate) use worker_resolution::resolve_batch_workers;
 
 pub(crate) fn is_scan_batch_snapshot(

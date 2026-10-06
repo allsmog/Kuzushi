@@ -40,6 +40,19 @@ impl ExclusiveFileLock {
         Ok(Self { _file: file })
     }
 
+    pub(crate) fn acquire_cancellable(path: &Path, canceled: &dyn Fn() -> bool) -> Result<Self> {
+        anyhow::ensure!(!canceled(), "lock acquisition was canceled");
+        let file = prepared_lock_file(path)?;
+        loop {
+            anyhow::ensure!(!canceled(), "lock acquisition was canceled");
+            if try_lock_file(&file, path)? {
+                anyhow::ensure!(!canceled(), "lock acquisition was canceled");
+                return Ok(Self { _file: file });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     pub(crate) fn try_acquire(path: &Path) -> Result<Option<Self>> {
         let file = prepared_lock_file(path)?;
         match file.try_lock() {
@@ -48,6 +61,16 @@ impl ExclusiveFileLock {
             Err(std::fs::TryLockError::Error(error)) => {
                 Err(error).with_context(|| format!("Could not lock {}", path.display()))
             }
+        }
+    }
+}
+
+fn try_lock_file(file: &File, path: &Path) -> Result<bool> {
+    match file.try_lock() {
+        Ok(()) => Ok(true),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(false),
+        Err(std::fs::TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("Could not lock {}", path.display()))
         }
     }
 }
@@ -347,5 +370,53 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
         assert!(reject_windows_reparse_attributes(Path::new("state.lock"), 0).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[test]
+    fn cancellation_releases_a_waiting_owner_without_stealing_the_held_lock() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("owner.lock");
+        let owner = ExclusiveFileLock::acquire(&path).unwrap();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let checks = Arc::new(AtomicUsize::new(0));
+        let flag = Arc::clone(&canceled);
+        let observed = Arc::clone(&checks);
+        let waiting = path.clone();
+        let worker = std::thread::spawn(move || {
+            ExclusiveFileLock::acquire_cancellable(&waiting, &|| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                flag.load(Ordering::SeqCst)
+            })
+            .err()
+            .unwrap()
+            .to_string()
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while checks.load(Ordering::SeqCst) < 3 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(checks.load(Ordering::SeqCst) >= 3);
+        canceled.store(true, Ordering::SeqCst);
+        assert!(worker.join().unwrap().contains("canceled"));
+        assert!(ExclusiveFileLock::try_acquire(&path).unwrap().is_none());
+        drop(owner);
+        drop(ExclusiveFileLock::acquire_cancellable(&path, &|| false).unwrap());
+    }
+
+    #[test]
+    fn already_canceled_lock_request_does_not_create_a_lock_file() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("unused.lock");
+        assert!(ExclusiveFileLock::acquire_cancellable(&path, &|| true).is_err());
+        assert!(!path.exists());
     }
 }

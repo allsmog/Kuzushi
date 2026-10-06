@@ -175,8 +175,9 @@ arrows, Home/End, Delete, Unicode and paste work inside that field. Enter or
 Ctrl+S saves the path without exporting; Escape cancels the edit. Relative
 paths resolve against the explicit target and use the shared output-path rules.
 
-Success and failure show the attempted format, completeness, time and full
-destination. Correct the path and retry after a failure. `PgUp/PgDn` reads
+Success and failure show the attempted format, finding count and time; `p`
+adds completeness, the full destination and the investigation receipt path.
+Correct the path and retry after a failure. `PgUp/PgDn` reads
 long reports and receipts; `Esc/q` returns to the originating view. Review
 counts use the unfiltered finding ledger. Cost coverage describes up to 100
 recent run records, distinguishing complete, incomplete, unavailable and
@@ -188,6 +189,16 @@ For a
 CI-consumable **confirmed-only** SARIF (latest-decision-wins filter
 applied), use `report:sarif` — default output
 `.kuzushi/v3/reports/confirmed-findings.sarif`.
+Pass `campaignId` to limit it to one study's observations; the study's
+investigation receipt is then embedded in the SARIF run properties. Every
+export record also names the run and source snapshot its latest review
+decision was made against (`reviewDecisionBasis`), and whether the finding was
+seen again on different source since. A confirmation made on earlier code is
+disclosed, never carried forward silently.
+
+When the current source has no Scan attempt (for example after files change),
+Report keeps the latest selected study reportable and labels it as recorded on
+earlier source. Its receipt keeps the original source identities.
 
 ## 3. Budget semantics
 

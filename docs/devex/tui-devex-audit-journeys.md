@@ -750,3 +750,573 @@ preserved; passing machine predicates still require recorded screen review.
   boundary context count disagreed with the full detail reader. Both now use
   the same selected-context lookup. Earlier recipe and arrow failures remain
   retained as failed evidence too.
+
+### J69: Recover generated context and inspect unusable results
+
+- **Fixture:** real offline plan creation, approval and exact context reads.
+  The result is an explicitly labeled imported document; queue completion and
+  failure are injected to exercise recovery. No generator, scan job or provider
+  request runs. Generation execution has separate mocked-provider core tests.
+- **Journey:** prepare and approve the Setup Map plan, return to its recovered
+  result, inspect and select its exact context, compile the next three-pass
+  study, inspect missing output across all six viewport sizes, prove exit and
+  recover in a fresh no-color process, then inspect a failed job and request a
+  separately approved replacement draft.
+- **Verify:** the same investigation and allowance survive every transition.
+  The scan plan records the selected inactive context. Missing and stopped
+  output requires inspection. Unknown costs remain unavailable; completed
+  context plans advertise result review. Back does not start or replace work.
+- **Judge:** state, action, complete failure reasons, cost uncertainty, paging,
+  comfortable reading width and return navigation agree with the recorded work.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261004-235128/J69/`
+  has 53 passing machine checks and 16 passing manual judgments. Earlier runs
+  remain failed evidence: `233652` and `233808` exposed recipe assumptions about
+  preloaded context; `233942` exposed stale Setup guidance, clipped notices and
+  false zero-cost presentation; `234851` retained a failed expectation that
+  incorrectly required a naturally wrapped failure reason on one line.
+  This checkpoint does not establish durable Map acceptance or live model
+  quality. The broader reference quality bar remains open.
+
+### J70: Accept recorded Map context and retain its exact revision
+
+- **Fixture:** two explicitly labeled imported contexts with different diagrams.
+  Real offline `context:build`, `threat-model:import`, `campaign:study` and exact
+  context reads. Queue outcomes and Map selection are produced by the TUI;
+  no generation, discovery or provider request runs. Grounding failure is
+  intentionally visible.
+- **Journey:** review and accept Alpha while Beta stays globally active, inspect
+  the recorded DFD at all six sizes, prepare a three-pass draft, inspect its
+  exact context, prove process exit and recover without color. Remove the
+  accepted immutable object, restart and inspect recorded runs from the
+  smallest failure card.
+- **Verify:** the accepted run reference supplies both Map and the study draft;
+  ordinary preparation cannot freeze active Beta first. The draft contains
+  three jobs, one worker and no approval. Missing evidence cannot substitute
+  another context. Enter opens history without starting work; shared accounting
+  records no provider reservations or discovery attempts.
+- **Judge:** acceptance, failed grounding, exact identity, keyboard controls,
+  resize, source limitations and failure recovery remain understandable. The
+  single-row DFD inspector names the selection at 40×12, and its recovery card
+  places the inspection action before a potentially long error.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-013949/J70/`
+  records 37 passing machine checks and all 15 manual judgments passing.
+  The harness retains `REVIEW_REQUIRED`; judgments are recorded separately in
+  `manual-review.json`. Earlier failed evidence remains, including `010453`
+  (active context froze into the draft), `011725` (hidden recovery reason) and
+  `013021` (blank resize capture and hidden narrow-screen action despite green
+  machine checks). The recipe now requires a rendered live frame after resize.
+  This is an imported-context acceptance proof. J71 covers the generated
+  campaign handoff; full reference parity remains open.
+
+### J71: Review generated context as a durable Map
+
+- **Fixture:** the real source-only context generator runs through shared
+  observed dispatch under an approved offline allowance and a mocked provider.
+  Its exact immutable revision and recorded result are real; the completed
+  campaign queue is injected. Another labeled context stays globally active.
+  No live provider or discovery job runs.
+- **Journey:** recover the completed context plan, inspect result controls at
+  all six sizes, use `m Review Map`, explicitly accept the recorded result,
+  inspect the DFD, verify process exit and restart without color. Change source,
+  refuse another handoff, dismiss the error and inspect the old exact revision.
+- **Verify:** one durable Map, one operator decision, one consumed provider
+  reservation and no new discovery attempt. Declared generated artifacts exist.
+  Source drift and active-model substitution cannot create new Map evidence.
+  Grounding and Git revision remain unrecorded in this offline fixture.
+- **Judge:** controls, budget disclosure, exact context, acceptance, diagram
+  readability, restart and historical inspection remain understandable. A
+  recorded diagram cannot appear beside a claim that no threat model exists.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-023106/J71/`
+  records 34 machine passes and all 12 manual judgments passing. Harness status
+  stays `REVIEW_REQUIRED`; `manual-review.json` holds the separate judgments.
+  Earlier failures are retained: `021654` and `021832` caught fixture artifact
+  assertions, `021914` caught a missing phase-history refresh, and `022406`
+  caught contradictory empty-state guidance and a selection/view assertion.
+  `022842` passed the shorter recipe before historical error dismissal was added.
+
+### J72: Accepted Map carries accounting into a scan study
+
+- **Fixture:** J71's real offline generator, mocked provider and injected
+  completed context queue. One approved provider reservation is already spent;
+  another context remains globally active. No live call or discovery job runs.
+  The isolated repository reuses an existing local commit as Git metadata;
+  its worktree deliberately differs from that commit. No commit is created.
+- **Journey:** explicitly accept generated Map, open ordinary `scan batch`,
+  inspect inherited allowance across all six sizes, prepare three exact-context
+  passes and separately approve that plan. Verify process exit, restart without
+  color, open a fresh form and recover the existing approved study. Remove its
+  approval rows while retaining call reservations and refuse new implicit work.
+  Change source content while retaining both the same SHA and dirty flag,
+  then refuse an implicit draft from the stale accepted Map.
+- **Verify:** one investigation, one consumed call, five total calls, two
+  protected review calls and exactly three unstarted discovery jobs. Planning
+  creates no approval; replacement approval advances revision without refunding
+  consumption. Missing approval cannot appear as a reset or zero budget.
+- **Judge:** retained consumption, current approval, distinct start action,
+  resize, complete term review, restart and recovery remain understandable.
+  This fixture proves accounting handoff, not nondeterministic finding quality
+  or completion of all three provider-backed discovery passes.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-034035/J72/`
+  records 44 machine passes and all 14 separately recorded screen judgments
+  passing. The harness remains `REVIEW_REQUIRED`; `manual-review.json` records
+  the judgments and capture hashes. Actual viewport dimensions and no-color
+  ANSI were inspected. The fixture leaves only two context/scan calls available
+  for three planned discovery jobs; it proves no promise of complete execution.
+  Earlier failures and judgments remain: `025933`, `031035` and `031448` found
+  wrapped-text assertions; `031204` found unborn Git metadata; `031720` found
+  a wrapped work-refusal assertion; `032652` found misleading worker-policy
+  classification after source drift. At `033146` all machine checks passed,
+  but manual review rejected a partial redraw containing stale Run Focus
+  controls. The recipe now waits for draft completion and the final form footer.
+  The narrow form needs eighteen detail pages and repeated error prefixes still
+  merit polish; reference interaction parity remains open.
+
+### J73: Execute three fresh passes under the retained investigation
+
+- **Fixture:** J72's real offline context generator and accepted Map, followed
+  by real scan-batch controller and agentic scanner execution. Every provider
+  fetch is intercepted in a preload; isolated credentials contain only a test
+  placeholder. Findings are labeled synthetic observations about a greeting
+  program. No live provider, proof execution or patching is involved.
+- **Journey:** accept generated Map, configure one source-only engine, compile
+  three jobs and explicitly revise total calls to six while preserving two
+  protected review calls. Approve the exact plan, open jobs, separately start
+  them, then inspect consolidated observations.
+- **Verify:** exactly three fresh bridge processes receive identical frozen
+  prompts without assistant history or the unrelated active context. Completed
+  discovery outcomes come from real execution, not an injected queue. Existing
+  context spending remains and new discovery cannot silently add work.
+- **Judge:** approval and start remain distinct, completed work is understandable
+  and recurrence remains separate from finding confidence. Navigation-mode paste
+  hands input visibly to the composer without submitting. Actual paging at 40x12
+  reaches both observations. The Scan result requires explicit acceptance before
+  human false-positive and deferral decisions, local report export and actual
+  no-color restart. An observation missing from a later pass cannot be presented
+  as fixed.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-052517/J73/`
+  has 53 machine checks and 15 separate passing screen judgments. The raw
+  harness remains `REVIEW_REQUIRED`; `manual-review.json` records each capture
+  hash and the fixture limits. This proves the offline operator path, not live
+  discovery quality or complete module readiness.
+
+### J74: Finish retained discovery after an allowance stop
+
+- **Fixture:** J73's real dispatcher and scanner with fully intercepted
+  transport. The accepted context has already committed one call. A five-call
+  total with two protected review calls admits only two discovery requests.
+  The third attempt reaches real shared admission and is refused before fetch.
+- **Journey:** approve three fixed jobs with the displayed net call capacity,
+  start them separately, inspect two completed and one failed pass, acknowledge
+  the partial Scan through its visible keyboard action, record a human decision,
+  export retained findings, exit and restart with no color.
+- **Verify:** no third provider fetch, no new jobs, no implicit allowance
+  increase and no refund of the retained context or completed calls. The failed
+  run keeps its host-captured source receipt and remains failed. Partial
+  selection requires explicit acknowledgement. Restart retains that decision,
+  the five-call ceiling and two protected review calls without retrying work.
+- **Judge:** incomplete work and unknown dollars stay visible. Approval shows
+  existing commitments and discovery capacity after protected review. Partial
+  work can reach triage and local finding export without claiming completion.
+- **Limits:** the partial Scan uses its honest degraded receipt layout. Finding
+  exports still need a full investigation coverage and allowance receipt. No
+  live quality, scope-enforcement or full-interface readiness claim follows.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-055219/J74/`
+  has 51 machine checks and seven separate passing screen judgments. Raw
+  `REVIEW_REQUIRED` is retained alongside `manual-review.json`. The earlier
+  failed source-receipt recovery run is preserved with its failed judgment.
+
+### J75: Report the selected study with durable provenance and accounting
+
+- **Fixture:** J74's real admission stop, accepted generated context and human
+  false-positive decision, with every provider transport intercepted. Findings
+  remain labeled synthetic. No live model, proof execution or patch work runs.
+- **Journey:** open Report from the acknowledged partial Scan, switch explicitly
+  between study and workspace history, export JSON, verify all six formats,
+  inspect full provenance and page top/tail at every supported size. Exit and
+  restart without color, then open Report directly without visiting Campaign.
+- **Verify:** two completed and one failed job, two observations folded into one
+  finding, one human decision, exact accepted context and authenticated source
+  identities. Three committed calls retain two protected review calls. Unknown
+  dollars serialize as null in the report-only accounting receipt. Export starts
+  no new jobs or provider calls. Every format writes a companion receipt;
+  Markdown includes its manifest digest.
+- **Judge:** scope, incomplete coverage, recurrence, source/context and allowance
+  remain readable. `s` chooses history explicitly; `p` reveals provenance and
+  receipt details. Study facts precede long paths. Report omits the process-local
+  cost sidebar that would conflict with the shared investigation accounting.
+  Pager and return controls remain available at 40x12.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-070922/J75/`
+  records 72 machine passes and all 21 separately recorded screen judgments
+  passing, with capture/ANSI hashes and actual dimensions. Raw
+  `REVIEW_REQUIRED` remains unchanged. Earlier runs retain the duplicated
+  historical generation count (`064627`), conflicting wide-screen cost sidebar
+  (`065534`) and unsettled resize capture (`070400`). The last issue required
+  waiting for the actual Report divider rather than footer text.
+- **Limits:** partial Scan is still noisy. No live quality, complete inventory or
+  engine coverage, raw-artifact bundle, revision-bound human verdict or complete
+  reference interaction parity is established by this journey.
+
+### J76: Capability selection, preparation and draft ownership
+
+- **Fixture:** a fresh target and isolated profile, without model or credentials.
+  No tool or provider work executes.
+- **Journey:** open capabilities from Setup, select Deep threat map with arrows,
+  load its command without submitting, clear the draft and retain selection
+  through all six viewport sizes. Confirm exit and repeat without color.
+- **Verify:** MODEL REQUIRED follows the selected row; loading states no work
+  started. Keyboard ownership and footer agree. The deterministic option and
+  explicit tool-model override use shared input preparation without fallback.
+- **Judge:** selection, prerequisites and loading remain understandable at
+  40x12. Draft controls replace picker controls when editing. Registration and
+  a selected model never become an execution-readiness claim.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-075324/J76/`
+  has 22 machine passes and nine separately recorded passing judgments with
+  text/ANSI hashes and actual dimensions. Raw REVIEW_REQUIRED remains intact.
+  Earlier failures preserve the incorrect driver mode (`072734`), conflicting
+  Esc ownership (`074048`) and explicit reopening that reset the resize test's
+  selection (`075131`).
+- **Limits:** preparation and navigation only. This does not certify external
+  dependencies, credentials, scope enforcement, allowance, useful module
+  output or complete reference interaction parity. At 40x12 the full key list
+  remains available through the visible `/keys` control.
+
+### J77: Discovery scope refusal and explicit revision
+
+- **Fixture:** isolated profile and two source directories, without model or
+  credentials. Only planning executes; no scanner or provider starts.
+- **Journey:** request a file through the native secret scanner, attempt a
+  study draft, inspect the refusal across six sizes and page to recovery at
+  40x12. Return to Options, explicitly select its directory and prepare a new
+  three-job, one-worker draft. Exit and repeat the refusal without color.
+- **Verify:** unsupported membership publishes no plan; the revised plan pins
+  `service` in every job, requires approval and has no admitted work or calls.
+- **Judge:** rejection, uncertainty, scope tradeoff and recovery remain readable;
+  a revised draft and completed approval are distinct states.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-083800/J77/`
+  records 19 machine passes and nine separate screen passes with text/ANSI
+  hashes and dimensions. Raw REVIEW_REQUIRED stays unchanged. The earlier
+  `082413` run preserves one machine failure and one manual failure caused by
+  incorrect exit and paging expectations.
+- **Limits:** this proves the refusal and revision route, not the planned
+  first-class scope editor, model access isolation, scan quality or complete
+  reference interaction parity. Per-engine evidence is in
+  [the scope audit](../assessments/discovery-scope-2026-10-05.md).
+
+### J78: Native rule gaps retain observations through Review and restart
+
+- **Fixture:** installed Semgrep with an explicit local rule, one readable
+  matching source file and one incompatible rule. Labeled imported context
+  is accepted through the TUI. No remote rules, model, proof or patch work runs.
+- **Journey:** start one scoped native scan, inspect its partial outcome across
+  six sizes, read the engine gap, explicitly acknowledge partial coverage,
+  review the retained fixture observation, open Report and restart without color.
+- **Verify:** the actual scanner reports an incompatible rule and one observation.
+  Authenticated coverage, source identity and selected scope survive restart.
+  Selection requires an explicit partial acknowledgement. No new jobs start.
+- **Judge:** retained evidence and missing coverage remain distinct, including
+  in narrow layouts. Reading, acceptance and return controls match their actions.
+- **Limits:** this exercises a local rule and an explicit rule omission, not
+  useful default rule coverage or scanner precision. Unreadable source identity
+  still blocks discovery. Fatal engine errors and cancellation need further
+  retention work. Native engines do not consume the accepted threat model;
+  this journey does not certify accepted-context isolation or a report export.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-101159/J78/`
+  records 25 machine passes and 10 separate passing screen judgments at all six
+  sizes, actual 40x12 paging, explicit selection and a fresh no-color restart.
+  `manual-review.json` retains dimensions and text/ANSI/native hashes. The raw
+  `REVIEW_REQUIRED` report and earlier failed runs remain unchanged.
+
+### J79: Standalone partial Semgrep through selection and restart
+
+- **Fixture:** installed Semgrep with explicit local rules and one labeled
+  observation. One incompatible rule creates a real omission. One whole-repository
+  job runs with an isolated home and no model calls or remote rule selectors.
+- **Journey:** inspect the partial result at six sizes, page the concrete
+  omission at 40x12, explicitly acknowledge it, review the observation, open
+  Report and recover Scan after actual exit and a no-color restart.
+- **Verify:** partial envelope and findings lifecycle agree. Authenticated
+  source identity, retained observation and acknowledgement survive restart.
+  No additional scan is created. DAG metadata is not credited as prerequisite
+  execution.
+- **Judge:** the actual omitted rule is readable before acceptance, controls
+  match their actions, and review completeness remains distinct from coverage.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-105209/J79/`
+  records 22 machine passes and nine separate passing screen judgments.
+  Text/ANSI/native hashes and actual dimensions are in `manual-review.json`.
+  Raw `REVIEW_REQUIRED`, recipe failures and their separate judgments remain.
+- **Limits:** no useful default rule, precision, CodeQL execution, accepted
+  context inheritance or report export claim. Source-drift ledger settlement,
+  cancellation, scoped standalone target membership and full interface parity
+  need further evidence.
+
+### J80: Failed and canceled native plans retain observations
+
+- **Fixture:** two separately initiated three-scope plans. Installed Semgrep
+  analyzes scope a using an explicit labeled local rule; b is a labeled failure
+  or cancellation seam, and c must never run. No model calls or remote rules.
+- **Journey:** inspect failed evidence across six sizes, page the omitted scope
+  at 40x12, open the retained observation, explicitly initiate the second plan,
+  cancel it with Ctrl+C, open Report and recover after actual no-color restart.
+- **Verify:** failed/canceled ledger status, authenticated source identity,
+  retained count, stage delta and fixed native job dispositions agree. Each
+  plan invokes a/b only; neither is selected as completed. Both attempts persist.
+- **Judge:** pending-result paging reads evidence without accepting it, failure
+  and cancellation are distinct, retained observations remain unverified, and
+  Report discloses stopped work without a complete coverage claim.
+- **Evidence:** `/tmp/kuzushi-bounded-investigations-tui/20261005-120452/J80/`
+  records 20 machine passes and 12 separately judged passing captures. Actual
+  dimensions and text/ANSI/native hashes are in `manual-review.json`. Raw
+  REVIEW_REQUIRED and failed predecessors remain unchanged.
+- **Limits:** local installed-scanner evidence plus a labeled stop seam does not
+  certify useful defaults, precision, live models, accepted-context inheritance,
+  native resource limits or standalone aborts. The fixture is unversioned;
+  Git SHA transitions, older-run navigation, human decisions and export are not
+  exercised by this journey. Full reference interaction parity remains open.
+
+
+## J81: Scope review, acceptance and changed source
+
+Persona: an operator dividing a repository before approving scan work. Run
+sequentially with the native binary and no provider credentials. Build inventory
+explicitly, inspect all six viewport sizes, split into named scopes while
+preserving a loose root file, rename, read concrete file membership, acknowledge
+inventory limitations and accept boundaries. Change fixture source, attempt an
+edit, and inspect the retained form and unchanged accepted revision. Exit and
+restart with no color, then reopen the durable scope review.
+
+Machine assertions authenticate saved revision numbers and exact memberships,
+require no campaign plans or provider/work reservations, and require live
+alternate-screen captures. Judgment checks cover reading controls, visible
+editing actions, multiline field ownership, source disclosure and narrow-terminal
+craft. This journey does not validate AI proposals, scan compilation, context
+inheritance, real provider spending, or fixed/future findings. The fixture has an
+unborn Git repository, so unavailable SHA remains explicit. It is content-drift
+evidence, not Git SHA transition evidence.
+
+
+## J82: Responsive scope locks and explicit recovery
+
+Run the native TUI sequentially against a labeled filesystem fixture with a
+300-level directory chain and 128 empty sibling directories. A separate bounded
+Python process holds the real inventory lock, then the real strategy ledger lock.
+The operator explicitly creates inventory and refreshes history, resizes to
+40x12, cancels each wait, releases each holder and retries. Machine assertions
+verify a live lock-holder PID, running/canceled module receipts, an unchanged
+proposal queue, a whole-repository draft and no scan plans or provider/work
+reservations. Screen judgments cover responsive cancellation, honest active
+states, retained boundaries and explicit retry. This is local source-metadata
+work, not scanner or live model validation. It does not prove every platform,
+wall-clock bound for blocked filesystem calls, million-entry performance, or
+end-to-end scoped study execution.
+
+
+## J84: Study engine choices and recovery
+
+Run sequentially with an isolated home and no provider credentials. Begin with
+accepted source inventory and imported labeled context, then open a study from
+one accepted boundary. Inspect inherited automatic selection, reject an
+unsupported model engine, read at all six viewport sizes and reach the final
+resource guidance at 40x12. Apply one native engine, paste multiline input,
+cancel a second edit, and prepare three fixed jobs without approving or starting
+them. Exit the process, restart with no color, reopen the saved campaign and
+apply identical choices. The saved plan must remain unchanged.
+
+Judge scope explanations, visible reading position, input ownership, reversible
+choices and restart honesty. Fixture checks require one saved study, three
+unstarted jobs, exact scope membership and no provider/work reservations.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261005-180208/J84/` records
+29 machine passes and eight separate passing screen judgments. The raw report
+remains `REVIEW_REQUIRED`; `manual-review.json` retains text/ANSI/native hashes,
+actual dimensions and limits. Failed runs at `174109`, `175448` and `175737`
+retain their driver and reading defects. No discovery or model request runs.
+This does not certify scanner usefulness, resource ceilings, live model behavior,
+Git SHA comparisons, multi-scope execution or full reference interaction parity.
+See the [selector assessment](../assessments/study-engine-selector-2026-10-05.md).
+
+
+## J86: Expired OAuth refuses inference
+
+Use an isolated home with explicitly labeled expired OAuth credentials and an
+offline refresh transport. Run one approved context job through real prepared
+dispatch. The refresh stub rejects authentication; the bridge must stop before
+inference and retain one failed work attempt, zero provider reservations and the
+same eight-call allowance with two protected review calls.
+
+Inspect the context result at all six sizes. It must show the recorded
+authentication cause, requested output rather than an unenforced token ceiling,
+source/plan identity and unconsumed calls. Page to final recovery guidance at
+40x12, confirm exit when the initial planning choices are unsaved, then restart
+without color and reopen the same result. Recovery starts no new work.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261005-191951/J86/` records
+23 machine passes and five separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains. `manual-review.json` includes text/ANSI/native hashes,
+actual dimensions and bridge source hash. Failed predecessors retain driver
+phrase/exit mistakes and the real missing-failure-reason defect. This is an
+offline auth-failure test; it does not certify live model quality or quota use.
+See the [OAuth recovery assessment](../assessments/oauth-preflight-context-recovery-2026-10-05.md).
+
+## J87: Scoped study filter recovery
+
+The accepted scope picker starts a study over saved global filters. The engine
+picker names the conflict and exposes local clear/apply/cancel actions. Cancel
+restores the prior study; apply retains accounting and creates a new finite
+draft. Six sizes, actual narrow paging, exit and no-color restart are covered.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261005-194110/J87/` records
+28 machine checks and five separate passing screen judgments. Global options
+remain byte-for-byte unchanged, the exact three jobs are retained and no scan
+or model request starts. Raw `REVIEW_REQUIRED` remains. Earlier failed host-home
+checks and clipped small-screen controls are retained in the recovery assessment.
+
+
+## J88: One optional scope proposal
+
+Review the inventory, preserve multiline operator priorities and accepted context,
+then approve one model job under a shared allowance. An intercepted, labeled
+response exercises the real executor without live inference. Review and accept
+the resulting boundaries separately; the next three-pass scan draft retains the
+proposal expense and requires its own approval. Inspect six terminal sizes,
+actual paging, cancellation of model selection, exit and no-color restart.
+
+Machine checks cover immutable source membership, existing exclusions, unchanged
+global context, one request and no discovery. Judge visible controls, boundary
+acceptance and honest spending separately. This does not establish live model
+usefulness or complete monorepo execution.
+
+## J89: Recorded live OAuth failures and bounded work
+
+Use an existing live validation target through `KUZUSHI_DEVEX_TARGET`. Read its
+failed context job, incomplete three-pass campaign and shared allowance in the
+native TUI. No inference or discovery is launched by this journey. Confirm that
+failures, source identity, consumed requests, protected Review calls and unknown
+dollar usage survive actual exit and no-color restart. Host checks compare the
+source bytes and durable reservations before and after. Missing live evidence
+fails setup instead of substituting a synthetic run.
+
+
+J88 final evidence: `/tmp/kuzushi-bounded-investigations-tui/20261005-215320/J88/`.
+35 machine checks and seven passing screen judgments; raw `REVIEW_REQUIRED`
+remains. The response is intercepted and grouping synthetic. No discovery runs.
+See the [scope proposal assessment](../assessments/ai-scope-proposal-2026-10-05.md).
+
+J89 final evidence: `/tmp/kuzushi-bounded-investigations-tui/20261005-215745/J89/`.
+21 machine checks and five passing screen judgments; raw `REVIEW_REQUIRED`
+remains. Existing live receipts survive actual exit and no-color restart with
+unchanged source bytes and ledger counts. The live workflow itself is partial.
+See the [live test assessment](../assessments/live-oauth-bounded-validation-2026-10-05.md).
+
+
+## J90: Rejected context output stays inspectable and unaccepted
+
+Run one approved source-only context job with two explicitly intercepted invalid
+responses. Retain the bounded diagnostic in its own run, keep ordinary failure
+text redacted, and inspect it only through the displayed control. Exercise the
+read-only surface at six viewport sizes, including actual narrow paging.
+Acceptance, launch and new-draft keys must be inert while reading. Exit and
+restart without color, read the same diagnostic and verify unchanged source,
+two request reservations, one work attempt and no accepted context. Missing
+or corrupted evidence must remain unavailable. This is an offline rejection
+journey and does not establish live model quality.
+
+J90 evidence: `/tmp/kuzushi-bounded-investigations-tui/20261005-230615/J90/`
+records thirty machine passes and five separate passing screen judgments.
+Raw `REVIEW_REQUIRED` remains. Changed recorded input produces an inspectable
+unavailable state without revealing unauthenticated model text. Host checks
+retain two intercepted requests, one attempt, unchanged source and no accepted
+context. Failed predecessors remain in the
+[diagnostic assessment](../assessments/rejected-context-output-2026-10-05.md).
+
+## J91: Historical usage and spending tradeoffs
+
+Execute a bounded offline scan with intercepted transport and synthetic
+observations, then inspect one completed pass as usage evidence for a new
+three-job plan. Requests remain visible without dollar pricing. Compare the
+projection with net available scan calls, preserve protected Review capacity,
+read all terms and cancel approval. No future job should start. Verify six
+sizes, actual 40x12 paging, real exit and no-color restart of the frozen basis.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261006-005118/J91/` has
+18 machine passes and five separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains. Four intercepted requests and one allowance revision
+stay unchanged; the selected pass records two requests, all three future jobs
+stay unstarted and source bytes remain unchanged. Failed cold-start, unsupported
+dispatcher and driver predecessors remain in the
+[resource assessment](../assessments/study-resource-preview-2026-10-06.md).
+
+
+## J92: Bounded usage history and older baseline recovery
+
+Inspect an explicitly selected older baseline outside a 100-record recent
+choice window. Read exact usage and uncertain projections without new work.
+Break its metadata, refresh, restore it and refresh again while preserving the
+selection, draft and spending. Complete narrow paging, cancel approval, exit
+and restart without color. The fixture history is explicitly synthetic; model
+transport is intercepted and no live inference occurs.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261006-014637/J92/` records
+23 machine passes and five passing separate screen judgments, with raw
+`REVIEW_REQUIRED` preserved. All six sizes were inspected; 40x12 reaches 44/44.
+The earlier `20261006-014014/J92` retains a failing screen judgment for hidden
+refresh controls and path-led error copy. The final screen exposes reload at
+every width and retry before diagnostic detail. Four intercepted requests, one
+approval revision and zero future starts remain unchanged.
+
+## J93: Real Map artifacts and source framework facts
+
+Build context, extract routes and create a partial deterministic Map through the
+real prepared CLI dispatch with no model runtime. The labeled source fixture
+contains Flask and FastAPI routes and is never executed. Inspect the persisted
+DFD, its partial qualification and the entry-point source frameworks. Read all
+evidence at six sizes, page to the actual 40x12 tail, exit and restart without
+color. Source bytes and zero provider consumption must remain unchanged.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261006-034301/J93/` records
+21 machine passes and five separate passing screen judgments, with raw
+`REVIEW_REQUIRED` retained. The 40x12 detail reaches rows 54-55/55. The first
+run's wrong initial-page expectation and the second run's failing narrow-screen
+judgment remain recorded. Standalone artifacts stay unaccepted across restart;
+the compact overview puts source evidence before complete pageable provenance.
+The earlier successful reading and acceptance captures remain too. See the
+[Map functionality assessment](../assessments/map-module-functionality-2026-10-06.md)
+for hashes, verification and remaining acceptance limits.
+
+## J94: Existing context, partial Map acceptance and exact study inheritance
+
+Produce a real partial deterministic Map and a separately active imported
+context through CLI dispatch. Inspect the first exact revision, review its Map
+without regeneration, acknowledge partial evidence and draft three one-worker
+jobs. Retain the active second context. Read all six sizes, page the 40x12 tail,
+exit and restart without color. No study is approved, no source is executed and
+no provider call occurs.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261006-050744/J94/` records
+18 machine passes and five separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains. Narrow paging reaches 51/51. Earlier missing
+qualification, wrong study-row capture and premature result capture remain
+recorded. The final wait requires the real acknowledgement control, and host
+checks retain accepted partial Map, exact draft context, unchanged source and
+active context, and zero provider work. See the
+[context handoff assessment](../assessments/existing-context-map-2026-10-06.md)
+for native hashes and remaining acceptance limits.
+
+## J95: Accepted scope in the study report
+
+Accept a whole-repository scope with one operator exclusion through real
+`pack:scopes` dispatch. Plan a three-pass, one-worker study from that boundary,
+approve its allowance and run the three offline `secret-scan` jobs. Without any
+refresh key, the completed Scan must appear as a result to select. Read the
+Report boundary and its provenance at all six sizes, export JSON, restart
+without color and export again. Move the accepted scope evidence aside and
+confirm that study export is blocked while workspace history, naming every run,
+remains an explicit choice. Finally change an unrelated source file: Report must
+still show the earlier study, labeled as recorded on earlier source, export it,
+and the Scan page must show the same attempt as earlier-source history. Source
+is labeled and never executed; no provider call occurs.
+
+Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261006-101326/J95/` records
+55 machine passes and nine passing screen judgments. Raw `REVIEW_REQUIRED`
+remains. Run `20261006-061350` keeps the original failing source-change
+judgment, and earlier runs keep their journey-script failures. See the
+[report scope assessment](../assessments/report-scope-2026-10-06.md).

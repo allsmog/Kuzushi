@@ -12,6 +12,7 @@ use crate::capabilities::campaign::trend::{
     workspace_campaign_spend_report,
 };
 use crate::findings::{extract_cwe, Finding, ReviewDecisionRecord};
+use crate::workspace::InvestigationReportReceipt;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -23,20 +24,41 @@ const DRIVER_NAME: &str = "kuzushi";
 const DRIVER_INFORMATION_URI: &str = "https://github.com/allsmog/Kuzushi";
 const DEFAULT_OUTPUT: &str = "reports/confirmed-findings.sarif";
 
+/// What one export covers: workspace history, or a single study whose
+/// investigation receipt travels with the results.
+pub struct ConfirmedSarifSelection<'a> {
+    pub findings: &'a [Finding],
+    pub records: &'a [ReviewDecisionRecord],
+    pub investigation: Option<&'a InvestigationReportReceipt>,
+}
+
 pub fn export_confirmed_sarif(
     root: &Path,
     input: &Value,
-    findings: &[Finding],
-    records: &[ReviewDecisionRecord],
+    selection: &ConfirmedSarifSelection<'_>,
 ) -> Result<Value> {
-    let confirmed = confirmed_findings(findings, records);
+    let confirmed = confirmed_findings(selection.findings, selection.records);
     let trend = trend_json(&trend_metrics_with_spend(
-        records,
+        selection.records,
         workspace_campaign_spend_report(root),
     ));
-    let document = sarif_document(&confirmed, trend.clone());
+    let mut document = sarif_document(&confirmed, trend.clone());
+    attach_investigation(&mut document, selection.investigation)?;
     let path = write_sarif(root, input, &document)?;
     Ok(export_result(&path, &confirmed, trend))
+}
+
+/// Same location `workspace:export-findings` uses for SARIF receipts.
+fn attach_investigation(
+    document: &mut Value,
+    investigation: Option<&InvestigationReportReceipt>,
+) -> Result<()> {
+    let Some(receipt) = investigation else {
+        return Ok(());
+    };
+    document["runs"][0]["properties"]["kuzushiExport"]["investigation"] =
+        serde_json::to_value(receipt).context("Could not serialize investigation receipt")?;
+    Ok(())
 }
 
 /// A finding is exported iff its latest review decision is `Confirmed` or
@@ -144,8 +166,9 @@ fn write_sarif(root: &Path, input: &Value, document: &Value) -> Result<PathBuf> 
         .with_context(|| format!("{} has no parent directory", path.display()))?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("Could not create {}", parent.display()))?;
-    let body = serde_json::to_vec_pretty(document).context("Could not serialize SARIF")?;
-    std::fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))?;
+    let body = serde_json::to_string_pretty(document).context("Could not serialize SARIF")?;
+    crate::fs_atomic::write_atomic(&path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))?;
     Ok(path)
 }
 
@@ -202,7 +225,18 @@ mod tests {
     fn export(root: &Path, store: &FindingStore, input: Value) -> Value {
         let findings = store.list_all_findings().unwrap();
         let records = store.list_review_decisions_for_findings(&findings).unwrap();
-        export_confirmed_sarif(root, &input, &findings, &records).unwrap()
+        export_confirmed_sarif(root, &input, &history(&findings, &records)).unwrap()
+    }
+
+    fn history<'a>(
+        findings: &'a [Finding],
+        records: &'a [ReviewDecisionRecord],
+    ) -> ConfirmedSarifSelection<'a> {
+        ConfirmedSarifSelection {
+            findings,
+            records,
+            investigation: None,
+        }
     }
 
     fn written_document(result: &Value) -> Value {
@@ -325,8 +359,7 @@ mod tests {
             let error = export_confirmed_sarif(
                 tmp.path(),
                 &json!({ "output": output }),
-                &findings,
-                &records,
+                &history(&findings, &records),
             )
             .unwrap_err()
             .to_string();

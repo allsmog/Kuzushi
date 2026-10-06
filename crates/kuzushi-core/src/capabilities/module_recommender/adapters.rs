@@ -180,6 +180,7 @@ fn strategy_proposal_from_recommendation(
         source_run_id: run_id,
         tool: Some(recommendation.tool.clone()),
         next_input: Some(recommendation.next_input.clone()),
+        scope_proposal_ref: None,
         created_at_ms: now,
         updated_at_ms: now,
     }

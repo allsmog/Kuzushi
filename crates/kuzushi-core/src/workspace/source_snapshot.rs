@@ -3,6 +3,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
 
+#[derive(Debug, Clone)]
 pub(crate) struct SourceSnapshot {
     snapshot_hash: String,
     tree_hash: String,
@@ -17,7 +18,8 @@ pub(crate) fn run_source_bound_tool(
     run: impl FnOnce() -> Result<Value>,
 ) -> Result<Value> {
     let snapshot = SourceSnapshot::capture(ctx, tool, target)?;
-    Ok(snapshot.finish(ctx, tool, target, run()?))
+    let output = snapshot.bind_result(run())?;
+    Ok(snapshot.finish(ctx, tool, target, output))
 }
 
 fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
@@ -29,8 +31,26 @@ fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
 }
 
 impl SourceSnapshot {
+    pub(crate) fn hashes(&self) -> (&str, &str) {
+        (&self.snapshot_hash, &self.tree_hash)
+    }
+
+    /// Preserve the host's pre-execution identity through error settlement.
+    pub(crate) fn bind_result<T>(&self, result: Result<T>) -> Result<T> {
+        result.map_err(|cause| {
+            anyhow::Error::new(SourceBoundFailure {
+                snapshot: self.clone(),
+                cause,
+            })
+        })
+    }
+
     pub(crate) fn finish(
-        self, ctx: &ToolExecutionContext<'_>, tool: &str, target: &Path, mut output: Value,
+        self,
+        ctx: &ToolExecutionContext<'_>,
+        tool: &str,
+        target: &Path,
+        mut output: Value,
     ) -> Value {
         if let Err(error) = self.ensure_current(ctx, tool, target) {
             mark_source_unverified(&mut output, &error);
@@ -50,9 +70,10 @@ impl SourceSnapshot {
                 emit_source_progress(ctx, tool, files);
             }
         };
-        let snapshot = crate::incremental_index::register_workspace_tree_identity_with_observer(
+        let snapshot = crate::incremental_index::register_workspace_tree_identity_cancellable(
             &workspace,
             &mut observer,
+            &|| ctx.is_cancelled(),
         )?;
         Ok(Self {
             snapshot_hash: snapshot.snapshot_hash,
@@ -72,9 +93,10 @@ impl SourceSnapshot {
                 emit_source_progress(ctx, tool, files);
             }
         };
-        let current = crate::incremental_index::current_workspace_tree_hash_with_observer(
+        let current = crate::incremental_index::current_workspace_tree_hash_cancellable(
             target,
             &mut observer,
+            &|| ctx.is_cancelled(),
         )?;
         anyhow::ensure!(
             current == self.tree_hash,
@@ -90,6 +112,32 @@ impl SourceSnapshot {
         }
         result
     }
+}
+
+#[derive(Debug)]
+struct SourceBoundFailure {
+    snapshot: SourceSnapshot,
+    cause: anyhow::Error,
+}
+
+impl std::fmt::Display for SourceBoundFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.cause, formatter)
+    }
+}
+
+impl std::error::Error for SourceBoundFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.cause.as_ref())
+    }
+}
+
+pub(crate) fn failed_source_snapshot(error: &anyhow::Error) -> Option<SourceSnapshot> {
+    error.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<SourceBoundFailure>()
+            .map(|failure| failure.snapshot.clone())
+    })
 }
 
 fn emit_source_progress(ctx: &ToolExecutionContext<'_>, tool: &str, files: usize) {

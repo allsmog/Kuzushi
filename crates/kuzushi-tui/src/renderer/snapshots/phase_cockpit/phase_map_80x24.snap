@@ -23,7 +23,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │OVERALL DATA FLOW                                                             │
 │external → application · 1 flow · boundary                                    │
 └──────────────────────────────────────────────────────────────────────────────┘
-./phase-target · rev:unknown · context:current · threat-model:unverified ·...
+unverified · ./phase-target · rev:unknown · context:current · indexed=3...
 ⛭ autonomy:fix · run route · ⠋ context:b... 6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

@@ -20,7 +20,7 @@ impl FindingStore {
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let conn = crate::sqlite_connection::open_read_only_file(path)?;
-        validate_schema_version(&conn)?;
+        crate::storage_v3::require_initialized_schema(&conn)?;
         Ok(Self {
             conn,
             db_path: Some(path.to_path_buf()),
@@ -56,38 +56,8 @@ impl FindingStore {
         configure_connection(&self.conn)?;
         create_schema(&self.conn)?;
         crate::storage_v3::create_projection_schema(&self.conn)?;
-        record_schema_version(&self.conn)?;
         Ok(())
     }
-}
-
-const FINDINGS_SCHEMA_VERSION: i32 = 1;
-
-fn record_schema_version(conn: &Connection) -> Result<()> {
-    let current = schema_version(conn)?;
-    anyhow::ensure!(
-        current <= FINDINGS_SCHEMA_VERSION,
-        "findings DB schema version {current} is newer than supported version {FINDINGS_SCHEMA_VERSION}"
-    );
-    if current == FINDINGS_SCHEMA_VERSION {
-        return Ok(());
-    }
-    conn.pragma_update(None, "user_version", FINDINGS_SCHEMA_VERSION)
-        .context("Could not record findings DB schema version")
-}
-
-fn validate_schema_version(conn: &Connection) -> Result<()> {
-    let current = schema_version(conn)?;
-    anyhow::ensure!(
-        current == FINDINGS_SCHEMA_VERSION,
-        "findings DB schema version {current} requires initialization at version {FINDINGS_SCHEMA_VERSION}"
-    );
-    Ok(())
-}
-
-fn schema_version(conn: &Connection) -> Result<i32> {
-    conn.pragma_query_value(None, "user_version", |row| row.get(0))
-        .context("Could not read findings DB schema version")
 }
 
 /// Concurrency posture for the findings DB. Scan workers, the shell, and MCP

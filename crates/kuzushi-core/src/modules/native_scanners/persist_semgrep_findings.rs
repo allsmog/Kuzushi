@@ -5,6 +5,7 @@ pub(in crate::modules) fn persist_semgrep_findings(
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
     index_static_evidence: bool,
+    scan_errors: &[String],
 ) -> Result<Option<SemgrepPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
@@ -25,7 +26,7 @@ pub(in crate::modules) fn persist_semgrep_findings(
     };
 
     let run_id = ctx.finding_run_id();
-    persist_findings_run(ctx, store, &run_id, target, findings)?;
+    persist_findings_run_with_coverage(ctx, store, &run_id, target, findings, scan_errors)?;
 
     Ok(Some(SemgrepPersistedRun {
         run_id,
@@ -40,6 +41,7 @@ pub(in crate::modules) fn persist_codeql_findings(
     ctx: &ToolExecutionContext<'_>,
     sarif_documents: &[String],
     index_static_evidence: bool,
+    scan_errors: &[String],
 ) -> Result<Option<CodeqlPersistedRun>> {
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
@@ -53,7 +55,7 @@ pub(in crate::modules) fn persist_codeql_findings(
     };
 
     let run_id = ctx.finding_run_id();
-    persist_findings_run(ctx, store, &run_id, target, findings)?;
+    persist_findings_run_with_coverage(ctx, store, &run_id, target, findings, scan_errors)?;
 
     Ok(Some(CodeqlPersistedRun {
         run_id,
@@ -129,6 +131,29 @@ fn persist_findings_run(
     )
 }
 
+fn persist_findings_run_with_coverage(
+    ctx: &ToolExecutionContext<'_>,
+    store: &FindingStore,
+    run_id: &str,
+    target: &Path,
+    findings: &[Finding],
+    scan_errors: &[String],
+) -> Result<()> {
+    let status = if scan_errors.is_empty() {
+        crate::run_lifecycle::RunItemStatus::Completed
+    } else {
+        crate::run_lifecycle::RunItemStatus::Partial
+    };
+    crate::findings::commit_observed_findings_with_status(
+        store,
+        ctx.run_observation().as_ref(),
+        run_id,
+        target,
+        findings,
+        status,
+    )
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -182,7 +207,10 @@ mod tests {
         assert_eq!((delta.added, delta.updated), (1, 0));
     }
 
-    fn last_finding_delta(target: &Path, run_id: &str) -> crate::run_lifecycle::FindingDeltaSummary {
+    fn last_finding_delta(
+        target: &Path,
+        run_id: &str,
+    ) -> crate::run_lifecycle::FindingDeltaSummary {
         crate::run_lifecycle::load_run_projection(target, run_id)
             .unwrap()
             .projection
@@ -201,3 +229,6 @@ mod tests {
         path
     }
 }
+
+#[cfg(all(test, unix))]
+mod partial_tests;

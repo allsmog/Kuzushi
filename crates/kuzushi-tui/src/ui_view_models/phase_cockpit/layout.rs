@@ -178,15 +178,7 @@ pub(crate) fn phase_presentation_plan(
     let specs = phase_surface_specs(body);
     let primary = specs[0].id;
     let (density, visible) = visible_specs(&specs, area, zoomed, attention);
-    let planned_area =
-        if density == LayoutDensity::Guided && prove_reading_composition(body).is_none() {
-            Rect {
-                height: area.height.min(5),
-                ..area
-            }
-        } else {
-            area
-        };
+    let planned_area = guided_phase_area(body, density, area, attention);
     let composition = screen_composition(body, density, &visible, planned_area);
     let surfaces = composition
         .solve(planned_area)
@@ -201,6 +193,26 @@ pub(crate) fn phase_presentation_plan(
         composition,
         available_surfaces: specs,
         surfaces,
+    }
+}
+
+fn guided_phase_area(
+    body: &PhaseCockpitBody,
+    density: LayoutDensity,
+    area: Rect,
+    attention: AttentionMode,
+) -> Rect {
+    if density != LayoutDensity::Guided || prove_reading_composition(body).is_some() {
+        return area;
+    }
+    if attention == AttentionMode::ResultReady
+        && matches!(body, PhaseCockpitBody::Scan(model) if !model.engine_outcomes.is_empty())
+    {
+        return area;
+    }
+    Rect {
+        height: area.height.min(5),
+        ..area
     }
 }
 

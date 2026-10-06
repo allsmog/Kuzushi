@@ -138,12 +138,17 @@ mod tests {
 
     #[test]
     fn only_refine_requests_threat_model_feedback() {
-        let refine = SastScanRequests::from_input(&json!({"threatModelFeedback": "refine"})).unwrap();
+        let refine =
+            SastScanRequests::from_input(&json!({"threatModelFeedback": "refine"})).unwrap();
         let off = SastScanRequests::from_input(&json!({"threatModelFeedback": "off"})).unwrap();
 
         assert!(refine.threat_model_feedback);
         assert!(!off.threat_model_feedback);
-        assert!(!SastScanRequests::from_input(&json!({})).unwrap().threat_model_feedback);
+        assert!(
+            !SastScanRequests::from_input(&json!({}))
+                .unwrap()
+                .threat_model_feedback
+        );
     }
 
     #[test]

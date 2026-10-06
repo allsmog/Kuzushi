@@ -410,7 +410,7 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert_completed_result(
             &result,
             "threat-model:build complete",
-            ["normalized threat model", "persistent threat model"],
+            ["normalized threat model", "immutable threat model"],
         );
         assert!(result
             .get("output")
@@ -558,7 +558,8 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert!(output.contains(&target));
         assert!(output.contains("partial — inadequate evidence"));
         assert!(output.contains("previous model preserved"));
-        assert!(output.contains("Cost:     >=$0.0000 (metering incomplete)"));
+        assert!(output.contains("Cost:     cost unavailable (metering incomplete)"), "{output}");
+        assert!(!output.contains("Cost:     >=$0.0000"), "{output}");
         assert!(!output.contains("threat-model:build complete"));
         let lifecycle = crate::run_lifecycle::read_run_items(workspace.root(), run_id)
             .unwrap()
@@ -582,7 +583,7 @@ pub fn accepts_scope(scope: &str) -> bool {
             result.pointer("/data/persisted").and_then(Value::as_bool),
             Some(false)
         );
-        assert!(!has_artifact_label(&result, "persistent threat model"));
+        assert!(!has_artifact_label(&result, "immutable threat model"));
         assert_eq!(fs::read(persistent_path).unwrap(), previous_bytes);
     }
 
@@ -13744,7 +13745,11 @@ pub fn accepts_scope(scope: &str) -> bool {
             .and_then(Value::as_str)
             .is_some_and(|summary| summary.starts_with(summary_prefix)));
         for label in artifact_labels {
-            assert!(has_artifact_label(value, label));
+            assert!(
+                has_artifact_label(value, label),
+                "missing artifact {label:?}: {:#}",
+                value["artifacts"]
+            );
         }
     }
 

@@ -1,6 +1,6 @@
 use crate::ui_view_models::{ScanAttemptModel, ScanEngineOutcomeModel};
 use crate::{ShellApp, ViewDataState};
-use kuzushi_core::run_artifacts::{PhaseStageOutcome, PhaseStageReceipt, ScanEngineStageOutcome};
+use kuzushi_core::run_artifacts::{PhaseStageReceipt, ScanEngineStageOutcome};
 use kuzushi_core::workflow_attempts::{
     PhaseAttemptOutcome, PhaseAttemptRecord, PhaseTargetSnapshot,
 };
@@ -17,22 +17,20 @@ pub(super) fn scan_attempt_from_stage(
         .finding_delta
         .added
         .saturating_add(scan.finding_delta.updated);
+    let run_refs = typed_run_refs(receipt, record);
+    let facts = app.attempt_finding_facts(&run_refs, Some(findings));
     Some(ScanAttemptModel {
         attempt_id: Some(record.completed.attempt_id.clone()),
         run_id: typed_run_id(receipt, record),
-        run_refs: typed_run_refs(receipt, record),
-        outcome: stage_outcome_label(receipt.outcome).to_string(),
+        run_refs,
+        outcome: attempt_outcome_label(record.completed.outcome).to_string(),
         disposition: disposition.to_string(),
         freshness: attempt_freshness(app, &scan.target_snapshot),
-        findings: Some(findings),
-        findings_observed: None,
+        findings: facts.count,
+        findings_observed: facts.observed,
         findings_added: Some(scan.finding_delta.added),
         findings_updated: Some(scan.finding_delta.updated),
-        severity_counts: scan
-            .severity_counts
-            .iter()
-            .map(|bucket| (bucket.severity.as_str().to_string(), bucket.count))
-            .collect(),
+        severity_counts: typed_severity_counts(scan, facts.severity_counts),
         artifact_count: scan.artifact_delta.len(),
         artifact_paths: typed_artifact_paths(scan),
         duration_secs: Some(scan.duration_ms.saturating_add(999) / 1_000),
@@ -40,6 +38,19 @@ pub(super) fn scan_attempt_from_stage(
         cost_complete: scan.cost.map(|cost| cost.complete),
         error: typed_scan_error(scan),
     })
+}
+
+fn typed_severity_counts(
+    scan: &kuzushi_core::run_artifacts::ScanStageData,
+    ledger: Vec<(String, u64)>,
+) -> Vec<(String, u64)> {
+    if !ledger.is_empty() {
+        return ledger;
+    }
+    scan.severity_counts
+        .iter()
+        .map(|bucket| (bucket.severity.as_str().to_string(), bucket.count))
+        .collect()
 }
 
 fn typed_run_id(receipt: &PhaseStageReceipt, record: &PhaseAttemptRecord) -> String {
@@ -190,15 +201,6 @@ fn attempt_outcome_label(outcome: PhaseAttemptOutcome) -> &'static str {
         PhaseAttemptOutcome::Blocked => "blocked",
         PhaseAttemptOutcome::Failed => "failed",
         PhaseAttemptOutcome::Canceled => "canceled",
-    }
-}
-
-fn stage_outcome_label(outcome: PhaseStageOutcome) -> &'static str {
-    match outcome {
-        PhaseStageOutcome::Completed => "completed",
-        PhaseStageOutcome::Partial => "partial",
-        PhaseStageOutcome::Failed => "failed",
-        PhaseStageOutcome::Skipped => "skipped",
     }
 }
 

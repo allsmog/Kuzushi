@@ -499,6 +499,7 @@ fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::V
         "kuzushiReviewDecisionConflict": record.review_decision_conflict,
         "kuzushiReviewDecisionReason": record.review_decision_reason,
         "kuzushiReviewDecisionAuthor": record.review_decision_author,
+        "kuzushiReviewDecisionBasis": record.review_decision_basis,
         "kuzushiTriageVerdict": record.triage_verdict,
         "kuzushiSuppressed": record.suppressed,
         "kuzushiSnoozedUntil": record.snoozed_until,

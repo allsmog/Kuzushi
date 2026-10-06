@@ -104,6 +104,7 @@ fn deterministic_dispatch_validates_allowance_without_needing_model_or_spending(
     assert!(registry.execute_tool("context:build", input.clone(), &ctx).is_err());
     approve(&registry, &ctx, approval()).unwrap();
     let result = registry.execute_tool("context:build", input, &ctx).unwrap();
+    assert_eq!(result["allowanceRef"], allowance_ref());
     assert!(result.get("data").is_some());
     assert_eq!(open_ledger(&ctx).unwrap().allowance_snapshot("study").unwrap().committed_calls, 0);
     assert!(workspace.root().join(".kuzushi/context-snapshot.json").exists());
@@ -116,6 +117,19 @@ fn descriptor_governance_is_removed_only_from_executor_input() {
     assert!(input.get("allowanceRef").is_some());
     assert_eq!(stripped.as_ref(), &json!({"model":MODEL,"enrichment":true}));
     assert!(matches!(executor_input(stripped.as_ref()), std::borrow::Cow::Borrowed(_)));
+}
+
+#[test]
+fn engines_cannot_forge_result_accounting_and_invalid_references_are_rejected() {
+    let forged = json!({"schemaVersion":1,"investigationId":"foreign","revision":4,"workId":"fake"});
+    let mut result = json!({"ok":true,"data":{"kept":true},"allowanceRef":forged});
+    attach_result_reference(&json!({}), &mut result).unwrap();
+    assert!(result.get("allowanceRef").is_none());
+    result["allowanceRef"] = forged;
+    attach_result_reference(&json!({"allowanceRef":allowance_ref()}), &mut result).unwrap();
+    assert_eq!(result["allowanceRef"], allowance_ref());
+    assert_eq!(result["data"], json!({"kept":true}));
+    assert!(attach_result_reference(&json!({"allowanceRef":null}), &mut result).is_err());
 }
 
 struct UnsupportedRuntime;

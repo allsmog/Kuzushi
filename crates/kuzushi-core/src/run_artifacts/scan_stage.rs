@@ -113,6 +113,11 @@ pub fn load_scan_stage_data(
     target: impl AsRef<Path>,
     run_id: &str,
 ) -> Result<Option<PhaseStageReceipt>> {
+    if let result_receipt::ScanReceiptSource::Typed(receipt) =
+        result_receipt::load(target.as_ref(), run_id)?
+    {
+        return Ok(receipt);
+    }
     let read = read_run_artifact_text(target, run_id, SAST_PHASE_STAGES_JSONL_FILE);
     let (_, body) = match read {
         RunArtifactRead::Ready { path, value } => (path, value),
@@ -132,6 +137,26 @@ pub fn load_scan_stage_data(
         .rev()
         .find(|receipt| receipt.phase == WorkflowPhase::Scan && receipt.scan.is_some()))
 }
+
+/// Include engine observation runs while keeping the accepted parent runs intact.
+/// This reads one level of recorded receipt membership and starts no work.
+pub fn scan_finding_run_refs(target: &Path, parent_runs: &[String]) -> Result<Vec<String>> {
+    let mut runs = parent_runs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    for parent in parent_runs {
+        if let Some(receipt) = load_scan_stage_data(target, parent)? {
+            for run in &receipt.run_refs {
+                crate::RunId::parse(run).context("invalid Scan observation run reference")?;
+            }
+            runs.extend(receipt.run_refs);
+        }
+    }
+    Ok(runs.into_iter().collect())
+}
+
+mod result_receipt;
 
 mod scope;
 pub(crate) use scope::scan_paths_cover_file;

@@ -16,6 +16,19 @@ pub(crate) fn verify_threat_model_adapter(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let workspace_root = verification_root(ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "threat-model:verify",
+        workspace_root,
+        || verify_document_for_root(input, workspace_root, ctx.run_id()),
+    )
+}
+
+fn verify_document_for_root(
+    input: Value,
+    workspace_root: &Path,
+    run_id: Option<String>,
+) -> Result<Value> {
     let roots = read_build_roots(&input, workspace_root)?;
     let selected_scope = roots
         .scope
@@ -32,6 +45,7 @@ pub(crate) fn verify_threat_model_adapter(
         selected_ref.as_ref(),
         &selected_scope,
         write,
+        run_id,
     )?;
     Ok(verification_result(
         verification,
@@ -67,9 +81,10 @@ fn write_verified_revision(
     selected_ref: Option<&ThreatModelRef>,
     selected_scope: &ScopeRef,
     write: bool,
+    run_id: Option<String>,
 ) -> Result<Option<ThreatModelRef>> {
     let written = write
-        .then(|| persist_verified_revision(root, document, selected_ref, selected_scope))
+        .then(|| persist_verified_revision(root, document, selected_ref, selected_scope, run_id))
         .transpose()?
         .map(|committed| committed.model_ref);
     Ok(written)
@@ -108,6 +123,7 @@ fn persist_verified_revision(
     document: &Value,
     selected_ref: Option<&ThreatModelRef>,
     selected_scope: &ScopeRef,
+    run_id: Option<String>,
 ) -> Result<ThreatModelCommitResult> {
     let manifest = open_writable_threat_model_store(root)?;
     let model_ref = selected_ref
@@ -131,7 +147,7 @@ fn persist_verified_revision(
             methodology: model.methodology.clone(),
             source: ThreatModelRevisionSource::Verify,
             source_revision_id: Some(model_ref.revision_id),
-            run_id: None,
+            run_id,
             activate: None,
             actor: "tool:threat-model:verify".to_string(),
         },
@@ -199,10 +215,10 @@ pub(crate) fn import_threat_model_adapter(
     let mut document = normalize_document(raw, &methodology)?;
     require_complete_security_context_links(&document)?;
     stamp_provenance(&mut document, root, "import");
-    bind_import_to_current_tree(&mut document, root)?;
+    let snapshot = bind_import_to_current_tree(&mut document, root)?;
     let verification = verify_threat_model_document(&document, root)?;
     stamp_verification(&mut document, &verification);
-    let model_ref = persist_imported_document(root, &document, &methodology, &input)?;
+    let model_ref = persist_imported_document(root, &document, &methodology, &input, ctx.run_id())?;
     let output = format!(
         "threat-model:import saved ({}; {} threats, verification {})",
         methodology,
@@ -219,13 +235,21 @@ pub(crate) fn import_threat_model_adapter(
             "methodology": methodology,
             "verification": verification,
             "modelRef": model_ref,
+            "snapshot": {"snapshotHash": snapshot.snapshot_hash, "treeHash": snapshot.tree_hash},
+            "document": document,
         }),
     ))
 }
 
-fn bind_import_to_current_tree(document: &mut Value, root: &Path) -> Result<()> {
-    let tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
-        .context("Could not authenticate the imported threat model's target tree")?;
+fn bind_import_to_current_tree(
+    document: &mut Value,
+    root: &Path,
+) -> Result<crate::incremental_index::IndexedWorkspaceSnapshot> {
+    let workspace = crate::WorkspaceTarget::new(root)?;
+    workspace.ensure_state_dir()?;
+    crate::FindingStore::open(workspace.findings_db_path())?;
+    let snapshot = crate::incremental_index::index_workspace_snapshot(&workspace)
+        .context("Could not authenticate the imported threat model's target snapshot")?;
     let object = document
         .as_object_mut()
         .context("normalized threat model must be an object")?;
@@ -234,8 +258,8 @@ fn bind_import_to_current_tree(document: &mut Value, root: &Path) -> Result<()> 
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .context("normalized threat-model provenance must be an object")?;
-    provenance.insert("treeHash".to_string(), json!(tree_hash));
-    Ok(())
+    provenance.insert("treeHash".to_string(), json!(snapshot.tree_hash));
+    Ok(snapshot)
 }
 
 fn persist_imported_document(
@@ -243,6 +267,7 @@ fn persist_imported_document(
     document: &Value,
     methodology: &str,
     input: &Value,
+    run_id: Option<String>,
 ) -> Result<ThreatModelRef> {
     let force = input.get("force").and_then(Value::as_bool).unwrap_or(false);
     prepare_import_store(root, force)?;
@@ -259,18 +284,17 @@ fn persist_imported_document(
         methodology: methodology.to_string(),
         source: ThreatModelRevisionSource::Import,
         source_revision_id: None,
-        run_id: None,
-        activate: Some(input.get("activate").and_then(Value::as_bool).unwrap_or(true)),
+        run_id,
+        activate: Some(
+            input
+                .get("activate")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        ),
         actor: "tool:threat-model:import".to_string(),
     };
     let committed = commit_threat_model_revision(root, document, request)?;
-    record_threat_model_version_with_ref(
-        root,
-        document,
-        "import",
-        None,
-        &committed.model_ref,
-    )?;
+    record_threat_model_version_with_ref(root, document, "import", None, &committed.model_ref)?;
     Ok(committed.model_ref)
 }
 
@@ -290,7 +314,9 @@ fn prepare_import_store(root: &Path, force: bool) -> Result<ThreatModelManifest>
 
 fn discard_divergent_import_mirror(root: &Path) -> Result<()> {
     let manifest = load_threat_model_manifest(root)?.context("threat-model manifest is missing")?;
-    let active = manifest.active.context("threat-model manifest has no active revision")?;
+    let active = manifest
+        .active
+        .context("threat-model manifest has no active revision")?;
     activate_threat_model(
         root,
         &active.model_id,
@@ -345,6 +371,117 @@ mod verify_import_tests {
     use super::*;
     use crate::modules::ExecutionAuthorization;
     use crate::{V2Config, WorkspaceTarget};
+
+    fn accept_import(workspace: &WorkspaceTarget, config: &V2Config) -> ThreatModelRef {
+        use crate::run_artifacts::*;
+        use crate::workflow_attempts::*;
+        let root = workspace.root();
+        let registry = crate::modules::ModuleRegistry::with_v2_builtins();
+        let context = ctx(config, workspace);
+        let input = json!({"document":hand_written_document(root),"label":"Accepted Alpha"});
+        let record = ToolRunRecord::new(root, "accepted-import", "tool", "threat-model:import");
+        try_record_tool_run_started_with_reproducibility(record, &input, None, None, vec![])
+            .unwrap();
+        let observation =
+            crate::run_lifecycle::RunObservationHandle::jsonl(root, "accepted-import").unwrap();
+        let call = crate::modules::ApplicationToolCall::start(
+            observation.clone(),
+            "threat-model:import",
+            &input,
+            None,
+            None,
+        )
+        .unwrap();
+        let output = registry
+            .execute_tool("threat-model:import", input, &context)
+            .unwrap();
+        let reference = serde_json::from_value(output["data"]["modelRef"].clone()).unwrap();
+        let completion = call.completion_from_result(&Ok(output.clone()));
+        try_record_tool_run_complete_settled(record, &output, &observation, completion).unwrap();
+        drop(observation);
+        let completed = PhaseAttemptCompleted::new(
+            crate::WorkflowPhase::Map,
+            vec!["accepted-import".into()],
+            PhaseTargetSnapshot::capture(root),
+            PhaseAttemptOutcome::Completed,
+        )
+        .with_attempt_id(crate::run_lifecycle::RunAttemptId::new().to_string());
+        append_phase_attempt_completed_with_v2(root, completed.clone()).unwrap();
+        append_phase_attempt_disposition(
+            root,
+            PhaseAttemptDispositionRecorded::new(
+                completed.attempt_id,
+                PhaseAttemptDisposition::Selected {
+                    acknowledged_partial: false,
+                },
+            ),
+        )
+        .unwrap();
+        reference
+    }
+
+    #[test]
+    fn accepted_import_supplies_exact_context_to_study_after_active_model_changes() {
+        let (_temp, workspace) = fixture();
+        let config = V2Config::default();
+        let alpha = accept_import(&workspace, &config);
+        let registry = crate::modules::ModuleRegistry::with_v2_builtins();
+        let context = ctx(&config, &workspace);
+        let beta = registry
+            .execute_tool(
+                "threat-model:import",
+                json!({
+                    "document":hand_written_document(workspace.root()), "label":"Active Beta"
+                }),
+                &context,
+            )
+            .unwrap();
+        let result = registry
+            .execute_tool(
+                "campaign:study",
+                json!({"campaignId":"accepted-map-study",
+            "scanInput":{"taskMode":"manual","tasks":["secret-scan"]}}),
+                &context,
+            )
+            .unwrap();
+        assert!(result["ok"].as_bool().unwrap());
+        let active = load_active_threat_model(workspace.root())
+            .unwrap()
+            .unwrap()
+            .model_ref;
+        assert_eq!(json!(active), beta["data"]["modelRef"]);
+        assert_ne!(active, alpha);
+        let receipt = crate::capabilities::campaign::load_study_plan_receipt(
+            workspace.root(),
+            "accepted-map-study",
+        )
+        .unwrap();
+        assert_eq!(receipt.scan_input["threatModelRef"], json!(alpha));
+        assert_eq!(receipt.job_count, 3);
+    }
+
+    #[test]
+    fn changed_source_requires_fresh_map_or_explicit_context_for_new_study() {
+        let (_temp, workspace) = fixture();
+        let config = V2Config::default();
+        let alpha = accept_import(&workspace, &config);
+        std::fs::write(workspace.root().join("src/app.py"), "changed source\n").unwrap();
+        let registry = crate::modules::ModuleRegistry::with_v2_builtins();
+        let context = ctx(&config, &workspace);
+        let input = json!({"campaignId":"source-changed-study", "scanInput":{"taskMode":"manual","tasks":["secret-scan"]}});
+        let error = registry
+            .execute_tool("campaign:study", input.clone(), &context)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("earlier source content"),
+            "{error:#}"
+        );
+        let mut explicit = input;
+        explicit["scanInput"]["threatModelRef"] = json!(alpha);
+        registry
+            .execute_tool("campaign:study", explicit, &context)
+            .unwrap();
+    }
 
     fn fixture() -> (tempfile::TempDir, WorkspaceTarget) {
         let temp = tempfile::tempdir().unwrap();
@@ -472,10 +609,15 @@ mod verify_import_tests {
         )
         .unwrap();
 
-        let manifest = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+        let manifest = load_threat_model_manifest(workspace.root())
+            .unwrap()
+            .unwrap();
         assert_eq!(manifest.models.len(), 2);
         let legacy = &manifest.models[0];
-        assert_eq!(legacy.revisions[0].source, ThreatModelRevisionSource::LegacyImport);
+        assert_eq!(
+            legacy.revisions[0].source,
+            ThreatModelRevisionSource::LegacyImport
+        );
         let preserved = load_threat_model_revision(
             workspace.root(),
             &legacy.model_id,
@@ -571,8 +713,13 @@ mod verify_import_tests {
             &ctx,
         )
         .unwrap();
-        let initial_manifest = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
-        let before = active_model(&initial_manifest).scope.target_revision.clone();
+        let initial_manifest = load_threat_model_manifest(workspace.root())
+            .unwrap()
+            .unwrap();
+        let before = active_model(&initial_manifest)
+            .scope
+            .target_revision
+            .clone();
 
         std::fs::write(workspace.root().join("src/app.py"), "a\nb\nc\n").unwrap();
         commit_all(workspace.root(), "next");
@@ -581,12 +728,21 @@ mod verify_import_tests {
             .sha;
         verify_threat_model_adapter(json!({}), &ctx).unwrap();
 
-        let manifest = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+        let manifest = load_threat_model_manifest(workspace.root())
+            .unwrap()
+            .unwrap();
         let model = active_model(&manifest);
         assert_ne!(before, current);
         assert_eq!(model.scope.target_revision, current);
         assert_eq!(
-            model.revisions.last().unwrap().scope.as_ref().unwrap().target_revision,
+            model
+                .revisions
+                .last()
+                .unwrap()
+                .scope
+                .as_ref()
+                .unwrap()
+                .target_revision,
             current
         );
     }
@@ -603,14 +759,12 @@ mod verify_import_tests {
             &ctx,
         )
         .unwrap();
-        let before = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+        let before = load_threat_model_manifest(workspace.root())
+            .unwrap()
+            .unwrap();
 
-        let read = read_threat_model(
-            json!({"scope": "id:api"}),
-            &ctx,
-            ReadFlavor::ThreatModel,
-        )
-        .unwrap();
+        let read =
+            read_threat_model(json!({"scope": "id:api"}), &ctx, ReadFlavor::ThreatModel).unwrap();
         let verify_error = verify_threat_model_adapter(json!({"scope": "id:api"}), &ctx)
             .unwrap_err()
             .to_string();
@@ -619,7 +773,9 @@ mod verify_import_tests {
         assert_eq!(read["data"]["reason"], json!("missing-output-dir"));
         assert!(verify_error.contains("requires a persisted threat model"));
         assert_eq!(
-            load_threat_model_manifest(workspace.root()).unwrap().unwrap(),
+            load_threat_model_manifest(workspace.root())
+                .unwrap()
+                .unwrap(),
             before,
             "failed scoped verification must not append to the active root lineage"
         );

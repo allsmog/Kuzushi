@@ -238,6 +238,7 @@ pub(crate) struct WorkspaceExportFindings {
 }
 
 pub(crate) struct ReportExport {
+    pub(crate) campaign_id: Option<String>,
     pub(crate) format: kuzushi_core::WorkspaceExportFormat,
     pub(crate) completeness: kuzushi_core::WorkspaceExportCompleteness,
     pub(crate) output: PathBuf,
@@ -629,6 +630,7 @@ impl ShellApp {
             export.completeness.as_deref(),
             export.allow_empty,
             self.review_yield_export_provenance(),
+            None,
         ) {
             Ok(report) => {
                 let workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
@@ -663,6 +665,7 @@ impl ShellApp {
             Some(export.completeness.as_str()),
             true,
             self.review_yield_export_provenance(),
+            export.campaign_id.as_deref(),
         );
         let receipt = match result {
             Ok(report) => ReportReceipt {
@@ -670,6 +673,7 @@ impl ShellApp {
                 completeness: export.completeness,
                 count: Some(report.count),
                 absolute_path: Some(report.output_path),
+                investigation_receipt_path: report.investigation_receipt_path,
                 error: None,
                 timestamp,
             },
@@ -678,6 +682,7 @@ impl ShellApp {
                 completeness: export.completeness,
                 count: None,
                 absolute_path: report_absolute_path(export.target.as_ref(), &export.output),
+                investigation_receipt_path: None,
                 error: Some(error.to_string()),
                 timestamp,
             },
@@ -1479,6 +1484,7 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
         app.export_report_effect(ReportExport {
+            campaign_id: None,
             format: kuzushi_core::WorkspaceExportFormat::Sarif,
             completeness: kuzushi_core::WorkspaceExportCompleteness::All,
             output: PathBuf::from("report.sarif"),
@@ -1504,6 +1510,7 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), None);
 
         app.export_report_effect(ReportExport {
+            campaign_id: None,
             format: kuzushi_core::WorkspaceExportFormat::Json,
             completeness: kuzushi_core::WorkspaceExportCompleteness::Complete,
             output: PathBuf::from("findings.json"),
@@ -1544,6 +1551,7 @@ mod tests {
         let output = PathBuf::from(app.router.report().path_draft());
         assert!(output.starts_with(".kuzushi/reports"));
         let attempt = |output: PathBuf| ReportExport {
+            campaign_id: None,
             format: kuzushi_core::WorkspaceExportFormat::Sarif,
             completeness: kuzushi_core::WorkspaceExportCompleteness::All,
             output,

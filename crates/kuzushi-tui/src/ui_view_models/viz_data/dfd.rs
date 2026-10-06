@@ -87,11 +87,15 @@ pub(crate) struct DfdModel {
     pub boundaries: Vec<DfdBoundaryModel>,
     pub security_context: Vec<DfdSecurityItem>,
     pub link_state: DfdLinkState,
+    pub review_only: bool,
     pub empty_hint: Option<String>,
 }
 
 pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
     let doc = super::super::threat_model_doc(app);
+    if doc.is_none() && super::super::map_context_run_refs(app).is_some() {
+        return empty_dfd(super::super::threat_model_absence_hint(app));
+    }
     let key = DfdModelCacheKey::from_threat_doc(doc.as_ref());
     if let Some(cached) = app.workbench_cache().borrow().dfd_model(&key) {
         return cached;
@@ -151,8 +155,23 @@ pub(crate) fn dfd_model_from_doc(
         boundaries: project_boundaries(doc),
         security_context: project_security_context(doc, link_state),
         link_state,
+        review_only: deterministic_review_only(doc),
         empty_hint: None,
     }
+}
+
+impl DfdModel {
+    pub(crate) fn evidence_notice(&self) -> Option<&'static str> {
+        self.review_only.then_some(
+            "Partial deterministic Map. Artifact review only; no model or empirical verification.",
+        )
+    }
+}
+
+fn deterministic_review_only(doc: &serde_json::Value) -> bool {
+    doc.pointer("/degradation/mode")
+        .and_then(serde_json::Value::as_str)
+        == Some("deterministic-no-runtime")
 }
 
 fn empty_dfd(hint: impl Into<String>) -> DfdModel {
@@ -514,6 +533,17 @@ fn dfd_kind(raw: &str) -> DfdKind {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deterministic_map_retains_a_read_only_evidence_notice_with_its_real_topology() {
+        let document = serde_json::json!({"degradation":{"mode":"deterministic-no-runtime"},"dfd":{"nodes":[{"id":"N1","name":"Health service","type":"process","trustZone":"internal"},{"id":"N2","name":"HTTP client","type":"external_entity","trustZone":"external"}],"flows":[{"id":"F1","from":"N2","to":"N1","data":"health requests"}],"trustBoundaries":[]}});
+        let model = super::dfd_model_from_doc(Some(&document), None);
+        assert!(model.review_only);
+        assert!(model
+            .evidence_notice()
+            .unwrap()
+            .contains("no model or empirical verification"));
+        assert_eq!(model.nodes.len(), 2);
+    }
     use super::*;
     use kuzushi_core::{capabilities::persistent_threat_model_path, V2Config, WorkspaceTarget};
 

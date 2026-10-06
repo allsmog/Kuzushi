@@ -35,6 +35,18 @@ Core still does not prove that the current target, prerequisites or allowance
 are ready. Individual-tool readiness evidence is tracked in the
 [bounded investigation audit](assessments/bounded-investigation-tools.json).
 
+The shell capability picker shows preparation hints for its selected action:
+target, model or input required, plan review, or input review. Stored tool options
+use the shared registry input preparation and runtime policy, so a deterministic
+threat-map configuration does not acquire a model requirement. These hints do
+not certify credentials, external dependencies, scope support, allowance or
+useful executor output. Validation runs only for the selected action.
+
+With an empty composer, arrows select and Enter loads an editable command.
+Loading starts no work. A draft keeps its editing keys; Esc clears it before
+returning from a contextual picker. Selection survives draft clearing and resize.
+The contextual footer advertises back rather than navigation-mode entry.
+
 Catalog omission does not bypass policy. Exact dispatch still passes through
 descriptor input validation, workspace containment, effect approval, runtime
 selection, lifecycle recording, and artifact contracts.

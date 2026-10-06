@@ -8,6 +8,7 @@
 mod domain;
 mod ledger;
 mod map_evidence;
+mod map_context;
 mod phase_result_policy;
 mod proof_deferral_service;
 mod proof_deferral_view;
@@ -17,6 +18,8 @@ mod v2;
 pub use domain::*;
 pub use ledger::*;
 pub use map_evidence::*;
+pub use map_context::{load_map_run_context, MapRunContext};
+pub(crate) use map_context::{accepted_map_context_selection, accepted_map_run_context, selected_map_history_run_context};
 pub use proof_deferral_service::*;
 pub use proof_deferral_view::*;
 pub use storage::*;

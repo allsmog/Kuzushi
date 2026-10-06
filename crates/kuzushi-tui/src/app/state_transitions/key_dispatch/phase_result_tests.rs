@@ -155,6 +155,38 @@ struct ResultCardFixture {
     app: ShellApp,
 }
 
+#[test]
+fn pending_scan_reading_pages_without_accepting_or_changing_the_draft() {
+    use crate::ui_view_models::PhaseSurfaceId;
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Scan, "sast:scan");
+    fixture
+        .app
+        .set_viewport(crate::TerminalViewport::new(40, 12));
+    fixture.app.editor_mut().set_input("keep this draft");
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    assert!(fixture.app.reduce_key(key(KeyCode::PageDown)).handled);
+    let offset = fixture
+        .app
+        .router
+        .workbench()
+        .scroll()
+        .get(PhaseSurfaceId::ScanEngines);
+    assert!(offset > 0, "advertised paging must reach engine evidence");
+    assert!(fixture.app.reduce_key(key(KeyCode::PageUp)).handled);
+    assert_eq!(
+        fixture
+            .app
+            .router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::ScanEngines),
+        0
+    );
+    assert!(fixture.attempt_is_unresolved(WorkflowPhase::Scan));
+    assert_eq!(fixture.app.input(), "keep this draft");
+    assert_eq!(fixture.app.input_mode(), InputMode::Navigate);
+}
+
 impl ResultCardFixture {
     /// A completed attempt for `phase` with its RESULT READY card open on the
     /// matching Workbench page, in Navigate mode — the state the card's
@@ -164,6 +196,15 @@ impl ResultCardFixture {
     }
 
     fn open_with_input(phase: WorkflowPhase, tool: &str, input: Value) -> Self {
+        Self::open_with_outcome(phase, tool, input, PhaseAttemptOutcome::Completed)
+    }
+
+    fn open_with_outcome(
+        phase: WorkflowPhase,
+        tool: &str,
+        input: Value,
+        outcome: PhaseAttemptOutcome,
+    ) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -173,17 +214,12 @@ impl ResultCardFixture {
             tool,
             input,
             serde_json::json!({
-                "ok": true,
-                "status": "completed",
+                "ok": outcome == PhaseAttemptOutcome::Completed,
+                "status": outcome,
                 "data": { "snapshot": { "filesIndexed": 1 } }
             }),
         );
-        crate::test_support::append_typed_attempt(
-            temp.path(),
-            phase,
-            "run-result-card",
-            PhaseAttemptOutcome::Completed,
-        );
+        crate::test_support::append_typed_attempt(temp.path(), phase, "run-result-card", outcome);
         app.refresh_phase_attempt_projection();
         app.set_shell_view(ShellView::Workbench);
         app.router
@@ -574,4 +610,76 @@ fn footer_esc_names_notice_dismissal_while_a_warning_holds_escape() {
         .reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(fixture.app.input_mode(), InputMode::Navigate);
     assert!(fixture.notice_message().is_none());
+}
+
+#[test]
+fn pending_guided_results_keep_coverage_paging_and_the_composer_draft() {
+    use crate::ui_view_models::PhaseSurfaceId;
+    for outcome in [
+        PhaseAttemptOutcome::Completed,
+        PhaseAttemptOutcome::Partial,
+        PhaseAttemptOutcome::Failed,
+        PhaseAttemptOutcome::Canceled,
+    ] {
+        let mut fixture = pending_guided_scan_fixture(outcome);
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        assert!(fixture.app.reduce_key(key(KeyCode::PageDown)).handled);
+        assert!(
+            fixture
+                .app
+                .router
+                .workbench()
+                .scroll()
+                .get(PhaseSurfaceId::ScanEngines)
+                > 0,
+            "{outcome:?} result swallowed coverage paging"
+        );
+        assert!(fixture.app.reduce_key(key(KeyCode::PageUp)).handled);
+        assert_eq!(
+            fixture
+                .app
+                .router
+                .workbench()
+                .scroll()
+                .get(PhaseSurfaceId::ScanEngines),
+            0
+        );
+        assert!(fixture.attempt_is_unresolved(WorkflowPhase::Scan));
+        assert_eq!(fixture.app.input(), "keep this draft");
+        assert_eq!(fixture.app.input_mode(), InputMode::Navigate);
+    }
+}
+
+fn pending_guided_scan_fixture(outcome: PhaseAttemptOutcome) -> ResultCardFixture {
+    use crate::app::guided_scan::{GuidedScanFlow, GuidedScanStage};
+    let mut fixture = ResultCardFixture::open_with_outcome(
+        WorkflowPhase::Scan,
+        "sast:scan",
+        serde_json::json!({}),
+        outcome,
+    );
+    fixture
+        .app
+        .set_viewport(crate::TerminalViewport::new(40, 12));
+    fixture.app.editor_mut().set_input("keep this draft");
+    let attempt = fixture
+        .app
+        .engagement
+        .unresolved_phase_attempt(WorkflowPhase::Scan)
+        .unwrap()
+        .completed
+        .attempt_id
+        .clone();
+    fixture
+        .app
+        .engagement
+        .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::AwaitingResult {
+            phase: WorkflowPhase::Scan,
+            attempt_id: attempt,
+        }));
+    assert_eq!(
+        fixture.app.guided_scan_question_is_open(),
+        outcome != PhaseAttemptOutcome::Completed
+    );
+    fixture
 }

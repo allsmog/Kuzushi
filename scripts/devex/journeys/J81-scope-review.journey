@@ -1,0 +1,95 @@
+# Explicit structural scope editing, provider-free, sequential native journey.
+name: Scope review preserves loose files, explicit acceptance and source drift
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 20 Enter / c build inventory | empty
+ask: Does the empty scope surface show a deliberate inventory action, with no implied model or scan work?
+keys: c
+require-live-snap: 30 DRAFT SCOPES | whole-120x36
+ask: Is the whole-repository boundary the default, with coverage, source and pending scan-plan work explained?
+resize: 160x48
+require-live-snap: 15 DRAFT SCOPES | whole-160x48
+ask: At 160x48, is the list/detail grid restrained and readable with visible action controls?
+resize: 96x89
+require-live-snap: 15 DRAFT SCOPES | whole-96x89
+ask: At 96x89, can the operator inspect rationale, context status and recorded source identity?
+resize: 80x24
+require-live-snap: 15 DRAFT SCOPES | whole-80x24
+ask: At 80x24, do stacked list and detail panels keep the selected boundary and controls understandable?
+resize: 60x20
+require-live-snap: 15 DRAFT SCOPES | whole-60x20
+ask: At 60x20, is the whole-repository choice still readable with a discoverable paging action?
+resize: 40x12
+require-live-snap: 15 DRAFT SCOPES | whole-40x12
+ask: At 40x12, are selection, editing and reading controls usable without overlap?
+keys: NPage NPage
+live-snap: whole-40x12-paged
+ask: Does actual paging expose more boundary evidence without changing selection or starting work?
+resize: 120x36
+keys: Enter Down Enter
+require-live-snap: 15 First scope name | split-name
+type: Auth
+keys: Tab
+type: auth
+keys: Tab
+type: Rest
+keys: Tab
+paste-file: @ART/split-paths.txt
+live-snap: split-paths
+ask: Can the operator enter multiline paths in a named split form while seeing save and field navigation controls?
+keys: F2
+require-live-snap: 30 r2 | split-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART split
+ask: Does the split preserve the loose README and produce two reviewed boundaries with no scans?
+keys: Enter Enter
+require-live-snap: 15 Field 1/1 | rename
+keys: C-u
+paste-file: @ART/rename.txt
+keys: Enter
+require-live-snap: 30 r3 | renamed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART renamed
+keys: f
+require-live-snap: 25 Files 1..1 of 1 | selected-files
+ask: Can the operator inspect concrete included files and return without losing boundary selection?
+keys: Escape
+require-live-snap: 15 Boundary: auth | files-closed
+keys: a
+require-live-snap: 15 Accept exact boundaries | acceptance
+ask: Does acceptance disclose inventory limits and remain separate from scan and allowance approval?
+keys: Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART change-source
+keys: Enter Enter
+require-live-snap: 15 Field 1/1 | drift-edit
+keys: C-u
+type: Changed name
+keys: Enter
+require-live-snap: 30 Action stopped | refused-drift
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART drift
+ask: Does changed source refuse the edit, preserve the entered draft and leave the accepted revision intact?
+keys: Escape
+wait: 1
+keys: Escape
+wait: 1
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | quit-confirmation
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted-shell
+submit: scopes
+require-live-snap: 30 ACCEPTED SCOPES | restarted-scopes
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_review.py @TMP_TARGET @ART restarted
+ask: After real exit and no-color restart, are the saved boundaries readable without silently approving changed source or launching work?
+keys: Escape
+wait: 1
+keys: C-c
+require-exit: 10

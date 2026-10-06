@@ -15,7 +15,7 @@ submit: set taskMode manual
 submit: set tasks secret-scan
 submit: scan batch
 require-live-snap: 20 PLAN A STUDY | form
-keys: Down Down Enter
+keys: Down Down Down Enter
 require-live-snap: 20 2 immutable revisions | context-catalog
 expect: alpha
 expect: beta
@@ -72,7 +72,7 @@ keys: Enter
 nav-mode:
 keys: a
 require-live-snap: 20 PLAN A STUDY | restored-study
-keys: Down Down Enter
+keys: Down Down Down Enter
 require-live-snap: 20 CHOOSE STUDY CONTEXT | restored-context
 keys: Enter
 require-live-snap: 25 CONTEXT SUMMARY | restored-preview

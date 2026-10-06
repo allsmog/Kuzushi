@@ -63,6 +63,15 @@ pub fn read_run_artifact_bytes(
     run_id: &str,
     artifact: impl AsRef<Path>,
 ) -> RunArtifactBytesRead {
+    read_run_artifact_bytes_bounded(target, run_id, artifact, MAX_RUN_ARTIFACT_READ_BYTES)
+}
+
+fn read_run_artifact_bytes_bounded(
+    target: impl AsRef<Path>,
+    run_id: &str,
+    artifact: impl AsRef<Path>,
+    limit: u64,
+) -> RunArtifactBytesRead {
     let path = match resolve_run_artifact_path(target, run_id, artifact) {
         Ok(path) => path,
         Err(error) => {
@@ -71,7 +80,18 @@ pub fn read_run_artifact_bytes(
             };
         }
     };
-    read_checked_artifact(path)
+    read_checked_artifact(path, limit.min(MAX_RUN_ARTIFACT_READ_BYTES))
+}
+
+pub(crate) fn read_run_artifact_text_bounded(
+    target: impl AsRef<Path>,
+    run_id: &str,
+    artifact: impl AsRef<Path>,
+    limit: u64,
+) -> anyhow::Result<(PathBuf, String)> {
+    let (path, bytes) = read_run_artifact_bytes_bounded(target, run_id, artifact, limit)
+        .require("Bounded run artifact")?;
+    Ok((path, String::from_utf8(bytes)?))
 }
 
 pub fn read_run_artifact_text(
@@ -125,16 +145,16 @@ fn non_readable_artifact_error<T>(read: RunArtifactRead<T>, label: &str) -> anyh
     }
 }
 
-fn read_checked_artifact(path: PathBuf) -> RunArtifactBytesRead {
+fn read_checked_artifact(path: PathBuf, limit: u64) -> RunArtifactBytesRead {
     let metadata = match artifact_metadata(&path) {
         Ok(Some(metadata)) => metadata,
         Ok(None) => return RunArtifactRead::Missing { path },
         Err(error) => return unreadable(path, error),
     };
-    if let Err(state) = validate_regular_artifact(&path, &metadata) {
+    if let Err(state) = validate_regular_artifact(&path, &metadata, limit) {
         return state;
     }
-    read_regular_artifact(path)
+    read_regular_artifact(path, limit)
 }
 
 fn artifact_metadata(path: &Path) -> std::io::Result<Option<fs::Metadata>> {
@@ -148,6 +168,7 @@ fn artifact_metadata(path: &Path) -> std::io::Result<Option<fs::Metadata>> {
 fn validate_regular_artifact(
     path: &Path,
     metadata: &fs::Metadata,
+    limit: u64,
 ) -> Result<(), RunArtifactBytesRead> {
     if metadata.file_type().is_symlink() {
         return Err(RunArtifactRead::Unsafe {
@@ -162,14 +183,14 @@ fn validate_regular_artifact(
             path: path.to_path_buf(),
         });
     }
-    if metadata.len() > MAX_RUN_ARTIFACT_READ_BYTES {
-        return Err(too_large(path));
+    if metadata.len() > limit {
+        return Err(too_large(path, limit));
     }
     Ok(())
 }
 
-fn read_regular_artifact(path: PathBuf) -> RunArtifactBytesRead {
-    match read_file_bytes(&path) {
+fn read_regular_artifact(path: PathBuf, limit: u64) -> RunArtifactBytesRead {
+    match read_file_bytes(&path, limit) {
         Ok(value) => RunArtifactRead::Ready { path, value },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             RunArtifactRead::Missing { path }
@@ -178,10 +199,10 @@ fn read_regular_artifact(path: PathBuf) -> RunArtifactBytesRead {
     }
 }
 
-fn too_large(path: &Path) -> RunArtifactBytesRead {
+fn too_large(path: &Path, limit: u64) -> RunArtifactBytesRead {
     RunArtifactRead::Unreadable {
         path: path.to_path_buf(),
-        error: format!("Run artifact exceeds the {MAX_RUN_ARTIFACT_READ_BYTES}-byte read limit"),
+        error: format!("Run artifact exceeds the {limit}-byte read limit"),
     }
 }
 
@@ -210,12 +231,12 @@ fn escaped_path(path: &Path) -> String {
     escape_terminal_controls(&path.display().to_string())
 }
 
-fn read_file_bytes(path: &Path) -> std::io::Result<Vec<u8>> {
+fn read_file_bytes(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
     let file = open_file_without_following_symlink(path)?;
-    let mut reader = file.take(MAX_RUN_ARTIFACT_READ_BYTES + 1);
+    let mut reader = file.take(limit + 1);
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_RUN_ARTIFACT_READ_BYTES {
+    if bytes.len() as u64 > limit {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "run artifact grew beyond the bounded read limit",

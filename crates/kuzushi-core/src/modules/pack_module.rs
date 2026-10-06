@@ -1,4 +1,6 @@
 use super::*;
+pub(in crate::modules) mod scopes;
+pub(in crate::modules) mod suggest_scopes;
 
 pub(crate) fn pack_module() -> BuiltinModule {
     builtin_module(
@@ -7,13 +9,21 @@ pub(crate) fn pack_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Validate out-of-tree knowledge packs before installing them into a workspace.",
         vec![
-            pack_lint_tool().with_policy(read_policy(
-                ToolPhase::Map,
-                WorkspaceRequirement::Optional,
-            )),
+            pack_lint_tool()
+                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
             suggest_shards_tool().with_policy(workspace_policy(
                 ToolPhase::Map,
                 RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
+            scopes::descriptor().with_policy(workspace_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
+            suggest_scopes::descriptor().with_policy(workspace_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Always,
                 FindingStoreRequirement::Optional,
             )),
         ],
@@ -28,7 +38,7 @@ fn suggest_shards_tool() -> ToolDescriptor {
          inventory (file counts, language mix, and extracted entry points). \
          Keeps parent files covered and discloses incomplete inventory. Writes \
          a commented DRAFT shards.toml under the workspace state dir for an \
-         operator to edit — never installs it. No model calls.",
+         operator to edit. Never installs it. No model calls.",
         vec![
             opt(
                 "output",

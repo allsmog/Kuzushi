@@ -26,8 +26,8 @@ pub(super) const CONTRACTS: [PhaseCompositionContract; 5] = [
         page: WorkbenchPage::Scan,
         phase: kuzushi_core::WorkflowPhase::Scan,
         slug: "scan",
-        complete_command: "run sast:scan {}",
-        compact_command: "run sast:scan {}",
+        complete_command: "r Review saved scan options",
+        compact_command: "r Review saved scan options",
     },
     PhaseCompositionContract {
         page: WorkbenchPage::Review,

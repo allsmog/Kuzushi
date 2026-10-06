@@ -1,0 +1,66 @@
+# Real bounded executor, intercepted model transport, synthetic observations.
+name: Usage evidence makes spending tradeoffs visible and survives restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_usage.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/future-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | finite-future-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | saved-plan-and-spending
+expect: 4 committed / 6 total
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 Observed: | usage-evidence
+expect: provider requests
+ask: Can the operator distinguish observed requests, unknown dollars and uncertain projection while seeing unchanged shared spending?
+keys: NPage NPage NPage NPage NPage
+require-live-snap: 20 Usage evidence: | exact-evidence-identity
+ask: Does the basis retain the original model, source and run identity without implying future charges are guaranteed?
+resize: 160x48
+live-snap: usage-160x48
+resize: 96x89
+live-snap: usage-96x89
+resize: 80x24
+live-snap: usage-80x24
+resize: 60x20
+live-snap: usage-60x20
+resize: 40x12
+live-snap: usage-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: usage-tail-40x12
+ask: At 40x12, are all usage details reachable with visible paging, back and next controls and intact frame corners?
+resize: 120x36
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | exact-plan-approval
+keys: End
+require-live-snap: 20 y approve | approval-last
+ask: Does approval disclose the shared remaining calls and projection uncertainty before the operator chooses to spend, with no automatic limit increase?
+keys: n
+require-live-snap: 20 PLAN A STUDY | cancelled-approval
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_usage.py @TMP_TARGET @ART verify
+keys: Escape
+require-live-snap: 15 BATCH usage-future | original-campaign
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/future-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | saved-unstarted-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | restored-usage-plan
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 Observed: | usage-after-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_usage.py @TMP_TARGET @ART verify
+ask: Does actual no-color restart restore the same chosen baseline and approved spending, without new requests, allowance approval or discovery starts?
+keys: Escape
+require-live-snap: 15 BATCH usage-future | restored-origin
+keys: C-c
+require-exit: 10

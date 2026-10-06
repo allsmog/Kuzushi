@@ -20,6 +20,8 @@ pub struct CampaignRouteState {
     /// campaign's job matrix.
     pub(crate) detail: bool,
     pub(crate) selected_job: usize,
+    /// Reading position for job details and consolidated observations.
+    pub(crate) read_scroll: usize,
     /// Job ids excluded from the next Launch (per selected campaign;
     /// cleared when the campaign selection changes).
     pub(crate) excluded: BTreeSet<String>,
@@ -52,6 +54,7 @@ impl Default for CampaignRouteState {
             selected_campaign: 0,
             detail: false,
             selected_job: 0,
+            read_scroll: 0,
             excluded: BTreeSet::new(),
             workers: CAMPAIGN_DEFAULT_WORKERS,
             dispatcher_pid: None,
@@ -94,6 +97,7 @@ impl CampaignRouteState {
         *cursor = (*cursor as i64 + delta).clamp(0, len as i64 - 1) as usize;
         if !self.detail {
             self.selected_job = 0;
+            self.read_scroll = 0;
             self.excluded.clear();
         }
     }

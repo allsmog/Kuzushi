@@ -1,0 +1,67 @@
+name: Accept an existing partial Map and inherit exact context without regeneration
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 -B @REPO/scripts/devex/fixtures/existing_context_map.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use sast
+submit: options sast:scan
+require-live-snap: 20 sast:scan | options
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | form
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | context-catalog
+keys: Up m
+require-live-snap: 20 Inspect an exact revision | inspection-required
+keys: Enter
+require-live-snap: 20 CONTEXT SUMMARY | exact-context
+expect: m Map
+expect: Partial deterministic Map
+ask: Does the inspected source context expose Map review without suggesting regeneration or workspace activation?
+resize: 160x48
+live-snap: context-160x48
+resize: 96x89
+live-snap: context-96x89
+resize: 80x24
+live-snap: context-80x24
+resize: 60x20
+live-snap: context-60x20
+resize: 40x12
+live-snap: context-40x12
+expect: m Map
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: context-tail-40x12
+ask: Are inspection, Map review, diagram, generation and back controls understandable at 40x12, with actual paging reaching the final guidance?
+resize: 120x36
+keys: m
+require-live-snap: 30 Acknowledge & use partial | pending-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/existing_context_map.py @TMP_TARGET @ART pending
+ask: Does the Map result preserve its partial status and require an explicit operator decision?
+nav-mode:
+keys: u
+require-live-snap: 20 Map ✓ | accepted-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/existing_context_map.py @TMP_TARGET @ART accepted
+keys: Escape
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | inherited-study
+keys: L
+require-live-snap: 30 Draft ready | planned-study
+require-shell: python3 -B @REPO/scripts/devex/fixtures/existing_context_map.py @TMP_TARGET @ART planned
+keys: Down Down Down
+require-live-snap: 20 Model: | planned-identities
+ask: Does the finite study inherit the accepted exact context while keeping model, allowance and approval decisions visible?
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+expect: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/existing_context_map.py @TMP_TARGET @ART planned
+ask: After no-color restart, does accepted partial context survive with unchanged source, active context and zero provider work?
+keys: C-c
+require-exit: 10

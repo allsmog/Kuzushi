@@ -1,0 +1,76 @@
+# Sequential offline scope failures and recovery. Planning starts no scan jobs.
+name: Unsupported discovery scope, readable failure and explicit revision
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 @REPO/scripts/devex/fixtures/discovery_scope.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+wait-for: 25 Start Map
+submit: use sast
+wait-for: 15 TOOLS
+submit: options sast:scan
+wait-for: 15 sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: set paths service/app.py
+submit: scan batch
+wait-for: 20 PLAN A STUDY
+keys: L
+require-live-snap: 15 Study draft unavailable | file-scope-refused
+expect: requires directory scopes
+expect: No scan started
+ask: Does the form explain that the selected file is unsupported without silently enlarging discovery, and provide a way to revise it?
+require-shell: python3 @REPO/scripts/devex/fixtures/discovery_scope.py @TMP_TARGET @ART blocked
+resize: 160x48
+live-snap: scope-160x48
+ask: At 160x48, are the blocked scope, its reason and recovery controls understandable with no approval implied?
+resize: 96x89
+live-snap: scope-96x89
+ask: At 96x89, is the selected file still attached to the failure rather than presented as an accepted scope?
+resize: 80x24
+live-snap: scope-80x24
+ask: At 80x24, can the operator read the refusal and reach the rest of its guidance using the visible controls?
+resize: 60x20
+live-snap: scope-60x20
+ask: At 60x20, are the failed draft and paging/back controls preserved?
+resize: 40x12
+live-snap: scope-40x12
+ask: At 40x12, can the operator recognize the failed draft and page through its full explanation without losing the form?
+keys: NPage
+live-snap: scope-40x12-paged
+expect: directory and review
+ask: Can the operator reach the scope recovery instructions at 40x12?
+resize: 120x36
+keys: Escape
+submit: options sast:scan
+wait-for: 15 sast:scan
+submit: set paths service
+submit: scan batch
+wait-for: 20 PLAN A STUDY
+keys: L
+require-live-snap: 30 Draft ready | revised-directory-draft
+expect: No jobs started
+ask: Does explicitly choosing the larger directory create a new draft for review while preserving three passes and one worker, without starting discovery?
+require-shell: python3 @REPO/scripts/devex/fixtures/discovery_scope.py @TMP_TARGET @ART draft
+keys: C-c
+wait-for: 10 CONFIRM SESSION EXIT
+keys: y
+require-exit: 10
+resize: 120x36
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+wait-for: 25 Start Map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: set paths service/app.py
+submit: scan batch
+wait-for: 20 PLAN A STUDY
+keys: L
+require-live-snap: 15 Study draft unavailable | scope-no-color
+expect: requires directory scopes
+ask: Is the unsupported scope and its recovery readable without color, with the previous draft left separate?
+keys: C-c
+require-exit: 10

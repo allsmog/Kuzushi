@@ -8,11 +8,11 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
  Map ● · Scan × · Review × · Report
  ▸ NEXT phase result ledger is degraded; repair it before selecting this result
  z open map viz · next → Map · jobs inspect Map runs
-│PROJECT CONTEXT
-│./failure-target · rev:checking…
-│checking durable map artifacts…
-│context:missing · Next: context build
-│○ scope tree     │ root only │ no persisted nested scopes yet; run `next` to map project...        │ ▸ next
+│MAP CONTEXT
+│▸ Enter inspect Map runs
+│Checking recorded Map context…
+│Type plan map to prepare new context
+│
 
           ┌ MAP · RESULT READY ──────────────────────────────────────────────────────────────────────────────┐
           │MAP returned partial evidence. Review it and choose a recovery action.                            │

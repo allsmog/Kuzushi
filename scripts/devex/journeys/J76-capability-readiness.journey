@@ -1,0 +1,63 @@
+# One sequential, offline catalog journey. No tool or provider execution.
+name: Capability selection, prerequisites and draft ownership
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+wait-for: 25 Start Map
+submit: modules
+wait-for: 15 CAPABILITIES
+live-snap: map-actions
+expect: Quick map
+expect: Deep threat map
+ask: Does the catalog distinguish planning from execution, with prerequisites disclosed rather than registration presented as readiness?
+keys: Down
+wait-live-snap: 10 MODEL REQUIRED | selected-threat-map
+expect: MODEL REQUIRED
+ask: Does the next-action hint describe the selected threat-map row, including any unresolved model or input requirement?
+keys: Enter
+wait-live-snap: 10 no work started | loaded-draft
+expect: run threat-model:build
+expect-not: RUN FOCUS
+expect: no work started
+ask: Does Enter load an editable command without launching work, and is that distinction visible?
+keys: C-u
+wait-for: 15 CAPABILITIES
+resize: 160x48
+live-snap: catalog-160x48
+expect: MODEL REQUIRED
+ask: At 160x48, does the selected action retain its prerequisite and draft-loading guidance without conflicting readiness claims?
+resize: 96x89
+live-snap: catalog-96x89
+expect: MODEL REQUIRED
+ask: At 96x89, is selection still attached to the same action, with input ownership and loading controls visible?
+resize: 80x24
+live-snap: catalog-80x24
+ask: Can the operator read the selected action and its prerequisites at 80x24 and identify the load control?
+resize: 60x20
+live-snap: catalog-60x20
+expect: MODEL REQUIRED
+ask: At 60x20, can the operator see the selected action and its preparation requirement without losing the cursor or draft?
+resize: 40x12
+live-snap: catalog-40x12
+expect: MODEL REQUIRED
+ask: At 40x12, are the selected action and its next step readable rather than hidden behind the catalog header?
+keys: C-c
+wait-for: 10 CONFIRM SESSION EXIT
+keys: y
+require-exit: 10
+resize: 120x36
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+wait-for: 25 Start Map
+submit: modules
+wait-for: 15 CAPABILITIES
+keys: Down
+live-snap: catalog-no-color
+expect: MODEL REQUIRED
+ask: Are readiness and selection understandable without color, with no work started?
+keys: C-c
+wait-for: 10 CONFIRM SESSION EXIT
+keys: y
+require-exit: 10

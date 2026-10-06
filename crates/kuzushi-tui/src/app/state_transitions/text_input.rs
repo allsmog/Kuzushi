@@ -66,7 +66,7 @@ impl ShellApp {
             return update;
         }
         let normalised = normalise_paste_text(text);
-        if let Some(update) = self.capture_picker_editor_paste(&normalised) {
+        if let Some(update) = self.capture_modal_editor_paste(&normalised) {
             return update;
         }
         if !self.prepare_picker_for_paste() {
@@ -105,8 +105,18 @@ impl ShellApp {
         self.picker_prompt_focused()
     }
 
+    fn capture_modal_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.capture_scope_review_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        self.capture_picker_editor_paste(text)
+    }
+
     fn capture_picker_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
-        if self.paste_operator_question_other(text) || self.capture_answer_paste(text) {
+        if self.study_engine_picker().is_some()
+            || self.paste_operator_question_other(text)
+            || self.capture_answer_paste(text)
+        {
             return Some(InputUpdate::handled());
         }
         if self.capture_map_scope_paste(text) {
@@ -154,7 +164,10 @@ impl ShellApp {
         if self.paste_operator_question_other(text) {
             return Some(InputUpdate::handled());
         }
-        (self.input_mode() == InputMode::Navigate).then(InputUpdate::ignored)
+        if self.input_mode() == InputMode::Navigate {
+            self.set_input_mode(InputMode::Prompt);
+        }
+        None
     }
 
     fn paste_into_prompt(&mut self, text: &str) -> InputUpdate {

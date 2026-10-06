@@ -6,6 +6,59 @@ use crate::workflow_attempts::{
 };
 use serde_json::json;
 
+#[test]
+fn referenced_map_source_requires_current_content_and_the_same_workspace() {
+    let target = tempfile::tempdir().unwrap();
+    let source = target.path().join("app.rs");
+    std::fs::write(&source, "pub fn context() {}\n").unwrap();
+    record_bound_context(target.path());
+    let refs = vec!["context-source".into()];
+    assert!(referenced_runs_match_current_source(target.path(), &refs));
+    std::fs::write(&source, "pub fn changed() {}\n").unwrap();
+    assert!(!referenced_runs_match_current_source(target.path(), &refs));
+    let other = tempfile::tempdir().unwrap();
+    assert!(!referenced_runs_match_current_source(other.path(), &refs));
+    assert!(!referenced_runs_match_current_source(target.path(), &[]));
+}
+
+fn record_bound_context(root: &Path) {
+    let record = ToolRunRecord::new(root, "context-source", "tool", "context:build");
+    crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        record,
+        &json!({}),
+        None,
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+    let config = crate::V2Config::default();
+    let workspace = crate::WorkspaceTarget::new(root).unwrap();
+    let trace = crate::TraceHandle::jsonl(root, "context-source");
+    let ctx = crate::ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: Some(&trace),
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let registry = crate::ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let prepared = registry
+        .prepare_dispatch_input("context:build", json!({"enrichment":false}), &ctx, None)
+        .unwrap();
+    let observed = registry
+        .dispatch_prepared_input_observed_with_runtime(prepared, &ctx, None)
+        .unwrap();
+    let output = observed.execution.unwrap();
+    crate::run_artifacts::try_record_tool_run_complete_settled(
+        record,
+        &output,
+        &trace.run_observation().unwrap(),
+        observed.completion,
+    )
+    .unwrap();
+}
+
 fn completed_tool(target: &Path, run_id: &str, tool: &str) -> PhaseAttemptCompleted {
     let record = ToolRunRecord::new(target, run_id, "tool", tool);
     record_tool_run_started(record, &json!({}));
@@ -54,7 +107,8 @@ fn delta_less_run_projects_an_unmeasured_compatibility_receipt() {
     let target = tempfile::tempdir().unwrap();
     let mut completed = completed_tool(target.path(), "verify-no-delta", "verify:finding");
     let attempt_id = RunAttemptId::parse(&completed.attempt_id).unwrap();
-    completed.target_snapshot = referenced_run_state(target.path(), &completed.run_refs).target_snapshot;
+    completed.target_snapshot =
+        referenced_run_state(target.path(), &completed.run_refs).target_snapshot;
     let receipt = emit_or_load_phase_receipt(target.path(), &completed, attempt_id).unwrap();
 
     project_typed_receipt_to_legacy(target.path(), &mut completed, &receipt).unwrap();

@@ -3,8 +3,11 @@ use crate::{V2Config, WorkspaceTarget};
 
 const MODEL: &str = "openai-codex:gpt-5.5";
 
+mod diagnosis;
 mod execution;
+mod map_handoff;
 mod recovery;
+mod scope;
 
 fn context<'a>(workspace: &'a WorkspaceTarget, config: &'a V2Config) -> ToolExecutionContext<'a> {
     ToolExecutionContext {

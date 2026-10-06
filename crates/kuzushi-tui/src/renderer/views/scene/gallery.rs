@@ -263,6 +263,7 @@ fn dfd_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
         ),
         theme::accent(),
     )])];
+    append_dfd_notice(&mut lines, width, model);
     append_dfd_node_lines(&mut lines, width, model);
     append_dfd_flow_lines(&mut lines, width, model);
     lines
@@ -312,11 +313,23 @@ fn summary_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
         );
     }
     let mut lines = Vec::new();
+    append_dfd_notice(&mut lines, width, model);
     let overview = dfd_overview(model);
     append_dfd_executive_summary(&mut lines, width, &overview);
     append_dfd_zone_flows(&mut lines, width, &overview);
     append_dfd_component_tree(&mut lines, width, model, &overview);
     lines
+}
+
+fn append_dfd_notice(lines: &mut Vec<Line<'static>>, width: usize, model: &DfdModel) {
+    let Some(notice) = model.evidence_notice() else {
+        return;
+    };
+    lines.extend(
+        crate::renderer::shared::text::wrap_text(notice, width)
+            .into_iter()
+            .map(|line| Line::styled(line, theme::label())),
+    );
 }
 
 fn append_dfd_executive_summary(

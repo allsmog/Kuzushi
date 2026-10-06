@@ -43,6 +43,40 @@ fn entry_reading_compact_browser_preserves_five_detail_rows_and_warning_presence
     );
 }
 
+#[test]
+fn entry_reading_wide_browser_leads_with_source_evidence_and_retains_full_receipts() {
+    let mut model = sample_model();
+    model.entries[0].evidence = "source_evidence_marker".into();
+    model.receipt.catalog_digest = Some("abcdef01".repeat(8));
+    let model = Arc::new(model);
+    let initial = render_to_text(
+        EntryPointBrowser {
+            model: model.clone(),
+            selection: 0,
+            detail_scroll: 0,
+        },
+        120,
+        26,
+    );
+    let evidence = initial
+        .find("source_evidence_marker")
+        .expect("visible source evidence");
+    if let Some(receipt) = initial.find("C SHA256") {
+        assert!(evidence < receipt, "source evidence must lead:\n{initial}");
+    }
+    let tail = render_to_text(
+        EntryPointBrowser {
+            model,
+            selection: 0,
+            detail_scroll: usize::MAX,
+        },
+        120,
+        26,
+    );
+    assert!(tail.contains("C SHA256"), "{tail}");
+    assert!(tail.contains("TIMESTAMPS MS"), "{tail}");
+}
+
 fn shell(width: u16, height: u16, embedded: bool) -> (tempfile::TempDir, crate::ShellApp) {
     let temp = tempfile::tempdir().unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
@@ -109,6 +143,11 @@ fn entry_reading_whole_shell_pages_every_row_and_has_no_overscroll_debt() {
             assert_full_shell_pages(width, height, embedded);
         }
     }
+}
+
+#[test]
+fn entry_reading_full_shell_at_forty_by_twelve_reaches_every_detail_row() {
+    assert_full_shell_pages(40, 12, false);
 }
 
 fn assert_full_shell_pages(width: u16, height: u16, embedded: bool) {

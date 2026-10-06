@@ -7,8 +7,19 @@ pub(in crate::renderer::views) fn map_canvas_sections(area: Rect) -> [Rect; 2] {
 }
 
 pub(super) fn gallery_sections(area: Rect, embedded: bool) -> [Rect; 2] {
-    let header = if embedded { 2 } else { 3 };
+    let header = gallery_header_height(area.height, embedded);
     split_rows(area, [Constraint::Length(header), Constraint::Min(0)])
+}
+
+fn gallery_header_height(height: u16, embedded: bool) -> u16 {
+    if !embedded && height < 12 {
+        return 1;
+    }
+    if embedded {
+        2
+    } else {
+        3
+    }
 }
 
 fn split_rows(area: Rect, constraints: [Constraint; 2]) -> [Rect; 2] {

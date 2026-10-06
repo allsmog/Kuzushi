@@ -10,6 +10,41 @@ pub fn campaign_plan_digest(root: &Path, id: &str) -> Result<String> {
     digest_serializable(&read_bounded_plan(root, id)?)
 }
 
+/// Validate recorded approval against frozen jobs without preparing execution
+/// against today's source, option store or globally active context.
+pub fn validate_campaign_report_approval(root: &Path, plan: &ApprovedWorkPlanV1) -> Result<()> {
+    let document = read_bounded_plan(root, &plan.campaign_id)?;
+    anyhow::ensure!(
+        digest_serializable(&document)? == plan.plan_sha256,
+        "study plan changed after approval"
+    );
+    let jobs = document["jobs"]
+        .as_array()
+        .context("study has no frozen jobs")?;
+    anyhow::ensure!(
+        jobs.len() == plan.jobs.len(),
+        "study approved workload differs from frozen jobs"
+    );
+    for job in jobs {
+        validate_report_job(&plan.campaign_id, plan, job)?;
+    }
+    Ok(())
+}
+
+fn validate_report_job(campaign: &str, plan: &ApprovedWorkPlanV1, job: &Value) -> Result<()> {
+    let id = job["jobId"].as_str().context("study job id missing")?;
+    let approved = plan.job(&format!("{campaign}:{id}"))?;
+    anyhow::ensure!(
+        approved.tool == "sast:scan",
+        "study approval contains different tool work"
+    );
+    anyhow::ensure!(
+        approved.input_sha256 == work_input_digest(&job["input"])?,
+        "study job input differs from recorded approval"
+    );
+    Ok(())
+}
+
 pub(super) fn approve_work(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -47,7 +82,12 @@ pub(super) fn approve_work(
     }))
 }
 
-fn review_campaign(id: &str, input: &Value, ctx: &ToolExecutionContext<'_>, registry: &ModuleRegistry) -> Result<(Value, String, BatchEquivalenceKey)> {
+fn review_campaign(
+    id: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    registry: &ModuleRegistry,
+) -> Result<(Value, String, BatchEquivalenceKey)> {
     let root = ctx
         .workspace
         .context("campaign approval requires a workspace")?
@@ -81,8 +121,10 @@ fn review_campaign(id: &str, input: &Value, ctx: &ToolExecutionContext<'_>, regi
 
 fn validate_investigation_binding(plan: &Value, input: &Value) -> Result<()> {
     if let Some(id) = plan.get("investigationId") {
-        anyhow::ensure!(input.get("investigationId") == Some(id),
-            "study belongs to a different investigation; preserve its existing accounting");
+        anyhow::ensure!(
+            input.get("investigationId") == Some(id),
+            "study belongs to a different investigation; preserve its existing accounting"
+        );
     }
     Ok(())
 }

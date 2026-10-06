@@ -353,7 +353,7 @@ fn journey_progress(app: &ShellApp, map_artifacts_built: bool) -> JourneyProgres
     );
     let selected_map = selected_attempt_counts(app, WorkflowPhase::Map);
     let selected_scan = selected_attempt_counts(app, WorkflowPhase::Scan);
-    let legacy = legacy_checkpoints(app, map_artifacts_built);
+    let legacy = legacy_checkpoints(app);
     progress.map_checkpoint =
         selected_map.is_some() || app.engagement.phase_is_skipped(WorkflowPhase::Map) || legacy.map;
     progress.scan_checkpoint = selected_scan.is_some()
@@ -406,7 +406,7 @@ struct LegacyCheckpoints {
     scan: bool,
 }
 
-fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckpoints {
+fn legacy_checkpoints(app: &ShellApp) -> LegacyCheckpoints {
     if app.engagement.phase_attempt_projection_is_degraded() {
         return LegacyCheckpoints::default();
     }
@@ -416,9 +416,11 @@ fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckp
         .is_some_and(|counts| counts.durable_scan_evidence);
     let scan = legacy_inference_applies(app, WorkflowPhase::Scan)
         && (legacy_completed_scan(app) || durable_finding_scan);
+    // Existing scan history retains its pre-ledger reading path. Map artifacts
+    // alone prove production, never operator acceptance or partial acknowledgement.
     let map = legacy_inference_applies(app, WorkflowPhase::Map)
         && !app.engagement.phase_is_skipped(WorkflowPhase::Map)
-        && (map_artifacts_built || scan);
+        && scan;
     LegacyCheckpoints { map, scan }
 }
 
@@ -819,7 +821,7 @@ fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
 fn destination_next_action(destination: JourneyDestination, progress: JourneyProgress) -> String {
     match destination {
         JourneyDestination::Phase(WorkflowPhase::Map) if progress.map_artifacts_built => {
-            "choose whether to reuse, run, or skip current-revision Map evidence".to_string()
+            "review existing Map evidence, rebuild, or explicitly skip Map".to_string()
         }
         JourneyDestination::Phase(WorkflowPhase::Map) => {
             "build or explicitly skip the current-revision map".to_string()
@@ -1464,7 +1466,7 @@ mod tests {
             assert!(!journey.progress.legacy_inferred, "discarded={discarded}");
             assert_eq!(journey.current, WorkflowPhase::Map);
             let expected = if discarded {
-                "choose whether to reuse, run, or skip current-revision Map evidence"
+                "review existing Map evidence, rebuild, or explicitly skip Map"
             } else {
                 "accept, continue with, or discard the completed Map result"
             };
@@ -1844,9 +1846,9 @@ mod tests {
 
         let journey = journey_model(&app).expect("journey");
 
-        assert!(journey.progress.map_checkpoint);
+        assert!(!journey.progress.map_checkpoint);
         assert!(!journey.progress.scan_checkpoint);
-        assert_eq!(journey.current, WorkflowPhase::Scan);
+        assert_eq!(journey.current, WorkflowPhase::Map);
     }
 
     #[test]
@@ -2057,7 +2059,7 @@ mod tests {
     }
 
     #[test]
-    fn finished_and_cleared_map_session_does_not_suppress_legacy_inference() {
+    fn finished_and_cleared_map_session_still_requires_acceptance() {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         write_map_artifact(target.path());
@@ -2070,8 +2072,30 @@ mod tests {
 
         let journey = journey_model(&app).expect("journey");
 
-        assert!(journey.progress.map_checkpoint);
-        assert!(journey.progress.legacy_inferred);
+        assert!(journey.progress.map_artifacts_built);
+        assert!(!journey.progress.map_checkpoint);
+        assert!(!journey.progress.legacy_inferred);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+    }
+
+    #[test]
+    fn standalone_map_artifacts_are_readable_without_becoming_accepted() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let journey = journey_model(&hydrated_app(
+            &workspace,
+            vec![ViewHydrationKey::MapArtifacts],
+        ))
+        .expect("journey");
+
+        assert!(journey.progress.map_artifacts_built);
+        assert!(!journey.progress.map_checkpoint);
+        assert!(!journey.progress.legacy_inferred);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        assert_eq!(journey.phases[0].state, JourneyPhaseState::Current);
+        assert_eq!(journey.phases[1].state, JourneyPhaseState::Pending);
     }
 
     #[test]

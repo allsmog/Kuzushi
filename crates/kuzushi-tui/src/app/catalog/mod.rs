@@ -29,12 +29,16 @@ impl ShellApp {
         self.keep_catalog_selection_visible();
     }
 
+    /// The overlay reserves rows for the cockpit chrome, capability header,
+    /// NEXT action, and category rails; the rest is the action-row budget that
+    /// keeps the selection inside the modal and sizes one page of paging.
+    pub(crate) fn catalog_visible_rows(&self) -> usize {
+        usize::from(self.viewport().rows.saturating_sub(17)).max(3)
+    }
+
     fn keep_catalog_selection_visible(&mut self) {
         let cursor = self.router.catalog().cursor();
-        // The overlay reserves rows for the cockpit chrome, capability header,
-        // NEXT action, and category rails. Use the remaining action-row budget
-        // so the selected entry stays inside the modal on short terminals.
-        let visible_rows = usize::from(self.viewport().rows.saturating_sub(17)).max(3);
+        let visible_rows = self.catalog_visible_rows();
         let scroll = self.router.modules().scroll();
         let next = if cursor < scroll {
             cursor

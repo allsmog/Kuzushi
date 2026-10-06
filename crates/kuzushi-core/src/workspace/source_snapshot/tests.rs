@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn source_bound_failure_retains_start_identity_and_runtime_class_without_recapture() {
+    let target = tempfile::tempdir().unwrap();
+    let source = target.path().join("lib.rs");
+    std::fs::write(&source, "fn before() {}\n").unwrap();
+    let before = crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap();
+    let config = crate::V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let metadata = crate::runtime::RuntimeFailureMetadata::new(
+        crate::runtime::RuntimeFailureClass::AllowanceRefused,
+        None,
+        None,
+    );
+    let error = run_source_bound_tool(&ctx, "test:source", target.path(), || {
+        std::fs::write(&source, "fn after() {}\n")?;
+        Err(anyhow::Error::new(crate::runtime::RuntimeFailure::new(
+            metadata.clone(),
+        )))
+    })
+    .unwrap_err();
+    assert_eq!(
+        crate::runtime::runtime_failure_metadata(&error),
+        Some(metadata)
+    );
+    assert!(error.to_string().contains("allowance refused"));
+    let output = failed_source_snapshot(&error)
+        .unwrap()
+        .attach(json!({"data":{}}));
+    assert_eq!(output["data"]["treeHash"], before);
+    assert_ne!(
+        before,
+        crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap()
+    );
+    assert!(failed_source_snapshot(&anyhow::anyhow!("uncaptured failure")).is_none());
+}
+
+#[test]
 fn source_bound_tool_retains_output_and_spend_when_source_changes() {
     let target = tempfile::tempdir().unwrap();
     let source = target.path().join("lib.rs");

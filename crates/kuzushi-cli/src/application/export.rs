@@ -12,12 +12,14 @@ pub(crate) fn export_command(
     completeness: String,
     preview: bool,
     allow_empty: bool,
+    campaign_id: Option<String>,
 ) -> Result<()> {
     let workspace = WorkspaceTarget::new(target)?;
     let format = resolve_export_format(&output, format.as_deref())?;
     let completeness = WorkspaceExportCompleteness::from_input(&completeness)
         .context("invalid export completeness")?;
     let options = WorkspaceExportOptions::new(Some(format))
+        .with_campaign(campaign_id)
         .with_completeness(completeness)
         .with_allow_empty(allow_empty);
     if preview {
@@ -33,6 +35,9 @@ pub(crate) fn export_command(
         report.format.as_str(),
         completeness.as_str()
     );
+    if let Some(path) = report.investigation_receipt_path {
+        println!("investigation receipt: {}", path.display());
+    }
     Ok(())
 }
 
@@ -42,6 +47,17 @@ fn preview_export_command(
     options: &WorkspaceExportOptions,
 ) -> Result<()> {
     let preview = preview_workspace_findings_export(workspace, format, options)?;
+    if matches!(
+        format,
+        WorkspaceExportFormat::Csv | WorkspaceExportFormat::VulnFindings
+    ) {
+        if let Some(receipt) = &preview.investigation {
+            eprintln!(
+                "Investigation receipt (written alongside a file export):\n{}",
+                serde_json::to_string_pretty(receipt)?
+            );
+        }
+    }
     print!("{}", preview.body);
     Ok(())
 }
@@ -73,6 +89,7 @@ mod tests {
                 "all".to_string(),
                 false,
                 true,
+                None,
             )
             .unwrap_err()
             .to_string();

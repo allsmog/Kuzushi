@@ -80,9 +80,9 @@ fn threat_model_terminal_label(
 pub(super) fn threat_model_artifacts(
     normalized_artifact: &Path,
     markdown_artifact: &Path,
-    persistent_artifact: &Path,
-    persisted: bool,
-) -> Vec<Value> {
+    target: &Path,
+    model_ref: Option<&ThreatModelRef>,
+) -> Result<Vec<Value>> {
     let mut artifacts = vec![
         json!({
             "label": "normalized threat model",
@@ -95,14 +95,15 @@ pub(super) fn threat_model_artifacts(
             "kind": "markdown",
         }),
     ];
-    if persisted {
+    if let Some(reference) = model_ref {
+        let persistent_artifact = threat_model_object_path(target, &reference.sha256)?;
         artifacts.push(json!({
-            "label": "persistent threat model",
+            "label": "immutable threat model",
             "path": persistent_artifact.display().to_string(),
             "kind": "json",
         }));
     }
-    artifacts
+    Ok(artifacts)
 }
 
 fn threat_model_header_lines(
@@ -150,14 +151,17 @@ fn threat_model_build_header_lines(
         format!("  Artifact: {}", input.output_dir),
         format!(
             "  Saved:    {}",
-            saved_threat_model_status(
-                persisted,
-                has_concrete_content,
-                input.workspace_root(),
-            )
+            saved_build_status(input, persisted, has_concrete_content)
         ),
     ]);
     lines
+}
+
+fn saved_build_status(input: &BuildInput, persisted: bool, has_concrete_content: bool) -> String {
+    if persisted && input.activate == Some(false) {
+        return "immutable draft saved; active context unchanged".into();
+    }
+    saved_threat_model_status(persisted, has_concrete_content, input.workspace_root())
 }
 
 fn randori_pasta_header_lines(input: &BuildInput, has_concrete_content: bool) -> Vec<String> {

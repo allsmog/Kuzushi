@@ -5,8 +5,16 @@ use serde_json::{json, Map, Value};
 pub(super) fn collect_entry_points(snapshot: &Value) -> Result<Vec<EntryPointRecord>> {
     let rows = attack_surface_rows(snapshot)?;
     anyhow::ensure!(
-        !rows.iter().any(crate::workspace::rust_surface_policy::is_legacy_rust_row),
+        !rows
+            .iter()
+            .any(crate::workspace::rust_surface_policy::is_legacy_rust_row),
         crate::workspace::rust_surface_policy::REBUILD_RUST_SURFACES
+    );
+    anyhow::ensure!(
+        !rows
+            .iter()
+            .any(crate::workspace::python_surface_policy::is_legacy_python_http_row),
+        crate::workspace::python_surface_policy::REBUILD_PYTHON_SURFACES
     );
     rows.iter()
         .map(normalize_entry_point)
@@ -105,9 +113,7 @@ fn insert_surface_identity(fields: &mut Map<String, Value>, path: &str, title: &
         json!(crate::workspace::attack_surface::language_from_path(path).unwrap_or("Unknown"))
     });
     fields.entry("title".to_string()).or_insert(json!(title));
-    fields
-        .entry("evidence".to_string())
-        .or_insert(json!(title));
+    fields.entry("evidence".to_string()).or_insert(json!(title));
 }
 
 fn first_text(fields: &Map<String, Value>, keys: &[&str]) -> String {

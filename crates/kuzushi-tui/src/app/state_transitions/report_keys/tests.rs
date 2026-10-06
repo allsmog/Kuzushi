@@ -20,6 +20,82 @@ fn press(app: &mut ShellApp, code: KeyCode, modifiers: KeyModifiers) {
 }
 
 #[test]
+fn report_scope_and_provenance_preserve_composer_and_saved_destination() {
+    let mut app = editor();
+    press(&mut app, KeyCode::Esc, KeyModifiers::NONE);
+    let path = app.router.report().path_draft().to_string();
+    press(&mut app, KeyCode::Char('s'), KeyModifiers::NONE);
+    press(&mut app, KeyCode::Char('p'), KeyModifiers::NONE);
+    assert!(app.router.report().workspace_history());
+    assert!(app.router.report().provenance_details());
+    assert_eq!(app.router.report().path_draft(), path);
+    press(&mut app, KeyCode::Char('s'), KeyModifiers::NONE);
+    assert!(!app.router.report().workspace_history());
+}
+
+#[test]
+fn report_loading_refuses_implicit_workspace_export_but_explicit_history_can_export() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+    app.open_report_from_current_origin();
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(update.effects.is_empty());
+    assert!(app
+        .router
+        .report()
+        .reveal_error()
+        .unwrap()
+        .contains("loading"));
+    app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(
+        update.effects.as_slice(),
+        [ShellEffect::ExportReport(ReportExport {
+            campaign_id: None,
+            ..
+        })]
+    ));
+}
+
+#[test]
+fn damaged_scope_evidence_blocks_study_export_until_history_is_chosen() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+    app.open_report_from_current_origin();
+    let error = "study report's accepted scope evidence is unavailable";
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: app.target().unwrap().to_path_buf(),
+            key: ViewHydrationKey::InvestigationReport {
+                run_refs: app.report_scan_run_refs(),
+            },
+            value: ViewHydrationValue::InvestigationReport(Err(error.into())),
+        });
+    let lines = crate::ui_view_models::report_investigation_lines(&app).join("\n");
+    assert!(lines.contains("Scope: study receipt unavailable"));
+    assert!(lines.contains(error));
+    assert!(lines.contains("s selects workspace history"));
+    let path = app.router.report().path_draft().to_string();
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(update.effects.is_empty());
+    let refusal = app.router.report().reveal_error().unwrap();
+    assert!(refusal.contains(error) && refusal.contains("Press s"));
+    assert_eq!(app.router.report().path_draft(), path);
+    app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(
+        update.effects.as_slice(),
+        [ShellEffect::ExportReport(ReportExport {
+            campaign_id: None,
+            ..
+        })]
+    ));
+}
+
+#[test]
 fn report_destination_cursor_delete_and_escape_restore_saved_path() {
     let mut app = editor();
     let original = app.router.report().path_draft().to_string();

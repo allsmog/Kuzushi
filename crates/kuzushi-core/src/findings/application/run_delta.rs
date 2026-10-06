@@ -1,6 +1,6 @@
 use crate::findings::{Finding, FindingStore};
 use crate::run_lifecycle::{
-    FindingDeltaSummary, RunItemId, RunItemRecord, RunItemSource, RunItemV1,
+    FindingDeltaSummary, RunItemId, RunItemRecord, RunItemSource, RunItemStatus, RunItemV1,
     RunObservationHandle, SafeText, MAX_FINDING_ID_SAMPLES,
 };
 use crate::ToolExecutionContext;
@@ -51,8 +51,30 @@ pub(crate) fn commit_observed_findings(
     target: &Path,
     findings: &[Finding],
 ) -> Result<()> {
+    commit_observed_findings_with_status(
+        store,
+        observation,
+        run_id,
+        target,
+        findings,
+        RunItemStatus::Completed,
+    )
+}
+
+pub(crate) fn commit_observed_findings_with_status(
+    store: &FindingStore,
+    observation: Option<&RunObservationHandle>,
+    run_id: &str,
+    target: &Path,
+    findings: &[Finding],
+    status: RunItemStatus,
+) -> Result<()> {
+    anyhow::ensure!(
+        matches!(status, RunItemStatus::Completed | RunItemStatus::Partial),
+        "Finding commits require a completed or partial outcome"
+    );
     let counts = store.fingerprint_delta(findings)?;
-    insert_run_findings(store, run_id, target, findings)?;
+    insert_run_findings(store, run_id, target, findings, status)?;
     emit_finding_delta(observation, store, findings, counts)
 }
 
@@ -61,12 +83,13 @@ fn insert_run_findings(
     run_id: &str,
     target: &Path,
     findings: &[Finding],
+    status: RunItemStatus,
 ) -> Result<()> {
-    store.with_run_lifecycle(run_id, target, || {
+    store.with_run_lifecycle_status(run_id, target, || {
         for finding in findings {
             store.insert_finding(run_id, finding)?;
         }
-        Ok(((), findings.len()))
+        Ok(((), findings.len(), status))
     })
 }
 
@@ -88,4 +111,28 @@ fn finding_delta_summary(
             .map(|finding| SafeText::operator_visible(&finding.fingerprint))
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_commit_status_is_refused_before_creating_a_run() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let error = commit_observed_findings_with_status(
+            &store,
+            None,
+            "invalid-status",
+            root.path(),
+            &[],
+            RunItemStatus::Canceled,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("completed or partial"));
+        assert_eq!(store.run_status("invalid-status").unwrap(), None);
+        assert!(store.list_all_findings().unwrap().is_empty());
+    }
 }

@@ -169,6 +169,30 @@ impl EngagementState {
         self.stale_selected_phase_attempt_for_snapshot(phase, snapshot)
     }
 
+    /// The attempt a phase page presents: one awaiting disposition, then the
+    /// current selection, then (unless the ledger is degraded) the latest
+    /// selection recorded on earlier source. Page projections and their
+    /// receipt hydration share this choice so they cannot drift apart.
+    pub(crate) fn displayed_phase_attempt(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<(
+        &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+        DisplayedAttempt,
+    )> {
+        if let Some(record) = self.unresolved_phase_attempt(phase) {
+            return Some((record, DisplayedAttempt::Unresolved));
+        }
+        if let Some(record) = self.selected_phase_attempt(phase) {
+            return Some((record, DisplayedAttempt::Selected));
+        }
+        if self.phase_attempt_projection_degraded {
+            return None;
+        }
+        self.stale_selected_phase_attempt(phase)
+            .map(|record| (record, DisplayedAttempt::EarlierSource))
+    }
+
     pub(crate) fn stale_selected_phase_attempt_for_snapshot(
         &self,
         phase: WorkflowPhase,
@@ -942,4 +966,12 @@ impl EngagementState {
             self.plan_skipped.insert(idx);
         }
     }
+}
+
+/// How a displayed phase attempt relates to the current source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DisplayedAttempt {
+    Unresolved,
+    Selected,
+    EarlierSource,
 }

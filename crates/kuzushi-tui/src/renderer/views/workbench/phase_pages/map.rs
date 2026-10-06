@@ -17,19 +17,47 @@ pub(super) fn render(
     _header: &EngagementHeaderModel,
     state: PhaseRenderState,
 ) {
+    if state.surface == Some(PhaseSurfaceId::MapReadiness) && model.recorded_context_issue.is_some()
+    {
+        return render_map_action_card(frame, area, model, state);
+    }
+    if render_selected_map_surface(frame, area, app, model, state) {
+        return;
+    }
+    render_map_grid(frame, area, model, state);
+}
+
+fn render_selected_map_surface(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) -> bool {
     match state.role {
         crate::ui_view_models::SurfaceRole::Canvas => {
-            return render_map_canvas(frame, area, app, model, state);
+            render_map_canvas(frame, area, app, model, state);
+            return true;
         }
         crate::ui_view_models::SurfaceRole::Drawer => {
-            return render_map_action_card(frame, area, model, state);
+            render_map_action_card(frame, area, model, state);
+            return true;
         }
         crate::ui_view_models::SurfaceRole::Standard => {}
     }
     if let Some(pane) = state.surface {
         render_map_pane(frame, area, model, state, pane);
-        return;
+        return true;
     }
+    false
+}
+
+fn render_map_grid(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) {
     if area.width < GRID_MIN_WIDTH || area.height < COMPACT_MIN_HEIGHT {
         render_compact(frame, area, model, state);
         return;
@@ -52,11 +80,18 @@ pub(super) fn plain_lines(
     _header: &EngagementHeaderModel,
     width: usize,
 ) -> Vec<Line<'static>> {
+    if let Some(issue) = model.recorded_context_issue.as_deref() {
+        return recorded_context_issue_lines(issue, width);
+    }
     if crate::ui_view_models::map_gallery_is_primary(app) {
         let mut lines = crate::renderer::views::scene::map_summary_plain_lines(app, width);
         lines.push(map_artifact_status_line(model, width));
         return lines;
     }
+    map_evidence_plain_lines(model, width)
+}
+
+fn map_evidence_plain_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = divider_lines(
         "PROJECT CONTEXT",
         context_lines(model, width, STACKED_CONTEXT_ROWS),
@@ -151,11 +186,11 @@ fn map_artifact_status_line(model: &MapPhaseModel, width: usize) -> Line<'static
         .map(|details| details.files.as_str())
         .unwrap_or("context inventory unavailable");
     let status = format!(
-        "{} · {} · context:{} · threat-model:{} · {} · {} nodes · {} flows",
+        "{} · {} · {} · context:{} · {} · {} nodes · {} flows",
+        model.threat_model_freshness.verdict,
         model.project.scope_label,
         model.project.revision_label,
         model.context.state,
-        model.threat_model_freshness.verdict,
         files,
         model.dfd.nodes.len(),
         model.dfd.flows.len(),
@@ -189,10 +224,30 @@ fn map_action_card_lines(
     model: &MapPhaseModel,
     width: usize,
 ) -> (&'static str, Vec<Line<'static>>) {
+    if let Some(issue) = model.recorded_context_issue.as_deref() {
+        return ("MAP CONTEXT", recorded_context_issue_lines(issue, width));
+    }
     if let Some(hint) = model.scope_suggestion.as_deref() {
         return ("NEXT ACTION", scope_suggestion_lines(hint, width));
     }
     map_evidence_action(model, width).unwrap_or_else(|| ready_map_lines(model, width))
+}
+
+fn recorded_context_issue_lines(issue: &str, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        fit("▸ Enter inspect Map runs", width),
+        theme::accent(),
+    )];
+    lines.extend(
+        wrap_text(issue, width)
+            .into_iter()
+            .map(|line| Line::styled(line, theme::warn())),
+    );
+    lines.push(Line::styled(
+        fit("Type plan map to prepare new context", width),
+        theme::muted(),
+    ));
+    lines
 }
 
 fn map_evidence_action(

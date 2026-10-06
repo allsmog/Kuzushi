@@ -70,7 +70,9 @@ pub(super) fn logs_keybindings() -> Vec<ViewKeybinding> {
     )]
 }
 
-pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
+/// `e` toggles between phase actions and every expert engine, so its label
+/// names the state it switches to.
+pub(super) fn catalog_keybindings(expanded: bool) -> Vec<ViewKeybinding> {
     vec![
         bind(
             HotkeyTrigger::Enter,
@@ -81,7 +83,11 @@ pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
         bind_char(
             'e',
             "e",
-            "expert engines",
+            if expanded {
+                "phase only"
+            } else {
+                "expert engines"
+            },
             ViewHotkeyAction::CatalogToggleExpert,
         ),
     ]
@@ -241,23 +247,36 @@ fn guided_workbench_bindings(
         plan.density == crate::ui_view_models::LayoutDensity::Guided
             && !matches!(
                 plan.effective_focus,
-                crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
+                crate::ui_view_models::PhaseSurfaceId::MapReadiness
+                    | crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
                     | crate::ui_view_models::PhaseSurfaceId::ProveResult
                     | crate::ui_view_models::PhaseSurfaceId::ProveTrace
             )
     }) {
         return None;
     }
-    // Questions own their keys; pending results retain page navigation.
+    // Questions own their keys; pending results retain page navigation and reading.
     if app.guided_scan_question_is_open() {
         return Some(Vec::new());
     }
     let mut bindings = workbench_page_keybindings();
+    bindings.extend(focused_detail_paging(plan));
     bindings.extend(workbench_secondary_action_keybindings(
         page,
         crate::ui_view_models::review_backlog_active(app),
     ));
     Some(bindings)
+}
+
+fn focused_detail_paging(
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+) -> Vec<ViewKeybinding> {
+    plan.and_then(|plan| plan.surface(plan.effective_focus))
+        .filter(|surface| {
+            surface.interaction == crate::ui_view_models::SurfaceInteraction::Scrollable
+        })
+        .map(|_| Vec::from(workbench_detail_paging()))
+        .unwrap_or_default()
 }
 
 fn workbench_pane_cycle_keybindings(available_count: usize) -> Vec<ViewKeybinding> {
@@ -279,7 +298,8 @@ fn workbench_open_keybindings(
         surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable
             || matches!(
                 surface.id,
-                crate::ui_view_models::PhaseSurfaceId::ReviewQueue
+                crate::ui_view_models::PhaseSurfaceId::MapReadiness
+                    | crate::ui_view_models::PhaseSurfaceId::ReviewQueue
                     | crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
                     | crate::ui_view_models::PhaseSurfaceId::ProveTrace
             )

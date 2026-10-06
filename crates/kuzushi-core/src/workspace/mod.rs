@@ -9,8 +9,9 @@ mod git_history_mining;
 mod git_metadata;
 mod infrastructure;
 pub mod inventory;
-pub(crate) mod rust_test_source;
+pub(crate) mod python_surface_policy;
 pub(crate) mod rust_surface_policy;
+pub(crate) mod rust_test_source;
 pub(crate) mod source_snapshot;
 pub mod source_span;
 pub mod tool_shelf;
@@ -19,22 +20,26 @@ pub mod tool_shelf;
 mod tests;
 
 pub use application::{
-    active_workspace_required_message, build_project_model_document, changed_scan_input,
-    discover_and_save_nested_project_scopes, discover_nested_project_scopes,
-    export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
-    export_workspace_findings, export_workspace_findings_with_options,
-    findings_since_filter_expression, load_nested_project_scopes, load_program_scope,
-    load_project_model_document, preview_workspace_findings_export, project_model_scope_path,
-    record_review_session_started, record_user_review_decision_for_finding,
-    record_user_review_decision_for_finding_at_watermark,
-    record_user_review_decision_for_finding_with_session, refresh_project_model_staleness, save_nested_project_scopes, save_project_model_document,
+    accept_scan_scope_proposal, active_workspace_required_message, build_project_model_document,
+    changed_scan_input, create_scan_scope_proposal, discover_and_save_nested_project_scopes,
+    discover_nested_project_scopes, edit_scan_scope_proposal, export_scan_findings_sarif,
+    export_scan_findings_sarif_with_run_summary, export_workspace_findings,
+    export_workspace_findings_with_options, findings_since_filter_expression,
+    load_accepted_scan_scope_proposal, load_investigation_report,
+    load_investigation_report_for_runs, load_nested_project_scopes, load_program_scope,
+    load_project_model_document, load_scan_scope_proposal, preview_workspace_findings_export,
+    project_model_scope_path, record_review_session_started,
+    record_user_review_decision_for_finding, record_user_review_decision_for_finding_at_watermark,
+    record_user_review_decision_for_finding_with_session, refresh_project_model_staleness,
+    save_nested_project_scopes, save_project_model_document, scan_scope_proposal_files,
     workspace_export_omitted_fields, workspace_finding_export_records_with_context,
     workspace_finding_export_records_with_reviews, workspace_status_for_target,
-    write_program_scope_scaffold, ProjectModelDocument, ProjectModelSection,
-    ProjectModelSectionOrigin, WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary,
-    WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
-    ChangedScanScope, WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
-    WorkspaceFindingsExportPreview, WorkspaceRemediationExportSummary, WorkspaceRunExportContext, WorkspaceStatus,
+    write_program_scope_scaffold, ChangedScanScope, InvestigationReportReceipt,
+    ProjectModelDocument, ProjectModelSection, ProjectModelSectionOrigin,
+    WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary, WorkspaceFindingExportLocation,
+    WorkspaceFindingExportRecord, WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
+    WorkspaceFindingsExportPreview, WorkspaceObservedSource, WorkspaceRemediationExportSummary,
+    WorkspaceReviewDecisionBasis, WorkspaceRunExportContext, WorkspaceStatus,
     WorkspaceVerificationExportSummary, PROJECT_MODEL_SCHEMA_VERSION,
 };
 pub use artifact_kb::*;
@@ -57,13 +62,17 @@ pub use domain::{
     workspace_state_root, workspace_static_evidence_db_path, workspace_suppressions_path,
     write_workspace_file, write_workspace_state_file, HostPattern, NestedProjectKind,
     NestedProjectScope, NestedProjectScopeTree, ProgramScope, ProgramScopeFile, ProgramScopeList,
-    ScopeVerdict, TargetSyntax, WorkspaceExportCompleteness, WorkspaceExportFormat, ReviewYieldExportProvenance, WorkspaceExportOptions,
-    WorkspaceFindingsExport, WorkspaceTarget, KUZUSHI_STATE_DIR, LEGACY_CODEQL_DB_DIR,
-    LEGACY_CODEQL_STATE_DIR, PROJECT_MODEL_DIR, PROJECT_MODEL_SCOPES_FILE, ROOT_SCOPE_ID,
-    WORKSPACE_ARTIFACT_KB_DB_FILE, WORKSPACE_ATTACHMENTS_FILE, WORKSPACE_CODEQL_DB_DIR,
-    WORKSPACE_CONFIG_FILE, WORKSPACE_EVENT_LOG_DIR, WORKSPACE_FINDINGS_DB_FILE,
-    WORKSPACE_MODELS_FILE, WORKSPACE_OBJECTS_DIR, WORKSPACE_OPTIONS_FILE,
-    WORKSPACE_STATE_VERSION_DIR, WORKSPACE_STATIC_EVIDENCE_DB_FILE, WORKSPACE_SUPPRESSIONS_FILE,
+    ProposedScanScope, ReviewYieldExportProvenance, ScanScopeCoverage, ScanScopeDraft,
+    ScanScopeEdit, ScanScopeExclusion, ScanScopeGeneration, ScanScopeProposalRef, ScanScopeReview,
+    ScanScopeRevision, ScanScopeSource, ScopeCoverageApproval, ScopeFileFilter, ScopeFilePage,
+    ScopeFilePreview, ScopeOverlapPreview, ScopeVerdict, TargetSyntax, WorkspaceExportCompleteness,
+    WorkspaceExportFormat, WorkspaceExportOptions, WorkspaceFindingsExport, WorkspaceTarget,
+    KUZUSHI_STATE_DIR, LEGACY_CODEQL_DB_DIR, LEGACY_CODEQL_STATE_DIR, PROJECT_MODEL_DIR,
+    PROJECT_MODEL_SCOPES_FILE, ROOT_SCOPE_ID, WORKSPACE_ARTIFACT_KB_DB_FILE,
+    WORKSPACE_ATTACHMENTS_FILE, WORKSPACE_CODEQL_DB_DIR, WORKSPACE_CONFIG_FILE,
+    WORKSPACE_EVENT_LOG_DIR, WORKSPACE_FINDINGS_DB_FILE, WORKSPACE_MODELS_FILE,
+    WORKSPACE_OBJECTS_DIR, WORKSPACE_OPTIONS_FILE, WORKSPACE_STATE_VERSION_DIR,
+    WORKSPACE_STATIC_EVIDENCE_DB_FILE, WORKSPACE_SUPPRESSIONS_FILE,
 };
 pub use git_history_mining::{
     changed_files_since, mine_vuln_history, security_keywords_for_languages,
@@ -80,3 +89,12 @@ pub use tool_shelf::{
     load_tool_shelf, record_tool_use, save_tool_shelf, workspace_tool_shelf_path, RecentTool,
     ToolShelf, RECENTS_CAP, WORKSPACE_TOOL_SHELF_FILE,
 };
+
+pub(crate) use application::{
+    load_latest_scan_scope_proposal, load_scan_scope_proposal_cancellable,
+    scan_scope_proposal_files_cancellable,
+};
+
+pub use application::resolve_accepted_scan_scope_selection;
+pub(crate) use application::{suggest_scan_scope_proposal, validate_scan_scope_suggestion_input};
+pub use domain::{AcceptedScanScopeSelection, ScanScopeRef};

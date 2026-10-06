@@ -73,10 +73,11 @@ fn engine_outcome_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'stati
         .flat_map(|outcome| {
             let mut lines = vec![engine_line(outcome, width)];
             if let Some(detail) = outcome.detail.as_deref() {
-                lines.push(Line::styled(
-                    fit(&format!("  {detail}"), width),
-                    theme::muted(),
-                ));
+                lines.extend(
+                    crate::renderer::shared::text::wrap_text(detail, width.saturating_sub(2))
+                        .into_iter()
+                        .map(|line| Line::styled(format!("  {line}"), theme::muted())),
+                );
             }
             lines
         })
@@ -210,6 +211,37 @@ fn short_ref(run_ref: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_engine_detail_remains_readable_at_narrow_widths() {
+        let model = ScanPhaseModel {
+            scope: "service".into(),
+            plan: "manual".into(),
+            attempt: None,
+            empty_hint: None,
+            live: None,
+            engine_outcomes: vec![ScanEngineOutcomeModel {
+                tool_key: Some("secret-scan:scan".into()),
+                engine: "secret-scan".into(),
+                outcome: "partial".into(),
+                run_ref: None,
+                detail: Some(
+                    "Incomplete coverage: 1 gap; service: unreadable.js: permission denied".into(),
+                ),
+            }],
+        };
+        for width in [20, 38, 58, 78, 118, 158] {
+            let lines = engine_lines(&model, width);
+            assert!(lines.iter().all(|line| line.width() <= width), "{lines:?}");
+            let text = lines[1..]
+                .iter()
+                .map(|line| line.to_string().trim().to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(text.contains("Incomplete coverage: 1 gap"), "{text}");
+            assert!(text.contains("unreadable.js: permission denied"), "{text}");
+        }
+    }
 
     #[test]
     fn live_scan_line_names_the_run_and_defers_output_to_run_focus() {
@@ -393,5 +425,13 @@ pub(super) fn receipt_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'s
 }
 
 pub(super) fn compact_summary_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
-    formatted_compact_summary_lines(model, width)
+    let mut lines = formatted_compact_summary_lines(model, width);
+    if model
+        .engine_outcomes
+        .iter()
+        .any(|engine| engine.outcome == "partial")
+    {
+        lines.extend(engine_lines(model, width));
+    }
+    lines
 }

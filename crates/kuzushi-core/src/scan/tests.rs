@@ -225,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn native_scan_run_exists_only_after_every_selected_engine_completes() {
+    fn failed_native_scan_retains_completed_engine_observations() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -237,7 +237,12 @@ mod tests {
         let error = run_scan_engines(&workspace, &store, &scanners).unwrap_err();
 
         assert!(error.to_string().contains("native engine failed"));
-        assert!(store.list_findings(10).unwrap().is_empty());
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+        let run_id = store.latest_run_id().unwrap().unwrap();
+        assert_eq!(
+            store.run_status(&run_id).unwrap().as_deref(),
+            Some("failed")
+        );
     }
 
     #[test]
@@ -315,66 +320,70 @@ mod tests {
     }
 
     #[test]
-    fn scan_runner_accepts_file_scopes_and_keeps_only_requested_files() {
-        struct FileScopedScanner;
-
-        impl ScanEngine for FileScopedScanner {
+    fn scan_runner_rejects_file_scopes_before_preflight_or_discovery() {
+        struct DirectoryScanner;
+        impl ScanEngine for DirectoryScanner {
             fn id(&self) -> &'static str {
-                "file-scoped"
+                "directory-only"
             }
-
-            fn scan(
-                &self,
-                target: &Path,
-                _cancellation: &ScanCancellation,
-            ) -> Result<Vec<Finding>> {
-                assert!(target.ends_with("src"));
-                Ok(vec![
-                    Finding::new_tool(
-                        "static",
-                        "static/requested",
-                        "requested.rs",
-                        7,
-                        None,
-                        Severity::Medium,
-                        "requested finding",
-                    ),
-                    Finding::new_tool(
-                        "static",
-                        "static/neighbor",
-                        "neighbor.rs",
-                        9,
-                        None,
-                        Severity::Medium,
-                        "neighbor finding",
-                    ),
-                ])
+            fn preflight(&self) -> Result<()> {
+                panic!("unsupported scope must fail before preflight")
+            }
+            fn scan(&self, _: &Path, _: &ScanCancellation) -> Result<Vec<Finding>> {
+                panic!("a file scope must never enlarge discovery")
             }
         }
-
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
         fs::write(tmp.path().join("src/requested.rs"), "fn requested() {}\n").unwrap();
-        fs::write(tmp.path().join("src/neighbor.rs"), "fn neighbor() {}\n").unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(FileScopedScanner)];
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(DirectoryScanner)];
         let options = ScanRunOptions {
-            run_id: Some("scan-file-scoped".to_string()),
-            severity: None,
-            paths: vec!["src/requested.rs".to_string()],
-            tasks: None,
-            static_proof_state: None,
-            index_static_evidence: false,
+            run_id: Some("scan-file-scoped".into()),
+            paths: vec!["src/requested.rs".into()],
+            ..ScanRunOptions::default()
+        };
+        let error =
+            run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap_err();
+        assert!(
+            error.to_string().contains("requires directory scopes"),
+            "{error:#}"
+        );
+        assert!(store
+            .list_findings_for_scan_id("scan-file-scoped")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn plain_file_paths_scan_exactly_those_files_with_exact_file_engines() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join("config")).unwrap();
+        for name in ["config/changed.env", "config/untouched.env"] {
+            fs::write(
+                tmp.path().join(name),
+                "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n",
+            )
+            .unwrap();
+        }
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> =
+            vec![Box::new(crate::scan::SecretScanScanner)];
+        let options = ScanRunOptions {
+            run_id: Some("scan-exact-paths".into()),
+            paths: vec!["config/changed.env".into()],
+            ..ScanRunOptions::default()
         };
 
         run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap();
-        let findings = store
-            .list_findings_for_scan_id("scan-file-scoped")
-            .unwrap();
 
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].file_path, "src/requested.rs");
+        let findings = store.list_findings_for_scan_id("scan-exact-paths").unwrap();
+        assert!(!findings.is_empty());
+        assert!(findings
+            .iter()
+            .all(|finding| finding.file_path == "config/changed.env"));
     }
 
     #[test]
@@ -661,7 +670,10 @@ printf '{"results":[]}'
             .to_string();
 
         assert!(error.contains("semgrep failed with status"), "{error}");
-        assert!(error.contains("network down while fetching rules"), "{error}");
+        assert!(
+            error.contains("network down while fetching rules"),
+            "{error}"
+        );
     }
 
     #[cfg(unix)]
@@ -675,9 +687,8 @@ printf '{"results":[]}'
             &format!("#!/bin/sh\nprintf '%s' '{report}'\n"),
         );
 
-        let outcome = scanner
-            .scan_outcome_with_cancel(tmp.path(), &ScanCancellation::default())
-            .unwrap();
+        let outcome =
+            ScanEngine::scan_artifacts(&scanner, tmp.path(), &ScanCancellation::default()).unwrap();
 
         assert_eq!(outcome.findings.len(), 1);
         assert_eq!(
@@ -691,12 +702,11 @@ printf '{"results":[]}'
 
     #[test]
     fn semgrep_report_with_scan_errors_admits_incomplete_coverage() {
-        let report = SemgrepScanReport::new("repo".to_string(), Vec::new(), None).with_scan_errors(
-            vec![
+        let report =
+            SemgrepScanReport::new("repo".to_string(), Vec::new(), None).with_scan_errors(vec![
                 "a.js: Failed to parse".to_string(),
                 "b.js: Failed to parse".to_string(),
-            ],
-        );
+            ]);
 
         let output = report.output();
         assert!(
@@ -1218,7 +1228,10 @@ printf '{"results":[]}'
     fn codeql_report_stays_silent_about_coverage_when_every_language_was_analyzed() {
         let report = CodeqlScanReport::new("/repo", vec![codeql_scan_error_finding()], None);
 
-        assert_eq!(report.output().lines().next(), Some("codeql: 1 finding under /repo"));
+        assert_eq!(
+            report.output().lines().next(),
+            Some("codeql: 1 finding under /repo")
+        );
         assert_eq!(report.to_tool_json()["data"].get("scanErrors"), None);
     }
 

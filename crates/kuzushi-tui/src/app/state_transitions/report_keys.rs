@@ -39,23 +39,12 @@ impl ShellApp {
             KeyCode::Up | KeyCode::Char('k') => self.router.report_mut().move_format(-1),
             KeyCode::Down | KeyCode::Char('j') => self.router.report_mut().move_format(1),
             KeyCode::Char('c') => self.router.report_mut().cycle_completeness(),
+            KeyCode::Char('s') => self.router.report_mut().toggle_scope(),
+            KeyCode::Char('p') => self.router.report_mut().toggle_provenance(),
             KeyCode::Char('e') => self.router.report_mut().set_editing_path(true),
             KeyCode::Char('q') => self.close_report_to_origin(),
             KeyCode::Enter => {
-                let route = self.router.report();
-                let output = route.path_draft();
-                if output.trim().is_empty() {
-                    self.log("report", "destination must not be empty");
-                    return InputUpdate::handled();
-                }
-                return InputUpdate::handled_with_effects(vec![ShellEffect::ExportReport(
-                    ReportExport {
-                        format: route.format(),
-                        completeness: route.completeness(),
-                        output: PathBuf::from(output),
-                        target: self.target_owned(),
-                    },
-                )]);
+                return self.export_report_key();
             }
             KeyCode::Char('o') => {
                 return InputUpdate::handled_with_effects(vec![
@@ -65,6 +54,31 @@ impl ShellApp {
             _ => return InputUpdate::ignored(),
         }
         InputUpdate::handled()
+    }
+
+    fn export_report_key(&mut self) -> InputUpdate {
+        let campaign_id = match crate::ui_view_models::report_export_campaign(self) {
+            Ok(campaign) => campaign,
+            Err(error) => {
+                self.router.report_mut().set_reveal_error(Some(error));
+                return InputUpdate::handled();
+            }
+        };
+        let route = self.router.report();
+        let output = route.path_draft();
+        if output.trim().is_empty() {
+            self.router
+                .report_mut()
+                .set_reveal_error(Some("Enter a destination path.".into()));
+            return InputUpdate::handled();
+        }
+        InputUpdate::handled_with_effects(vec![ShellEffect::ExportReport(ReportExport {
+            format: route.format(),
+            completeness: route.completeness(),
+            output: PathBuf::from(output),
+            target: self.target_owned(),
+            campaign_id,
+        })])
     }
 
     fn page_report(&mut self, direction: isize) {

@@ -45,16 +45,140 @@ attempt cannot redirect that journey. Report is a separate descriptor surface;
 `BuildReport` is retained as a saved-plan identifier but is no longer offered as
 a Fix planning task. No public module executor is removed.
 
+Standalone Map artifacts remain readable, including partial deterministic
+diagrams, but do not accept themselves or advance the phase rail. A completed
+Map attempt needs explicit selection; partial work needs acknowledgement.
+Existing completed scan history retains its pre-ledger compatibility reading
+path. Browsing or restarting with artifacts alone records no acceptance.
+
+`campaign:context-map threatModelRef=<exact reference>` reviews an existing
+revision through its authenticated producing run. It requires current source
+and preserves completed or partial outcomes; it never regenerates context,
+changes the active model or selects a Map attempt. It is an alternative to
+the context-campaign handoff, which still requires both campaign identifier and
+plan digest. Missing, changed or damaged source evidence remains inspectable
+but cannot satisfy current Map acceptance. Re-importing verified context can
+create a new source-bound receipt without a model request.
+
 ## Report surface
 
-`report:build` and `report:sarif` declare `phase: report`, a catalog and dispatch
+`report:build`, `report:sarif` and `workspace:export-findings` declare
+`phase: report`, a catalog and dispatch
 surface separate from the persisted Map/Scan/Review/Prove/Fix workflow. Reports
 export existing evidence at any autonomy posture and never advance a workflow
 phase. File exports retain descriptor authorization. The Report phase permits
 read, workspace-write and target-write effects; repository-execute and
 external-action descriptors are rejected. Phase metadata never schedules work.
 
+`workspace:export-findings` accepts optional `campaignId` (`campaign_id` alias).
+The CLI equivalent is `kuzushi export --campaign-id <id>`. This selects the
+study's authenticated parent and engine observations, including retained partial
+attempts, instead of unrelated workspace history. Safe identity projection is
+shared with Review, so recurring observations retain their evidence as one
+finding without folding different weak identities together.
+
+Every format includes a companion version-1 investigation receipt. It records
+planned/completed/failed/pending work, occurrence, raw observation run references,
+source SHA and content identity, accepted context, configuration/prompt digests,
+human review counts and current shared investigation allowance. JSON, JSONL and
+SARIF embed it too; Markdown links it and hashes it in the bundle manifest. CSV
+and external scanner files preserve their existing rows. Omission of `campaignId`
+retains the existing workspace-history export. Completeness filters describe
+human review, not repository coverage. Unknown dollar totals remain unknown.
+
+Reporting authenticates saved work and historical approval without granting
+execution authority, resetting reservations or starting follow-up work. The
+receipt discloses missing inventory/engine coverage and prompt/context omissions.
+It references raw observations rather than bundling every historical artifact.
+Human decisions are not yet bound to a source revision, and a missing observation
+never proves a fix. Old campaigns without allowance history disclose that absence.
+
 ## Bounded shard proposals
+
+`pack:scopes` is the source-bound review foundation for logical discovery
+boundaries. Its descriptor exposes `create`, `read`, `edit`, `accept`, and
+`files` operations. It uses bounded repository inventory and makes no model
+requests. `create` keeps the whole repository together unless given an explicit
+draft. It does not install a shard manifest, start jobs, or advance Map.
+
+Each edit creates an immutable revision linked from the existing strategy
+proposal queue. A saved reference identifies the proposal, revision, and
+content digest. Coverage reports exact totals with previews of at most 128
+files; `files` provides bounded pages for the remainder. Loose root files,
+overlaps, exclusions, context-only shared membership, and inventory limits
+remain visible. Invalid paths, more than eight primary scopes, stale references,
+source drift, or damaged saved data fail explicitly.
+
+`identityOmissions` separately reports included files absent from the authenticated
+content tree, including files beyond its per-file size limit. Those memberships
+cannot be accepted by acknowledging partial inventory. Explicitly exclude them
+or reduce the scope first. The source identity and inventory have separate
+limits; inventory inspection byte counts do not measure content hashing work.
+
+Acceptance refuses uncovered inventoried files and requires acknowledgements
+of inventory limitations, duplicate discovery, and exclusions. It approves
+boundaries only. Future study compilation must consume
+`load_accepted_scan_scope_proposal`, which checks committed acceptance and current
+source, rather than trusting a raw historical artifact. Editing a newer draft
+does not invalidate an earlier committed acceptance used by an approved plan.
+An acceptance orphaned by failed queue publication cannot be consumed. History
+verification checks immutable predecessor links with a 4096-revision read bound.
+Ordinary strategy approval cannot accept scope boundaries. The shell scope editor is available through `scopes`. The optional model
+proposal and fixed scoped study compiler remain pending;
+this tool is not evidence that the monorepo workflow is complete.
+
+Scoped `sast:scan` preparation checks repository-relative membership without
+following symlinks. Native adapters currently require directory scopes; a file
+selection fails before scanner preflight instead of expanding to its parent.
+`offense-review` and `systems-hunt` currently require whole-repository discovery.
+`taint-iris-next` accepts one directory per scoped job, with any `targetSubdir`
+matching that selection. Unsupported memberships require an explicit new draft;
+workers cannot enlarge them. Explicit agentic include patterns cannot override
+`paths`, and empty patterns no longer disable the derived selection.
+
+These checks also run before study publication and again before pipeline work.
+The shared native runner rejects outside-root and parent-traversal finding paths.
+Directory-root dispatch is not proof of every scanner's complete coverage or
+model-tool access isolation. Per-engine evidence and remaining limitations are
+in [the discovery scope audit](./assessments/discovery-scope-2026-10-05.md).
+
+Native SAST observations remain usable when an engine reports incomplete
+coverage. The run is `partial`, with per-engine reasons in Scan and original
+messages in authenticated `native-coverage.json` and `data.nativeCoverage`.
+Coverage schema version 2 records engine, selected scope, findings count,
+reported errors and execution disposition. The updated reader also accepts old
+schema-1 rows, defaulting their execution disposition while preserving gaps. A separate engine with no reported error keeps its own
+completed outcome; this does not certify complete repository coverage. Partial
+absence cannot resolve earlier findings. The operator must explicitly
+acknowledge a partial attempt before using it for the guided journey.
+
+For a selected Semgrep task, `semgrepConfig` declares rule files or selectors
+and `semgrepBinary` declares the executable through shared prepared dispatch.
+Use absolute local rule paths when scanning directory scopes. Local rules
+avoid remote rule selection but do not disable every executable network feature.
+Neither option enables Semgrep when it is absent from the approved task list.
+Legacy public scan helpers still return a coverage error after persisting
+observations. The native SAST runner also retains earlier observations that passed scope checks
+when a later native engine fails or cancellation stops the fixed plan. Coverage records
+all approved engine/scope jobs with their explicit execution disposition,
+including jobs never started. The findings ledger keeps failed, canceled or
+interrupted status with its retained count; these runs cannot reconcile absent
+findings. The authenticated terminal result carries the recorded Scan phase
+stages, native coverage and retained count. A failed or canceled attempt remains
+unselected, with inspection and separately initiated recovery actions. This
+contract does not retain unreturned output from the failing engine or certify
+storage-failure recovery, standalone abort retention or provider context
+isolation.
+
+Standalone `semgrep:scan` and `codeql:scan` also preserve reported omissions
+through a `partial` envelope and findings lifecycle. Both use the shared source
+snapshot guard, so current-source workflow selection can authenticate the
+source present before discovery. A changed source keeps the output for review
+without claiming it is current. Recorded partial summaries include a bounded
+omission preview; full messages stay in the authenticated result. Their DAG
+prerequisites remain metadata unless a caller explicitly consumes them.
+Dedicated evidence and limits are in
+[the native coverage audit](./assessments/native-partial-coverage-2026-10-05.md).
 
 `pack:suggest-shards` uses one repository inventory and proposes at most eight
 scopes. It keeps small repositories whole and retains a parent when splitting
@@ -227,6 +351,23 @@ ledger's source-reuse decision and refresh it before accepting a result. Missing
 or changed source identity requires a fresh run; historical receipts are never
 backfilled with a newly computed hash. Tool names, options, and manifest schemas
 are unchanged.
+
+`threat-model:import` also returns the normalized, verification-stamped
+`data.document` and an authenticated indexed `data.snapshot` receipt. Import
+uses the existing snapshot index limits: 200,000 indexed files and 1 GiB total,
+with files larger than 64 MiB excluded by the shared index policy. These are
+source-identity limits, separate from repository inventory inspection limits.
+Import can now hit the indexed snapshot ceiling before its earlier hash-only
+ceiling. It reports that failure rather than substituting a weaker receipt.
+
+Map reads context from authenticated results of its recorded runs. Exact
+references authenticate the immutable object and must agree with any recorded
+document. Historical documents without a revision remain readable from their
+authenticated run. Missing or damaged evidence never substitutes the globally
+active model. New `campaign:study` drafts inherit the current accepted Map
+revision unless `scanInput` explicitly selects or omits context. An accepted
+Map from changed source requires a current acceptance or an explicit selection.
+With no accepted Map history, the existing active-context default remains.
 
 ### Review result source identity and current observations
 
@@ -429,6 +570,45 @@ the reservation. Missing dollar usage is unknown, even when a call failed.
 Neither this channel nor the existing retrospective dollar stop guarantees a
 strict dollar ceiling.
 
+Approved campaigns with call-bound jobs and no dollar ceiling may continue when
+prices or dollar receipts are unknown. Every job must have authenticated finite work
+approval; the shared runtime still reserves each request and retains unresolved
+reservations. A campaign, dispatcher job or plan job dollar ceiling continues to
+require usable dollar evidence. Unknown totals stay unavailable rather than zero.
+The campaign's cost notice does not itself imply that dispatch has halted.
+
+Current SAST Scan receipts are read from their authenticated, call-correlated
+result artifact. A changed result or damaged lifecycle fails that read rather
+than falling back to a sidecar. Summary-only legacy receipts remain readable.
+Accepted parent runs keep their identity; their recorded engine membership
+connects observations to the guided Review queue. The Scan page aggregates all
+parent receipts, keeping distinct ledger findings separate from added/updated
+changes and retaining each engine outcome. A missing receipt is disclosed.
+
+Source-bound executor errors retain the host's pre-execution snapshot through
+shared observed failure settlement. Failed, canceled and interrupted results
+may therefore carry additive `data.snapshotHash` and `data.treeHash` fields.
+This records attempted source, not successful discovery or coverage. Source
+drift still blocks current-target selection, and changed result artifacts fail
+authentication. No new snapshot is captured after failure to make old work
+look current. Partial Scan selection requires explicit acknowledgement.
+
+The scan-batch controller records an unselected Scan phase result from its
+authenticated attempt receipts. Completed and partial work retain their run
+references; a batch with no executed attempt cannot claim a Scan result.
+Repeated controller finalization reuses the same phase attempt, including
+recovery after its typed receipt was saved before the compatibility history.
+Changed source blocks selection as current coverage and retains the observations
+for historical inspection. Accepting the result is an explicit shell action.
+Campaign refresh reloads this phase history without selecting it or taking focus.
+
+Agentic scan context includes bounded Map architecture, data flows, trust
+boundaries and open questions even when no threats were proposed. Each section
+uses at most twelve elements and caps textual fields at 200 characters; omitted
+elements and truncated fields are disclosed in the supplied digest. The exact
+accepted revision remains the input authority. These derived claims remain
+untrusted guidance and do not establish finding verdicts.
+
 This is an opt-in dispatch contract under implementation. Eligible built-ins
 declare `allowanceRef` as a JSON option containing `schemaVersion: 1`,
 `investigationId`, the approved `revision`, and `workId`. Shared prepared
@@ -437,6 +617,24 @@ The tool descriptor supplies its work category; input cannot label discovery
 as review to spend the protected allocation. Governance fields are removed
 before engine parsing or model prompting, while the prepared operation retains
 their identity. Nested tools inherit the bound runtime and cannot replace it.
+
+Normalized results add a host-owned top-level `allowanceRef` only when shared
+prepared dispatch bound that reference. Engine-supplied values are replaced or
+removed; payload `data` is unchanged. This is provenance, not approval of more
+work. The call-correlated recorded result authenticates it. Legacy results
+without this field stay readable, with accounting unrecorded.
+
+A new `campaign:study` with no explicit `investigationId` retains the current
+accepted Map's recorded investigation when available. Exact context selection
+and accounting are independent: explicitly omitting or changing scan context
+does not reset recorded spending. `load_accepted_map_allowance` authenticates
+Map history and source content, then reads the latest accounting revision.
+Missing accounting or damaged evidence fails implicit continuation. An explicit
+`investigationId` overrides this default using that investigation's ledger;
+plan approval remains required. Setup uses authenticated selected Map history
+to retain spending when preparing a replacement Map after source changes.
+`load_selected_map_history_allowance` permits this financial recovery without
+allowing historical context to satisfy current-source discovery.
 
 `campaign:approve-allowance` requires explicit operator authorization and exact
 model, total-call, protected-review and expected-revision values. Approval
@@ -477,6 +675,36 @@ and Enter reads its exact run-associated revision before selection. A completion
 without usable context remains available as a job outcome. Legacy context actions,
 review and learning still need guided allowance integration before every model
 action is bound automatically.
+
+The completed context result also offers `m Review Map`. Its shared
+`campaign:context-map` tool accepts the `campaignId` and `expectedPlanSha256`
+pair for this origin, or an exact `threatModelRef` for an existing revision.
+The executor rejects missing, incomplete or combined origins through shared
+prepared dispatch; ordinary required-option flags do not express this choice.
+It checks the frozen source identity, every completed job and its recorded tool
+call, then authenticates the exact generated revision against the recorded
+result. It creates or reopens one durable Map attempt without selecting it.
+Repeated review preserves the attempt identity; discarded results cannot be
+recreated. A foreground completion presents Map for explicit acceptance.
+Background completion preserves navigation and typing ownership. Changed source
+requires inspecting the historical context or preparing a separately approved
+draft. The handoff starts no job or model request and changes no allowance.
+
+An explicit historical context choice, including omission, may draft new work
+against current source while retaining authenticated investigation spending.
+The new finite plan still requires its own approval. Ordinary continuation
+without that explicit choice requires current accepted Map evidence. Missing
+historical accounting remains an error rather than creating a fresh allowance.
+
+Generated builds declare the immutable context object as their artifact, including
+inactive drafts. The compatibility `data.threatModelPath` still names the active
+mirror, which may not exist for an inactive build. Consume the authenticated
+`modelRef` or declared artifacts for the generated result.
+Recovery treats planned and running generation as pending. Failed, parked,
+partial and unrecognized states require inspecting their recorded outcome.
+A completed generation needs exactly one authenticated immutable revision
+associated with its run. A missing manifest, missing revision, ambiguous match
+or unreadable document cannot be interpreted as another pending launch.
 Setup routes a model-backed Map plan through this study instead of starting its
 legacy planning queue. Optional `preparationJobs` freezes at most one
 `context:build` and one `entry-points:extract`, including their canonical inputs.
@@ -980,3 +1208,185 @@ The detail leads with the effective saved decision and source evidence.
 Other decisions remain in history, including newer automated decisions that
 do not override a human verdict. Comparison reports source and context
 differences without claiming that absence proves remediation.
+
+
+### Interactive scope review
+
+`scopes` opens the current repository's saved scope draft, or offers an explicit
+inventory action when none exists. Arrow keys choose a boundary or coverage row;
+Enter opens its action menu, `f` reads a bounded file page, and PgUp/PgDn read
+long detail. The menu exposes rename, split, merge, scope/path exclusions,
+boundary questions, shared discovery, whole repository and exact acceptance.
+Forms preserve the shell composer and use Tab/Shift+Tab between fields, newline
+path lists and F2 to save. Failed edits retain the form. Acceptance has separate
+inventory, overlap and exclusion acknowledgements and starts no scans.
+
+The surface shows recorded source identities; edits and acceptance recheck
+current source. A saved accepted revision is historical evidence, not an assertion
+that the current checkout still matches it. Restart reopens the saved draft
+without approval or discovery work. `exclude-path` adds a literal inventoried
+file/directory exclusion with a reason through the same prepared option contract.
+An accepted discovery boundary exposes `p` and **Plan selected scope**. This
+opens the existing study form with its exact `scanScopeRef`, preserving the
+operator's engine choices. Back returns to the scope selection and reading
+position. The default remains three passes and one worker. Other boundaries
+remain unplanned. Preparing the draft runs source authentication in a cancellable
+worker; opening the form makes no model requests and starts no jobs.
+
+The study's **Discovery engines** row opens a local selection draft. Arrows
+choose an engine, Space or Enter toggles it, `a` applies the choices, and Esc
+cancels. The first explicit choice replaces automatic selection deliberately.
+Unsupported engines remain visible with a scope-specific explanation; unknown
+saved engines can be removed. PgUp/PgDn reads details with a visible line range,
+including at 40x12. Plain output retains every engine and the selected detail.
+
+When earlier `paths` filters conflict with an accepted scope, the picker lists
+them and offers `x` to clear them in the local draft. Esc restores the original
+study. Applying the repair writes an explicit empty filter list for this study,
+preserves global settings and requires a new plan before approval or execution.
+
+Applying changed choices invalidates only the study plan. Source and context
+references, custom scan options, investigation identity, allowance and consumption
+remain intact. Global tool settings are unchanged. Applying identical choices
+retains the existing plan. Saved task-input order is preserved, and removed/readded
+engines move to the end of that input. Execution retains existing orchestration
+ordering. The capability preview
+does not inspect source or certify dependency availability, useful findings,
+credentials or spending approval. Preparation authenticates source, and dispatch
+enforces dependency, runtime and allowance requirements. Useful output still
+requires functional evidence.
+
+`sast:scan` accepts `scanScopeRef` as a workflow-owned JSON option:
+`{"proposal":{"proposalId":"...","revision":3,"recordHash":"..."},"scopeId":"repository"}`.
+It cannot be combined with `paths`. Only committed accepted revisions with
+current content and Git revision can be consumed. Exact membership comes from
+the authenticated inventory, including literal loose files and exclusions,
+rather than the 128-file preview. Scope identity contributes to batch equivalence.
+
+Secret scanning and Semgrep currently implement exact file discovery. Semgrep
+passes literal files in groups of at most 64 and checks its file-coverage receipt.
+Missing receipts, unscanned files, skipped binary/oversized secret inputs and
+interrupted batches remain incomplete. Unsupported engines fail before work;
+they require an explicitly reviewed whole-repository job. Existing `paths`
+directory behavior and public `ScanRunOptions` remain unchanged. Native adapters
+do not consume the resolver's inherited context-file list.
+
+This increment supports one selected scope per existing homogeneous study.
+Multi-scope scheduling, scoped model sessions, inherited scanner context,
+AI division and complete resource estimates remain incomplete.
+
+
+Source identity and blob indexing now share an iterative source walk. It excludes
+symlinks and generated paths, checks canonical repository containment and
+repeated directory visits, and refuses more than 1,000,000 examined entries,
+including directories and ignored entries. This is an additional safety bound;
+the identity/file universes and content hash format stay unchanged for targets
+within the bounds. Identity retains 1,000,000-file/16-GiB ceilings and blob
+indexing retains 200,000-file/1-GiB ceilings. Per-file content remains capped at
+64 MiB; oversized files remain excluded and included identity gaps still block
+scope acceptance. Inventory retains its separate 100,000-entry/512-MiB/256-KiB
+inspection limits. A source walk that stops produces no complete identity.
+
+Source-bound tools check cancellation between traversal steps and 64-KiB read
+chunks. Scope inventory, mutable scope review, exact reads, file paging and
+latest-head lookup use cancellable lock acquisition. `pack:scopes` adds
+`operation=latest`, which returns `data.review` as an exact saved review or null
+when no scope proposal exists. Opening and refreshing the shell surface dispatch
+that lookup in a background worker. Cancellation preserves saved revisions and
+requires explicit retry. It cannot interrupt an operating-system filesystem call
+already blocked inside the kernel; cross-platform and very-large-repository
+performance remain separate acceptance work.
+
+
+### Historical resource evidence
+
+The study form's **Usage evidence** row selects a completed SAST run explicitly.
+Provider-request evidence remains usable when subscription OAuth cannot supply
+a dollar price. Observed counts include internal turns, repairs and retries.
+Missing legacy accounting stays unavailable; unresolved requests remain committed.
+`campaign:allowance runId` exposes the same admitted-run counts through shared
+prepared dispatch without starting work or changing the ledger.
+
+`campaign:study baselineRunId` records the choice as optional
+`resourceBaselineRunId` plan metadata. It does not enter scan options. The
+authenticated pointer survives restart. Selecting a different basis requires a
+new plan and separate approval, preserving limits and spending. A missing or
+corrupted basis remains unavailable instead of becoming zero cost.
+
+Future projections require identical recorded source, context, scan options,
+model and runtime conditions, completed engine work and settled request evidence.
+The preview multiplies one historical scan's observations by the full planned
+maximum starts and labels the uncertainty. It compares projected requests with
+proposed capacity after existing commitments and protected Review calls. A
+shortfall offers explicit work or allowance revision. Actual usage can differ;
+the estimate has no enforced upper bound and never increases the allowance.
+
+Historical choices load through the shared background view reader. The selector
+uses the most recent 100 run records, disclosing the limit; it reads detailed
+usage only for the selected run. A baseline named by an authenticated plan can
+be older than this window. Loading, failure, refresh and restart preserve that
+choice, the draft and existing spending. Background results never take focus.
+The shared cache retains at most 32 named usage reads. A cold or stale history
+index can still rebuild from canonical metadata in the background; the choice
+window does not limit that rebuild.
+
+### Rejected context diagnosis
+
+`threat-model:build` and its generation aliases expose `saveRejectedOutput`.
+Direct calls leave retention disabled when the option is absent. Newly prepared
+context studies freeze it as enabled unless explicitly disabled. The context
+form displays the disclosure and lets `s` change the draft before preparation.
+Changing a frozen choice requires a new, separately approved plan.
+
+Single-synthesis build rejection after its existing one-repair contract may
+publish `rejected-context-output.txt` in the owning run. The bounded diagnostic
+is at most 24 KiB, plus its final newline. It can contain source or sensitive
+model text and is owner-readable on Unix. Ordinary failure text remains redacted;
+authentication and transport failures do not produce this diagnostic. Staged,
+deterministic and refinement paths reject enabled retention until supported.
+
+The failed context form offers `d` only when the owning job has published the
+diagnostic. Explicit inspection checks frozen input, contained paths, file size
+and the content object before reading. The full-frame reader labels the output
+unaccepted, escapes terminal control characters and shows source/model/run
+provenance. PgUp/PgDn reads it; `d` or Esc restores the previous view and scroll.
+Other workflow actions remain inert while reading. Inspection never accepts
+context, changes its active revision, starts work or spends allowance. Historical
+plans without the flag cannot read a file injected under the diagnostic name.
+
+### Optional AI scope proposals
+
+`pack:suggest-scopes` reads an authenticated existing scope inventory and returns
+an unaccepted immutable revision. Its descriptor requires `proposalRef` and an
+approved `allowanceRef`. `threatModelRef` selects one immutable context revision
+or explicitly omits context. `priorities`, `model`, `thinkingLevel` and requested
+`maxOutputTokens` flow through shared prepared dispatch. The OAuth adapter may
+not enforce output-token limits, so approval discloses uncertain usage.
+
+The executor sends bounded inventory and architecture data in one model turn,
+with no tools, delegation, output repair or follow-up scans. Paths, dependencies,
+counts, overlaps and residual coverage are checked against the saved inventory.
+Operator exclusions remain intact. Source drift or a concurrent draft edit
+rejects publication while retaining the request expense.
+
+Shell scope review offers **Suggest scan scopes with AI**. The multiline priority
+editor leads to the existing fixed-plan and allowance review. Context, scope and
+scan acceptance stay separate. `campaign:context-study generationTool=pack:suggest-scopes`
+provides the same one-job path for headless use. A later accepted-scope scan study
+retains the proposal's investigation accounting and requires its own work approval.
+Missing or mismatched generation receipts fail instead of resetting spending.
+
+
+### Source framework extraction and partial Map evidence
+
+Python HTTP routes use conservative source receiver bindings for Flask, FastAPI
+and Sanic shared decorators. Unknown factories and ambiguous bindings retain
+route evidence without a guessed framework. Bindings are memoized per inspected
+file. Current rows carry `metadata.sourcePolicy=python-http-receivers-v1`; cached
+context or entry-point rows without it request `context:build` followed by
+`entry-points:extract` before new grounding. This is an extraction-policy change,
+independent of source revision. Historical accepted context stays unchanged.
+
+The deterministic Map remains partial and limited to artifact review. Diagram,
+Summary and plain reading preserve that qualification. Entry-point details use
+the catalog framework and cannot inherit a contradictory model annotation.

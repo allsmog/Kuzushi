@@ -51,6 +51,8 @@ pub struct StrategyProposal {
     pub source_run_id: Option<String>,
     pub tool: Option<String>,
     pub next_input: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_proposal_ref: Option<crate::workspace::ScanScopeProposalRef>,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
 }
@@ -212,6 +214,7 @@ impl StrategyProposal {
             source_run_id: None,
             tool: None,
             next_input: None,
+            scope_proposal_ref: None,
             created_at_ms: now,
             updated_at_ms: now,
         }
@@ -317,6 +320,16 @@ pub(crate) fn acquire_recovered_strategy_lock(
     Ok(guard)
 }
 
+pub(crate) fn acquire_recovered_strategy_lock_cancellable(
+    workspace: &WorkspaceTarget,
+    canceled: &dyn Fn() -> bool,
+) -> Result<crate::file_lock::ExclusiveFileLock> {
+    let guard = persistence::acquire_strategy_ledger_lock_cancellable(workspace, canceled)?;
+    anyhow::ensure!(!canceled(), "scope review was canceled");
+    recover_strategy_transaction(workspace, STRATEGY_QUEUE_FILE, STRATEGY_CORRECTIONS_FILE)?;
+    Ok(guard)
+}
+
 pub(crate) fn load_strategy_queue_unlocked(
     workspace: &WorkspaceTarget,
 ) -> Result<Vec<StrategyProposal>> {
@@ -363,6 +376,10 @@ pub fn set_strategy_proposal_status(
     let Some(proposal) = proposals.iter_mut().find(|proposal| proposal.id == id) else {
         return Ok(false);
     };
+    anyhow::ensure!(
+        proposal.scope_proposal_ref.is_none() || status == StrategyProposalStatus::Rejected,
+        "scope boundaries require scope review; generic proposal approval cannot accept them"
+    );
     proposal.status = status;
     proposal.updated_at_ms = now_ms();
     save_strategy_queue_unlocked(workspace, &proposals)?;

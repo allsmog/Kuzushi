@@ -420,13 +420,17 @@ fn threat_model_bounds_options() -> Vec<OptionSpec> {
         opt(
             "maxOutputTokens",
             OptionType::Int,
-            "Output-token budget for synthesis model calls; the full ThreatModelDocument JSON must fit or the structured contract fails on truncation.",
+            "Requested maximum output tokens for synthesis. Enforcement depends on the model adapter; OpenAI subscription OAuth currently does not enforce this ceiling. Truncated JSON fails the structured contract.",
         )
         .aliases(&["max_output_tokens"])
         .default(json!(32000))
         .advanced(),
         bool_option("emitFindings", &["emit_findings"], false),
         bool_option("preserveUserEdits", &["preserve_user_edits"], true),
+        opt("saveRejectedOutput", OptionType::Bool,
+            "Save a bounded local diagnostic after single-synthesis JSON rejection. May contain source or sensitive model text; never becomes accepted context. Requires a durable run. Omitted means disabled.")
+            .aliases(&["save_rejected_output"])
+            .advanced(),
         opt("THREAT_MODEL_PROMPT", OptionType::String, "Prompt guidance or workspace file.")
             .inline_or_workspace_file()
             .advanced(),

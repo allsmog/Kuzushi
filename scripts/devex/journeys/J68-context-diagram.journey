@@ -15,7 +15,7 @@ submit: set taskMode manual
 submit: set tasks secret-scan
 submit: scan batch
 require-live-snap: 20 PLAN A STUDY | form
-keys: Down Down Enter Up v
+keys: Down Down Down Enter Up v
 require-live-snap: 20 Inspect a context revision | inspect-first
 ask: Does opening a diagram require inspection of the selected revision, with a clear next action and no new model work?
 keys: Enter
@@ -83,7 +83,7 @@ keys: Enter
 nav-mode:
 keys: a
 require-live-snap: 20 PLAN A STUDY | recovered-study
-keys: Down Down Enter Enter
+keys: Down Down Down Enter Enter
 require-live-snap: 25 CONTEXT SUMMARY | recovered-context
 keys: v
 require-live-snap: 20 CONTEXT DATA FLOW | recovered-diagram

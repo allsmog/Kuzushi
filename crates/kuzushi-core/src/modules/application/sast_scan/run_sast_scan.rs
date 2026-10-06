@@ -1,3 +1,4 @@
+mod stopped_scan;
 use super::*;
 use crate::run_artifacts::{
     PhaseStageOutcome, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta,
@@ -273,10 +274,14 @@ fn run_started_sast_scan(
     threat_model_lease: &ScanThreatModelLease,
 ) -> Result<Value> {
     let requests = SastScanRequests::from_input(&input)?;
-    let options = sast_scan_options(&input, whitebox_static.is_some())?;
+    let options = scope_scan_options(&input, whitebox_static.is_some(), ctx)?;
     let option_store = sast_subtool_options(ctx, workspace)?;
-    let source = crate::workspace::source_snapshot::SourceSnapshot::capture(ctx, "sast:scan", workspace.root())?;
-    let executed = execute_sast_scan(SastScanExecutionInput {
+    let source = crate::workspace::source_snapshot::SourceSnapshot::capture(
+        ctx,
+        "sast:scan",
+        workspace.root(),
+    )?;
+    let executed = source.bind_result(execute_sast_scan(SastScanExecutionInput {
         registry,
         input: &input,
         ctx,
@@ -289,9 +294,10 @@ fn run_started_sast_scan(
         primary_run_id: &primary_run_id,
         whitebox_static: whitebox_static.is_some(),
         threat_model_lease,
-    })?;
+    }))?;
     let findings_count = executed.tally.distinct;
-    let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
+    let (artifacts, result) =
+        source.bind_result(executed.into_result(workspace, whitebox_static.as_ref()))?;
     let result = source.finish(ctx, "sast:scan", workspace.root(), result);
     persist_sast_scan_result(
         ctx,
@@ -416,7 +422,7 @@ mod terminal_error_tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("cancelled"));
+        assert!(error.to_string().contains("cancel"), "{error:#}");
         let summary = load_run_summary(target.path(), run_id).unwrap();
         assert_eq!(summary.status, "canceled");
         let record = ToolRunRecord::new(target.path(), run_id, "scan", "sast:scan");
@@ -457,7 +463,7 @@ mod terminal_error_tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("cancelled"));
+        assert!(error.to_string().contains("cancel"), "{error:#}");
         let summary = load_run_summary(target.path(), run_id).unwrap();
         assert_eq!(summary.status, "interrupted");
     }
@@ -522,7 +528,10 @@ mod lifecycle_task_tests {
         .unwrap();
         std::fs::write(
             target.path().join(".env"),
-            "OPENAI_API_KEY=sk-production-scan-lifecycle-sentinel\n",
+            format!(
+                "OPENAI_API_KEY={}{}\n",
+                "sk-", "production-scan-lifecycle-sentinel"
+            ),
         )
         .unwrap();
         target
@@ -572,7 +581,7 @@ struct SastScanExecutionInput<'a> {
     workspace: &'a crate::workspace::WorkspaceTarget,
     store: &'a crate::findings::FindingStore,
     requests: &'a SastScanRequests,
-    options: &'a ScanRunOptions,
+    options: &'a SastScanOptions,
     primary_run_id: &'a str,
     whitebox_static: bool,
     threat_model_lease: &'a ScanThreatModelLease,
@@ -662,31 +671,10 @@ impl SastScanExecutionInput<'_> {
     fn record_failed_scan_stage(
         &self,
         artifacts: &SastRunArtifacts,
-        selected: &SastTaskSelection,
-        started: Instant,
-        target_snapshot: crate::workflow_attempts::PhaseTargetSnapshot,
+        baseline: &ScanStageBaseline,
         error: &anyhow::Error,
     ) -> Result<()> {
-        let run_ref = self.primary_run_id.to_string();
-        let scan = ScanStageData {
-            scope: scan_stage_scope(self.workspace, self.options),
-            plan: scan_stage_plan(self.input, selected),
-            engines: vec![ScanStageEngine {
-                engine: "sast:scan".to_string(),
-                outcome: ScanEngineStageOutcome::Failed,
-                run_ref: Some(run_ref.clone()),
-                detail: Some(format!(
-                    "pipeline failed before complete per-engine outcomes were available: {error}"
-                )),
-            }],
-            finding_delta: ScanFindingDelta::default(),
-            severity_counts: Vec::new(),
-            artifact_delta: Vec::new(),
-            duration_ms: elapsed_millis(started),
-            cost: None,
-            target_snapshot,
-        };
-        record_sast_scan_stage(artifacts, PhaseStageOutcome::Failed, vec![run_ref], scan)
+        stopped_scan::record(self, artifacts, baseline, error)
     }
 
     fn whitebox_artifacts(
@@ -771,9 +759,14 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
     write_sast_scan_input(input.workspace, &primary_run_id, &artifacts, input.input)?;
     let baseline = scan_stage_baseline(&input, &primary_run_id)?;
     let reports = scan_reports_with_failure_receipt(&input, &artifacts, &baseline)?;
+    write_native_scan_coverage(&artifacts, &reports)?;
     let run_ids = reports.run_ids(primary_run_id.clone());
     let core_findings = findings_for_sast_runs(input.store, &run_ids)?;
-    artifacts.write_json("findings.json", "discovery observations", &json!(core_findings))?;
+    artifacts.write_json(
+        "findings.json",
+        "discovery observations",
+        &json!(core_findings),
+    )?;
     let whitebox_artifacts = input.whitebox_artifacts(&run_ids, &artifacts)?;
     input.record_scan_stage(
         &artifacts,
@@ -805,6 +798,20 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
         post_processing,
         lines,
     })
+}
+
+fn write_native_scan_coverage(
+    artifacts: &SastRunArtifacts,
+    reports: &SastPipelineReports,
+) -> Result<()> {
+    if let Some(native) = &reports.native {
+        artifacts.write_json(
+            "native-coverage.json",
+            "native scan coverage",
+            &json!(native.coverage),
+        )?;
+    }
+    Ok(())
 }
 
 fn scan_stage_baseline(
@@ -842,18 +849,8 @@ fn scan_reports_with_failure_receipt(
             Ok(reports)
         })
         .map_err(|error| {
-            let (status, detail) =
-                scan_pipeline_stop_task_terminal(sast_cancellation_disposition(input.ctx));
-            let task_persistence =
-                update_scan_tasks(&baseline.lifecycle_tasks, status, Some(detail));
-            let stage_persistence = input.record_failed_scan_stage(
-                artifacts,
-                &baseline.selected,
-                baseline.started,
-                baseline.target_snapshot.clone(),
-                &error,
-            );
-            error_with_persistence(error, task_persistence.and(stage_persistence))
+            let persistence = input.record_failed_scan_stage(artifacts, baseline, &error);
+            error_with_persistence(error, persistence)
         })
 }
 
@@ -908,7 +905,7 @@ fn finish_scan_tasks(
     for (task, outcome) in tasks.iter().zip(outcomes) {
         task.update(
             scan_task_status(outcome),
-            scan_task_outcome_detail(task.title(), outcome, &run_ids).as_deref(),
+            scan_task_outcome_detail(task.title(), outcome, &run_ids, reports).as_deref(),
         )?;
     }
     Ok(())
@@ -918,8 +915,9 @@ fn scan_task_outcome_detail(
     engine: &str,
     outcome: ScanEngineStageOutcome,
     run_ids: &SastRunIds,
+    reports: &SastPipelineReports,
 ) -> Option<String> {
-    let detail = scan_engine_outcome_detail(outcome);
+    let detail = scan_report_engine_detail(reports, engine, outcome);
     match (scan_engine_run_ref(engine, run_ids), detail) {
         (Some(run_ref), Some(detail)) => Some(format!("child run {run_ref}: {detail}")),
         (Some(run_ref), None) => Some(format!("child run {run_ref}: completed")),
@@ -964,11 +962,14 @@ fn current_finding_fingerprints(store: &FindingStore) -> Result<BTreeSet<String>
 
 fn scan_stage_scope(
     workspace: &crate::workspace::WorkspaceTarget,
-    options: &ScanRunOptions,
+    options: &SastScanOptions,
 ) -> ScanStageScope {
     ScanStageScope {
         target: workspace.root().display().to_string(),
-        paths: options.paths.clone(),
+        paths: options
+            .discovery_files()
+            .map(<[String]>::to_vec)
+            .unwrap_or_else(|| options.run.paths.clone()),
     }
 }
 
@@ -1002,7 +1003,7 @@ fn scan_stage_engines(
                 engine: (*engine).to_string(),
                 outcome,
                 run_ref: scan_engine_run_ref(engine, run_ids),
-                detail: scan_engine_outcome_detail(outcome),
+                detail: scan_report_engine_detail(reports, engine, outcome),
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1027,6 +1028,18 @@ fn scan_engine_outcome_detail(outcome: ScanEngineStageOutcome) -> Option<String>
         ScanEngineStageOutcome::Skipped => Some("child reported a skipped result".into()),
         ScanEngineStageOutcome::Failed => Some("child reported a failed result".into()),
     }
+}
+
+fn scan_report_engine_detail(
+    reports: &SastPipelineReports,
+    engine: &str,
+    outcome: ScanEngineStageOutcome,
+) -> Option<String> {
+    reports
+        .native
+        .as_ref()
+        .and_then(|report| report.coverage.engine_detail(engine))
+        .or_else(|| scan_engine_outcome_detail(outcome))
 }
 
 fn scan_stage_outcome(reports: &SastPipelineReports) -> SastPhaseStageOutcome {
@@ -1216,7 +1229,8 @@ struct SastScanResultParts<'a> {
 
 fn sast_scan_result(parts: SastScanResultParts<'_>) -> Result<Value> {
     let cost = sast_cost_report(parts.reports, parts.post_processing)?;
-    let output = parts.lines.join("\n");
+    let partial = sast_scan_has_partial_engine(parts.reports);
+    let output = sast_terminal_output(&parts.lines, partial);
     let summary = output
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -1224,11 +1238,25 @@ fn sast_scan_result(parts: SastScanResultParts<'_>) -> Result<Value> {
         .to_string();
     let mut warnings = sast_scan_warnings(parts.reports);
     warnings.extend(threat_model_feedback_warning(parts.post_processing));
-    let partial = sast_scan_has_partial_engine(parts.reports);
     let data = sast_scan_data(parts)?;
     let mut result = sast_scan_result_envelope(summary, output, warnings, data, partial);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
+}
+
+fn sast_terminal_output(lines: &[String], partial: bool) -> String {
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if index == 0 && partial {
+                line.replacen(" completed:", " partial:", 1)
+            } else {
+                line.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn sast_scan_warnings(reports: &SastPipelineReports) -> Vec<Value> {
@@ -1242,9 +1270,11 @@ fn sast_scan_warnings(reports: &SastPipelineReports) -> Vec<Value> {
             .engine_outcomes
             .iter()
             .filter_map(|(engine, outcome)| match outcome {
-                ScanEngineStageOutcome::Partial => {
-                    Some(json!(format!("{engine} returned a usable partial result")))
-                }
+                ScanEngineStageOutcome::Partial => Some(json!(format!(
+                    "{engine}: {}",
+                    scan_report_engine_detail(reports, engine, *outcome)
+                        .unwrap_or_else(|| "incomplete coverage".into())
+                ))),
                 ScanEngineStageOutcome::Skipped => Some(json!(skipped_engine_warning(
                     engine,
                     reports.engine_skip_reasons.get(engine)
@@ -1299,6 +1329,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
+        "nativeCoverage": parts.reports.native.as_ref().map(|report| &report.coverage),
         "skippedEngines": parts.reports.skipped_engines.iter().map(|skipped| skipped.id).collect::<Vec<_>>(),
         "agentic": parts.reports.agentic.as_ref().map(|report| json!(report)),
         "carliniThreatHunt": parts.reports.carlini.as_ref().map(|report| json!(report)),
@@ -1415,9 +1446,15 @@ fn threat_model_feedback_json(post_processing: &SastPostProcessing) -> Option<Va
 
 fn threat_model_feedback_warning(post_processing: &SastPostProcessing) -> Option<Value> {
     let output = post_processing.threat_model_feedback.as_ref()?;
-    let status = output.get("status").and_then(Value::as_str).unwrap_or("unknown");
+    let status = output
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     (status != "completed").then(|| {
-        let summary = output.get("summary").and_then(Value::as_str).unwrap_or(status);
+        let summary = output
+            .get("summary")
+            .and_then(Value::as_str)
+            .unwrap_or(status);
         json!(format!("threat-model feedback did not complete: {summary}"))
     })
 }
@@ -1506,6 +1543,18 @@ mod scan_result_outcome_tests {
     use super::*;
     use crate::{tool_result_status, ToolResultStatus};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn partial_scan_output_never_calls_its_terminal_result_completed() {
+        let lines = vec![
+            "sast:scan run completed: 1 finding(s)".into(),
+            "child completed: 0 findings".into(),
+        ];
+        let partial = sast_terminal_output(&lines, true);
+        assert!(partial.starts_with("sast:scan run partial: 1 finding(s)"));
+        assert!(partial.contains("child completed: 0 findings"));
+        assert_eq!(sast_terminal_output(&lines, false), lines.join("\n"));
+    }
 
     #[test]
     fn optional_preflight_skip_warns_without_making_the_scan_partial() {

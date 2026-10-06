@@ -154,11 +154,12 @@ fn compact_catalog_overlay_lines(
     if capacity == 1 {
         return vec![selected];
     }
-    let mut lines = vec![catalog_overlay_header(model, width)];
+    let mut lines = Vec::new();
     if capacity == 3 {
-        lines.push(catalog_overlay_warning(model, width));
+        lines.push(catalog_overlay_header(model, width));
     }
     lines.push(selected);
+    lines.push(catalog_overlay_readiness(model, width));
     lines
 }
 
@@ -169,27 +170,25 @@ fn windowed_catalog_overlay_lines(
     width: usize,
     capacity: usize,
 ) -> Vec<Line<'static>> {
-    let row_capacity = capacity.saturating_sub(3).max(1).min(rows.len());
+    let show_draft_hint = capacity >= 7;
+    let chrome = 3 + usize::from(show_draft_hint);
+    let row_capacity = capacity.saturating_sub(chrome).max(1).min(rows.len());
     let start = viewport_start_for_cursor(rows.len(), row_capacity, cursor);
     let end = start.saturating_add(row_capacity).min(rows.len());
     let mut lines = vec![
         catalog_overlay_header(model, width),
-        catalog_overlay_warning(model, width),
-        Line::styled(
+        catalog_overlay_readiness(model, width),
+        catalog_overlay_position(start, end, cursor, rows.len(), width),
+    ];
+    if show_draft_hint {
+        lines.push(Line::styled(
             fit(
-                &format!(
-                    "ACTIONS {}-{}/{} · selected {}/{}",
-                    start + 1,
-                    end,
-                    rows.len(),
-                    cursor + 1,
-                    rows.len()
-                ),
+                "Enter loads a draft · e expert · review inputs before execution",
                 width,
             ),
             theme::muted(),
-        ),
-    ];
+        ));
+    }
     lines.extend(
         rows[start..end]
             .iter()
@@ -197,6 +196,21 @@ fn windowed_catalog_overlay_lines(
             .map(|(offset, row)| catalog_overlay_action_line(row, start + offset == cursor, width)),
     );
     lines
+}
+
+fn catalog_overlay_position(
+    start: usize,
+    end: usize,
+    cursor: usize,
+    total: usize,
+    width: usize,
+) -> Line<'static> {
+    let text = format!(
+        "ACTIONS {}-{end}/{total} · selected {}/{total}",
+        start + 1,
+        cursor + 1
+    );
+    Line::styled(fit(&text, width), theme::muted())
 }
 
 fn catalog_overlay_header(
@@ -216,15 +230,16 @@ fn catalog_overlay_header(
     )
 }
 
-fn catalog_overlay_warning(
+fn catalog_overlay_readiness(
     model: &crate::ui_view_models::CatalogModel,
     width: usize,
 ) -> Line<'static> {
-    let warning = model
-        .collapsed
-        .target_warning
-        .unwrap_or("Phase-native actions first · e shows expert engines");
-    Line::styled(fit(warning, width), theme::muted())
+    let Some(action) = model.selected_action.as_ref() else {
+        return Line::default();
+    };
+    let readiness = &action.readiness;
+    let text = format!("{} · {}", readiness.label, readiness.next);
+    Line::styled(fit(&text, width), theme::muted())
 }
 
 fn compact_catalog_action_line(
@@ -239,7 +254,7 @@ fn compact_catalog_action_line(
     let mut body = format!("{prefix}{label}");
     let remaining = width.saturating_sub(display_width(&body));
     if remaining > 4 {
-        body.push_str(" — ");
+        body.push_str(": ");
         body.push_str(&fit(description, remaining.saturating_sub(3)));
     }
     Line::styled(fit(&body, width), theme::selection())

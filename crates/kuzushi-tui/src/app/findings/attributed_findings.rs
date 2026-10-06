@@ -43,8 +43,8 @@ impl ShellApp {
     /// asked to see, so in either case both numbers would be floors — a filter
     /// must never move what an accepted attempt found. An attempt the ledger
     /// attributes nothing to is the ordinary case of a summary whose findings
-    /// were never projected, not an observed zero. A typed finding delta is
-    /// durable truth and never consults the ledger at all.
+    /// were never projected, not an observed zero. Recorded finding deltas stay
+    /// separate from the distinct count projected from the ledger.
     pub(crate) fn attributed_findings(&self, run_refs: &[String]) -> Option<AttributedFindings> {
         if self.findings_are_partial() || self.active_findings_filter().is_some() {
             return None;

@@ -127,6 +127,9 @@ pub(crate) enum Command {
     },
     /// Export persisted workspace findings.
     Export {
+        /// Export this study's findings and investigation receipt; omit for workspace history.
+        #[arg(long)]
+        campaign_id: Option<String>,
         /// Export format: json, jsonl, sarif, csv, markdown-bundle, or vuln-findings.
         #[arg(long)]
         format: Option<String>,

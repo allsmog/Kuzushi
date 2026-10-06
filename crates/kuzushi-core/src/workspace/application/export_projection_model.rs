@@ -35,6 +35,10 @@ pub struct WorkspaceFindingExportRecord {
     pub review_decision_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_decision_author: Option<String>,
+    /// The observed run and source snapshot the latest decision was made
+    /// against, and whether the finding was seen on different source since.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_decision_basis: Option<super::WorkspaceReviewDecisionBasis>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triage_verdict: Option<String>,
     pub suppressed: bool,

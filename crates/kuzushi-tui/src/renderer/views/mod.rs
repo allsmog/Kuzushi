@@ -5,6 +5,7 @@ use ratatui::style::Style;
 
 pub(in crate::renderer) use activity::*;
 pub(crate) use activity::{activity_output_scroll, ActivityOutputScroll};
+pub(crate) use campaign::campaign_reader_scroll;
 pub(in crate::renderer) use campaign::*;
 pub(in crate::renderer) use catalog::*;
 pub(in crate::renderer) use chat::*;

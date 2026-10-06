@@ -9,6 +9,19 @@ pub trait ScanEngine: Send + Sync {
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>>;
 
+    fn supports_exact_files(&self) -> bool {
+        false
+    }
+
+    fn scan_exact_files(
+        &self,
+        _root: &Path,
+        _files: &[String],
+        _cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        anyhow::bail!("{} does not support exact file membership. Review a separately approved whole-repository job or choose a supported engine.", self.id())
+    }
+
     fn scan_artifacts(
         &self,
         target: &Path,

@@ -67,4 +67,30 @@ impl ScanEngine for SemgrepScanner {
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
         self.scan_with_cancel(target, cancellation)
     }
+
+    fn supports_exact_files(&self) -> bool {
+        true
+    }
+
+    fn scan_exact_files(
+        &self,
+        root: &Path,
+        files: &[String],
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        self.scan_exact_source_files(root, files, cancellation)
+    }
+
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        let outcome = self.scan_outcome_with_cancel(target, cancellation)?;
+        Ok(ScanEngineOutput {
+            findings: outcome.findings,
+            scan_errors: outcome.scan_errors,
+            codeql_sarif_documents: Vec::new(),
+        })
+    }
 }

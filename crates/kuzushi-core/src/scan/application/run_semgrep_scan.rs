@@ -24,25 +24,12 @@ pub fn run_semgrep_scan(
     store: &FindingStore,
     scanner: &SemgrepScanner,
 ) -> Result<ScanRun> {
-    scanner.preflight()?;
-    workspace.ensure_state_dir()?;
-
-    let run_id = Uuid::new_v4().to_string();
-    store.with_run_lifecycle(&run_id, workspace.root(), || {
-        let findings = scanner.scan(workspace.root())?;
-        for finding in &findings {
-            store.insert_finding(&run_id, finding)?;
-        }
-        let findings_count = findings.len();
-        Ok((
-            ScanRun {
-                id: run_id.clone(),
-                target: workspace.root().to_path_buf(),
-                findings_count,
-            },
-            findings_count,
-        ))
-    })
+    run_scan_engines_with_options(
+        workspace,
+        store,
+        &[Box::new(scanner.clone())],
+        &ScanRunOptions::default(),
+    )
 }
 
 pub fn default_scan_engines() -> Vec<Box<dyn ScanEngine>> {

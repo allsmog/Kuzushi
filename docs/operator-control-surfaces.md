@@ -168,9 +168,15 @@ reference changed, drops the ones it deleted, and both modes then scope the
 identical set. `--include-worktree` adds uncommitted edits.
 
 The resolved scope compiles into the canonical `sast:scan` options `paths` and
-`diffBase`, so every engine is narrowed — not only the ones that read
-`.kuzushi/v3/since.txt`. That scope file is still written, from the same
-effective list, for `full-mode:hunt`.
+`diffBase`, so engines are narrowed through the shared input, not only the
+ones that read `.kuzushi/v3/since.txt`. That scope file is still written, from
+the same effective list, for `full-mode:hunt`.
+
+Changed files are file scopes. Engines that read exact files (secret scanning
+and Semgrep) scan only those files. Engines that only scan directories refuse
+the scan and name themselves, rather than scanning each file's parent
+directory; choose `--tasks` that read exact files, or pass a directory scope
+and review the larger scope.
 
 Precedence when `--since` meets `--paths` or `--shard`:
 
@@ -288,6 +294,17 @@ truth.
   restart. Editing work creates a new draft under the same investigation;
   consumed calls and unresolved reservations remain. `batch <batch-id>` opens
   its occurrence report and scopes Review; `batch clear` removes that filter.
+  A fresh scan form inherits the accepted Map's recorded investigation, its
+  current consumption and protected review. This also works after restart;
+  the newly drafted scan work requires separate approval. Budget row details
+  show consumption and remaining calls with paging at narrow widths. Missing
+  recorded accounting or changed source blocks implicit continuation rather
+  than offering a fresh budget. Older Map results without an accounting
+  reference remain readable; prior spending is not inferred.
+  A call-bound study with no dollar ceiling can execute despite unavailable
+  dollar pricing. All jobs and requests still require finite approval and
+  durable reservations. Unknown prices do not appear as zero charges or as a
+  false halted state. Dollar-capped campaigns retain their evidence requirement.
 - In the study form, Enter on Source and context opens the immutable revision
   browser. Arrows choose a revision; Enter reads its exact document; Tab switches
   between summary and complete document; Page Up/Down scroll the detail. `a`
@@ -349,14 +366,27 @@ truth.
   and visualizations are contextual full-frame decks. Replacing one contextual
   surface retains the original workflow origin; Esc restores that exact route
   and input mode.
-- Report orders the existing formats SARIF, Markdown bundle, JSONL, JSON, CSV;
+- Report orders SARIF, Markdown bundle, JSONL, JSON, CSV, and external scanner findings;
   defaults completeness to All; cycles All/Open/Complete; and permits editing
   target-relative output paths. Its defaults are `report.sarif`, `report/`,
-  `findings.jsonl`, `findings.json`, and `findings.csv`. Export success or
+  `findings.jsonl`, `findings.json`, `findings.csv`, and `VULN-FINDINGS.json`. Export success or
   failure remains on Report with format, count, completeness, absolute
   path/error, and timestamp.
   Revealing a destination requires explicit `o` and is an argument-safe
   platform action, never an automatic side effect.
+  A selected study is recovered from authenticated Scan references, including
+  after restart without visiting Campaign. `s` switches between that study and
+  workspace history; `p` shows full provenance and export receipt details.
+  Scope changes preserve format, destination, composer and return origin.
+  Loading or damaged study receipts block export until ready or until the
+  operator explicitly chooses workspace history. No silent scope substitution
+  occurs. Report shows fixed work, retained observations, source/context,
+  unknown costs and the shared investigation's call allowance before long paths.
+  Its sidebar omits process-local session cost to avoid conflicting totals.
+  Page/Home/End navigation reaches the complete wrapped document at all supported
+  widths. Study exports write the same local investigation receipt through the
+  shared exporter as `workspace:export-findings campaignId=<id>` and
+  `kuzushi export --campaign-id <id>`. Export starts no model or follow-up work.
 - Root-shell agent runs may display a reliable operator-question card in Run
   Focus. Questions are capped, cancellable, backgroundable, redacted in run
   artifacts, and never exposed to modules, subagents, bridge-owned loops, or
@@ -507,6 +537,19 @@ defaults to `global`), `openai:*` (OPENAI_API_KEY), and OpenAI
 subscription-backed model selectors (stored OAuth). Vertex model ids use the
 Vertex naming scheme (for example
 `vertex-anthropic:claude-sonnet-4-5@20250929`).
+
+Stored OAuth credentials require a nonempty access token and a numeric expiry.
+The bridge attempts refresh when needed, then rejects an expired or malformed
+credential before constructing the model client. Failed refresh preserves the
+stored credential and reports authentication failure. A subscription selector
+does not switch to an API-key client after this failure.
+
+`threat-model:build maxOutputTokens` requests a maximum from the model adapter.
+The LangGraph OpenAI subscription OAuth adapter currently does not enforce an
+output-token ceiling. Context planning labels the value as requested output;
+approved investigation allowances enforce provider-request counts, including
+internal turns and potentially billable retries. OAuth token and dollar
+consumption remain uncertain.
 
 Role-routed tools then resolve their role model with this precedence:
 
@@ -825,3 +868,48 @@ investigation. `campaign <id>` and `a` recover a saved plan after restart.
 Unsupported Map combinations are explained before any job starts. Dollar costs
 can be unavailable; the call allowance is distinct from the legacy observed USD
 spending stop used by other interactive work.
+
+The campaign reader offers `PgUp`/`PgDn` for complete job and occurrence details,
+with a visible row position when its document exceeds the viewport. Paging keeps
+job selection and the composer draft; refreshing retains the reading position.
+Pasting while navigating explicitly moves input to the composer and preserves
+its cursor and held draft. A multiline paste retains its complete text in the
+existing paste block. Neither paste form submits work; Enter remains required.
+Editors and confirmation surfaces retain their own paste ownership.
+
+Returning to a saved context plan refreshes its result as well as its allowance.
+The result view's Enter action inspects the exact generated revision. After
+inspection, `a` selects it for the finite scan study, and `v` opens its DFD.
+Missing or stopped generation shows the recorded problem and opens job
+inspection. A new draft still requires `n`, preparation and approval. The
+completed context job screen keeps the full recovery explanation and labels
+missing cost receipts as unavailable. It offers context-result review once
+all its jobs are complete.
+
+On a completed readable result, `m Review Map` records or reopens that exact
+context as a durable Map awaiting acceptance. Review starts no work and does not
+select the context. Its foreground result opens Map, where `u` accepts it.
+The same controls remain visible at 40×12 through 160×48. A changed repository
+refuses a new handoff and offers historical inspection or a separately approved
+draft. Background completion retains the current view and any unsent draft.
+
+Durable Map and its DFD show the context recorded by that attempt, independently
+of the globally active model. The receipt distinguishes awaiting review,
+accepted and historical source, and retains the context's grounding verdict.
+Missing recorded evidence offers Map run inspection. Preparing replacement
+context remains an explicit Map plan action. Global context editors continue
+to edit the active model.
+
+The study form inherits accepted Map context before shared dispatch binds
+defaults. Explicit stored context choices, including `null`, take precedence.
+
+The context picker also offers `m Map` after Enter has inspected the selected
+revision. This reviews its existing producing run without regeneration or
+global activation. The Map result then requires explicit selection, including
+acknowledgement for partial evidence. A missing producing run, damaged result
+or changed source explains why a current Map receipt cannot be recorded.
+Reading historical context remains available. All controls, including Map
+review and back, remain visible in the narrow layout.
+A pending Map can be inspected without replacing the accepted revision used by
+a new study. Missing accepted evidence blocks preparation. Existing frozen
+study inputs are retained when reopening their plan.

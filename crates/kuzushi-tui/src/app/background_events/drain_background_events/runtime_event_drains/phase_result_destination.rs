@@ -10,12 +10,53 @@ impl ShellApp {
         origin: Option<RunFocusOrigin>,
         pending_viz: Option<crate::scene3d::VizPage>,
     ) {
+        if self.present_context_map_result(origin) {
+            return;
+        }
         if self.present_pending_phase_result(origin) {
             return;
         }
         if let Some(page) = pending_viz {
             self.open_deferred_viz_page(page);
         }
+    }
+
+    fn present_context_map_result(&mut self, origin: Option<RunFocusOrigin>) -> bool {
+        if !self.context_map_handoff_completed(origin) {
+            return false;
+        }
+        let Some(id) = self.reviewed_context_map_attempt() else {
+            return false;
+        };
+        if !self.context_map_attempt_is_current(id) {
+            return false;
+        }
+        self.set_workbench_page(WorkbenchPage::Map);
+        self.ui_mut().clear_phase_result_cursor();
+        self.arm_presented_result_card();
+        true
+    }
+
+    fn context_map_handoff_completed(&self, origin: Option<RunFocusOrigin>) -> bool {
+        if origin.is_none_or(|origin| origin.view != ShellView::Campaign) {
+            return false;
+        }
+        self.activity()
+            .and_then(|session| session.run_focus_receipt.as_ref())
+            .and_then(|receipt| receipt.result_summaries.last())
+            .is_some_and(|result| {
+                result.tool == "campaign:context-map" && result.status == "completed"
+            })
+    }
+
+    fn context_map_attempt_is_current(&self, id: &str) -> bool {
+        if self.engagement.phase_attempt_projection_is_degraded() {
+            return false;
+        }
+        self.engagement
+            .unresolved_phase_attempt(WorkflowPhase::Map)
+            .or_else(|| self.engagement.selected_phase_attempt(WorkflowPhase::Map))
+            .is_some_and(|attempt| attempt.completed.attempt_id == id)
     }
 
     fn present_pending_phase_result(&mut self, origin: Option<RunFocusOrigin>) -> bool {

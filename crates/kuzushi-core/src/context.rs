@@ -52,7 +52,11 @@ impl ContextSnapshotFreshness {
 /// hydration / execution boundaries rather than from a per-frame renderer:
 /// dirty and non-Git targets require a content-tree hash.
 pub fn context_snapshot_freshness(target: &Path, snapshot: &Value) -> ContextSnapshotFreshness {
-    if let Some(reason) = crate::workspace::rust_surface_policy::snapshot_policy_disclosure(snapshot) {
+    if let Some(reason) =
+        crate::workspace::rust_surface_policy::snapshot_policy_disclosure(snapshot).or_else(|| {
+            crate::workspace::python_surface_policy::snapshot_policy_disclosure(snapshot)
+        })
+    {
         return ContextSnapshotFreshness::Stale(reason.to_string());
     }
     if let Some(freshness) = target_path_freshness(target, snapshot) {

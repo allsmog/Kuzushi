@@ -13,14 +13,19 @@ impl ContextStudyReceipt {
 
     /// Only an exact revision committed by this completed campaign job is a result.
     pub fn generated_context(&self, root: &Path) -> Result<Option<ThreatModelRef>> {
+        anyhow::ensure!(
+            self.generation_tool == TOOL,
+            "scope proposal jobs do not create accepted Map context"
+        );
         let snapshot = super::super::snapshot::load_campaign_snapshot(root, &self.campaign_id)?;
-        let Some(job) = snapshot
+        let job = snapshot
             .jobs
             .iter()
-            .find(|job| job.job_id == JOB && job.state == "completed")
-        else {
+            .find(|job| job.job_id == JOB)
+            .context("context study has no generation job")?;
+        if !context_job_completed(job)? {
             return Ok(None);
-        };
+        }
         let run = job
             .run_id
             .as_deref()
@@ -39,6 +44,74 @@ impl ContextStudyReceipt {
         let reference = matches.remove(0);
         load_exact_threat_model(root, &reference)?;
         Ok(Some(reference))
+    }
+
+    pub fn generated_scopes(
+        &self,
+        root: &Path,
+    ) -> Result<Option<crate::workspace::ScanScopeReview>> {
+        anyhow::ensure!(
+            self.generation_tool == generation::SCOPE_TOOL,
+            "this job does not generate scan scopes"
+        );
+        let snapshot = super::super::snapshot::load_campaign_snapshot(root, &self.campaign_id)?;
+        let job = snapshot
+            .jobs
+            .iter()
+            .find(|job| job.job_id == JOB)
+            .context("scope study has no generation job")?;
+        anyhow::ensure!(
+            job.tool.as_deref() == Some(generation::SCOPE_TOOL),
+            "scope generation job tool changed"
+        );
+        if !context_job_completed(job)? {
+            return Ok(None);
+        }
+        let run = job
+            .run_id
+            .as_deref()
+            .context("completed scope job has no run identity")?;
+        load_saved_scope_result(root, run, &self.model).map(Some)
+    }
+}
+
+fn load_saved_scope_result(
+    root: &Path,
+    run: &str,
+    model: &str,
+) -> Result<crate::workspace::ScanScopeReview> {
+    let (_, body) = crate::run_artifacts::read_run_artifact_text(root, run, "result.json")
+        .require("Scope proposal result")?;
+    let output: Value = serde_json::from_str(&body)?;
+    let result: crate::workspace::ScanScopeReview = serde_json::from_value(output["data"].clone())?;
+    let origin = result
+        .record
+        .generation
+        .as_ref()
+        .context("scope result lacks its model receipt")?;
+    anyhow::ensure!(
+        origin.run_id == run && origin.model == model,
+        "scope result has a different run or model"
+    );
+    let workspace = crate::WorkspaceTarget::new(root)?;
+    let saved = crate::workspace::load_scan_scope_proposal(&workspace, &result.reference)?;
+    anyhow::ensure!(
+        saved == result,
+        "scope result disagrees with its committed immutable revision"
+    );
+    Ok(saved)
+}
+
+fn context_job_completed(job: &super::super::snapshot::CampaignJobSnapshot) -> Result<bool> {
+    match job.state.as_str() {
+        "planned" | "running" => Ok(false),
+        "completed" => Ok(true),
+        _ => anyhow::bail!(
+            "context job {} is {}; inspect its recorded outcome ({}) before approving replacement work",
+            job.job_id,
+            job.state,
+            job.reason.as_deref().unwrap_or("reason unavailable")
+        ),
     }
 }
 

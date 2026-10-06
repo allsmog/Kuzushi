@@ -93,8 +93,17 @@ impl ViewArtifactReader for CountingReader {
     }
 }
 
-fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
+pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
     match key {
+        ViewHydrationKey::StudyUsageCatalogue => {
+            ViewHydrationValue::StudyUsageCatalogue(Ok(Default::default()))
+        }
+        ViewHydrationKey::StudyUsageRun { .. } => {
+            ViewHydrationValue::StudyUsageRun(Err("missing fixture usage".into()))
+        }
+        ViewHydrationKey::InvestigationReport { .. } => {
+            ViewHydrationValue::InvestigationReport(Ok(None))
+        }
         ViewHydrationKey::FileCompletionValues => {
             ViewHydrationValue::FileCompletionValues(FileCompletionIndex::default())
         }
@@ -148,6 +157,7 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::ThreatModelStore => {
             ViewHydrationValue::ThreatModelStore(ThreatModelStoreState::Legacy)
         }
+        ViewHydrationKey::MapRunContext { .. } => ViewHydrationValue::MapRunContext(Ok(None)),
         ViewHydrationKey::ProjectModelDocument { .. } => {
             ViewHydrationValue::ProjectModelDocument(None)
         }
@@ -571,6 +581,7 @@ struct BlockingReader {
 #[derive(Debug, Default)]
 struct BlockingState {
     started: bool,
+    reads_started: usize,
     released: bool,
 }
 
@@ -579,6 +590,7 @@ impl ViewArtifactReader for BlockingReader {
         let (lock, wake) = &*self.state;
         let mut state = lock.lock().unwrap();
         state.started = true;
+        state.reads_started += 1;
         wake.notify_all();
         while !state.released {
             state = wake.wait(state).unwrap();
@@ -671,6 +683,10 @@ fn rapid_target_generations_keep_worker_count_bounded() {
     schedule_latest(&mut runtime, first.path());
     wait_for_reader_start(&reader);
     schedule_latest(&mut runtime, second.path());
+    // A superseded batch cancelled before it reaches the reader exits and
+    // frees its slot. Wait until both workers are blocked inside the reader
+    // so the cap, not that race, decides the third request.
+    wait_for_reads_started(&reader, MAX_VIEW_HYDRATION_WORKERS);
     let refused = schedule_latest(&mut runtime, third.path());
 
     assert!(refused.is_empty());
@@ -774,6 +790,17 @@ fn wait_for_reader_start(reader: &BlockingReader) {
     }
 }
 
+fn wait_for_reads_started(reader: &BlockingReader, count: usize) {
+    let (lock, wake) = &*reader.state;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut state = lock.lock().unwrap();
+    while state.reads_started < count {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(!remaining.is_zero(), "readers did not start");
+        state = wake.wait_timeout(state, remaining).unwrap().0;
+    }
+}
+
 fn release_reader(reader: &BlockingReader) {
     let (lock, wake) = &*reader.state;
     let mut state = lock.lock().unwrap();
@@ -787,4 +814,49 @@ fn wait_until(mut condition: impl FnMut() -> bool) {
         std::thread::yield_now();
     }
     assert!(condition(), "condition did not become true");
+}
+
+#[test]
+fn scan_page_hydrates_typed_receipts_for_an_earlier_source_selection() {
+    use kuzushi_core::workflow_attempts::{
+        PhaseAttemptCompleted, PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
+        PhaseAttemptEvent, PhaseAttemptLedger, PhaseAttemptOutcome, PhaseTargetSnapshot,
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let snapshot = |revision: &str| PhaseTargetSnapshot {
+        target: "/earlier-source-target".to_string(),
+        revision: Some(revision.to_string()),
+        dirty: false,
+    };
+    let completed = PhaseAttemptCompleted::new(
+        WorkflowPhase::Scan,
+        vec!["trial-1".into(), "trial-2".into()],
+        snapshot("abc"),
+        PhaseAttemptOutcome::Completed,
+    );
+    let selection = PhaseAttemptDispositionRecorded::new(
+        &completed.attempt_id,
+        PhaseAttemptDisposition::Selected {
+            acknowledged_partial: false,
+        },
+    );
+    let ledger = PhaseAttemptLedger::from_events([
+        PhaseAttemptEvent::PhaseAttemptCompleted(completed),
+        PhaseAttemptEvent::PhaseAttemptDispositionRecorded(selection),
+    ])
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_workbench_page(WorkbenchPage::Scan);
+    app.engagement
+        .set_phase_attempt_projection(Some(snapshot("def")), ledger);
+
+    let keys = active_view_hydration_keys(&app);
+
+    for run_id in ["trial-1", "trial-2"] {
+        assert!(keys.contains(&ViewHydrationKey::ScanStageReceipt {
+            run_id: run_id.to_string()
+        }));
+    }
 }

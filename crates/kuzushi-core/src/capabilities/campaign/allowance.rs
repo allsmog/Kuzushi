@@ -62,7 +62,39 @@ pub fn execute_allowance_status(input: &Value, ctx: &ToolExecutionContext<'_>) -
         .workspace
         .context("allowance requires an active workspace")?;
     let snapshot = crate::SpendLimiter::read_allowance_snapshot(&workspace.findings_db_path(), id)?;
-    Ok(result(snapshot, "Investigation allowance"))
+    let mut output = result(snapshot, "Investigation allowance");
+    append_run_usage(input, id, &workspace.findings_db_path(), &mut output)?;
+    Ok(output)
+}
+
+fn append_run_usage(
+    input: &Value,
+    id: &str,
+    db: &std::path::Path,
+    output: &mut Value,
+) -> Result<()> {
+    let Some(run) = input["runId"].as_str() else {
+        return Ok(());
+    };
+    let usage = crate::SpendLimiter::read_run_provider_usage(db, run)?;
+    if let Some(usage) = &usage {
+        anyhow::ensure!(
+            usage.investigation_id == id,
+            "run belongs to another investigation"
+        );
+    }
+    let text = usage.as_ref().map_or_else(
+        || format!("\nRun {run}: provider-request evidence unavailable; unknown is not zero."),
+        |usage| format!("\nRun {run}: {} provider requests committed · {} unresolved. Includes internal turns and retries; no future usage or dollar ceiling is implied.", usage.committed_calls, usage.unresolved_calls),
+    );
+    for field in ["output", "summary"] {
+        output[field] = Value::String(format!(
+            "{}{text}",
+            output[field].as_str().unwrap_or_default()
+        ));
+    }
+    output["data"]["runUsage"] = serde_json::to_value(usage)?;
+    Ok(())
 }
 
 fn open_ledger(ctx: &ToolExecutionContext<'_>) -> Result<crate::SpendLimiter> {

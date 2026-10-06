@@ -283,6 +283,7 @@ impl ModuleRegistry {
         let mut input = self.prepare_tool_input(name, input, option_store)?;
         normalize_workspace_path_options(self, name, &mut input, ctx, false, None)?;
         let input = input_with_declared_prompt_defaults(self, name, input, ctx)?;
+        let input = crate::modules::scan_planning::bind_dispatch_scan_scope(name, input, ctx)?;
         let input = bind_repository_execution_input(name, input, ctx)?;
         let input = bind_identity_policy_defaults(name, input, ctx)?;
         bind_dispatch_snapshot_input(name, input, ctx)
@@ -393,7 +394,10 @@ impl ModuleRegistry {
         )?;
         let operation_binding = prepared.binding.operation_fingerprint;
         let allowance_runtime = match crate::modules::allowance_dispatch::bind_runtime(
-            descriptor, &prepared.value, ctx, runtime,
+            descriptor,
+            &prepared.value,
+            ctx,
+            runtime,
         ) {
             Ok(runtime) => runtime,
             Err(error) => return lifecycle.rejected(error),
@@ -563,9 +567,10 @@ impl ModuleRegistry {
         let executor = self.executors.get(name).with_context(|| {
             format!("registered tool or DAG node {name:?} has no Rust executor mapping")
         })?;
-        let input = crate::modules::allowance_dispatch::executor_input(input);
-        let mut output = executor(self, name, &input, ctx, runtime)
+        let executor_input = crate::modules::allowance_dispatch::executor_input(input);
+        let mut output = executor(self, name, &executor_input, ctx, runtime)
             .map(|output| normalize_tool_output_contract(name, output))?;
+        crate::modules::allowance_dispatch::attach_result_reference(input, &mut output)?;
         if let Some(traced) = traced_runtime.as_ref() {
             crate::module_result::backfill_estimated_cost(&mut output, traced.observed_spend());
         }

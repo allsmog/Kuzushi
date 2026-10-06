@@ -41,7 +41,12 @@ impl ApplicationToolCall {
 
     pub fn completion_from_result(self, result: &Result<Value>) -> PendingToolCallCompletion {
         let (status, cost, preview, warning_count, error_count) = result_fields(result);
-        self.completion(status, cost, preview, warning_count, error_count)
+        let mut completion = self.completion(status, cost, preview, warning_count, error_count);
+        completion.failure_source_snapshot = result
+            .as_ref()
+            .err()
+            .and_then(crate::workspace::source_snapshot::failed_source_snapshot);
+        completion
     }
 
     pub fn completion(
@@ -61,6 +66,7 @@ impl ApplicationToolCall {
             warning_count,
             error_count,
             execution_may_have_occurred: true,
+            failure_source_snapshot: None,
         }
     }
 
@@ -93,6 +99,7 @@ fn rejected_completion(
         warning_count: 0,
         error_count: 1,
         execution_may_have_occurred: false,
+        failure_source_snapshot: None,
     }
 }
 

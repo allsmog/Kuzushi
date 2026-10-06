@@ -27,8 +27,9 @@ pub(crate) fn context_layout(
             .height
             .saturating_sub(row_count.min(u16::MAX as usize) as u16);
         layout.list.height -= unused;
-        layout.detail.y -= unused;
-        layout.detail.height += unused;
+        let reclaimed = layout.detail.y.saturating_sub(layout.list.bottom());
+        layout.detail.y = layout.list.bottom();
+        layout.detail.height += reclaimed;
     }
     layout
 }
@@ -158,6 +159,10 @@ fn append_selected_context(
         text.push(
             "a uses this exact revision. A new study plan must be approved before scanning.".into(),
         );
+        text.push(
+            "m reviews its producing run as Map for separate acceptance. No model request is made."
+                .into(),
+        );
     }
 }
 
@@ -190,6 +195,9 @@ fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
         String::new(),
         "CONTEXT SUMMARY · v diagram · Tab complete document".into(),
     ];
+    if let Some(notice) = preview.dfd.evidence_notice() {
+        lines.push(notice.into());
+    }
     lines.extend(context_summary(&preview.document));
     lines
 }

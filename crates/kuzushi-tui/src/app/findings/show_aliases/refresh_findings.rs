@@ -253,6 +253,10 @@ impl ShellApp {
         let Some(run_refs) = self.selected_current_scan_run_refs() else {
             return Ok(findings);
         };
+        let run_refs = match self.target() {
+            Some(target) => kuzushi_core::run_artifacts::scan_finding_run_refs(target, &run_refs)?,
+            None => run_refs,
+        };
         let run_refs = run_refs.into_iter().collect::<BTreeSet<_>>();
         findings.retain(|finding| finding_observed_in_runs(finding, &run_refs));
         Ok(findings)
@@ -535,6 +539,8 @@ mod tests {
         FindingIdentityAuditGroupDisposition, IDENTITY_AUDIT_APPROVAL_SCHEMA_VERSION,
     };
     use kuzushi_core::{OptionScope, OptionTarget, Severity, V2Config};
+
+    mod scan_membership;
 
     #[test]
     fn refresh_reads_current_generation_local_decisions_into_queue_and_journey_counts() {

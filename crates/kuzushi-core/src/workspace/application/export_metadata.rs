@@ -14,6 +14,10 @@ pub(in crate::workspace::application) fn workspace_export_metadata_value(
         "includedCount": included_count,
         "totalCount": total_count,
         "omittedFields": workspace_export_omitted_fields(format),
+        "findingSelection": match options.campaign_id.as_deref() {
+            Some(id) => json!({"kind": "study", "campaignId": id}),
+            None => json!({"kind": "workspace-history"}),
+        },
     });
     if let Some(review_yield) = review_yield_metadata_value(options.review_yield.as_ref()) {
         metadata["reviewYield"] = review_yield;

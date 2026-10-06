@@ -1,0 +1,148 @@
+# One offline study over an accepted boundary. Only the deterministic secret scanner runs.
+name: Study report retains its accepted scope through source change and damaged evidence
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/alpha-command.txt
+keys: Enter
+require-live-snap: 30 RESULT READY | imported-map
+nav-mode:
+keys: u
+require-live-snap: 25 Viewing Scan | accepted-map
+keys: Escape
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | accepted-boundary
+keys: p
+require-live-snap: 25 PLAN A STUDY | study-form
+expect: Selected scope
+keys: L
+require-live-snap: 30 Draft ready | scoped-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART draft
+keys: Down Down Down Down Enter
+require-live-snap: 15 Total calls | calls-editor
+type: 9
+keys: Enter Down Enter
+require-live-snap: 15 Protected review | review-editor
+type: 3
+keys: Enter Down Down Down
+require-live-snap: 15 Next action | next-step
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval-first-page
+keys: End
+require-live-snap: 15 y approve | approval-last-page
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-study
+keys: L
+require-live-snap: 20 L starts its fixed jobs | jobs-before-launch
+keys: L
+require-live-snap: 20 dispatcher pid | dispatcher-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART finished
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART attempt-recorded
+submit: workbench
+require-live-snap: 25 RESULT READY | scan-result
+ask: Does the detached study's completed Scan appear as a result to select, without any manual refresh?
+nav-mode:
+keys: u
+require-live-snap: 25 Viewing Review | selected-scan
+keys: Escape
+submit: report
+require-live-snap: 25 Scope: study | report-ready
+expect: Boundary:
+expect: planned discovery file(s)
+expect: Proposal coverage: 1 excluded
+expect: not completed scanner coverage
+ask: Does the study report state the accepted boundary it was planned under, separately from completed scanner coverage?
+keys: p
+require-live-snap: 20 Boundary rationale | report-provenance
+expect: Excluded excluded.py: Explicit labeled fixture exclusion
+ask: Do provenance details expose the boundary rationale, scope reference, source tree and operator exclusion without crowding the study facts?
+resize: 160x48
+keys: Home
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+keys: Home
+live-snap: report-40x12-top
+keys: End
+require-live-snap: 15 provenance | report-40x12-tail
+ask: At 40x12, can the operator page from the study scope to the complete tail without losing report controls?
+resize: 120x36
+keys: Home j j j End
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter End
+require-live-snap: 30 Enter Retry | first-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART first
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 30 Scope: study | report-after-restart
+expect: Boundary:
+expect: Proposal coverage: 1 excluded
+ask: After actual exit and no-color restart, does Report recover the same study and its accepted boundary without starting work?
+keys: j j j End
+require-live-snap: 20 format json (4/6) | restarted-format
+keys: Enter End
+require-live-snap: 30 Enter Retry | restarted-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART damage
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | damaged-restart
+submit: report
+require-live-snap: 30 study receipt unavailable | damaged-report
+expect: scope evidence is unavailable
+expect: s selects workspace history
+keys: j j j End
+require-live-snap: 20 format json (4/6) | damaged-format
+keys: Enter End
+require-live-snap: 15 Press s | refused-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART damaged
+ask: With the accepted scope evidence missing, is study export blocked with a readable reason and an explicit workspace-history choice, leaving the previous export untouched?
+keys: s
+require-live-snap: 20 Scope: workspace history | workspace-history
+expect: +2 more run(s)
+ask: Does workspace history disclose that it makes no study or boundary claim, while naming all three runs of the displayed attempt?
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART restore
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART change-source
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | source-changed-restart
+submit: report
+require-live-snap: 30 Recorded on earlier source | report-after-source-change
+expect: Scope: study
+expect: Boundary:
+expect: phase:Map
+ask: After an unrelated source file changed, does Report show the earlier study, clearly labeled as recorded on earlier source, with export available?
+keys: j j j End
+require-live-snap: 20 format json (4/6) | drift-format
+keys: Enter End
+require-live-snap: 30 Enter Retry | drift-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_scope.py @TMP_TARGET @ART drift
+keys: Escape
+submit: workbench
+require-live-snap: 25 Viewing Map | drift-map
+keys: BTab
+require-live-snap: 25 Secret scan | scan-earlier-source
+expect: selected · earlier source
+ask: Does the Scan page show the selected three-run attempt as earlier-source history rather than a single legacy run?
+keys: C-c
+require-exit: 10

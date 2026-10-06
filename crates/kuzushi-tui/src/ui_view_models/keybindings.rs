@@ -77,6 +77,7 @@ fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         return Some(system::pending_confirm_keybindings(app));
     }
     batch_config_bindings(app)
+        .or_else(|| catalog::owned_picker_keybindings(app))
         .or_else(|| super::answers_own_input(app).then(|| answer_bindings(app)))
         .or_else(|| workbench::prove_detail_bindings(app))
         .or_else(|| run_artifact::keybindings(app))

@@ -84,7 +84,7 @@ const APPROVED_FIXTURE_HASHES = new Map([
   ],
   [
     "crates/kuzushi-core/src/modules/application/sast_scan/run_sast_scan.rs",
-    "dd2dd2f2efedb547ba224bb082d884a2252efc785ab7165386c2c07e1448e277",
+    "0f260824ebc92176061de18c86bfd9b850497634f88cefb13296f2c16653468f",
   ],
   [
     "crates/kuzushi-core/src/run_lifecycle/tests.rs",
@@ -270,6 +270,59 @@ export function parseArguments(argv, environment = process.env) {
   return { base, head };
 }
 
+export function diffForWorktree(base, cwd = process.cwd()) {
+  const revision = /^0{40}$/.test(base) ? EMPTY_TREE_SHA : base;
+  const tracked = checkedGitOutput(
+    [
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--unified=0",
+      "--no-color",
+      "--diff-filter=ACMR",
+      revision,
+      "--",
+    ],
+    cwd,
+  );
+  const names = checkedGitOutput(["ls-files", "--others", "--exclude-standard", "-z"], cwd)
+    .split("\0")
+    .filter(Boolean);
+  const additions = names.map((name) =>
+    checkedGitOutput(
+      [
+        "diff",
+        "--no-index",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--unified=0",
+        "--no-color",
+        "--",
+        "/dev/null",
+        name,
+      ],
+      cwd,
+      [0, 1],
+    ),
+  );
+  return [tracked, ...additions].join("\n");
+}
+
+function checkedGitOutput(args, cwd, allowed = [0]) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (result.error) throw result.error;
+  if (!allowed.includes(result.status))
+    throw new Error(`secret scan could not read the working tree: git ${args[0]} failed`);
+  return result.stdout;
+}
+
+function parseScanMode(argv) {
+  const worktree = argv.includes("--worktree");
+  if (worktree && argv.includes("--head"))
+    throw new Error("--worktree cannot be combined with --head");
+  return { worktree, ...parseArguments(argv.filter((arg) => arg !== "--worktree")) };
+}
+
 function escapeWorkflowCommand(value) {
   return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
@@ -287,11 +340,14 @@ export function formatFinding(finding, githubActions = process.env.GITHUB_ACTION
 }
 
 export function run(argv = process.argv.slice(2)) {
-  const { base, head } = parseArguments(argv);
+  const { base, head, worktree } = parseScanMode(argv);
   const cwd = process.cwd();
-  const findings = scanDiff(diffForRange(base, head, cwd), (path) => fixtureIsApproved(path, cwd));
+  const diff = worktree ? diffForWorktree(base, cwd) : diffForRange(base, head, cwd);
+  const findings = scanDiff(diff, (path) => fixtureIsApproved(path, cwd));
   if (findings.length === 0) {
-    console.log(`Secret scan passed for ${base}...${head}.`);
+    console.log(
+      `Secret scan passed for ${base}...${worktree ? "working tree (including untracked files)" : head}.`,
+    );
     return 0;
   }
   for (const finding of findings) {

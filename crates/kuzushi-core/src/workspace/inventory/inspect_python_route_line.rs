@@ -8,10 +8,10 @@ pub(crate) fn inspect_python_route_line(
     builder: &mut InventoryBuilder,
 ) {
     let trimmed = line.trim();
-    if is_sanic_source(scan) {
+    if python_decorator_framework(trimmed, scan) == Some("Sanic") {
         inspect_sanic_route(relative, line_number, trimmed, builder);
     } else {
-        inspect_python_decorator_route(relative, line_number, trimmed, builder);
+        inspect_python_decorator_route(relative, line_number, trimmed, scan, builder);
     }
     inspect_bottle_route(relative, line_number, trimmed, scan, builder);
     inspect_falcon_route(relative, line_number, trimmed, scan, builder);
@@ -28,19 +28,20 @@ fn inspect_python_decorator_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     if !trimmed.starts_with('@') {
         return;
     }
-    for (method, marker, framework) in [
-        ("ANY", ".route(", "Flask"),
-        ("GET", ".get(", "FastAPI"),
-        ("POST", ".post(", "FastAPI"),
-        ("PUT", ".put(", "FastAPI"),
-        ("PATCH", ".patch(", "FastAPI"),
-        ("DELETE", ".delete(", "FastAPI"),
-        ("ANY", ".api_route(", "FastAPI"),
+    for (method, marker) in [
+        ("ANY", ".route("),
+        ("GET", ".get("),
+        ("POST", ".post("),
+        ("PUT", ".put("),
+        ("PATCH", ".patch("),
+        ("DELETE", ".delete("),
+        ("ANY", ".api_route("),
     ] {
         if let Some(route) = extract_quoted_after_marker(trimmed, marker) {
             let method = if method == "ANY" {
@@ -48,14 +49,16 @@ fn inspect_python_decorator_route(
             } else {
                 method.to_string()
             };
-            builder.add_route_controller(route_item(
+            let mut item = route_item(
                 relative,
                 line_number,
                 &method,
                 &route,
-                framework,
+                "Python",
                 trim_detail(trimmed),
-            ));
+            );
+            item.framework = python_decorator_framework(trimmed, scan).map(str::to_string);
+            builder.add_route_controller(item);
         }
     }
 }
@@ -82,8 +85,14 @@ fn inspect_sanic_route(
     ));
 }
 
-fn is_sanic_source(scan: &SourceTextScan) -> bool {
-    scan.contains_ci("sanic")
+fn python_decorator_framework(line: &str, scan: &SourceTextScan) -> Option<&'static str> {
+    let receiver = line
+        .strip_prefix('@')?
+        .split('(')
+        .next()?
+        .rsplit_once('.')?
+        .0;
+    scan.python_route_framework(receiver)
 }
 
 fn sanic_decorator_route(line: &str) -> Option<(&'static str, String)> {

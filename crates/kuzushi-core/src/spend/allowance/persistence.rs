@@ -38,32 +38,48 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<()> {
             primary key(investigation_id, run_id),
             foreign key(investigation_id, revision)
                 references investigation_allowance_revisions(investigation_id, revision)
-         );"
+         );",
     )?;
     Ok(())
 }
 
-pub(super) fn latest_approval(conn: &Connection, id: &str) -> Result<Option<(u32, AllowanceApprovalV1)>> {
-    let row: Option<(u32, String)> = conn.query_row(
-        "select revision, approval_json from investigation_allowance_revisions
+pub(super) fn latest_approval(
+    conn: &Connection,
+    id: &str,
+) -> Result<Option<(u32, AllowanceApprovalV1)>> {
+    let row: Option<(u32, String)> = conn
+        .query_row(
+            "select revision, approval_json from investigation_allowance_revisions
          where investigation_id = ? order by revision desc limit 1",
-        [id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).optional()?;
-    row.map(|(revision, json)| decode_approval(id, revision, &json)).transpose()
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    row.map(|(revision, json)| decode_approval(id, revision, &json))
+        .transpose()
 }
 
-fn decode_approval(id: &str, revision: u32, json: &str) -> Result<(u32, AllowanceApprovalV1)> {
+pub(super) fn decode_approval(
+    id: &str,
+    revision: u32,
+    json: &str,
+) -> Result<(u32, AllowanceApprovalV1)> {
     let approval: AllowanceApprovalV1 = serde_json::from_str(json)?;
     approval.validate()?;
-    anyhow::ensure!(approval.investigation_id == id, "allowance identity mismatch");
-    anyhow::ensure!(approval.expected_revision.checked_add(1) == Some(revision), "invalid allowance revision chain");
+    anyhow::ensure!(
+        approval.investigation_id == id,
+        "allowance identity mismatch"
+    );
+    anyhow::ensure!(
+        approval.expected_revision.checked_add(1) == Some(revision),
+        "invalid allowance revision chain"
+    );
     Ok((revision, approval))
 }
 
 pub(super) fn snapshot(conn: &Connection, id: &str) -> Result<AllowanceSnapshot> {
-    let (revision, approval) = latest_approval(conn, id)?
-        .ok_or_else(|| AllowanceError::NotApproved(id.to_string()))?;
+    let (revision, approval) =
+        latest_approval(conn, id)?.ok_or_else(|| AllowanceError::NotApproved(id.to_string()))?;
     let usage = usage(conn, id)?;
     Ok(AllowanceSnapshot {
         schema_version: 1,
@@ -121,7 +137,11 @@ pub(super) fn require_revision(expected: u32, current: u32) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn insert_approval(conn: &Connection, approval: &AllowanceApprovalV1, revision: u32) -> Result<()> {
+pub(super) fn insert_approval(
+    conn: &Connection,
+    approval: &AllowanceApprovalV1,
+    revision: u32,
+) -> Result<()> {
     conn.execute(
         "insert into investigation_allowance_revisions(investigation_id, revision, approval_json, created_at)
          values (?, ?, ?, ?)",

@@ -1,4 +1,4 @@
-use super::super::{browser_summary_text, fit};
+use super::super::fit;
 use crate::renderer::shared::text::display_width;
 use crate::ui_view_models::EntryPointBreakdown;
 use ratatui::layout::Rect;
@@ -11,12 +11,18 @@ pub(super) struct BrowserLayout {
 }
 
 pub(super) fn browser_layout(area: Rect, model: &EntryPointBreakdown) -> BrowserLayout {
-    let full = browser_summary_text(area.width as usize, model);
-    let compact = area.height.saturating_sub(full.len() as u16) < 14;
-    let summary = if compact {
-        compact_summary(area.width as usize, model)
+    let summary = if area.height < 9 {
+        vec![fit(
+            &format!(
+                "{} extracted · {} {}",
+                model.counts.extracted,
+                model.receipt.warnings.len(),
+                warning_label(model.receipt.warnings.len())
+            ),
+            area.width as usize,
+        )]
     } else {
-        full
+        compact_summary(area.width as usize, model)
     };
     let summary_height = (summary.len() as u16).min(area.height);
     let summary_area = Rect {
@@ -51,17 +57,21 @@ fn compact_summary(width: usize, model: &EntryPointBreakdown) -> Vec<String> {
     } else {
         short
     };
-    let warning_label = if model.receipt.warnings.len() == 1 {
-        "warning"
-    } else {
-        "warnings"
-    };
+    let warning_label = warning_label(model.receipt.warnings.len());
     let state = format!(
         "{} · {} {warning_label} · PgUp/PgDn detail",
         model.receipt.freshness.label(),
         model.receipt.warnings.len()
     );
     vec![fit(&counts, width), fit(&state, width)]
+}
+
+fn warning_label(count: usize) -> &'static str {
+    if count == 1 {
+        "warning"
+    } else {
+        "warnings"
+    }
 }
 
 fn pane_areas(area: Rect) -> (Rect, Rect) {

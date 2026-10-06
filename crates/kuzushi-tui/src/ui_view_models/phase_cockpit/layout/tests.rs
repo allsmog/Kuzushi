@@ -132,3 +132,33 @@ fn phase_presentation_plan_guided_mode_has_one_attention_surface() {
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].id, PhaseSurfaceId::FixRemediation);
 }
+
+#[test]
+fn guided_scan_coverage_can_use_the_available_rows_without_acceptance() {
+    use crate::ui_view_models::{ScanEngineOutcomeModel, ScanPhaseModel};
+    let body = PhaseCockpitBody::Scan(ScanPhaseModel {
+        scope: "service".into(),
+        plan: "manual".into(),
+        attempt: None,
+        empty_hint: None,
+        live: None,
+        engine_outcomes: vec![ScanEngineOutcomeModel {
+            engine: "semgrep".into(),
+            tool_key: Some("semgrep:scan".into()),
+            outcome: "partial".into(),
+            run_ref: None,
+            detail: Some("An incompatible rule was omitted".into()),
+        }],
+    });
+    for height in [3, 8, 30, 80] {
+        let area = Rect::new(0, 4, 96, height);
+        let plan = phase_presentation_plan(&body, area, None, None, AttentionMode::ResultReady);
+        assert_eq!(plan.density, LayoutDensity::Guided);
+        assert_eq!(plan.surfaces.len(), 1);
+        assert_eq!(plan.surfaces[0].rect, area);
+        assert_eq!(plan.surfaces[0].interaction, SurfaceInteraction::Scrollable);
+    }
+    let area = Rect::new(0, 4, 96, 80);
+    let question = phase_presentation_plan(&body, area, None, None, AttentionMode::GuidedQuestion);
+    assert_eq!(question.surfaces[0].rect.height, 5);
+}

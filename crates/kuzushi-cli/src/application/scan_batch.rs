@@ -160,6 +160,12 @@ fn finish_batch_controller(
     let gate = apply_batch_scan_gate_policy(workspace, store, &report, gate_policy)?;
     report.gate = Some(gate.outcome().clone());
     emit_batch_report(&report, json, ci)?;
+    kuzushi_core::capabilities::campaign::record_scan_batch_phase_result(
+        workspace.root(),
+        batch_id,
+        store,
+    )
+    .context("could not record the scan-batch result for explicit review")?;
     match batch_completion_status(
         dispatch.is_err(),
         gate.operationally_incomplete(),

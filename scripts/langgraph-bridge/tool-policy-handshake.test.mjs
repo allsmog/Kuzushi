@@ -124,7 +124,7 @@ function expectedReceipt(policyRequest) {
 function authorizedProbeRequest() {
   const query = request();
   const credentials = join(query.cwd, "oauth.json");
-  writeFileSync(credentials, JSON.stringify({ anthropic: { access: "test-oauth-token" } }));
+  writeFileSync(credentials, JSON.stringify({ anthropic: { access: "test-oauth-token", expires: Date.now() + 600_000 } }));
   return {
     ...query,
     protocolVersion: 1,

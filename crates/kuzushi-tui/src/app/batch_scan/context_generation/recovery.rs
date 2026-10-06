@@ -4,23 +4,78 @@ use kuzushi_core::capabilities::campaign::load_context_study;
 impl StudyContextGeneration {
     pub(super) fn refresh_result(&mut self, target: &std::path::Path) {
         self.generated = None;
+        self.generated_scopes = None;
         self.result_error = None;
+        self.rejected_available = false;
+        self.rejected_output = None;
+        self.show_rejected = false;
+        self.refresh_rejected_output_availability(target);
         let Some(receipt) = &self.receipt else {
             return;
         };
-        match receipt.generated_context(target) {
-            Ok(reference) => self.generated = reference,
-            Err(error) => self.result_error = Some(format!("{error:#}")),
+        if self.is_scope_proposal() {
+            match receipt.generated_scopes(target) {
+                Ok(review) => self.generated_scopes = review,
+                Err(error) => self.result_error = Some(format!("{error:#}")),
+            }
+        } else {
+            match receipt.generated_context(target) {
+                Ok(reference) => self.generated = reference,
+                Err(error) => self.result_error = Some(format!("{error:#}")),
+            }
+        }
+    }
+
+    fn refresh_rejected_output_availability(&mut self, target: &std::path::Path) {
+        let Some(receipt) = &self.receipt else {
+            return;
+        };
+        match receipt.rejected_output_available(target) {
+            Ok(available) => self.rejected_available = available,
+            Err(error) => {
+                self.rejected_available = true;
+                self.rejected_output = Some(Err(error.to_string()));
+            }
         }
     }
 }
 
 impl ShellApp {
+    pub(crate) fn cache_context_map_result(&mut self, data: &Value) -> bool {
+        let state = self.router.campaign_mut();
+        let mut updated = false;
+        for config in [
+            state.batch_scan_config.as_mut(),
+            state.setup_context_study.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            updated |= cache_map_attempt(config, data);
+            updated |= cache_revision_map_attempt(config, data);
+        }
+        if updated {
+            self.refresh_phase_attempt_projection();
+        }
+        true
+    }
+
+    pub(crate) fn reviewed_context_map_attempt(&self) -> Option<&str> {
+        self.study_context_picker()
+            .and_then(|picker| picker.map_attempt_id.as_deref())
+            .or_else(|| self.context_generation()?.map_attempt_id.as_deref())
+    }
+
     pub(crate) fn restore_context_generation(&mut self, target: &std::path::Path, id: &str) {
         match restore_context_form(target, id) {
             Ok(config) => {
                 self.show_study_form(config);
-                self.open_study_context_picker();
+                if self
+                    .context_generation()
+                    .is_none_or(|generation| !generation.is_scope_proposal())
+                {
+                    self.open_study_context_picker();
+                }
             }
             Err(error) => {
                 self.router.campaign_mut().notice =
@@ -28,6 +83,45 @@ impl ShellApp {
             }
         }
     }
+}
+
+fn cache_revision_map_attempt(config: &mut BatchScanConfig, data: &Value) -> bool {
+    if data["contextOrigin"] != "revision" {
+        return false;
+    }
+    let Some(picker) = config.context_picker.as_mut() else {
+        return false;
+    };
+    let matches =
+        serde_json::from_value::<kuzushi_core::ThreatModelRef>(data["modelRef"].clone()).ok();
+    if matches.is_none() || matches != picker.selected {
+        return false;
+    }
+    picker.map_attempt_id = data["attemptId"].as_str().map(str::to_string);
+    config.notice = Some("Existing context is recorded for Map review. Accept it explicitly before scanning; no model request was made.".into());
+    picker.map_attempt_id.is_some()
+}
+
+fn cache_map_attempt(config: &mut BatchScanConfig, data: &Value) -> bool {
+    let Some((generation, attempt)) = config
+        .context_generation
+        .as_mut()
+        .zip(data["attemptId"].as_str())
+    else {
+        return false;
+    };
+    let Some(receipt) = generation.receipt.as_ref() else {
+        return false;
+    };
+    if data["campaignId"] != receipt.campaign_id || data["planSha256"] != receipt.plan_sha256 {
+        return false;
+    }
+    generation.map_attempt_id = Some(attempt.into());
+    if let Some(picker) = config.context_picker.as_mut() {
+        picker.map_attempt_id = None;
+    }
+    config.notice = Some("Recorded Map is ready for review. Accept it explicitly before scanning; existing spending is retained.".into());
+    true
 }
 
 fn restore_context_form(target: &std::path::Path, id: &str) -> Result<BatchScanConfig> {

@@ -23,6 +23,7 @@ struct ExternalTargetStateChanges {
     config: bool,
     options: bool,
     project_scopes: bool,
+    phase_attempts: bool,
 }
 
 impl ExternalTargetStateChanges {
@@ -35,6 +36,49 @@ impl ExternalTargetStateChanges {
             config: changed_path(target, relative_paths, broad, &config),
             options: changed_path(target, relative_paths, broad, &options),
             project_scopes: changed_path(target, relative_paths, broad, &scopes),
+            phase_attempts: phase_attempt_ledger_changed(target, relative_paths, broad),
+        }
+    }
+}
+
+/// A detached dispatcher or headless run records phase results in either
+/// ledger; the shell must see them without a manual refresh.
+fn phase_attempt_ledger_changed(
+    target: &std::path::Path,
+    relative_paths: &[std::path::PathBuf],
+    broad: &std::path::Path,
+) -> bool {
+    use kuzushi_core::workflow_attempts::{
+        phase_attempt_ledger_path, phase_attempt_v2_ledger_path,
+    };
+    changed_path(
+        target,
+        relative_paths,
+        broad,
+        &phase_attempt_ledger_path(target),
+    ) || changed_path(
+        target,
+        relative_paths,
+        broad,
+        &phase_attempt_v2_ledger_path(target),
+    )
+}
+
+/// The Scan attempt Report reads, and whether it describes current source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReportScanAttempt {
+    pub(crate) run_refs: Vec<String>,
+    pub(crate) current: bool,
+}
+
+impl ReportScanAttempt {
+    fn from_record(
+        record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+        current: bool,
+    ) -> Self {
+        Self {
+            run_refs: record.completed.run_refs.clone(),
+            current,
         }
     }
 }
@@ -126,6 +170,32 @@ impl ShellApp {
         }
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
+    }
+
+    pub(crate) fn report_scan_run_refs(&self) -> Vec<String> {
+        self.report_scan_attempt()
+            .map(|attempt| attempt.run_refs)
+            .unwrap_or_default()
+    }
+
+    /// Report prefers the current Scan attempt. After source drift it keeps
+    /// the latest selected attempt for this target, flagged as not current,
+    /// so earlier work stays reportable without claiming to describe today.
+    pub(crate) fn report_scan_attempt(&self) -> Option<ReportScanAttempt> {
+        let scan = kuzushi_core::WorkflowPhase::Scan;
+        let current = self
+            .engagement
+            .selected_phase_attempt(scan)
+            .or_else(|| self.engagement.unresolved_phase_attempt(scan));
+        if let Some(record) = current {
+            return Some(ReportScanAttempt::from_record(record, true));
+        }
+        if self.engagement.phase_attempt_projection_is_degraded() {
+            return None;
+        }
+        self.engagement
+            .stale_selected_phase_attempt(scan)
+            .map(|record| ReportScanAttempt::from_record(record, false))
     }
 
     pub(crate) fn close_report_to_origin(&mut self) {
@@ -1107,10 +1177,7 @@ impl ShellApp {
                 .borrow_mut()
                 .invalidate_state_artifact_paths(&target, relative_paths)
         };
-        self.reload_external_target_settings(&target, changes.config, changes.options);
-        if changes.project_scopes {
-            self.reload_external_project_scope_tree(&target);
-        }
+        self.reload_external_state(&target, &changes);
         if !findings_changed || self.findings_projection_is_current(&target) {
             return Vec::new();
         }
@@ -1118,6 +1185,20 @@ impl ShellApp {
             announce: false,
             filter: self.active_findings_filter().clone(),
         })]
+    }
+
+    fn reload_external_state(
+        &mut self,
+        target: &std::path::Path,
+        changes: &ExternalTargetStateChanges,
+    ) {
+        self.reload_external_target_settings(target, changes.config, changes.options);
+        if changes.project_scopes {
+            self.reload_external_project_scope_tree(target);
+        }
+        if changes.phase_attempts {
+            self.refresh_phase_attempt_projection();
+        }
     }
 
     pub(crate) fn findings_projection_is_current(&self, target: &std::path::Path) -> bool {

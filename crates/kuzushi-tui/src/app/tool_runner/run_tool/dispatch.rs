@@ -222,14 +222,22 @@ impl ShellApp {
         let empty_allowlist = std::collections::BTreeSet::new();
         let input_gate =
             confirm_gate_for_tool(&request.tool_name, request.input.value(), &empty_allowlist);
-        input_gate.or_else(|| {
-            self.registry()
-                .resolve_tool(&request.tool_name)
-                .and_then(|descriptor| {
-                    descriptor_approval_confirm(descriptor, request.input.value())
-                })
-                .map(|confirm| patch_validation_confirm(confirm, request))
-        })
+        input_gate
+            .or_else(|| {
+                self.registry()
+                    .resolve_tool(&request.tool_name)
+                    .and_then(|descriptor| {
+                        descriptor_approval_confirm(descriptor, request.input.value())
+                    })
+                    .map(|confirm| patch_validation_confirm(confirm, request))
+            })
+            .map(|confirm| {
+                crate::app::approval::allowance::with_accounting_terms(
+                    self,
+                    request.input.value(),
+                    confirm,
+                )
+            })
     }
 
     fn apply_run_confirmation(

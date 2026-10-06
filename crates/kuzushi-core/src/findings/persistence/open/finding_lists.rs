@@ -25,14 +25,10 @@ impl FindingStore {
         for run_id in run_ids {
             findings.extend(self.list_findings_for_scan_id(run_id.as_ref())?);
         }
-        let mut seen = std::collections::BTreeSet::new();
-        findings.retain(|finding| {
-            seen.insert(crate::findings::finding_projection_key(
-                finding,
-                IdentityFoldPolicy::Safe,
-            ))
-        });
-        Ok(findings)
+        Ok(project_finding_generations(
+            findings,
+            IdentityFoldPolicy::Safe,
+        ))
     }
 
     /// Raw producer observations recorded by these runs, before same-issue
@@ -161,10 +157,13 @@ fn review_decisions_by_fingerprint(
     findings: &[Finding],
     cache: &std::collections::BTreeMap<String, ReviewDecision>,
 ) -> std::collections::BTreeMap<String, ReviewDecision> {
-    findings.iter().filter_map(|finding| {
-        let decision = cache.get(&review_cache_key(finding)?)?;
-        Some((finding.fingerprint.clone(), decision.clone()))
-    }).collect()
+    findings
+        .iter()
+        .filter_map(|finding| {
+            let decision = cache.get(&review_cache_key(finding)?)?;
+            Some((finding.fingerprint.clone(), decision.clone()))
+        })
+        .collect()
 }
 
 fn ledger_aliases_by_row_index(rows: &[Finding]) -> Vec<String> {

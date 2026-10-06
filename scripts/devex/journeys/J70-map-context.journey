@@ -1,0 +1,106 @@
+# Imported labeled documents, actual shared local dispatch, no live provider.
+name: Accept exact Map context and retain it through a fixed study and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/alpha-command.txt
+keys: Enter
+require-live-snap: 30 RESULT READY | imported
+require-live-snap: 25 Alpha receiver | reviewing-map
+expect: RESULT READY
+expect-not: Beta receiver
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART reviewing
+ask: Does Map show the exact imported Alpha context for review while the globally active Beta remains unchanged?
+nav-mode:
+keys: u
+require-live-snap: 20 Viewing Scan | after-acceptance
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART accepted
+submit: map
+require-live-snap: 20 accepted | accepted-map
+ask: Does acceptance advance to Scan while returning to Map preserves the approved picture and clearly names its accepted state?
+keys: Tab
+require-live-snap: 15 DATA-FLOW DIAGRAM | exact-dfd
+expect-not: Beta receiver
+ask: Does the DFD show the accepted context, with legible topology and useful keyboard controls?
+resize: 80x24
+require-live-snap: 15 Alpha client | map-80
+ask: Is the exact DFD readable at 80x24 without hiding navigation?
+resize: 60x20
+require-live-snap: 15 Alpha client | map-60
+ask: Does the Map flow remain readable at 60x20?
+resize: 40x12
+require-live-snap: 15 Alpha client | map-40
+expect: Alpha client
+ask: Are Map navigation and inspection still usable at 40x12?
+nav-mode:
+keys: j
+require-live-snap: 15 Alpha receiver | map-40-selected
+ask: Does keyboard selection reveal the selected component at 40x12 instead of spending the only reading row on a border?
+keys: k
+resize: 96x89
+require-live-snap: 15 Alpha client | map-tall
+ask: Does the tall layout retain a clear hierarchy and exact context evidence?
+resize: 160x48
+require-live-snap: 15 Alpha client | map-wide
+ask: Does the wide layout show a useful DFD without stretched copy or lost controls?
+resize: 120x36
+keys: Escape
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study-form
+keys: L
+require-live-snap: 30 Draft ready | exact-study
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART study
+ask: Does the three-pass plan retain accepted Alpha context without launching work or implying approval?
+keys: Down Down Down Enter
+require-live-snap: 20 Enter inspect | plan-context-choice
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | plan-context-inspected
+expect: Labeled diagram Alpha
+expect-not: Labeled diagram Beta
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART study
+ask: Does exact plan-context inspection show accepted Alpha and its grounding limitations while preserving the draft and active Beta?
+keys: Escape
+require-live-snap: 15 PLAN A STUDY | returned-study
+keys: Escape
+require-live-snap: 15 KUZUSHI | returned-origin
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 20 Alpha receiver | resumed-map
+expect-not: Beta receiver
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART resumed
+ask: Does a fresh no-color process restore the accepted exact Map and preserve honest scan-plan state?
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART remove
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | missing-restart
+submit: map
+require-live-snap: 25 Recorded Map context unavailable | missing-map
+expect-not: Beta receiver
+expect-not: Alpha receiver
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART missing
+ask: Does a missing accepted object stop the DFD from silently showing another model and explain the unavailable evidence?
+resize: 40x12
+require-live-snap: 15 Recorded Map context unavailable | missing-map-40
+expect: Enter inspect Map runs
+ask: Does the smallest missing-context state explain the problem and keep run inspection reachable?
+nav-mode:
+keys: Enter
+require-live-snap: 15 JOBS | missing-inspection
+require-shell: python3 @REPO/scripts/devex/fixtures/map_context.py @TMP_TARGET @ART missing
+ask: Does Enter inspect recorded Map runs without starting replacement work or activating another model?
+keys: C-c
+require-exit: 10

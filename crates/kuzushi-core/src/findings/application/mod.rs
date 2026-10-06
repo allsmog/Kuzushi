@@ -1,7 +1,7 @@
 mod scan_assessment;
-pub use scan_assessment::scan_reassessment_block;
 use super::domain::*;
 use super::presentation::{proof_state_label, runtime_validation_label};
+pub use scan_assessment::scan_reassessment_block;
 use serde::Serialize;
 
 mod batch_occurrence;
@@ -18,7 +18,8 @@ mod reviewed_refutation;
 mod run_delta;
 mod scan_comparison;
 pub(crate) use run_delta::{
-    commit_observed_findings, emit_finding_delta, emit_persisted_finding_delta,
+    commit_observed_findings, commit_observed_findings_with_status, emit_finding_delta,
+    emit_persisted_finding_delta,
 };
 
 pub use batch_occurrence::{
@@ -35,8 +36,7 @@ pub use effective_review_state::{
     review_verdict_is_actionable, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
 pub(crate) use finding_review_gate::{
-    load_finding_review_gate, FindingReviewGate,
-    ReviewConfirmation, MISSING_CONFIRMATION_GUIDANCE,
+    load_finding_review_gate, FindingReviewGate, ReviewConfirmation, MISSING_CONFIRMATION_GUIDANCE,
 };
 pub(crate) use generic_tool_findings::{
     normalize_agent_json_findings, persist_tool_findings, persist_tool_findings_to,

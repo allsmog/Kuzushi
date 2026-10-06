@@ -6,6 +6,8 @@ use std::path::PathBuf;
 pub struct ReportRouteState {
     format_index: usize,
     completeness: kuzushi_core::WorkspaceExportCompleteness,
+    workspace_history: bool,
+    provenance_details: bool,
     paths: [String; 6],
     path_edit: Option<FieldEditor>,
     path_error: Option<String>,
@@ -19,6 +21,8 @@ impl Default for ReportRouteState {
         Self {
             format_index: 0,
             completeness: kuzushi_core::WorkspaceExportCompleteness::All,
+            workspace_history: false,
+            provenance_details: false,
             paths: Self::FORMATS.map(|format| default_report_path(format).to_string()),
             path_edit: None,
             path_error: None,
@@ -30,6 +34,24 @@ impl Default for ReportRouteState {
 }
 
 impl ReportRouteState {
+    pub(crate) fn provenance_details(&self) -> bool {
+        self.provenance_details
+    }
+
+    pub(crate) fn toggle_provenance(&mut self) {
+        self.provenance_details = !self.provenance_details;
+    }
+
+    pub(crate) fn workspace_history(&self) -> bool {
+        self.workspace_history
+    }
+
+    pub(crate) fn toggle_scope(&mut self) {
+        self.workspace_history = !self.workspace_history;
+        self.receipt = None;
+        self.reveal_error = None;
+    }
+
     pub(crate) const FORMATS: [kuzushi_core::WorkspaceExportFormat; 6] = [
         kuzushi_core::WorkspaceExportFormat::Sarif,
         kuzushi_core::WorkspaceExportFormat::MarkdownBundle,
@@ -177,6 +199,7 @@ pub struct ReportReceipt {
     pub(crate) completeness: kuzushi_core::WorkspaceExportCompleteness,
     pub(crate) count: Option<usize>,
     pub(crate) absolute_path: Option<PathBuf>,
+    pub(crate) investigation_receipt_path: Option<PathBuf>,
     pub(crate) error: Option<String>,
     pub(crate) timestamp: String,
 }

@@ -260,7 +260,27 @@ pub(crate) fn select_typed_attempt(target: &Path, completed: &PhaseAttemptComple
     .expect("typed phase disposition");
 }
 
+pub(crate) fn record_fixture_context_run(target: &Path, run_id: &str) {
+    let document = kuzushi_core::capabilities::load_persistent_threat_model(target)
+        .expect("load intended fixture context")
+        .expect("intended fixture context");
+    record_indexed_run(
+        target,
+        run_id,
+        "threat-model:build",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "data": {
+            "document": document,
+                "snapshot": {"filesIndexed": 1}
+            }
+        }),
+    );
+}
+
 pub(crate) fn seed_fira_shaped_completed_map_attempt(target: &Path) {
+    record_fixture_context_run(target, "map-context");
     record_indexed_run(
         target,
         "entry-points",
@@ -290,13 +310,17 @@ pub(crate) fn seed_fira_shaped_completed_map_attempt(target: &Path) {
 fn fira_shaped_map_attempt(target: &Path) -> PhaseAttemptCompleted {
     PhaseAttemptCompleted::new(
         WorkflowPhase::Map,
-        vec!["entry-points".to_string(), "recommend-modules".to_string()],
+        vec![
+            "map-context".to_string(),
+            "entry-points".to_string(),
+            "recommend-modules".to_string(),
+        ],
         PhaseTargetSnapshot::capture(target),
         PhaseAttemptOutcome::Completed,
     )
     .with_attempt_id(kuzushi_core::run_lifecycle::RunAttemptId::new().to_string())
     .with_receipt(PhaseAttemptReceipt {
-        run_count: 2,
+        run_count: 3,
         elapsed_secs: 1,
         cost: "cost not recorded".to_string(),
         changed_findings: 0,

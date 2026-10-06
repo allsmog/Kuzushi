@@ -388,6 +388,10 @@ impl ShellApp {
         let crate::ui_view_models::PhaseCockpitBody::Map(map) = model.body else {
             return;
         };
+        if map.recorded_context_issue.is_some() {
+            self.reduce_hotkey_command(ShellCommand::ShowJobs);
+            return;
+        }
         if map.scope_suggestion.is_some() {
             self.open_map_action_plan(PlanningTaskId::DecomposeModules);
             self.log(
@@ -404,18 +408,16 @@ impl ShellApp {
             );
             return;
         }
-        let (command, note) = if map.context.state.eq_ignore_ascii_case("stale") {
-            (
-                "next",
-                "Map planner loaded · press Space to choose reuse, run, or skip",
-            )
+        self.draft_map_journey_command(map.context.state.eq_ignore_ascii_case("stale"));
+    }
+
+    fn draft_map_journey_command(&mut self, stale: bool) {
+        let note = if stale {
+            "Map planner loaded · press Space to choose reuse, run, or skip"
         } else {
-            (
-                "next",
-                "journey planner loaded — Enter to continue the derived phase",
-            )
+            "journey planner loaded · Enter to continue the derived phase"
         };
-        self.set_input(command.to_string());
+        self.set_input("next".to_string());
         self.set_input_mode(InputMode::Prompt);
         self.log("map", note);
     }
@@ -1314,7 +1316,10 @@ impl ShellApp {
         self.set_input_mode(InputMode::Prompt);
         self.log(
             "capability",
-            format!("loaded `{}` — edit if needed, then submit", command.trim()),
+            format!(
+                "loaded `{}`; edit before submitting; no work started",
+                command.trim()
+            ),
         );
         InputUpdate::handled()
     }

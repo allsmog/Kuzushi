@@ -185,7 +185,11 @@ fn panel_block(title: &str) -> Block<'static> {
 }
 
 fn executive_summary_lines(model: &DfdModel, overview: &DfdOverview) -> Vec<Line<'static>> {
-    vec![
+    let mut lines = Vec::new();
+    if let Some(notice) = model.evidence_notice() {
+        lines.push(Line::styled(notice, theme::label()));
+    }
+    lines.extend(vec![
         Line::styled(
             overview.executive_summary.clone(),
             diagram_style(diagram_primary()),
@@ -193,7 +197,8 @@ fn executive_summary_lines(model: &DfdModel, overview: &DfdOverview) -> Vec<Line
         Line::default(),
         Line::styled(component_shape(model), diagram_style(diagram_muted())),
         Line::styled(security_shape(model), diagram_style(diagram_muted())),
-    ]
+    ]);
+    lines
 }
 
 fn component_shape(model: &DfdModel) -> String {

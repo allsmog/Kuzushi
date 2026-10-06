@@ -1,0 +1,82 @@
+# Two explicit three-scope plans, sequential local source analysis. Labeled stop seam.
+name: Failed and canceled native plans preserve observations without starting remaining work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_stop.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/alpha-command.txt
+keys: Enter
+require-live-snap: 30 RESULT READY | imported-map
+nav-mode:
+keys: u
+require-live-snap: 25 Viewing Scan | accepted-map
+keys: Escape
+paste-file: @ART/stop-command.txt
+keys: Enter
+require-live-snap: 25 PREREQUISITE PLAN | prerequisite
+keys: r
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_stop.py @TMP_TARGET @ART failed
+submit: workbench
+nav-mode:
+require-live-snap: 25 RESULT failed | failed-120x36
+ask: Does the failure card preserve the stopped outcome and retained observation count without implying that remaining scopes ran?
+keys: Escape
+submit: scan
+nav-mode:
+require-live-snap: 15 RESULT failed | failed-details-120x36
+ask: Can the operator inspect the failed scan and its retained evidence without accidentally starting more work?
+resize: 160x48
+require-live-snap: 15 RESULT failed | failed-160x48
+ask: At 160x48, are failure evidence, scope omissions and recovery controls clear?
+resize: 96x89
+require-live-snap: 15 RESULT failed | failed-96x89
+ask: At 96x89, does failed work remain readable and unselected?
+resize: 80x24
+require-live-snap: 15 RESULT failed | failed-80x24
+ask: At 80x24, can the operator distinguish failure from completion and reach retained evidence?
+resize: 60x20
+require-live-snap: 15 RESULT failed | failed-60x20
+ask: At 60x20, is the retained observation discoverable without accepting failed work?
+resize: 40x12
+require-live-snap: 15 RESULT failed | failed-40x12
+ask: At 40x12, are the stopped state and a usable recovery action visible?
+keys: NPage NPage NPage
+require-live-snap: 15 retry. | failed-40x12-paged
+ask: Can the operator read the unstarted scope and no automatic retry notice by paging the narrow Scan view?
+resize: 120x36
+keys: Escape
+paste-file: @ART/retained-stop-finding.txt
+keys: Enter
+require-live-snap: 25 needs_review | retained-failed-finding
+ask: Does the retained finding open with its source evidence after the failed plan?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_stop.py @TMP_TARGET @ART prepare-cancel
+paste-file: @ART/stop-command.txt
+keys: Enter
+require-live-snap: 25 PREREQUISITE PLAN | canceled-prerequisite
+keys: r
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_stop.py @TMP_TARGET @ART wait-cancel
+keys: C-c
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_stop.py @TMP_TARGET @ART canceled
+submit: workbench
+nav-mode:
+require-live-snap: 25 RESULT canceled | canceled-120x36
+ask: Does operator cancellation leave the shell open and retain the earlier finding with no automatic restart?
+keys: Escape
+submit: report
+require-live-snap: 25 Displayed Scan: canceled | stopped-report
+ask: Does Report disclose stopped coverage while leaving the retained finding available for a human decision?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan
+nav-mode:
+require-live-snap: 15 RESULT canceled | restarted-stop
+require-shell: python3 -B @REPO/scripts/devex/fixtures/native_stop.py @TMP_TARGET @ART restarted
+ask: After restart without color, do both stopped attempts and the retained finding remain available without additional work?
+keys: C-c
+require-exit: 10

@@ -32,16 +32,7 @@ pub(super) fn dispatch_reporting_command(
             json,
         } => decision_command(default_target, reference, verdict, reason, json),
         Command::Runs { command } => runs_command(command, default_target),
-        Command::Export {
-            format,
-            completeness,
-            preview,
-            allow_empty,
-            output,
-        } => {
-            let target = require_cli_target("export", None, default_target)?;
-            export_command(target, output, format, completeness, preview, allow_empty)
-        }
+        export @ Command::Export { .. } => dispatch_export_command(export, default_target),
         suppress @ Command::Suppress { .. } => dispatch_suppress_command(suppress, default_target),
         Command::Proof { command } => proof_command(command, default_target),
         Command::Suppressions { json } => suppressions_command(default_target, json),
@@ -54,6 +45,30 @@ pub(super) fn dispatch_reporting_command(
         }
         _ => unreachable!("non-reporting command routed to reporting dispatcher"),
     }
+}
+
+fn dispatch_export_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {
+    let Command::Export {
+        campaign_id,
+        format,
+        completeness,
+        preview,
+        allow_empty,
+        output,
+    } = command
+    else {
+        unreachable!("non-export command routed to export dispatcher")
+    };
+    let target = require_cli_target("export", None, default_target)?;
+    export_command(
+        target,
+        output,
+        format,
+        completeness,
+        preview,
+        allow_empty,
+        campaign_id,
+    )
 }
 
 fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {

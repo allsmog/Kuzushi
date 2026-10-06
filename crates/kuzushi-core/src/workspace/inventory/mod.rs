@@ -24,6 +24,7 @@ mod inspect_python_route_line;
 mod inspect_source_frameworks;
 mod language_for_path;
 mod manifest_package_tokens;
+mod python_route_frameworks;
 mod repository_inventory;
 mod route_item;
 mod source_text_scan;
@@ -37,8 +38,8 @@ pub use build_repository_inventory::{
 };
 pub use repository_inventory::InventoryEntrypoint;
 pub use repository_inventory::InventoryFile;
-pub use repository_inventory::InventoryInspection;
 pub use repository_inventory::InventoryFramework;
+pub use repository_inventory::InventoryInspection;
 pub use repository_inventory::InventoryLanguage;
 pub use repository_inventory::InventoryPathClassification;
 pub use repository_inventory::InventoryRouteController;

@@ -11,6 +11,8 @@ review; randori=threat model; tob/shinsa=plugin adapters.
 Examples: kuzushi scan <target>  ·  kuzushi --target <target> run sast:scan  ·  findings export report.sarif sarif
 
 NAVIGATION — browse modules and tools
+scopes - review inventory, edit scan boundaries, and accept an exact scope revision
+  aliases / examples: /scopes
 home - open the current phase cockpit
   aliases / examples: /home, /
 help - show grouped shell help

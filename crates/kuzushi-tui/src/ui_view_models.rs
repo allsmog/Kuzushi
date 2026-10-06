@@ -10,8 +10,10 @@ pub(crate) use answers::*;
 mod active_stage;
 mod allowance_review;
 pub(crate) mod context_generation;
+pub(crate) mod scope_review;
 pub(crate) mod study_config;
 pub(crate) mod study_context;
+pub(crate) mod study_engines;
 pub(crate) use allowance_review::{
     allowance_review_model, allowance_review_width, AllowanceReviewModel,
 };
@@ -52,8 +54,12 @@ mod help;
 mod home_cockpit;
 mod jobs_registry;
 mod journey;
+mod report_investigation;
 mod report_summary;
-pub(crate) use report_summary::{report_cost_coverage, report_review_summary};
+pub(crate) use report_investigation::report_investigation_lines;
+pub(crate) use report_summary::{
+    report_cost_coverage, report_export_campaign, report_investigation_state, report_review_summary,
+};
 mod keybindings;
 mod keymap;
 mod knowledge_base;
@@ -145,7 +151,7 @@ pub(crate) use auth::{
 };
 pub(crate) use boot_splash::{boot_splash_model, BootSplashModel};
 pub(crate) use catalog::{
-    catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
+    catalog_model, catalog_selected_action_hint, catalog_uses_collapsed_layout, CatalogModel,
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
@@ -355,7 +361,8 @@ pub(crate) use target_facts::target_fact_detail_lines;
 pub(crate) use terminal_title::terminal_title;
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_model::{
-    threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
+    map_context_run_refs, threat_model_absence_hint, threat_model_doc, threat_model_relative_path,
+    threat_summary_review, ThreatSummaryReview,
 };
 pub(crate) use threat_model::{
     threat_model_freshness, threat_model_picker, ThreatModelFreshnessModel, ThreatModelHeadRow,

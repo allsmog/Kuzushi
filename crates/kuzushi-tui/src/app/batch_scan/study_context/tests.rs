@@ -4,6 +4,7 @@ use kuzushi_core::capabilities::threat_model::{
     commit_threat_model_revision, load_active_threat_model, ScopeRef, ThreatModelCommit,
     ThreatModelRevisionSource,
 };
+use kuzushi_core::WorkspaceTarget;
 use kuzushi_core::{modules::ToolExecutionContext, V2Config};
 use ratatui::{backend::TestBackend, Terminal};
 
@@ -41,6 +42,45 @@ fn commit_document(root: &std::path::Path, label: &str, document: &Value) -> Thr
 }
 
 mod diagram;
+
+#[test]
+fn existing_context_map_review_requires_inspection_and_uses_shared_dispatch() {
+    let (root, mut app, first, _) = fixture();
+    app.handle_study_context_key(KeyCode::Up);
+    assert!(app
+        .handle_study_context_key(KeyCode::Char('m'))
+        .effects
+        .is_empty());
+    let result = inspect(&app, root.path(), &first);
+    app.cache_tool_snapshot("threat-model:read", &result);
+    let update = app.handle_study_context_key(KeyCode::Char('m'));
+    let [ShellEffect::PrepareRunTool(request)] = update.effects.as_slice() else {
+        panic!("shared prepared dispatch required");
+    };
+    assert_eq!(request.tool_name, "campaign:context-map");
+    assert_eq!(
+        serde_json::from_str::<Value>(request.input.as_ref().unwrap()).unwrap()["threatModelRef"],
+        json!(first)
+    );
+}
+
+#[test]
+fn existing_context_map_cache_matches_selection_and_never_substitutes_another_revision() {
+    let (root, mut app, first, second) = fixture();
+    app.handle_study_context_key(KeyCode::Up);
+    let result = inspect(&app, root.path(), &first);
+    app.cache_tool_snapshot("threat-model:read", &result);
+    app.cache_context_map_result(
+        &json!({"contextOrigin":"revision", "modelRef":second, "attemptId":"wrong-result"}),
+    );
+    assert_eq!(app.reviewed_context_map_attempt(), None);
+    app.cache_context_map_result(
+        &json!({"contextOrigin":"revision", "modelRef":first, "attemptId":"selected-result"}),
+    );
+    assert_eq!(app.reviewed_context_map_attempt(), Some("selected-result"));
+    app.handle_study_context_key(KeyCode::Down);
+    assert_eq!(app.reviewed_context_map_attempt(), None);
+}
 
 fn fixture() -> (tempfile::TempDir, ShellApp, ThreatModelRef, ThreatModelRef) {
     let root = tempfile::tempdir().unwrap();
@@ -212,15 +252,24 @@ fn study_context_reader_pages_at_every_viewport_and_plain_output_keeps_the_docum
         let screen = format!("{:?}", terminal.backend().buffer());
         assert!(screen.contains("CHOOSE STUDY CONTEXT"), "{screen}");
         assert!(screen.contains("Esc back"), "{screen}");
+        let mut read = screen;
         for _ in 0..80 {
+            let previous = app.study_context_picker().unwrap().detail_scroll;
             app.handle_study_context_key(KeyCode::PageDown);
+            terminal
+                .draw(|frame| crate::renderer::render_app(frame, &app))
+                .unwrap();
+            read.push_str(&format!("{:?}", terminal.backend().buffer()));
+            if app.study_context_picker().unwrap().detail_scroll == previous {
+                break;
+            }
         }
         terminal
             .draw(|frame| crate::renderer::render_app(frame, &app))
             .unwrap();
         let screen = format!("{:?}", terminal.backend().buffer());
         assert!(
-            screen.contains("approved") && screen.contains("scanning."),
+            read.contains("approved") && read.contains("scanning.") && read.contains("No model"),
             "{screen}"
         );
     }

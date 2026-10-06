@@ -122,7 +122,14 @@ fn bound_threat_model_ref(root: &Path, input: &Value) -> Result<Option<Value>> {
 
 fn scope_sha256(root: &Path, input: &Value) -> Result<String> {
     let mut scope = Map::new();
-    for key in ["paths", "shard", "scope", "scopeFile", "since"] {
+    for key in [
+        "paths",
+        "shard",
+        "scope",
+        "scopeFile",
+        "since",
+        "scanScopeRef",
+    ] {
         if let Some(value) = input.get(key) {
             scope.insert(key.to_string(), value.clone());
         }
@@ -226,7 +233,9 @@ fn digest_file_row(root: &Path, path: &Path, size: u64) -> Result<(String, Strin
     ))
 }
 
-pub(in crate::capabilities::campaign) fn digest_serializable(value: &impl Serialize) -> Result<String> {
+pub(in crate::capabilities::campaign) fn digest_serializable(
+    value: &impl Serialize,
+) -> Result<String> {
     let bytes = canonical_json_bytes(value)?;
     Ok(crate::run_lifecycle::sha256_content_digest(&bytes))
 }

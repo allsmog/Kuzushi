@@ -207,6 +207,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "workbench" => Some(ShellCommand::Workbench),
         "report" => Some(ShellCommand::Report),
+        "scopes" => Some(ShellCommand::Scopes),
         "doctor" | "health" => Some(ShellCommand::Health),
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),

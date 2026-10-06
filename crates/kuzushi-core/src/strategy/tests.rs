@@ -316,6 +316,7 @@ fn codeql_strategy_proposal_for_rerun() -> StrategyProposal {
         source_run_id: Some("run-2".to_string()),
         tool: Some("codeql:scan".to_string()),
         next_input: None,
+        scope_proposal_ref: None,
         created_at_ms: 1,
         updated_at_ms: 1,
     }

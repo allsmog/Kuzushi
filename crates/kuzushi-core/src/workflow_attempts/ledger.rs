@@ -53,6 +53,17 @@ impl PhaseAttemptLedger {
         self.attempts.get(attempt_id)
     }
 
+    pub(super) fn validate_proposed_disposition(
+        &self,
+        disposition: &PhaseAttemptDispositionRecorded,
+    ) -> Result<()> {
+        let mut proposed = self.clone();
+        proposed.apply(
+            PhaseAttemptEvent::PhaseAttemptDispositionRecorded(disposition.clone()),
+            usize::MAX,
+        )
+    }
+
     /// Whether `later_attempt_id` completed after `earlier_attempt_id` in the
     /// durable ledger. Append order breaks same-second timestamp ties.
     pub fn attempt_completed_after(

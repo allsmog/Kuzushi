@@ -19,6 +19,9 @@ pub(super) fn prepare(
     for (key, value) in fixed_options().as_object().unwrap() {
         object.entry(key.clone()).or_insert_with(|| value.clone());
     }
+    object
+        .entry("saveRejectedOutput")
+        .or_insert(Value::Bool(true));
     let prepared = registry.prepare_dispatch_input(TOOL, input, ctx, None)?;
     let mut input = prepared.value().clone();
     validate(&input)?;

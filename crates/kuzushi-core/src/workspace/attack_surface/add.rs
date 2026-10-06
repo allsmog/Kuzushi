@@ -27,9 +27,7 @@ impl AttackSurfaceBuilder {
     }
 
     pub(crate) fn finish(mut self, root_name: String) -> AttackSurfaceMap {
-        self.surfaces
-            .values_mut()
-            .for_each(stamp_rust_surface_policy);
+        self.surfaces.values_mut().for_each(stamp_surface_policy);
         let surfaces = rank_attack_surfaces(self.surfaces.into_values().collect());
         AttackSurfaceMap {
             root_name,
@@ -39,17 +37,18 @@ impl AttackSurfaceBuilder {
     }
 }
 
-fn stamp_rust_surface_policy(surface: &mut AttackSurface) {
-    if surface.language != "Rust" {
-        return;
-    }
+fn stamp_surface_policy(surface: &mut AttackSurface) {
+    let policy = match (surface.language.as_str(), surface.kind) {
+        ("Rust", _) => crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY,
+        ("Python", AttackSurfaceKind::HttpRoute) => {
+            crate::workspace::python_surface_policy::PYTHON_HTTP_SURFACE_POLICY
+        }
+        _ => return,
+    };
     let Some(metadata) = surface.metadata.as_object_mut() else {
         return;
     };
-    metadata.insert(
-        "sourcePolicy".to_string(),
-        json!(crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY),
-    );
+    metadata.insert("sourcePolicy".to_string(), json!(policy));
 }
 
 pub fn build_attack_surface_map(root: impl AsRef<Path>) -> Result<AttackSurfaceMap> {

@@ -166,20 +166,44 @@ fn job_snapshot(root: &Path, row: &Value, queue: &Map<String, Value>) -> Campaig
             .and_then(Value::as_bool)
             .unwrap_or(false),
         run_id,
-        reason: string_field(&entry, "reason"),
+        reason: job_reason(root, row, &entry),
         job_id,
     }
+}
+
+fn job_reason(root: &Path, row: &Value, entry: &Value) -> Option<String> {
+    string_field(entry, "reason").or_else(|| recorded_job_failure(root, row, entry))
+}
+
+fn recorded_job_failure(root: &Path, row: &Value, entry: &Value) -> Option<String> {
+    let state = entry["state"].as_str()?;
+    if !["failed", "partial", "interrupted", "parked"].contains(&state) {
+        return None;
+    }
+    let run = crate::run_artifacts::load_run_summary_without_repair(root, entry["runId"].as_str()?)
+        .ok()?;
+    let tool = row["tool"].as_str()?;
+    if run.tool.as_deref() != Some(tool)
+        || !["failed", "partial", "canceled"].contains(&run.status.as_str())
+    {
+        return None;
+    }
+    run.error
+        .map(|error| crate::run_artifacts::bounded_run_diagnostic_line(&error))
+        .filter(|error| !error.is_empty())
 }
 
 /// Finding count from the child run's finalized metadata. Absent while the
 /// run is still live (run.json carries no `findings` until completion) or
 /// when the run directory was pruned.
 fn run_finding_count(root: &Path, run_id: Option<&str>) -> Option<u64> {
-    let run_json = crate::workspace::workspace_state_dir(root)
-        .join("runs")
-        .join(run_id?)
-        .join("run.json");
-    read_json_file(&run_json).ok()?.get("findings")?.as_u64()
+    let (_, body) = crate::run_artifacts::read_run_artifact_text(root, run_id?, "run.json")
+        .require("Run finding count")
+        .ok()?;
+    serde_json::from_str::<Value>(&body)
+        .ok()?
+        .get("findings")?
+        .as_u64()
 }
 
 fn string_field(value: &Value, key: &str) -> Option<String> {
@@ -197,3 +221,6 @@ fn load_queue_doc(root: &Path, campaign_id: &str) -> Result<Value> {
     }
     read_json_file(&path).with_context(|| format!("campaign {campaign_id:?} has no readable queue"))
 }
+
+#[cfg(test)]
+mod tests;

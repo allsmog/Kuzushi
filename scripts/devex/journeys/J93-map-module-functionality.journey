@@ -1,0 +1,60 @@
+# Real source extraction and deterministic Map. No model or source execution.
+name: Map consumers preserve source framework facts and expose the real diagram
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/map_functionality.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+expect: Map 1/3
+expect-not: Map ✓
+ask: Does existing Map evidence remain readable without being accepted or advancing the investigation automatically?
+submit: scene
+require-live-snap: 20 DATA-FLOW DIAGRAM | real-dfd
+expect: PARTIAL
+ask: Does the actual deterministic Map show a source-grounded diagram without presenting it as validated model context?
+keys: Tab
+require-live-snap: 20 ENTRY POINTS | entry-points
+require-live-snap: 20 Flask | flask-source
+expect: /health
+expect: @web.get
+ask: Does the selected route lead with source evidence, distinguish catalog facts from model annotations, and retain complete provenance through clear paging and back controls?
+keys: Down
+require-live-snap: 20 FastAPI | fastapi-source
+expect: /notes
+resize: 160x48
+live-snap: route-160x48
+resize: 96x89
+live-snap: route-96x89
+resize: 80x24
+live-snap: route-80x24
+resize: 60x20
+live-snap: route-60x20
+resize: 40x12
+live-snap: route-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: route-tail-40x12
+ask: Are the selected route and all evidence reachable at 40x12, with clear paging, return controls and honest catalog/model receipts?
+resize: 120x36
+keys: Escape
+require-live-snap: 15 KUZUSHI | restored-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/map_functionality.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+expect: Map 1/3
+expect-not: Map ✓
+submit: scene
+require-live-snap: 20 DATA-FLOW DIAGRAM | restored-dfd
+expect: PARTIAL
+keys: Tab
+require-live-snap: 20 Flask | restored-source-facts
+require-shell: python3 -B @REPO/scripts/devex/fixtures/map_functionality.py @TMP_TARGET @ART verify
+ask: Does no-color restart restore the same source facts and source-grounded Map while source bytes and zero provider consumption remain unchanged?
+keys: Escape
+require-live-snap: 15 KUZUSHI | restarted-origin
+keys: C-c
+require-exit: 10

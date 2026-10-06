@@ -30,6 +30,17 @@ pub(crate) fn acquire_strategy_ledger_lock(
     crate::file_lock::ExclusiveFileLock::acquire(&state_dir.join(STRATEGY_LEDGER_LOCK))
 }
 
+pub(super) fn acquire_strategy_ledger_lock_cancellable(
+    workspace: &WorkspaceTarget,
+    canceled: &dyn Fn() -> bool,
+) -> Result<crate::file_lock::ExclusiveFileLock> {
+    let state_dir = workspace.ensure_state_dir()?;
+    crate::file_lock::ExclusiveFileLock::acquire_cancellable(
+        &state_dir.join(STRATEGY_LEDGER_LOCK),
+        canceled,
+    )
+}
+
 pub(super) fn load_strategy_jsonl<T>(
     workspace: &WorkspaceTarget,
     file_name: &str,

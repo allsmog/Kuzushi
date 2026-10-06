@@ -1,11 +1,14 @@
 use super::{LiveScanModel, ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel};
 use crate::ui_view_models::scoped_target_path_label;
 use crate::{RunSummaryEntriesState, ScanStageReceiptState, ShellApp, ViewDataState};
-use kuzushi_core::run_artifacts::{PhaseStageReceipt, ScanEngineStageOutcome};
-use kuzushi_core::workflow_attempts::{PhaseAttemptDisposition, PhaseAttemptRecord};
+use kuzushi_core::run_artifacts::ScanEngineStageOutcome;
+use kuzushi_core::workflow_attempts::{
+    PhaseAttemptDisposition, PhaseAttemptOutcome, PhaseAttemptRecord,
+};
 use kuzushi_core::{RunSummaryEntry, WorkflowPhase};
 
 mod attempt;
+mod receipts;
 mod summaries;
 
 use attempt::{
@@ -78,14 +81,16 @@ struct ScanProjection {
 }
 
 fn durable_attempt(app: &ShellApp) -> Option<(&PhaseAttemptRecord, &'static str)> {
-    app.engagement
-        .unresolved_phase_attempt(WorkflowPhase::Scan)
-        .map(|record| (record, "awaiting disposition"))
-        .or_else(|| {
-            app.engagement
-                .selected_phase_attempt(WorkflowPhase::Scan)
-                .map(|record| (record, selected_disposition(record)))
-        })
+    use crate::app::DisplayedAttempt;
+    let (record, standing) = app
+        .engagement
+        .displayed_phase_attempt(WorkflowPhase::Scan)?;
+    let disposition = match standing {
+        DisplayedAttempt::Unresolved => "awaiting disposition",
+        DisplayedAttempt::Selected => selected_disposition(record),
+        DisplayedAttempt::EarlierSource => "selected · earlier source",
+    };
+    Some((record, disposition))
 }
 
 fn selected_disposition(record: &PhaseAttemptRecord) -> &'static str {
@@ -145,61 +150,67 @@ fn legacy_projection(app: &ShellApp, entries: &[RunSummaryEntry]) -> Option<Scan
     })
 }
 
-fn typed_scan_receipt(app: &ShellApp, record: &PhaseAttemptRecord) -> Option<PhaseStageReceipt> {
+fn typed_scan_receipt(
+    app: &ShellApp,
+    record: &PhaseAttemptRecord,
+) -> Option<receipts::ScanReceiptSummary> {
     let target = app.target()?;
-    record.completed.run_refs.iter().rev().find_map(|run_ref| {
-        match app
-            .workbench_cache()
-            .borrow()
-            .cached_scan_stage_receipt(target, run_ref)
-        {
-            ViewDataState::Ready(ScanStageReceiptState::Ready(receipt)) => Some(receipt),
-            _ => None,
-        }
-    })
+    let receipts = record
+        .completed
+        .run_refs
+        .iter()
+        .map(|run_ref| {
+            match app
+                .workbench_cache()
+                .borrow()
+                .cached_scan_stage_receipt(target, run_ref)
+            {
+                ViewDataState::Ready(ScanStageReceiptState::Ready(receipt)) => Some(receipt),
+                _ => None,
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    receipts::summarize(&receipts)
 }
 
 fn typed_scan_projection(
     app: &ShellApp,
     record: &PhaseAttemptRecord,
     disposition: &str,
-    receipt: &PhaseStageReceipt,
+    summary: &receipts::ScanReceiptSummary,
 ) -> Option<ScanProjection> {
+    let receipt = &summary.receipt;
     let scan = receipt.scan.as_ref()?;
-    let scope = if scan.scope.paths.is_empty() {
-        scan.scope.target.clone()
-    } else {
-        format!(
-            "{} · paths {}",
-            scan.scope.target,
-            scan.scope.paths.join(", ")
-        )
-    };
-    let plan = format!(
-        "{} selection · {}",
-        scan.plan.selection,
-        scan.plan.engines.join(", ")
-    );
     let engine_outcomes = scan
         .engines
         .iter()
         .map(|engine| ScanEngineOutcomeModel {
             engine: kuzushi_core::modules::tool_display_name(&engine.engine),
             tool_key: Some(engine.engine.clone()),
-            outcome: typed_engine_outcome(engine.outcome).to_string(),
+            outcome: typed_engine_outcome(engine.outcome, record.completed.outcome).to_string(),
             run_ref: engine.run_ref.clone(),
             detail: engine.detail.clone(),
         })
         .collect();
     Some(ScanProjection {
-        scope,
-        plan,
+        scope: summary.scope.clone(),
+        plan: summary.plan.clone(),
         attempt: scan_attempt_from_stage(app, record, disposition, receipt)?,
         engine_outcomes,
     })
 }
 
-fn typed_engine_outcome(outcome: ScanEngineStageOutcome) -> &'static str {
+fn typed_engine_outcome(
+    outcome: ScanEngineStageOutcome,
+    attempt: PhaseAttemptOutcome,
+) -> &'static str {
+    if outcome == ScanEngineStageOutcome::Failed && attempt == PhaseAttemptOutcome::Canceled {
+        return "stopped";
+    }
+    recorded_engine_outcome(outcome)
+}
+
+fn recorded_engine_outcome(outcome: ScanEngineStageOutcome) -> &'static str {
     match outcome {
         ScanEngineStageOutcome::Complete => "complete",
         ScanEngineStageOutcome::Partial => "partial",
@@ -259,7 +270,7 @@ fn scan_receipt_load_hint(app: &ShellApp) -> Option<String> {
             .borrow()
             .cached_scan_stage_receipt(target, run_ref)
         {
-            ViewDataState::Ready(ScanStageReceiptState::Ready(_)) => return None,
+            ViewDataState::Ready(ScanStageReceiptState::Ready(_)) => {}
             ViewDataState::Ready(ScanStageReceiptState::Failed(error)) => {
                 return Some(format!("Scan receipt unavailable: {error}"));
             }

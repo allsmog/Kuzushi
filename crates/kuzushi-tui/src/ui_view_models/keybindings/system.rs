@@ -51,6 +51,8 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("PgUp/PgDn", "read"),
         bind("j/k", "format"),
         bind("c", "completeness"),
+        bind("s", "study/history"),
+        bind("p", "provenance"),
         bind("e", "edit path"),
         bind("o", "reveal"),
     ]

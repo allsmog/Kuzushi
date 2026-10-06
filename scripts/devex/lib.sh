@@ -124,6 +124,13 @@ json_escape() { # <text> — JSON string body, quotes excluded
   printf '%s' "$s"
 }
 
+devex_footer_is_clean_prompt() { # <last-three-lines>
+  case $1 in
+    *'Esc list keys'*|*'Esc map keys'*|*'type help or press Tab'*) return 0;;
+    *) return 1;;
+  esac
+}
+
 devex_footer_is_navigate() { # <last-three-lines>
   case $1 in
     *'Esc dismiss'*) return 1;;

@@ -55,3 +55,50 @@ fn tampered_jobs_and_invalid_paths_cannot_be_presented_as_reviewable() {
     assert!(load_study_plan_receipt(target.path(), "study").is_err());
     assert!(load_study_plan_receipt(target.path(), "../study").is_err());
 }
+
+#[test]
+fn usage_baseline_is_frozen_outside_scan_options_and_authenticated_after_restart() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("source.rs"), "fn main() {}\n").unwrap();
+    let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+    let config = V2Config::default();
+    let ctx = crate::modules::ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let registry = ModuleRegistry::with_v2_builtins();
+    let input = json!({"campaignId":"usage-plan","baseline_run_id":"recorded-baseline","scanInput":{"taskMode":"manual","tasks":["secret-scan"],"threatModelRef":null}});
+    let prepared = registry
+        .prepare_dispatch_input("campaign:study", input, &ctx, None)
+        .unwrap();
+    let output = registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .unwrap();
+    assert_eq!(output["data"]["resourceBaselineRunId"], "recorded-baseline");
+    let receipt = load_study_plan_receipt(root.path(), "usage-plan").unwrap();
+    assert_eq!(
+        load_study_resource_baseline(root.path(), &receipt)
+            .unwrap()
+            .as_deref(),
+        Some("recorded-baseline")
+    );
+    assert!(receipt.scan_input.get("baselineRunId").is_none());
+    assert!(!root.path().join(".kuzushi/v3/index.sqlite3").exists());
+    let mut document: Value =
+        serde_json::from_slice(&std::fs::read(&receipt.plan_path).unwrap()).unwrap();
+    document["resourceBaselineRunId"] = json!("different-baseline");
+    std::fs::write(&receipt.plan_path, serde_json::to_vec(&document).unwrap()).unwrap();
+    assert!(load_study_resource_baseline(root.path(), &receipt).is_err());
+    let invalid = json!({"campaignId":"bad-baseline","baselineRunId":"../outside","scanInput":{"taskMode":"manual","tasks":["secret-scan"],"threatModelRef":null}});
+    let prepared = registry
+        .prepare_dispatch_input("campaign:study", invalid, &ctx, None)
+        .unwrap();
+    assert!(registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .is_err());
+    assert!(!campaign_plan_path(root.path(), "bad-baseline").exists());
+}

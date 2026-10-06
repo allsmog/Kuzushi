@@ -1,0 +1,76 @@
+# Installed scanner and local rules only. Sequential source analysis.
+name: Native rule gaps retain findings for explicit partial review and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 @REPO/scripts/devex/fixtures/native_partial.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/alpha-command.txt
+keys: Enter
+require-live-snap: 30 RESULT READY | imported-map
+nav-mode:
+keys: u
+require-live-snap: 25 Viewing Scan | accepted-map
+keys: Escape
+paste-file: @ART/native-scan-command.txt
+keys: Enter
+require-live-snap: 25 PREREQUISITE PLAN | native-prerequisite
+expect: recommended reuse
+ask: Does the prerequisite card disclose local indexing and let the operator explicitly reuse the cached context before starting this scoped scanner?
+keys: r
+require-shell: python3 @REPO/scripts/devex/fixtures/native_partial.py @TMP_TARGET @ART unselected
+submit: workbench
+nav-mode:
+require-live-snap: 30 RESULT partial | partial-120x36
+expect: partial
+expect: Incomplete coverage
+expect: incompatible-fixture-rule
+ask: Does Scan retain its finding and explain the actual omitted rule before asking the operator to acknowledge incomplete coverage?
+resize: 160x48
+require-live-snap: 15 incompatible-fixture-rule | partial-160x48
+ask: At 160x48, is the scoped engine gap readable with one retained finding and no complete-coverage claim?
+resize: 96x89
+require-live-snap: 15 incompatible-fixture-rule | partial-96x89
+ask: At 96x89, does the full partial result remain readable without accepting or starting work?
+resize: 80x24
+require-live-snap: 15 u Accept partial | partial-80x24
+ask: At 80x24, are partial status and the controls for reading and acknowledging the result understandable?
+resize: 60x20
+require-live-snap: 15 u Accept partial | partial-60x20
+ask: At 60x20, can the operator distinguish retained evidence from incomplete coverage and reach its details?
+resize: 40x12
+require-live-snap: 15 u Accept | partial-40x12
+ask: At 40x12, is incomplete work identifiable and can the operator read the rest before accepting it?
+nav-mode:
+keys: NPage NPage
+require-live-snap: 15 7-10/10 | partial-40x12-paged
+ask: Can the operator read the concrete native coverage gap at 40x12 using the same visible controls?
+resize: 120x36
+keys: u
+require-live-snap: 25 Viewing Review | acknowledged-native
+require-shell: python3 @REPO/scripts/devex/fixtures/native_partial.py @TMP_TARGET @ART selected
+expect: 1 remaining
+keys: Escape
+paste-file: @ART/open-finding.txt
+keys: Enter
+require-live-snap: 25 needs_review | retained-observation
+submit: dismiss false_positive Labeled local rule fixture
+require-live-snap: 25 rejected_false_positive | reviewed-observation
+submit: report
+require-live-snap: 25 1 findings · 1 reviewed | native-report
+ask: Can the operator report the retained observation after an explicit human decision while incomplete Scan remains durable?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan
+nav-mode:
+require-live-snap: 25 Incomplete coverage | restarted-scan
+expect: partial acknowledged
+require-shell: python3 @REPO/scripts/devex/fixtures/native_partial.py @TMP_TARGET @ART restarted
+ask: After restart without color, do the selected partial run, concrete gap and retained decision remain readable without another scan?
+keys: C-c
+require-exit: 10

@@ -33,7 +33,7 @@ pub(crate) fn build_deterministic_threat_model(
         has_concrete_content,
     )?;
     let persisted = model_ref.is_some();
-    Ok(deterministic_response(
+    deterministic_response(
         input,
         flavor,
         document,
@@ -42,7 +42,7 @@ pub(crate) fn build_deterministic_threat_model(
         persisted,
         model_ref,
         has_concrete_content,
-    ))
+    )
 }
 
 fn preflight_deterministic_build_lineage(input: &DeterministicBuildInput) -> Result<()> {
@@ -649,16 +649,16 @@ fn deterministic_response(
     persisted: bool,
     model_ref: Option<ThreatModelRef>,
     has_concrete_content: bool,
-) -> Value {
+) -> Result<Value> {
     let threat_count = array_len(document.pointer("/threats"));
     let target = input.workspace_root().to_path_buf();
     let persistent_artifact = persistent_threat_model_path(input.workspace_root());
     let artifacts = threat_model_artifacts(
         &normalized_artifact,
         &markdown_artifact,
-        &persistent_artifact,
-        persisted,
-    );
+        input.workspace_root(),
+        model_ref.as_ref(),
+    )?;
     let summary = deterministic_summary(&input.repo_name);
     let output = deterministic_output(flavor, &input.repo_name, threat_count);
     let data = deterministic_response_data(
@@ -675,7 +675,7 @@ fn deterministic_response(
         crate::module_result::partial_output_result(summary, output, vec![json!(warning)], data);
     result["artifacts"] = json!(artifacts);
     result["costUsd"] = json!(0.0);
-    result
+    Ok(result)
 }
 
 fn deterministic_warning(target: &Path, has_concrete_content: bool) -> String {

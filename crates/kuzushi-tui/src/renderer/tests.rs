@@ -1428,8 +1428,16 @@ fn scan_batch_config_has_tty_and_plain_content_parity() {
     let target = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(target.path().to_path_buf()));
-    app.router.campaign_mut().batch_scan_config =
-        Some(crate::app::BatchScanConfig::load(target.path(), None));
+    let mut config = crate::app::BatchScanConfig::load(target.path(), None);
+    // Usage history hydrates in the background; parity is checked once it has.
+    config.apply_usage_catalogue(crate::app::ViewDataState::Ready(Ok(
+        kuzushi_core::capabilities::campaign::ScanUsageCatalogue {
+            run_ids: vec!["earlier-scan".into()],
+            inspected_entries: 1,
+            history_limit_reached: false,
+        },
+    )));
+    app.router.campaign_mut().batch_scan_config = Some(config);
     app.set_shell_view(ShellView::Campaign);
 
     let backend = TestBackend::new(132, 32);
@@ -1443,8 +1451,8 @@ fn scan_batch_config_has_tty_and_plain_content_parity() {
         "Discovery passes",
         "Workers",
         "set explicitly",
-        "Cost evidence",
-        "unknown",
+        "Usage evidence",
+        "select explicitly",
         "Prepare study draft",
     ] {
         assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
@@ -3273,7 +3281,8 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
         rendered.contains(&last_action),
         "missing last capability {last_action}"
     );
-    assert!(rendered.contains("PgUp/PgDn scroll"));
+    assert!(rendered.contains("PgUp/PgDn page"));
+    assert!(rendered.contains("e phase only"));
     assert!(!rendered.contains("┌"));
 }
 

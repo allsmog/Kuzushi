@@ -837,7 +837,7 @@ fn compact_result_summary_says_unmeasured_instead_of_a_fake_plus_zero() {
 
     summary.finding_delta_observed = Some(true);
     summary.changed_findings = 73;
-    assert!(compact_result_summary(&summary).ends_with("findings +73"));
+    assert!(compact_result_summary(&summary).ends_with("finding changes 73"));
 }
 
 #[test]

@@ -45,7 +45,7 @@ test("CI plan includes every host-independent hard gate", () => {
   assert.ok(ci.includes("e2e"));
   assert.deepEqual(ci.slice(0, quick.length), quick);
   assert.equal(new Set(ciPlan.map(commandKey)).size, ciPlan.length);
-  assert.deepEqual(stepArgs(quickPlan, "secrets"), ["quality:secrets"]);
+  assert.deepEqual(stepArgs(quickPlan, "secrets"), ["quality:secrets", "--worktree"]);
   assert.deepEqual(stepArgs(quickPlan, "cargo-check"), [
     "check",
     "--workspace",

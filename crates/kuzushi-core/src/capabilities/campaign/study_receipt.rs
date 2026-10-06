@@ -45,6 +45,25 @@ pub fn load_study_plan_receipt(root: &Path, id: &str) -> Result<StudyPlanReceipt
     })
 }
 
+pub fn load_study_resource_baseline(
+    root: &Path,
+    receipt: &StudyPlanReceipt,
+) -> Result<Option<String>> {
+    let document = super::approved_work::read_bounded_plan(root, &receipt.campaign_id)?;
+    anyhow::ensure!(
+        super::batch::equivalence::digest_serializable(&document)? == receipt.plan_sha256,
+        "study usage baseline belongs to a different plan revision"
+    );
+    let Some(value) = document.get("resourceBaselineRunId") else {
+        return Ok(None);
+    };
+    let run = value
+        .as_str()
+        .context("study usage baseline is malformed")?;
+    crate::run_artifacts::resolve_run_artifact_path(root, run, "run.json")?;
+    Ok(Some(run.into()))
+}
+
 /// Load durable approval and consumption for a draft without opening or
 /// migrating the ledger in the presentation layer. Revisions retain spending.
 pub fn load_study_allowance(
@@ -58,7 +77,10 @@ pub fn load_study_allowance(
     load_investigation_allowance(root, id)
 }
 
-pub(super) fn load_investigation_allowance(root: &Path, id: &str) -> Result<Option<crate::allowance::AllowanceSnapshot>> {
+pub(super) fn load_investigation_allowance(
+    root: &Path,
+    id: &str,
+) -> Result<Option<crate::allowance::AllowanceSnapshot>> {
     let db = crate::WorkspaceTarget::new(root)?.findings_db_path();
     match crate::SpendLimiter::read_allowance_snapshot(&db, id) {
         Ok(snapshot) => Ok(Some(snapshot)),

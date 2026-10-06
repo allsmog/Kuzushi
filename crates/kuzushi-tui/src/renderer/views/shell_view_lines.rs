@@ -102,7 +102,7 @@ fn threat_run_shell_view_lines(
         ShellView::ActorDetail => actor_detail_lines(app, area, app.router.actor_detail().index()),
         ShellView::Runs => default_scrolled_lines(app, area, runs_lines(app, area)),
         ShellView::Jobs => default_scrolled_lines(app, area, jobs_lines(app, area)),
-        ShellView::Campaign => campaign_lines(app, area),
+        ShellView::Campaign => campaign_view_lines(app, area),
         ShellView::Coverage => default_scrolled_lines(app, area, coverage_lines(app, area)),
         ShellView::RunDiff => run_diff_view_lines(app, area),
         ShellView::Replay => default_scrolled_lines(

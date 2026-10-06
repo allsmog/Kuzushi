@@ -243,6 +243,8 @@ impl WorkspaceExportCompleteness {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceExportOptions {
     pub format: Option<WorkspaceExportFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub campaign_id: Option<String>,
     pub completeness: WorkspaceExportCompleteness,
     #[serde(default = "default_allow_empty_export")]
     pub allow_empty: bool,
@@ -270,6 +272,7 @@ impl Default for WorkspaceExportOptions {
     fn default() -> Self {
         Self {
             format: None,
+            campaign_id: None,
             completeness: WorkspaceExportCompleteness::All,
             allow_empty: default_allow_empty_export(),
             review_yield: None,
@@ -278,6 +281,11 @@ impl Default for WorkspaceExportOptions {
 }
 
 impl WorkspaceExportOptions {
+    pub fn with_campaign(mut self, campaign_id: Option<String>) -> Self {
+        self.campaign_id = campaign_id;
+        self
+    }
+
     pub fn new(format: Option<WorkspaceExportFormat>) -> Self {
         Self {
             format,
@@ -311,4 +319,6 @@ pub struct WorkspaceFindingsExport {
     pub output_path: PathBuf,
     pub format: WorkspaceExportFormat,
     pub count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub investigation_receipt_path: Option<PathBuf>,
 }

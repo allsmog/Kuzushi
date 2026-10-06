@@ -101,8 +101,8 @@ fn render_context_controls(
 
 fn context_action_controls(width: u16, tab: &str) -> String {
     if width < 50 {
-        "a use · g new · v DFD · Esc back".into()
+        "a use m Map g new v DFD Esc back".into()
     } else {
-        format!("a use · g new · v diagram · Tab {tab} · Esc back")
+        format!("a use · m Map · g new · v diagram · Tab {tab} · Esc back")
     }
 }

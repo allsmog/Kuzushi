@@ -135,12 +135,21 @@ export function oauthAccessToken(request, provider) {
 
 function oauthCredentialForRequest(request, provider) {
   const entry = freshOauthCredentialBag(request, provider)[oauthCredentialProvider(provider)];
-  const access = nonEmpty(entry?.access) ?? allowedOauthEnvToken(request, provider);
+  const access = currentStoredOauthAccess(entry) ?? allowedOauthEnvToken(request, provider);
   if (!access) return undefined;
   return {
     access,
     accountId: nonEmpty(entry?.accountId) ?? openAiAccountIdFromJwt(access),
   };
+}
+
+function currentStoredOauthAccess(entry) {
+  const access = nonEmpty(entry?.access);
+  if (!access) return undefined;
+  if (!Number.isFinite(entry.expires) || entry.expires <= Date.now()) {
+    throw new BridgePublicError("authentication");
+  }
+  return access;
 }
 
 function oauthCredentialProvider(provider) {

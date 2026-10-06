@@ -458,7 +458,9 @@ impl Dispatcher {
     }
 
     fn dispatch_stop_reason(&self) -> Option<&'static str> {
-        if self.store.provider_spend_unresolved() {
+        if self.store.provider_spend_unresolved()
+            && !approved_work::call_allowance_covers_unpriced_work(&self.plan_jobs, &self.settings)
+        {
             return Some("provider-spend-unresolved");
         }
         budget_exhausted(self.store.total_cost_usd(), self.settings.budget_usd)
@@ -809,6 +811,9 @@ fn current_batch_equivalence(
 
 fn campaign_cost_label(observed_usd: f64, provider_spend_unresolved: bool) -> String {
     if provider_spend_unresolved {
+        if observed_usd <= 0.0 {
+            return "total cost unavailable (provider spend incomplete)".into();
+        }
         return format!("total cost >=${observed_usd:.2} (provider spend incomplete)");
     }
     format!("total cost ${observed_usd:.2}")
@@ -1156,6 +1161,10 @@ mod cost_accounting_tests {
         assert_eq!(
             campaign_cost_label(0.75, true),
             "total cost >=$0.75 (provider spend incomplete)"
+        );
+        assert_eq!(
+            campaign_cost_label(0.0, true),
+            "total cost unavailable (provider spend incomplete)"
         );
     }
 

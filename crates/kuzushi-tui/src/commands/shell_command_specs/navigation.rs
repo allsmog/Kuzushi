@@ -2,6 +2,12 @@ use super::*;
 
 pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "scopes",
+        aliases: &["scopes", "/scopes"],
+        category: ShellCommandCategory::Navigation,
+        description: "review inventory, edit scan boundaries, and accept an exact scope revision",
+    },
+    ShellCommandSpec {
         command: "home",
         aliases: &["/home", "/", "home"],
         category: ShellCommandCategory::Navigation,

@@ -1,0 +1,169 @@
+# Real shared admission refuses a third provider call. All transport is intercepted.
+name: Study report preserves partial coverage, context, source and accounting through restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 @REPO/scripts/devex/fixtures/study_limit.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 context-draft | context-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | context-result
+keys: m
+require-live-snap: 30 RESULT READY | generated-map
+keys: u
+require-live-snap: 20 Map ✓ | accepted-map
+submit: use sast
+require-live-snap: 20 TOOLS | scanner
+submit: options sast:scan
+require-live-snap: 20 sast:scan | scanner-options
+submit: set taskMode manual
+submit: set tasks agentic
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | inherited-form
+expect: 1 committed / 5 total
+keys: L
+wait-for: 30 Draft ready
+require-live-snap: 30 Enter edit · L next | scan-draft
+require-shell: python3 @REPO/scripts/devex/fixtures/study_limit.py @TMP_TARGET @ART draft
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | limited-approval
+keys: End
+require-live-snap: 15 y approve | approval-last
+expect: Total provider calls: 5
+expect: Protected review calls: 2
+expect: 3 fixed jobs
+expect: Calls already committed: 1
+expect: 2 context/scan calls · 2 protected review calls
+ask: Does approval disclose this exact finite work and allowance before execution, including that existing commitments are retained?
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-scan
+require-shell: python3 @REPO/scripts/devex/fixtures/study_limit.py @TMP_TARGET @ART approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | jobs-before-launch
+keys: L
+require-live-snap: 25 dispatcher pid | dispatcher-started
+require-shell: python3 @REPO/scripts/devex/fixtures/study_limit.py @TMP_TARGET @ART stopped
+keys: r
+require-live-snap: 25 completed 2 / planned 3 | stopped-study
+expect: failed 1
+expect-not: completed 3 / planned 3
+ask: Does the stopped study preserve two completed passes and a failed third attempt without claiming complete coverage or a zero dollar charge?
+keys: a
+require-live-snap: 25 APPROVED STUDY | retained-allowance
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 3 committed / 5 total | protected-review
+expect: 0 context/scan · 2 protected review
+ask: Are the two protected review calls still available while discovery is exhausted, with no silent allowance increase?
+keys: Escape
+submit: workbench
+require-live-snap: 25 Viewing Scan | partial-scan
+expect: RESULT partial
+expect: partial
+require-shell: python3 @REPO/scripts/devex/fixtures/study_limit.py @TMP_TARGET @ART unselected
+ask: Does partial Scan remain unaccepted until the operator explicitly acknowledges its incomplete work?
+nav-mode:
+require-live-snap: 15 u Acknowledge & use partial | partial-scan-navigation
+ask: Is partial acceptance available through the displayed keyboard control while the result still discloses incomplete work?
+keys: u
+require-live-snap: 25 Viewing Review | acknowledged-scan
+require-shell: python3 @REPO/scripts/devex/fixtures/study_limit.py @TMP_TARGET @ART selected
+expect: 1 remaining
+keys: Escape
+require-live-snap: 15 Esc nav findings | review-prompt
+paste-file: @ART/open-recurring.txt
+keys: Enter
+require-live-snap: 25 needs_review | recurring-review
+submit: dismiss false_positive Labeled synthetic limit observation
+require-live-snap: 25 rejected_false_positive | reviewed-observation
+submit: report
+require-live-snap: 25 Scope: study | report-ready
+expect: Work: 2 completed / 3 planned
+expect: 3 committed / 5 calls
+expect: 2 protected review remaining
+expect-not: $0.0000
+keys: s
+require-live-snap: 20 Scope: workspace history | workspace-history
+ask: Does workspace history clearly disclose that it includes all recorded source revisions and makes no study coverage claim?
+keys: s
+require-live-snap: 20 Scope: study | selected-study
+expect: 1 findings · 1 reviewed
+expect-not: REVIEW VIEW
+ask: Can the operator finish and report retained findings after the allowance stop, without starting more discovery?
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 30 EXPORTED | exported-report
+require-shell: python3 @REPO/scripts/devex/fixtures/study_report.py @TMP_TARGET @ART report
+require-shell: python3 @REPO/scripts/devex/fixtures/study_report.py @TMP_TARGET @ART formats
+keys: p End
+require-live-snap: 20 p provenance | report-provenance-tail
+ask: Are coverage limits, frozen provenance and report controls readable, with no suggestion that missing observations establish fixes?
+resize: 160x48
+keys: Home
+require-live-snap: 15 ── REPORT ─ | report-160x48-top
+expect-not: $0.00 spent
+expect-not: budget not enforced
+ask: At 160x48, is the report's state readable and its paging or next action discoverable?
+keys: End
+require-live-snap: 15 provenance | report-160x48-tail
+ask: At 160x48, can the operator reach the complete tail and return without losing report selection or destination?
+resize: 120x36
+keys: Home
+require-live-snap: 15 ── REPORT ─ | report-120x36-top
+ask: At 120x36, is the report's state readable and its paging or next action discoverable?
+keys: End
+require-live-snap: 15 provenance | report-120x36-tail
+ask: At 120x36, can the operator reach the complete tail and return without losing report selection or destination?
+resize: 96x89
+keys: Home
+require-live-snap: 15 ── REPORT ─ | report-96x89-top
+ask: At 96x89, is the report's state readable and its paging or next action discoverable?
+keys: End
+require-live-snap: 15 provenance | report-96x89-tail
+ask: At 96x89, can the operator reach the complete tail and return without losing report selection or destination?
+resize: 80x24
+keys: Home
+require-live-snap: 15 ── REPORT ─ | report-80x24-top
+ask: At 80x24, is the report's state readable and its paging or next action discoverable?
+keys: End
+require-live-snap: 15 provenance | report-80x24-tail
+ask: At 80x24, can the operator reach the complete tail and return without losing report selection or destination?
+resize: 60x20
+keys: Home
+require-live-snap: 15 ── REPORT ─ | report-60x20-top
+ask: At 60x20, is the report's state readable and its paging or next action discoverable?
+keys: End
+require-live-snap: 15 provenance | report-60x20-tail
+ask: At 60x20, can the operator reach the complete tail and return without losing report selection or destination?
+resize: 40x12
+keys: Home
+require-live-snap: 15 ── REPORT ─ | report-40x12-top
+ask: At 40x12, is the report's state readable and its paging or next action discoverable?
+keys: End
+require-live-snap: 15 provenance | report-40x12-tail
+ask: At 40x12, can the operator reach the complete tail and return without losing report selection or destination?
+resize: 120x36
+keys: Home p
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 30 Scope: study | restored-report-direct
+expect: Work: 2 completed / 3 planned
+expect: 3 committed / 5 calls
+expect: 2 protected review remaining
+expect: 1 findings · 1 reviewed
+expect-not: $0.0000
+ask: Does opening Report directly after restart recover the same study, context and shared accounting without launching more work?
+keys: j j j Enter
+require-live-snap: 30 EXPORTED | restored-export
+require-shell: python3 @REPO/scripts/devex/fixtures/study_report.py @TMP_TARGET @ART report
+keys: C-c
+require-exit: 10

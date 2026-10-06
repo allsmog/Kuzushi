@@ -79,14 +79,14 @@ fn capability_catalog_never_replaces_actions_with_a_bland_compact_state() {
 }
 
 #[test]
-fn catalog_default_action_hint_is_display_ready() {
+fn catalog_selected_action_hint_is_display_ready() {
     let app = ShellApp::new(V2Config::default(), None);
     let model = catalog_model(&app);
-    let module = model.default_action.as_ref().expect("default action");
+    let module = model.selected_action.as_ref().expect("selected action");
 
-    let hint = catalog_default_action_hint(module, 80);
+    let hint = catalog_selected_action_hint(module, 80);
 
-    assert!(hint.starts_with("Load Quick map —"));
+    assert!(hint.starts_with("Load Quick map:"));
     assert!(hint.len() <= 80);
 }
 
@@ -104,6 +104,92 @@ fn catalog_capability_rows_shape_display_cells_and_commands() {
     assert_eq!(row.cells[0], "Quick map");
     assert_eq!(row.command, "next");
     assert!(!row.cells[1].is_empty());
+}
+
+#[test]
+fn selected_action_hint_follows_the_visible_cursor_without_changing_the_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.set_input("an unfinished operator draft".to_string());
+    app.move_catalog_cursor(1);
+
+    let model = catalog_model(&app);
+    let selected = model.selected_action.unwrap();
+    assert_eq!(selected.id, "deep-map");
+    assert_eq!(selected.command, app.catalog_cursor_command().unwrap());
+    assert!(catalog_selected_action_hint(&selected, 120).starts_with("Load Deep threat map:"));
+    assert_eq!(selected.readiness.label, "MODEL REQUIRED");
+    assert_eq!(app.input(), "an unfinished operator draft");
+}
+
+#[test]
+fn catalog_model_requirement_uses_the_same_stored_options_as_dispatch() {
+    use kuzushi_core::{OptionScope, OptionTarget};
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.move_catalog_cursor(1);
+    app.option_store_mut().set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("threat-model:build".to_string()),
+        "pipeline",
+        serde_json::json!("deterministic"),
+    );
+
+    let model = catalog_model(&app);
+    assert_eq!(
+        model.selected_action.unwrap().readiness.label,
+        "REVIEW INPUTS"
+    );
+    assert!(app.config().model.is_none());
+}
+
+#[test]
+fn catalog_readiness_never_turns_a_selected_model_into_execution_authority() {
+    let mut config = V2Config::default();
+    config.model = Some("openai-codex:gpt-5.5".into());
+    let mut app = ShellApp::new(config, None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.move_catalog_cursor(1);
+
+    let selected = catalog_model(&app).selected_action.unwrap();
+    assert_eq!(selected.readiness.label, "REVIEW INPUTS");
+    assert!(selected
+        .readiness
+        .next
+        .contains("options threat-model:build"));
+}
+
+#[test]
+fn targetless_catalog_explains_the_actual_enter_action() {
+    let app = ShellApp::new(V2Config::default(), None);
+    let selected = catalog_model(&app).selected_action.unwrap();
+    assert_eq!(selected.readiness.label, "TARGET REQUIRED");
+    assert_eq!(selected.readiness.next, "Enter selects a target");
+}
+
+#[test]
+fn catalog_preserves_an_invalid_model_and_an_explicit_tool_override() {
+    use kuzushi_core::{OptionScope, OptionTarget};
+    let mut config = V2Config::default();
+    config.model = Some("invalid-model".into());
+    let mut app = ShellApp::new(config, None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.move_catalog_cursor(1);
+    assert_eq!(
+        catalog_model(&app).selected_action.unwrap().readiness.label,
+        "MODEL CONFIG"
+    );
+    app.option_store_mut().set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("threat-model:build".to_string()),
+        "model",
+        serde_json::json!("openai-codex:gpt-5.5"),
+    );
+    assert_eq!(
+        catalog_model(&app).selected_action.unwrap().readiness.label,
+        "REVIEW INPUTS"
+    );
+    assert_eq!(app.config().model.as_deref(), Some("invalid-model"));
 }
 
 #[test]

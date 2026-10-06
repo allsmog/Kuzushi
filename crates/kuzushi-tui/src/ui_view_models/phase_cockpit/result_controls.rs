@@ -53,7 +53,7 @@ fn result_action_binding(
 ) -> FooterKeybinding {
     use kuzushi_core::workflow_attempts::PhaseResultAction::*;
     let verb = match action {
-        Select if outcome == "partial" => "Acknowledge & use partial".to_string(),
+        Select if outcome == "partial" => partial_acceptance_label(app.viewport().columns).into(),
         Select if verified_remediation => "Acknowledge verified".to_string(),
         Select => select_action_label(phase).to_string(),
         SelectAndContinue => continuation_label(app, phase),
@@ -80,6 +80,35 @@ fn result_action_binding(
         labels.join("/")
     };
     FooterKeybinding { key, label: verb }
+}
+
+fn partial_acceptance_label(columns: u16) -> &'static str {
+    if columns <= 40 {
+        return "Accept";
+    }
+    if columns <= 80 {
+        return "Accept partial";
+    }
+    "Acknowledge & use partial"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::partial_acceptance_label;
+
+    #[test]
+    fn partial_acceptance_stays_explicit_at_every_supported_width() {
+        assert_eq!(partial_acceptance_label(40), "Accept");
+        for columns in [60, 80] {
+            assert_eq!(partial_acceptance_label(columns), "Accept partial");
+        }
+        for columns in [96, 120, 160] {
+            assert_eq!(
+                partial_acceptance_label(columns),
+                "Acknowledge & use partial"
+            );
+        }
+    }
 }
 
 fn continuation_label(app: &ShellApp, phase: WorkflowPhase) -> String {

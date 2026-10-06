@@ -1,0 +1,134 @@
+# Source-only real scanner execution, intercepted OAuth transport, synthetic findings.
+name: Generated Map to three fresh discovery passes and consolidated observations
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 context-draft | context-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | context-result
+keys: m
+require-live-snap: 30 RESULT READY | generated-map
+keys: u
+require-live-snap: 20 Map ✓ | accepted-map
+submit: use sast
+require-live-snap: 20 TOOLS | scanner
+submit: options sast:scan
+require-live-snap: 20 sast:scan | scanner-options
+submit: set taskMode manual
+submit: set tasks agentic
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | inherited-form
+expect: 1 committed / 5 total
+keys: L
+wait-for: 30 Draft ready
+require-live-snap: 30 Enter edit · L next | scan-draft
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART draft
+keys: Down Down Down Down Enter
+require-live-snap: 15 Total calls | calls-editor
+type: 6
+keys: Enter
+require-live-snap: 15 Total calls  6 | revised-calls
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | scan-approval
+keys: End
+require-live-snap: 15 y approve | approval-last
+expect: Total provider calls: 6
+ask: Does approval disclose the exact model, revised six-call allowance, retained spending and three fixed jobs before any discovery starts?
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-scan
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART approved
+expect: 1 committed / 6 total
+keys: L
+require-live-snap: 25 L starts its fixed jobs | jobs-before-launch
+ask: Is starting the finite job list a distinct action after approving it?
+keys: L
+require-live-snap: 25 dispatcher pid | dispatcher-started
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART finished
+keys: r
+require-live-snap: 25 completed 3 / planned 3 | completed-study
+ask: Does the campaign show exactly three completed fresh passes and retain the synthetic findings without suggesting that repetition proves correctness?
+paste-file: @ART/batch-command.txt
+require-live-snap: 15 batch study- | batch-command-draft
+ask: Does pasting from Navigation mode visibly hand input to the composer without submitting it or replacing the completed study?
+keys: Enter
+require-live-snap: 25 BATCH | consolidated-observations
+ask: Does consolidation keep recurrence distinct from confidence and preserve a finding absent from the third pass?
+nav-mode:
+resize: 40x12
+require-live-snap: 20 BATCH | observations-small
+ask: Are the completed plan and page controls disclosed at the smallest supported viewport?
+keys: NPage NPage NPage NPage NPage
+require-live-snap: 20 seen 1 / completed 3 | observations-small-later-only
+ask: Can the operator page to the observation seen only in the final pass at 40x12?
+keys: NPage NPage
+require-live-snap: 20 seen 2 / completed 3 | observations-small-recurring
+ask: Can the operator reach the recurring observation at 40x12 without moving the selected job or losing its provenance?
+resize: 120x36
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-ready
+expect: RESULT READY
+expect: scan run 3 of 3
+ask: Does the completed three-pass study become a Scan result for inspection and explicit acceptance without starting more work?
+nav-mode:
+keys: u
+require-live-snap: 25 Viewing Review | accepted-scan
+expect: Scan ✓
+expect-not: accepted scan found no candidates
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART selected
+keys: Escape
+require-live-snap: 15 Esc nav findings | review-prompt
+paste-file: @ART/open-recurring.txt
+require-live-snap: 15 open fp3_ | recurring-command-draft
+keys: Enter
+require-live-snap: 25 F-0002 · needs_review | recurring-review
+ask: Can the operator inspect the recurring synthetic observation and its evidence before deciding it is a false positive?
+submit: dismiss false_positive Labeled synthetic greeting observation
+require-live-snap: 25 F-0002 · rejected_false_positive | dismissed-recurring
+paste-file: @ART/open-later-only.txt
+require-live-snap: 15 open fp3_ | later-only-command-draft
+keys: Enter
+require-live-snap: 25 F-0001 · needs_review | later-only-review
+submit: decision deferred Labeled offline workflow decision
+require-live-snap: 25 F-0001 · deferred | deferred-later-only
+ask: Do human false-positive and deferral decisions remain separate from recurrence and avoid any claim of a fix?
+submit: report
+require-live-snap: 25 e edits path · Enter exports · Esc returns | report-ready
+expect: 2 findings · 2 reviewed
+expect-not: REVIEW VIEW
+ask: Does the report retain both observations and durable review decisions with honest unavailable dollar costs?
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 30 EXPORTED | exported-report
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART report
+ask: Does exporting publish only the reviewed report to the displayed local path without starting more discovery?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/batch-command.txt
+keys: Enter
+require-live-snap: 25 completed 3 / planned 3 | restored-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | restored-study
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 4 committed / 6 total | restored-budget
+expect: 2 protected review
+ask: After actual exit and no-color restart, are all three completed passes, retained calls and protected review recoverable without rerunning discovery?
+keys: Escape
+submit: report
+require-live-snap: 25 Enter export | restored-report
+expect: 2 reviewed
+require-shell: python3 @REPO/scripts/devex/fixtures/study_execution.py @TMP_TARGET @ART report
+ask: After restart, do both durable decisions and the report remain available without treating a missing observation as fixed?
+keys: C-c
+require-exit: 10

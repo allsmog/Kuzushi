@@ -300,6 +300,9 @@ fn entry_detail_lines(width: usize, entry: &EntryPointItem) -> Vec<Line<'static>
     if let Some(source) = entry.recorded_source() {
         append_field(&mut lines, width, "source", source);
     }
+    if let Some(framework) = &entry.source_framework {
+        append_field(&mut lines, width, "framework", framework);
+    }
     append_optional_field(&mut lines, width, "risk", &entry.risk, "");
     append_targets(&mut lines, width, entry);
     append_optional_field(&mut lines, width, "evidence", &entry.evidence, "");
@@ -382,6 +385,27 @@ mod tests {
     }
 
     #[test]
+    fn source_framework_is_readable_without_inventing_missing_metadata() {
+        let mut model = sample_model();
+        for width in [36, 56, 76, 92, 116, 156] {
+            model.entries[0].source_framework = Some("Flask".into());
+            let text = entry_point_lines(width, &model)
+                .iter()
+                .map(line_text)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("framework") && text.contains("Flask"));
+        }
+        model.entries[0].source_framework = None;
+        let text = entry_point_lines(80, &model)
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!text.contains("framework"));
+    }
+
+    #[test]
     fn receipt_summary_separates_grounding_from_modeled_coverage() {
         let mut model = sample_model();
         model.receipt.records = Some(519);
@@ -432,6 +456,7 @@ mod tests {
                 description: "Administrative route".into(),
                 ingress: "POST /admin".into(),
                 source: "src/routes.rs:42".into(),
+                source_framework: None,
                 evidence: "route registration with authorization middleware".into(),
                 risk: "high · score 78".into(),
                 disposition: EntryPointDisposition::Modeled,

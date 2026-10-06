@@ -60,20 +60,41 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         name if name.starts_with("fleet:") => dispatch_fleet_tool(name, input),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "workspace:import-findings" => Some(workspace_import_findings_tool(input, ctx)),
-        "campaign:plan" | "campaign:status" | "campaign:coverage" | "campaign:approve-allowance" | "campaign:allowance" | "campaign:study" | "campaign:context-study" => {
-            dispatch_campaign_tool(name, input, ctx)
-        }
+        "campaign:plan"
+        | "campaign:status"
+        | "campaign:coverage"
+        | "campaign:approve-allowance"
+        | "campaign:allowance"
+        | "campaign:study"
+        | "campaign:context-study"
+        | "campaign:context-map" => dispatch_campaign_tool(name, input, ctx),
         "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
+        name if name.starts_with("pack:") => dispatch_pack_tool(name, input, ctx, runtime),
+        "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
+        _ => dispatch_finding_ledger_tool(name, input, ctx),
+    }
+}
+
+fn dispatch_pack_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> ToolDispatchResult {
+    match name {
         "pack:lint" => Some(crate::capabilities::pack_lint::execute_pack_lint(
             input, ctx,
         )),
         "pack:suggest-shards" => Some(crate::capabilities::shard_suggest::execute_suggest_shards(
             input, ctx,
         )),
-        "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
-        _ => dispatch_finding_ledger_tool(name, input, ctx),
+        "pack:scopes" => Some(super::super::pack_module::scopes::execute(input, ctx)),
+        "pack:suggest-scopes" => Some(super::super::pack_module::suggest_scopes::execute(
+            input, ctx, runtime,
+        )),
+        _ => None,
     }
 }
 
@@ -116,6 +137,7 @@ fn dispatch_campaign_tool(
         "campaign:approve-allowance" => Some(campaign::execute_approve_allowance(input, ctx)),
         "campaign:study" => Some(campaign::execute_study_plan(input, ctx)),
         "campaign:context-study" => Some(campaign::execute_context_study(input, ctx)),
+        "campaign:context-map" => Some(campaign::execute_context_map(input, ctx)),
         "campaign:allowance" => Some(campaign::execute_allowance_status(input, ctx)),
         _ => None,
     }

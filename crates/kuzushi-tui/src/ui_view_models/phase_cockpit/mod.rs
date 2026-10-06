@@ -162,8 +162,8 @@ pub(crate) struct ScanAttemptModel {
 pub(crate) struct ScanEngineOutcomeModel {
     /// Operator-facing verb-phrase label.
     pub(crate) engine: String,
-    /// Raw registry key when known — the only valid source for a runnable
-    /// `run <tool> {}` command; labels are never parseable back into keys.
+    /// Raw registry key for engine identity. Reruns use the saved owning
+    /// operation, including its scope and options.
     pub(crate) tool_key: Option<String>,
     pub(crate) outcome: String,
     pub(crate) run_ref: Option<String>,
@@ -208,6 +208,7 @@ pub(crate) struct MapPhaseModel {
     pub(crate) dfd: DfdModel,
     pub(crate) threat_model_freshness: super::ThreatModelFreshnessModel,
     pub(crate) empty_hint: Option<String>,
+    pub(crate) recorded_context_issue: Option<String>,
     /// Set on very large, still-undecomposed repositories: the NEXT ACTION
     /// card offers a scope proposal alongside whole-repository planning.
     pub(crate) scope_suggestion: Option<String>,

@@ -1,7 +1,7 @@
 use super::*;
 use crate::SpendLimiter;
 
-fn approval() -> AllowanceApprovalV1 {
+pub(super) fn approval() -> AllowanceApprovalV1 {
     AllowanceApprovalV1 {
         schema_version: 1,
         investigation_id: "study".into(),
@@ -30,7 +30,7 @@ fn approval() -> AllowanceApprovalV1 {
     }
 }
 
-fn reference() -> AllowanceReferenceV1 {
+pub(super) fn reference() -> AllowanceReferenceV1 {
     AllowanceReferenceV1 {
         schema_version: 1,
         investigation_id: "study".into(),
@@ -39,7 +39,11 @@ fn reference() -> AllowanceReferenceV1 {
     }
 }
 
-fn claim(ledger: &SpendLimiter, reference: &AllowanceReferenceV1, run: &str) -> anyhow::Result<()> {
+pub(super) fn claim(
+    ledger: &SpendLimiter,
+    reference: &AllowanceReferenceV1,
+    run: &str,
+) -> anyhow::Result<()> {
     ledger.claim_work_attempt(&WorkAttempt {
         reference,
         run_id: run,
@@ -160,12 +164,18 @@ fn campaign_ownership_and_finite_plan_shape_are_validated_before_approval() {
         let mut invalid = approval();
         let plan = invalid.work_plan.as_mut().unwrap();
         plan.jobs = vec![plan.jobs[0].clone(); size];
-        assert!(SpendLimiter::open_in_memory().unwrap().approve_allowance(&invalid).is_err());
+        assert!(SpendLimiter::open_in_memory()
+            .unwrap()
+            .approve_allowance(&invalid)
+            .is_err());
     }
     let mut duplicate = approval();
     let plan = duplicate.work_plan.as_mut().unwrap();
     plan.jobs[1] = plan.jobs[0].clone();
-    assert!(SpendLimiter::open_in_memory().unwrap().approve_allowance(&duplicate).is_err());
+    assert!(SpendLimiter::open_in_memory()
+        .unwrap()
+        .approve_allowance(&duplicate)
+        .is_err());
 }
 
 #[test]

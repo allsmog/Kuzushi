@@ -41,6 +41,12 @@ impl PendingToolCallCompletion {
         self.execution_may_have_occurred
     }
 
+    pub(crate) fn failure_source_snapshot(
+        &self,
+    ) -> Option<crate::workspace::source_snapshot::SourceSnapshot> {
+        self.failure_source_snapshot.clone()
+    }
+
     pub fn finish(
         self,
         result_artifact: Option<ArtifactReference>,
@@ -90,6 +96,8 @@ impl PendingToolCallCompletion {
         let Some(detail) = detail else {
             return;
         };
+        self.preview
+            .truncate(crate::run_lifecycle::MAX_PREVIEW_LINES.saturating_sub(1));
         self.preview.push(SafeText::preview_line(format!(
             "semantic settlement incomplete: {detail}; do not retry automatically"
         )));
@@ -139,6 +147,54 @@ fn persistence_failure_status(status: RunItemStatus) -> RunItemStatus {
     }
 }
 
+#[cfg(test)]
+mod persistence_failure_tests {
+    use super::*;
+
+    #[test]
+    fn persistence_failure_keeps_terminal_preview_within_the_lifecycle_limit() {
+        let mut pending = PendingToolCallCompletion {
+            observation: None,
+            identity: None,
+            status: RunItemStatus::Completed,
+            cost: RuntimeCostReport::UNAVAILABLE,
+            preview: (0..crate::run_lifecycle::MAX_PREVIEW_LINES)
+                .map(|line| SafeText::preview_line(format!("output {line}")))
+                .collect(),
+            warning_count: 0,
+            error_count: 0,
+            execution_may_have_occurred: true,
+            failure_source_snapshot: None,
+        };
+        pending.record_persistence_failure(Some("declared artifact missing"));
+        assert_eq!(
+            pending.preview.len(),
+            crate::run_lifecycle::MAX_PREVIEW_LINES
+        );
+        assert_eq!(pending.error_count, 1);
+        assert!(pending
+            .preview
+            .last()
+            .unwrap()
+            .as_str()
+            .contains("do not retry automatically"));
+        let identity = ToolCallIdentity {
+            item_id: crate::run_lifecycle::RunItemId::new(),
+            call_id: crate::run_lifecycle::RunCallId::new(),
+            task_id: None,
+            parent_item_id: None,
+        };
+        let record = pending.finished_record(identity, RunItemStatus::Partial, None);
+        crate::run_lifecycle::RunItemEnvelopeV1::from_record(
+            1,
+            crate::run_lifecycle::RunId::parse("preview-limit").unwrap(),
+            record,
+            None,
+        )
+        .unwrap();
+    }
+}
+
 pub(super) fn result_fields(
     result: &Result<Value>,
 ) -> (RunItemStatus, RuntimeCostReport, Vec<SafeText>, u64, u64) {
@@ -167,7 +223,9 @@ fn failed_result_fields(
     let cost = error
         .chain()
         .find_map(|source| source.downcast_ref::<crate::structured_output::StructuredOutputError>())
-        .map_or(RuntimeCostReport::UNAVAILABLE, |failure| failure.cost_report());
+        .map_or(RuntimeCostReport::UNAVAILABLE, |failure| {
+            failure.cost_report()
+        });
     let status = if crate::runtime::is_pre_execution_refusal(error) {
         RunItemStatus::Blocked
     } else {

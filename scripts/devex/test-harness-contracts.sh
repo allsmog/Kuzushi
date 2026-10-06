@@ -102,6 +102,14 @@ if devex_file_contains_any "$TEST_ROOT/wait-screen.txt" \
   printf 'FAIL: alternate wait accepted an absent state\n' >&2
   exit 1
 fi
+devex_footer_is_clean_prompt 'MAP VIEW › describe what to map · Esc map keys' \
+  || { printf 'FAIL: clean Map prompt was not recognized\n' >&2; exit 1; }
+devex_footer_is_clean_prompt 'SCAN VIEW › describe what to scan · Esc list keys' \
+  || { printf 'FAIL: clean Scan prompt was not recognized\n' >&2; exit 1; }
+if devex_footer_is_clean_prompt $'Esc clear draft\nMAP VIEW › workbench'; then
+  printf 'FAIL: drafted prompt was mistaken for clean input\n' >&2
+  exit 1
+fi
 devex_footer_is_navigate $'Esc prompt\nSCAN VIEW › NAVIGATE' \
   || { printf 'FAIL: Navigate footer was not recognized\n' >&2; exit 1; }
 devex_footer_is_navigate $'last command\nlast notice\nNAVIGATION MODE — view keys active · Esc returns to prompt' \

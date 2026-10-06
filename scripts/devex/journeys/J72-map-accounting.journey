@@ -1,0 +1,119 @@
+# Real offline generator with mocked provider; no discovery or live model calls.
+name: Accepted Map carries consumed calls into a separately approved scan plan
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 context-draft | context-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | context-result
+keys: m
+require-live-snap: 30 RESULT READY | generated-map
+keys: u
+require-live-snap: 20 Map ✓ | accepted-map
+submit: use sast
+require-live-snap: 20 TOOLS | scanner
+submit: options sast:scan
+require-live-snap: 20 sast:scan | scanner-options
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | inherited-form
+expect: 1 committed / 5 total
+expect: 2 protected review
+expect: 3 passes · 1 worker
+ask: Does an ordinary scan form retain the generated Map's consumed call, protected review and three-pass single-worker default without implying this new plan is approved?
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 1 committed / 5 total | inherited-budget
+expect: revision 1
+expect-not: APPROVED STUDY
+resize: 80x24
+live-snap: budget-80
+ask: At 80x24, are retained consumption, the next action and detail paging understandable?
+resize: 60x20
+live-snap: budget-60
+ask: At 60x20, can the operator inspect the shared allowance without losing navigation?
+resize: 40x12
+live-snap: budget-40
+expect: Esc back
+ask: At 40x12, are the next action and paging controls readable while the retained accounting remains inspectable?
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 Dollar ceiling not | budget-40-last-page
+expect: enforced.
+ask: Can the operator read the complete retained accounting and dollar-limit disclosure at 40x12 without losing the controls?
+keys: PPage PPage PPage PPage PPage PPage PPage PPage PPage PPage PPage PPage PPage PPage
+resize: 96x89
+live-snap: budget-tall
+ask: Does the tall budget form keep coherent hierarchy and explicit next actions?
+resize: 160x48
+live-snap: budget-wide
+ask: Does the wide budget form clearly distinguish consumed calls, remaining discovery and protected review?
+resize: 120x36
+keys: L
+wait-for: 30 Draft ready
+require-live-snap: 30 Enter / L next | scan-draft
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART draft
+expect: Draft ready
+expect: 1 committed / 5 total
+ask: Does preparing three exact-context passes preserve spending while leaving the new work unapproved and unstarted?
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | scan-approval
+expect: revision 1 → 2
+keys: End
+require-live-snap: 15 y approve | approval-last
+ask: Does the approval document name the replacement plan, exact model and unchanged limits before authorizing its fixed jobs?
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-scan
+expect: 1 committed / 5 total
+expect: 2 protected review
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART approved
+ask: Does approval preserve the call already consumed by Map and leave starting discovery as a separate action?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | new-form-after-restart
+expect: 1 committed / 5 total
+ask: Does a fresh form after restart recover the same consumption and latest allowance while requiring approval of any new plan?
+keys: Escape
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-live-snap: 25 3 job(s) · 3 planned | unstarted-scan
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | resumed-approved-study
+keys: Down Down Down Down Down Down Down Down
+require-live-snap: 20 revision 2 | resumed-budget
+expect: 1 committed / 5 total
+expect: 2 protected review
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART resumed
+ask: Does restart restore the exact approved plan and consumed calls in no-color output without executing any discovery?
+keys: Escape
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART drift
+submit: scan batch
+require-live-snap: 25 source content; | same-sha-drift
+keys: L
+require-live-snap: 25 Study draft unavailable | refused-drift-draft
+expect: source content;
+ask: Does changed source content block a new implicit study even though the Git SHA and dirty flag are unchanged, without suggesting the finding state is resolved?
+keys: Escape
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART restore-source
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART remove-approval
+submit: scan batch
+require-live-snap: 25 accounting is missing | missing-accounting
+expect: No work can start
+expect-not: 0 committed
+keys: L
+require-live-snap: 25 accounting is missing | refused-draft
+require-shell: python3 @REPO/scripts/devex/fixtures/map_accounting.py @TMP_TARGET @ART missing
+ask: Does damaged accounting block new work with useful recovery guidance instead of presenting a reset budget?
+keys: C-c
+require-exit: 10

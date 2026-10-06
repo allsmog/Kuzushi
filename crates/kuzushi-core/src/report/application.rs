@@ -16,8 +16,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub fn build_run_report(target: impl AsRef<Path>, run_id: Option<&str>) -> Result<RunReportBuild> {
+    build_run_report_with_source_filter(target, run_id, &|_| true)
+}
+
+/// `is_analysis_tool` comes from the caller that owns tool classification, so
+/// this reader never consults module policy. It only shapes the implicit
+/// latest-run choice; an explicit `runId` can still name any run.
+pub fn build_run_report_with_source_filter(
+    target: impl AsRef<Path>,
+    run_id: Option<&str>,
+    is_analysis_tool: &dyn Fn(&str) -> bool,
+) -> Result<RunReportBuild> {
     let target = target.as_ref();
-    let summary = source_summary(target, run_id)?;
+    let summary = source_summary(target, run_id, is_analysis_tool)?;
     let declared_artifacts = load_run_artifacts(target, &summary.run_id)?;
     let canonical_artifacts =
         load_canonical_artifacts(target, &summary.run_id, &declared_artifacts);
@@ -39,17 +50,24 @@ pub fn build_run_report(target: impl AsRef<Path>, run_id: Option<&str>) -> Resul
     ))
 }
 
-fn source_summary(target: &Path, run_id: Option<&str>) -> Result<RunSummary> {
+fn source_summary(
+    target: &Path,
+    run_id: Option<&str>,
+    is_analysis_tool: &dyn Fn(&str) -> bool,
+) -> Result<RunSummary> {
     match run_id.filter(|id| !id.trim().is_empty()) {
         Some(run_id) => load_run_summary(target, run_id.trim()),
-        None => latest_report_source_summary(target),
+        None => latest_report_source_summary(target, is_analysis_tool),
     }
 }
 
-fn latest_report_source_summary(target: &Path) -> Result<RunSummary> {
+fn latest_report_source_summary(
+    target: &Path,
+    is_analysis_tool: &dyn Fn(&str) -> bool,
+) -> Result<RunSummary> {
     let mut candidates = list_run_summaries(target)?
         .into_iter()
-        .filter(report_source_candidate)
+        .filter(|summary| report_source_candidate(summary, is_analysis_tool))
         .collect::<Vec<_>>();
     candidates.sort_by_key(report_time_key);
     candidates
@@ -57,8 +75,13 @@ fn latest_report_source_summary(target: &Path) -> Result<RunSummary> {
         .context("No completed Kuzushi run is available for report:build")
 }
 
-fn report_source_candidate(summary: &RunSummary) -> bool {
-    summary.status != "running" && summary.tool.as_deref() != Some("report:build")
+/// The implicit source is the latest finished analysis, never a prior report.
+fn report_source_candidate(summary: &RunSummary, is_analysis_tool: &dyn Fn(&str) -> bool) -> bool {
+    summary.status != "running"
+        && summary
+            .tool
+            .as_deref()
+            .is_none_or(|tool| tool != "report:build" && is_analysis_tool(tool))
 }
 
 fn report_time_key(summary: &RunSummary) -> (u64, u64, String) {
@@ -433,9 +456,7 @@ impl ReportArtifactReader<'_> {
         let artifact = match self.relative_artifact_reference(artifact) {
             Ok(artifact) => artifact,
             Err(error) => {
-                return TextArtifactRead::Malformed(format!(
-                    "unsafe {label} artifact: {error}"
-                ))
+                return TextArtifactRead::Malformed(format!("unsafe {label} artifact: {error}"))
             }
         };
         match read_run_artifact_text(self.target, self.run_id, artifact) {

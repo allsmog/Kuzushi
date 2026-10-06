@@ -1,0 +1,140 @@
+# Imported context and explicitly injected queue completion test recovery only.
+# No generation job, discovery job, or provider call is executed.
+name: Review a recovered context result and handle missing output honestly
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 @REPO/scripts/devex/fixtures/context_recovery.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setup
+require-live-snap: 30 READY THE MAP RUN | setup
+keys: Down Enter
+require-live-snap: 20 Build threat model | map-selection
+keys: Down Down Down Space Enter
+require-live-snap: 20 READY THE MAP RUN | setup-with-context
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 GENERATE STUDY CONTEXT | context-form
+keys: t
+type: 5
+keys: Enter r
+type: 2
+keys: Enter Enter
+require-live-snap: 30 Draft ready | prepared-map
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | map-approval
+keys: End
+require-live-snap: 15 y approve | approval-last
+keys: y
+require-live-snap: 30 Open approved Map jobs | approved-map
+require-shell: python3 @REPO/scripts/devex/fixtures/context_recovery.py @TMP_TARGET @ART complete
+keys: Escape
+require-live-snap: 20 READY THE MAP RUN | returned-setup
+keys: Enter
+require-live-snap: 20 CONTEXT JOB RESULT | recovered-result
+expect: Inspect generated context
+expect: Enter inspects the exact revision
+ask: Does returning to Setup reveal the completed result and make inspection the next action, while preserving the exact plan and allowance?
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-result
+expect: Alpha
+ask: Does Enter open the generated revision for inspection from Setup, with clear selection and Back controls?
+keys: v
+require-live-snap: 20 CONTEXT DATA FLOW | recovered-diagram
+expect: Alpha receiver
+resize: 40x12
+live-snap: recovered-diagram-40
+ask: Does the recovered diagram keep its element, detail and Back controls at the smallest terminal size?
+keys: Escape
+require-live-snap: 15 CHOOSE STUDY CONTEXT | returned-context
+keys: a
+resize: 120x36
+require-live-snap: 20 Context selected for this study | selected-context
+expect: Total calls
+keys: L
+require-live-snap: 30 Draft ready | scan-draft
+require-shell: python3 @REPO/scripts/devex/fixtures/context_recovery.py @TMP_TARGET @ART selected
+ask: Does the next finite scan plan use the selected revision and the same allowance without silently launching scans?
+keys: Escape
+require-live-snap: 20 READY THE MAP RUN | returned-with-scan
+require-shell: python3 @REPO/scripts/devex/fixtures/context_recovery.py @TMP_TARGET @ART remove-result
+keys: Enter
+require-live-snap: 20 CONTEXT JOB RESULT | missing-result
+expect: Inspect context job outcome
+expect: Context result unavailable
+expect-not: Open approved Map jobs
+ask: Does missing generated output have an honest explanation and a job-inspection action instead of inviting another launch?
+resize: 80x24
+live-snap: missing-80
+ask: Is the recovery problem and next action readable at 80x24?
+resize: 60x20
+live-snap: missing-60
+ask: Is the recovery explanation reachable with visible paging controls at 60x20?
+resize: 40x12
+live-snap: missing-40
+ask: Does the smallest result view preserve the next action and Back controls?
+keys: NPage
+live-snap: missing-40-explanation
+ask: Is the exact missing-output explanation readable on the next page at 40x12?
+keys: NPage
+live-snap: missing-40-paged
+ask: Can the operator read the missing-result explanation and retained allowance through the advertised paging controls?
+resize: 96x89
+live-snap: missing-tall
+ask: Does the tall view make the recorded plan, result problem and remaining allowance clear?
+resize: 160x48
+live-snap: missing-wide
+ask: Does the wide view keep a comfortable reading width and visible controls?
+keys: Enter
+resize: 120x36
+require-live-snap: 20 Context result unavailable | job-outcome
+expect: completed
+expect: cost unavailable
+expect: separately approved replacement draft
+expect-not: L launch
+ask: Does inspecting the job preserve its completed state and explain that a replacement requires separate approval?
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | quit-review
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 20 CONTEXT JOB RESULT | recovered-missing
+expect: Inspect context job outcome
+expect-not: Open approved Map jobs
+require-shell: python3 @REPO/scripts/devex/fixtures/context_recovery.py @TMP_TARGET @ART resumed
+ask: Does a fresh no-color session preserve the same unavailable result and allowance, without replacement work or another approval?
+keys: Escape
+require-live-snap: 15 CHOOSE STUDY CONTEXT | back-to-context
+keys: Escape
+require-live-snap: 15 PLAN A STUDY | back-to-study
+keys: Escape
+require-live-snap: 15 KUZUSHI | back-to-campaign
+require-shell: python3 @REPO/scripts/devex/fixtures/context_recovery.py @TMP_TARGET @ART fail-job
+keys: a
+require-live-snap: 20 CONTEXT JOB RESULT | failed-result
+expect: is failed
+expect: labeled fixture
+expect: refusal) before approving replacement work
+expect-not: Open approved Map jobs
+ask: Does a failed context job show its recorded reason and inspection action, with no offer to repeat the consumed attempt?
+keys: n
+require-live-snap: 20 GENERATE STUDY CONTEXT | replacement-draft
+expect: Prepare context draft
+expect: Total calls: 5
+expect: Protected review: 2
+ask: Does requesting a new draft preserve spending limits and require preparing and approving new work?
+keys: Escape
+require-live-snap: 15 CHOOSE STUDY CONTEXT | back-from-replacement
+keys: Escape
+require-live-snap: 15 PLAN A STUDY | leave-study
+keys: Escape
+require-live-snap: 15 KUZUSHI | returned-campaign
+keys: C-c
+require-exit: 10

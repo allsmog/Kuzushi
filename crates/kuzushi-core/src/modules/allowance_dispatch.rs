@@ -6,7 +6,7 @@ use std::sync::Arc;
 const OPTION: &str = "allowanceRef";
 
 pub(super) fn declare_allowance_option(mut tool: ToolDescriptor) -> ToolDescriptor {
-    if supports_allowance(&tool) {
+    if supports_allowance(&tool) && !tool.options.iter().any(|option| option.name == OPTION) {
         tool.options.push(opt(
             OPTION,
             OptionType::Json,
@@ -174,6 +174,19 @@ pub(super) fn executor_input(input: &Value) -> std::borrow::Cow<'_, Value> {
         object.remove(OPTION);
     }
     std::borrow::Cow::Owned(input)
+}
+
+/// Only prepared dispatch may attribute a result to investigation accounting.
+/// Engines cannot supply this receipt, even when no allowance was selected.
+pub(super) fn attach_result_reference(input: &Value, output: &mut Value) -> Result<()> {
+    let Some(object) = output.as_object_mut() else {
+        return Ok(());
+    };
+    object.remove(OPTION);
+    if let Some(reference) = reference(input)? {
+        object.insert(OPTION.into(), serde_json::to_value(reference)?);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

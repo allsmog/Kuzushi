@@ -8,6 +8,7 @@ pub(super) enum PageScrollKind {
     KnowledgeBase,
     Modules,
     Logs,
+    Campaign,
 }
 
 pub(super) fn page_scroll_kind(view: &ShellView, catalog_expanded: bool) -> Option<PageScrollKind> {
@@ -27,4 +28,5 @@ const PAGE_SCROLL_KINDS: &[(ShellView, PageScrollKind)] = &[
     (ShellView::Tools, PageScrollKind::Tools),
     (ShellView::History, PageScrollKind::History),
     (ShellView::KnowledgeBase, PageScrollKind::KnowledgeBase),
+    (ShellView::Campaign, PageScrollKind::Campaign),
 ];

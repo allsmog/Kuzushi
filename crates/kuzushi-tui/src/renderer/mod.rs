@@ -17,6 +17,7 @@ pub(crate) use render_app::{
 };
 pub(in crate::renderer) use section_slot::*;
 pub(in crate::renderer) use shared::*;
+pub(crate) use views::campaign_reader_scroll;
 pub(crate) use views::entry_point_page_scroll;
 pub(crate) use views::keymap_reader_scroll;
 pub(crate) use views::logs_reader_scroll;
@@ -32,8 +33,10 @@ mod answers;
 mod chrome;
 mod context_generation;
 mod paste_inspection;
+mod scope_review;
 mod study_config;
 mod study_context;
+mod study_engines;
 pub(crate) use answers::{
     answer_body_area, answer_plain_lines, render_answer_prompt, render_answers,
 };

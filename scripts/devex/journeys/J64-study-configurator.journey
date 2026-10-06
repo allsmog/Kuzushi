@@ -22,7 +22,7 @@ keys: L
 require-live-snap: 30 Draft ready | prepared-study
 expect: No jobs started
 require-shell: python3 @REPO/scripts/devex/fixtures/study_form.py @TMP_TARGET @ART/draft-check.json draft
-keys: Down Down
+keys: Down Down Down
 require-live-snap: 20 Source content | frozen-context
 expect: Git SHA
 expect: explicitly omitted
@@ -92,7 +92,7 @@ keys: Enter
 nav-mode:
 keys: a
 require-live-snap: 25 APPROVED STUDY | restored-study
-keys: Down Down Down Down Down Down Down
+keys: Down Down Down Down Down Down Down Down
 require-live-snap: 20 0 committed / 9 total | restored-allowance
 expect: 3 protected review
 ask: After restart without color, are the same plan and allowance available directly without searching Logs?

@@ -970,7 +970,7 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("active threat-model object"), "{error}");
+        assert!(error.contains("immutable threat-model object"), "{error}");
     }
 
     #[test]

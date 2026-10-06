@@ -18,6 +18,7 @@ use std::time::UNIX_EPOCH;
 
 mod change_coalescing;
 mod language;
+mod source_walk;
 mod watcher;
 
 pub use change_coalescing::coalesce_changes;
@@ -159,10 +160,18 @@ pub(crate) fn current_workspace_tree_hash_with_observer(
     root: impl AsRef<Path>,
     on_files_hashed: &mut dyn FnMut(usize),
 ) -> Result<String> {
-    let root = root.as_ref();
+    current_workspace_tree_hash_cancellable(root, on_files_hashed, &|| false)
+}
+
+pub(crate) fn current_workspace_tree_hash_cancellable(
+    root: impl AsRef<Path>,
+    on_files_hashed: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
+) -> Result<String> {
+    let root = root.as_ref().canonicalize()?;
     let mut entries = Vec::new();
     let mut budget = IndexBudget::tree_identity();
-    collect_current_tree_entries(root, root, &mut entries, &mut budget, on_files_hashed)?;
+    collect_current_tree_entries(&root, &mut entries, &mut budget, on_files_hashed, canceled)?;
     entries.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -203,17 +212,37 @@ pub fn register_workspace_tree_identity_with_observer(
     workspace: &WorkspaceTarget,
     on_files_hashed: &mut dyn FnMut(usize),
 ) -> Result<IndexedWorkspaceSnapshot> {
+    let mut last = 0;
+    register_workspace_tree_identity_cancellable(
+        workspace,
+        &mut |files| {
+            if files > last {
+                on_files_hashed(files);
+                last = files;
+            }
+        },
+        &|| false,
+    )
+}
+
+pub(crate) fn register_workspace_tree_identity_cancellable(
+    workspace: &WorkspaceTarget,
+    on_files_hashed: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
+) -> Result<IndexedWorkspaceSnapshot> {
+    source_walk::check_cancellation(canceled)?;
     workspace.ensure_state_dir()?;
     let store = ContentStore::open(workspace.objects_dir())?;
     let mut entries = Vec::new();
     let mut budget = IndexBudget::tree_identity();
     collect_current_tree_entries(
         workspace.root(),
-        workspace.root(),
         &mut entries,
         &mut budget,
         on_files_hashed,
+        canceled,
     )?;
+    source_walk::check_cancellation(canceled)?;
     let tree = store.put_tree(entries)?;
     let metadata = snapshot_metadata(workspace.root(), &[]);
     let snapshot = store.put_snapshot(&TargetSnapshot {
@@ -232,42 +261,27 @@ pub fn register_workspace_tree_identity_with_observer(
 
 fn collect_current_tree_entries(
     root: &Path,
-    dir: &Path,
     entries: &mut Vec<TreeEntry>,
     budget: &mut IndexBudget,
     on_files_hashed: &mut dyn FnMut(usize),
+    canceled: &dyn Fn() -> bool,
 ) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
-        let entry = entry?;
-        let path = entry.path();
-        if should_ignore_path(path.strip_prefix(root)?) {
-            continue;
+    source_walk::walk_source_files(root, canceled, &mut |event| {
+        if let source_walk::SourceWalkEvent::File(path) = event {
+            entries.push(current_tree_entry(root, &path, budget, canceled)?);
         }
-        let kind = entry.file_type()?;
-        if kind.is_dir() {
-            collect_current_tree_entries(root, &path, entries, budget, on_files_hashed)?;
-        } else if kind.is_file() && !exceeds_indexed_file_size(&entry)? {
-            entries.push(current_tree_entry(root, &path, budget)?);
-            on_files_hashed(entries.len());
-        }
-    }
-    Ok(())
+        on_files_hashed(entries.len());
+        Ok(())
+    })
 }
 
-/// Oversized files are deterministically excluded from indexing and tree
-/// identity: the rule depends only on file size, so the producing and
-/// verifying walks always agree on the same tree — one core dump or fat
-/// artifact must not fail (or skew) the whole workspace identity.
-fn exceeds_indexed_file_size(entry: &fs::DirEntry) -> Result<bool> {
-    Ok(entry.metadata()?.len() > MAX_INDEXED_FILE_BYTES)
-}
-
-fn current_tree_entry(root: &Path, path: &Path, budget: &mut IndexBudget) -> Result<TreeEntry> {
-    let metadata =
-        fs::symlink_metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
-    validate_indexed_file(path, &metadata)?;
-    budget.record(metadata.len())?;
-    let bytes = read_indexed_file(path)?;
+fn current_tree_entry(
+    root: &Path,
+    path: &Path,
+    budget: &mut IndexBudget,
+    canceled: &dyn Fn() -> bool,
+) -> Result<TreeEntry> {
+    let (_, bytes) = read_budgeted_source_file(path, budget, canceled)?;
     Ok(TreeEntry {
         name: workspace_relative_path(root, path)?,
         kind: TreeEntryKind::Blob,
@@ -489,36 +503,18 @@ fn is_route_or_controller(path: &Path) -> bool {
 }
 
 fn collect_indexed_files(root: &Path, store: &ContentStore) -> Result<Vec<IndexedFile>> {
+    let root = root.canonicalize()?;
     let mut files = Vec::new();
     let mut budget = IndexBudget::default();
-    collect_indexed_files_from(root, root, store, &mut files, &mut budget)?;
+    source_walk::walk_source_files(&root, &|| false, &mut |event| {
+        if let source_walk::SourceWalkEvent::File(path) = event {
+            let (metadata, bytes) = read_budgeted_source_file(&path, &mut budget, &|| false)?;
+            files.push(store_indexed_file(&root, &path, store, &metadata, &bytes)?);
+        }
+        Ok(())
+    })?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(files)
-}
-
-fn collect_indexed_files_from(
-    root: &Path,
-    dir: &Path,
-    store: &ContentStore,
-    files: &mut Vec<IndexedFile>,
-    budget: &mut IndexBudget,
-) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
-        let entry = entry?;
-        let path = entry.path();
-        if should_ignore_path(path.strip_prefix(root)?) {
-            continue;
-        }
-        let kind = entry.file_type()?;
-        if kind.is_dir() {
-            collect_indexed_files_from(root, &path, store, files, budget)?;
-        } else if kind.is_file() && !exceeds_indexed_file_size(&entry)? {
-            let indexed = index_file(root, &path, store)?;
-            budget.record(indexed.file_size)?;
-            files.push(indexed);
-        }
-    }
-    Ok(())
 }
 
 fn latest_projected_snapshot(workspace: &WorkspaceTarget) -> Result<Vec<IndexedFile>> {
@@ -618,13 +614,23 @@ fn index_file(root: &Path, path: &Path, store: &ContentStore) -> Result<IndexedF
         fs::symlink_metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
     validate_indexed_file(path, &metadata)?;
     let bytes = read_indexed_file(path)?;
-    let blob = store.put_blob(&bytes)?;
+    store_indexed_file(root, path, store, &metadata, &bytes)
+}
+
+fn store_indexed_file(
+    root: &Path,
+    path: &Path,
+    store: &ContentStore,
+    metadata: &fs::Metadata,
+    bytes: &[u8],
+) -> Result<IndexedFile> {
+    let blob = store.put_blob(bytes)?;
     let storage_path = store.object_path(&blob.hash);
     Ok(IndexedFile {
         path: workspace_relative_path(root, path)?,
         blob,
         storage_path,
-        file_size: metadata.len(),
+        file_size: bytes.len() as u64,
         mtime_ns: modified_time_ns(&metadata),
         language: language::language_for_path(path),
     })
@@ -669,12 +675,16 @@ impl IndexBudget {
 
     fn record(&mut self, bytes: u64) -> Result<()> {
         self.files = self.files.saturating_add(1);
-        self.bytes = self.bytes.saturating_add(bytes);
         anyhow::ensure!(
             self.files <= self.max_files,
             "workspace index exceeds the {}-file safety limit",
             self.max_files
         );
+        self.record_bytes(bytes)
+    }
+
+    fn record_bytes(&mut self, bytes: u64) -> Result<()> {
+        self.bytes = self.bytes.saturating_add(bytes);
         anyhow::ensure!(
             self.bytes <= self.max_bytes,
             "workspace index exceeds the {}-byte safety limit",
@@ -704,17 +714,59 @@ fn validate_indexed_file(path: &Path, metadata: &fs::Metadata) -> Result<()> {
 }
 
 fn read_indexed_file(path: &Path) -> Result<Vec<u8>> {
-    let file =
-        open_indexed_file(path).with_context(|| format!("Could not read {}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_INDEXED_FILE_BYTES + 1)
-        .read_to_end(&mut bytes)?;
+    read_indexed_file_cancellable(path, &|| false)
+}
+
+fn read_indexed_file_cancellable(path: &Path, canceled: &dyn Fn() -> bool) -> Result<Vec<u8>> {
+    read_indexed_file_bounded(path, MAX_INDEXED_FILE_BYTES, canceled)
+}
+
+fn read_budgeted_source_file(
+    path: &Path,
+    budget: &mut IndexBudget,
+    canceled: &dyn Fn() -> bool,
+) -> Result<(fs::Metadata, Vec<u8>)> {
+    let metadata =
+        fs::symlink_metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
+    validate_indexed_file(path, &metadata)?;
+    budget.record(0)?;
+    let maximum = budget
+        .max_bytes
+        .saturating_sub(budget.bytes)
+        .min(MAX_INDEXED_FILE_BYTES);
     anyhow::ensure!(
-        bytes.len() as u64 <= MAX_INDEXED_FILE_BYTES,
-        "Indexed file grew beyond the {MAX_INDEXED_FILE_BYTES}-byte safety limit: {}",
-        path.display()
+        metadata.len() <= maximum,
+        "workspace index exceeds the {}-byte safety limit",
+        budget.max_bytes
     );
-    Ok(bytes)
+    let bytes = read_indexed_file_bounded(path, maximum, canceled)?;
+    budget.record_bytes(bytes.len() as u64)?;
+    Ok((metadata, bytes))
+}
+
+fn read_indexed_file_bounded(
+    path: &Path,
+    maximum: u64,
+    canceled: &dyn Fn() -> bool,
+) -> Result<Vec<u8>> {
+    let mut file = open_indexed_file(path)
+        .with_context(|| format!("Could not read {}", path.display()))?
+        .take(maximum + 1);
+    let mut bytes = Vec::new();
+    let mut chunk = vec![0_u8; 64 * 1024];
+    loop {
+        source_walk::check_cancellation(canceled)?;
+        let count = file.read(&mut chunk)?;
+        if count == 0 {
+            return Ok(bytes);
+        }
+        anyhow::ensure!(
+            bytes.len() as u64 + count as u64 <= maximum,
+            "Indexed file grew beyond the {maximum}-byte safety limit: {}",
+            path.display()
+        );
+        bytes.extend_from_slice(&chunk[..count]);
+    }
 }
 
 #[cfg(unix)]

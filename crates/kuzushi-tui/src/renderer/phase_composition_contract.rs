@@ -136,6 +136,7 @@ fn unresolved_completed_map_keeps_the_gallery_primary_with_a_compact_receipt() {
     crate::test_support::seed_fira_shaped_completed_map_attempt(&target);
     fixture.app.clear_running_tool_for_test();
     fixture.app.refresh_phase_attempt_projection();
+    fixture.app.hydrate_all_view_data_for_test();
 
     let text = render_compact_map_result(&fixture);
     assert_compact_map_result(&fixture, &text);
@@ -162,7 +163,7 @@ fn assert_compact_map_result(fixture: &PhaseReferenceFixture, text: &str) {
     assert!(text.contains("SYSTEM SUMMARY"), "{text}");
     assert!(text.contains("RESULT READY"), "{text}");
     assert!(text.contains("Map ready"), "{text}");
-    assert!(text.contains("2 run(s)"), "{text}");
+    assert!(text.contains("3 run(s)"), "{text}");
     assert!(!text.contains("Recommended 5 module tool(s)"), "{text}");
     assert!(fixture
         .app

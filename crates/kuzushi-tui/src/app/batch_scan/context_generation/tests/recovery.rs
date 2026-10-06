@@ -74,6 +74,92 @@ fn reopen_setup(app: &mut ShellApp) {
 }
 
 #[test]
+fn generated_map_review_dispatches_only_the_exact_context_plan_without_resetting_allowance() {
+    let (root, mut app, receipt) = setup_fixture();
+    let active = commit(root.path(), "Other active context", None, true);
+    commit(root.path(), "Generated Map", Some("context-run"), false);
+    completed(root.path(), &receipt, "context-run");
+    reopen_setup(&mut app);
+    let original = app.router.campaign().batch_scan_config.clone().unwrap();
+    let update = app.handle_context_generation_key(KeyCode::Char('m'));
+    let [ShellEffect::PrepareRunTool(request)] = update.effects.as_slice() else {
+        panic!("Map handoff must use shared prepared dispatch")
+    };
+    assert_eq!(request.tool_name, "campaign:context-map");
+    assert_eq!(
+        serde_json::from_str::<Value>(request.input.as_ref().unwrap()).unwrap(),
+        json!({"campaignId":receipt.campaign_id,"expectedPlanSha256":receipt.plan_sha256})
+    );
+    let retained = app.router.campaign().setup_context_study.as_ref().unwrap();
+    assert_eq!(retained.study, original.study);
+    assert_eq!(app.input(), "unfinished\noperator note");
+    assert_eq!(app.cursor(), 4);
+    assert_eq!(
+        load_active_threat_model(root.path())
+            .unwrap()
+            .unwrap()
+            .model_ref,
+        active
+    );
+    assert!(app.router.campaign().dispatcher_pid.is_none());
+}
+
+#[test]
+fn generated_map_cache_keeps_background_focus_and_ignores_another_plan() {
+    let (_root, mut app, receipt) = setup_fixture();
+    app.retain_setup_context_study();
+    app.set_shell_view(ShellView::Report);
+    let data = json!({"campaignId":receipt.campaign_id,"planSha256":receipt.plan_sha256,"attemptId":"map-result"});
+    app.cache_context_map_result(&data);
+    assert_eq!(app.shell_view(), ShellView::Report);
+    assert_eq!(app.input(), "unfinished\noperator note");
+    assert_eq!(app.cursor(), 4);
+    assert_eq!(app.reviewed_context_map_attempt(), Some("map-result"));
+    let retained = app.router.campaign().setup_context_study.as_ref().unwrap();
+    assert_eq!(
+        retained
+            .context_generation
+            .as_ref()
+            .unwrap()
+            .map_attempt_id
+            .as_deref(),
+        Some("map-result")
+    );
+    app.cache_context_map_result(
+        &json!({"campaignId":receipt.campaign_id,"planSha256":"other","attemptId":"wrong"}),
+    );
+    assert_eq!(app.reviewed_context_map_attempt(), Some("map-result"));
+    assert!(app
+        .engagement
+        .selected_phase_attempt(kuzushi_core::WorkflowPhase::Map)
+        .is_none());
+}
+
+#[test]
+fn generated_map_review_control_is_visible_at_every_supported_viewport() {
+    let (root, mut app, receipt) = setup_fixture();
+    commit(root.path(), "Generated Map", Some("context-run"), false);
+    completed(root.path(), &receipt, "context-run");
+    reopen_setup(&mut app);
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        app.reduce_resize(width, height);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let screen = format!("{:?}", terminal.backend().buffer());
+        assert!(
+            screen.contains("m Map") || screen.contains("m Review Map"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Enter inspect") && screen.contains("Esc back"),
+            "{screen}"
+        );
+    }
+}
+
+#[test]
 fn setup_recovery_inspects_exact_generated_revision_and_preserves_allowance_and_origin() {
     let (root, mut app, receipt) = setup_fixture();
     let active = commit(root.path(), "Other active context", None, true);
@@ -197,4 +283,46 @@ fn saved_generated_reference_is_invalidated_when_its_output_disappears() {
     std::fs::remove_file(root.path().join(".kuzushi/threat-models/manifest.json")).unwrap();
     reopen_setup(&mut app);
     assert_missing_output(&app);
+}
+
+#[test]
+fn recovered_result_and_missing_output_keep_controls_and_plain_evidence_at_every_viewport() {
+    let (root, mut app, receipt) = setup_fixture();
+    commit(root.path(), "Recovery fixture", Some("context-run"), false);
+    completed(root.path(), &receipt, "context-run");
+    reopen_setup(&mut app);
+    assert_result_viewports(&mut app, "Inspect generated context");
+    let plain = crate::renderer::render_plain_app(&app, 80)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(plain.contains("Enter inspects the exact revision"));
+    assert!(plain.contains("m opens its recorded Map for review and explicit acceptance"));
+    std::fs::remove_file(root.path().join(".kuzushi/threat-models/manifest.json")).unwrap();
+    reopen_setup(&mut app);
+    assert_result_viewports(&mut app, "Inspect context job outcome");
+    let plain = crate::renderer::render_plain_app(&app, 80)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(plain.contains("no immutable context manifest"));
+    assert!(plain.contains("replacement draft needs separate approval"));
+}
+
+fn assert_result_viewports(app: &mut ShellApp, action: &str) {
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        app.reduce_resize(width, height);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, app))
+            .unwrap();
+        let screen = format!("{:?}", terminal.backend().buffer());
+        assert!(screen.contains("CONTEXT JOB RESULT"), "{screen}");
+        assert!(screen.contains(action), "{screen}");
+        assert!(
+            screen.contains("Esc back") && screen.contains("PgUp/Dn"),
+            "{screen}"
+        );
+        assert!(!screen.contains("GENERATE STUDY CONTEXT"), "{screen}");
+    }
 }

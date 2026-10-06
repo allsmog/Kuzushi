@@ -4,6 +4,8 @@ const MAX_DIGEST_THREATS: usize = 12;
 const MAX_DIGEST_ENTRIES: usize = 12;
 const MAX_DIGEST_FIELD_CHARS: usize = 200;
 
+mod map_digest;
+
 /// Prompt enrichment resolved once per run: the persisted threat-model
 /// digest plus the MCP servers the tool policy actually attached, so the
 /// hunt prompt only advertises tools the agent can really call.
@@ -161,6 +163,7 @@ pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
         ),
     ]
     .into_iter()
+    .chain(map_digest::sections(document))
     .filter(|(_, lines)| !lines.is_empty())
     .map(|(heading, lines)| format!("{heading}:\n{}", lines.join("\n")))
     .collect();
@@ -326,6 +329,31 @@ mod tests {
         assert!(render_threat_model_digest(&json!({})).is_none());
         assert!(render_threat_model_digest(&json!({"threats": []})).is_none());
         assert!(render_threat_model_digest(&json!({"threats": "not-a-list"})).is_none());
+    }
+
+    #[test]
+    fn architecture_and_questions_reach_scans_without_inventing_threats() {
+        let document = json!({"threats":[], "dfd":{
+            "nodes":[{"id":"app","name":"Command line application","description":"Prints a greeting","trustZone":"internal"}],
+            "flows":[{"sourceId":"app","targetId":"terminal","description":"Standard output"}],
+            "trustBoundaries":[{"name":"Operator boundary","description":"Local user invokes the program"}]
+        },"openQuestions":["Which callers supply input?"]});
+        let digest = render_threat_model_digest(&document).unwrap();
+        assert!(digest.contains("Command line application"));
+        assert!(digest.contains("app -> terminal"));
+        assert!(digest.contains("Operator boundary"));
+        assert!(digest.contains("Which callers supply input?"));
+        assert!(!digest.contains("Modeled threats:"));
+    }
+
+    #[test]
+    fn architecture_digest_is_bounded_and_discloses_omitted_elements() {
+        let document = json!({"dfd":{"nodes":(0..50).map(|i|json!({"name":format!("node-{i}"),"description":"x".repeat(2000)})).collect::<Vec<_>>()}});
+        let digest = render_threat_model_digest(&document).unwrap();
+        assert!(digest.contains("38 additional elements omitted"));
+        assert!(!digest.contains("node-12"));
+        assert!(digest.len() < 6000);
+        assert!(digest.contains("..."));
     }
 
     #[test]

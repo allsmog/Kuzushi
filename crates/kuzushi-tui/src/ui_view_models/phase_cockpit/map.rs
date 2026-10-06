@@ -31,6 +31,9 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
         dfd,
         threat_model_freshness,
         empty_hint,
+        recorded_context_issue: crate::ui_view_models::threat_model::recorded_map_context_issue(
+            app,
+        ),
         scope_suggestion: scope_suggestion_hint(app),
     }
 }
@@ -152,6 +155,21 @@ fn map_empty_hint(
     let Some(target) = app.target() else {
         return Some("select a target to map its durable security artifacts".to_string());
     };
+    if crate::ui_view_models::threat_model::map_context_run_refs(app).is_some()
+        && dfd.empty_hint.is_none()
+    {
+        return None;
+    }
+    unrecorded_map_hint(app, context, has_attack_surface, dfd, target)
+}
+
+fn unrecorded_map_hint(
+    app: &ShellApp,
+    context: &crate::ui_view_models::ContextSnapshotModel,
+    has_attack_surface: bool,
+    dfd: &crate::ui_view_models::DfdModel,
+    target: &std::path::Path,
+) -> Option<String> {
     let built = app
         .workbench_cache()
         .borrow()

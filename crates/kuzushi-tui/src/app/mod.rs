@@ -78,6 +78,8 @@ mod autonomy;
 mod background_events;
 mod batch_scan;
 mod campaign;
+mod scope_review;
+pub(crate) use scope_review::*;
 mod catalog;
 mod command_palette;
 mod command_router;

@@ -11,7 +11,7 @@ const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
 
 const quickPlan = Object.freeze([
   step("private-context", pnpm, ["quality:private-context"]),
-  step("secrets", pnpm, ["quality:secrets"]),
+  step("secrets", pnpm, ["quality:secrets", "--worktree"]),
   step("tests", pnpm, ["test"]),
   step("format", cargo, ["fmt", "--all", "--", "--check"]),
   step("cargo-check", cargo, ["check", "--workspace", "--all-targets", "--locked"]),

@@ -93,7 +93,7 @@ for (const provider of ["openai-codex", "anthropic"]) {
     const root = mkdtempSync(join(tmpdir(), "kuzushi-tool-schema-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const credentials = join(root, "oauth.json");
-    writeFileSync(credentials, JSON.stringify({ [provider]: { access: "fixture-token" } }));
+    writeFileSync(credentials, JSON.stringify({ [provider]: { access: "fixture-token", expires: Date.now() + 600_000 } }));
     const fixture = join(root, "provider.mjs");
     writeFileSync(fixture, nextStepProviderFixture(provider));
     const request = {

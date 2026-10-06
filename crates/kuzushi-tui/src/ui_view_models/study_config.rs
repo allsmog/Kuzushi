@@ -2,6 +2,10 @@
 use crate::app::{BatchScanConfig, BatchScanConfigRow};
 use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
+mod controls;
+mod resources;
+pub(crate) use controls::study_controls_hint;
+pub(crate) use resources::study_resource_lines;
 
 pub(crate) fn study_config_area(columns: u16, rows: u16) -> Rect {
     let width = columns.min(120);
@@ -30,9 +34,9 @@ pub(crate) struct StudyConfigLayout {
 pub(crate) fn study_config_layout(area: Rect) -> StudyConfigLayout {
     let body = Rect::new(
         area.x + 2,
-        area.y + 2,
+        area.y + 3,
         area.width.saturating_sub(4),
-        area.height.saturating_sub(5),
+        area.height.saturating_sub(6),
     );
     let controls = Rect::new(body.x, area.bottom().saturating_sub(3), body.width, 2);
     if area.width >= 100 && area.height >= 20 {
@@ -60,10 +64,52 @@ pub(crate) fn study_config_layout(area: Rect) -> StudyConfigLayout {
     }
 }
 
+pub(crate) fn study_allowance_summary(config: &BatchScanConfig, width: usize) -> String {
+    if config.study.accounting_error.is_some() {
+        return "Accounting unavailable · work blocked".into();
+    }
+    let Some(allowance) = &config.study.allowance else {
+        return "Allowance not approved".into();
+    };
+    if width >= 72 {
+        return format!(
+            "Calls: {} committed / {} total · {} unresolved · {} Review left",
+            allowance.committed_calls,
+            allowance.limits.max_provider_calls,
+            allowance.unresolved_calls,
+            allowance.protected_review_remaining()
+        );
+    }
+    compact_allowance_summary(allowance, width)
+}
+
+fn compact_allowance_summary(
+    allowance: &kuzushi_core::allowance::AllowanceSnapshot,
+    width: usize,
+) -> String {
+    let calls = format!(
+        "Calls {}/{}",
+        allowance.committed_calls, allowance.limits.max_provider_calls
+    );
+    let summary = format!(
+        "{calls} · Review {}",
+        allowance.protected_review_remaining()
+    );
+    if summary.len() <= width {
+        summary
+    } else {
+        calls
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn study_row_value(config: &BatchScanConfig, row: BatchScanConfigRow) -> String {
     match row {
         BatchScanConfigRow::Trials => config.trials.to_string(),
         BatchScanConfigRow::Workers => format!("{}", config.effective_workers),
+        BatchScanConfigRow::Engines => engine_summary(config),
         BatchScanConfigRow::Context => if config.study.receipt.is_some() {
             "frozen"
         } else {
@@ -87,9 +133,7 @@ fn other_row_value(config: &BatchScanConfig, row: BatchScanConfigRow) -> String 
     if row == BatchScanConfigRow::Launch {
         return config.study.next_action().into();
     }
-    config
-        .projected_cost_usd()
-        .map_or_else(|| "unknown".into(), |cost| format!("~${cost:.4}"))
+    resources::row_value(config)
 }
 
 fn optional_limit(value: Option<usize>) -> String {
@@ -112,17 +156,40 @@ fn row_description(config: &BatchScanConfig) -> Vec<String> {
         BatchScanConfigRow::Trials => vec![format!("{} fresh discovery passes with identical source, context and scan options. Repetition does not prove correctness. Editing prepares a new immutable plan.", config.trials)],
         BatchScanConfigRow::Workers => vec![format!("Requested {} workers; {} permitted. {}", config.requested_workers, config.effective_workers, config.worker_clamp_reason.as_deref().unwrap_or("One worker is the default. More workers can consume the shared allowance faster."))],
         BatchScanConfigRow::Context => context_description(config),
+        BatchScanConfigRow::Engines => vec!["Enter chooses discovery engines for this study. Unsupported scope contracts are explained before selection. Choices change only the draft; source, dependencies, credentials and allowance are checked before execution.".into(), format!("Current: {}", engine_summary(config))],
         _ => allowance_description(config),
     }
 }
 
-fn allowance_description(config: &BatchScanConfig) -> Vec<String> {
-    match config.selected_row() {
-        BatchScanConfigRow::ProviderCalls => vec!["Total provider requests across this investigation, including internal turns and transport retries. Dollar charges are uncertain; this is not a dollar ceiling.".into()],
-        BatchScanConfigRow::ReviewCalls => vec!["Calls reserved within the total for Review and Report. Discovery cannot use them. Choose zero explicitly to reserve none.".into()],
-        BatchScanConfigRow::Attempts => vec!["Maximum starts per fixed job. Failed and canceled starts consume attempts. Each provider retry also consumes a provider call. No additional passes or recursive jobs are created.".into()],
-        _ => action_description(config),
+fn engine_summary(config: &BatchScanConfig) -> String {
+    let Some(input) = config.study.scan_input.as_ref() else {
+        return "current settings".into();
+    };
+    if input["taskMode"].as_str() != Some("manual") {
+        return "automatic".into();
     }
+    let engines = input["tasks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    if engines.is_empty() {
+        return "none selected".into();
+    }
+    engines.join(", ")
+}
+
+fn allowance_description(config: &BatchScanConfig) -> Vec<String> {
+    let description = match config.selected_row() {
+        BatchScanConfigRow::ProviderCalls => "Total provider requests across this investigation, including internal turns and transport retries. Dollar charges are uncertain; this is not a dollar ceiling.",
+        BatchScanConfigRow::ReviewCalls => "Calls reserved within the total for Review and Report. Discovery cannot use them. Choose zero explicitly to reserve none.",
+        BatchScanConfigRow::Attempts => "Maximum starts per fixed job. Failed and canceled starts consume attempts. Each provider retry also consumes a provider call. No additional passes or recursive jobs are created.",
+        _ => return action_description(config),
+    };
+    let mut text = vec![description.into()];
+    text.extend(allowance_status_lines(config));
+    text
 }
 
 fn action_description(config: &BatchScanConfig) -> Vec<String> {
@@ -135,10 +202,9 @@ fn action_description(config: &BatchScanConfig) -> Vec<String> {
 }
 
 fn cost_description(config: &BatchScanConfig) -> Vec<String> {
-    match config.projected_cost_usd().zip(config.prior_run_id.as_deref()) {
-        Some((cost, id)) => vec![format!("Historical projection ${cost:.4} from {id}. Not a guarantee: prompt size, turns and retries may differ. Enter cycles completed scans with exact cost receipts.")],
-        None => vec!["Cost not estimated. No exact prior scan selected. Enter cycles available completed scans with exact cost receipts; unknown cost is never zero.".into()],
-    }
+    let mut lines = study_resource_lines(config);
+    lines.push("Enter cycles completed SAST scans or clears the selection. Preparation checks whether their recorded conditions match this draft.".into());
+    lines
 }
 
 fn context_description(config: &BatchScanConfig) -> Vec<String> {
@@ -165,6 +231,12 @@ fn context_description(config: &BatchScanConfig) -> Vec<String> {
 
 pub(crate) fn allowance_status_lines(config: &BatchScanConfig) -> Vec<String> {
     let study = &config.study;
+    if let Some(error) = &study.accounting_error {
+        return vec![
+            format!("Accounting unavailable: {error}"),
+            "No work can start. Restore the recorded evidence and reopen this form.".into(),
+        ];
+    }
     let Some(allowance) = &study.allowance else {
         return vec![
             format!("Investigation: {}", study.investigation_id),
@@ -187,7 +259,10 @@ pub(crate) fn allowance_status_lines(config: &BatchScanConfig) -> Vec<String> {
             allowance.remaining_discovery_calls(),
             allowance.protected_review_remaining()
         ),
-        format!("Approved model: {}", allowance.model),
+        format!(
+            "Approved model: {}",
+            crate::app::display_model_selector(&allowance.model)
+        ),
         "Revising work preserves all consumption. Dollar ceiling not enforced.".into(),
     ]
 }

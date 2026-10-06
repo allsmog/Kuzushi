@@ -152,7 +152,10 @@ fn validate_v1_attempt_identity(
         "workflow-v1 phase changed"
     );
     anyhow::ensure!(
-        record.completed.target_snapshot.equivalent_to(target_snapshot),
+        record
+            .completed
+            .target_snapshot
+            .equivalent_to(target_snapshot),
         "workflow-v1 target snapshot disagrees with referenced runs"
     );
     anyhow::ensure!(
@@ -251,11 +254,15 @@ fn compare_current_target_identity(
     identity: &TargetContentIdentity,
 ) -> CurrentContentIdentityStatus {
     match identity {
-        TargetContentIdentity::CleanGitCommit { commit } => match crate::workspace::target_git_metadata(target) {
-            Some(git) if !git.dirty && git.sha == commit.as_str() => CurrentContentIdentityStatus::Current,
-            Some(_) => CurrentContentIdentityStatus::AuthenticatedDrift,
-            None => CurrentContentIdentityStatus::Unverifiable,
-        },
+        TargetContentIdentity::CleanGitCommit { commit } => {
+            match crate::workspace::target_git_metadata(target) {
+                Some(git) if !git.dirty && git.sha == commit.as_str() => {
+                    CurrentContentIdentityStatus::Current
+                }
+                Some(_) => CurrentContentIdentityStatus::AuthenticatedDrift,
+                None => CurrentContentIdentityStatus::Unverifiable,
+            }
+        }
         TargetContentIdentity::IndexedSnapshot {
             tree_hash: Some(expected),
             ..
@@ -271,7 +278,10 @@ fn compare_current_target_identity(
     }
 }
 
-fn current_target_matches_identity(target: &Path, identity: &TargetContentIdentity) -> bool {
+pub(super) fn current_target_matches_identity(
+    target: &Path,
+    identity: &TargetContentIdentity,
+) -> bool {
     compare_current_target_identity(target, identity) == CurrentContentIdentityStatus::Current
 }
 

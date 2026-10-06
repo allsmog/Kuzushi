@@ -41,5 +41,6 @@ pub(crate) use structured_json_contract::parse_or_repair_required_structured_jso
 pub(crate) use structured_json_contract::query_required_structured_json;
 pub(crate) use structured_json_contract::{
     parse_or_repair_required_structured_json_with_cost, query_required_structured_json_with_cost,
-    repair_request_from, CostedStructuredJson, StructuredJsonContract, StructuredOutputError,
+    rejected_output_diagnostic, repair_request_from, CostedStructuredJson, StructuredJsonContract,
+    StructuredOutputError,
 };

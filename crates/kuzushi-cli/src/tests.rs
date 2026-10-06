@@ -422,6 +422,8 @@ mod tests {
         let cli = crate::cli::Cli::try_parse_from([
             "kuzushi",
             "export",
+            "--campaign-id",
+            "study-1",
             "--out",
             "findings.json",
             "--format",
@@ -434,6 +436,7 @@ mod tests {
         .unwrap();
 
         let Some(Command::Export {
+            campaign_id,
             format,
             completeness,
             preview,
@@ -444,6 +447,7 @@ mod tests {
             panic!("expected export command");
         };
 
+        assert_eq!(campaign_id.as_deref(), Some("study-1"));
         assert_eq!(format.as_deref(), Some("json"));
         assert_eq!(completeness, "open");
         assert!(preview);
@@ -481,6 +485,7 @@ mod tests {
             "all".to_string(),
             true,
             false,
+            None,
         )
         .unwrap();
 
@@ -501,6 +506,7 @@ mod tests {
             "all".to_string(),
             false,
             false,
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -514,6 +520,7 @@ mod tests {
             "all".to_string(),
             false,
             true,
+            None,
         )
         .unwrap();
         assert!(workspace.root().join(output).exists());
@@ -533,6 +540,7 @@ mod tests {
             "all".to_string(),
             true,
             false,
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -546,6 +554,7 @@ mod tests {
             "all".to_string(),
             true,
             true,
+            None,
         )
         .unwrap();
         assert!(!workspace.root().join(output).exists());
@@ -601,6 +610,7 @@ mod tests {
             "complete".to_string(),
             false,
             false,
+            None,
         )
         .unwrap();
 
@@ -638,6 +648,7 @@ mod tests {
             "open".to_string(),
             false,
             false,
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -911,6 +922,7 @@ mod tests {
             "complete".to_string(),
             false,
             false,
+            None,
         )
         .unwrap();
 

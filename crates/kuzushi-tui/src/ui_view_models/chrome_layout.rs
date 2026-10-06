@@ -21,7 +21,7 @@ fn compact_answers_supply_guidance(app: &ShellApp, terminal_height: u16) -> bool
 }
 
 pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
-    if compact_answers_supply_guidance(app, terminal_height) {
+    if compact_reading_hides_transcript(app, terminal_height) {
         return 0;
     }
     // ModuleRun, Quickstart, and Logs hide the embedded transcript strip
@@ -40,6 +40,11 @@ pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> 
         return 1;
     }
     2
+}
+
+fn compact_reading_hides_transcript(app: &ShellApp, height: u16) -> bool {
+    compact_answers_supply_guidance(app, height)
+        || (app.shell_view() == ShellView::Scene && height < 20)
 }
 
 pub(crate) fn keybind_footer_chrome_height(

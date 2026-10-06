@@ -86,3 +86,6 @@ plans/artifacts/
 # Scratch space (screenshots, live-audit captures) — never tracked.
 /tmp/
 package-lock.json
+
+# Generated Python bytecode from offline TUI fixtures.
+scripts/devex/fixtures/__pycache__/

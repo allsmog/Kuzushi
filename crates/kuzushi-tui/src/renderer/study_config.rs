@@ -1,7 +1,8 @@
 use super::*;
 use crate::app::{BatchScanConfig, BatchScanConfigRow};
 use crate::ui_view_models::study_config::{
-    study_config_area, study_config_layout, study_detail_lines, study_projection, study_row_value,
+    study_allowance_summary, study_config_area, study_config_layout, study_controls_hint,
+    study_detail_lines, study_projection, study_row_value,
 };
 use ratatui::widgets::{Block, Borders, Clear};
 
@@ -30,6 +31,10 @@ fn render_study_surface(
     config: &BatchScanConfig,
     area: Rect,
 ) {
+    if app.study_engine_picker().is_some() && !app.notice_captures_escape() {
+        super::study_engines::render_engine_picker(frame, app);
+        return;
+    }
     if app.context_generation().is_some() && !app.notice_captures_escape() {
         super::context_generation::render_context_generation(frame, app, area);
         return;
@@ -61,6 +66,17 @@ fn render_study_chrome(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Re
         );
     frame.render_widget(block, area);
     render_study_target(frame, config, area);
+    render_study_allowance(frame, config, area);
+}
+
+fn render_study_allowance(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            study_allowance_summary(config, area.width.saturating_sub(4) as usize),
+            theme::muted(),
+        )),
+        Rect::new(area.x + 2, area.y + 2, area.width.saturating_sub(4), 1),
+    );
 }
 
 pub(super) fn render_study_target(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
@@ -126,15 +142,7 @@ fn render_study_controls(
     attention: bool,
 ) {
     let (offset, maximum) = position;
-    let edit = if attention {
-        "Esc dismiss · PgUp/Dn read"
-    } else {
-        match row {
-            BatchScanConfigRow::Context => "Enter context · L next · Esc back",
-            BatchScanConfigRow::Launch => "Enter / L next · Esc back",
-            _ => "Enter edit · L next · Esc back",
-        }
-    };
+    let edit = study_controls_hint(row, area.width as usize, attention);
     let controls = vec![
         Line::styled(
             format!("↑↓ choose · PgUp/Dn {}/{}", offset + 1, maximum + 1),

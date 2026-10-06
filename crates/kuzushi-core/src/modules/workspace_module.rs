@@ -10,7 +10,7 @@ pub(crate) fn workspace_module() -> BuiltinModule {
             workspace_status_tool()
                 .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
             workspace_export_findings_tool().with_policy(target_write_policy(
-                ToolPhase::Map,
+                ToolPhase::Report,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             )),
@@ -61,6 +61,12 @@ fn workspace_export_findings_tool() -> ToolDescriptor {
 fn workspace_export_findings_options() -> Vec<OptionSpec> {
     vec![
         workspace_export_output_option(),
+        opt(
+            "campaignId",
+            OptionType::String,
+            "Export only this study's observations, with its coverage, context and allowance receipts. Omit for workspace history.",
+        )
+        .aliases(&["campaign_id"]),
         opt("format", OptionType::Enum, "Export format.").choices(&[
             "json",
             "jsonl",
@@ -143,6 +149,7 @@ fn sast_scan_tool() -> ToolDescriptor {
 fn sast_scan_options() -> Vec<OptionSpec> {
     let mut options = Vec::new();
     options.extend(sast_selection_options());
+    options.extend(sast_semgrep_options());
     options.extend(sast_whitebox_options());
     options.extend(sast_post_processing_options());
     options.extend(sast_patch_options());
@@ -154,6 +161,15 @@ fn sast_scan_options() -> Vec<OptionSpec> {
     options.push(mcps_option());
     options.push(model_option());
     options
+}
+
+fn sast_semgrep_options() -> Vec<OptionSpec> {
+    vec![
+        opt("semgrepConfig", OptionType::StringList,
+            "Rule files or selectors for the selected Semgrep task. Local files allow offline scans.").advanced(),
+        opt("semgrepBinary", OptionType::String,
+            "Executable for the selected Semgrep task.").advanced(),
+    ]
 }
 
 fn sast_selection_options() -> Vec<OptionSpec> {
@@ -211,6 +227,8 @@ fn sast_run_filter_options() -> Vec<OptionSpec> {
             "Optional workspace-relative path roots to scan.",
         )
         .aliases(&["includePaths", "include_paths"]),
+        opt("scanScopeRef", OptionType::Json,
+            "Exact accepted scope revision and discovery scope id. Source membership is immutable; unsupported engines are refused before work. Do not combine with paths.").advanced(),
         opt(
             "shard",
             OptionType::String,

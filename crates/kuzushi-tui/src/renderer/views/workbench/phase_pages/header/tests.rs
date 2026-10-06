@@ -1,4 +1,25 @@
 use super::*;
+
+#[test]
+fn scan_receipt_stays_compact_and_discloses_details_without_crowding_out_evidence() {
+    let card = keyed_result_card();
+    let rows = result_card_render_rows(
+        &card,
+        120,
+        scan_result_header_budget(kuzushi_core::WorkflowPhase::Scan, 30),
+    );
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].line.to_string().contains("replay"));
+    assert_eq!(rows[0].disclosed_keys, card.semantic_keys);
+    assert_eq!(
+        scan_result_header_budget(kuzushi_core::WorkflowPhase::Scan, 1),
+        1
+    );
+    assert_eq!(
+        scan_result_header_budget(kuzushi_core::WorkflowPhase::Map, 30),
+        30
+    );
+}
 use kuzushi_core::V2Config;
 use std::borrow::Cow;
 use std::time::{Duration, Instant};
@@ -279,11 +300,8 @@ fn unresolved_partial_result_suppresses_phase_command_hints() {
     let text = rendered_header_text(&scan_header(Some(partial_result_card())));
 
     assert!(text.contains("NEXT acknowledge the partial Scan"), "{text}");
-    assert!(text.contains("Esc Navigate to resolve"), "{text}");
-    assert!(
-        text.contains("next: acknowledge the partial Scan"),
-        "{text}"
-    );
+    assert!(text.contains("RESULT partial"), "{text}");
+    assert!(text.contains("details · replay"), "{text}");
     assert!(!text.contains("run sast:scan {} scan now"), "{text}");
     assert!(!text.contains("next continue workspace phase"), "{text}");
 }

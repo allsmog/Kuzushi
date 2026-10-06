@@ -1,0 +1,84 @@
+# Intercepted initial and repair responses; no real inference or source execution.
+name: Rejected context output remains inspectable and unaccepted after restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/rejected_context.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 1 planned | approved-context-campaign
+nav-mode:
+keys: L
+require-live-snap: 25 dispatcher pid | single-context-started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/rejected_context.py @TMP_TARGET @ART verify
+keys: r
+require-live-snap: 25 1 failed | rejected-context-job
+keys: a
+require-live-snap: 25 rejected-context-output.txt | safe-failure-card
+expect-not: LABELED_REJECTED_OUTPUT
+expect: d output
+ask: Does the failed job preserve spending and name locally retained diagnosis without leaking model text or suggesting accepted context?
+keys: d
+require-live-snap: 25 REJECTED CONTEXT OUTPUT | explicit-local-inspection
+expect: UNACCEPTED MODEL OUTPUT
+ask: Does explicit inspection label untrusted model output, record source/model/run provenance and keep acceptance separate?
+keys: Enter m n s t Tab
+require-live-snap: 15 REJECTED CONTEXT OUTPUT | inert-inspection
+expect-not: REVIEW PLAN & ALLOWANCE
+resize: 160x48
+live-snap: diagnostic-160x48
+resize: 96x89
+live-snap: diagnostic-96x89
+resize: 80x24
+live-snap: diagnostic-80x24
+resize: 60x20
+live-snap: diagnostic-60x20
+resize: 40x12
+live-snap: diagnostic-40x12
+expect: d / Esc back · PgUp/Dn read
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 This output is unaccepted. | complete-diagnostic-tail
+ask: At 40x12, can the operator read the complete bounded diagnosis, see the reading position and return without accepting or running anything?
+resize: 120x36
+keys: Escape
+require-live-snap: 15 CONTEXT JOB RESULT | failure-origin-restored
+expect-not: LABELED_REJECTED_OUTPUT
+keys: Enter
+require-live-snap: 15 CAMPAIGN rejected-context | recorded-jobs
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 1 failed | saved-rejected-job
+nav-mode:
+keys: a
+require-live-snap: 25 d output | recovered-failure-card
+keys: d
+require-live-snap: 25 REJECTED CONTEXT OUTPUT | diagnosis-after-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/rejected_context.py @TMP_TARGET @ART verify
+ask: After actual restart without color, is the same rejected diagnostic readable with unchanged source and two recorded requests, while context remains unaccepted?
+keys: Escape
+require-live-snap: 15 CONTEXT JOB RESULT | recovered-origin
+keys: Enter
+require-live-snap: 15 CAMPAIGN rejected-context | exit-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/rejected_context.py @TMP_TARGET @ART damage
+keys: a
+require-live-snap: 15 Retained diagnostic unavailable | corrupted-input-disclosed
+expect-not: LABELED_REJECTED_OUTPUT
+keys: d
+require-live-snap: 15 Rejected output unavailable | corrupted-input-refused
+expect-not: LABELED_REJECTED_OUTPUT
+require-shell: python3 -B @REPO/scripts/devex/fixtures/rejected_context.py @TMP_TARGET @ART verify
+ask: Does changed diagnostic input produce a readable unavailable state without exposing unauthenticated output, accepting context or spending more requests?
+keys: Escape
+require-live-snap: 15 CONTEXT JOB RESULT | corrupted-origin
+keys: Enter
+require-live-snap: 15 CAMPAIGN rejected-context | final-exit-origin
+keys: C-c
+require-exit: 10

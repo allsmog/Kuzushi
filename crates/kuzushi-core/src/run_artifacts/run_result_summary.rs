@@ -290,7 +290,7 @@ fn condensed_bounded_line(value: &str) -> String {
     safe_bounded_line(&joined)
 }
 
-fn safe_bounded_line(value: &str) -> String {
+pub(crate) fn safe_bounded_line(value: &str) -> String {
     let redacted = crate::session_transcript::redaction::redact_text(value);
     let safe = escape_control_characters(&redacted);
     if safe.chars().count() <= MAX_LINE_CHARS {

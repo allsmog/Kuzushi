@@ -1,3 +1,4 @@
+use super::python_route_frameworks::PythonRouteFrameworks;
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
 
@@ -7,6 +8,7 @@ pub(crate) struct SourceTextScan<'t> {
     text: &'t str,
     lower: OnceCell<String>,
     memo: RefCell<HashMap<&'static str, bool>>,
+    python_routes: OnceCell<PythonRouteFrameworks>,
 }
 
 impl<'t> SourceTextScan<'t> {
@@ -15,11 +17,18 @@ impl<'t> SourceTextScan<'t> {
             text,
             lower: OnceCell::new(),
             memo: RefCell::new(HashMap::new()),
+            python_routes: OnceCell::new(),
         }
     }
 
     pub(crate) fn text(&self) -> &'t str {
         self.text
+    }
+
+    pub(crate) fn python_route_framework(&self, receiver: &str) -> Option<&'static str> {
+        self.python_routes
+            .get_or_init(|| PythonRouteFrameworks::from_source(self.text))
+            .framework(receiver)
     }
 
     /// Memoized `text.to_ascii_lowercase().contains(needle)`.

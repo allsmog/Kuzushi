@@ -9,7 +9,7 @@ use crate::{
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
-struct OfflineContextRuntime {
+pub(super) struct OfflineContextRuntime {
     binding: Option<AllowanceBinding>,
     requests: Arc<Mutex<Vec<AgentQueryRequest>>>,
 }
@@ -69,6 +69,8 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
         ..Default::default()
     };
     let registry = ModuleRegistry::with_v2_builtins();
+    let run_record = crate::run_artifacts::ToolRunRecord::new(root.path(), "context-run", "tool", TOOL);
+    crate::run_artifacts::try_record_tool_run_started_with_reproducibility(run_record, &json!({}), None, None, Vec::new()).unwrap();
     let trace = crate::run_artifacts::TraceHandle::jsonl(root.path(), "context-run");
     let mut ctx = context(&workspace, &config);
     ctx.trace = Some(&trace);
@@ -82,9 +84,12 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
         .prepare_dispatch_input(TOOL, input.clone(), &ctx, None)
         .unwrap()
         .authorize_explicit_headless();
-    let result = registry
-        .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+    let observed = registry
+        .dispatch_prepared_input_observed_with_runtime(prepared, &ctx, Some(&runtime))
         .unwrap();
+    let result = observed.execution.unwrap();
+    crate::run_artifacts::try_record_tool_run_complete_settled(run_record, &result,
+        &trace.run_observation().unwrap(), observed.completion).unwrap();
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(runtime.requests.lock().unwrap().len(), 1);
     let reference: crate::ThreatModelRef =
@@ -106,6 +111,10 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
         receipt.generated_context(root.path()).unwrap(),
         Some(reference.clone())
     );
+    drop(ctx);
+    drop(trace);
+    let mut ctx = context(&workspace, &config);
+    review_generated_map(&registry, &ctx, &receipt, &reference);
     let trace2 = crate::run_artifacts::TraceHandle::jsonl(root.path(), "unapproved-context-retry");
     ctx.trace = Some(&trace2);
     let prepared = registry
@@ -118,6 +127,24 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
     assert!(error.to_string().contains("attempt limit"), "{error:#}");
     assert_eq!(runtime.requests.lock().unwrap().len(), 1);
     approve_scan_after_context(&registry, &ctx, reference);
+}
+
+fn review_generated_map(
+    registry: &ModuleRegistry, ctx: &ToolExecutionContext<'_>,
+    receipt: &ContextStudyReceipt, reference: &crate::ThreatModelRef,
+) {
+    use crate::workflow_attempts::*;
+    let root = ctx.workspace.unwrap().root();
+    let input = json!({"campaignId":receipt.campaign_id,"expectedPlanSha256":receipt.plan_sha256});
+    let result = registry.execute_tool("campaign:context-map", input.clone(), ctx).unwrap();
+    let again = registry.execute_tool("campaign:context-map", input, ctx).unwrap();
+    assert_eq!(result["data"], again["data"]);
+    let ledger = load_phase_attempt_ledger(root).unwrap();
+    assert_eq!(ledger.attempts().count(), 1);
+    let attempt = ledger.unresolved_for(crate::WorkflowPhase::Map, &PhaseTargetSnapshot::capture(root)).unwrap();
+    assert!(attempt.disposition.is_none());
+    assert_eq!(load_map_run_context(root, &attempt.completed.run_refs).unwrap().unwrap().model_ref.as_ref(), Some(reference));
+    assert_eq!(receipt.load_allowance(root).unwrap().unwrap().committed_calls, 1);
 }
 
 fn approve_scan_after_context(

@@ -3,7 +3,7 @@ use crate::ui_view_models::study_config::study_config_area;
 use crate::ui_view_models::study_context::{context_catalog, context_detail_lines, context_layout};
 use anyhow::Context;
 use crossterm::event::KeyCode;
-use kuzushi_core::{ThreatModelRef, WorkspaceTarget};
+use kuzushi_core::ThreatModelRef;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -19,6 +19,7 @@ pub(crate) struct StudyContextPicker {
     pub(crate) raw: bool,
     pub(crate) diagram: Option<StudyContextDiagram>,
     pub(crate) diagram_visible: bool,
+    pub(crate) map_attempt_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,8 +59,7 @@ impl ShellApp {
         let Some(config) = self.router.campaign().batch_scan_config.as_ref() else {
             return InputUpdate::handled();
         };
-        let input = WorkspaceTarget::new(&config.target)
-            .and_then(|workspace| super::launch::configured_scan_input(self, &workspace, config));
+        let input = super::launch::configured_scan_input(self, config);
         match input {
             Ok(input) => self.install_study_context_picker(input),
             Err(error) => {
@@ -102,6 +102,7 @@ impl ShellApp {
             KeyCode::Char('g') => self.open_context_generation(),
             KeyCode::Char('v') => self.open_study_context_diagram(),
             KeyCode::Char('a') => self.accept_study_context(),
+            KeyCode::Char('m') => return self.review_existing_context_map(),
             _ => self.handle_context_detail_key(code),
         }
         InputUpdate::handled()
@@ -134,6 +135,7 @@ impl ShellApp {
                 picker.raw = false;
                 picker.diagram = None;
                 picker.diagram_visible = false;
+                picker.map_attempt_id = None;
             }
         });
     }
@@ -158,6 +160,23 @@ impl ShellApp {
             Some("threat-model:read".into()),
             Some(json!({"threatModelRef": reference}).to_string()),
         ))
+    }
+
+    fn review_existing_context_map(&mut self) -> InputUpdate {
+        let Some(picker) = self.study_context_picker() else {
+            return InputUpdate::handled();
+        };
+        let Some(reference) = picker.selected.clone().filter(|_| picker.preview.is_some()) else {
+            self.set_batch_config_notice(
+                "Inspect an exact revision with Enter before reviewing Map.",
+            );
+            return InputUpdate::handled();
+        };
+        if self.has_running_work() {
+            self.set_batch_config_notice("Wait for active work, then review this context as Map.");
+            return InputUpdate::handled();
+        }
+        self.dispatch_context_action("campaign:context-map", json!({"threatModelRef":reference}))
     }
 
     pub(super) fn cache_study_context_preview(&mut self, data: &Value) -> bool {

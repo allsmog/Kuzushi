@@ -78,11 +78,15 @@ pub(super) fn validate_jobs(jobs: &[ContextPreparationJob]) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn plan_jobs(input: Value, preparation: &[ContextPreparationJob]) -> Vec<Value> {
+pub(super) fn plan_jobs(
+    input: Value,
+    preparation: &[ContextPreparationJob],
+    tool: &str,
+) -> Vec<Value> {
     let mut jobs = preparation.iter().enumerate().map(|(index, job)| {
         json!({"jobId":format!("prepare-{:03}", index + 1),"tool":job.tool,"input":job.input})
     }).collect::<Vec<_>>();
-    jobs.push(json!({"jobId":JOB,"tool":TOOL,"input":input}));
+    jobs.push(json!({"jobId":JOB,"tool":tool,"input":input}));
     jobs
 }
 
@@ -103,15 +107,19 @@ pub(super) fn read_jobs(jobs: &[Value]) -> Result<Vec<ContextPreparationJob>> {
 }
 
 pub(super) fn approved_jobs(receipt: &ContextStudyReceipt) -> Result<Vec<ApprovedWorkItem>> {
-    plan_jobs(receipt.input.clone(), &receipt.preparation_jobs)
-        .into_iter()
-        .map(|job| {
-            Ok(ApprovedWorkItem {
-                work_id: format!("{}:{}", receipt.campaign_id, required_text(&job, "jobId")?),
-                tool: required_text(&job, "tool")?,
-                input_sha256: work_input_digest(&job["input"])?,
-                max_attempts: 1,
-            })
+    plan_jobs(
+        receipt.input.clone(),
+        &receipt.preparation_jobs,
+        &receipt.generation_tool,
+    )
+    .into_iter()
+    .map(|job| {
+        Ok(ApprovedWorkItem {
+            work_id: format!("{}:{}", receipt.campaign_id, required_text(&job, "jobId")?),
+            tool: required_text(&job, "tool")?,
+            input_sha256: work_input_digest(&job["input"])?,
+            max_attempts: 1,
         })
-        .collect()
+    })
+    .collect()
 }

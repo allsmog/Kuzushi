@@ -2,6 +2,26 @@ use super::*;
 use crate::app::{BatchScanConfig, BatchScanConfigRow};
 use crate::ui_view_models::study_config::{study_detail_lines, study_row_value};
 
+pub(super) fn append_study_engines(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+    use crate::ui_view_models::study_engines::{engine_detail, engine_line, engine_rows};
+    lines.push(divider("CHOOSE DISCOVERY ENGINES", area.width));
+    let selected = app.study_engine_picker().map_or(0, |picker| picker.cursor);
+    lines.extend(
+        engine_rows(app).iter().enumerate().map(|(index, row)| {
+            Line::styled(engine_line(row, index == selected), theme::primary())
+        }),
+    );
+    lines.extend(
+        engine_detail(app, area.width as usize)
+            .into_iter()
+            .map(|line| Line::styled(line, theme::primary())),
+    );
+    lines.push(Line::styled(
+        crate::ui_view_models::study_engines::engine_apply_controls(app),
+        theme::muted(),
+    ));
+}
+
 pub(super) fn append_study_context(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
     use crate::ui_view_models::study_context::{context_catalog, context_detail_lines};
     if app

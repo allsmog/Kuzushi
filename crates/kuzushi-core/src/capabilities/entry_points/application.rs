@@ -90,6 +90,17 @@ fn validate_catalog_extraction_policy(catalog: &EntryPointCatalog) -> Result<()>
         }),
         REBUILD_RUST_SURFACES
     );
+    anyhow::ensure!(
+        !catalog.entry_points.iter().any(|entry| {
+            crate::workspace::python_surface_policy::has_legacy_python_http_surface(
+                &entry.surface.language,
+                &entry.surface.path,
+                entry.surface.kind == crate::attack_surface::AttackSurfaceKind::HttpRoute,
+                &entry.surface.metadata,
+            )
+        }),
+        crate::workspace::python_surface_policy::REBUILD_PYTHON_SURFACES
+    );
     Ok(())
 }
 
@@ -117,10 +128,8 @@ pub(super) fn authenticate_catalog_against_context_documents(
 ) -> Result<EntryPointCatalogAuthentication> {
     let catalog: EntryPointCatalog = serde_json::from_value(catalog_document.clone())
         .context("entry-point catalog does not match the typed artifact contract")?;
-    let identity = context_snapshot_identity_with_sha(
-        context_document,
-        context_sha256.to_string(),
-    )?;
+    let identity =
+        context_snapshot_identity_with_sha(context_document, context_sha256.to_string())?;
     let snapshot = ContextSnapshotDocument {
         value: context_document.clone(),
         identity,
@@ -215,11 +224,7 @@ fn validate_catalog_payload(catalog: &EntryPointCatalog) -> Result<()> {
         "entry-point snapshot timestamp does not match its provenance"
     );
     anyhow::ensure!(
-        !catalog
-            .provenance
-            .context_snapshot_sha256
-            .trim()
-            .is_empty(),
+        !catalog.provenance.context_snapshot_sha256.trim().is_empty(),
         "entry-point context digest is missing"
     );
     anyhow::ensure!(

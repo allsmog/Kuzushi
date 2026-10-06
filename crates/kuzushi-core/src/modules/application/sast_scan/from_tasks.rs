@@ -1,6 +1,22 @@
 use super::*;
 
 impl SastTaskSelection {
+    pub(in crate::modules) fn configure_semgrep(&mut self, input: &Value) -> Result<()> {
+        if input.get("semgrepConfig").is_none() && input.get("semgrepBinary").is_none() {
+            return Ok(());
+        }
+        for scanner in &mut self.scanners {
+            if scanner.id() == "semgrep" {
+                let options = json!({
+                    "config": input.get("semgrepConfig").cloned().unwrap_or(Value::Null),
+                    "binary": input.get("semgrepBinary").cloned().unwrap_or(Value::Null),
+                });
+                let options = semgrep_non_null_options(options);
+                *scanner = Box::new(crate::scan::SemgrepScanner::from_tool_input(&options)?);
+            }
+        }
+        Ok(())
+    }
     pub(in crate::modules) fn planned_engine_ids(&self) -> Vec<String> {
         let mut engines = self
             .engine_ids
@@ -70,21 +86,31 @@ impl SastTaskSelection {
         &self,
         workspace: &crate::workspace::WorkspaceTarget,
         store: &crate::findings::FindingStore,
-        options: &ScanRunOptions,
+        options: &SastScanOptions,
         ctx: &ToolExecutionContext<'_>,
-    ) -> Result<Option<ScanRun>> {
+    ) -> Result<Option<NativeScanReport>> {
         self.ensure_explicit_native_prerequisites(workspace)?;
         if self.scanners.is_empty() {
             Ok(None)
         } else {
             ctx.with_cancellation(|cancellation| {
-                run_scan_engines_with_options_and_cancellation(
-                    workspace,
-                    store,
-                    &self.scanners,
-                    options,
-                    cancellation,
-                )
+                match options.discovery_files() {
+                    Some(files) => run_native_scan_files_with_cancellation(
+                        workspace,
+                        store,
+                        &self.scanners,
+                        &options.run,
+                        files,
+                        cancellation,
+                    ),
+                    None => run_native_scan_with_cancellation(
+                        workspace,
+                        store,
+                        &self.scanners,
+                        &options.run,
+                        cancellation,
+                    ),
+                }
                 .map(Some)
             })
         }
@@ -104,6 +130,13 @@ impl SastTaskSelection {
         }
         Ok(())
     }
+}
+
+fn semgrep_non_null_options(mut input: Value) -> Value {
+    if let Some(options) = input.as_object_mut() {
+        options.retain(|_, value| !value.is_null());
+    }
+    input
 }
 
 pub(in crate::modules) fn selected_native_scanners(
@@ -270,10 +303,7 @@ struct SastSubtoolDispatch<'a> {
 }
 
 impl SastSubtoolDispatch<'_> {
-    fn report_from_data<T>(
-        &self,
-        tool_name: &str,
-    ) -> Result<EngineRun<T>>
+    fn report_from_data<T>(&self, tool_name: &str) -> Result<EngineRun<T>>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -282,11 +312,7 @@ impl SastSubtoolDispatch<'_> {
 
     /// An engine that reports `skipped` (it does not apply to this target)
     /// has no report to parse; its outcome is still recorded.
-    fn report_from_input<T>(
-        &self,
-        tool_name: &str,
-        input: &Value,
-    ) -> Result<EngineRun<T>>
+    fn report_from_input<T>(&self, tool_name: &str, input: &Value) -> Result<EngineRun<T>>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -324,11 +350,11 @@ impl SastSubtoolDispatch<'_> {
 
     /// Umbrella-level engine continuation: a Completed agentic engine from a
     /// prior failed sast:scan run is reused from its checkpointed output.
-    /// Its findings already live in the findings store — reusing the report
+    /// Its findings already live in the findings store; reusing the report
     /// never re-ingests them.
     /// taint-iris-next scopes by one `targetSubdir`: a scan scoped to exactly
-    /// one directory passes it through; any other scope leaves the hunt
-    /// repository-wide rather than guessing a subdirectory.
+    /// one directory passes it through. Scope validation rejects unsupported
+    /// memberships before any engine starts.
     fn taint_iris_next_scoped_input(&self) -> Value {
         let mut input = taint_iris_next_hunt_input(self.input);
         let root = self.ctx.workspace.map(|workspace| workspace.root());
@@ -514,14 +540,16 @@ fn scan_engine_outcome(output: &Value) -> crate::run_artifacts::ScanEngineStageO
 }
 
 /// The scan's `paths` scope becomes agentic SAST's include patterns (each
-/// path and everything below it), unless the operator set patterns directly.
-/// Without this the engine's descriptor filter dropped `paths` and a scoped
-/// scan hunted — and paid for — the whole repository.
+/// path and everything below it). The shared scope guard rejects conflicting
+/// explicit patterns before this adapter runs.
 fn agentic_scoped_input(input: &Value) -> Value {
     let mut scoped = input.clone();
-    let explicit = ["includePatterns", "include_patterns"]
-        .iter()
-        .any(|key| input.get(key).is_some());
+    let explicit = ["includePatterns", "include_patterns"].iter().any(|key| {
+        input
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty())
+    });
     let paths = scan_scope_paths(input);
     if let (false, Some(object), false) = (explicit, scoped.as_object_mut(), paths.is_empty()) {
         object.insert("includePatterns".to_string(), json!(scope_patterns(&paths)));
@@ -665,11 +693,16 @@ mod canonical_report_cost_tests {
     use super::*;
 
     #[test]
-    fn scan_paths_scope_the_agentic_inventory_unless_patterns_are_explicit() {
+    fn scan_paths_scope_the_agentic_inventory_after_shared_guard_validation() {
         let scoped = agentic_scoped_input(&json!({"paths": ["routes/", "lib/insecurity.ts"]}));
         assert_eq!(
             scoped["includePatterns"],
-            json!(["routes", "routes/*", "lib/insecurity.ts", "lib/insecurity.ts/*"])
+            json!([
+                "routes",
+                "routes/*",
+                "lib/insecurity.ts",
+                "lib/insecurity.ts/*"
+            ])
         );
         assert!(crate::capabilities::agentic_sast::agentic_path_allowed(
             "routes/login.ts",
@@ -677,7 +710,13 @@ mod canonical_report_cost_tests {
             &[],
         ));
 
-        let explicit = json!({"paths": ["routes"], "includePatterns": ["lib/*"]});
+        let empty_patterns =
+            agentic_scoped_input(&json!({"paths":["routes"], "includePatterns":[]}));
+        assert_eq!(
+            empty_patterns["includePatterns"],
+            json!(["routes", "routes/*"])
+        );
+        let explicit = json!({"includePatterns": ["lib/*"]});
         assert_eq!(agentic_scoped_input(&explicit), explicit);
         let unscoped = json!({"mode": "standard"});
         assert_eq!(agentic_scoped_input(&unscoped), unscoped);
@@ -688,11 +727,20 @@ mod canonical_report_cost_tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("routes")).unwrap();
         std::fs::write(root.path().join("server.ts"), "").unwrap();
-        let single = |paths: Value| single_scope_directory(&json!({ "paths": paths }), Some(root.path()));
+        let single =
+            |paths: Value| single_scope_directory(&json!({ "paths": paths }), Some(root.path()));
 
         assert_eq!(single(json!(["routes/"])).as_deref(), Some("routes"));
-        assert_eq!(single(json!(["server.ts"])), None, "a file is not a subdirectory");
-        assert_eq!(single(json!(["routes", "lib"])), None, "several paths stay repo-wide");
+        assert_eq!(
+            single(json!(["server.ts"])),
+            None,
+            "a file is not a subdirectory"
+        );
+        assert_eq!(
+            single(json!(["routes", "lib"])),
+            None,
+            "unsupported multiple scopes are rejected by the shared guard"
+        );
         let explicit = json!({"paths": ["routes"], "targetSubdir": "lib"});
         assert_eq!(single_scope_directory(&explicit, Some(root.path())), None);
     }

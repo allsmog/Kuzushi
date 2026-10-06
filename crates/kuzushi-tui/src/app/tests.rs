@@ -7752,8 +7752,10 @@ fn empty_input_enter_does_not_log_or_grow_history() {
     // P-NEW-3: pressing Enter on an empty / whitespace-only prompt used
     // to push a `>` bullet with no body into the transcript and waste
     // a precious row in the 2-row strip. The submit is now a no-op:
-    // no log, no history entry.
+    // no log, no history entry. (On the startup capability picker, Enter on
+    // an empty composer opens the selected capability by design.)
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
     let log_count = app.log_len();
     let history_count = app.command_history().len();
 
@@ -14917,20 +14919,23 @@ fn ctrl_a_e_b_f_navigate_input() {
 
 #[test]
 fn up_arrow_recalls_command_history() {
+    // Commands that stay on the Workbench: an open capability picker owns
+    // empty-composer arrows by design, so history recall is checked here.
     let mut app = ShellApp::new(V2Config::default(), None);
     submit_shell_line(&mut app, "/findings");
-    submit_shell_line(&mut app, "/modules");
+    submit_shell_line(&mut app, "/workbench");
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert!(app.input().is_empty());
 
     press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
-    assert_eq!(app.input(), "/modules");
+    assert_eq!(app.input(), "/workbench");
     press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
     assert_eq!(app.input(), "/findings");
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
     );
-    assert_eq!(app.input(), "/modules");
+    assert_eq!(app.input(), "/workbench");
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
@@ -20022,7 +20027,7 @@ fn seed_ready_map_target(target: &Path, run_id: &str) {
         true,
     )
     .unwrap();
-    persist_adequate_test_map_result(target, run_id);
+    crate::test_support::record_fixture_context_run(target, run_id);
     persist_selected_test_phase_attempt(target, WorkflowPhase::Map, run_id);
 }
 
@@ -24523,6 +24528,9 @@ fn dfd_page_cycles_all_13_nodes_and_11_flows_and_scrolls_details() {
 #[test]
 fn entry_points_page_selects_entries_and_pages_only_the_detail() {
     let (_temp, mut app) = entry_point_browser_app(entry_point_rows());
+    // Small enough that the selected entry's detail overflows its pane;
+    // at roomier sizes the detail fits and paging correctly stays at 0.
+    app.set_viewport(crate::app::TerminalViewport::new(60, 20));
     app.set_input_mode(crate::InputMode::Navigate);
 
     press_key(
@@ -24535,6 +24543,7 @@ fn entry_points_page_selects_entries_and_pages_only_the_detail() {
         KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
     );
     assert!(app.router.scene().entry_point_detail_scroll() > 0);
+    assert_eq!(app.router.scene().entry_point_selection(), 1);
     press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
     assert_eq!(app.router.scene().entry_point_selection(), 0);
     assert_eq!(app.router.scene().entry_point_detail_scroll(), 0);
@@ -24695,3 +24704,5 @@ fn entry_point_rows() -> serde_json::Value {
 }
 
 mod source_investigation;
+
+mod report_scan_attempt;

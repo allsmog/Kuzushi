@@ -52,6 +52,7 @@ pub struct RouterState {
     activity: ActivityRouteState,
     workbench: WorkbenchRouteState,
     campaign: super::CampaignRouteState,
+    scope_review: Option<crate::app::ScopeReviewState>,
     coverage: super::CoverageRouteState,
     catalog: CatalogRouteState,
     findings: FindingsRouteState,
@@ -394,6 +395,14 @@ impl RouterState {
 
     pub(crate) fn workbench_mut(&mut self) -> &mut WorkbenchRouteState {
         &mut self.workbench
+    }
+
+    pub(crate) fn scope_review(&self) -> &Option<crate::app::ScopeReviewState> {
+        &self.scope_review
+    }
+
+    pub(crate) fn scope_review_mut(&mut self) -> &mut Option<crate::app::ScopeReviewState> {
+        &mut self.scope_review
     }
 
     pub(crate) fn campaign(&self) -> &super::CampaignRouteState {

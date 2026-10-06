@@ -35,6 +35,9 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     {
         return lines;
     }
+    if let Some(lines) = super::super::scope_review::scope_review_plain_lines(app, width) {
+        return lines;
+    }
     let mode = plain_render_mode(app);
     let include_run_projection = !matches!(&mode, PlainRenderMode::Activity);
     let mut lines = match mode {

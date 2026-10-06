@@ -13,6 +13,9 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if let Some(mut bindings) = crate::ui_view_models::phase_cockpit::result_keybindings(app) {
+        if scan_coverage_reader_is_open(app) {
+            bindings.insert(bindings.len().min(1), bind("PgUp/PgDn", "coverage"));
+        }
         bindings.push(bind("Ctrl+C", "exit"));
         return bindings;
     }
@@ -21,6 +24,10 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return bindings;
     }
     regular_workbench_keybindings(app, plan.as_ref())
+}
+
+fn scan_coverage_reader_is_open(app: &ShellApp) -> bool {
+    active_workbench_page(app) == WorkbenchPage::Scan && app.guided_scan_question_model().is_none()
 }
 
 fn regular_workbench_keybindings(

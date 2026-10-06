@@ -8,11 +8,13 @@
 //! `kuzushi campaign run`) and run `done.json` sentinels into one view.
 //! Neither tool calls a model: planning is pure workspace-file computation.
 
-mod batch;
 mod allowance;
 mod approved_work;
+mod batch;
+pub use approved_work::validate_campaign_report_approval;
 pub mod coverage;
 mod dispatcher_lease;
+mod map_allowance;
 mod parallel_safety;
 mod plan;
 mod prior_runs;
@@ -21,31 +23,46 @@ pub mod snapshot;
 mod status;
 mod study_plan;
 mod study_receipt;
+mod study_resources;
+pub use map_allowance::{load_accepted_map_allowance, load_selected_map_history_allowance};
+pub use study_resources::catalogue::{
+    load_named_scan_usage, load_scan_usage_catalogue, ScanUsageCatalogue, SCAN_USAGE_HISTORY_LIMIT,
+};
+pub use study_resources::{
+    load_scan_resource_evidence, ScanResourceEvidence, StudyResourceProjection,
+};
 mod context_study;
-pub use context_study::{execute_context_study, load_context_study, ContextPreparationJob, ContextStudyReceipt};
-pub use study_receipt::{load_study_allowance, load_study_plan_receipt, StudyPlanReceipt};
+mod scope_allowance;
+pub use context_study::{
+    execute_context_map, execute_context_study, load_context_study, scope_proposal_study_input,
+    ContextPreparationJob, ContextStudyReceipt, RejectedContextOutput,
+};
+pub use scope_allowance::load_scope_proposal_allowance;
+pub use study_receipt::{
+    load_study_allowance, load_study_plan_receipt, load_study_resource_baseline, StudyPlanReceipt,
+};
 #[cfg(test)]
 mod tests;
 mod threats;
 pub mod trend;
 pub mod trend_history;
 
+pub use allowance::{execute_allowance_status, execute_approve_allowance};
+pub(crate) use approved_work::require_study_reference;
+pub use approved_work::{campaign_plan_digest, work_input_digest};
 pub use batch::{
     acquire_scan_batch_threat_model_lease, capture_batch_equivalence, compile_scan_batch_plan,
     load_scan_batch_child_equivalence_receipt, persist_batch_gate_outcome,
-    persist_batch_sarif_document, scan_batch_base_input, validate_scan_batch_execution_plan,
-    validate_scan_batch_id,
+    persist_batch_sarif_document, record_scan_batch_phase_result, scan_batch_base_input,
+    validate_scan_batch_execution_plan, validate_scan_batch_id,
     verify_scan_batch_child_equivalence, BatchEquivalenceComponents, BatchEquivalenceKey,
     BatchGateStatus, BatchOperationalStatus, BatchSecurityGateStatus, CampaignPlanHandle,
-    ScanBatchChildEquivalenceReceipt, ScanBatchGateBinding, ScanBatchGateCounts, ScanBatchGateOutcome,
-    ScanBatchGatePolicy, ScanBatchPlanSpec, ScanBatchThreatModelLease, ValidatedScanBatchPlan,
-    MAX_SCAN_BATCH_TRIALS, RECEIPTLESS_ATTEMPT_OUTCOME, SCAN_BATCH_EQUIVALENCE_RECEIPT_FILE,
-    SCAN_BATCH_KIND, SCAN_BATCH_SCHEMA_VERSION,
+    ScanBatchChildEquivalenceReceipt, ScanBatchGateBinding, ScanBatchGateCounts,
+    ScanBatchGateOutcome, ScanBatchGatePolicy, ScanBatchPlanSpec, ScanBatchThreatModelLease,
+    ValidatedScanBatchPlan, MAX_SCAN_BATCH_TRIALS, RECEIPTLESS_ATTEMPT_OUTCOME,
+    SCAN_BATCH_EQUIVALENCE_RECEIPT_FILE, SCAN_BATCH_KIND, SCAN_BATCH_SCHEMA_VERSION,
 };
 pub use coverage::execute_campaign_coverage;
-pub use allowance::{execute_allowance_status, execute_approve_allowance};
-pub use approved_work::{campaign_plan_digest, work_input_digest};
-pub(crate) use approved_work::require_study_reference;
 pub use dispatcher_lease::{
     acquire_batch_controller_lease, acquire_dispatcher_lease, BatchControllerLease,
     CampaignDispatcherLease,

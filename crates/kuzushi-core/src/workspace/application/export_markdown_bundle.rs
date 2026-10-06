@@ -357,8 +357,12 @@ fn push_bundle_finding_summary(out: &mut String, record: &WorkspaceFindingExport
         "- **Review decision:** {}\n",
         markdown_inline_text(&record.review_decision)
     ));
+    push_bundle_decision_basis(out, record);
     if let Some(note) = record.observation_note.as_deref() {
-        out.push_str(&format!("- **Observation:** {}\n", markdown_inline_text(note)));
+        out.push_str(&format!(
+            "- **Observation:** {}\n",
+            markdown_inline_text(note)
+        ));
     }
     if let Some(conflict) = record.review_decision_conflict.as_deref() {
         out.push_str(&format!(
@@ -369,6 +373,32 @@ fn push_bundle_finding_summary(out: &mut String, record: &WorkspaceFindingExport
     out.push_str(&format!(
         "- **Lifecycle status:** {}\n",
         markdown_inline_text(&record.lifecycle_status)
+    ));
+}
+
+/// Names the observation a decision was made against, so a later run on
+/// different source never silently inherits the verdict.
+fn push_bundle_decision_basis(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    let Some(basis) = record.review_decision_basis.as_ref() else {
+        return;
+    };
+    out.push_str(&format!(
+        "- **Decision basis:** run {} · source snapshot {}\n",
+        markdown_code_span(&basis.run_id),
+        markdown_code_span(&basis.snapshot_hash)
+    ));
+    let Some(later) = basis.later_observation.as_ref() else {
+        return;
+    };
+    out.push_str(&format!(
+        "- **Seen again after the decision:** run {} · source snapshot {}{}\n",
+        markdown_code_span(&later.run_id),
+        markdown_code_span(&later.snapshot_hash),
+        if basis.source_changed_since_decision {
+            " · source changed, so the decision may not describe current code"
+        } else {
+            " · same source"
+        }
     ));
 }
 

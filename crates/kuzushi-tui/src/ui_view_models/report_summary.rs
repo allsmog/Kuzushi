@@ -3,6 +3,11 @@ use crate::app::{RunSummaryEntriesState, ShellApp, ViewDataState};
 use kuzushi_core::{RunSummaryEntry, RunSummaryEntryState};
 
 pub(crate) fn report_review_summary(app: &ShellApp) -> String {
+    if !app.router.report().workspace_history() {
+        if let Some(summary) = study_review_summary(app) {
+            return summary;
+        }
+    }
     let Some(reality) = journey_reality_projection(app) else {
         return "Select a target to report its findings.".to_string();
     };
@@ -11,6 +16,39 @@ pub(crate) fn report_review_summary(app: &ShellApp) -> String {
         "{} findings · {} reviewed · {} confirmed",
         progress.finding_total, progress.reviewed_findings, progress.confirmed_findings,
     )
+}
+
+fn study_review_summary(app: &ShellApp) -> Option<String> {
+    match report_investigation_state(app) {
+        ViewDataState::Ready(Ok(Some(receipt))) => Some(format!(
+            "{} findings · {} reviewed · {} confirmed",
+            receipt.finding_count, receipt.reviewed_count, receipt.confirmed_count
+        )),
+        ViewDataState::Ready(Ok(None)) => None,
+        ViewDataState::Ready(Err(_)) => {
+            Some("Study findings and decisions could not be loaded.".into())
+        }
+        _ => Some("Loading study findings and decisions…".into()),
+    }
+}
+
+pub(crate) fn report_investigation_state(
+    app: &ShellApp,
+) -> ViewDataState<Result<Option<kuzushi_core::workspace::InvestigationReportReceipt>, String>> {
+    app.workbench_cache()
+        .borrow()
+        .cached_investigation_report(app.target(), &app.report_scan_run_refs())
+}
+
+pub(crate) fn report_export_campaign(app: &ShellApp) -> Result<Option<String>, String> {
+    if app.router.report().workspace_history() {
+        return Ok(None);
+    }
+    match report_investigation_state(app) {
+        ViewDataState::Ready(Ok(receipt)) => Ok(receipt.map(|receipt| receipt.campaign_id)),
+        ViewDataState::Ready(Err(error)) => Err(format!("Study receipt unavailable: {error}. Press s to explicitly export workspace history instead.")),
+        _ => Err("Study receipt is loading. Wait before exporting, or press s for workspace history.".into()),
+    }
 }
 
 /// Cost records can include parent totals and the same work's child runs.

@@ -29,6 +29,14 @@ mod storage;
 mod validation;
 pub use identity::referenced_run_content_identity;
 use identity::referenced_run_state;
+
+pub(crate) fn referenced_runs_match_current_source(target: &Path, run_refs: &[String]) -> bool {
+    let referenced = referenced_run_state(target, run_refs);
+    referenced
+        .target_snapshot
+        .equivalent_to(&super::PhaseTargetSnapshot::capture(target))
+        && validation::current_target_matches_identity(target, &referenced.content_identity)
+}
 use legacy_projection::project_typed_receipt_to_legacy;
 use receipt::{completed_v2, emit_or_load_phase_receipt};
 pub use receipt_builder::PhaseReceiptBuilder;
@@ -166,6 +174,8 @@ pub fn append_phase_attempt_disposition_v2_if_present(
     let Some(completed) = ledger.attempts.get(&attempt_id) else {
         return Ok(None);
     };
+    super::load_phase_attempt_ledger(target.as_ref())?
+        .validate_proposed_disposition(disposition)?;
     if matches!(
         disposition.disposition,
         PhaseAttemptDisposition::Selected { .. }

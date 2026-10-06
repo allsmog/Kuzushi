@@ -170,6 +170,7 @@ pub(crate) struct EntryPointItem {
     pub description: String,
     pub ingress: String,
     pub source: String,
+    pub source_framework: Option<String>,
     pub evidence: String,
     pub risk: String,
     pub disposition: EntryPointDisposition,

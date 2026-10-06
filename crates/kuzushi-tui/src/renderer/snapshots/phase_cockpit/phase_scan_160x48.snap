@@ -13,7 +13,7 @@ KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● 
 │                                                │result legacy inferred              │recorded tool sast:scan              │ ⛭ autonomy:fix
 │                                                │run 1/1 scan-phase-run              │b plan study and allowance           │
 │                                                │duration 12s · cost $0.0420         │                                     │ IN FLIGHT
-│                                                │> run sast:scan {}                  │                                     │ ⠋ context:build
+│                                                │r Review saved scan options         │                                     │ ⠋ context:build
 │                                                │                                    │                                     │
 │                                                │                                    │                                     │ FINDINGS
 │                                                │                                    │                                     │ 6 findings · 1 C · 2 H · 2 M

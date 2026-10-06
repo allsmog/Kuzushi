@@ -1,6 +1,6 @@
 use super::*;
 use crate::ui_view_models::{
-    catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
+    catalog_model, catalog_selected_action_hint, catalog_uses_collapsed_layout, CatalogModel,
     CatalogModuleGroup,
 };
 
@@ -22,7 +22,7 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    append_default_next_action(&mut lines, &model, area.width);
+    append_selected_next_action(&mut lines, &model, area.width);
     append_module_groups(&mut lines, &model, area.width);
     lines
 }
@@ -52,9 +52,9 @@ fn append_capabilities_header(lines: &mut Vec<Line<'static>>, model: &CatalogMod
     lines.push(blank());
 }
 
-fn append_default_next_action(lines: &mut Vec<Line<'static>>, model: &CatalogModel, width: u16) {
-    if let Some(module) = model.default_action.as_ref() {
-        let hint = catalog_default_action_hint(module, width);
+fn append_selected_next_action(lines: &mut Vec<Line<'static>>, model: &CatalogModel, width: u16) {
+    if let Some(module) = model.selected_action.as_ref() {
+        let hint = catalog_selected_action_hint(module, width);
         lines.push(next_action_line(&hint, width as usize));
         lines.push(blank());
     }

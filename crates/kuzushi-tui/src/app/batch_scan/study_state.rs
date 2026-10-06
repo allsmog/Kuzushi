@@ -7,6 +7,7 @@ pub(crate) struct StudyDraftState {
     pub(crate) receipt: Option<StudyPlanReceipt>,
     pub(crate) scan_input: Option<serde_json::Value>,
     pub(crate) allowance: Option<AllowanceSnapshot>,
+    pub(crate) accounting_error: Option<String>,
     pub(crate) max_provider_calls: Option<usize>,
     pub(crate) protected_review_calls: Option<usize>,
     pub(crate) max_job_attempts: usize,
@@ -20,6 +21,7 @@ impl Default for StudyDraftState {
             receipt: None,
             scan_input: None,
             allowance: None,
+            accounting_error: None,
             max_provider_calls: None,
             protected_review_calls: None,
             max_job_attempts: 1,
@@ -28,6 +30,13 @@ impl Default for StudyDraftState {
 }
 
 impl StudyDraftState {
+    pub(crate) fn ensure_accounting_ready(&self) -> anyhow::Result<()> {
+        if let Some(error) = &self.accounting_error {
+            anyhow::bail!("Study continuation unavailable: {error}");
+        }
+        Ok(())
+    }
+
     pub(crate) fn record_receipt(&mut self, receipt: StudyPlanReceipt) {
         self.scan_input = Some(receipt.scan_input.clone());
         self.receipt = Some(receipt);
@@ -70,6 +79,7 @@ impl StudyDraftState {
     }
 
     pub(crate) fn restore_allowance(&mut self, allowance: AllowanceSnapshot) {
+        self.accounting_error = None;
         self.investigation_id = allowance.investigation_id.clone();
         self.max_provider_calls = Some(allowance.limits.max_provider_calls as usize);
         self.protected_review_calls = Some(allowance.limits.protected_review_calls as usize);

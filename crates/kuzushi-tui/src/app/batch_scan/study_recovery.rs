@@ -47,6 +47,7 @@ impl ShellApp {
     pub(crate) fn cache_study_result(&mut self, tool: &str, data: &Value) -> bool {
         match tool {
             "campaign:context-study" => return self.cache_context_generation_result(tool, data),
+            "campaign:context-map" => return self.cache_context_map_result(data),
             "campaign:study" => self.cache_study_receipt(data),
             "campaign:approve-allowance" => self.cache_study_approval(data),
             "threat-model:read" => return self.cache_study_context_preview(data),
@@ -167,7 +168,9 @@ fn restore_study(target: &std::path::Path, id: &str) -> anyhow::Result<BatchScan
         "Legacy batch: use scan batch to prepare a study with an explicit allowance."
     );
     let allowance = load_study_allowance(target, &receipt)?;
-    let mut config = BatchScanConfig::load(target, None);
+    let baseline =
+        kuzushi_core::capabilities::campaign::load_study_resource_baseline(target, &receipt)?;
+    let mut config = BatchScanConfig::load(target, baseline.as_deref());
     config.trials = receipt.job_count;
     config.requested_workers = receipt.requested_workers;
     config.apply_worker_resolution(receipt.workers, receipt.worker_limitation.clone());

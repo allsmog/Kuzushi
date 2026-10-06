@@ -33,6 +33,7 @@ pub(crate) fn export_findings_for_target(
     completeness: Option<&str>,
     allow_empty: bool,
     review_yield: Option<ReviewYieldExportProvenance>,
+    campaign_id: Option<&str>,
 ) -> Result<WorkspaceFindingsExport> {
     let workspace = explicit_workspace_for_target(target)?;
     let output = workspace_output_path(&workspace, output)?;
@@ -42,6 +43,7 @@ pub(crate) fn export_findings_for_target(
         .transpose()?
         .unwrap_or_default();
     let options = WorkspaceExportOptions::new(format)
+        .with_campaign(campaign_id.map(str::to_owned))
         .with_completeness(completeness)
         .with_allow_empty(allow_empty)
         .with_review_yield(review_yield);

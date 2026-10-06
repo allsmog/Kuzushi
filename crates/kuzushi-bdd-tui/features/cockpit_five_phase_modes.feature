@@ -29,16 +29,17 @@ Feature: Five phase modes are real interactive Workbench states
     And an alternate-screen capture shows "▣ REVIEW VIEW › alpha-omega"
 
   Scenario: Navigate numbers select any page and disclose the required phase
+    # A context artifact alone never completes Map; explicit selection does.
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"bdd\",\"filesIndexed\":1}"
     When I launch the shell
-    Then an alternate-screen capture shows "Viewing Scan"
+    Then an alternate-screen capture shows "Viewing Map"
     When I press "Esc"
-    And I press "1"
-    Then one alternate-screen row shows "Viewing Map" and "next required Scan"
-    And an alternate-screen capture shows "◇ MAP VIEW › NAVIGATE"
-    When I press "2"
-    Then an alternate-screen capture shows "Viewing Scan"
+    And I press "2"
+    Then one alternate-screen row shows "Viewing Scan" and "next required Map"
     And an alternate-screen capture shows "▦ SCAN VIEW › NAVIGATE"
     When I press "3"
-    Then one alternate-screen row shows "Viewing Review" and "next required Scan"
+    Then one alternate-screen row shows "Viewing Review" and "next required Map"
     And an alternate-screen capture shows "▣ REVIEW VIEW › NAVIGATE"
+    When I press "1"
+    Then an alternate-screen capture shows "Viewing Map"
+    And an alternate-screen capture shows "◇ MAP VIEW › NAVIGATE"

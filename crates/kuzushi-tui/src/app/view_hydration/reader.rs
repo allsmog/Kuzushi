@@ -3,6 +3,7 @@ use kuzushi_core::{CodeqlScanner, ScanEngine, SemgrepScanner};
 use kuzushi_core::{LatestRunPointerIssue, LatestRunPointerState};
 
 mod completion_io;
+mod study_usage;
 mod workspace_io;
 use completion_io::*;
 use workspace_io::*;
@@ -24,24 +25,39 @@ impl ViewArtifactReader for FsViewArtifactReader {
         if cancellation.is_canceled() {
             return None;
         }
-        if key == &ViewHydrationKey::TargetProfile {
-            return TargetProfile::detect_cancellable(target, || cancellation.is_canceled())
-                .map(ViewHydrationValue::TargetProfile);
+        if let Some(value) = study_usage::read_study_usage(target, key, cancellation) {
+            return value;
         }
-        if key != &ViewHydrationKey::FileCompletionValues {
-            return Some(self.read(target, key));
-        }
-        let index = crate::app::workspace_file_candidates_cancellable(
-            target,
-            crate::app::FILE_PICKER_MAX_FILES,
-            || cancellation.is_canceled(),
-        )?;
-        Some(ViewHydrationValue::FileCompletionValues(index))
+        read_regular_cancellable(self, target, key, cancellation)
     }
 }
 
+fn read_regular_cancellable(
+    reader: &FsViewArtifactReader,
+    target: &Path,
+    key: &ViewHydrationKey,
+    cancellation: &ViewHydrationCancellation,
+) -> Option<ViewHydrationValue> {
+    if key == &ViewHydrationKey::TargetProfile {
+        return TargetProfile::detect_cancellable(target, || cancellation.is_canceled())
+            .map(ViewHydrationValue::TargetProfile);
+    }
+    if key != &ViewHydrationKey::FileCompletionValues {
+        return Some(reader.read(target, key));
+    }
+    let index = crate::app::workspace_file_candidates_cancellable(
+        target,
+        crate::app::FILE_PICKER_MAX_FILES,
+        || cancellation.is_canceled(),
+    )?;
+    Some(ViewHydrationValue::FileCompletionValues(index))
+}
+
 fn read_artifact_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
-    read_completion_value(target, key)
+    study_usage::read_study_usage(target, key, &ViewHydrationCancellation::default())
+        .flatten()
+        .or_else(|| read_completion_value(target, key))
+        .or_else(|| read_report_value(target, key))
         .or_else(|| read_run_value(target, key))
         .or_else(|| read_project_value(target, key))
         .or_else(|| read_workspace_file_value(target, key))
@@ -86,6 +102,24 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
     }
 }
 
+fn read_report_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    match key {
+        ViewHydrationKey::InvestigationReport { run_refs } => {
+            Some(read_investigation_report(target, run_refs))
+        }
+        _ => None,
+    }
+}
+
+fn read_investigation_report(target: &Path, run_refs: &[String]) -> ViewHydrationValue {
+    let receipt = kuzushi_core::WorkspaceTarget::new(target)
+        .and_then(|workspace| {
+            kuzushi_core::workspace::load_investigation_report_for_runs(&workspace, run_refs)
+        })
+        .map_err(|error| error.to_string());
+    ViewHydrationValue::InvestigationReport(receipt)
+}
+
 fn read_recent_run_history(target: &Path, limit: usize) -> RunSummaryEntriesHydration {
     match kuzushi_core::list_recent_run_summary_entries_with_recoveries(target, limit) {
         Ok(read) => RunSummaryEntriesHydration {
@@ -117,6 +151,10 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
             project_scope_tree(target),
         )),
         ViewHydrationKey::ThreatModelStore => Some(read_threat_model_store(target)),
+        ViewHydrationKey::MapRunContext { run_refs } => Some(ViewHydrationValue::MapRunContext(
+            kuzushi_core::workflow_attempts::load_map_run_context(target, run_refs)
+                .map_err(|error| format!("{error:#}")),
+        )),
         ViewHydrationKey::ProjectModelDocument { scope_id, revision } => Some(
             read_project_model_document(target, scope_id, revision.as_deref()),
         ),

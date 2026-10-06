@@ -39,7 +39,7 @@ impl SemgrepScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        completed_scan_tool_json(self.output(), json!(self))
+        crate::scan::scan_tool_json_with_coverage(self.output(), json!(self), &self.scan_errors)
     }
 }
 
@@ -166,7 +166,7 @@ impl CodeqlScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        completed_scan_tool_json(self.output(), json!(self))
+        crate::scan::scan_tool_json_with_coverage(self.output(), json!(self), &self.scan_errors)
     }
 }
 
@@ -223,11 +223,7 @@ const CODEQL_COVERAGE_GAP_HEADER: &str =
 fn codeql_output_lines(report: &CodeqlScanReport) -> Vec<String> {
     let mut lines = vec![codeql_summary_line(report)];
     append_codeql_persisted_run(&mut lines, report.persisted.as_ref());
-    append_scan_errors(
-        &mut lines,
-        CODEQL_COVERAGE_GAP_HEADER,
-        &report.scan_errors,
-    );
+    append_scan_errors(&mut lines, CODEQL_COVERAGE_GAP_HEADER, &report.scan_errors);
     append_codeql_top_findings(&mut lines, &report.findings);
     lines
 }

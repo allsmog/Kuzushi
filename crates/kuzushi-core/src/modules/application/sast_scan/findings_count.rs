@@ -13,7 +13,7 @@ impl SastPipelineReports {
     }
 
     pub(in crate::modules) fn native_run_id(&self) -> Option<String> {
-        self.native.as_ref().map(|run| run.id.clone())
+        self.native.as_ref().map(|report| report.run.id.clone())
     }
 
     pub(in crate::modules) fn agentic_run_id(&self) -> Option<String> {
@@ -47,7 +47,9 @@ impl SastPipelineReports {
 
 pub(in crate::modules) fn prepare_sast_task_selection(input: &Value) -> Result<SastTaskSelection> {
     let request = parse_sast_tasks(input)?;
-    SastTaskSelection::from_tasks(request.tasks, request.source)
+    let mut selected = SastTaskSelection::from_tasks(request.tasks, request.source)?;
+    selected.configure_semgrep(input)?;
+    Ok(selected)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -59,10 +61,11 @@ pub(in crate::modules) fn run_selected_sast_pipeline_reports(
     option_store: &crate::options::ToolOptionStore,
     workspace: &crate::workspace::WorkspaceTarget,
     store: &crate::findings::FindingStore,
-    options: &ScanRunOptions,
+    options: &SastScanOptions,
     selected: &SastTaskSelection,
 ) -> Result<SastPipelineReports> {
     selected.ensure_non_empty()?;
+    selected.ensure_scoped_input(input, workspace.root())?;
     let native = selected.run_native(workspace, store, options, ctx)?;
     let mut reports = initial_sast_pipeline_reports(selected, native);
     fill_agentic_reports(
@@ -79,17 +82,12 @@ pub(in crate::modules) fn run_selected_sast_pipeline_reports(
 
 fn initial_sast_pipeline_reports(
     selected: &SastTaskSelection,
-    native: Option<ScanRun>,
+    native: Option<NativeScanReport>,
 ) -> SastPipelineReports {
     let engine_outcomes = selected
         .engine_ids
         .iter()
-        .map(|engine| {
-            (
-                *engine,
-                crate::run_artifacts::ScanEngineStageOutcome::Complete,
-            )
-        })
+        .map(|engine| (*engine, native_engine_outcome(native.as_ref(), engine)))
         .collect();
     SastPipelineReports {
         native,
@@ -102,6 +100,17 @@ fn initial_sast_pipeline_reports(
         skipped_engines: selected.skipped_engines.clone(),
         engine_skip_reasons: Default::default(),
         engines_not_applicable: Default::default(),
+    }
+}
+
+fn native_engine_outcome(
+    report: Option<&NativeScanReport>,
+    engine: &str,
+) -> crate::run_artifacts::ScanEngineStageOutcome {
+    if report.is_some_and(|report| report.coverage.engine_has_gaps(engine)) {
+        crate::run_artifacts::ScanEngineStageOutcome::Partial
+    } else {
+        crate::run_artifacts::ScanEngineStageOutcome::Complete
     }
 }
 

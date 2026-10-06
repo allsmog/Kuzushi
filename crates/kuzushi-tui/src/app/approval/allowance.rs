@@ -28,6 +28,78 @@ fn work_terms(input: &serde_json::Value) -> String {
         input["campaignJobs"], input["maxJobAttempts"], input["campaignPlanSha256"].as_str().unwrap_or("missing"))
 }
 
+pub(crate) fn with_accounting_terms(
+    app: &ShellApp,
+    input: &serde_json::Value,
+    mut confirm: PendingConfirm,
+) -> PendingConfirm {
+    append_resource_terms(app, input, &mut confirm);
+    let Some(snapshot) = revised_snapshot(app, input) else {
+        return confirm;
+    };
+    let terms = format!("\n\nCalls already committed: {} · unresolved: {}.\nAvailable under these limits: {} context/scan calls · {} protected review calls.\nAll fixed jobs share these calls, including internal turns and retries.\nAt the limit, unfinished jobs remain partial. Finish and report or revise work explicitly.",
+        snapshot.committed_calls, snapshot.unresolved_calls, snapshot.remaining_discovery_calls(), snapshot.protected_review_remaining());
+    confirm
+        .rationale
+        .get_or_insert_with(String::new)
+        .push_str(&terms);
+    confirm
+}
+
+fn append_resource_terms(app: &ShellApp, input: &serde_json::Value, confirm: &mut PendingConfirm) {
+    let Some(config) = app.router.campaign().batch_scan_config.as_ref() else {
+        return;
+    };
+    let Some(receipt) = &config.study.receipt else {
+        return;
+    };
+    if input["campaignId"].as_str() != Some(receipt.campaign_id.as_str())
+        || input["campaignPlanSha256"].as_str() != Some(receipt.plan_sha256.as_str())
+    {
+        return;
+    }
+    let mut projection = config.clone();
+    projection.study.max_provider_calls = input["maxProviderCalls"]
+        .as_u64()
+        .and_then(|count| count.try_into().ok());
+    projection.study.protected_review_calls = input["protectedReviewCalls"]
+        .as_u64()
+        .and_then(|count| count.try_into().ok());
+    projection.study.max_job_attempts = input["maxJobAttempts"]
+        .as_u64()
+        .and_then(|count| count.try_into().ok())
+        .unwrap_or(0);
+    let lines = crate::ui_view_models::study_config::study_resource_lines(&projection);
+    confirm
+        .rationale
+        .get_or_insert_with(String::new)
+        .push_str(&format!("\n\n{}", lines.join("\n")));
+}
+
+fn revised_snapshot(
+    app: &ShellApp,
+    input: &serde_json::Value,
+) -> Option<kuzushi_core::allowance::AllowanceSnapshot> {
+    if input["campaignId"].as_str().is_none() {
+        return None;
+    }
+    let study = &app.router.campaign().batch_scan_config.as_ref()?.study;
+    let mut snapshot = study.allowance.clone()?;
+    if study.accounting_error.is_some() {
+        return None;
+    }
+    if input["investigationId"].as_str()? != snapshot.investigation_id
+        || input["expectedRevision"].as_u64()? != u64::from(snapshot.revision)
+    {
+        return None;
+    }
+    snapshot.limits = kuzushi_core::allowance::AllowanceLimits {
+        max_provider_calls: input["maxProviderCalls"].as_u64()?.try_into().ok()?,
+        protected_review_calls: input["protectedReviewCalls"].as_u64()?.try_into().ok()?,
+    };
+    Some(snapshot)
+}
+
 /// Approval is available at the end of the same document the operator sees.
 /// The viewport never hides terms behind an enabled generic confirmation.
 pub(crate) fn approval_visible(app: &ShellApp) -> bool {
@@ -41,6 +113,81 @@ mod tests {
     use super::*;
     use kuzushi_core::modules::ModuleRegistry;
     use serde_json::json;
+
+    const TEST_MODEL: &str = "openai-codex:gpt-5.5";
+
+    fn app_with_commitments(root: &std::path::Path) -> ShellApp {
+        let mut app = ShellApp::new(Default::default(), None);
+        let mut config = crate::app::batch_scan::BatchScanConfig::load(root, None);
+        config.study.allowance = Some(kuzushi_core::allowance::AllowanceSnapshot {
+            schema_version: 1,
+            investigation_id: "study".into(),
+            revision: 2,
+            model: TEST_MODEL.into(),
+            limits: kuzushi_core::allowance::AllowanceLimits {
+                max_provider_calls: 10,
+                protected_review_calls: 3,
+            },
+            committed_calls: 1,
+            review_calls: 0,
+            unresolved_calls: 1,
+            cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+            work_plan: None,
+        });
+        app.router.campaign_mut().batch_scan_config = Some(config);
+        app
+    }
+
+    #[test]
+    fn revised_work_approval_discloses_net_calls_without_resetting_commitments() {
+        let root = tempfile::tempdir().unwrap();
+        let app = app_with_commitments(root.path());
+        let input = json!({"campaignId":"three-pass","investigationId":"study","expectedRevision":2,
+            "maxProviderCalls":5,"protectedReviewCalls":2});
+        let confirm = with_accounting_terms(&app, &input, confirmation(&input));
+        let text = confirm.rationale.unwrap();
+        assert!(text.contains("Calls already committed: 1 · unresolved: 1"));
+        assert!(text.contains("2 context/scan calls · 2 protected review calls"));
+        assert!(text.contains("unfinished jobs remain partial"));
+        assert_eq!(
+            app.router
+                .campaign()
+                .batch_scan_config
+                .as_ref()
+                .unwrap()
+                .study
+                .allowance
+                .as_ref()
+                .unwrap()
+                .limits
+                .max_provider_calls,
+            10
+        );
+    }
+
+    #[test]
+    fn approval_never_borrows_accounting_from_a_different_revision_or_investigation() {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = app_with_commitments(root.path());
+        let base = json!({"campaignId":"three-pass","investigationId":"study","expectedRevision":2,
+            "maxProviderCalls":5,"protectedReviewCalls":2});
+        for (key, value) in [
+            ("expectedRevision", json!(1)),
+            ("investigationId", json!("other")),
+        ] {
+            let mut input = base.clone();
+            input[key] = value;
+            assert!(revised_snapshot(&app, &input).is_none());
+        }
+        app.router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .unwrap()
+            .study
+            .accounting_error = Some("unreadable".into());
+        assert!(revised_snapshot(&app, &base).is_none());
+    }
 
     #[test]
     fn finite_work_confirmation_names_exact_plan_terms() {

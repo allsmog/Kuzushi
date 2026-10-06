@@ -427,18 +427,15 @@ d_submit() { # literal text + Enter (the common "type a verb" case)
   local tries=0 tail3
   while (( tries++ < 10 )); do
     tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
-    case $tail3 in
-      *'Esc list keys'* | *'type help or press Tab'*)
-        break;;                               # clean prompt — ready for input
-      *'command prompt paused'*)
-        # Picker-style views park the prompt entirely; the advertised ":"
-        # reopens it (Escape only cycles picker states and never converges).
-        tmux send-keys -t "$SESSION" :;;
-      *)
-        # Navigate -> Prompt, drafted prompt -> cleared, or notice/completion
-        # card -> dismissed; re-check the rendered state before each press.
-        tmux send-keys -t "$SESSION" Escape;;
-    esac
+    if devex_footer_is_clean_prompt "$tail3"; then
+      break
+    elif [[ $tail3 == *'command prompt paused'* ]]; then
+      # Picker-style views reopen their prompt with the advertised colon.
+      tmux send-keys -t "$SESSION" :
+    else
+      # Re-check rendered ownership between clearing or mode-changing keys.
+      tmux send-keys -t "$SESSION" Escape
+    fi
     sleep 0.3
   done
   # The TUI event loop can lag seconds behind send-keys while async target

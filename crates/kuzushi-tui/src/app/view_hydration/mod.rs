@@ -16,12 +16,19 @@ mod reader_tests;
 mod requests;
 mod runtime;
 #[cfg(test)]
+mod study_usage_tests;
+#[cfg(test)]
 mod tests;
 
 use requests::active_view_hydration_keys;
 pub(crate) use runtime::ViewHydrationRuntime;
 
 pub(crate) const GLOBAL_HEALTH_HYDRATION_SCOPE: &str = "global-health-view-data";
+
+pub(crate) type StudyUsageCatalogueRead =
+    Result<kuzushi_core::capabilities::campaign::ScanUsageCatalogue, String>;
+pub(crate) type StudyUsageRunRead =
+    Result<kuzushi_core::capabilities::campaign::ScanResourceEvidence, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewDataState<T> {
@@ -160,6 +167,13 @@ pub(crate) enum ViewHydrationKey {
     RunIdCompletionValues,
     LatestRunPointer,
     RunSummaryEntries,
+    StudyUsageCatalogue,
+    StudyUsageRun {
+        run_id: String,
+    },
+    InvestigationReport {
+        run_refs: Vec<String>,
+    },
     RunArtifactText {
         run_id: String,
         leaf: String,
@@ -196,6 +210,9 @@ pub(crate) enum ViewHydrationKey {
     },
     ProjectScopeTree,
     ThreatModelStore,
+    MapRunContext {
+        run_refs: Vec<String>,
+    },
     ProjectModelDocument {
         scope_id: String,
         revision: Option<String>,
@@ -232,6 +249,11 @@ pub(crate) enum ViewHydrationValue {
     RunIdCompletionValues(Vec<String>),
     LatestRunPointer(LatestRunPointerState),
     RunSummaryEntries(RunSummaryEntriesHydration),
+    StudyUsageCatalogue(StudyUsageCatalogueRead),
+    StudyUsageRun(StudyUsageRunRead),
+    InvestigationReport(
+        Result<Option<kuzushi_core::workspace::InvestigationReportReceipt>, String>,
+    ),
     RunArtifactText(RunArtifactTextRead),
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
     PhaseReceiptOutcome(
@@ -246,6 +268,7 @@ pub(crate) enum ViewHydrationValue {
     RevisionRelationship(kuzushi_core::workspace::RevisionRelationship),
     ProjectScopeTree(ProjectScopeTreeState),
     ThreatModelStore(ThreatModelStoreState),
+    MapRunContext(Result<Option<kuzushi_core::workflow_attempts::MapRunContext>, String>),
     ProjectModelDocument(Option<ProjectModelDocument>),
     StrategyQueue(StrategyQueueState),
     PromptMutations(PromptMutationsState),
@@ -446,6 +469,7 @@ impl ShellApp {
         }
         self.disclose_returning_workspace_drift();
         self.announce_recovered_runs(&recovered_runs);
+        self.refresh_study_usage_from_cache();
     }
 
     fn disclose_returning_workspace_drift(&mut self) {

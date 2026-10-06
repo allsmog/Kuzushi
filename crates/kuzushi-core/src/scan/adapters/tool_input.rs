@@ -40,6 +40,14 @@ impl SemgrepScanner {
         cancel: &ScanCancellation,
     ) -> Result<SemgrepScanOutcome> {
         let (output, status) = self.run_semgrep_process(target, cancel)?;
+        self.parse_semgrep_outcome(output, status)
+    }
+
+    pub(super) fn parse_semgrep_outcome(
+        &self,
+        output: ScannerProcessOutput,
+        status: ExitStatus,
+    ) -> Result<SemgrepScanOutcome> {
         let stdout = String::from_utf8(output.stdout).context("semgrep emitted non-UTF8 JSON")?;
         if !status.success() {
             anyhow::bail!(semgrep_run_failure(status, &stdout, &output.stderr));
@@ -61,7 +69,18 @@ impl SemgrepScanner {
         }
 
         let mut command = self.semgrep_command(target);
-        let process_group = configure_scanner_process_group(&mut command)?;
+        self.run_semgrep_command(&mut command, cancel)
+    }
+
+    pub(super) fn run_semgrep_command(
+        &self,
+        command: &mut Command,
+        cancel: &ScanCancellation,
+    ) -> Result<(ScannerProcessOutput, ExitStatus)> {
+        if cancel.is_cancelled() {
+            anyhow::bail!("semgrep scan cancelled");
+        }
+        let process_group = configure_scanner_process_group(command)?;
 
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -86,18 +105,20 @@ impl SemgrepScanner {
     }
 
     pub(in crate::scan) fn semgrep_command(&self, target: &Path) -> Command {
+        let mut command = self.semgrep_base_command(target);
+        command.arg(".");
+        command
+    }
+
+    pub(super) fn semgrep_base_command(&self, target: &Path) -> Command {
         let mut command = Command::new(&self.binary);
         command.args(["--metrics", "off", "--json"]);
         for config in &self.config {
             command.arg("--config").arg(config);
         }
-        // Scan `.` from inside the target instead of passing the absolute
-        // path: docker-wrapped semgrep distributions mount only the caller's
-        // working directory, so an absolute root fails with "Invalid
-        // scanning root" on every target — and the relative result paths
-        // match the findings store convention without translation.
+        // Relative targets support wrappers that mount the working directory
+        // and keep returned paths compatible with the findings ledger.
         command
-            .arg(".")
             .current_dir(target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -140,4 +161,3 @@ fn semgrep_failure_detail(stdout: &str, stderr: &[u8]) -> String {
     }
     lines.join("; ")
 }
-

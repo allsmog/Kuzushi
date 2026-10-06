@@ -49,6 +49,7 @@ mod read_methodology;
 mod read_randori_artifacts;
 mod read_threat_model;
 mod reconcile;
+pub(crate) mod rejected_output;
 mod revision_commit;
 mod schema_markdown;
 mod scope_binding;

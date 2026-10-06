@@ -7,12 +7,27 @@ pub(crate) fn build_threat_model(
     runtime: Option<&dyn AgentRuntime>,
     flavor: BuildFlavor,
 ) -> Result<Value> {
+    super::rejected_output::validate_requested_mode(&input)?;
     if deterministic_pipeline_requested(&input) {
         reject_model_only_options_for_deterministic_pipeline(&input, ctx)?;
-        return build_deterministic_threat_model(input, ctx, flavor);
+        return build_source_bound_deterministic_model(input, ctx, flavor);
     }
     let runtime = require_threat_model_runtime(runtime, flavor)?;
     build_agentic_threat_model(input, ctx, runtime, flavor)
+}
+
+fn build_source_bound_deterministic_model(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+) -> Result<Value> {
+    let target = resolve_target(&input, ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        flavor.tool_name(),
+        &target,
+        || build_deterministic_threat_model(input, ctx, flavor),
+    )
 }
 
 /// Threat modeling is model-backed. The runtime-free deterministic fold is an
@@ -241,15 +256,20 @@ fn failed_gap_fill_cost(error: &anyhow::Error) -> crate::runtime::RuntimeCostRep
     error
         .chain()
         .find_map(|source| source.downcast_ref::<crate::structured_output::StructuredOutputError>())
-        .map_or(crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO, |failure| {
-            failure.cost_report()
-        })
+        .map_or(
+            crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            |failure| failure.cost_report(),
+        )
 }
 
 fn emit_gap_fill_failed(ctx: &ToolExecutionContext<'_>, verb: &str, error: &anyhow::Error) {
     if let Some(trace) = ctx.trace {
         let _ = trace
-            .step("tool-progress", verb, format!("gap-fill failed · {error:#}"))
+            .step(
+                "tool-progress",
+                verb,
+                format!("gap-fill failed · {error:#}"),
+            )
             .emit();
     }
 }
@@ -944,7 +964,8 @@ pub(crate) fn query_threat_model_document(
             threat_model_document_schema(),
         ),
         |raw| validate_threat_model_raw(raw, &input.methodology),
-    )?
+    )
+    .map_err(|error| super::rejected_output::retain(input, ctx, error))?
     .costed;
     drop(_llm_scope);
     Ok(costed)
@@ -1113,9 +1134,9 @@ fn threat_model_response(
     let artifact_items = threat_model_artifacts(
         &artifacts.normalized_artifact,
         &artifacts.markdown_artifact,
-        &persistent_artifact,
-        artifacts.persisted,
-    );
+        input.workspace_root(),
+        artifacts.model_ref.as_ref(),
+    )?;
     let data = threat_model_result_data(
         input,
         flavor,

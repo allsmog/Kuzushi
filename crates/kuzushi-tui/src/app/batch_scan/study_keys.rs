@@ -20,6 +20,9 @@ impl ShellApp {
     }
 
     fn handle_study_subview_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        if self.study_engine_picker().is_some() {
+            return Some(self.handle_study_engine_key(code));
+        }
         if self.context_generation().is_some() {
             return Some(self.handle_context_generation_key(code));
         }

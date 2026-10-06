@@ -45,6 +45,7 @@ pub struct PendingToolCallCompletion {
     warning_count: u64,
     error_count: u64,
     execution_may_have_occurred: bool,
+    failure_source_snapshot: Option<crate::workspace::source_snapshot::SourceSnapshot>,
 }
 
 impl DispatchLifecycle {
@@ -128,6 +129,10 @@ impl DispatchLifecycle {
             warning_count,
             error_count,
             execution_may_have_occurred: status != RunItemStatus::Blocked,
+            failure_source_snapshot: result
+                .as_ref()
+                .err()
+                .and_then(crate::workspace::source_snapshot::failed_source_snapshot),
         }
     }
 
@@ -211,6 +216,7 @@ impl DispatchLifecycle {
             warning_count: 0,
             error_count: 1,
             execution_may_have_occurred: false,
+            failure_source_snapshot: None,
         }
     }
 }

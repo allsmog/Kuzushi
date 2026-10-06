@@ -1,6 +1,7 @@
 use super::number_edit::BatchNumberEdit;
-use kuzushi_core::RunSummary;
+use crate::app::{StudyUsageCatalogueRead, StudyUsageRunRead, ViewDataState};
 use std::path::Path;
+mod usage;
 
 pub(crate) const DEFAULT_BATCH_TRIALS: usize = 3;
 pub(crate) const BATCH_HARD_CAP: usize = 50;
@@ -11,6 +12,7 @@ pub(super) const MAX_BATCH_WORKERS: usize = 8;
 pub(crate) enum BatchScanConfigRow {
     Trials,
     Workers,
+    Engines,
     Context,
     ProviderCalls,
     ReviewCalls,
@@ -20,9 +22,10 @@ pub(crate) enum BatchScanConfigRow {
 }
 
 impl BatchScanConfigRow {
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Trials,
         Self::Workers,
+        Self::Engines,
         Self::Context,
         Self::ProviderCalls,
         Self::ReviewCalls,
@@ -35,11 +38,12 @@ impl BatchScanConfigRow {
         match self {
             Self::Trials => "Discovery passes",
             Self::Workers => "Workers",
+            Self::Engines => "Discovery engines",
             Self::Context => "Source and context",
             Self::ProviderCalls => "Total calls",
             Self::ReviewCalls => "Protected review",
             Self::Attempts => "Attempts per job",
-            Self::PriorRun => "Cost evidence",
+            Self::PriorRun => "Usage evidence",
             Self::Launch => "Next action",
         }
     }
@@ -48,7 +52,7 @@ impl BatchScanConfigRow {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BatchPriorRun {
     pub(crate) run_id: String,
-    pub(crate) cost_usd: f64,
+    pub(crate) evidence: ViewDataState<StudyUsageRunRead>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,24 +64,20 @@ pub(crate) struct BatchScanConfig {
     pub(crate) effective_workers: usize,
     pub(crate) worker_clamp_reason: Option<String>,
     pub(crate) prior_run_id: Option<String>,
-    pub(crate) prior_run_cost_usd: Option<f64>,
     pub(crate) prior_runs: Vec<BatchPriorRun>,
+    pub(crate) prior_catalogue: ViewDataState<StudyUsageCatalogueRead>,
     pub(crate) cursor: usize,
     pub(crate) study: super::study_state::StudyDraftState,
     pub(crate) detail_scroll: usize,
     pub(crate) notice: Option<String>,
     pub(crate) number_edit: Option<BatchNumberEdit>,
     pub(crate) context_picker: Option<super::StudyContextPicker>,
+    pub(crate) engine_picker: Option<super::StudyEnginePicker>,
     pub(crate) context_generation: Option<super::context_generation::StudyContextGeneration>,
 }
 
 impl BatchScanConfig {
     pub(crate) fn load(target: &Path, requested_prior_run: Option<&str>) -> Self {
-        let prior_runs = exact_prior_scan_runs(target);
-        let requested = requested_prior_run.and_then(|id| prior_run_named(&prior_runs, id));
-        let notice = requested_prior_run
-            .filter(|_| requested.is_none())
-            .map(unavailable_prior_notice);
         Self {
             origin: None,
             target: target.to_path_buf(),
@@ -85,17 +85,33 @@ impl BatchScanConfig {
             requested_workers: 1,
             effective_workers: 1,
             worker_clamp_reason: None,
-            prior_run_id: requested.map(|prior| prior.run_id.clone()),
-            prior_run_cost_usd: requested.map(|prior| prior.cost_usd),
-            prior_runs,
+            prior_run_id: requested_prior_run.map(str::to_owned),
+            prior_runs: requested_prior_run
+                .map(BatchPriorRun::pending)
+                .into_iter()
+                .collect(),
+            prior_catalogue: ViewDataState::NotRequested,
             cursor: 0,
             study: super::study_state::StudyDraftState::default(),
             detail_scroll: 0,
-            notice,
+            notice: None,
             number_edit: None,
             context_picker: None,
+            engine_picker: None,
             context_generation: None,
         }
+    }
+
+    pub(crate) fn load_for_new_study(target: &Path, requested_prior_run: Option<&str>) -> Self {
+        let mut config = Self::load(target, requested_prior_run);
+        super::map_allowance::restore_map_allowance(&mut config);
+        config
+    }
+
+    pub(crate) fn load_for_map_study(target: &Path) -> Self {
+        let mut config = Self::load(target, None);
+        super::map_allowance::restore_map_history_allowance(&mut config);
+        config
     }
 
     pub(crate) fn selected_row(&self) -> BatchScanConfigRow {
@@ -118,15 +134,40 @@ impl BatchScanConfig {
     }
 
     pub(crate) fn cycle_prior_run(&mut self) {
+        let previous = self.prior_run_id.clone();
         let next = next_prior_run(&self.prior_runs, self.prior_run_id.as_deref());
         self.prior_run_id = next.map(|prior| prior.run_id.clone());
-        self.prior_run_cost_usd = next.map(|prior| prior.cost_usd);
         self.notice = None;
+        if previous != self.prior_run_id && self.study.receipt.is_some() {
+            self.study.invalidate_plan();
+            self.notice = Some("Usage evidence changed. Prepare a new plan for separate approval; limits, options and existing spending remain.".into());
+        }
     }
 
-    pub(crate) fn projected_cost_usd(&self) -> Option<f64> {
-        self.prior_run_cost_usd
-            .map(|per_trial| per_trial * self.trials as f64)
+    pub(crate) fn selected_prior(&self) -> Option<&BatchPriorRun> {
+        prior_run_named(&self.prior_runs, self.prior_run_id.as_deref()?)
+    }
+
+    pub(crate) fn resource_projection(
+        &self,
+    ) -> Result<kuzushi_core::capabilities::campaign::StudyResourceProjection, String> {
+        let prior = self
+            .selected_prior()
+            .ok_or("Select usage evidence explicitly.")?;
+        let evidence = match &prior.evidence {
+            ViewDataState::Ready(value) => value.as_ref().map_err(Clone::clone)?,
+            _ => return Err("Historical usage is loading; no projection yet.".into()),
+        };
+        let receipt = self.study.receipt.as_ref().ok_or(
+            "Prepare the draft to compare historical source, context, model and scan options.",
+        )?;
+        evidence
+            .project(
+                &receipt.equivalence,
+                self.trials,
+                self.study.max_job_attempts,
+            )
+            .map_err(|error| error.to_string())
     }
 
     pub(crate) fn apply_worker_resolution(
@@ -144,33 +185,7 @@ pub(crate) struct StudyNavigationOrigin {
     pub(crate) view: crate::app::ShellView,
     pub(crate) mode: crate::app::InputMode,
     pub(crate) workbench: crate::app::WorkbenchRouteState,
-}
-
-fn exact_prior_scan_runs(target: &Path) -> Vec<BatchPriorRun> {
-    kuzushi_core::list_run_summaries(target)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(exact_prior_scan_run)
-        .collect()
-}
-
-fn exact_prior_scan_run(summary: RunSummary) -> Option<BatchPriorRun> {
-    if !is_exact_completed_scan(&summary) {
-        return None;
-    }
-    let cost_usd = summary
-        .cost_usd
-        .filter(|cost| cost.is_finite() && *cost >= 0.0)?;
-    Some(BatchPriorRun {
-        run_id: summary.run_id,
-        cost_usd,
-    })
-}
-
-fn is_exact_completed_scan(summary: &RunSummary) -> bool {
-    summary.status == "completed"
-        && summary.tool.as_deref() == Some("sast:scan")
-        && !summary.provider_spend_unresolved
+    pub(crate) scope_review: bool,
 }
 
 fn prior_run_named<'a>(runs: &'a [BatchPriorRun], run_id: &str) -> Option<&'a BatchPriorRun> {
@@ -188,13 +203,11 @@ fn next_prior_run<'a>(
     runs.get(next_index)
 }
 
-fn unavailable_prior_notice(run_id: &str) -> String {
-    format!("prior run {run_id:?} has no exact completed sast:scan cost; projection withheld")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::RunSummary;
+    mod resources;
 
     #[test]
     fn defaults_require_an_explicit_allowance() {
@@ -202,7 +215,7 @@ mod tests {
         let config = BatchScanConfig::load(target.path(), None);
 
         assert_eq!(config.trials, 3);
-        assert_eq!(config.projected_cost_usd(), None);
+        assert!(config.resource_projection().is_err());
         assert_eq!(config.study.max_provider_calls, None);
         assert_eq!(config.study.protected_review_calls, None);
         assert_eq!(config.study.max_job_attempts, 1);
@@ -210,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_requires_an_exact_named_prior_scan_run() {
+    fn named_completed_cost_remains_historical_without_verified_conditions() {
         let target = tempfile::tempdir().unwrap();
         let summary = RunSummary::running(
             "scan-prior",
@@ -222,10 +235,21 @@ mod tests {
         .with_cost(Some(0.25));
         kuzushi_core::write_run_summary(target.path(), &summary).unwrap();
 
-        let config = BatchScanConfig::load(target.path(), Some("scan-prior"));
+        let mut config = BatchScanConfig::load(target.path(), Some("scan-prior"));
+        config.prior_runs[0].evidence = ViewDataState::Ready(
+            kuzushi_core::capabilities::campaign::load_named_scan_usage(
+                target.path(),
+                "scan-prior",
+            )
+            .map_err(|error| error.to_string()),
+        );
 
         assert_eq!(config.prior_run_id.as_deref(), Some("scan-prior"));
-        assert_eq!(config.projected_cost_usd(), Some(0.75));
+        let ViewDataState::Ready(Ok(evidence)) = &config.selected_prior().unwrap().evidence else {
+            panic!("missing evidence")
+        };
+        assert_eq!(evidence.cost_usd, Some(0.25));
+        assert!(config.resource_projection().is_err());
     }
 
     #[test]
@@ -241,18 +265,26 @@ mod tests {
         .with_cost(Some(0.25));
         kuzushi_core::write_run_summary(target.path(), &summary).unwrap();
 
-        let config = BatchScanConfig::load(target.path(), Some("agent-prior"));
+        let mut config = BatchScanConfig::load(target.path(), Some("agent-prior"));
+        config.prior_runs[0].evidence = ViewDataState::Ready(
+            kuzushi_core::capabilities::campaign::load_named_scan_usage(
+                target.path(),
+                "agent-prior",
+            )
+            .map_err(|error| error.to_string()),
+        );
 
-        assert_eq!(config.projected_cost_usd(), None);
-        assert!(config
-            .notice
-            .as_deref()
-            .unwrap()
-            .contains("projection withheld"));
+        assert!(config.resource_projection().is_err());
+        assert!(
+            crate::ui_view_models::study_config::study_resource_lines(&config)
+                .join("\n")
+                .contains("Historical usage unavailable")
+        );
     }
 
     #[test]
     fn unresolved_provider_spend_never_creates_an_exact_projection() {
+        let root = tempfile::tempdir().unwrap();
         let mut summary = RunSummary::running(
             "scan-unresolved",
             "tool",
@@ -263,6 +295,11 @@ mod tests {
         .with_cost(Some(0.25));
         summary.provider_spend_unresolved = true;
 
-        assert_eq!(exact_prior_scan_run(summary), None);
+        let evidence = kuzushi_core::capabilities::campaign::load_scan_resource_evidence(
+            root.path(),
+            &summary,
+        )
+        .unwrap();
+        assert_eq!(evidence.cost_usd, None);
     }
 }

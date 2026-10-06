@@ -246,12 +246,15 @@ fn try_record_tool_run_failed_with_settlement(
         completion.as_ref(),
         execution_may_have_occurred_without_completion,
     );
+    let source = completion
+        .as_ref()
+        .and_then(crate::modules::PendingToolCallCompletion::failure_source_snapshot);
     let (_guard, prepared, mut completion) = lock_and_prepare_terminal_result(
         record,
         observation,
         completion,
         execution_may_have_occurred_without_completion,
-        || prepare_unsuccessful_result(record, error, terminal_status),
+        || prepare_unsuccessful_result(record, error, terminal_status, source.as_ref()),
     )?;
     let failure_context = settlement_failure_context(completion.as_ref());
     let producing_call = settle_result_artifact(record, completion.take())?;
@@ -323,13 +326,17 @@ fn prepare_unsuccessful_result(
     record: ToolRunRecord<'_>,
     error: &str,
     status: RunItemStatus,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
 ) -> Result<PreparedUnsuccessfulResult> {
     let error = crate::session_transcript::redaction::redact_text(error);
     let status = unsuccessful_status_label(status);
-    let terminal_digest = terminal_result_digest(status, &json!({ "error": &error }));
+    let context = super::scan_failure_context::attach(record, json!({ "error": &error }))?;
+    let terminal_digest =
+        terminal_result_digest(status, &with_failure_source(context.clone(), source));
     validate_terminalization(record, status, &terminal_digest)?;
     let mut artifacts = existing_run_artifacts(record)?;
-    let mut summary = unsuccessful_summary(record, &error, &artifacts, status)?;
+    let mut summary = unsuccessful_summary(record, &error, &artifacts, status)?
+        .with_findings(tool_run_output_findings_count(&context));
     let failure = write_run_failures(
         record.target,
         record.run_id,
@@ -340,19 +347,31 @@ fn prepare_unsuccessful_result(
     )?;
     artifacts.push(failure.clone());
     summary = summary.with_artifact(failure);
-    let mut output = failed_tool_result_with_context(
-        record.target,
-        record.run_id,
-        record.tool,
-        &error,
-        &artifacts,
-    );
-    set_unsuccessful_output_status(&mut output, record.tool, status);
+    let output = unsuccessful_output(record, &error, &artifacts, status, source)?;
     let result = result_artifact(record, &output)?;
     summary = summary
         .with_artifact(result)
         .with_terminal_result_sha256(Some(terminal_digest));
     Ok(PreparedUnsuccessfulResult { output, summary })
+}
+
+fn unsuccessful_output(
+    record: ToolRunRecord<'_>,
+    error: &str,
+    artifacts: &[RunArtifact],
+    status: &str,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
+) -> Result<Value> {
+    let mut output = failed_tool_result_with_context(
+        record.target,
+        record.run_id,
+        record.tool,
+        error,
+        artifacts,
+    );
+    set_unsuccessful_output_status(&mut output, record.tool, status);
+    let output = super::scan_failure_context::attach(record, output)?;
+    Ok(with_failure_source(output, source))
 }
 
 fn unsuccessful_status_label(status: RunItemStatus) -> &'static str {
@@ -477,12 +496,15 @@ fn try_record_reason_terminal(
     completion: Option<crate::modules::PendingToolCallCompletion>,
     execution_may_have_occurred: bool,
 ) -> Result<()> {
+    let source = completion
+        .as_ref()
+        .and_then(crate::modules::PendingToolCallCompletion::failure_source_snapshot);
     let (_guard, prepared, completion) = lock_and_prepare_terminal_result(
         record,
         observation,
         completion,
         execution_may_have_occurred,
-        || prepare_reason_terminal(record, status, reason),
+        || prepare_reason_terminal(record, status, reason, source.as_ref()),
     )?;
     let failure_context = settlement_failure_context(completion.as_ref());
     let producing_call = settle_reason_result(record, completion, reason_terminal_status(status)?)?;
@@ -505,12 +527,17 @@ fn prepare_reason_terminal(
     record: ToolRunRecord<'_>,
     status: &'static str,
     reason: &str,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
 ) -> Result<PreparedReasonTerminal> {
-    let terminal_digest = terminal_result_digest(status, &json!({ "reason": reason }));
+    let context = super::scan_failure_context::attach(record, json!({ "reason": reason }))?;
+    let terminal_digest = terminal_result_digest(status, &with_failure_source(context, source));
+    let output =
+        super::scan_failure_context::attach(record, terminal_reason_output(status, reason))?;
+    let output = with_failure_source(output, source);
     validate_terminalization(record, status, &terminal_digest)?;
     let artifacts = existing_run_artifacts(record)?;
-    let summary = reason_terminal_summary(record, status, reason)?;
-    let output = terminal_reason_output(status, reason);
+    let summary = reason_terminal_summary(record, status, reason)?
+        .with_findings(tool_run_output_findings_count(&output));
     let result = result_artifact(record, &output)?;
     let summary = artifacts
         .into_iter()
@@ -518,6 +545,19 @@ fn prepare_reason_terminal(
         .with_artifact(result)
         .with_terminal_result_sha256(Some(terminal_digest));
     Ok(PreparedReasonTerminal { output, summary })
+}
+
+fn with_failure_source(
+    mut output: Value,
+    source: Option<&crate::workspace::source_snapshot::SourceSnapshot>,
+) -> Value {
+    let Some(source) = source else {
+        return output;
+    };
+    if !output["data"].is_object() {
+        output["data"] = json!({});
+    }
+    source.clone().attach(output)
 }
 
 fn reason_terminal_summary(
@@ -817,6 +857,10 @@ pub fn tool_run_output_findings_count(output: &Value) -> Option<u64> {
 #[path = "tool_run_record_settlement_tests.rs"]
 mod settlement_tests;
 
+#[cfg(test)]
+#[path = "tool_run_record_source_failure_tests.rs"]
+mod source_failure_tests;
+
 fn tool_run_output_model(output: &Value) -> Option<String> {
     output
         .get("model")
@@ -1085,7 +1129,7 @@ fn attach_failure_artifact(
 }
 
 fn tool_run_output_error(output: &Value) -> String {
-    output
+    let summary = output
         .get("errors")
         .and_then(Value::as_array)
         .and_then(|errors| errors.first())
@@ -1093,5 +1137,52 @@ fn tool_run_output_error(output: &Value) -> String {
         .or_else(|| output.get("error").and_then(Value::as_str))
         .or_else(|| output.get("summary").and_then(Value::as_str))
         .unwrap_or("module returned a non-completed status")
-        .to_string()
+        .to_string();
+    match partial_scan_omission_preview(output) {
+        Some(omissions) => format!("{summary}\nIncomplete coverage: {omissions}"),
+        None => summary,
+    }
 }
+
+fn partial_scan_omission_preview(output: &Value) -> Option<String> {
+    if tool_result_status(output) != ToolResultStatus::Partial {
+        return None;
+    }
+    let errors = output.pointer("/data/scanErrors")?.as_array()?;
+    let mut previews = errors
+        .iter()
+        .filter_map(Value::as_str)
+        .take(3)
+        .map(bounded_omission_preview)
+        .collect::<Vec<_>>();
+    if previews.is_empty() {
+        return None;
+    }
+    if errors.len() > previews.len() {
+        previews.push(format!(
+            "{} more reported omissions; open the run for details",
+            errors.len() - previews.len()
+        ));
+    }
+    Some(previews.join("; "))
+}
+
+fn bounded_omission_preview(error: &str) -> String {
+    let mut chars = error
+        .lines()
+        .next()
+        .unwrap_or("unspecified omission")
+        .chars();
+    let mut preview = chars.by_ref().take(240).collect::<String>();
+    if chars.next().is_some() || error.contains('\n') {
+        preview.push('…');
+    }
+    preview
+}
+
+#[cfg(test)]
+mod coverage_error_tests;
+
+#[cfg(test)]
+#[path = "tool_run_record/retention_digest_tests.rs"]
+mod retention_digest_tests;

@@ -3,6 +3,8 @@ use crate::ShellApp;
 use kuzushi_core::{Severity, WorkflowPhase};
 use std::collections::BTreeMap;
 
+mod readiness;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CapabilityDisposition {
     Product,
@@ -18,7 +20,7 @@ pub(crate) struct CatalogModel {
     pub(crate) module_count: usize,
     pub(crate) expanded: bool,
     pub(crate) phase_label: &'static str,
-    pub(crate) default_action: Option<CatalogActionModule>,
+    pub(crate) selected_action: Option<CatalogActionModule>,
     pub(crate) collapsed: CatalogCollapsedModel,
     pub(crate) groups: Vec<CatalogModuleGroup>,
 }
@@ -30,6 +32,7 @@ pub(crate) struct CatalogActionModule {
     command: String,
     description: String,
     category: &'static str,
+    pub(crate) readiness: readiness::CatalogReadiness,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,13 +81,18 @@ impl CapabilityActionSpec {
         tool_available && integration_visible
     }
 
-    fn into_action(self) -> CatalogActionModule {
+    fn into_action(self, app: &ShellApp, selected: bool) -> CatalogActionModule {
         CatalogActionModule {
             id: self.id.to_string(),
             label: self.label.to_string(),
             command: self.command.to_string(),
             description: self.description.to_string(),
             category: self.category,
+            readiness: if selected {
+                readiness::action_readiness(app, self)
+            } else {
+                readiness::unassessed()
+            },
         }
     }
 }
@@ -99,14 +107,17 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
         .unwrap_or(WorkflowPhase::Map);
     let actions = capability_actions(app, phase, app.router.catalog().is_expanded());
     let module_count = actions.len();
-    let default_action = actions.first().cloned();
     let cursor_id = selected_cursor_id(app, &actions);
+    let selected_action = actions
+        .iter()
+        .find(|action| Some(action.id.as_str()) == cursor_id.as_deref())
+        .cloned();
     let focused_id = app.focused_module();
     CatalogModel {
         module_count,
         expanded: app.router.catalog().is_expanded(),
         phase_label: phase_label(phase),
-        default_action,
+        selected_action,
         collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&actions, focused_id, cursor_id.as_deref()),
     }
@@ -116,12 +127,11 @@ pub(crate) fn catalog_uses_collapsed_layout(_model: &CatalogModel, _width: u16) 
     false
 }
 
-pub(crate) fn catalog_default_action_hint(module: &CatalogActionModule, width: u16) -> String {
-    let prefix = format!("Load {} — ", module.label);
-    let budget = (width as usize)
-        .saturating_sub(prefix.chars().count() + 4)
-        .max(24);
-    format!("{prefix}{}", fit_catalog_text(&module.description, budget))
+pub(crate) fn catalog_selected_action_hint(module: &CatalogActionModule, width: u16) -> String {
+    let prefix = format!("Load {}: ", module.label);
+    let budget = (width as usize).saturating_sub(prefix.chars().count() + 4);
+    let detail = format!("{} · {}", module.readiness.label, module.description);
+    format!("{prefix}{}", fit_catalog_text(&detail, budget))
 }
 
 pub(crate) fn capability_disposition(id: &str) -> Option<CapabilityDisposition> {
@@ -249,10 +259,19 @@ fn capability_actions(
         specs.extend_from_slice(expert_action_specs(phase));
         specs.extend_from_slice(integration_action_specs(phase));
     }
-    specs
+    let visible = specs
         .into_iter()
         .filter(|spec| spec.available(app))
-        .map(CapabilityActionSpec::into_action)
+        .collect::<Vec<_>>();
+    let selected = app
+        .router
+        .catalog()
+        .cursor()
+        .min(visible.len().saturating_sub(1));
+    visible
+        .into_iter()
+        .enumerate()
+        .map(|(index, spec)| spec.into_action(app, index == selected))
         .collect()
 }
 

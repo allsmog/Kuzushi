@@ -124,6 +124,9 @@ impl ShellApp {
             .or_else(|| crate::renderer::run_artifact_page_rows(self))
             .or_else(|| crate::renderer::logs_reader_scroll(self).map(|reader| reader.page_rows))
             .or_else(|| crate::renderer::keymap_reader_scroll(self).map(|reader| reader.page_rows))
+            .or_else(|| {
+                crate::renderer::campaign_reader_scroll(self).map(|reader| reader.page_rows)
+            })
             .unwrap_or(VIEWPORT_PAGE_LINES)
     }
 
@@ -167,6 +170,10 @@ impl ShellApp {
     }
 
     fn add_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
+        if matches!(kind, PageScrollKind::Campaign) {
+            self.shift_campaign_scroll(step.min(isize::MAX as usize) as isize);
+            return;
+        }
         if matches!(kind, PageScrollKind::Logs) {
             self.scroll_down(step.min(u16::MAX as usize) as u16);
             return;
@@ -176,12 +183,23 @@ impl ShellApp {
     }
 
     fn subtract_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
+        if matches!(kind, PageScrollKind::Campaign) {
+            self.shift_campaign_scroll(-(step.min(isize::MAX as usize) as isize));
+            return;
+        }
         if matches!(kind, PageScrollKind::Logs) {
             self.scroll_up(step.min(u16::MAX as usize) as u16);
             return;
         }
         let scroll = self.page_scroll_mut(kind);
         *scroll = scroll.saturating_sub(step);
+    }
+
+    fn shift_campaign_scroll(&mut self, amount: isize) {
+        let max =
+            crate::renderer::campaign_reader_scroll(self).map_or(0, |reader| reader.max_offset);
+        let scroll = &mut self.router.campaign_mut().read_scroll;
+        *scroll = (*scroll).min(max).saturating_add_signed(amount).min(max);
     }
 
     fn page_scroll_mut(&mut self, kind: PageScrollKind) -> &mut usize {
@@ -192,6 +210,7 @@ impl ShellApp {
             PageScrollKind::KnowledgeBase => self.router.kb_mut().scroll_mut(),
             PageScrollKind::Modules => self.router.modules_mut().scroll_mut(),
             PageScrollKind::Logs => self.router.logs_mut().scroll_mut(),
+            PageScrollKind::Campaign => &mut self.router.campaign_mut().read_scroll,
         }
     }
 
@@ -200,43 +219,47 @@ impl ShellApp {
     }
 
     pub(super) fn is_view_scrollable(&self, view: ShellView) -> bool {
-        match view {
-            ShellView::Catalog => true,
-            ShellView::Help
-            | ShellView::Module
-            | ShellView::Quickstart
-            | ShellView::Logs
-            | ShellView::Config
-            | ShellView::Permissions
-            | ShellView::Health
-            | ShellView::Keymap
-            | ShellView::Tools
-            | ShellView::Options
-            | ShellView::Runs
-            | ShellView::RunDiff
-            | ShellView::Replay
-            | ShellView::Trace
-            | ShellView::Activity
-            | ShellView::SastTasks
-            | ShellView::Context
-            | ShellView::FailureHandoff
-            | ShellView::ProjectModel
-            | ShellView::StrategyQueue
-            | ShellView::Workspace
-            | ShellView::KnowledgeBase
-            | ShellView::History
-            | ShellView::Story
-            | ShellView::Threat
-            | ShellView::ThreatEditor
-            | ShellView::PromptsEditor
-            | ShellView::Pwn
-            | ShellView::Tune
-            | ShellView::ActorDetail
-            | ShellView::ModuleRun
-            | ShellView::Report
-            | ShellView::Workbench => true,
-            ShellView::Scene => !self.router.scene().page().is_frame_rendered(),
-            _ => false,
+        if view == ShellView::Scene {
+            return !self.router.scene().page().is_frame_rendered();
         }
+        SCROLLABLE_SHELL_VIEWS.contains(&view)
     }
 }
+
+const SCROLLABLE_SHELL_VIEWS: &[ShellView] = &[
+    ShellView::Catalog,
+    ShellView::Help,
+    ShellView::Module,
+    ShellView::Quickstart,
+    ShellView::Logs,
+    ShellView::Config,
+    ShellView::Permissions,
+    ShellView::Health,
+    ShellView::Keymap,
+    ShellView::Tools,
+    ShellView::Options,
+    ShellView::Runs,
+    ShellView::RunDiff,
+    ShellView::Replay,
+    ShellView::Trace,
+    ShellView::Activity,
+    ShellView::SastTasks,
+    ShellView::Context,
+    ShellView::FailureHandoff,
+    ShellView::ProjectModel,
+    ShellView::StrategyQueue,
+    ShellView::Workspace,
+    ShellView::KnowledgeBase,
+    ShellView::History,
+    ShellView::Story,
+    ShellView::Threat,
+    ShellView::ThreatEditor,
+    ShellView::PromptsEditor,
+    ShellView::Pwn,
+    ShellView::Tune,
+    ShellView::ActorDetail,
+    ShellView::Campaign,
+    ShellView::ModuleRun,
+    ShellView::Report,
+    ShellView::Workbench,
+];

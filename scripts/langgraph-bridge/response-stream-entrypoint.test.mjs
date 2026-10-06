@@ -42,7 +42,7 @@ function setup(t, complete = true) {
   const root = mkdtempSync(join(tmpdir(), "kuzushi-response-stream-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const credentials = join(root, "oauth.json");
-  writeFileSync(credentials, JSON.stringify({ "openai-codex": { access: "fixture-token" } }));
+  writeFileSync(credentials, JSON.stringify({ "openai-codex": { access: "fixture-token", expires: Date.now() + 600_000 } }));
   const fixture = join(root, "provider.mjs");
   writeFileSync(fixture, `
 import assert from 'node:assert/strict';

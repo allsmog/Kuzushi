@@ -188,6 +188,21 @@ impl StructuredOutputError {
     pub(crate) fn cost_report(&self) -> RuntimeCostReport {
         self.cost
     }
+
+    pub(crate) fn rejected_output_diagnostic(&self) -> Option<String> {
+        if !matches!(self.reason, FailureReason::InvalidAfterRepair) {
+            return None;
+        }
+        let evidence = formatted_evidence(format_args!("{:#}", self.source)).ok()?;
+        Some(evidence.render(
+            "rejected output diagnostic",
+            super::diagnostics::MAX_STRUCTURED_DIAGNOSTIC_BYTES,
+        ))
+    }
+}
+
+pub(crate) fn rejected_output_diagnostic(error: &anyhow::Error) -> Option<String> {
+    chain_find::<StructuredOutputError>(error)?.rejected_output_diagnostic()
 }
 
 /// Raw provider text never reaches the message, but an allowlisted cause

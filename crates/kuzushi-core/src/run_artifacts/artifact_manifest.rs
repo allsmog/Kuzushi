@@ -28,6 +28,19 @@ pub fn load_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<Vec<
     Ok(load_manifest(target, run_id)?.artifacts)
 }
 
+pub(crate) fn load_run_artifact_object_reference(
+    target: &Path,
+    run_id: &str,
+    leaf: &str,
+) -> Result<ObjectRef> {
+    load_manifest(target, run_id)?
+        .objects
+        .into_iter()
+        .find(|artifact| artifact.path == leaf)
+        .map(|artifact| artifact.object_ref)
+        .context("run artifact has no authenticated content reference")
+}
+
 pub(crate) fn record_canonical_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<()> {
     let target = target.as_ref();
     for artifact in canonical_run_artifacts() {

@@ -7,9 +7,15 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+mod generation;
 mod input;
+pub use generation::scope_proposal_study_input;
+mod diagnosis;
+mod map_result;
 mod preparation;
 mod recovery;
+pub use diagnosis::RejectedContextOutput;
+pub use map_result::execute_context_map;
 pub use preparation::ContextPreparationJob;
 
 const TOOL: &str = "threat-model:build";
@@ -19,6 +25,8 @@ const KIND: &str = "context-study";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextStudyReceipt {
+    #[serde(default = "generation::default_tool")]
+    pub generation_tool: String,
     pub campaign_id: String,
     pub investigation_id: String,
     pub plan_sha256: String,
@@ -36,7 +44,9 @@ pub fn execute_context_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         .context("context study requires a workspace")?
         .root();
     let registry = ModuleRegistry::with_v2_builtins();
-    let prepared = input::prepare(
+    let tool = generation::selected(input["generationTool"].as_str())?;
+    let prepared = generation::prepare(
+        tool,
         input
             .get("contextInput")
             .context("contextInput is required")?,
@@ -44,13 +54,14 @@ pub fn execute_context_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         &registry,
     )?;
     let preparation = preparation::prepare_jobs(input.get("preparationJobs"), ctx, &registry)?;
+    generation::validate_preparation(tool, &preparation)?;
     let id =
         string_input(input, &["campaignId"]).unwrap_or_else(|| crate::new_run_id("context-study"));
     validate_scan_batch_id(&id)?;
     let investigation = input["investigationId"]
         .as_str()
         .context("investigationId is required")?;
-    let document = plan_document(&id, investigation, prepared, &preparation, ctx)?;
+    let document = plan_document(&id, investigation, tool, prepared, &preparation, ctx)?;
     let receipt = receipt_from_plan(&id, &document)?;
     let directory = campaign_dir(root, &id);
     std::fs::create_dir_all(campaigns_dir(root))?;
@@ -67,6 +78,7 @@ pub fn execute_context_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
 fn plan_document(
     id: &str,
     investigation: &str,
+    tool: &str,
     input: Value,
     preparation: &[ContextPreparationJob],
     ctx: &ToolExecutionContext<'_>,
@@ -80,11 +92,11 @@ fn plan_document(
         .context("context study needs an explicit selected model")?;
     Ok(json!({
         "schemaVersion":1, "kind":KIND, "campaignId":id, "investigationId":investigation,
-        "requiresWorkApproval":true, "tool":TOOL, "workers":1,
+        "requiresWorkApproval":true, "tool":tool, "workers":1,
         "requestedWorkers":1, "effectiveWorkers":1,
         "sourceIdentity":crate::incremental_index::current_workspace_resume_identity(root)?,
         "configSha256":crate::config_hash(ctx.config)?, "model":model,
-        "jobs":preparation::plan_jobs(input.clone(), preparation),
+        "jobs":preparation::plan_jobs(input.clone(), preparation, tool),
     }))
 }
 
@@ -94,6 +106,7 @@ pub fn load_context_study(root: &Path, id: &str) -> Result<ContextStudyReceipt> 
 
 fn receipt_from_plan(id: &str, plan: &Value) -> Result<ContextStudyReceipt> {
     validate_context_identity(id, plan)?;
+    let tool = generation::selected(plan["tool"].as_str())?;
     let jobs = plan["jobs"]
         .as_array()
         .context("context study has no jobs")?;
@@ -105,21 +118,16 @@ fn receipt_from_plan(id: &str, plan: &Value) -> Result<ContextStudyReceipt> {
         plan["workers"] == 1
             && plan["effectiveWorkers"] == 1
             && plan["requestedWorkers"] == 1
-            && plan["tool"] == TOOL,
+            && plan["tool"] == tool,
         "context study worker or tool declaration changed"
     );
     let context_job = jobs.last().unwrap();
     let preparation_jobs = preparation::read_jobs(&jobs[..jobs.len() - 1])?;
-    anyhow::ensure!(
-        context_job["jobId"] == JOB && context_job["tool"] == TOOL,
-        "context study job changed"
-    );
-    input::validate(&context_job["input"])?;
-    anyhow::ensure!(
-        plan["model"] == context_job["input"]["model"],
-        "context study model differs from its job"
-    );
+    validate_generation_job(plan, context_job, tool)?;
+    generation::validate_preparation(tool, &preparation_jobs)?;
+    generation::validate(tool, &context_job["input"])?;
     Ok(ContextStudyReceipt {
+        generation_tool: tool.into(),
         campaign_id: id.into(),
         investigation_id: required_text(plan, "investigationId")?,
         plan_sha256: digest_serializable(plan)?,
@@ -139,6 +147,18 @@ fn validate_context_identity(id: &str, plan: &Value) -> Result<()> {
     anyhow::ensure!(
         plan["campaignId"] == id && plan["requiresWorkApproval"] == true,
         "context study identity or approval requirement changed"
+    );
+    Ok(())
+}
+
+fn validate_generation_job(plan: &Value, job: &Value, tool: &str) -> Result<()> {
+    anyhow::ensure!(
+        job["jobId"] == JOB && job["tool"] == tool,
+        "context study job changed"
+    );
+    anyhow::ensure!(
+        plan["model"] == job["input"]["model"],
+        "context study model differs from its job"
     );
     Ok(())
 }
@@ -209,7 +229,7 @@ fn validate_current_inputs(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<()> {
     let registry = ModuleRegistry::with_v2_builtins();
-    let prepared = input::prepare(&receipt.input, ctx, &registry)?;
+    let prepared = generation::prepare(&receipt.generation_tool, &receipt.input, ctx, &registry)?;
     anyhow::ensure!(
         prepared == receipt.input,
         "context options changed; prepare a new draft"
@@ -226,6 +246,7 @@ fn validate_current_inputs(
     let current = plan_document(
         &receipt.campaign_id,
         &receipt.investigation_id,
+        &receipt.generation_tool,
         prepared,
         &preparation,
         ctx,

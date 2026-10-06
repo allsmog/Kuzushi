@@ -11,6 +11,7 @@ pub(crate) fn campaign_module() -> BuiltinModule {
         vec![
             allowance::study_tool(),
             allowance::context_study_tool(),
+            allowance::context_map_tool(),
             allowance::approve_tool(),
             allowance::status_tool(),
             campaign_plan_tool().with_policy(workspace_policy(

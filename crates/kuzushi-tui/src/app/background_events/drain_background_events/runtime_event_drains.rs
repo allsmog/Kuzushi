@@ -1,6 +1,8 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+mod context_map_result_tests;
 mod phase_result_destination;
 #[cfg(test)]
 mod planner_result_tests;

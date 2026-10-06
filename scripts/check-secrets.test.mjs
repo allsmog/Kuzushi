@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  diffForWorktree,
   fixtureIsApproved,
   formatFinding,
   parseArguments,
@@ -17,6 +18,44 @@ const patterned = (prefix, length) => {
   const alphabet = "Ab9Cd8Ef7Gh6Jk5Lm4Np3Qr2St1Uv0WxYz";
   return `${prefix}${alphabet.repeat(Math.ceil(length / alphabet.length)).slice(0, length)}`;
 };
+
+test("working-tree scan catches unstaged and untracked credentials while excluding deleted values", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "kuzushi-secret-worktree-"));
+  try {
+    gitFixture(directory, ["init"]);
+    writeFileSync(path.join(directory, "config.txt"), 'api_key = "<placeholder>"\n');
+    gitFixture(directory, ["add", "config.txt"]);
+    gitFixture(directory, ["commit", "-m", "initial fixture"]);
+    writeFileSync(path.join(directory, "config.txt"), `api_key = "${patterned("", 28)}"\n`);
+    writeFileSync(path.join(directory, "new.txt"), `token=${patterned("ghp_", 40)}\n`);
+    const findings = scanDiff(diffForWorktree("HEAD", directory));
+    assert.deepEqual(findings.map((finding) => finding.path).sort(), ["config.txt", "new.txt"]);
+    writeFileSync(path.join(directory, "config.txt"), 'api_key = "<replacement>"\n');
+    assert.deepEqual(
+      scanDiff(diffForWorktree("HEAD", directory)).map((finding) => finding.path),
+      ["new.txt"],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function gitFixture(directory, args) {
+  const result = spawnSync(
+    "git",
+    [
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ],
+    { cwd: directory, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+}
 
 test("detects representative provider and platform credentials", () => {
   const github = patterned("ghp_", 40);
@@ -106,18 +145,14 @@ test("only exact approved fixture bytes bypass their intentional patterns", () =
   }
 });
 
-test("whole repository scan accepts only hash-approved synthetic secret fixtures", () => {
-  const revision = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
-  assert.equal(revision.status, 0, revision.stderr);
-  const head = revision.stdout.trim();
+test("whole current repository scan accepts only hash-approved synthetic secret fixtures", () => {
   const scan = spawnSync(
     process.execPath,
     [
       "scripts/check-secrets.mjs",
       "--base",
       "0000000000000000000000000000000000000000",
-      "--head",
-      head,
+      "--worktree",
     ],
     { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );

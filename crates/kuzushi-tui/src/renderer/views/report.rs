@@ -16,10 +16,18 @@ fn report_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let route = app.router.report();
     let mut lines = report_header_lines(app, area);
     append_report_status(&mut lines, route, area.width);
+    for line in crate::ui_view_models::report_investigation_lines(app) {
+        append_wrapped(&mut lines, &line, area.width);
+    }
+    if route.provenance_details() {
+        if let Some(receipt) = route.receipt() {
+            append_report_receipt(&mut lines, receipt, area.width);
+        }
+    }
+    lines.push(blank());
     append_report_formats(&mut lines, route, area.width);
     append_report_destination(&mut lines, route, area.width);
     lines.push(blank());
-    append_wrapped(&mut lines, "Workspace spend: total unavailable", area.width);
     append_wrapped(
         &mut lines,
         &crate::ui_view_models::report_cost_coverage(app),
@@ -134,18 +142,55 @@ fn append_report_status(
     width: u16,
 ) {
     if let Some(receipt) = route.receipt() {
-        append_report_receipt(lines, receipt, width);
+        append_report_status_summary(lines, receipt, width);
     }
     if let Some(error) = route.reveal_error() {
         append_wrapped(lines, &format!("reveal  {error}"), width);
     }
 }
 
-fn report_actions(has_receipt: bool) -> [&'static str; 6] {
+fn append_report_status_summary(
+    lines: &mut Vec<Line<'static>>,
+    receipt: &crate::app::ReportReceipt,
+    width: u16,
+) {
+    let title = if receipt.error.is_some() {
+        "EXPORT FAILED"
+    } else {
+        "EXPORTED"
+    };
+    lines.push(divider(title, width));
+    for line in compact_receipt_lines(receipt) {
+        append_wrapped(lines, &line, width);
+    }
+    if let Some(error) = &receipt.error {
+        append_wrapped(lines, error, width);
+    }
+}
+
+/// What happened and when. The long destination path stays in `p` details so
+/// study facts keep their place above it.
+fn compact_receipt_lines(receipt: &crate::app::ReportReceipt) -> Vec<String> {
+    let count = receipt.count.map_or_else(
+        || "count unavailable".to_string(),
+        |count| format!("{count} finding(s)"),
+    );
+    vec![
+        format!("{} · {count} · p receipt details", receipt.format.as_str()),
+        format!(
+            "timestamp {}",
+            crate::ui_view_models::recorded_timestamp_label(&receipt.timestamp)
+        ),
+    ]
+}
+
+fn report_actions(has_receipt: bool) -> [&'static str; 8] {
     if has_receipt {
         [
             "j/k format",
             "c completeness",
+            "s study/history",
+            "p provenance",
             "e edit path",
             "Enter Retry",
             "o Reveal Destination",
@@ -155,6 +200,8 @@ fn report_actions(has_receipt: bool) -> [&'static str; 6] {
         [
             "j/k format",
             "c completeness",
+            "s study/history",
+            "p provenance",
             "e edit path",
             "Enter export",
             "o reveal after export",
@@ -180,12 +227,7 @@ fn append_report_receipt(
     width: u16,
 ) {
     lines.push(blank());
-    let title = if receipt.error.is_some() {
-        "EXPORT FAILED"
-    } else {
-        "EXPORTED"
-    };
-    lines.push(divider(title, width));
+    lines.push(divider("EXPORT RECEIPT", width));
     lines.push(detail("format", receipt.format.as_str()));
     lines.push(detail("completeness", receipt.completeness.as_str()));
     lines.push(detail(
@@ -195,11 +237,24 @@ fn append_report_receipt(
     if let Some(count) = receipt.count {
         lines.push(detail("findings", &count.to_string()));
     }
-    if let Some(path) = receipt.absolute_path.as_ref() {
-        append_wrapped(lines, &format!("path  {}", path.display()), width);
-    }
+    append_report_paths(lines, receipt, width);
     if let Some(error) = receipt.error.as_ref() {
         append_wrapped(lines, &format!("error  {error}"), width);
+    }
+}
+
+fn append_report_paths(
+    lines: &mut Vec<Line<'static>>,
+    receipt: &crate::app::ReportReceipt,
+    width: u16,
+) {
+    for (label, path) in [
+        ("path", &receipt.absolute_path),
+        ("investigation receipt", &receipt.investigation_receipt_path),
+    ] {
+        if let Some(path) = path {
+            append_wrapped(lines, &format!("{label}  {}", path.display()), width);
+        }
     }
 }
 
@@ -225,6 +280,42 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("$8.00 spent"), "{text}");
+    }
+
+    #[test]
+    fn report_status_does_not_push_scope_below_export_paths() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Report);
+        app.router.report_mut().toggle_scope();
+        app.router
+            .report_mut()
+            .set_receipt(crate::app::ReportReceipt {
+                format: kuzushi_core::WorkspaceExportFormat::Json,
+                completeness: kuzushi_core::WorkspaceExportCompleteness::All,
+                count: Some(1),
+                absolute_path: Some("/long/export/destination.json".into()),
+                investigation_receipt_path: None,
+                error: None,
+                timestamp: "test".into(),
+            });
+        let text = report_document_lines(&app, Rect::new(0, 0, 80, 24))
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("EXPORTED"));
+        assert!(text.contains("json · 1 finding(s) · p receipt details"));
+        assert!(text.contains("timestamp"));
+        assert!(!text.contains("/long/export"));
+        app.router.report_mut().toggle_provenance();
+        let detail = report_document_lines(&app, Rect::new(0, 0, 80, 24))
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            detail.find("Scope: workspace history").unwrap() < detail.find("/long/export").unwrap()
+        );
     }
 
     #[test]
@@ -254,6 +345,7 @@ mod tests {
             completeness: kuzushi_core::WorkspaceExportCompleteness::All,
             count: None,
             absolute_path: Some(format!("/{}last.sarif", "long-directory/".repeat(12)).into()),
+            investigation_receipt_path: None,
             error: Some(format!(
                 "{}recovery detail",
                 "cannot write destination ".repeat(8)
@@ -286,6 +378,7 @@ mod tests {
                 completeness: kuzushi_core::WorkspaceExportCompleteness::All,
                 count: None,
                 absolute_path: None,
+                investigation_receipt_path: None,
                 error: Some(format!(
                     "{}LAST RECOVERY DETAIL",
                     "Export failed because the path is unavailable. ".repeat(20)

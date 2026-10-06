@@ -13,7 +13,7 @@ KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● 
 │                                         │result legacy inferred
 │                                         │run 1/1 scan-phase-run
 │                                         │duration 12s · cost $0.0420
-│                                         │> run sast:scan {}
+│                                         │r Review saved scan options
 │                                         │
 │                                         │
 │                                         │

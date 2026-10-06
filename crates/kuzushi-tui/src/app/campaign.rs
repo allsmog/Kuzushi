@@ -32,6 +32,7 @@ impl ShellApp {
             Some(index) => {
                 deck.selected_campaign = index;
                 deck.selected_job = 0;
+                deck.read_scroll = 0;
                 deck.excluded.clear();
                 deck.detail = true;
             }
@@ -50,16 +51,10 @@ impl ShellApp {
             return;
         };
         self.refresh_findings_preserving_active_filter(false);
+        self.refresh_phase_attempt_projection();
         let (campaigns, unreadable) = load_campaign_snapshots(&target);
-        let spend = campaign_snapshot_spend(&campaigns, unreadable);
-        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
-            self.review_decisions(),
-            spend,
-        );
-        let history = refresh_trend_history(&target, &trend);
+        self.refresh_campaign_trend(&target, &campaigns, unreadable);
         let deck = self.router.campaign_mut();
-        deck.trend = Some(trend);
-        deck.trend_history = history;
         deck.campaigns = campaigns;
         deck.selected_campaign = deck
             .selected_campaign
@@ -79,6 +74,23 @@ impl ShellApp {
         if active_batch_exists {
             self.refresh_active_batch_report();
         }
+    }
+
+    fn refresh_campaign_trend(
+        &mut self,
+        target: &Path,
+        campaigns: &[CampaignSnapshot],
+        unreadable: usize,
+    ) {
+        let spend = campaign_snapshot_spend(campaigns, unreadable);
+        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
+            self.review_decisions(),
+            spend,
+        );
+        let history = refresh_trend_history(target, &trend);
+        let deck = self.router.campaign_mut();
+        deck.trend = Some(trend);
+        deck.trend_history = history;
     }
 
     pub(crate) fn apply_campaign_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
@@ -104,10 +116,12 @@ impl ShellApp {
             }),
             ViewHotkeyAction::CampaignOpenDetail => self.campaign_deck_edit(|deck| {
                 deck.detail = deck.selected_campaign().is_some();
+                deck.read_scroll = 0;
                 deck.sync_selected_batch_workers();
             }),
             ViewHotkeyAction::CampaignBackToList => self.campaign_deck_edit(|deck| {
                 deck.detail = false;
+                deck.read_scroll = 0;
             }),
             ViewHotkeyAction::CampaignToggleExclude => self.toggle_campaign_exclusion(),
             ViewHotkeyAction::CampaignCycleWorkers => self.cycle_campaign_workers(),
@@ -633,6 +647,49 @@ mod tests {
         assert_eq!(app.domain().finding_ledger_counts().unwrap().total, 2);
         assert_eq!(app.shell_view(), origin);
         assert_eq!(app.input(), "preserve this draft");
+    }
+
+    #[test]
+    fn campaign_refresh_recovers_external_scan_result_without_selecting_or_stealing_focus() {
+        use kuzushi_core::run_artifacts::{
+            record_tool_run_complete, record_tool_run_started, ToolRunRecord,
+        };
+        use kuzushi_core::workflow_attempts::{
+            append_phase_attempt_completed_with_v2, PhaseAttemptCompleted, PhaseAttemptOutcome,
+            PhaseTargetSnapshot,
+        };
+        let (temp, mut app) = deck_app();
+        app.open_campaign_view(None);
+        let record = ToolRunRecord::new(temp.path(), "external-discovery", "tool", "sast:scan");
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({"ok":true,"data":{"fixture":"phase refresh only"}}),
+        );
+        let completed = PhaseAttemptCompleted::new(
+            WorkflowPhase::Scan,
+            vec!["external-discovery".into()],
+            PhaseTargetSnapshot::capture(temp.path()),
+            PhaseAttemptOutcome::Completed,
+        )
+        .with_attempt_id(kuzushi_core::run_lifecycle::RunAttemptId::new().to_string());
+        append_phase_attempt_completed_with_v2(temp.path(), completed).unwrap();
+        app.set_input("held draft");
+        app.router.campaign_mut().read_scroll = 8;
+
+        app.refresh_campaign_deck();
+
+        assert!(app
+            .engagement
+            .unresolved_phase_attempt(WorkflowPhase::Scan)
+            .is_some());
+        assert!(app
+            .engagement
+            .selected_phase_attempt(WorkflowPhase::Scan)
+            .is_none());
+        assert_eq!(app.shell_view(), ShellView::Campaign);
+        assert_eq!(app.input(), "held draft");
+        assert_eq!(app.router.campaign().read_scroll, 8);
     }
 
     #[test]

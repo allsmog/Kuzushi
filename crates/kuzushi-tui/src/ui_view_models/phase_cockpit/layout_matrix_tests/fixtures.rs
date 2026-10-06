@@ -43,6 +43,7 @@ fn map_fixture(state: SemanticFixture) -> MapPhaseModel {
             requires_attention: false,
         },
         empty_hint: (richness == 0).then_some("fixture empty".to_string()),
+        recorded_context_issue: None,
         scope_suggestion: None,
     }
 }

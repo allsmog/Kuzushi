@@ -1,0 +1,76 @@
+# Labeled synthetic history; intercepted fixture requests only, no live inference.
+name: Bounded usage history preserves an older baseline through refresh and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/usage_history.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/future-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | finite-future-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | saved-plan-and-spending
+expect: 4 committed / 6 total
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 most recent 100 | bounded-history
+expect: Observed:
+ask: Does the screen disclose the history window, preserve the explicitly chosen older baseline and separate unknown dollars from recorded requests?
+keys: NPage NPage NPage NPage NPage NPage
+require-live-snap: 20 Usage evidence: | older-baseline-identity
+resize: 160x48
+live-snap: usage-160x48
+resize: 96x89
+live-snap: usage-96x89
+resize: 80x24
+live-snap: usage-80x24
+resize: 60x20
+live-snap: usage-60x20
+resize: 40x12
+live-snap: usage-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: usage-tail-40x12
+ask: At 40x12, are the selected evidence and all detail reachable with visible paging and back controls, including after resize?
+resize: 120x36
+keys: PPage PPage PPage PPage PPage PPage PPage PPage PPage PPage
+require-shell: python3 -B @REPO/scripts/devex/fixtures/usage_history.py @TMP_TARGET @ART break
+keys: r
+require-live-snap: 20 Historical usage unavailable | failed-baseline-refresh
+expect: 4 committed / 6 total
+ask: Does refresh expose the unreadable baseline without clearing selection, changing the draft or presenting missing charges as zero?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/usage_history.py @TMP_TARGET @ART restore
+keys: r
+require-live-snap: 20 Observed: | recovered-baseline-refresh
+expect: 4 committed / 6 total
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | exact-plan-approval
+keys: End
+require-live-snap: 20 y approve | approval-last
+ask: Does the allowance approval retain its exact proposed terms and uncertain usage estimate after background history refresh?
+keys: n
+require-live-snap: 20 PLAN A STUDY | cancelled-approval
+require-shell: python3 -B @REPO/scripts/devex/fixtures/usage_history.py @TMP_TARGET @ART verify
+keys: Escape
+require-live-snap: 15 BATCH usage-future | original-campaign
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/future-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | saved-unstarted-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | restored-usage-plan
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 most recent 100 | usage-after-restart
+expect: Observed:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/usage_history.py @TMP_TARGET @ART verify
+ask: Does no-color restart recover the older baseline, history limit and unchanged spending without approving or starting new work?
+keys: Escape
+require-live-snap: 15 BATCH usage-future | restored-origin
+keys: C-c
+require-exit: 10

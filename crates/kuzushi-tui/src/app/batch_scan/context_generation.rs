@@ -5,25 +5,42 @@ use crossterm::event::KeyCode;
 use kuzushi_core::{capabilities::campaign::ContextStudyReceipt, ThreatModelRef};
 use serde_json::{json, Value};
 
+mod diagnosis;
 mod recovery;
+mod scopes;
 mod setup;
 #[cfg(test)]
 mod tests;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct StudyContextGeneration {
+    pub(crate) generation_tool: Option<String>,
     pub(crate) context_input: Value,
     pub(crate) preparation_jobs: Value,
     pub(crate) campaign_id: Option<String>,
     pub(crate) receipt: Option<ContextStudyReceipt>,
     pub(crate) generated: Option<ThreatModelRef>,
+    pub(crate) generated_scopes: Option<kuzushi_core::workspace::ScanScopeReview>,
     pub(crate) result_error: Option<String>,
+    pub(crate) rejected_available: bool,
+    pub(crate) rejected_output:
+        Option<Result<kuzushi_core::capabilities::campaign::RejectedContextOutput, String>>,
+    pub(crate) show_rejected: bool,
+    pub(crate) rejected_scroll: usize,
+    pub(crate) map_attempt_id: Option<String>,
     pub(crate) scroll: usize,
     pub(crate) show_options: bool,
     pub(crate) options: std::sync::Arc<Vec<String>>,
 }
 
 impl StudyContextGeneration {
+    pub(crate) fn is_scope_proposal(&self) -> bool {
+        self.generation_tool.as_deref() == Some("pack:suggest-scopes")
+    }
+
+    pub(crate) fn has_result(&self) -> bool {
+        self.generated.is_some() || self.generated_scopes.is_some()
+    }
     pub(crate) fn preparation_count(&self) -> usize {
         self.receipt
             .as_ref()
@@ -31,10 +48,12 @@ impl StudyContextGeneration {
             .unwrap_or_else(|| self.preparation_jobs.as_array().map_or(0, Vec::len))
     }
     pub(crate) fn record_receipt(&mut self, receipt: ContextStudyReceipt) {
-        self.options =
-            std::sync::Arc::new(crate::ui_view_models::context_generation::format_options(
-                &json!({"contextInput":receipt.input,"preparationJobs":receipt.preparation_jobs}),
-            ));
+        self.generation_tool = Some(receipt.generation_tool.clone());
+        self.options = std::sync::Arc::new(
+            crate::ui_view_models::context_generation::format_options(
+                &json!({"generationTool":receipt.generation_tool,"contextInput":receipt.input,"preparationJobs":receipt.preparation_jobs}),
+            ),
+        );
         self.receipt = Some(receipt);
         self.scroll = 0;
         self.show_options = false;
@@ -51,6 +70,9 @@ impl StudyContextGeneration {
     }
 
     fn approved_action(&self) -> &'static str {
+        if self.is_scope_proposal() {
+            return "Open approved scope proposal job";
+        }
         if self.preparation_count() == 0 {
             "Open approved context job"
         } else {
@@ -59,6 +81,9 @@ impl StudyContextGeneration {
     }
 
     pub(crate) fn action(&self, config: &BatchScanConfig) -> &'static str {
+        if self.is_scope_proposal() {
+            return self.scope_proposal_action(config);
+        }
         if self.result_error.is_some() {
             return "Inspect context job outcome";
         }
@@ -70,6 +95,22 @@ impl StudyContextGeneration {
         }
         if self.approved(config) {
             return self.approved_action();
+        }
+        "Review plan and allowance"
+    }
+
+    fn scope_proposal_action(&self, config: &BatchScanConfig) -> &'static str {
+        if self.result_error.is_some() {
+            return "Inspect scope proposal outcome";
+        }
+        if self.generated_scopes.is_some() {
+            return "Review suggested scopes";
+        }
+        if self.receipt.is_none() {
+            return "Prepare scope proposal draft";
+        }
+        if self.approved(config) {
+            return "Open approved scope proposal job";
         }
         "Review plan and allowance"
     }
@@ -87,8 +128,13 @@ impl ShellApp {
 
     pub(super) fn open_context_generation(&mut self) {
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
-            let previous = config.context_generation.take().unwrap_or_default();
+            if config.study.accounting_error.is_some() {
+                super::map_allowance::restore_map_history_allowance(config);
+            }
+            let mut previous = config.context_generation.take().unwrap_or_default();
+            previous.bind_completed_scope_reference();
             config.context_generation = Some(StudyContextGeneration {
+                generation_tool: previous.generation_tool,
                 context_input: previous.context_input,
                 preparation_jobs: previous.preparation_jobs,
                 ..Default::default()
@@ -98,13 +144,36 @@ impl ShellApp {
     }
 
     pub(super) fn handle_context_generation_key(&mut self, code: KeyCode) -> InputUpdate {
+        if self
+            .context_generation()
+            .is_some_and(|generation| generation.show_rejected)
+        {
+            return self.handle_rejected_context_key(code);
+        }
         match code {
             KeyCode::Enter => return self.advance_context_generation(),
+            KeyCode::Char('m') => return self.review_generated_map(),
             KeyCode::Esc => self.close_context_generation(),
             KeyCode::Char('t') => self.edit_context_allowance(BatchScanConfigRow::ProviderCalls),
             KeyCode::Char('r') => self.edit_context_allowance(BatchScanConfigRow::ReviewCalls),
             KeyCode::Char('n') if !self.has_running_work() => self.open_context_generation(),
+            KeyCode::Char('M')
+                if !self.has_running_work()
+                    && self
+                        .context_generation()
+                        .is_some_and(|generation| generation.is_scope_proposal()) =>
+            {
+                self.open_model_picker()
+            }
             KeyCode::Tab => self.toggle_context_options(),
+            KeyCode::Char('d') => self.inspect_rejected_context(),
+            KeyCode::Char('s')
+                if self
+                    .context_generation()
+                    .is_some_and(|generation| !generation.is_scope_proposal()) =>
+            {
+                self.toggle_rejected_output_retention()
+            }
             _ => self.scroll_context_generation(code),
         }
         InputUpdate::handled()
@@ -123,7 +192,39 @@ impl ShellApp {
         }
     }
 
+    fn review_generated_map(&mut self) -> InputUpdate {
+        if self.has_running_work() {
+            return InputUpdate::handled();
+        }
+        let Some(generation) = self.context_generation() else {
+            return InputUpdate::handled();
+        };
+        if generation.is_scope_proposal() {
+            return self.inspect_generated_scopes();
+        }
+        if generation.generated.is_none() {
+            self.set_batch_config_notice(
+                "A completed, readable context job is required before reviewing Map.",
+            );
+            return InputUpdate::handled();
+        }
+        let Some(receipt) = generation.receipt.as_ref() else {
+            return InputUpdate::handled();
+        };
+        let input =
+            json!({"campaignId":receipt.campaign_id,"expectedPlanSha256":receipt.plan_sha256});
+        self.retain_setup_context_study();
+        self.dispatch_context_action("campaign:context-map", input)
+    }
+
     fn close_context_generation(&mut self) {
+        if self
+            .context_generation()
+            .is_some_and(|generation| generation.is_scope_proposal())
+        {
+            self.close_batch_config();
+            return;
+        }
         if self.retain_setup_context_study() {
             self.close_batch_config();
             return;
@@ -158,8 +259,11 @@ impl ShellApp {
         config: &BatchScanConfig,
         generation: &StudyContextGeneration,
     ) -> InputUpdate {
+        if generation.generated_scopes.is_some() {
+            return self.inspect_generated_scopes();
+        }
         if let Some(error) = &generation.result_error {
-            return self.open_context_jobs(generation, format!("Context result unavailable: {error}. Inspect the completed attempt; n in context review prepares a separately approved draft."));
+            return self.open_context_jobs(generation, format!("Context result unavailable: {error}. Use a for context review; n prepares a separately approved replacement draft."));
         }
         if let Some(reference) = &generation.generated {
             return self.inspect_generated_context(reference.clone());
@@ -168,9 +272,14 @@ impl ShellApp {
             return self.prepare_context_generation(&config);
         }
         if generation.approved(&config) {
+            let result = if generation.is_scope_proposal() {
+                "scope"
+            } else {
+                "context"
+            };
             return self.open_context_jobs(
                 generation,
-                "L starts the approved jobs. After completion, a reopens context review.".into(),
+                format!("L starts the approved jobs. After completion, a reopens {result} review."),
             );
         }
         match context_action_input(&config) {
@@ -183,6 +292,10 @@ impl ShellApp {
     }
 
     fn prepare_context_generation(&mut self, config: &BatchScanConfig) -> InputUpdate {
+        if let Err(error) = config.study.ensure_accounting_ready() {
+            self.set_batch_config_notice(format!("{error:#}"));
+            return InputUpdate::handled();
+        }
         let id = kuzushi_core::new_run_id("context-study");
         if let Some(generation) = self
             .router
@@ -194,11 +307,12 @@ impl ShellApp {
             generation.campaign_id = Some(id.clone());
         }
         let input = json!({"campaignId":id,"investigationId":config.study.investigation_id,"contextInput":object_or_empty(config.context_generation.as_ref().map(|g| &g.context_input)),
+            "generationTool":config.context_generation.as_ref().and_then(|g|g.generation_tool.as_deref()).unwrap_or("threat-model:build"),
             "preparationJobs":config.context_generation.as_ref().map(|g| &g.preparation_jobs).filter(|v| v.is_array()).cloned().unwrap_or_else(|| json!([]))});
         self.dispatch_context_action("campaign:context-study", input)
     }
 
-    fn dispatch_context_action(&mut self, tool: &str, input: Value) -> InputUpdate {
+    pub(super) fn dispatch_context_action(&mut self, tool: &str, input: Value) -> InputUpdate {
         self.set_batch_config_notice(
             "Preparing the selected context action. Activity shows its progress and outcome.",
         );
@@ -258,7 +372,7 @@ impl ShellApp {
         cache_generation_output(state.setup_context_study.as_mut(), tool, data)
     }
 
-    fn scroll_context_generation(&mut self, code: KeyCode) {
+    pub(super) fn scroll_context_generation(&mut self, code: KeyCode) {
         if !matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
             return;
         }
@@ -298,7 +412,7 @@ fn context_action_input(config: &BatchScanConfig) -> Result<(&'static str, Value
         .as_ref()
         .context("Prepare a context draft first.")?;
     let mut input = allowance_terms(&config.study, &receipt.model)?;
-    input["reason"] = json!("Operator reviewed the fixed context generation and preparation jobs with their shared investigation allowance.");
+    input["reason"] = json!(format!("Operator reviewed the fixed {} job and its explicit preparation with the shared investigation allowance.", receipt.generation_tool));
     input["campaignId"] = json!(receipt.campaign_id);
     input["campaignPlanSha256"] = json!(receipt.plan_sha256);
     input["campaignJobs"] = json!(receipt.job_count());

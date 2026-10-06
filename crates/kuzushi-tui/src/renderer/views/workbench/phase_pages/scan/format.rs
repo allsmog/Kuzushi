@@ -2,19 +2,14 @@ use super::*;
 use crate::ui_view_models::{ScanAttemptModel, ScanPhaseModel};
 
 pub(super) fn receipt_status_lines(attempt: &ScanAttemptModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::styled(
-            fit(
-                &format!("outcome {} · {}", attempt.outcome, attempt.freshness),
-                width,
-            ),
-            outcome_style(&attempt.outcome),
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!("outcome {} · {}", attempt.outcome, attempt.freshness),
+            width,
         ),
-        Line::styled(
-            fit(&format!("result {}", attempt.disposition), width),
-            disposition_style(&attempt.disposition),
-        ),
-    ];
+        outcome_style(&attempt.outcome),
+    )];
+    lines.extend(disposition_lines(&attempt.disposition, width));
     if let Some(attempt_id) = attempt.attempt_id.as_deref() {
         lines.push(Line::styled(
             fit(&format!("attempt {attempt_id}"), width),
@@ -22,6 +17,19 @@ pub(super) fn receipt_status_lines(attempt: &ScanAttemptModel, width: usize) -> 
         ));
     }
     lines
+}
+
+fn disposition_lines(disposition: &str, width: usize) -> Vec<Line<'static>> {
+    let full = format!("result {disposition}");
+    let label = if display_width(&full) <= width {
+        full
+    } else {
+        disposition.to_string()
+    };
+    crate::renderer::shared::text::wrap_text(&label, width)
+        .into_iter()
+        .map(|line| Line::styled(line, disposition_style(disposition)))
+        .collect()
 }
 
 pub(super) fn receipt_reference_lines(
@@ -62,17 +70,15 @@ pub(super) fn receipt_metrics_lines(
             ),
             theme::muted(),
         ),
-        Line::styled(fit(&scan_rerun_command(model), width), theme::primary()),
+        Line::styled(fit(&scan_rerun_guidance(model), width), theme::primary()),
     ]
 }
 
-fn scan_rerun_command(model: &ScanPhaseModel) -> String {
-    model
-        .engine_outcomes
-        .iter()
-        .find_map(|outcome| outcome.tool_key.as_deref())
-        .map(|key| format!("> run {key} {{}}"))
-        .unwrap_or_else(|| "> describe what to scan".to_string())
+fn scan_rerun_guidance(model: &ScanPhaseModel) -> String {
+    if model.attempt.is_some() {
+        return "r Review saved scan options".into();
+    }
+    "> describe what to scan".into()
 }
 
 pub(super) fn compact_summary_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
@@ -153,6 +159,7 @@ fn optional_duration(value: Option<u64>) -> String {
 
 fn optional_cost(value: Option<f64>, complete: Option<bool>) -> String {
     match (value, complete) {
+        (Some(0.0), Some(false)) => "unavailable (metering incomplete)".to_string(),
         (Some(cost), Some(false)) => format!(">=${cost:.4} incomplete"),
         (Some(cost), _) => format!("${cost:.4}"),
         (None, _) => "not recorded".to_string(),
@@ -219,7 +226,7 @@ pub(super) fn outcome_symbol(outcome: &str) -> &'static str {
         "partial" => "⚠",
         "blocked" | "refused" => "▣",
         "failed" => "✗",
-        "canceled" | "cancelled" | "interrupted" => "×",
+        "canceled" | "cancelled" | "interrupted" | "stopped" => "×",
         "skipped" => "⊘",
         _ => "○",
     }
@@ -230,7 +237,7 @@ pub(super) fn outcome_style(outcome: &str) -> ratatui::style::Style {
         "complete" | "completed" => theme::success(),
         "partial" | "blocked" | "refused" | "skipped" => theme::warn(),
         "failed" => theme::danger(),
-        "canceled" | "cancelled" | "interrupted" => theme::muted(),
+        "canceled" | "cancelled" | "interrupted" | "stopped" => theme::muted(),
         _ => theme::primary(),
     }
 }
@@ -247,7 +254,53 @@ pub(super) fn disposition_style(disposition: &str) -> ratatui::style::Style {
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_finding_delta, ScanAttemptModel};
+    use super::{compact_finding_delta, disposition_lines, ScanAttemptModel};
+
+    #[test]
+    fn receipt_rerun_guidance_keeps_the_owner_options_instead_of_an_empty_engine_command() {
+        let model = super::ScanPhaseModel {
+            scope: "2 exact source files".into(),
+            plan: "saved selection".into(),
+            engine_outcomes: Vec::new(),
+            attempt: Some(attempt(Some(2), None)),
+            empty_hint: None,
+            live: None,
+        };
+        let text = super::scan_rerun_guidance(&model);
+        assert!(text.contains("saved scan options"));
+        assert!(!text.contains("run semgrep"));
+        assert!(!text.contains("{}"));
+    }
+
+    #[test]
+    fn acknowledged_partial_disposition_remains_readable_in_a_receipt_column() {
+        let disposition = "selected · partial acknowledged";
+        let column = disposition_lines(disposition, 35);
+        assert_eq!(column[0].to_string(), disposition);
+        for width in [18, 20, 35, 58, 118] {
+            let lines = disposition_lines(disposition, width);
+            assert!(lines.iter().all(|line| line.width() <= width));
+            let text = lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(text.contains(disposition), "{width}: {text}");
+        }
+    }
+
+    #[test]
+    fn unpriced_scan_never_displays_a_zero_dollar_total() {
+        assert_eq!(
+            super::optional_cost(Some(0.0), Some(false)),
+            "unavailable (metering incomplete)"
+        );
+        assert_eq!(
+            super::optional_cost(Some(0.25), Some(false)),
+            ">=$0.2500 incomplete"
+        );
+        assert_eq!(super::optional_cost(Some(0.0), Some(true)), "$0.0000");
+    }
 
     fn attempt(findings: Option<u64>, findings_observed: Option<u64>) -> ScanAttemptModel {
         ScanAttemptModel {

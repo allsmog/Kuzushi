@@ -38,6 +38,7 @@ impl ShellApp {
         let Some(target) = self.target_owned() else {
             return InputUpdate::handled();
         };
+        self.refresh_phase_attempt_projection();
         let id = kuzushi_core::new_run_id("study");
         match study_input(self, &target, config, &id) {
             Ok(input) => self.dispatch_new_study(id, input),
@@ -105,6 +106,7 @@ pub(super) fn allowance_terms(
     study: &super::study_state::StudyDraftState,
     model: &str,
 ) -> Result<Value> {
+    study.ensure_accounting_ready()?;
     let total = study
         .max_provider_calls
         .context("Set Total calls before reviewing the allowance.")?;

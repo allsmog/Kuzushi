@@ -15,6 +15,62 @@ pub fn scan_for_secrets(
     Ok(tally.into_report(&root, options))
 }
 
+pub(super) fn scan_for_secrets_in_files(
+    root: &Path,
+    files: &[String],
+    cancellation: &ScanCancellation,
+) -> Result<SecretScanReport> {
+    scan_exact_files_with_options(root, files, &SecretScanOptions::default(), cancellation)
+}
+
+fn scan_exact_files_with_options(
+    root: &Path,
+    files: &[String],
+    options: &SecretScanOptions,
+    cancellation: &ScanCancellation,
+) -> Result<SecretScanReport> {
+    let root = canonical_directory(root)?;
+    let paths = crate::scan::resolve_scan_scopes(&root, files)?;
+    anyhow::ensure!(
+        paths.iter().all(|path| !path.is_directory),
+        "exact secret discovery requires regular files"
+    );
+    let mut tally = SecretScanTally::default();
+    let selected_count = paths.len();
+    for (index, path) in paths.into_iter().enumerate() {
+        if cancellation.is_cancelled() {
+            record_exact_gap(
+                &mut tally,
+                &root,
+                &path.path,
+                format!(
+                    "operator canceled discovery; {} selected files were not scanned",
+                    selected_count - index
+                ),
+            );
+            break;
+        }
+        tally.record_file(&root, &path.path, options);
+        if tally.findings.len() >= options.max_findings {
+            record_exact_gap(&mut tally, &root, &path.path, format!("finding limit reached; this file may contain further matches and {} selected files were not scanned", selected_count - index - 1));
+            break;
+        }
+    }
+    Ok(tally.into_report(&root, options))
+}
+
+fn record_exact_gap(tally: &mut SecretScanTally, root: &Path, file: &Path, reason: String) {
+    tally.coverage_gaps.record(
+        root,
+        file,
+        CoverageGapKind::File,
+        &std::io::Error::other(reason),
+    );
+}
+
+#[cfg(test)]
+mod exact_tests;
+
 fn selected_files(
     root: &Path,
     options: &SecretScanOptions,

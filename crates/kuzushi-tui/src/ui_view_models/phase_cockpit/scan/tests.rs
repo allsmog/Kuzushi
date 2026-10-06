@@ -13,6 +13,8 @@ use kuzushi_core::workflow_attempts::{
 };
 use kuzushi_core::{write_run_summary, RunSummary, V2Config, WorkflowPhase, WorkspaceTarget};
 
+mod repeated;
+
 #[test]
 fn missing_target_discloses_unloaded_scan_receipts() {
     let app = ShellApp::new(V2Config::default(), None);
@@ -492,4 +494,30 @@ fn scan_panel_running_state_projects_the_live_run() {
 
     app.scan_mut().unwrap().running = false;
     assert_eq!(scan_phase_model(&app).live, None);
+}
+
+#[test]
+fn canceled_attempts_label_stopped_engines_without_relabeling_completed_work() {
+    use super::typed_engine_outcome;
+    let attempt = PhaseAttemptOutcome::Canceled;
+    assert_eq!(
+        typed_engine_outcome(ScanEngineStageOutcome::Failed, attempt),
+        "stopped"
+    );
+    assert_eq!(
+        typed_engine_outcome(ScanEngineStageOutcome::Complete, attempt),
+        "complete"
+    );
+    assert_eq!(
+        typed_engine_outcome(ScanEngineStageOutcome::Partial, attempt),
+        "partial"
+    );
+    assert_eq!(
+        typed_engine_outcome(ScanEngineStageOutcome::Skipped, attempt),
+        "skipped"
+    );
+    assert_eq!(
+        typed_engine_outcome(ScanEngineStageOutcome::Failed, PhaseAttemptOutcome::Failed),
+        "failed"
+    );
 }

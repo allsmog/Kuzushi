@@ -11,18 +11,36 @@ impl FindingStore {
         target: &Path,
         operation: impl FnOnce() -> Result<(T, usize)>,
     ) -> Result<T> {
+        self.with_run_lifecycle_status(id, target, || {
+            operation().map(|(value, count)| {
+                (value, count, crate::run_lifecycle::RunItemStatus::Completed)
+            })
+        })
+    }
+
+    pub(crate) fn with_run_lifecycle_status<T>(
+        &self,
+        id: &str,
+        target: &Path,
+        operation: impl FnOnce() -> Result<(T, usize, crate::run_lifecycle::RunItemStatus)>,
+    ) -> Result<T> {
         self.record_run_started(id, target, "running")?;
         match operation() {
-            Ok((value, findings_count)) => {
-                self.finish_successful_run(id, findings_count)?;
+            Ok((value, findings_count, status)) => {
+                self.finish_terminal_run(id, findings_count, status)?;
                 Ok(value)
             }
             Err(error) => Err(self.finish_failed_run(id, error)),
         }
     }
 
-    fn finish_successful_run(&self, id: &str, findings_count: usize) -> Result<()> {
-        self.record_run_finished(id, "completed", findings_count)
+    fn finish_terminal_run(
+        &self,
+        id: &str,
+        findings_count: usize,
+        status: crate::run_lifecycle::RunItemStatus,
+    ) -> Result<()> {
+        self.record_run_finished(id, status.label(), findings_count)
             .inspect_err(|_| {
                 let _ = self.record_run_finished(id, "failed", findings_count);
             })
@@ -66,7 +84,7 @@ impl FindingStore {
             actor: "finding-store".to_string(),
         })?;
         // Only a fully-completed re-scan can honestly retire a prior finding.
-        // Allowlist (not `!= failed`) so a future canceled/partial status can
+        // Allowlist so partial work and canceled statuses can
         // never silently enable reconciliation on this honesty-critical path.
         if status == "completed" && self.v3_storage_paths().is_some() {
             self.reconcile_disappeared_findings(id)?;
@@ -120,9 +138,9 @@ impl FindingStore {
 fn terminal_run_event_kind(status: &str) -> Result<EventKind> {
     match status {
         "completed" => Ok(EventKind::RunCompleted),
-        "failed" => Ok(EventKind::RunFailed),
+        "failed" | "partial" | "canceled" | "interrupted" => Ok(EventKind::RunFailed),
         _ => anyhow::bail!(
-            "unsupported terminal run status {status:?}; expected \"completed\" or \"failed\""
+            "unsupported terminal run status {status:?}; expected completed, partial, failed, canceled or interrupted"
         ),
     }
 }
@@ -141,11 +159,15 @@ mod tests {
             terminal_run_event_kind("failed").unwrap(),
             EventKind::RunFailed
         );
+        assert_eq!(
+            terminal_run_event_kind("partial").unwrap(),
+            EventKind::RunFailed
+        );
     }
 
     #[test]
     fn unsupported_terminal_statuses_fail_closed() {
-        for status in ["partial", "canceled", "interrupted", "blocked", "skipped"] {
+        for status in ["blocked", "skipped", "running", "unknown"] {
             let error = terminal_run_event_kind(status).unwrap_err().to_string();
             assert!(error.contains("unsupported terminal run status"), "{error}");
             assert!(error.contains(status), "{error}");

@@ -188,6 +188,8 @@ pub struct ModelPickerRouteState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigModelPickerOrigin {
+    pub(crate) view: crate::app::ShellView,
+    pub(crate) model: Option<String>,
     pub(crate) input_mode: crate::app::InputMode,
     pub(crate) scroll: u16,
     pub(crate) navigation: super::NavigationRouteState,

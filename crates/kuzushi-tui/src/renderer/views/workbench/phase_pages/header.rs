@@ -21,6 +21,7 @@ pub(in crate::renderer::views) fn phase_header_lines(
     }
     let trailing = command_hint_lines(header, hints, width);
     let card_rows = height.saturating_sub(lines.len() + trailing.len() + 3);
+    let card_rows = scan_result_header_budget(header.phase, card_rows);
     lines.extend(result_card_lines(
         header.result_card.as_ref(),
         width,
@@ -28,6 +29,13 @@ pub(in crate::renderer::views) fn phase_header_lines(
     ));
     lines.extend(trailing);
     lines
+}
+
+fn scan_result_header_budget(phase: kuzushi_core::WorkflowPhase, rows: usize) -> usize {
+    if phase == kuzushi_core::WorkflowPhase::Scan {
+        return rows.min(3);
+    }
+    rows
 }
 
 fn context_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {

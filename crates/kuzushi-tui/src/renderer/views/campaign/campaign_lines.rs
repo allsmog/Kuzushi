@@ -35,12 +35,23 @@ fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: R
         );
         return true;
     }
-    if app.study_context_picker().is_some() {
-        super::batch_scan_config_lines::append_study_context(lines, app, area);
+    if append_study_picker(lines, app, area) {
         return true;
     }
     if let Some(config) = app.router.campaign().batch_scan_config.as_ref() {
         append_batch_scan_config(lines, config, area);
+        return true;
+    }
+    false
+}
+
+fn append_study_picker(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
+    if app.study_engine_picker().is_some() {
+        super::batch_scan_config_lines::append_study_engines(lines, app, area);
+        return true;
+    }
+    if app.study_context_picker().is_some() {
+        super::batch_scan_config_lines::append_study_context(lines, app, area);
         return true;
     }
     false
@@ -226,10 +237,9 @@ fn append_campaign_operational_detail(lines: &mut Vec<Line<'static>>, campaign: 
     );
     append_optional_campaign_detail(
         lines,
-        campaign.provider_spend_unresolved.then(|| {
-            "provider spend is incomplete; shown cost is a lower bound and dispatch is halted"
-                .to_string()
-        }),
+        campaign
+            .provider_spend_unresolved
+            .then(|| "provider cost evidence is incomplete; dollar total is unknown".to_string()),
         theme::warn(),
     );
 }
@@ -352,6 +362,9 @@ fn job_findings_label(job: &CampaignJobSnapshot) -> String {
 }
 
 pub(super) fn job_cost_label(job: &CampaignJobSnapshot) -> String {
+    if job.provider_spend_unresolved && job.cost_usd.is_some_and(|cost| cost <= 0.0) {
+        return "unknown".into();
+    }
     job.cost_usd
         .map(|cost| {
             if job.provider_spend_unresolved {
@@ -360,15 +373,22 @@ pub(super) fn job_cost_label(job: &CampaignJobSnapshot) -> String {
                 format!("${cost:.2}")
             }
         })
-        .unwrap_or_else(|| "—".to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn campaign_spend_label(campaign: &CampaignSnapshot) -> String {
-    if campaign.provider_spend_unresolved {
-        format!("≥${:.2} spent", campaign.total_cost_usd)
-    } else {
-        format!("${:.2} spent", campaign.total_cost_usd)
+    let missing_cost = campaign
+        .jobs
+        .iter()
+        .any(|job| job.cost_usd.is_none() && job.state != "planned");
+    if missing_cost || campaign.provider_spend_unresolved {
+        return if campaign.total_cost_usd <= 0.0 {
+            "cost unavailable".into()
+        } else {
+            format!("≥${:.2} reported · total unknown", campaign.total_cost_usd)
+        };
     }
+    format!("${:.2} spent", campaign.total_cost_usd)
 }
 
 fn job_scope_label(job: &CampaignJobSnapshot) -> String {
@@ -455,23 +475,28 @@ fn unix_now_ms() -> u64 {
 fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
     if let Some(notice) = &deck.notice {
         lines.push(blank());
-        lines.push(Line::styled(format!("  {notice}"), theme::warn()));
+        lines.extend(
+            wrap_text(notice, area.width.saturating_sub(2) as usize)
+                .into_iter()
+                .map(|line| Line::styled(format!("  {line}"), theme::warn())),
+        );
     }
     lines.push(blank());
+    lines.push(command_list_line(deck_commands(deck), area.width as usize));
+}
+
+fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
     let batch_detail = deck
         .selected_campaign()
         .is_some_and(crate::app::is_fixed_study_snapshot);
-    let commands: &[&str] = if deck.detail && batch_detail {
-        &[
-            "j/k",
-            "a plan/allowance",
-            "jobs frozen",
-            "workers frozen",
-            "L launch",
-            "K kill",
-            "r refresh",
-            "q list",
-        ]
+    let completed_context = deck.selected_campaign().is_some_and(|campaign| {
+        campaign.kind.as_deref() == Some("context-study")
+            && campaign.jobs.iter().all(|job| job.state == "completed")
+    });
+    if deck.detail && completed_context {
+        completed_generation_commands(deck)
+    } else if deck.detail && batch_detail {
+        fixed_work_commands(deck)
     } else if deck.detail {
         &[
             "j/k",
@@ -485,8 +510,50 @@ fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState,
         ]
     } else {
         &["j/k", "Enter jobs", "r refresh", "campaign <id>", "back"]
-    };
-    lines.push(command_list_line(commands, area.width as usize));
+    }
+}
+
+fn fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+    let unfinished = deck.selected_campaign().is_some_and(|campaign| {
+        campaign
+            .jobs
+            .iter()
+            .any(|job| matches!(job.state.as_str(), "planned" | "running"))
+    });
+    if unfinished {
+        &[
+            "j/k",
+            "a plan/allowance",
+            "jobs frozen",
+            "workers frozen",
+            "L launch",
+            "K kill",
+            "r refresh",
+            "q list",
+        ]
+    } else {
+        &[
+            "j/k",
+            "a plan/allowance",
+            "work finished",
+            "r refresh",
+            "q list",
+        ]
+    }
+}
+
+fn completed_generation_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+    let scopes = deck.selected_campaign().is_some_and(|campaign| {
+        campaign
+            .jobs
+            .iter()
+            .any(|job| job.tool.as_deref() == Some("pack:suggest-scopes"))
+    });
+    if scopes {
+        &["j/k", "a scope result", "r refresh", "q list"]
+    } else {
+        &["j/k", "a context result", "r refresh", "q list"]
+    }
 }
 
 fn append_empty_deck(lines: &mut Vec<Line<'static>>) {
@@ -589,11 +656,13 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.router.campaign_mut().batch_scan_config =
             Some(crate::app::BatchScanConfig::load(target.path(), None));
+        app.set_shell_view(crate::app::ShellView::Campaign);
 
         let text = rendered_text(&app);
 
         assert!(text.contains("PLAN A STUDY"), "{text}");
-        assert!(text.contains("Cost not estimated"), "{text}");
+        assert!(text.contains("Provider requests: not estimated"), "{text}");
+        assert!(text.contains("Dollar estimate: unavailable"), "{text}");
         assert!(text.contains("Requested 1 workers; 1 permitted"), "{text}");
     }
 
@@ -616,7 +685,11 @@ mod tests {
             text.contains("gate failed · operational complete · security failed · blocking 1"),
             "{text}"
         );
-        assert!(text.contains("jobs frozen"), "{text}");
+        assert!(text.contains("work finished"), "{text}");
+        assert!(
+            !text.contains("L launch") && !text.contains("K kill"),
+            "{text}"
+        );
         assert!(!text.contains("x include/exclude"), "{text}");
     }
 
@@ -682,6 +755,95 @@ mod tests {
             reason: None,
             findings: None,
         }
+    }
+
+    #[test]
+    fn unknown_campaign_cost_never_looks_like_a_zero_charge() {
+        let mut campaign = sample_campaign();
+        assert_eq!(campaign_spend_label(&campaign), "cost unavailable");
+        assert_eq!(job_cost_label(&campaign.jobs[0]), "unknown");
+        campaign.jobs.push(sample_job("second", "running"));
+        campaign.jobs[0].cost_usd = Some(1.25);
+        campaign.total_cost_usd = 1.25;
+        assert_eq!(
+            campaign_spend_label(&campaign),
+            "≥$1.25 reported · total unknown"
+        );
+        campaign.jobs[1].cost_usd = Some(0.0);
+        assert_eq!(campaign_spend_label(&campaign), "$1.25 spent");
+        campaign.provider_spend_unresolved = true;
+        assert_eq!(
+            campaign_spend_label(&campaign),
+            "≥$1.25 reported · total unknown"
+        );
+    }
+
+    #[test]
+    fn an_unpriced_call_with_zero_observed_cost_stays_unknown() {
+        let mut campaign = sample_campaign();
+        campaign.jobs[0].cost_usd = Some(0.0);
+        campaign.jobs[0].provider_spend_unresolved = true;
+        campaign.provider_spend_unresolved = true;
+        assert_eq!(job_cost_label(&campaign.jobs[0]), "unknown");
+        assert_eq!(campaign_spend_label(&campaign), "cost unavailable");
+    }
+
+    #[test]
+    fn finished_fixed_work_keeps_review_available_without_launch_or_kill_controls() {
+        let mut campaign = sample_campaign();
+        campaign.jobs.push(sample_job("failed", "failed"));
+        let mut deck = CampaignRouteState::default();
+        deck.detail = true;
+        deck.campaigns = vec![campaign];
+        assert!(deck_commands(&deck).contains(&"a plan/allowance"));
+        assert!(!deck_commands(&deck).contains(&"L launch"));
+        assert!(!deck_commands(&deck).contains(&"K kill"));
+        for state in ["planned", "running"] {
+            deck.campaigns[0].jobs[0].state = state.into();
+            assert!(deck_commands(&deck).contains(&"L launch"));
+        }
+    }
+
+    #[test]
+    fn completed_scope_job_names_the_scope_result_and_keeps_launch_unavailable() {
+        let mut campaign = sample_campaign();
+        campaign.kind = Some("context-study".into());
+        campaign.tool = Some("pack:suggest-scopes".into());
+        campaign.jobs[0].tool = Some("pack:suggest-scopes".into());
+        let mut deck = CampaignRouteState::default();
+        deck.detail = true;
+        deck.campaigns = vec![campaign];
+        assert!(deck_commands(&deck).contains(&"a scope result"));
+        assert!(!deck_commands(&deck).contains(&"a context result"));
+        assert!(!deck_commands(&deck).contains(&"L launch"));
+    }
+
+    #[test]
+    fn completed_context_jobs_show_full_recovery_notice_and_review_controls() {
+        let mut campaign = sample_campaign();
+        campaign.kind = Some("context-study".into());
+        let mut deck = CampaignRouteState::default();
+        deck.detail = true;
+        deck.campaigns = vec![campaign];
+        deck.notice = Some("Context result unavailable. Inspect the completed attempt; a replacement draft requires separate approval.".into());
+        for width in [40, 60, 80, 96, 120, 160] {
+            let mut lines = Vec::new();
+            append_deck_footer(&mut lines, &deck, Rect::new(0, 0, width, 48));
+            let text = lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(text.contains("separate approval."), "{text}");
+            assert!(
+                !text.contains("L launch") && !text.contains("K kill"),
+                "{text}"
+            );
+            assert!(lines.iter().all(|line| line_width(line) <= width as usize));
+        }
+        assert!(deck_commands(&deck).contains(&"a context result"));
+        deck.campaigns[0].jobs[0].state = "planned".into();
+        assert!(deck_commands(&deck).contains(&"L launch"));
     }
 
     fn sample_campaign() -> CampaignSnapshot {

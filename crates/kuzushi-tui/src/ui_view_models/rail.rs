@@ -28,9 +28,14 @@ pub(crate) fn rail_sections(app: &ShellApp, width: usize) -> Vec<RailSection> {
     .collect()
 }
 
-/// Run Focus already reports cost in its header, so the rail does not repeat it.
+/// Run Focus and Report own their accounting projection. Session cost would
+/// confuse Report's durable investigation allowance with this shell process.
 fn cost_section_unless_shown(app: &ShellApp) -> Option<RailSection> {
-    (app.shell_view() != crate::ShellView::Activity).then(|| cost_section(app))
+    (!matches!(
+        app.shell_view(),
+        crate::ShellView::Activity | crate::ShellView::Report
+    ))
+    .then(|| cost_section(app))
 }
 
 /// Always present: which target, which scope. The rail's anchor row.
@@ -293,6 +298,15 @@ mod tests {
 
         assert_eq!(cost.rows[0].to_string(), "$0.00 spent");
         assert_eq!(cost.rows[1].to_string(), "budget not enforced");
+    }
+
+    #[test]
+    fn report_owns_investigation_accounting_instead_of_showing_session_zero() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Report);
+        assert!(!section_titles(&app).contains(&"SESSION COST"));
+        app.set_shell_view(crate::ShellView::Activity);
+        assert!(!section_titles(&app).contains(&"SESSION COST"));
     }
 
     #[test]

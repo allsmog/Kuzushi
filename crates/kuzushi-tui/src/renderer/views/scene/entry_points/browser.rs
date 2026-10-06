@@ -661,6 +661,7 @@ mod tests {
                 description: "Administrative route".into(),
                 ingress: "POST /admin".into(),
                 source: "src/routes.rs:42".into(),
+                source_framework: None,
                 evidence: "route registration with authorization middleware".into(),
                 risk: "high · score 78".into(),
                 disposition: EntryPointDisposition::Modeled,

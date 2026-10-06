@@ -43,6 +43,48 @@ fn identities(findings: &[Finding]) -> BTreeSet<String> {
 }
 
 #[test]
+fn repeated_producer_observation_uses_the_same_safe_projection_as_review() {
+    let target = tempfile::tempdir().unwrap();
+    std::fs::write(target.path().join("source.rs"), "fn greet() {}\n").unwrap();
+    let store = open_store(target.path());
+    let mut finding = Finding::new_tool(
+        "agentic",
+        "same-observation",
+        "source.rs",
+        1,
+        None,
+        Severity::Info,
+        "Repeated source observation",
+    );
+    finding.fingerprint = "producer-fingerprint".into();
+    finding.source_signature = Some("same-grounded-source".into());
+    for run in ["first-pass", "second-pass"] {
+        store
+            .record_run_started(run, target.path(), "running")
+            .unwrap();
+        store.insert_finding(run, &finding).unwrap();
+    }
+    let runs = ["first-pass", "second-pass"];
+    let findings = store.list_distinct_findings_for_scan_ids(&runs).unwrap();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(
+        store
+            .count_finding_observations_for_scan_ids(&runs)
+            .unwrap(),
+        2
+    );
+    assert_eq!(store.list_all_findings().unwrap().len(), 1);
+    assert!(findings[0]
+        .sources
+        .iter()
+        .any(|source| source.first_scan_id == "first-pass"));
+    assert!(findings[0]
+        .sources
+        .iter()
+        .any(|source| source.last_scan_id == "second-pass"));
+}
+
+#[test]
 fn two_packages_in_one_manifest_keep_two_identities() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -111,14 +153,23 @@ fn same_issue_observed_twice_corroborates_one_identity() {
 
     assert_eq!(first, second);
     assert_eq!(ledger.len(), 2);
-    assert!(ledger.iter().all(|finding| finding.corroboration_count == 2));
+    assert!(ledger
+        .iter()
+        .all(|finding| finding.corroboration_count == 2));
 }
 
 #[test]
 fn repeated_secret_occurrences_keep_one_identity_each() {
     let tmp = tempfile::tempdir().unwrap();
-    let key = concat!("OPENAI_API_KEY=sk-", "proj-abcdefghijklmnopqrstuvwxyzABCDEFGH");
-    std::fs::write(tmp.path().join("keys.txt"), format!("{key}\nlogin();\n{key}\n")).unwrap();
+    let key = concat!(
+        "OPENAI_API_KEY=sk-",
+        "proj-abcdefghijklmnopqrstuvwxyzABCDEFGH"
+    );
+    std::fs::write(
+        tmp.path().join("keys.txt"),
+        format!("{key}\nlogin();\n{key}\n"),
+    )
+    .unwrap();
     let store = open_store(tmp.path());
     persist_scan(&store, tmp.path(), "run-secrets", &SecretScanScanner);
 

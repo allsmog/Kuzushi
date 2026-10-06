@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "014c3ffc07efad21c486dfbe9e5e0252e774dee9",
-  "sourceState": "uncommitted bounded-investigations implementation",
+  "sourceCommit": "7a5d3ece7687bb696013e798179607e2ed657f85",
+  "sourceState": "Committed foundation plus local deterministic Map and existing-context handoff changes; functional claims remain limited to named evidence.",
   "catalog": "kuzushi tools --all --json",
   "visibility": "Historical captured baseline: 93 non-hidden operator tools and a 164-tool built-in policy inventory. Later functional additions are recorded below; those baseline counts are not a current registry census.",
-  "meaning": "Registry baseline, not a completed functional audit. Core is a declared tier, not readiness proof. No retirement or maturity change is inferred.",
+  "meaning": "Registry-derived inventory with explicit per-tool pending outcome dimensions. Declared maturity and successful envelopes are not functional verdicts. Exact scoped native evidence is limited to documented adapters; no retirement is inferred.",
   "remainingEvidence": [
     "phase/target suitability",
     "nonempty output and next consumer",
@@ -29,6 +29,7 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "threatModelRef",
         "maxFindings",
         "passes",
         "mode",
@@ -53,15 +54,31 @@
         "autoTriage",
         "autoTriageMaxSteps",
         "autoTriageDepositUsd",
+        "maxModelTurns",
         "model",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned",
+      "executionEvidence": "J73 executes this real engine through shared SAST dispatch, with intercepted provider transport and synthetic observations: three fresh bridge processes consume the same accepted generated context, import two distinct findings from three observations and reach human review, finding export and restart. J74 exercises shared provider admission until the third discovery request is refused. No live scan-quality, selected-scope, chunked-strategy or full option-path claim follows.",
+      "readinessVerdict": "narrow-execution-and-budget-evidence; live usefulness and full journey pending",
       "resourceEvidence": [
         "Chunked execution reserves an estimate per chunk and only refunds complete costs; unknown spend keeps the deposit. Internal model turns and repairs remain below this boundary.",
-        "Descriptor-declared allowanceRef now binds provider admission through shared dispatch. This executor still requires its own functional allowance audit; no live validation was performed."
-      ]
+        "J73 and J74 provide a limited real shared-dispatch allowance audit with intercepted transport: fresh same-model discovery requests reserve calls durably, existing context spending remains and protected review survives refusal and restart. Internal retry/repair and all chunked paths remain in the broader audit; no live validation was performed."
+      ],
+      "scopeEvidence": "Prepared SAST membership and inventory-pattern adapter checks prevent explicit pattern replacement; no provider execution in this increment. Read-tool/MCP source isolation and actual scoped discovery remain unverified.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "liveEvidence": "Sequential source-only OAuth validation at /tmp/kuzushi-live-model-ua7rhauw, GPT-6 Luna low, eight total requests with two protected for Review. Normal adapter, no transport interception.",
+      "liveOutcome": "One discovery pass completed after four underlying requests with zero findings. The other two finite passes failed before any provider reservation at the protected Review boundary. Model precision and useful finding production were not established."
     },
     {
       "tool": "android-apk:scan",
@@ -88,7 +105,19 @@
         "skipHybrid"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "campaign:allowance",
@@ -107,11 +136,25 @@
         "investigationId"
       ],
       "declaredOptions": [
-        "investigationId"
+        "investigationId",
+        "runId"
       ],
       "resourceEvidence": [
         "Deterministic approval/status; no provider calls. Approval needs exact authorization, persists limits/revision without starting jobs; status uses a read-only ledger connection."
-      ]
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "resourcePreviewEvidence": "Shared admitted-run request counts remain visible without dollar pricing. Matching frozen conditions support explicitly uncertain historical projections. J91 covers allowance shortfall, frozen baseline, cancellation, six sizes and no-color restart with intercepted transport; no live scan-quality certification."
     },
     {
       "tool": "campaign:approve-allowance",
@@ -149,14 +192,60 @@
       ],
       "resourceEvidence": [
         "Deterministic approval/status; no provider calls. Approval needs exact authorization, persists limits/revision without starting jobs; status uses a read-only ledger connection."
-      ]
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
+    },
+    {
+      "tool": "campaign:context-map",
+      "module": "campaign",
+      "declaredMaturity": "core",
+      "declaredPhase": "map",
+      "purpose": "Record context-study jobs or an exact revision's authenticated producing run as a durable Map for review. Preserves partial status; starts no jobs or model requests and accepts nothing.",
+      "scope": "source-only-context-map-handoff",
+      "runtimeRequirement": "never",
+      "headlessDeclared": true,
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "optional",
+      "requiredOptions": [],
+      "declaredOptions": [
+        "campaignId",
+        "expectedPlanSha256",
+        "threatModelRef",
+        "allowanceRef"
+      ],
+      "executionEvidence": "Existing completed-campaign regressions plus three real runtime-free producer/admission checks authenticate an exact revision and producing run, preserve partial outcome, reject corruption and source drift, retain idempotency and require explicit acknowledgement. J94 exercises CLI producers, shell review, exact context inheritance and no-color restart with zero provider calls. Live context quality remains unproven.",
+      "readinessVerdict": "narrow-existing-context-handoff-verified; full investigation and live quality remain open",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "Verified exclusive origins and exact-reference authentication; unknown options rejected through shared preparation.",
+        "sharedDispatchExecution": "Real source-bound deterministic producer consumed by exact-revision handoff; completed-campaign path retains focused regressions.",
+        "artifactConsumption": "Exact revision -> pending partial Map -> explicit acceptance -> immutable context in a three-job draft, independent of globally active context.",
+        "failureAndRecovery": "Source drift, corrupt run result, invalid acknowledgement, repeated review and restart covered narrowly; large history and concurrent source mutation remain open.",
+        "approvedResources": "Runtime-free handoff makes zero provider calls and starts no jobs. Historical spending retained for explicit new-source drafts; missing accounting blocks.",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "CLI producers and shell handoff exercised. Shared run dispatch tested; complete mode/option matrix remains open."
+      },
+      "inputContract": "Executor requires either campaignId plus expectedPlanSha256, or exact threatModelRef. Mixed, absent or incomplete origins fail. Descriptor optional flags do not express this one-of contract."
     },
     {
       "tool": "campaign:context-study",
       "module": "campaign",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Draft one source-grounded context generation job for approval. Keeps the current context active until the operator selects the result. Makes no model requests.",
+      "purpose": "Draft one bounded Map model action for approval: source-grounded context or a scan scope proposal. Keeps current context and scope acceptance unchanged. Makes no model requests.",
       "scope": "one repository-wide source-only context generation job, optionally preceded by up to two frozen deterministic preparation jobs",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -169,14 +258,28 @@
       "declaredOptions": [
         "campaignId",
         "investigationId",
+        "generationTool",
         "preparationJobs",
         "contextInput",
         "allowanceRef"
       ],
-      "executionEvidence": "Shared prepared dispatch freezes one context job and up to two deterministic preparation jobs without spending. Core tests execute both preparation tools, run the real generator with a mocked provider, retain a non-active immutable result, refuse a second attempt, recover the run-associated revision, and approve a subsequent scan study under the same consumed allowance. CLI integration binds every exact job and refuses worker expansion. J67 verifies Setup entry, Back/draft preservation, exact inputs, paged approval, named jobs and a proven fresh no-color restart: 35 machine checks and 16 manual judgments pass. No live provider quality claim.",
+      "executionEvidence": "Shared prepared dispatch freezes one context job and up to two deterministic preparation jobs without spending. Core tests execute both preparation tools, run the real generator with a mocked provider, retain a non-active immutable result, refuse a second attempt, recover the run-associated revision, and approve a subsequent scan study under the same consumed allowance. CLI integration binds every exact job and refuses worker expansion. J67 verifies Setup entry, Back/draft preservation, exact inputs, paged approval, named jobs and a proven fresh no-color restart: 35 machine checks and 16 manual judgments pass. No live provider quality claim. Current recovery tests distinguish pending generation from stopped or unavailable output. J69 verifies Setup result inspection, same-investigation scan-plan binding, complete error reading, unknown cost, all viewport sizes and a proven fresh no-color restart: 53 machine checks and 16 manual judgments pass. Its imported context and injected queue outcomes test recovery UI only; no generator, scan job or provider runs in that journey.",
       "readinessVerdict": "narrow-functional-proof",
-      "evidenceSourceCommit": "77d69695602a5240a539819911c83eb0e4f9b5b5 plus uncommitted context-study implementation",
-      "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20260910-041224/J67/manual-review.json"
+      "evidenceSourceCommit": "058388c588333466ca47846322ed38c6733dcabe plus uncommitted context-result recovery changes",
+      "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20261004-235128/J69/manual-review.json",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "rejectedOutputEvidence": "New context plans freeze saveRejectedOutput=true unless explicitly disabled. Historical inputs without the flag remain unchanged. Context-study tests cover authentication, corruption and old-plan behavior. No provider request occurs during inspection."
     },
     {
       "tool": "campaign:coverage",
@@ -194,7 +297,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "campaign:plan",
@@ -226,7 +341,19 @@
       "resourceEvidence": [
         "Planning writes a finite job matrix without model calls. The existing campaign dollar guard operates between jobs and from retrospective child runtime receipts.",
         "An immutable accepted investigation plan and allowance binding still need to reach every child."
-      ]
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "campaign:status",
@@ -244,8 +371,20 @@
         "campaignId",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "J86 uses the actual shared campaign projection for a failed context job. Its matching recorded run error is surfaced, provider-call consumption remains zero, and one consumed work attempt plus protected review survive restart. Five focused tests cover correlation, bounded/redacted diagnostics, explicit-reason precedence, read-only metadata and escaped references. This does not certify all campaign kinds or live provider quality.",
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "campaign:study",
@@ -258,18 +397,33 @@
       "headlessDeclared": true,
       "workspaceRequirement": "required",
       "findingStoreRequirement": "optional",
-      "executionEvidence": "Shared prepared-dispatch tests compile a real three-pass draft, refuse unapproved child execution, approve the exact plan and complete three offline secret-scan passes. The fourth invocation is refused. J60 exercises the real shell draft and approval without model execution.",
+      "executionEvidence": "Shared prepared-dispatch tests compile a real three-pass draft, refuse unapproved child execution, approve the exact plan and complete three offline secret-scan passes. The fourth invocation is refused. J60 exercises the real shell draft and approval without model execution. Accepted-context tests now cover default inheritance, explicit omission and source drift. The shell preparation test uses a different globally active revision and preserves accepted Map context before shared default binding.",
       "readinessVerdict": "narrow-functional-proof",
       "declaredOptions": [
         "campaignId",
+        "investigationId",
         "trials",
         "workers",
+        "baselineRunId",
         "scanInput",
         "allowanceRef"
       ],
       "requiredOptions": [
         "scanInput"
-      ]
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "resourcePreviewEvidence": "Shared admitted-run request counts remain visible without dollar pricing. Matching frozen conditions support explicitly uncertain historical projections. J91 covers allowance shortfall, frozen baseline, cancellation, six sizes and no-color restart with intercepted transport; no live scan-quality certification."
     },
     {
       "tool": "cargo-audit:scan",
@@ -288,7 +442,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "codeql:create-db",
@@ -314,7 +480,19 @@
         "__kuzushiRepositoryTargetScope"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "codeql:scan",
@@ -344,8 +522,20 @@
         "multiLanguage",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "2026-10-05: a report-adapter fixture exercises real persistence and envelope construction for an empty CodeQL result with a labeled omitted language. The envelope and findings lifecycle remain partial. The executor now invokes the existing source-binding guard before discovery, and shared source-guard regressions pass. This does not execute an installed CodeQL analyzer or certify dependency setup, useful findings, scoped membership, resource limits, cancellation, source-drift ledger settlement or full interface parity.",
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "config:show",
@@ -361,7 +551,19 @@
       "requiredOptions": [],
       "declaredOptions": [],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "context:build",
@@ -384,8 +586,29 @@
         "model",
         "allowanceRef"
       ],
-      "executionEvidence": "Prepared CLI dispatch indexed two source files with enrichment disabled; source hashes agreed with entry-points:extract. A real executor-to-bridge test consumes structured enrichment from an intercepted local provider and refuses its next call before protected review; missing dollar cost remains unavailable.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "map_context_contract integration suite executes the real shared prepared dispatch, creates nonempty current source-grounded routes, consumes the generated snapshot in the catalog, and checks missing context, source drift, legacy extraction policy and immutable prior evidence. Python receiver/framework fixtures include mixed frameworks, aliases, ambiguous rebinding and unknown factories.",
+      "readinessVerdict": "narrow-source-to-consumer-functional-evidence; full configuration and scale audit pending",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "Verified fixture: nonempty source-bound HTTP routes retain distinct Flask/FastAPI facts instead of misleading framework labels.",
+        "phaseAgreement": "Verified fixture: Map artifacts feed entry-point extraction and the deterministic Map consumer; no discovery verdict is generated by this check.",
+        "requiredInputs": "Verified fixture: explicit target, deterministic context configuration and current context prerequisite. Missing/stale/legacy context produces a concrete re-extraction action.",
+        "sharedDispatchExecution": "Verified through prepare_dispatch_input and dispatch_prepared_input_with_runtime; real executors, no model runtime or source execution.",
+        "artifactConsumption": "Verified: real context snapshot -> real catalog -> real deterministic Map, source ids/frameworks retained; exact stored Map revision reads unchanged.",
+        "failureAndRecovery": "Verified missing context, changed source, old Python extraction policy and retained prior bytes. Cancellation, malformed artifacts and every option path remain broader audit work.",
+        "approvedResources": "Verified deterministic fixture only: no runtime supplied and zero provider requests. Model enrichment and live allowance behavior are separate existing evidence.",
+        "scopeEnforcement": "Whole-root fixture only; inventory-derived scope and source-read isolation remain separate audits.",
+        "interfaceParity": "Shared dispatch integration and native CLI producer evidence. Terminal consumer evidence is recorded separately; no full scan/shell/run certification."
+      },
+      "scopeEvidence": "One explicit whole-repository fixture root. Source files remain byte-identical. Context truncation and scoped/monorepo paths remain separate evidence; no complete scope certification follows.",
+      "functionalCases": [
+        "real_context_and_catalogue_preserve_nonempty_source_bound_routes",
+        "unresolved_receiver_keeps_the_route_and_omits_a_framework_claim",
+        "source_drift_blocks_new_catalogue_output_and_preserves_prior_evidence",
+        "missing_context_has_a_concrete_prerequisite_and_no_catalogue",
+        "legacy_python_snapshot_is_not_reused_or_silently_repaired",
+        "deterministic_map_consumes_the_actual_catalogue_and_remains_explicitly_partial"
+      ]
     },
     {
       "tool": "coverage:baselines",
@@ -403,7 +626,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "coverage:recommend",
@@ -422,7 +657,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "coverage:sweep",
@@ -441,7 +688,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "cpg:build",
@@ -464,7 +723,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "dep-hygiene:check",
@@ -483,7 +754,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "engagement:aim",
@@ -504,7 +787,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "entry-points:extract",
@@ -522,8 +817,29 @@
         "target",
         "allowanceRef"
       ],
-      "executionEvidence": "Prepared CLI dispatch wrote an empty catalog with matching context source provenance. Nonempty usefulness is unassessed.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "map_context_contract integration suite executes the real shared prepared dispatch, creates nonempty current source-grounded routes, consumes the generated snapshot in the catalog, and checks missing context, source drift, legacy extraction policy and immutable prior evidence. Python receiver/framework fixtures include mixed frameworks, aliases, ambiguous rebinding and unknown factories.",
+      "readinessVerdict": "narrow-source-to-consumer-functional-evidence; full configuration and scale audit pending",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "Verified fixture: nonempty source-bound HTTP routes retain distinct Flask/FastAPI facts instead of misleading framework labels.",
+        "phaseAgreement": "Verified fixture: Map artifacts feed entry-point extraction and the deterministic Map consumer; no discovery verdict is generated by this check.",
+        "requiredInputs": "Verified fixture: explicit target, deterministic context configuration and current context prerequisite. Missing/stale/legacy context produces a concrete re-extraction action.",
+        "sharedDispatchExecution": "Verified through prepare_dispatch_input and dispatch_prepared_input_with_runtime; real executors, no model runtime or source execution.",
+        "artifactConsumption": "Verified: real context snapshot -> real catalog -> real deterministic Map, source ids/frameworks retained; exact stored Map revision reads unchanged.",
+        "failureAndRecovery": "Verified missing context, changed source, old Python extraction policy and retained prior bytes. Cancellation, malformed artifacts and every option path remain broader audit work.",
+        "approvedResources": "Verified deterministic fixture only: no runtime supplied and zero provider requests. Model enrichment and live allowance behavior are separate existing evidence.",
+        "scopeEnforcement": "Whole-root fixture only; inventory-derived scope and source-read isolation remain separate audits.",
+        "interfaceParity": "Shared dispatch integration and native CLI producer evidence. Terminal consumer evidence is recorded separately; no full scan/shell/run certification."
+      },
+      "scopeEvidence": "One explicit whole-repository fixture root. Source files remain byte-identical. Context truncation and scoped/monorepo paths remain separate evidence; no complete scope certification follows.",
+      "functionalCases": [
+        "real_context_and_catalogue_preserve_nonempty_source_bound_routes",
+        "unresolved_receiver_keeps_the_route_and_omits_a_framework_claim",
+        "source_drift_blocks_new_catalogue_output_and_preserves_prior_evidence",
+        "missing_context_has_a_concrete_prerequisite_and_no_catalogue",
+        "legacy_python_snapshot_is_not_reused_or_silently_repaired",
+        "deterministic_map_consumes_the_actual_catalogue_and_remains_explicitly_partial"
+      ]
     },
     {
       "tool": "findings:chains",
@@ -544,7 +860,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "findings:dismiss",
@@ -570,7 +898,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "findings:ground",
@@ -589,7 +929,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "findings:list",
@@ -620,7 +972,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Prepared CLI dispatch returned honest empty findings. Populated ledger and SHA filters are unassessed in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fleet:diff-findings",
@@ -645,7 +1009,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fleet:findings",
@@ -666,7 +1042,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fleet:ingest",
@@ -684,7 +1072,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fleet:register",
@@ -710,7 +1110,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fleet:status",
@@ -728,7 +1140,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:author",
@@ -762,7 +1186,19 @@
         "timeoutMs"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:differential",
@@ -798,7 +1234,19 @@
         "timeoutMs"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:import",
@@ -820,7 +1268,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:prove",
@@ -853,7 +1313,19 @@
         "timeoutMs"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:run",
@@ -892,7 +1364,19 @@
         "timeoutMs"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:status",
@@ -913,7 +1397,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "fuzz:sweep",
@@ -949,7 +1445,19 @@
         "timeoutMs"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "govulncheck:scan",
@@ -968,7 +1476,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "iac-scan:scan",
@@ -989,7 +1509,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "license-scan:scan",
@@ -1009,7 +1541,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "ndiff:extract-fix-pattern",
@@ -1033,7 +1577,19 @@
         "model"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "ndiff:fetch-cve",
@@ -1057,7 +1613,19 @@
         "binary"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "ndiff:hunt-variants",
@@ -1082,7 +1650,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "offense-review:threat-hunt",
@@ -1098,6 +1678,7 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "threatModelRef",
         "maxFindings",
         "maxActors",
         "runsPerActor",
@@ -1108,7 +1689,20 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "scopeEvidence": "Scoped SAST jobs now fail before study publication or execution because this adapter discovers repository-wide. Whole-repository preparation remains available. Actual engine functionality remains pending.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "pack:lint",
@@ -1130,14 +1724,105 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
+    },
+    {
+      "tool": "pack:scopes",
+      "module": "pack",
+      "declaredMaturity": "core",
+      "declaredPhase": "map",
+      "purpose": "Build bounded inventory and review source-bound scan scope drafts. Edits preserve immutable revisions. Acceptance approves boundaries only, never scans or spending. No model calls.",
+      "scope": "logical scope review and single selected-scope native study handoff",
+      "runtimeRequirement": "never",
+      "headlessDeclared": true,
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "optional",
+      "requiredOptions": [],
+      "declaredOptions": [
+        "operation",
+        "draft",
+        "proposalRef",
+        "edit",
+        "acknowledgements",
+        "fileFilter",
+        "offset",
+        "pageSize",
+        "allowanceRef"
+      ],
+      "executionEvidence": "Shared prepared dispatch, 35 focused scope tests, 12 final native CLI cases and J81 native TUI evidence cover inventory/draft creation, exact reads, named split, merge, rename, scope/path exclusion, acceptance, file paging, source drift, committed history and recovery. J81 has 23 machine passes and 14 separately judged passing screens, with actual no-color restart. See scope-review-foundation-2026-10-05.md. No scans or provider requests start. The additive latest-head operation and scope UI lock cancellation are verified by J82 (11 machine passes, six separate screen judgments); 38 focused scope tests and source traversal regressions pass. See source-traversal-2026-10-05.md.",
+      "readinessVerdict": "narrow-functional-evidence; scope review and native study handoff verified; full monorepo workflow pending",
+      "scopeEvidence": "Membership and coverage are validated against enumerated inventory. Included members absent from authenticated content identity block acceptance. This does not prove scanner scope enforcement or complete inventory.",
+      "resourceEvidence": "Eight primary scopes plus optional shared context; previews/pages capped at 128. Inventory limits remain 100,000 entries/512 MiB inspection/256 KiB per file. Iterative source identity has a separate 1,000,000-entry/1,000,000-file/16-GiB bound and 64-MiB per-file limit. Basic deep/wide traversal, byte growth and cancellation are tested. No model calls or scan allowances are created. Large-scale and cross-platform performance remain unproven.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
+    },
+    {
+      "tool": "pack:suggest-scopes",
+      "scope": "one budgeted architecture proposal over an authenticated existing inventory; no discovery",
+      "executionEvidence": "Focused prepared-dispatch tests cover one query, invalid paths/counts/dependencies, no repair or recursive work, immutable context/source, retained exclusions and retained accounting. Live scope usefulness and complete monorepo execution remain unverified.",
+      "readinessVerdict": "narrow-functional-evidence; live usefulness pending",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "module": "pack",
+      "declaredMaturity": "core",
+      "declaredPhase": "map",
+      "purpose": "Suggest at most eight primary scan scopes from an existing bounded inventory and immutable context. One proposal request, no tools, delegation, repair or jobs. A valid result creates an unaccepted scope revision. An approved investigation allowance is required.",
+      "headlessDeclared": true,
+      "runtimeRequirement": "always",
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "optional",
+      "requiredOptions": [
+        "proposalRef",
+        "allowanceRef"
+      ],
+      "declaredOptions": [
+        "proposalRef",
+        "threatModelRef",
+        "priorities",
+        "model",
+        "thinkingLevel",
+        "maxOutputTokens",
+        "allowanceRef"
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never."
     },
     {
       "tool": "pack:suggest-shards",
       "module": "pack",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Propose at most eight shard candidates from one bounded repository inventory (file counts, language mix, and extracted entry points). Keeps parent files covered and discloses incomplete inventory. Writes a commented DRAFT shards.toml under the workspace state dir for an operator to edit \u2014 never installs it. No model calls.",
+      "purpose": "Propose at most eight shard candidates from one bounded repository inventory (file counts, language mix, and extracted entry points). Keeps parent files covered and discloses incomplete inventory. Writes a commented DRAFT shards.toml under the workspace state dir for an operator to edit. Never installs it. No model calls.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1150,7 +1835,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Prepared CLI dispatch retained a two-file repository and wrote readable TOML. Focused tests cover partial inventory, bounded splits and path containment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "patch:finding",
@@ -1179,7 +1876,19 @@
         "PATCH_PROMPT"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "patch:reverify",
@@ -1203,7 +1912,19 @@
         "comparisonUnavailable"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "recon:http-fingerprint",
@@ -1225,7 +1946,19 @@
         "binary"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "recon:import",
@@ -1248,7 +1981,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "recon:nmap",
@@ -1270,7 +2015,19 @@
         "binary"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "recon:subdomain",
@@ -1293,7 +2050,19 @@
         "binary"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "report:build",
@@ -1314,7 +2083,21 @@
       ],
       "executionEvidence": "Prepared CLI dispatch consumed findings:list and wrote a report naming its actual tool, status and unknown cost. Investigation aggregation is unassessed.",
       "readinessVerdict": "not-assigned",
-      "phaseEvidence": "Prepared dispatch under Review posture consumes a completed source run and writes a readable report artifact; no runtime supplied. Export is not phase completion."
+      "phaseEvidence": "Prepared dispatch under Review posture consumes a completed source run and writes a readable report artifact; no runtime supplied. Export is not phase completion.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "Verified: implicit source selection skips Report-classified exports and Read-only listings using the shared descriptor classification; an explicit runId still selects any run. Test report::tests::latest_report_source_skips_later_export_and_read_only_runs (failed before the fix by reporting a report:sarif run).",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "Verified: consumes canonical run artifacts of the selected analysis run and writes report.md beside them (87 report tests). It does not aggregate studies or human decisions; workspace:export-findings with campaignId is the study report.",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "evidencePath": "docs/assessments/report-boundary-audit-2026-10-06.md",
+      "evidenceSourceCommit": "7a5d3ece7687bb696013e798179607e2ed657f85"
     },
     {
       "tool": "report:sarif",
@@ -1333,7 +2116,21 @@
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
       "readinessVerdict": "not-assigned",
-      "phaseEvidence": "Autonomy tests permit export at every posture while preserving explicit file-write approval. Nonempty finding export still needs end-to-end audit evidence."
+      "phaseEvidence": "Autonomy tests permit export at every posture while preserving explicit file-write approval. Nonempty finding export still needs end-to-end audit evidence.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "Verified: descriptor-declared campaignId (alias campaign_id) selects one study; unknown keys are still rejected by shared preparation.",
+        "sharedDispatchExecution": "Verified through prepare_dispatch_input and dispatch_prepared_input_with_runtime with explicit target-write authorization (confirmed_sarif_selects_only_the_study_and_embeds_its_receipt).",
+        "artifactConsumption": "Verified: with campaignId, only the study's observations are exported and the investigation receipt (scope, source, context, allowance, limitations) is embedded in runs[0].properties.kuzushiExport.investigation. Without it, workspace-history output is unchanged. Writes are atomic.",
+        "failureAndRecovery": "Verified: a missing or unapproved study fails before any file write, through the shared investigation report service.",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "evidencePath": "docs/assessments/report-boundary-audit-2026-10-06.md",
+      "evidenceSourceCommit": "7a5d3ece7687bb696013e798179607e2ed657f85"
     },
     {
       "tool": "router:show",
@@ -1361,7 +2158,19 @@
         "MODEL_X_RAY"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "sast:scan",
@@ -1383,6 +2192,7 @@
         "runId",
         "severity",
         "paths",
+        "scanScopeRef",
         "shard",
         "batchId",
         "trial",
@@ -1390,6 +2200,8 @@
         "threatModelRef",
         "identityFold",
         "maxFindings",
+        "semgrepConfig",
+        "semgrepBinary",
         "diffBase",
         "whiteboxStatic",
         "staticProofState",
@@ -1397,6 +2209,7 @@
         "proofStates",
         "triage",
         "TRIAGE_PROMPT",
+        "threatModelFeedback",
         "verify",
         "verifyWhen",
         "verifyMax",
@@ -1429,8 +2242,23 @@
         "model",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "J73 proves the real finite agentic-engine pipeline with accepted immutable context, three fresh bridge processes, consolidated ledger import, explicit Scan selection, human false-positive/deferral decisions, local finding export and restart. J74 proves real admission refusal preserves two completed jobs, a failed third attempt, protected review and explicit partial selection. Transport is fully intercepted and findings are synthetic. Other engines, scope enforcement, live precision and comprehensive option/phase readiness remain unproven. 2026-10-05: the native SAST trait path now retains reported coverage errors, persists usable partial observations and writes authenticated native-coverage.json. Focused tests prove nonempty and empty partial results, per-engine outcomes, no disappearance reconciliation and reopen. Installed Semgrep with explicit local rules reports one intentionally incompatible rule and retains one labeled source observation; J78 records 25 machine passes and 10 separate passing screen judgments across all six sizes, actual 40x12 paging, explicit partial selection, human review, settled Report and no-color restart. One scoped native scan and zero live provider calls are verified. This does not certify accepted-context isolation, scanner precision or report export. Standalone Semgrep partial/source-identity evidence is recorded in J79; other direct-engine scope and interface parity remains open. The subsequent native stopped-plan increment proves earlier observations survive fatal engine errors, cancellation/interruption and later indexing failure in focused tests. Shared prepared observed dispatch authenticates failed/canceled results and retained counts. J80 records 20 machine passes and 12 separately judged passing captures across six sizes, actual narrow paging, real Ctrl+C, stopped coverage in Report preview and no-color restart. Installed Semgrep analyzes scope a with a labeled local rule; scope b uses an explicit stop seam, and scope c never starts. Two finite plans are separately initiated with zero live provider calls. This does not prove standalone aborts, persistence-fault recovery, later delegated-failure receipt propagation, source-drift settlement, native resource limits, full coverage export or Git SHA transitions.",
+      "readinessVerdict": "narrow-execution-and-budget-evidence; live usefulness and full journey pending",
+      "scopeEvidence": "Shared prepared dispatch and execution refuse unsupported scopes; directory-root native findings remain contained. Real source-analysis secret fixture produces persisted findings. See discovery-scope-2026-10-05.md; full audit remains pending. Exact accepted scanScopeRef now selects the full immutable inventory membership for secret scanning and Semgrep. Literal files, exclusions, outside observations, skipped inputs, missing Semgrep file receipts, partial batches and source drift have focused evidence. The shell owning scope action binds a single-scope three-pass study through existing campaign compilation. Model-backed and other unsupported exact-file adapters refuse work. Multi-scope scheduling, inherited scanner context, native process estimates and full report scope coverage remain unproven.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "liveEvidence": "Sequential source-only OAuth validation at /tmp/kuzushi-live-model-ua7rhauw, GPT-6 Luna low, eight total requests with two protected for Review. Normal adapter, no transport interception.",
+      "liveOutcome": "One discovery pass completed after four underlying requests with zero findings. The other two finite passes failed before any provider reservation at the protected Review boundary. Model precision and useful finding production were not established."
     },
     {
       "tool": "sbom-scan:scan",
@@ -1449,7 +2277,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "secret-scan:scan",
@@ -1470,7 +2310,20 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "scopeEvidence": "Real SAST dispatch scans a selected directory and persists source-located findings from a synthetic token fixture. Shared native adapter refuses file expansion and symlink scopes; deep walk/coverage/direct-tool parity remain pending.",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "semgrep:scan",
@@ -1493,8 +2346,20 @@
         "config",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "2026-10-05: the SAST adapter retains findings and reported errors. Standalone prepared protocol fixtures now prove nonempty and empty partial envelopes, partial ledger status, measured finding deltas and reopen. J79 runs installed Semgrep with explicit compatible and intentionally incompatible local rules: one whole-repository job retains one labeled observation and the real omission. Its 22 machine checks and nine separate screen judgments cover all six sizes, actual paging, explicit acknowledgement, human review, Report preview and no-color restart. Source identity and selection survive restart; zero live provider calls are recorded. This does not establish useful default coverage, precision, accepted-context inheritance, scoped standalone target membership, cancellation, source-drift ledger settlement, report export or full interface parity.",
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "suppress:add",
@@ -1527,7 +2392,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "suppress:list",
@@ -1545,7 +2422,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "suppress:remove",
@@ -1564,7 +2453,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "taint-iris-next:dataflow-plan",
@@ -1580,6 +2481,7 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "threatModelRef",
         "backend",
         "languages",
         "maxBudgetUsd",
@@ -1599,7 +2501,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "taint-iris-next:finding-review",
@@ -1615,6 +2529,7 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "threatModelRef",
         "maxFindings",
         "model",
         "TAINT_IRIS_NEXT_PROMPT",
@@ -1644,7 +2559,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "taint-iris-next:import-sinks",
@@ -1666,7 +2593,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "taint-iris-next:source-sink-trace",
@@ -1682,6 +2621,7 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "threatModelRef",
         "backend",
         "languages",
         "maxBudgetUsd",
@@ -1701,7 +2641,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-intel:apply",
@@ -1721,7 +2673,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-intel:discover",
@@ -1740,7 +2704,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-intel:harvest",
@@ -1764,7 +2740,19 @@
         "model"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-intel:list",
@@ -1783,7 +2771,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-intel:research",
@@ -1808,7 +2808,19 @@
         "model"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:activate",
@@ -1832,7 +2844,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:adopt",
@@ -1851,7 +2875,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:build",
@@ -1879,6 +2915,7 @@
         "mode",
         "seedMode",
         "budgetUsd",
+        "minCoverage",
         "historyDepth",
         "variantScan",
         "advisories",
@@ -1894,6 +2931,7 @@
         "maxOutputTokens",
         "emitFindings",
         "preserveUserEdits",
+        "saveRejectedOutput",
         "THREAT_MODEL_PROMPT",
         "modelId",
         "newModel",
@@ -1902,12 +2940,64 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned",
+      "readinessVerdict": "live-model-contract-failure; deterministic and prior narrow evidence remain separate",
       "resourceEvidence": [
         "Staged synthesis and conditional gap-fill use estimated stage deposits. Settlement now requires a complete cost receipt; transport failures and incomplete structured-output costs retain the reservation.",
         "Focused offline tests cover reported zero, unknown success, unreported failure, exact failure cost, incomplete repair cost, and unknown gap-fill cost.",
         "Internal structured-output repair and optional continuation still need admission at the provider boundary; stage deposits do not certify a strict dollar limit."
-      ]
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "Verified deterministic fixture: generated current catalog -> persisted partial Map -> exact immutable reader. Model synthesis consumers remain unverified live.",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "liveEvidence": "Sequential source-only OAuth validation at /tmp/kuzushi-live-model-ua7rhauw, GPT-6 Luna low, eight total requests with two protected for Review. Normal adapter, no transport interception.",
+      "liveOutcome": "Failed schema validation after one repair. Two underlying requests recorded. No immutable context accepted.",
+      "rejectedOutputEvidence": "Optional bounded local diagnosis for single-synthesis build rejection, authenticated against the frozen context input and published content object. Core rejection/read tests and native J90 cover explicit inspection, ordinary-error redaction, inert keys and restart. No live-model success or per-tool usefulness certification follows.",
+      "deterministicEvidence": "Real shared-dispatch integration consumes a nonempty generated catalog, emits actual DFD nodes/flows and entry-point links, preserves source framework facts, reports status partial, and can be read by its immutable modelRef. This source-derived result is artifact-review-only; no model or empirical verification ran. It does not repair the prior live model contract failure or establish model usefulness. Existing-revision review now consumes authenticated source snapshot receipts and preserves partial outcome. Three real admission checks and native J94 cover non-Git source, acknowledgement and exact study inheritance without model calls."
+    },
+    {
+      "tool": "threat-model:diff",
+      "scope": "audit-pending",
+      "executionEvidence": "No functional outcome evidence assigned. Registration does not establish readiness.",
+      "readinessVerdict": "not-assigned",
+      "module": "threat-model",
+      "declaredMaturity": "core",
+      "declaredPhase": "map",
+      "purpose": "Compare two immutable threat-model revisions or lineage heads: threats added/removed/changed (keyed by stableId, else id), DFD node/flow/boundary deltas, entry-point coverage, and methodology.",
+      "headlessDeclared": true,
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "optional",
+      "requiredOptions": [
+        "from",
+        "to"
+      ],
+      "declaredOptions": [
+        "target",
+        "from",
+        "to",
+        "allowanceRef"
+      ],
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "runtimeRequirement": "never"
     },
     {
       "tool": "threat-model:import",
@@ -1915,7 +3005,7 @@
       "declaredMaturity": "core",
       "declaredPhase": "map",
       "purpose": "Import an externally-authored threat-model document: normalize, verify against the target, stamp import provenance, and persist (refuses to overwrite a user-edited live model without force).",
-      "scope": "audit-pending",
+      "scope": "immutable imported context with indexed source identity",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
       "workspaceRequirement": "required",
@@ -1932,8 +3022,20 @@
         "force",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "Nine shared-dispatch import tests cover verification persistence and the accepted Map consumer. A new study inherits accepted Alpha while globally active Beta remains unchanged; changed source requires a current Map or explicit context selection. Imports return exact normalized documents and authenticated indexed snapshot receipts. Grounding can fail and is disclosed. Deep-tree limits, cancellation and real-project usefulness remain audit work. New immutable imports retain their producing run. J94 imports globally active Beta while accepting and planning with exact Alpha; historical artifacts remain unchanged.",
+      "readinessVerdict": "narrow-functional-proof",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:methodologies",
@@ -1951,7 +3053,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:models",
@@ -1970,7 +3084,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:read",
@@ -1995,7 +3121,20 @@
       "executionEvidence": "Shared exact-context read authenticates the selected document without activating it. Focused core tests cover exact reads and conflicting overlays; TUI tests cover foreign/malformed completion, selection isolation and all six viewport sizes. J68 executes real offline reads and scan-plan compilation: 29 machine checks and 12 manual judgments pass, including the selected revision DFD and a proven fresh no-color restart. No scans or provider requests start. Legacy/scoped read variants remain part of the broader audit.",
       "readinessVerdict": "narrow-functional-proof",
       "evidenceSourceCommit": "77d69695602a5240a539819911c83eb0e4f9b5b5 plus uncommitted exact-context reader and DFD inspection",
-      "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20260910-044815/J68/manual-review.json"
+      "evidencePath": "/tmp/kuzushi-bounded-investigations-tui/20260910-044815/J68/manual-review.json",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      },
+      "functionalConsumerEvidence": "map_context_contract reads the exact persisted deterministic revision and compares the complete document with its producer result; the generator status remains partial and the viewer must retain its evidence limitation."
     },
     {
       "tool": "threat-model:restore",
@@ -2017,7 +3156,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:revisions",
@@ -2039,7 +3190,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "threat-model:verify",
@@ -2059,8 +3222,20 @@
         "write",
         "allowanceRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "Focused import/verification regressions pass after source-bound wrapping and producing-run attribution. No full standalone verify option, cancellation or real-project outcome audit is claimed.",
+      "readinessVerdict": "source-receipt-regressions-verified; functional audit remains partial",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "trace:expand",
@@ -2083,7 +3258,19 @@
         "model"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "triage:chain-hunt",
@@ -2103,7 +3290,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "triage:dedupe",
@@ -2126,7 +3325,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "triage:run",
@@ -2141,6 +3352,7 @@
       "findingStoreRequirement": "required",
       "requiredOptions": [],
       "declaredOptions": [
+        "threatModelRef",
         "scanId",
         "scope",
         "fingerprint",
@@ -2167,7 +3379,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "variant:hunt",
@@ -2193,7 +3417,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "variant:lift-pattern",
@@ -2215,7 +3451,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "verify:finding",
@@ -2240,10 +3488,23 @@
         "gateModel",
         "escalationModel",
         "mcps",
-        "mcpToolTimeoutMs"
+        "mcpToolTimeoutMs",
+        "maxModelTurns"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "worklist:rank",
@@ -2265,13 +3526,25 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "workspace:export-findings",
       "module": "workspace",
       "declaredMaturity": "core",
-      "declaredPhase": "map",
+      "declaredPhase": "report",
       "purpose": "Export persisted workspace findings to a local file or markdown bundle directory. Supports JSON, JSONL, SARIF 2.1.0, CSV, and a multi-file markdown bundle.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
@@ -2283,12 +3556,27 @@
       ],
       "declaredOptions": [
         "output",
+        "campaignId",
         "format",
         "completeness",
         "allowEmpty"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "executionEvidence": "2026-10-05: prepared dispatch resolves campaign_id and writes a pending study receipt without a model. Core fixtures and intercepted terminal journey exercise study-scoped JSON, JSONL, SARIF, CSV, external scanner and Markdown exports, shared safe identity projection, human decisions, frozen source/context, coverage limitations and retained shared allowance. Final terminal screen review and summary verification are recorded in the implementation checklist. Historical workspace export remains available. Missing full inventory/engine coverage, raw artifact bundling and source-bound human verdicts remain limitations; this is partial report evidence, not a complete readiness certification.",
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "Verified: study exports embed the accepted scope proposal (scope.acceptedScopeProposal) and each record discloses reviewDecisionBasis: the run and source snapshot the latest decision was made against, a later observation and whether its source changed. JSON, JSONL, SARIF and the Markdown bundle carry it; CSV keeps its public columns.",
+        "failureAndRecovery": "Verified: damaged scope evidence blocks export before writing; a failed receipt write leaves the previous export intact (receipt is written first for single-file formats; both writes are atomic). TUI shows the blocked state and keeps workspace history as an explicit choice.",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "Partial: shared dispatch, CLI --campaign-id and TUI Report use the same service; J95 exercises the native TUI path."
+      },
+      "evidencePath": "docs/assessments/report-boundary-audit-2026-10-06.md",
+      "evidenceSourceCommit": "7a5d3ece7687bb696013e798179607e2ed657f85"
     },
     {
       "tool": "workspace:import-findings",
@@ -2309,7 +3597,19 @@
         "tool"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "workspace:status",
@@ -2327,7 +3627,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "x-ray:read",
@@ -2345,7 +3657,19 @@
         "allowanceRef"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     },
     {
       "tool": "x-ray:run",
@@ -2367,7 +3691,19 @@
         "maxBudgetUsd"
       ],
       "executionEvidence": "Not yet functionally audited in this increment.",
-      "readinessVerdict": "not-assigned"
+      "readinessVerdict": "not-assigned",
+      "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
+      "auditDimensions": {
+        "purposeAndValue": "pending outcome evidence",
+        "phaseAgreement": "pending outcome evidence",
+        "requiredInputs": "pending outcome evidence",
+        "sharedDispatchExecution": "pending outcome evidence",
+        "artifactConsumption": "pending outcome evidence",
+        "failureAndRecovery": "pending outcome evidence",
+        "approvedResources": "pending outcome evidence",
+        "scopeEnforcement": "pending outcome evidence",
+        "interfaceParity": "pending outcome evidence"
+      }
     }
   ],
   "curationChanges": [
@@ -3253,5 +4589,34 @@
       "Unknown legacy spend retains the estimate, which may be below an observed incomplete subtotal. The investigation ledger separately records cost completeness."
     ],
     "nextBoundary": "Bind every accepted finite campaign job to its exact allowance, source and context; present approval/status through the dedicated responsive editor, and preserve those associations across restart."
+  },
+  "catalogSnapshot": {
+    "sha256": "16986af4b05425f2c50aeb4818bf1571c97447eac9562c39acc73bfefd77c2df",
+    "binarySha256": "0cbf9ec5ad8aabdfaa7735e98db416738e38d6489213d5436383547885166c6f",
+    "capturedAt": "2026-10-06T02:42:21.210677+00:00",
+    "scope": "all non-hidden operator-visible tools from tools --all --json; internal nodes require separate executor evidence",
+    "count": 97
+  },
+  "currentOperatorToolCount": 98,
+  "catalogSource": ".git/bounded-investigations/scope-model-current-catalog.json; native built-ins with uncommitted changes",
+  "currentPolicyInventory": {
+    "registeredToolCount": 169,
+    "fingerprint": "dca12664c0f8083e3a1352e3fcee2c77ded80c6882fc4022eb7e73bf6f69bfc1",
+    "source": ".git/bounded-investigations/scope-model-policy-review.log",
+    "meaning": "Reviewed descriptor policy contract. No functional verdict follows from registration."
+  },
+  "catalogFactsRefreshed": "Current native tools --all --json: 98 visible records; optional context-map origin refreshed from .git/bounded-investigations/existing-context-registry.json. Fact refresh is not a functional verdict; 169 internal policy entries remain independently tracked.",
+  "functionalAuditCheckpoint": {
+    "scope": "Deterministic source context and Map consumers; no exploit development, reproducer work, patching, model calls or source execution.",
+    "testFile": "crates/kuzushi-core/tests/map_context_contract.rs",
+    "productionDefect": "Shared Python HTTP syntax incorrectly labeled Flask receivers as FastAPI. Framework claims now use conservative source bindings. Older extraction policy requires explicit rebuild even at unchanged source identity.",
+    "workflowEvidence": "45 workflow regressions preserve explicit Map selection and partial acknowledgement. Standalone artifacts remain readable without advancing the phase rail; historical completed scans retain their pre-ledger reading path.",
+    "tuiEvidence": "J93 at /tmp/kuzushi-bounded-investigations-tui/20261006-034301/J93 has 21 machine passes and five separate passing screen judgments. Real source facts, partial qualification, evidence before provenance, all six sizes, 40x12 paging and no-color restart are covered. No provider call or source execution occurred.",
+    "remaining": "All other per-tool pending dimensions remain pending. No module promotion or retirement follows from this checkpoint. Complete module readiness, context acceptance and the live investigation remain separate acceptance work."
+  },
+  "existingContextCheckpoint": {
+    "assessment": "docs/assessments/existing-context-map-2026-10-06.md",
+    "tuiEvidence": "J94 at /tmp/kuzushi-bounded-investigations-tui/20261006-050744/J94: 18 machine passes, five separate screen passes, raw REVIEW_REQUIRED unchanged. All six sizes, actual 40x12 paging, explicit partial acknowledgement, draft exact context and no-color restart. Zero provider work.",
+    "remaining": "Complete per-tool outcome audit, all option paths, real-model quality, complete investigation and reference parity remain pending. No module promotion or retirement."
   }
 }

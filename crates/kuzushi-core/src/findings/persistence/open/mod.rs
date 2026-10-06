@@ -32,7 +32,7 @@ pub use audit_events::FindingAuditEvent;
 pub use finding_rekeys::ModelRekeyRequest;
 pub(crate) use rescan_reconciliation::CompletedScanScope;
 pub(crate) use v3_finding_reads::finding_stable_fp;
-pub use observation_reads::ObservationSourceRef;
+pub use observation_reads::{ObservationSourceRef, ObservedSnapshot};
 pub use suppression_events::SuppressionLifecycleEvent;
 pub use threat_model_versions::{threat_model_document_sha256, ThreatModelVersionRecord};
 pub(in crate::findings::persistence::open) use v3_commit_target::{

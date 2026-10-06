@@ -36,21 +36,27 @@ mod tests;
 pub(in crate::scan) use application::default_scan_engine_selection_for_test;
 pub use application::{
     default_scan_engines, normalize_semgrep_json, prepare_scan_workspace_state,
-    prepare_scan_workspace_state_with_observer, run_scan_engines,
-    run_scan_engines_with_options, run_scan_engines_with_options_and_cancellation,
-    run_semgrep_scan, scan_engines_for_tasks, ScanRun, ScanRunOptions, ScanWorkspacePreparation,
+    prepare_scan_workspace_state_with_observer, run_scan_engines, run_scan_engines_with_options,
+    run_scan_engines_with_options_and_cancellation, run_semgrep_scan, scan_engines_for_tasks,
+    ScanRun, ScanRunOptions, ScanWorkspacePreparation,
 };
 pub(crate) use application::{
-    parse_semgrep_report, select_default_scan_engines, semgrep_error_summaries,
-    semgrep_findings_from_report, DefaultScanEngineSelection, SkippedDefaultScanEngine,
+    normalized_scan_path, parse_semgrep_report, require_directory_scope, resolve_scan_scopes,
+    run_native_scan_files_with_cancellation, run_native_scan_with_cancellation,
+    select_default_scan_engines, semgrep_error_summaries, semgrep_findings_from_report,
+    DefaultScanEngineSelection, ScanScope, SkippedDefaultScanEngine,
+};
+pub(crate) use domain::{
+    native_scan_failure, NativeEngineCoverage, NativeEngineDisposition, NativeScanCoverage,
+    NativeScanFailure, NativeScanReport,
 };
 pub use domain::{
     CodeqlPersistedRun, CodeqlScanReport, ScanEngine, ScanEngineOutput, SemgrepPersistedRun,
     SemgrepScanOutcome, SemgrepScanReport, SemgrepScanner,
 };
+pub(crate) use engines::codeql::index_grounded_codeql_sarif_documents_as_static_evidence;
 #[cfg(test)]
 pub(in crate::scan) use engines::codeql::*;
-pub(crate) use engines::codeql::index_grounded_codeql_sarif_documents_as_static_evidence;
 pub use engines::codeql::{
     index_codeql_sarif_as_static_evidence, index_codeql_sarif_documents_as_static_evidence,
     normalize_codeql_sarif, CodeqlScanner,
@@ -67,11 +73,11 @@ pub use engines::sbom_scan::{
     scan_sbom, SbomComponent, SbomDependencyEdge, SbomLockfile, SbomScanReport,
 };
 pub(in crate::scan) use engines::semgrep::*;
+pub(crate) use subprocess::configure_scanner_process_group;
 use subprocess::{
     capture_scanner_process_pipes, configure_scanner_subprocess_env, join_scanner_process_readers,
     wait_for_scanner_process, ProcessOutput, ScannerProcessOutput,
 };
-pub(crate) use subprocess::configure_scanner_process_group;
 pub use subprocess::{
     CancellationDisposition, PreparedProcessGroup, RegisteredChild, ScanCancellation,
 };
@@ -79,6 +85,25 @@ pub use subprocess::{
 pub(crate) fn completed_scan_tool_json(output: String, data: Value) -> Value {
     let summary = output_summary(&output);
     crate::module_result::completed_output_result(summary, output, data)
+}
+
+pub(crate) fn scan_tool_json_with_coverage(
+    output: String,
+    data: Value,
+    scan_errors: &[String],
+) -> Value {
+    if scan_errors.is_empty() {
+        return completed_scan_tool_json(output, data);
+    }
+    let summary = output_summary(&output);
+    crate::module_result::partial_output_result(
+        summary,
+        output,
+        vec![serde_json::json!(
+            "Coverage is incomplete. Read the reported omissions before accepting this scan."
+        )],
+        data,
+    )
 }
 
 fn output_summary(output: &str) -> String {

@@ -75,6 +75,7 @@ fn workspace_export_tool_request(input: &Value, root: &Path) -> Result<Workspace
         .unwrap_or_default();
     let allow_empty = read_bool_any(&input, &["allowEmpty", "allow_empty"])?.unwrap_or(false);
     let options = WorkspaceExportOptions::new(format)
+        .with_campaign(string_input_any(input, &["campaignId", "campaign_id"]))
         .with_completeness(completeness)
         .with_allow_empty(allow_empty);
     Ok(WorkspaceExportToolRequest {
@@ -90,14 +91,18 @@ fn workspace_export_tool_message(
     completeness: WorkspaceExportCompleteness,
     allow_empty: bool,
 ) -> String {
-    format!(
+    let mut message = format!(
         "workspace:export-findings wrote {} finding(s) to {} ({}, completeness:{}, allowEmpty:{})",
         report.count,
         report.output_path.display(),
         report.format.as_str(),
         completeness.as_str(),
         allow_empty
-    )
+    );
+    if let Some(path) = &report.investigation_receipt_path {
+        message.push_str(&format!("\nInvestigation receipt: {}", path.display()));
+    }
+    message
 }
 
 fn workspace_export_tool_data(
@@ -111,6 +116,7 @@ fn workspace_export_tool_data(
         "completeness": completeness.as_str(),
         "allowEmpty": allow_empty,
         "count": report.count,
+        "investigationReceiptPath": report.investigation_receipt_path,
     })
 }
 

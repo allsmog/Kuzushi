@@ -37,6 +37,10 @@ const MAX_LARGE_RUN_CACHE_BYTES: usize = kuzushi_core::MAX_RUN_ARTIFACT_READ_BYT
 const MAX_FINDING_TRUTH_CACHE_ENTRIES: usize = 256;
 const MAX_STATUS_CACHE_ENTRIES: usize = 32;
 
+type MapRunContextRead = Result<Option<kuzushi_core::workflow_attempts::MapRunContext>, String>;
+type InvestigationReportRead =
+    Result<Option<kuzushi_core::workspace::InvestigationReportReceipt>, String>;
+
 mod audit_dataflow;
 mod cache_entries;
 mod completion_values;
@@ -48,6 +52,7 @@ mod map_artifacts_cache;
 mod prompt_override_cache;
 mod remediation_projection;
 mod scanned_snippet;
+mod study_usage;
 #[cfg(test)]
 mod tests;
 mod view_model_fragments;
@@ -82,6 +87,8 @@ pub(crate) struct WorkbenchCache {
         BTreeMap<(PathBuf, String, String), kuzushi_core::workspace::RevisionRelationship>,
     scope_tree: Option<ScopeTreeCache>,
     threat_model_store: Option<(PathBuf, ThreatModelStoreState)>,
+    map_run_context: BTreeMap<(PathBuf, Vec<String>), MapRunContextRead>,
+    investigation_report: Option<(PathBuf, Vec<String>, InvestigationReportRead)>,
     project_model_document: Option<ProjectModelDocumentCache>,
     strategy_queue: Option<StrategyQueueCache>,
     prompt_mutations: Option<PromptMutationsCache>,
@@ -97,6 +104,8 @@ pub(crate) struct WorkbenchCache {
     >,
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
+    study_usage_catalogue: Option<(PathBuf, StudyUsageCatalogueRead)>,
+    study_usage_runs: BTreeMap<(PathBuf, String), StudyUsageRunRead>,
     map_artifacts: MapArtifactsCache,
     cpg_artifacts: CpgArtifactsCache,
     scan_recommendations: Option<ScanRecommendationsCache>,
@@ -433,11 +442,13 @@ impl WorkbenchCache {
     }
 
     pub(crate) fn invalidate_workspace_files(&mut self) {
+        self.investigation_report = None;
         self.source_file = None;
         self.mark_git_metadata_stale();
         self.revision_relationships.clear();
         self.scope_tree = None;
         self.threat_model_store = None;
+        self.map_run_context.clear();
         self.project_model_document = None;
         self.strategy_queue = None;
         self.prompt_mutations = None;
@@ -520,6 +531,7 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_threat_model(&mut self, target: &Path) {
         self.threat_model_store = None;
+        self.map_run_context.clear();
         self.invalidate_json_file(&kuzushi_core::capabilities::persistent_threat_model_path(
             target,
         ));
@@ -567,7 +579,11 @@ impl WorkbenchCache {
     fn invalidate_legacy_run_summary_index(&mut self) {}
 
     fn invalidate_run_summary_dependents(&mut self) {
+        self.study_usage_catalogue = None;
+        self.study_usage_runs.clear();
+        self.investigation_report = None;
         self.invalidate_legacy_run_summary_index();
+        self.map_run_context.clear();
         self.view_models.invalidate_visible_findings();
     }
 
@@ -594,6 +610,7 @@ impl WorkbenchCache {
         }
         if is_threat_model_store_path(relative) {
             self.threat_model_store = None;
+            self.map_run_context.clear();
         }
         if is_map_artifact_path(relative) {
             self.map_artifacts.invalidate();
@@ -676,6 +693,7 @@ impl WorkbenchCache {
         self.directory_listings
             .retain(|cached, _| !cached.starts_with(state_root));
         self.threat_model_store = None;
+        self.map_run_context.clear();
         self.map_artifacts.invalidate();
         self.cpg_artifacts.invalidate();
         self.finding_patch_truth.invalidate(None);

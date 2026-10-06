@@ -52,6 +52,17 @@ pub(in crate::modules) fn run_semgrep_scan(
     if let Err(error) = scanner.preflight() {
         return Ok(failed_tool_output("semgrep:scan", &target, error));
     }
+    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "semgrep:scan", &target, || {
+        run_started_semgrep_scan(&target, &scanner, &input, ctx)
+    })
+}
+
+fn run_started_semgrep_scan(
+    target: &Path,
+    scanner: &SemgrepScanner,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
     emit_scan_start(ctx, "semgrep", &target);
     let outcome =
         match ctx.with_cancellation(|cancel| scanner.scan_outcome_with_cancel(&target, cancel)) {
@@ -60,13 +71,19 @@ pub(in crate::modules) fn run_semgrep_scan(
         };
     let mut findings = outcome.findings;
     emit_scan_coverage_gaps(ctx, "semgrep", &outcome.scan_errors);
-    let index_static_evidence = whitebox_static_profile_requested(&input)?;
+    let index_static_evidence = whitebox_static_profile_requested(input)?;
     if index_static_evidence {
         let static_proof_state =
-            whitebox_static_proof_state_from_input(&input)?.unwrap_or(StaticProofState::SignalOnly);
+            whitebox_static_proof_state_from_input(input)?.unwrap_or(StaticProofState::SignalOnly);
         mark_whitebox_static_findings(&mut findings, static_proof_state)?;
     }
-    let persisted = persist_semgrep_findings(&target, &findings, ctx, index_static_evidence)?;
+    let persisted = persist_semgrep_findings(
+        &target,
+        &findings,
+        ctx,
+        index_static_evidence,
+        &outcome.scan_errors,
+    )?;
     emit_scan_done(ctx, "semgrep", findings.len());
     Ok(
         SemgrepScanReport::new(target.display().to_string(), findings, persisted)
@@ -75,11 +92,7 @@ pub(in crate::modules) fn run_semgrep_scan(
     )
 }
 
-fn emit_scan_coverage_gaps(
-    ctx: &ToolExecutionContext<'_>,
-    scanner: &str,
-    scan_errors: &[String],
-) {
+fn emit_scan_coverage_gaps(ctx: &ToolExecutionContext<'_>, scanner: &str, scan_errors: &[String]) {
     if scan_errors.is_empty() {
         return;
     }
@@ -107,16 +120,27 @@ pub(in crate::modules) fn run_codeql_scan(
     if let Err(error) = scanner.preflight() {
         return Ok(failed_tool_output("codeql:scan", &target, error));
     }
+    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "codeql:scan", &target, || {
+        run_started_codeql_scan(&target, &scanner, &input, ctx)
+    })
+}
+
+fn run_started_codeql_scan(
+    target: &Path,
+    scanner: &CodeqlScanner,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
     emit_scan_start(ctx, "codeql", &target);
     let mut output =
         match ctx.with_cancellation(|cancel| scanner.scan_with_artifacts(&target, cancel)) {
             Ok(output) => output,
             Err(error) => return Ok(failed_tool_output("codeql:scan", &target, error)),
         };
-    let index_static_evidence = whitebox_static_profile_requested(&input)?;
+    let index_static_evidence = whitebox_static_profile_requested(input)?;
     if index_static_evidence {
         let static_proof_state =
-            whitebox_static_proof_state_from_input(&input)?.unwrap_or(StaticProofState::SignalOnly);
+            whitebox_static_proof_state_from_input(input)?.unwrap_or(StaticProofState::SignalOnly);
         mark_whitebox_static_findings(&mut output.findings, static_proof_state)?;
     }
     persist_and_report_codeql_scan(&target, output, ctx, index_static_evidence)
@@ -140,6 +164,7 @@ fn persist_and_report_codeql_scan(
         ctx,
         &codeql_sarif_documents,
         index_static_evidence,
+        &scan_errors,
     )?;
     emit_scan_done(ctx, "codeql", findings.len());
     Ok(
@@ -392,6 +417,41 @@ fn persist_exploit_chain_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standalone_codeql_reported_gaps_reach_the_partial_ledger() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = crate::V2Config::default();
+        let trace = crate::run_artifacts::TraceHandle::jsonl(root.path(), "codeql-gap");
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let output = ScanEngineOutput {
+            findings: vec![],
+            codeql_sarif_documents: vec![],
+            scan_errors: vec!["go: labeled missing database".into()],
+        };
+        let report = persist_and_report_codeql_scan(root.path(), output, &ctx, false).unwrap();
+        assert_eq!(
+            crate::tool_result_status(&report),
+            crate::ToolResultStatus::Partial
+        );
+        assert_eq!(
+            report["data"]["scanErrors"][0],
+            "go: labeled missing database"
+        );
+        assert_eq!(
+            store.run_status("codeql-gap").unwrap().as_deref(),
+            Some("partial")
+        );
+    }
 
     #[test]
     fn cargo_audit_output_preserves_static_proof_state_on_core_findings() {

@@ -15,6 +15,7 @@ fn union_keeps_catalog_facts_and_overlays_model_context() {
             "src/routes.rs",
             json!({
                 "method": "POST", "route": "/admin", "line": 42,
+                "framework": "Flask",
                 "evidence": "catalog evidence",
                 "risk": {"rank": 0, "tier": "high", "score": 78, "reasons": []}
             }),
@@ -49,6 +50,7 @@ fn union_keeps_catalog_facts_and_overlays_model_context() {
             "id": "EP-1", "name": "model name", "kind": "other_kind",
             "trustZone": "internet", "description": "admin route",
             "path": "model.rs", "evidence": "model evidence",
+            "framework": "unverified-model-framework",
             "targetElementIds": ["N1", "TB1"]
         }]}
     }));
@@ -78,6 +80,7 @@ fn union_keeps_catalog_facts_and_overlays_model_context() {
     assert_eq!(entry.name, "catalog name");
     assert_eq!(entry.kind, "http_route");
     assert_eq!(entry.source, "src/routes.rs:42");
+    assert_eq!(entry.source_framework.as_deref(), Some("Flask"));
     assert_eq!(entry.evidence, "catalog evidence");
     assert_eq!(entry.risk, "high · score 78 · rank 0");
     assert_eq!(entry.trust_zone, "internet");

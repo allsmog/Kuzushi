@@ -2,6 +2,29 @@ use super::*;
 use kuzushi_core::workspace::ProjectModelDocument;
 
 impl WorkbenchCache {
+    pub(crate) fn cached_investigation_report(
+        &self,
+        target: Option<&Path>,
+        runs: &[String],
+    ) -> ViewDataState<InvestigationReportRead> {
+        let Some(target) = target else {
+            return ViewDataState::Ready(Ok(None));
+        };
+        if let Some((_, _, state)) = self
+            .investigation_report
+            .as_ref()
+            .filter(|(path, refs, _)| path == target && refs == runs)
+        {
+            return ViewDataState::Ready(state.clone());
+        }
+        self.loading_state(
+            target,
+            &ViewHydrationKey::InvestigationReport {
+                run_refs: runs.to_vec(),
+            },
+        )
+    }
+
     pub(crate) fn cached_target_profile(
         &self,
         target: Option<&Path>,
@@ -143,6 +166,25 @@ impl WorkbenchCache {
             return ViewDataState::Ready(state.clone());
         }
         self.loading_state(target, &ViewHydrationKey::ThreatModelStore)
+    }
+
+    pub(crate) fn cached_map_run_context(
+        &self,
+        target: &Path,
+        run_refs: &[String],
+    ) -> ViewDataState<MapRunContextRead> {
+        if let Some(state) = self
+            .map_run_context
+            .get(&(target.to_path_buf(), run_refs.to_vec()))
+        {
+            return ViewDataState::Ready(state.clone());
+        }
+        self.loading_state(
+            target,
+            &ViewHydrationKey::MapRunContext {
+                run_refs: run_refs.to_vec(),
+            },
+        )
     }
 
     pub(crate) fn cached_project_model_document(

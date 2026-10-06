@@ -66,7 +66,7 @@ impl ShellApp {
                     ViewHotkeyAction::RunDiffToggleSources,
                 ),
             ],
-            ShellView::Catalog => catalog_keybindings(),
+            ShellView::Catalog => catalog_keybindings(self.router.catalog().is_expanded()),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(self),
             ShellView::Recommend => recommend_keybindings(),

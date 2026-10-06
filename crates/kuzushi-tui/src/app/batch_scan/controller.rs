@@ -6,13 +6,38 @@ use crate::app::{ShellApp, ShellView};
 use kuzushi_core::findings::derive_batch_occurrence_report;
 
 impl ShellApp {
+    pub(crate) fn open_selected_scope_study(
+        &mut self,
+        reference: kuzushi_core::workspace::ScanScopeRef,
+        summary: String,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.has_running_work(),
+            "Wait for active work. Your scope selection is preserved."
+        );
+        let target = self
+            .target_owned()
+            .ok_or_else(|| anyhow::anyhow!("Select a repository first."))?;
+        self.refresh_phase_attempt_projection();
+        let mut input = super::launch::preview_scan_input(self)?;
+        input["scanScopeRef"] = serde_json::json!(reference);
+        let mut config = BatchScanConfig::load_for_new_study(&target, None);
+        restore_scope_allowance(&mut config, &input)?;
+        config.study.scan_input = Some(input);
+        config.notice = Some(summary);
+        self.show_study_form(config);
+        self.refresh_batch_worker_resolution();
+        Ok(())
+    }
+
     pub(crate) fn open_batch_scan_config(&mut self, prior_run_id: Option<&str>) {
         let Some(target) = self.target_owned() else {
             self.log("batch", "scan batch requires an active target");
             return;
         };
+        self.refresh_phase_attempt_projection();
         self.refresh_campaign_deck();
-        self.show_study_form(BatchScanConfig::load(&target, prior_run_id));
+        self.show_study_form(BatchScanConfig::load_for_new_study(&target, prior_run_id));
         self.refresh_batch_worker_resolution();
         self.log("batch", "scan-batch configurator");
     }
@@ -74,6 +99,15 @@ impl ShellApp {
             .campaign()
             .batch_scan_config
             .as_ref()
+            .is_some_and(|config| config.selected_row() == BatchScanConfigRow::Engines)
+        {
+            return self.open_study_engine_picker();
+        }
+        if self
+            .router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
             .is_some_and(|config| config.selected_row() == BatchScanConfigRow::Context)
         {
             return self.open_study_context_picker();
@@ -108,6 +142,9 @@ impl ShellApp {
             self.set_shell_view(origin.view);
             self.set_input_mode(origin.mode);
             *self.router.workbench_mut() = origin.workbench;
+            if let Some(scope) = self.router.scope_review_mut().as_mut() {
+                scope.open = origin.scope_review;
+            }
         } else {
             self.open_campaign_view(None);
         }
@@ -119,24 +156,30 @@ impl ShellApp {
             view: self.shell_view(),
             mode: self.input_mode(),
             workbench: self.router.workbench().clone(),
+            scope_review: self.scope_review_is_visible(),
         });
+        if let Some(scope) = self.router.scope_review_mut().as_mut() {
+            scope.open = false;
+        }
         self.router.campaign_mut().batch_scan_config = Some(config);
         self.set_shell_view(ShellView::Campaign);
         self.set_input_mode(crate::app::InputMode::Navigate);
     }
 
     fn refresh_batch_config(&mut self) -> InputUpdate {
-        let previous = self.router.campaign().batch_scan_config.clone();
-        let Some((target, previous)) = self.target_owned().zip(previous) else {
+        let Some(target) = self.target_owned() else {
             return InputUpdate::handled();
         };
-        let prior = BatchScanConfig::load(&target, previous.prior_run_id.as_deref());
+        self.invalidate_view_hydration();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_study_usage(&target);
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
-            config.prior_runs = prior.prior_runs;
-            config.prior_run_cost_usd = prior.prior_run_cost_usd;
+            config.reset_usage_loading();
         }
         self.refresh_study_allowance();
         self.refresh_batch_worker_resolution();
+        self.schedule_active_view_hydration();
         InputUpdate::handled()
     }
 
@@ -147,6 +190,9 @@ impl ShellApp {
         else {
             return;
         };
+        if config.study.accounting_error.is_some() {
+            return;
+        }
         match resolve_config_workers(self, &target, &config) {
             Ok(resolution) => self.apply_batch_worker_resolution(resolution),
             Err(error) => {
@@ -211,4 +257,20 @@ impl ShellApp {
             }
         }
     }
+}
+
+fn restore_scope_allowance(
+    config: &mut BatchScanConfig,
+    input: &serde_json::Value,
+) -> anyhow::Result<()> {
+    let reference: kuzushi_core::workspace::ScanScopeRef =
+        serde_json::from_value(input["scanScopeRef"].clone())?;
+    if let Some(allowance) = kuzushi_core::capabilities::campaign::load_scope_proposal_allowance(
+        &config.target,
+        &reference.proposal,
+    )? {
+        config.study.accounting_error = None;
+        config.study.restore_allowance(allowance);
+    }
+    Ok(())
 }

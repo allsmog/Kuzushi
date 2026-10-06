@@ -93,9 +93,9 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
     assert!(report
         .report_markdown
         .contains("events.jsonl: present - 1 line(s)"));
-    assert!(report
-        .report_markdown
-        .contains("items.jsonl: present - 2 semantic item(s), types task_updated=1, terminal_outcome=1"));
+    assert!(report.report_markdown.contains(
+        "items.jsonl: present - 2 semantic item(s), types task_updated=1, terminal_outcome=1"
+    ));
     assert!(report
         .report_markdown
         .contains("report.md: present - generated report"));

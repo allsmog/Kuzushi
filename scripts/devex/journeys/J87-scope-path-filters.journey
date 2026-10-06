@@ -1,0 +1,86 @@
+# Saved global filters, local repair and immutable planning. No discovery starts.
+name: Clear conflicting path filters in a scoped study without changing global settings
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_path_filters.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/alpha-command.txt
+keys: Enter
+require-live-snap: 30 RESULT READY | imported-map
+nav-mode:
+keys: u
+require-live-snap: 25 Viewing Scan | accepted-map
+keys: Escape
+submit: use sast
+submit: options sast:scan
+submit: setg taskMode manual
+submit: setg tasks secret-scan
+submit: setg paths excluded.py
+live-snap: saved-global-filter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_path_filters.py @TMP_TARGET @ART filters
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | accepted-scopes
+keys: p
+require-live-snap: 20 PLAN A STUDY | scoped-study
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | conflicting-filters
+expect: Earlier path filters conflict
+expect: excluded.py
+expect: a apply · x clear · Esc cancel
+ask: Does the picker name the saved filter and accepted boundary, offer a visible repair, and explain that apply and a new plan are required?
+resize: 160x48
+live-snap: conflict-160x48
+resize: 96x89
+live-snap: conflict-96x89
+resize: 80x24
+live-snap: conflict-80x24
+resize: 60x20
+live-snap: conflict-60x20
+resize: 40x12
+live-snap: conflict-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 guarantee. | conflict-small-last
+expect: a apply · x clear · Esc cancel
+ask: At 40x12, are clear/apply/cancel controls readable and can the complete explanation be paged without changing choices or starting work?
+resize: 120x36
+keys: x
+require-live-snap: 15 Earlier path filters cleared | cleared-draft
+expect: Supports this scope
+keys: Escape
+keys: Enter
+require-live-snap: 15 Earlier path filters conflict | canceled-repair
+expect: excluded.py
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_path_filters.py @TMP_TARGET @ART canceled
+ask: Does Esc restore the original filters and selection after clearing only the draft, with global settings unchanged?
+keys: x a
+require-live-snap: 20 Engine choices updated | applied-repair
+expect: Discovery engines  secret-scan
+keys: L
+require-live-snap: 30 Draft ready | finite-repaired-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_path_filters.py @TMP_TARGET @ART draft
+ask: Does the repaired study bind the accepted scope to three fixed jobs, leave global filters unchanged, and keep execution approval separate?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | restored-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | restored-study
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | restored-local-filters
+expect: [x] secret-scan
+expect: Supports this scope
+expect-not: x clear
+keys: a
+require-live-snap: 15 Engine choices retained | exact-plan-retained
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_path_filters.py @TMP_TARGET @ART restarted
+ask: After actual exit and no-color restart, does the study retain its local repair and exact plan while the original global filter remains persisted?
+keys: C-c
+require-exit: 10

@@ -139,13 +139,13 @@ pub(super) fn read_object(root: &Path, sha256: &str) -> Result<Value> {
     let bytes = crate::bounded_file::read_regular_bytes_within(root, &path, MAX_STORE_JSON_BYTES)
         .with_context(|| {
         format!(
-            "Could not read active threat-model object {}",
+            "Could not read immutable threat-model object {}",
             path.display()
         )
     })?;
     anyhow::ensure!(
         crate::run_lifecycle::sha256_content_digest(&bytes) == sha256,
-        "active threat-model object {} failed SHA verification",
+        "immutable threat-model object {} failed SHA verification",
         path.display()
     );
     serde_json::from_slice(&bytes)

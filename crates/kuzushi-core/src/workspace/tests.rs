@@ -2154,6 +2154,15 @@ mod tests {
             review_decision_conflict: Some("sentinel-review-decision-conflict".to_string()),
             review_decision_reason: Some("sentinel-review-decision-reason".to_string()),
             review_decision_author: Some("sentinel-review-decision-author".to_string()),
+            review_decision_basis: Some(crate::workspace::WorkspaceReviewDecisionBasis {
+                run_id: "sentinel-decision-basis-run".to_string(),
+                snapshot_hash: "sentinel-decision-basis-snapshot".to_string(),
+                later_observation: Some(crate::workspace::WorkspaceObservedSource {
+                    run_id: "sentinel-decision-later-run".to_string(),
+                    snapshot_hash: "sentinel-decision-later-snapshot".to_string(),
+                }),
+                source_changed_since_decision: true,
+            }),
             triage_verdict: Some("sentinel-triage-verdict".to_string()),
             suppressed: true,
             snoozed_until: Some("sentinel-snoozed-until".to_string()),

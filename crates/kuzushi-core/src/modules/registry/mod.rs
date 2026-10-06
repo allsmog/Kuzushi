@@ -47,10 +47,12 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 mod dispatch_catalog_tool;
 mod dispatch_plugin_prompt_tool;
+#[cfg(test)]
+mod map_source_identity_tests;
 mod module_registry;
 mod run_taint_iris_tool;
 #[cfg(test)]
-mod tests;
+mod scan_scope_proposal_tests;
 #[cfg(test)]
-mod map_source_identity_tests;
+mod tests;
 pub use module_registry::ModuleRegistry;

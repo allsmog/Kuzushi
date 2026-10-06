@@ -9,7 +9,7 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
 submit: scan batch
 require-live-snap: 20 PLAN A STUDY | study
-keys: Down Down Enter
+keys: Down Down Down Enter
 require-live-snap: 20 CHOOSE STUDY CONTEXT | context-picker
 expect: g new
 keys: g

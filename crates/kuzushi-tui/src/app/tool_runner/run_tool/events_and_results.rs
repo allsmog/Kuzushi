@@ -514,24 +514,11 @@ impl ShellApp {
         error: String,
         reason: AbortReason,
     ) -> Vec<ShellEffect> {
+        self.scope_review_failed(&tool_name, &error);
         self.record_failed_tool_spent_cost(&state);
         self.abort_pending_chain(&tool_name);
         if reason.records_canceled() {
-            if let Some(session) = self.activity_mut() {
-                session.mark_active_tasks_canceled();
-            }
-            self.set_completed_activity(tool_name.clone(), "canceled");
-            self.log(
-                "tool",
-                format!("{tool_name} canceled ({}) — {error}", reason.label()),
-            );
-            return vec![tool_run_record_effect(
-                &mut state,
-                &tool_name,
-                ToolRunRecordOutcome::Canceled {
-                    reason: format!("{}: {error}", reason.label()),
-                },
-            )];
+            return self.settle_canceled_tool_event(state, tool_name, error, reason);
         }
 
         self.mark_tool_activity_failed(&tool_name, &error);
@@ -543,6 +530,30 @@ impl ShellApp {
             &mut state,
             &tool_name,
             ToolRunRecordOutcome::Interrupted {
+                reason: format!("{}: {error}", reason.label()),
+            },
+        )]
+    }
+
+    fn settle_canceled_tool_event(
+        &mut self,
+        mut state: ToolEventState,
+        tool_name: String,
+        error: String,
+        reason: AbortReason,
+    ) -> Vec<ShellEffect> {
+        if let Some(session) = self.activity_mut() {
+            session.mark_active_tasks_canceled();
+        }
+        self.set_completed_activity(tool_name.clone(), "canceled");
+        self.log(
+            "tool",
+            format!("{tool_name} canceled ({}): {error}", reason.label()),
+        );
+        vec![tool_run_record_effect(
+            &mut state,
+            &tool_name,
+            ToolRunRecordOutcome::Canceled {
                 reason: format!("{}: {error}", reason.label()),
             },
         )]
@@ -633,6 +644,7 @@ impl ShellApp {
     }
 
     fn log_tool_failure(&mut self, tool_name: &str, message: String, abort_requested: bool) {
+        self.scope_review_failed(tool_name, &message);
         if abort_requested {
             // The operator asked for the abort — record it, but don't pop an
             // error banner for an outcome they initiated.

@@ -537,6 +537,9 @@ impl DfdDiagram {
     }
 
     fn draw_detail_panel(&self, buf: &mut Buffer, area: Rect, show_resize_hint: bool) {
+        if area.height < 3 {
+            return self.draw_borderless_detail(buf, area);
+        }
         let width = area.width.saturating_sub(2) as usize;
         let mut detail = selected_detail_content(&self.model, self.selection, width);
         prepend_resize_hint(&mut detail.lines, width, show_resize_hint);
@@ -556,6 +559,17 @@ impl DfdDiagram {
             .block(block)
             .scroll((scroll.min(u16::MAX as usize) as u16, 0))
             .render(render_area, buf);
+    }
+
+    fn draw_borderless_detail(&self, buf: &mut Buffer, area: Rect) {
+        let detail = selected_detail_content(&self.model, self.selection, area.width as usize);
+        let viewport = area.height as usize;
+        let scroll = self
+            .detail_scroll
+            .min(detail.lines.len().saturating_sub(viewport));
+        Paragraph::new(detail.lines)
+            .scroll((scroll.min(u16::MAX as usize) as u16, 0))
+            .render(area, buf);
     }
 }
 
@@ -582,6 +596,18 @@ fn compact_detail_area(area: Rect, line_count: usize) -> Rect {
 }
 
 fn legend_text(model: &DfdModel, selection: Option<usize>, total: usize, width: u16) -> String {
+    if model.review_only {
+        return "PARTIAL · artifact review only".into();
+    }
+    complete_legend_text(model, selection, total, width)
+}
+
+fn complete_legend_text(
+    model: &DfdModel,
+    selection: Option<usize>,
+    total: usize,
+    width: u16,
+) -> String {
     if width < 24 {
         return minimal_legend_text(model, selection, total);
     }
@@ -1573,6 +1599,7 @@ mod tests {
         DfdModel {
             target_name: "opencode".into(),
             system_context: None,
+            review_only: false,
             zones,
             nodes,
             flows,
@@ -1687,6 +1714,28 @@ mod tests {
             purpose: None,
             zone: zone.into(),
             kind: DfdKind::Process,
+        }
+    }
+
+    #[test]
+    fn tiny_inspector_spends_its_rows_on_selected_evidence_and_keeps_paging() {
+        for height in [1, 2] {
+            let model = DfdModel {
+                nodes: vec![node("Alpha receiver", "application")],
+                ..Default::default()
+            };
+            let diagram = |scroll| DfdDiagram {
+                model: model.clone(),
+                selection: Some(0),
+                detail_scroll: scroll,
+                focused: false,
+                context_selection: 0,
+            };
+            let first = render_to_text(diagram(0), 40, height);
+            assert!(first.contains("Alpha receiver"), "{first}");
+            assert!(!first.contains("┌ DETAIL"), "{first}");
+            let next = render_to_text(diagram(1), 40, height);
+            assert!(next.contains("does"), "{next}");
         }
     }
 

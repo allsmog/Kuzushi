@@ -84,6 +84,7 @@ impl ShellApp {
 
     fn reduce_scan_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
         match command {
+            ShellCommand::Scopes => Some(self.open_scope_review()),
             ShellCommand::ScanSince {
                 reference,
                 include_worktree,

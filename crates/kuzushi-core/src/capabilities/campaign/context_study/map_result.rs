@@ -1,0 +1,173 @@
+//! Explicit handoff from completed campaign jobs to durable Map review.
+use super::*;
+use crate::run_lifecycle::{CallKind, RunAttemptId, RunItemStatus};
+use crate::workflow_attempts::{
+    append_phase_attempt_completed_with_v2, load_map_run_context, load_phase_attempt_events,
+    load_phase_attempt_ledger_v2, PhaseAttemptCompleted, PhaseAttemptDisposition,
+    PhaseAttemptLedger, PhaseAttemptOutcome, PhaseTargetSnapshot,
+};
+use crate::WorkflowPhase;
+
+mod revision;
+
+pub fn execute_context_map(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let root = ctx
+        .workspace
+        .context("context Map requires a workspace")?
+        .root();
+    if input.get("threatModelRef").is_some() {
+        return revision::review_revision(root, input, ctx);
+    }
+    let id = required_text(input, "campaignId")?;
+    validate_scan_batch_id(&id)?;
+    let directory = campaign_dir(root, &id);
+    let _lock = crate::file_lock::ExclusiveFileLock::acquire(&directory.join(".context-map.lock"))?;
+    let receipt = load_context_study(root, &id)?;
+    anyhow::ensure!(
+        input["expectedPlanSha256"] == receipt.plan_sha256,
+        "context plan changed; inspect the current plan before reviewing Map"
+    );
+    let runs = completed_map_runs(root, &receipt)?;
+    let reference = authenticated_generated_context(root, &receipt, &runs)?;
+    let attempt = persist_map_result(
+        root,
+        &runs,
+        PhaseAttemptOutcome::Completed,
+        ctx.cancellation,
+    )?;
+    let summary = "Recorded Map is ready for inspection. Accept it explicitly before scanning. No jobs or model requests started.";
+    Ok(crate::module_result::completed_output_result(
+        summary,
+        summary,
+        json!({"campaignId":id,"investigationId":receipt.investigation_id,
+            "planSha256":receipt.plan_sha256,"attemptId":attempt,
+            "runRefs":runs,"modelRef":reference}),
+    ))
+}
+
+fn completed_map_runs(root: &Path, receipt: &ContextStudyReceipt) -> Result<Vec<String>> {
+    anyhow::ensure!(
+        crate::incremental_index::current_workspace_resume_identity(root)? == receipt.source_identity,
+        "context study belongs to earlier source content; inspect that context or prepare a new Map draft"
+    );
+    let snapshot = snapshot::load_campaign_snapshot(root, &receipt.campaign_id)?;
+    anyhow::ensure!(
+        snapshot.jobs.len() == receipt.job_count(),
+        "context study job count changed"
+    );
+    snapshot
+        .jobs
+        .iter()
+        .map(|job| completed_job_run(job, root))
+        .collect()
+}
+
+fn completed_job_run(job: &snapshot::CampaignJobSnapshot, root: &Path) -> Result<String> {
+    anyhow::ensure!(
+        job.state == "completed",
+        "Map job {} is {}; inspect its outcome before reviewing Map",
+        job.job_id,
+        job.state
+    );
+    let run = job
+        .run_id
+        .as_deref()
+        .context("completed Map job has no run identity")?;
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(root, run)?;
+    anyhow::ensure!(
+        projection
+            .terminal
+            .as_ref()
+            .is_some_and(|terminal| terminal.status == RunItemStatus::Completed),
+        "Map job {} has no completed run outcome",
+        job.job_id
+    );
+    anyhow::ensure!(
+        projection
+            .calls
+            .values()
+            .any(|call| call.kind == CallKind::Tool
+                && Some(call.label.as_str()) == job.tool.as_deref()
+                && call.status == RunItemStatus::Completed),
+        "Map job {} has no matching completed tool call",
+        job.job_id
+    );
+    Ok(run.into())
+}
+
+fn authenticated_generated_context(
+    root: &Path,
+    receipt: &ContextStudyReceipt,
+    runs: &[String],
+) -> Result<crate::ThreatModelRef> {
+    let expected = receipt
+        .generated_context(root)?
+        .context("context job has no completed result")?;
+    let recorded = load_map_run_context(root, runs)?
+        .context("Map runs have no authenticated context result")?;
+    anyhow::ensure!(
+        recorded.model_ref.as_ref() == Some(&expected),
+        "generated context disagrees with its authenticated run result"
+    );
+    anyhow::ensure!(
+        runs.last() == Some(&recorded.run_id),
+        "context result does not belong to the generation job"
+    );
+    Ok(expected)
+}
+
+fn persist_map_result(
+    root: &Path,
+    runs: &[String],
+    outcome: PhaseAttemptOutcome,
+    cancellation: Option<&crate::ScanCancellation>,
+) -> Result<String> {
+    let lock = crate::workspace::workspace_state_dir(root).join(".context-map.lock");
+    let _lock = crate::file_lock::ExclusiveFileLock::acquire_cancellable(&lock, &|| {
+        cancellation.is_some_and(|value| value.is_cancelled())
+    })?;
+    let ledger = PhaseAttemptLedger::from_events(load_phase_attempt_events(root)?)?;
+    if let Some(record) = ledger.attempts().find(|record| {
+        record.completed.phase == WorkflowPhase::Map && record.completed.run_refs == runs
+    }) {
+        crate::workflow_attempts::load_phase_attempt_ledger(root)?;
+        anyhow::ensure!(
+            !matches!(record.disposition.as_ref().map(|value| &value.disposition), Some(PhaseAttemptDisposition::Discarded)),
+            "this Map result was discarded; inspect its recorded runs or approve a new context draft"
+        );
+        return Ok(record.completed.attempt_id.clone());
+    }
+    let attempt = pending_map_attempt(root, runs)?;
+    let completed = PhaseAttemptCompleted::new(
+        WorkflowPhase::Map,
+        runs.to_vec(),
+        PhaseTargetSnapshot::capture(root),
+        outcome,
+    )
+    .with_attempt_id(attempt.clone());
+    append_phase_attempt_completed_with_v2(root, completed)?;
+    Ok(attempt)
+}
+
+/// Reuse a typed receipt if interruption happened before its compatibility append.
+fn pending_map_attempt(root: &Path, runs: &[String]) -> Result<String> {
+    let ledger = load_phase_attempt_ledger_v2(root)?;
+    anyhow::ensure!(
+        ledger.malformed_line.is_none(),
+        "Map history is damaged; inspect it before reviewing context"
+    );
+    Ok(ledger
+        .attempts
+        .values()
+        .find(|attempt| {
+            attempt.phase == WorkflowPhase::Map
+                && attempt
+                    .run_refs
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    == runs
+        })
+        .map(|attempt| attempt.attempt_id.to_string())
+        .unwrap_or_else(|| RunAttemptId::new().to_string()))
+}

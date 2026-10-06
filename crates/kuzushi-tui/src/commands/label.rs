@@ -57,6 +57,7 @@ pub enum ShellCommand {
     /// with the appropriate pane focus / selection.
     Workbench,
     Report,
+    Scopes,
     Aim(Option<String>),
     Findings,
     FindingsFilter(String),

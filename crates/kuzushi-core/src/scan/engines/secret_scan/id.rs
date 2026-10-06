@@ -9,6 +9,25 @@ impl ScanEngine for SecretScanScanner {
         Ok(secret_scan_engine_output(target, cancellation)?.findings)
     }
 
+    fn supports_exact_files(&self) -> bool {
+        true
+    }
+
+    fn scan_exact_files(
+        &self,
+        root: &Path,
+        files: &[String],
+        cancellation: &ScanCancellation,
+    ) -> Result<ScanEngineOutput> {
+        let report = super::scan_for_secrets::scan_for_secrets_in_files(root, files, cancellation)?;
+        let skipped = report.files_skipped;
+        let mut output = secret_report_output(report);
+        if skipped > 0 {
+            output.scan_errors.push(format!("secret-scan skipped {skipped} selected files because of file size or binary content; those files were not analyzed"));
+        }
+        Ok(output)
+    }
+
     /// The aggregate scan learns about unread paths only through
     /// `scan_errors`; the default implementation would forward findings
     /// alone and let a partially read target report as complete.
@@ -26,7 +45,11 @@ fn secret_scan_engine_output(
     cancellation: &ScanCancellation,
 ) -> Result<ScanEngineOutput> {
     let report = scan_for_secrets(target, &SecretScanOptions::default(), cancellation)?;
-    Ok(ScanEngineOutput {
+    Ok(secret_report_output(report))
+}
+
+fn secret_report_output(report: SecretScanReport) -> ScanEngineOutput {
+    ScanEngineOutput {
         findings: report
             .findings
             .iter()
@@ -34,7 +57,7 @@ fn secret_scan_engine_output(
             .collect(),
         codeql_sarif_documents: Vec::new(),
         scan_errors: report.coverage_gaps.scan_error_lines(),
-    })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

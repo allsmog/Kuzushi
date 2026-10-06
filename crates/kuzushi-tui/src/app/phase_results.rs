@@ -66,8 +66,8 @@ pub(crate) struct PhaseResultCompactSummary {
     /// See `PhaseAttemptReceipt::finding_delta_observed`.
     pub(crate) finding_delta_observed: Option<bool>,
     /// Distinct findings the loaded ledger attributes to this attempt's runs,
-    /// set only when no typed finding delta measured them and the ledger backs
-    /// the claim. `changed_findings` is then the runs' own reported total, which
+    /// set when the ledger backs the claim. Scan keeps recorded changes separate
+    /// from this distinct count. `changed_findings` is the recorded total, which
     /// the ledger's same-issue fold can exceed, so the label states this count
     /// instead of a total the rest of the frame contradicts.
     pub(crate) attributed_findings: Option<u64>,
@@ -83,6 +83,9 @@ impl PhaseResultCompactSummary {
     pub(crate) fn findings_label(&self) -> String {
         if let Some(distinct) = self.attributed_findings {
             return attributed_findings_label(distinct);
+        }
+        if self.phase == WorkflowPhase::Scan && self.finding_delta_observed == Some(true) {
+            return format!("finding changes {}", self.changed_findings);
         }
         finding_delta_label(
             &format!("+{}", self.changed_findings),
@@ -381,8 +384,8 @@ impl ShellApp {
     /// The compact summary, with the ledger consulted for the one count the
     /// receipt could not measure itself.
     ///
-    /// A receipt whose `finding_delta_observed` is set carries a typed finding
-    /// delta: durable truth, already a delta, left alone. Without one,
+    /// Recorded Scan changes and distinct findings remain separate. Other phases
+    /// keep their typed deltas. Without a typed delta,
     /// `changed_findings` is what the attempt's runs reported emitting — a
     /// total, not a delta — which is the number the banner used to print as
     /// `findings +27` over a panel that said 25. The ledger measures the same
@@ -396,12 +399,35 @@ impl ShellApp {
         outcome: PhaseAttemptOutcome,
     ) -> PhaseResultCompactSummary {
         let mut summary = phase_result_compact_summary(completed, outcome);
-        if summary.finding_delta_observed.is_none() {
+        if summary.finding_delta_observed.is_none() || completed.phase == WorkflowPhase::Scan {
             summary.attributed_findings = self
-                .attributed_findings(&completed.run_refs)
+                .phase_result_finding_runs(completed)
+                .and_then(|runs| self.attributed_findings(&runs))
                 .map(|ledger| ledger.distinct);
         }
         summary
+    }
+
+    fn phase_result_finding_runs(&self, completed: &PhaseAttemptCompleted) -> Option<Vec<String>> {
+        if completed.phase != WorkflowPhase::Scan {
+            return Some(completed.run_refs.clone());
+        }
+        let target = self.target()?;
+        let mut runs = completed.run_refs.clone();
+        for parent in &completed.run_refs {
+            match self
+                .workbench_cache()
+                .borrow()
+                .cached_scan_stage_receipt(target, parent)
+            {
+                crate::ViewDataState::Ready(crate::ScanStageReceiptState::Ready(receipt)) => {
+                    runs.extend(receipt.run_refs)
+                }
+                crate::ViewDataState::Ready(crate::ScanStageReceiptState::Missing) => {}
+                _ => return None,
+            }
+        }
+        Some(runs)
     }
 
     fn phase_result_detail_rows(
@@ -1182,12 +1208,10 @@ fn successful_result_recommendation(phase: WorkflowPhase, routes_to_report: bool
 mod tests {
     use super::*;
 
-    /// The RESULT READY banner printed the runs' raw observation count as a
-    /// finding delta (`findings +27`) one line above the Scan delta pane that
-    /// #302 had already fixed to read `findings 25 distinct · 27 observations`
-    /// from the same ledger. Issue #172, 2026-09-30 audit.
+    /// Loaded ledger rows cannot supply discovery membership without the
+    /// authenticated Scan stage receipt. Keep the reported count separate.
     #[test]
-    fn the_banner_names_the_same_findings_the_scan_pane_beneath_it_names() {
+    fn the_banner_cannot_attribute_scan_findings_without_stage_evidence() {
         let target = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
@@ -1200,11 +1224,8 @@ mod tests {
             .phase_result_presentation_for(&completed)
             .compact_summary;
 
-        assert_eq!(summary.attributed_findings, Some(3));
-        assert_eq!(summary.findings_label(), "findings 3 distinct");
-        // The receipt's 5 is `receipt_run_changes`'s `max` over the attempt's
-        // runs, while the Scan pane sums the same runs; neither may be stated
-        // here as the attempt's observations.
+        assert_eq!(summary.attributed_findings, None);
+        assert_eq!(summary.findings_label(), "findings +5");
         assert!(!summary.findings_label().contains("observation"));
     }
 
@@ -1227,7 +1248,7 @@ mod tests {
             .compact_summary;
 
         assert_eq!(summary.attributed_findings, None);
-        assert_eq!(summary.findings_label(), "findings +5");
+        assert_eq!(summary.findings_label(), "finding changes 5");
     }
 
     /// A filtered projection holds only the rows the operator asked to see, so

@@ -62,6 +62,23 @@ fn bind_job(
     Ok(())
 }
 
+/// Unknown prices may continue only when every job has an authenticated call
+/// allowance and no dollar ceiling depends on those prices. Shared prepared
+/// dispatch still reserves every provider request, including unresolved calls.
+pub(super) fn call_allowance_covers_unpriced_work(
+    jobs: &[PlanJob],
+    settings: &DispatchSettings,
+) -> bool {
+    if settings.budget_usd.is_some() || settings.job_budget_usd.is_some() {
+        return false;
+    }
+    !jobs.is_empty() && jobs.iter().all(call_limited_job)
+}
+
+fn call_limited_job(job: &PlanJob) -> bool {
+    job.approved_attempts.is_some() && job.job_budget_usd.is_none()
+}
+
 /// Bound campaign attempts include quota failures. The legacy retry policy is
 /// retained for campaigns that have no finite work approval.
 pub(super) fn job_transition(
@@ -86,6 +103,48 @@ mod tests {
     use super::*;
     use kuzushi_core::{ModuleRegistry, ToolExecutionContext, V2Config};
     use serde_json::json;
+
+    #[test]
+    fn unknown_prices_require_every_job_to_have_a_finite_call_allowance() {
+        let settings = standard_batch_dispatch_settings(1).unwrap();
+        let mut job = plan_job_row(&json!({"jobId":"one","tool":"sast:scan","input":{}})).unwrap();
+        assert!(!call_allowance_covers_unpriced_work(&[], &settings));
+        assert!(!call_allowance_covers_unpriced_work(
+            &[job.clone()],
+            &settings
+        ));
+        let unbound = job.clone();
+        job.approved_attempts = Some(1);
+        assert!(call_allowance_covers_unpriced_work(
+            &[job.clone()],
+            &settings
+        ));
+        assert!(!call_allowance_covers_unpriced_work(
+            &[job, unbound],
+            &settings
+        ));
+    }
+
+    #[test]
+    fn a_dollar_ceiling_always_requires_pricing_even_for_call_bound_jobs() {
+        let mut settings = standard_batch_dispatch_settings(1).unwrap();
+        let mut job = plan_job_row(&json!({"jobId":"one","tool":"sast:scan","input":{}})).unwrap();
+        job.approved_attempts = Some(1);
+        settings.budget_usd = Some(1.0);
+        assert!(!call_allowance_covers_unpriced_work(
+            &[job.clone()],
+            &settings
+        ));
+        settings.budget_usd = None;
+        settings.job_budget_usd = Some(1.0);
+        assert!(!call_allowance_covers_unpriced_work(
+            &[job.clone()],
+            &settings
+        ));
+        settings.job_budget_usd = None;
+        job.job_budget_usd = Some(1.0);
+        assert!(!call_allowance_covers_unpriced_work(&[job], &settings));
+    }
 
     #[test]
     fn dispatcher_refuses_unapproved_study_then_binds_every_frozen_job() {

@@ -6,6 +6,10 @@ use kuzushi_core::capabilities::threat_model::{
 };
 use std::path::PathBuf;
 
+mod map_context;
+pub(crate) use map_context::map_context_run_refs;
+pub(crate) use map_context::recorded_map_context_issue;
+
 pub(crate) const THREAT_MODEL_EMPTY_HINT: &str =
     "build or import a threat model to populate this view";
 pub(crate) const THREAT_MODEL_NO_THREATS_HINT: &str = "current threat model records no threats";
@@ -103,6 +107,9 @@ pub(crate) fn threat_model_picker(app: &ShellApp) -> ThreatModelPickerModel {
 }
 
 pub(crate) fn threat_model_freshness(app: &ShellApp) -> ThreatModelFreshnessModel {
+    if let Some(freshness) = map_context::recorded_map_freshness(app) {
+        return freshness;
+    }
     let picker = threat_model_picker(app);
     let Some(index) = picker.active_index else {
         return legacy_threat_model_freshness(app);
@@ -342,6 +349,7 @@ pub(crate) fn threat_model_absence_hint(app: &ShellApp) -> String {
     match read_threat_model_artifact(app) {
         ThreatModelArtifact::Present(_) => THREAT_MODEL_NO_THREATS_HINT.to_string(),
         ThreatModelArtifact::Invalid(error) => format!("threat-model integrity error: {error}"),
+        ThreatModelArtifact::Unavailable(reason) => reason,
         ThreatModelArtifact::Malformed => THREAT_MODEL_MALFORMED_HINT.to_string(),
         ThreatModelArtifact::NonFile => THREAT_MODEL_NON_FILE_HINT.to_string(),
         ThreatModelArtifact::Targetless => THREAT_MODEL_TARGETLESS_HINT.to_string(),
@@ -366,13 +374,27 @@ pub(crate) struct ThreatSummaryReview {
 }
 
 pub(crate) fn threat_summary_review(app: &ShellApp) -> ThreatSummaryReview {
-    let patch = app.engagement.pending_threat_patch();
+    let status = map_context::recorded_map_summary_status(app);
+    let patch = status
+        .is_none()
+        .then(|| app.engagement.pending_threat_patch())
+        .flatten();
     match read_threat_model_artifact(app) {
         ThreatModelArtifact::Present(doc) if !doc.is_null() => {
-            ThreatSummaryReview::from_doc(Some(&doc), patch)
+            let mut review = ThreatSummaryReview::from_doc(Some(&doc), patch);
+            if let Some(status) = status {
+                review.status = status.into();
+            }
+            review
         }
         ThreatModelArtifact::Malformed => ThreatSummaryReview::malformed(patch),
         ThreatModelArtifact::Invalid(error) => ThreatSummaryReview::invalid(patch, &error),
+        ThreatModelArtifact::Unavailable(reason) => {
+            let mut review = ThreatSummaryReview::unknown(patch);
+            review.status = "recorded Map context unavailable".into();
+            review.summary = reason;
+            review
+        }
         ThreatModelArtifact::NonFile => ThreatSummaryReview::non_file(patch),
         ThreatModelArtifact::Targetless => ThreatSummaryReview::targetless(patch),
         _ => ThreatSummaryReview::unknown(patch),
@@ -500,6 +522,9 @@ impl ThreatSummaryReview {
 }
 
 fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
+    if let Some(artifact) = map_context::recorded_map_artifact(app) {
+        return artifact;
+    }
     let Some(root) = app.target() else {
         return ThreatModelArtifact::Targetless;
     };
@@ -577,6 +602,7 @@ fn threat_model_file_name() -> String {
 enum ThreatModelArtifact {
     Present(serde_json::Value),
     Invalid(String),
+    Unavailable(String),
     Malformed,
     NonFile,
     Missing,

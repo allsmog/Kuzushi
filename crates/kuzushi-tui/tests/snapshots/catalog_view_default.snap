@@ -7,7 +7,7 @@ assertion_line: 33
 CAPABILITIES · MAP · 3 actions
 [!] target required; Enter opens picker · `target <path>` · `demo` offline
 
-> NEXT Load Quick map — Build context and entry points
+> NEXT Load Quick map: TARGET REQUIRED · Build context and entry points
 
 -- PRIMARY recommended actions for the workspace's current phase -------------------------------------------------------
 > Quick map               Build context and entry points

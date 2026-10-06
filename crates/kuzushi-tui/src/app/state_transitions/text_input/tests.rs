@@ -43,6 +43,43 @@ fn picker_list_paste_moves_losslessly_into_the_composer() {
 }
 
 #[test]
+fn navigation_paste_enters_the_composer_without_submitting_or_losing_the_cursor() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_shell_view(ShellView::Campaign);
+    app.set_input("ac");
+    app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Left,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    app.set_input_mode(InputMode::Navigate);
+
+    let update = app.reduce_paste("b");
+
+    assert!(update.handled);
+    assert!(update.effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+    assert_eq!(app.input(), "abc");
+    assert_eq!(app.cursor(), 2);
+}
+
+#[test]
+fn navigation_multiline_paste_keeps_all_text_for_explicit_submission() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_shell_view(ShellView::Campaign);
+    app.set_input_mode(InputMode::Navigate);
+
+    let update = app.reduce_paste("first\r\nsecond");
+
+    assert!(update.handled);
+    assert!(update.effects.is_empty());
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+    assert_eq!(app.editor().expanded_input(), "first\nsecond");
+    assert!(app.editor().paste_inspection().is_none());
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+}
+
+#[test]
 fn planning_options_paste_moves_losslessly_into_the_composer() {
     let target_dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);

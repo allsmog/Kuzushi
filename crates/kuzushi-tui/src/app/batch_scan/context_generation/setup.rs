@@ -41,10 +41,13 @@ impl ShellApp {
             .setup_context_study
             .clone()
             .filter(|config| config.target == target)
-            .unwrap_or_else(|| BatchScanConfig::load(&target, None));
+            .unwrap_or_else(|| BatchScanConfig::load_for_map_study(&target));
         refresh_saved_study(&mut config, &target)?;
+        config.study.ensure_accounting_ready()?;
         configure_generation(&mut config, context_input, preparation_jobs);
-        config.notice = Some("Review the selected Map work and set its shared allowance. Preparing a draft makes no model request. Esc returns to your unchanged Map selection.".into());
+        config.notice = config.context_generation.as_ref()
+            .filter(|generation| generation.receipt.is_none())
+            .map(|_| "Review the selected Map work and set its shared allowance. Preparing a draft makes no model request. Esc returns to your unchanged Map selection.".into());
         self.show_study_form(config);
         Ok(())
     }

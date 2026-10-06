@@ -1,0 +1,89 @@
+# Real source-only context generator, mocked provider, injected completed queue.
+name: Review generated context as an exact durable Map without extra work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 context-draft | completed-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | result-review
+expect: m Review Map
+ask: Does the completed context result offer inspection and Map review while disclosing allowance and preserving explicit operator choice?
+resize: 80x24
+require-live-snap: 15 m Review Map | result-80
+ask: Is generated-context review clear and keyboard reachable at 80x24?
+resize: 60x20
+require-live-snap: 15 m Review Map | result-60
+ask: Does 60x20 retain readable result guidance and visible controls?
+resize: 40x12
+require-live-snap: 15 m Map | result-40
+expect: Enter inspect
+ask: Does 40x12 keep Map review, exact inspection and back available without clipped actions?
+resize: 96x89
+require-live-snap: 15 m Review Map | result-tall
+ask: Does the tall result keep a clear hierarchy without losing the job result or controls?
+resize: 160x48
+require-live-snap: 15 m Review Map | result-wide
+ask: Does the wide result disclose the bounded plan and allowance without suggesting automatic new work?
+resize: 120x36
+require-live-snap: 15 m Review Map | result-returned
+keys: m
+require-live-snap: 30 RESULT READY | awaiting-acceptance
+require-live-snap: 25 Command line application | generated-map
+expect-not: Other active context
+expect-not: No threat model detected
+expect-not: This attempt carried no map evidence
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART reviewing
+ask: Does real foreground handoff present the exact generated Map for explicit acceptance while another context remains active?
+nav-mode:
+keys: u
+require-live-snap: 20 Map ✓ | after-acceptance
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART accepted
+submit: map
+require-live-snap: 20 accepted | accepted-map
+keys: Tab
+require-live-snap: 20 DATA-FLOW DIAGRAM | exact-dfd
+expect-not: Other active context
+ask: Does accepted Map retain the generated DFD and useful navigation without starting discovery?
+resize: 40x12
+require-live-snap: 15 Command line application | map-40
+ask: Is generated DFD inspection usable in the smallest supported terminal?
+resize: 120x36
+require-live-snap: 15 DATA-FLOW DIAGRAM | before-restart
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 25 Command line application | resumed-map
+expect-not: Other active context
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART resumed
+ask: Does restart restore accepted generated Map with exact context and truthful no-color output?
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART drift
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 context-draft | historical-campaign
+nav-mode:
+keys: a
+require-live-snap: 20 CONTEXT JOB RESULT | historical-result
+keys: m
+require-live-snap: 30 earlier source content | refused-handoff
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART refused
+ask: Does source drift refuse a fresh Map handoff with useful recovery guidance, retain the recorded context, and avoid automatic regeneration?
+keys: Escape
+require-live-snap: 15 CONTEXT JOB RESULT | refused-return
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | historical-inspection
+expect: Offline generated context
+expect-not: Labeled other active context
+require-shell: python3 @REPO/scripts/devex/fixtures/generated_map.py @TMP_TARGET @ART refused
+ask: After dismissing the refusal, can the operator inspect the exact historical context without a replacement job or reset of recorded spending?
+keys: C-c
+require-exit: 10

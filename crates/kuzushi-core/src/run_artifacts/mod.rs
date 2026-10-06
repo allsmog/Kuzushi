@@ -17,6 +17,7 @@ mod persisted_terminal_outcome;
 mod process_identity;
 mod run_artifact;
 mod run_artifact_reader;
+pub(crate) use run_artifact_reader::read_run_artifact_text_bounded;
 mod run_events;
 mod run_failures;
 mod run_history_index;
@@ -27,12 +28,13 @@ mod run_result_summary;
 mod run_retention;
 mod run_summary_store;
 mod running;
+mod scan_failure_context;
 mod scan_stage;
 mod source_revision;
 mod threat_model_context;
-pub use threat_model_context::RunThreatModelContext;
-pub use source_revision::RunSourceRevision;
 pub(crate) use scan_stage::scan_paths_cover_file;
+pub use source_revision::RunSourceRevision;
+pub use threat_model_context::RunThreatModelContext;
 mod stage_checkpoint;
 mod terminal_intent;
 #[cfg(test)]
@@ -46,6 +48,7 @@ mod trace_handle;
 mod write_run_artifact_json;
 mod write_run_artifact_text;
 
+pub(crate) use artifact_manifest::load_run_artifact_object_reference;
 pub(crate) use artifact_manifest::record_run_artifact;
 pub use artifact_manifest::{load_run_artifacts, RunArtifactManifest};
 pub(crate) use jsonl_append::append_run_artifact_jsonl_value;
@@ -78,6 +81,7 @@ pub use run_paths::{
     latest_run_path, new_run_id, run_artifact_path, run_dir, runs_root, ArtifactPath, RunId,
 };
 pub(crate) use run_result_summary::load_correlated_run_result_value;
+pub(crate) use run_result_summary::safe_bounded_line as bounded_run_diagnostic_line;
 pub use run_result_summary::{
     load_correlated_run_result_summary, load_run_result_summary, RunResultSummary,
 };
@@ -98,9 +102,9 @@ pub use running::{
     RunSummary, RunTargetGitMetadata,
 };
 pub use scan_stage::{
-    load_scan_stage_data, PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta,
-    ScanEngineStageOutcome, ScanFindingDelta, ScanSeverityCount, ScanStageCost, ScanStageData,
-    ScanStageEngine, ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
+    load_scan_stage_data, scan_finding_run_refs, PhaseStageOutcome, PhaseStageReceipt,
+    ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta, ScanSeverityCount, ScanStageCost,
+    ScanStageData, ScanStageEngine, ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
 };
 pub use stage_checkpoint::{
     active_stage_checkpoints, checkpoint_coordinates_for_run,

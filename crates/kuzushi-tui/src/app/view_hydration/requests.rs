@@ -12,6 +12,7 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
         .then(common_target_keys)
         .unwrap_or_default();
     append_phase_receipt_outcome_keys(app, &mut keys);
+    append_map_context_keys(app, &mut keys);
     append_checkpoint_revision_key(
         reality
             .as_ref()
@@ -76,11 +77,30 @@ fn append_view_hydration_keys(
         ShellView::Health => append_health_keys(app, keys),
         ShellView::ProjectModel => append_project_model_keys(app, keys),
         ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
-        ShellView::Campaign => keys.push(ViewHydrationKey::ThreatModelStore),
+        ShellView::Campaign => append_study_keys(app, keys),
+        ShellView::Report => keys.push(ViewHydrationKey::InvestigationReport {
+            run_refs: app.report_scan_run_refs(),
+        }),
         ShellView::FailureHandoff => {
             append_latest_run_keys(app, keys);
         }
         _ => {}
+    }
+}
+
+fn append_study_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    keys.push(ViewHydrationKey::ThreatModelStore);
+    let Some(config) = &app.router.campaign().batch_scan_config else {
+        return;
+    };
+    if config.context_generation.is_some() {
+        return;
+    }
+    keys.push(ViewHydrationKey::StudyUsageCatalogue);
+    if let Some(run_id) = &config.prior_run_id {
+        keys.push(ViewHydrationKey::StudyUsageRun {
+            run_id: run_id.clone(),
+        });
     }
 }
 
@@ -234,11 +254,7 @@ fn append_scan_receipt_keys(
     if workbench_page != WorkbenchPage::Scan {
         return;
     }
-    let attempt = app
-        .engagement
-        .unresolved_phase_attempt(WorkflowPhase::Scan)
-        .or_else(|| app.engagement.selected_phase_attempt(WorkflowPhase::Scan));
-    let Some(attempt) = attempt else {
+    let Some((attempt, _)) = app.engagement.displayed_phase_attempt(WorkflowPhase::Scan) else {
         return;
     };
     keys.extend(
@@ -310,6 +326,20 @@ fn append_prompt_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     for prompt in app.focused_prompt_specs() {
         keys.push(ViewHydrationKey::PromptOverrideHash {
             path: kuzushi_core::prompt_override_path(target, &prompt.module_id, &prompt.verb),
+        });
+    }
+}
+
+fn append_map_context_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    if app.target().is_none() {
+        return;
+    }
+    if let Some(run_refs) = crate::ui_view_models::map_context_run_refs(app) {
+        keys.push(ViewHydrationKey::MapRunContext { run_refs });
+    }
+    if let Some(attempt) = app.engagement.selected_phase_attempt(WorkflowPhase::Map) {
+        keys.push(ViewHydrationKey::MapRunContext {
+            run_refs: attempt.completed.run_refs.clone(),
         });
     }
 }
