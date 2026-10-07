@@ -263,7 +263,7 @@ impl ShellApp {
 
     fn toggle_workbench_pane_zoom(&mut self) {
         if crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Map
-            && crate::ui_view_models::map_gallery_is_primary(self)
+            && crate::ui_view_models::map_gallery_is_canvas(self)
         {
             self.open_map_scene_to_page(self.current_map_viz_page());
             return;

@@ -20031,19 +20031,24 @@ fn seed_ready_map_target(target: &Path, run_id: &str) {
     persist_selected_test_phase_attempt(target, WorkflowPhase::Map, run_id);
 }
 
-/// Item: the Map command bar may only name `Tab` and `z zoom` while the
-/// embedded gallery owns keys. On an action-required Map, Tab reaches no
-/// handler and there is no selected view to zoom — `z` opens the Map viz
-/// deck, which is what the Navigate footer and the keymap both say.
+/// Item: the Map command bar may only name `Tab` and `z zoom` while a ready
+/// Map leads with its gallery. The hints are header rows, so the body area
+/// the composition solves is sized from them and they cannot ask which
+/// composition won; they name only what holds at every terminal size. On a
+/// Map with no gallery body, Tab reaches no handler and there is no selected
+/// view to zoom — `z` opens the Map viz deck, which is what the Navigate
+/// footer and the keymap both say.
 #[test]
-fn map_command_bar_advertises_tab_only_when_the_gallery_owns_keys() {
+fn map_command_bar_advertises_tab_only_for_a_ready_map_gallery() {
     let pre_ready_target = tempfile::tempdir().unwrap();
     let mut pre_ready = ShellApp::new(V2Config::default(), None);
     pre_ready.set_target(Some(pre_ready_target.path().to_path_buf()));
     pre_ready.hydrate_all_view_data_for_test();
     pre_ready.set_workbench_page(WorkbenchPage::Map);
 
-    assert!(!crate::ui_view_models::map_gallery_is_primary(&pre_ready));
+    assert!(!crate::ui_view_models::ready_map_gallery_is_primary(
+        &pre_ready
+    ));
     let hints = map_command_bar_hints(&pre_ready);
     assert!(!hints.contains("Tab cycle map views"), "{hints}");
     assert!(!hints.contains("zoom selected view"), "{hints}");
@@ -20058,7 +20063,7 @@ fn map_command_bar_advertises_tab_only_when_the_gallery_owns_keys() {
     ready.hydrate_all_view_data_for_test();
     ready.set_workbench_page(WorkbenchPage::Map);
 
-    assert!(crate::ui_view_models::map_gallery_is_primary(&ready));
+    assert!(crate::ui_view_models::ready_map_gallery_is_primary(&ready));
     let hints = map_command_bar_hints(&ready);
     assert!(hints.contains("Tab cycle map views"), "{hints}");
     assert!(hints.contains("z zoom selected view"), "{hints}");
@@ -20148,7 +20153,7 @@ fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
     app.set_input_mode(InputMode::Navigate);
     app.router.scene_mut().set_page(VizPage::AttackSurface);
 
-    assert!(crate::ui_view_models::map_gallery_is_primary(&app));
+    assert!(crate::ui_view_models::map_gallery_is_canvas(&app));
     assert_eq!(app.current_map_viz_page(), VizPage::Summary);
     assert_eq!(
         app.available_map_viz_pages(),
@@ -20227,6 +20232,112 @@ fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
     );
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.current_map_viz_page(), VizPage::EntryPoints);
+}
+
+/// An accepted Map with findings but no threat model: the gallery is the
+/// canvas with the readiness card in a drawer beneath it, which is the first
+/// state any real engagement reaches. The gallery's own header advertises
+/// `Tab cycles · z zoom` there, so those keys and the per-page selection keys
+/// must reach it rather than the sibling panes behind it.
+fn app_with_actionable_map_gallery(target: &Path) -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.to_path_buf()));
+    app.hydrate_all_view_data_for_test();
+    app.set_findings(vec![
+        make_finding(Severity::High, "actionable-1", "hardcoded secret"),
+        make_finding(Severity::Medium, "actionable-2", "weak hash"),
+    ]);
+    app.set_workbench_page(WorkbenchPage::Map);
+    app.set_input_mode(InputMode::Navigate);
+    app
+}
+
+/// Reported twice against real targets (issue #172, 2026-10-05 and
+/// 2026-10-06): the gallery rendered as Map's body while every key it
+/// advertised went elsewhere, because the gate asked `map_requires_action`
+/// instead of asking which composition the renderer solved.
+#[test]
+fn an_actionable_map_gallery_owns_the_keys_it_advertises() {
+    use crate::scene3d::VizPage;
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_with_actionable_map_gallery(target.path());
+
+    let plan = crate::renderer::workbench_phase_plan_for_app(
+        &app,
+        ratatui::layout::Rect::new(0, 0, 160, 40),
+    )
+    .expect("Map plans a body at the default viewport");
+    assert_eq!(
+        plan.composition
+            .role_of(crate::ui_view_models::PhaseSurfaceId::MapDfd),
+        crate::ui_view_models::SurfaceRole::Canvas,
+        "an action-required Map draws the gallery as its canvas"
+    );
+    assert!(
+        !crate::ui_view_models::ready_map_gallery_is_primary(&app),
+        "this Map still requires action, which is exactly the state that used \
+         to disarm the gallery"
+    );
+    assert!(crate::ui_view_models::map_gallery_is_canvas(&app));
+
+    assert_eq!(app.current_map_viz_page(), VizPage::Summary);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(
+        app.current_map_viz_page(),
+        VizPage::Dfd,
+        "Tab cycles the gallery instead of the sibling panes"
+    );
+    assert_eq!(
+        app.shell_view(),
+        ShellView::Workbench,
+        "cycling the gallery never leaves the cockpit"
+    );
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('z'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.shell_view(), ShellView::Scene);
+    assert_eq!(app.router.scene().page(), VizPage::Dfd);
+    assert!(app.router.scene().map_only(), "z keeps the Map tab scope");
+}
+
+/// The footer and the gallery header may not disagree about the same keys:
+/// whatever the gallery owns, the footer names.
+#[test]
+fn an_actionable_map_gallery_is_advertised_by_the_footer() {
+    let target = tempfile::tempdir().unwrap();
+    let app = app_with_actionable_map_gallery(target.path());
+
+    let bindings = crate::ui_view_models::footer_keybindings(&app)
+        .iter()
+        .map(|binding| format!("{} {}", binding.key, binding.label))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    assert!(bindings.contains("Tab map view"), "{bindings}");
+    assert!(bindings.contains("z zoom"), "{bindings}");
+    assert!(
+        crate::ui_view_models::navigation_prompt_label(&app).contains("Tab map view"),
+        "{}",
+        crate::ui_view_models::navigation_prompt_label(&app)
+    );
+}
+
+/// A Map with nothing but its readiness card keeps the generic pane controls:
+/// there is no gallery canvas to own `Tab`, so the gate must still refuse.
+#[test]
+fn a_map_without_a_gallery_canvas_keeps_the_pane_controls() {
+    use crate::scene3d::VizPage;
+    let target = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
+    app.set_workbench_page(WorkbenchPage::Map);
+    app.set_input_mode(InputMode::Navigate);
+
+    assert!(!crate::ui_view_models::map_gallery_is_canvas(&app));
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.current_map_viz_page(), VizPage::Summary);
 }
 
 #[test]

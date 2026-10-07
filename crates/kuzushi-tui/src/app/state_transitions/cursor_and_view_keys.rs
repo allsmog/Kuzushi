@@ -245,7 +245,7 @@ impl ShellApp {
         {
             return false;
         }
-        crate::ui_view_models::map_gallery_is_primary(self)
+        crate::ui_view_models::map_gallery_is_canvas(self)
     }
 
     fn handle_embedded_map_gallery_key(&mut self, key: KeyEvent) -> InputUpdate {
