@@ -86,10 +86,14 @@ fn append_top_findings(lines: &mut Vec<String>, findings: &[Finding]) {
 pub struct AgenticSastPersistedRun {
     pub run_id: String,
     pub findings_db: String,
-    /// Distinct fingerprints not present in the store before this run.
+    /// Findings the run's batches created in the store, measured from the
+    /// committed rows rather than pre-insertion fingerprints — observations
+    /// that dedup-merge into one finding count once.
     #[serde(default)]
     pub findings_added: u64,
-    /// Distinct fingerprints re-observed over an existing store finding.
+    /// Findings the run updated instead of added: committed rows that were
+    /// already in the run's ledger before the batch or whose fingerprint the
+    /// store had already seen.
     #[serde(default)]
     pub findings_updated: u64,
 }

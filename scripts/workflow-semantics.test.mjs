@@ -64,28 +64,71 @@ function requireAllPullRequestBranches(document) {
   assert.equal(document.on.pull_request["branches-ignore"], undefined);
 }
 
+/// Every job that restores the Rust toolchain has to reserve disk first.
+/// `quality-gauntlet` was the one that did not, and the runner's own worker
+/// process died with `No space left on device` inside `moonrepo/setup-rust`
+/// before a single repository step ran, so the job failed with no log to read.
+/// Asserting this per job rather than for `rust-tests` alone is what stops the
+/// next job that restores the toolchain from reopening the same hole.
+function targetsHostedLinux(job) {
+  if (JSON.stringify(job["runs-on"] ?? "").includes("ubuntu")) return true;
+  return (job.strategy?.matrix?.os ?? []).some((os) => os.includes("ubuntu"));
+}
+
+/// The reservation is a Linux-hosted cleanup, so a job that only ever runs on
+/// macOS or Windows runners is out of scope rather than non-compliant.
+function hostedLinuxRustJobs(document) {
+  return Object.entries(document.jobs).filter(
+    ([, job]) =>
+      targetsHostedLinux(job) &&
+      job.steps?.some((step) => step.uses?.startsWith("moonrepo/setup-rust@")),
+  );
+}
+
 function requireHostedRustDiskPreparation(document) {
-  const steps = document.jobs["rust-tests"].steps;
-  const cleanup = steps.find((step) => step.name === "Reserve disk for Rust tests");
-  assert.equal(cleanup?.if, "${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}");
-  const restore = steps.findIndex((step) => step.uses?.startsWith("moonrepo/setup-rust@"));
-  assert.ok(restore >= 0 && steps.indexOf(cleanup) < restore);
+  const jobs = hostedLinuxRustJobs(document);
+  assert.ok(jobs.length > 0, "no job restores the Rust toolchain");
+  for (const [name, job] of jobs) {
+    const steps = job.steps;
+    const cleanup = steps.find((step) => step.name?.startsWith("Reserve disk"));
+    assert.equal(
+      cleanup?.if,
+      "${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}",
+      `${name} must reserve disk only on hosted Linux runners`,
+    );
+    const restore = steps.findIndex((step) => step.uses?.startsWith("moonrepo/setup-rust@"));
+    assert.ok(
+      restore >= 0 && steps.indexOf(cleanup) < restore,
+      `${name} must reserve disk before restoring the Rust toolchain`,
+    );
+  }
 }
 
 test("Rust disk preparation excludes owner machines and precedes cache restoration", () => {
   const ci = workflow("ci");
   requireHostedRustDiskPreparation(ci);
-  const ownerMachine = structuredClone(ci);
-  const cleanup = ownerMachine.jobs["rust-tests"].steps.find(
-    (step) => step.name === "Reserve disk for Rust tests",
+  assert.deepEqual(
+    hostedLinuxRustJobs(ci).map(([name]) => name),
+    ["quality-gauntlet", "rust-tests"],
   );
-  cleanup.if = cleanup.if.replace(" && runner.environment == 'github-hosted'", "");
-  assert.throws(() => requireHostedRustDiskPreparation(ownerMachine));
-  const late = structuredClone(ci);
-  const steps = late.jobs["rust-tests"].steps;
-  const index = steps.findIndex((step) => step.name === "Reserve disk for Rust tests");
-  steps.push(...steps.splice(index, 1));
-  assert.throws(() => requireHostedRustDiskPreparation(late));
+  for (const [name] of hostedLinuxRustJobs(ci)) {
+    const ownerMachine = structuredClone(ci);
+    const cleanup = ownerMachine.jobs[name].steps.find((step) =>
+      step.name?.startsWith("Reserve disk"),
+    );
+    cleanup.if = cleanup.if.replace(" && runner.environment == 'github-hosted'", "");
+    assert.throws(() => requireHostedRustDiskPreparation(ownerMachine));
+    const late = structuredClone(ci);
+    const steps = late.jobs[name].steps;
+    const index = steps.findIndex((step) => step.name?.startsWith("Reserve disk"));
+    steps.push(...steps.splice(index, 1));
+    assert.throws(() => requireHostedRustDiskPreparation(late));
+    const missing = structuredClone(ci);
+    missing.jobs[name].steps = missing.jobs[name].steps.filter(
+      (step) => !step.name?.startsWith("Reserve disk"),
+    );
+    assert.throws(() => requireHostedRustDiskPreparation(missing));
+  }
 });
 
 function requirePlatformSelection(document) {

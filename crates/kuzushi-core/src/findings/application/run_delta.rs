@@ -41,9 +41,10 @@ pub(crate) fn emit_finding_delta(
 }
 
 /// Commit one tool run's findings under the run lifecycle, then record the
-/// typed store delta on the observing run. Added/updated counts are measured
-/// against the store before insertion, so re-observed fingerprints count as
-/// updates rather than additions.
+/// typed store delta on the observing run. The insertion reports the delta it
+/// produced, so a receipt names the findings the ledger holds rather than the
+/// observations the run emitted; re-observed fingerprints count as updates
+/// rather than additions.
 pub(crate) fn commit_observed_findings(
     store: &FindingStore,
     observation: Option<&RunObservationHandle>,
@@ -73,23 +74,23 @@ pub(crate) fn commit_observed_findings_with_status(
         matches!(status, RunItemStatus::Completed | RunItemStatus::Partial),
         "Finding commits require a completed or partial outcome"
     );
-    let counts = store.fingerprint_delta(findings)?;
-    insert_run_findings(store, run_id, target, findings, status)?;
-    emit_finding_delta(observation, store, findings, counts)
+    let delta = insert_run_findings(store, run_id, target, findings, status)?;
+    emit_finding_delta(observation, store, findings, (delta.added, delta.updated))
 }
 
+/// The run's recorded findings count stays the number of observations it
+/// emitted — the honest answer to "what did this run report" — while the
+/// returned delta answers "what did the store gain".
 fn insert_run_findings(
     store: &FindingStore,
     run_id: &str,
     target: &Path,
     findings: &[Finding],
     status: RunItemStatus,
-) -> Result<()> {
+) -> Result<crate::findings::persistence::CommittedFindingDelta> {
     store.with_run_lifecycle_status(run_id, target, || {
-        for finding in findings {
-            store.insert_finding(run_id, finding)?;
-        }
-        Ok(((), findings.len(), status))
+        let delta = store.insert_findings_measuring_delta(run_id, findings)?;
+        Ok((delta, findings.len(), status))
     })
 }
 

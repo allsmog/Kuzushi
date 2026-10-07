@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_delta_splits_new_from_reobserved_distinct_fingerprints() {
+    fn a_committed_delta_splits_new_from_reobserved_findings() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-delta";
         store
@@ -322,11 +322,139 @@ mod tests {
 
         // The re-observed finding, one new finding, and a byte-duplicate of
         // the new finding (same fingerprint) — duplicates count once.
-        let (added, updated) = store
-            .fingerprint_delta(&[existing.clone(), fresh.clone(), fresh.clone()])
+        let delta = store
+            .insert_findings_measuring_delta(run, &[existing.clone(), fresh.clone(), fresh.clone()])
             .unwrap();
 
-        assert_eq!((added, updated), (1, 1));
+        assert_eq!((delta.added, delta.updated), (1, 1));
+        assert_eq!(delta.row_ids.len(), 3, "one row id per observation");
+        assert_eq!(delta.row_ids[1], delta.row_ids[2], "duplicates share a row");
+    }
+
+    /// A batch of 27 observations that dedup folds into 25 findings used to
+    /// commit a delta of 27, which the RESULT READY banner printed as
+    /// `findings +27` over a Review ledger holding 25. The delta has to count
+    /// the findings the store gained, not the observations the run emitted.
+    /// Issue #172, 2026-10-05 audit.
+    #[test]
+    fn a_committed_delta_counts_findings_the_store_gained_not_observations() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-fold";
+        store
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
+            .unwrap();
+
+        let (semgrep, full_mode) = collision_pair();
+        let separate = Finding::new_tool(
+            "semgrep",
+            "rule-elsewhere",
+            "src/bar.c",
+            7,
+            None,
+            Severity::Low,
+            "unrelated finding",
+        );
+
+        let delta = store
+            .insert_findings_measuring_delta(
+                run,
+                &[semgrep.clone(), full_mode.clone(), separate.clone()],
+            )
+            .unwrap();
+
+        // Three observations carrying three distinct fingerprints, two
+        // findings: counting the fingerprints is the arithmetic that over-
+        // reported the delta.
+        let batch = [semgrep.clone(), full_mode.clone(), separate.clone()];
+        assert_eq!(
+            batch
+                .iter()
+                .map(|finding| finding.fingerprint.as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(store.list_findings(10).unwrap().len(), 2);
+        assert_eq!((delta.added, delta.updated), (2, 0));
+        assert_eq!(delta.row_ids[0], delta.row_ids[1], "the merged pair");
+        assert_ne!(delta.row_ids[0], delta.row_ids[2]);
+    }
+
+    /// A later batch whose only finding merges into a row this run already
+    /// holds added nothing: the ledger still has one finding. The incoming
+    /// fingerprint is new, so asking the fingerprints alone would call it an
+    /// addition — the row the insertion returned is what settles it.
+    #[test]
+    fn a_second_batch_merging_into_this_runs_row_adds_nothing() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-second-batch";
+        store
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
+            .unwrap();
+        let (semgrep, full_mode) = collision_pair();
+
+        let first = store
+            .insert_findings_measuring_delta(run, &[semgrep])
+            .unwrap();
+        let second = store
+            .insert_findings_measuring_delta(run, &[full_mode])
+            .unwrap();
+
+        assert_eq!((first.added, first.updated), (1, 0));
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+        assert_eq!(
+            (second.added, second.updated),
+            (0, 1),
+            "the second batch merged into the first batch's row"
+        );
+        assert_eq!(second.row_ids, first.row_ids);
+    }
+
+    /// One issue at one location reported by two channels: the shared
+    /// file/line/CWE gives them one dedup key and one source signature, so the
+    /// insertion merges them.
+    fn collision_pair() -> (Finding, Finding) {
+        let semgrep = Finding::new_tool(
+            "semgrep",
+            "java.injection.tainted-system-call",
+            "src/foo.c",
+            42,
+            Some(42),
+            Severity::Medium,
+            "user-controlled exec, CWE-78",
+        );
+        let full_mode = Finding::new_tool(
+            "full-mode-multi",
+            "full-mode-multi/cwe-78",
+            "src/foo.c",
+            42,
+            Some(42),
+            Severity::High,
+            "exec with attacker-controlled argv, CWE-78",
+        );
+        assert_eq!(semgrep.dedup_key, full_mode.dedup_key);
+        assert_ne!(semgrep.fingerprint, full_mode.fingerprint);
+        (semgrep, full_mode)
+    }
+
+    /// A merge whose surviving row was already in the store is an update, not
+    /// an addition, even though the incoming fingerprint itself is new.
+    #[test]
+    fn a_merge_into_a_stored_finding_counts_as_an_update() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-merge-update";
+        store
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
+            .unwrap();
+        let (stored, collider) = collision_pair();
+        store.insert_finding(run, &stored).unwrap();
+
+        let delta = store
+            .insert_findings_measuring_delta(run, &[stored.clone(), collider.clone()])
+            .unwrap();
+
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+        assert_eq!((delta.added, delta.updated), (0, 1));
     }
 
     #[test]

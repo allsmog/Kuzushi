@@ -9,6 +9,29 @@ use crate::storage_v3::writer_actor::{
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// What one batch's commit changed in the store, in durable findings.
+///
+/// `added + updated` is the number of findings the batch committed, which is
+/// what the findings ledger will show for the run. It can be smaller than the
+/// batch length, because dedup merges fold several observations into one
+/// finding.
+pub(crate) struct CommittedFindingDelta {
+    pub(crate) added: u64,
+    pub(crate) updated: u64,
+    /// The finding each input observation landed in, in input order.
+    pub(crate) row_ids: Vec<i64>,
+}
+
+impl CommittedFindingDelta {
+    /// A run that committed no observations still changed nothing measurably,
+    /// which is what lets a clean scan offer Report truthfully.
+    pub(crate) const EMPTY: Self = Self {
+        added: 0,
+        updated: 0,
+        row_ids: Vec::new(),
+    };
+}
+
 struct FindingInsertOutcome {
     id: i64,
     projected: Finding,
@@ -71,6 +94,69 @@ impl FindingStore {
     pub fn insert_finding(&self, scan_id: &str, finding: &Finding) -> Result<i64> {
         let mut writer = self.storage_writer_session()?;
         self.insert_finding_with_writer(scan_id, finding, &mut writer)
+    }
+
+    /// Insert a batch and measure what it changed, counted in the findings the
+    /// store now holds rather than the fingerprints the batch carried.
+    ///
+    /// The two differ: `insert_finding_statements` merges an incoming finding
+    /// into an existing row when they share a `dedup_key` and
+    /// `dedup_collision_can_merge` agrees, so a batch of 27 fingerprints can
+    /// commit 25 findings. Only the insertion knows which merges happened,
+    /// which is why the count is taken from the rows it returned instead of
+    /// predicted beforehand — a receipt that counted fingerprints is what made
+    /// the RESULT READY banner read `findings +27` over a Review ledger of 25
+    /// (issue #172).
+    ///
+    /// A row counts as `updated`, not `added`, when the batch did not create
+    /// it: either it was already in this run's ledger before the batch, or a
+    /// fingerprint that landed in it was already in the store. The first case
+    /// needs the row's own identity — a second channel committing its
+    /// observation in a later batch merges into a row this run already holds
+    /// under a fingerprint the store has never seen, so the fingerprints alone
+    /// would report an addition the ledger never gained.
+    pub(crate) fn insert_findings_measuring_delta(
+        &self,
+        scan_id: &str,
+        findings: &[Finding],
+    ) -> Result<CommittedFindingDelta> {
+        if findings.is_empty() {
+            return Ok(CommittedFindingDelta::EMPTY);
+        }
+        let reobserved = self.reobserved_fingerprints(findings)?;
+        let stored_rows = self.run_finding_row_ids(scan_id)?;
+        let mut writer = self.storage_writer_session()?;
+        let mut row_ids = Vec::with_capacity(findings.len());
+        let mut rows = std::collections::BTreeMap::<i64, bool>::new();
+        for finding in findings {
+            let id = self.insert_finding_with_writer(scan_id, finding, &mut writer)?;
+            row_ids.push(id);
+            let row_was_present = rows
+                .entry(id)
+                .or_insert_with(|| stored_rows.contains(&id));
+            *row_was_present |= reobserved.contains(finding.fingerprint.as_str());
+        }
+        let updated = rows.values().filter(|present| **present).count() as u64;
+        Ok(CommittedFindingDelta {
+            added: rows.len() as u64 - updated,
+            updated,
+            row_ids,
+        })
+    }
+
+    /// The findings this run already holds, by row id, read before a batch
+    /// commits. A row the insertion returns that is in this set was merged
+    /// into rather than created.
+    fn run_finding_row_ids(&self, scan_id: &str) -> Result<std::collections::BTreeSet<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("select id from finding_current where run_id = ?1")
+            .context("Could not read the run's current findings")?;
+        let ids = stmt
+            .query_map(params![scan_id], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<std::collections::BTreeSet<i64>>>()
+            .context("Could not read the run's current finding ids")?;
+        Ok(ids)
     }
 
     pub fn insert_findings(&self, scan_id: &str, findings: &[Finding]) -> Result<Vec<i64>> {

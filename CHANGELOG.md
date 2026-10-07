@@ -45,6 +45,34 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- CI's `quality-gauntlet` reserves hosted-runner disk before it restores the
+  Rust toolchain. `8e07bd36` added that cleanup to `rust-tests` but not to the
+  gauntlet, which also restores the toolchain with its cache: the runner's own
+  worker process died with `No space left on device` inside
+  `moonrepo/setup-rust`, before any repository step ran and with no job log to
+  read, taking the dependent Rust and platform jobs down as skipped. The
+  `ci.yml` workflow contract now asserts the reservation for every job in that
+  workflow that restores the toolchain on a hosted Linux runner, rather than
+  for `rust-tests` alone, so the next such `ci.yml` job cannot reopen the
+  hole. `ci-full.yml` and the release workflows restore the same toolchain
+  without the reservation and stay outside this contract — closing that is a
+  named follow-up, not covered here.
+- A scan's receipt counts the findings it committed, not the observations it
+  emitted. The RESULT READY banner read `findings +27` one line above a Scan
+  delta pane reading `findings 25 distinct · 27 observations`, over a Review
+  ledger and a rail that both said 25. The delta a run commits was measured
+  before insertion and keyed by fingerprint, but cross-channel dedup merges an
+  incoming finding into a stored row when they share a `dedup_key` and the
+  collision rule accepts them — so two channels reporting one issue at one
+  file/line/CWE commit one finding while the pre-insertion count says two.
+  Only the insertion knows which merges happened, so the count now comes from
+  the rows it returned: a row counts as `added` only when the batch created it,
+  and as `updated` when it was already in the run's ledger or carries a
+  fingerprint the store already had — making `added + updated` the number of
+  findings the ledger will show. This also corrects
+  `agentic-sast:scan`'s reported `findingsAdded`/`findingsUpdated` and
+  full-mode's emitted delta. The banner's own reconciliation rules are
+  unchanged; a typed delta is now the durable truth they already assumed.
 - Full CI's `e2e` lane runs the native CLI again, and a failing smoke run now
   says why. GitHub's artifact round trip drops the executable bit, so
   `node22-compat`, `verify-pack`, and `real-semgrep` each restore it after

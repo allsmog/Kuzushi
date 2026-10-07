@@ -99,6 +99,52 @@ mod tests {
         assert_eq!(delta.finding_id_samples.len(), 2);
     }
 
+    /// The delta a receipt carries has to name the findings the ledger holds.
+    /// Two channels reporting one issue commit one finding, and counting the
+    /// observations instead is what made the RESULT READY banner read
+    /// `findings +27` over a Review ledger of 25. Issue #172, 2026-10-05.
+    #[test]
+    fn a_folded_observation_pair_commits_one_finding_not_two() {
+        let target = tempfile::tempdir().unwrap();
+        let (workspace, store) = open_store(target.path());
+        // One issue at one location, reported by two channels: the shared
+        // file/line/CWE gives them one dedup key and one source signature, so
+        // the insertion merges them.
+        let semgrep = Finding::new_tool(
+            "semgrep",
+            "java.injection.tainted-system-call",
+            "src/foo.c",
+            42,
+            Some(42),
+            Severity::Medium,
+            "user-controlled exec, CWE-78",
+        );
+        let full_mode = Finding::new_tool(
+            "full-mode-multi",
+            "full-mode-multi/cwe-78",
+            "src/foo.c",
+            42,
+            Some(42),
+            Severity::High,
+            "exec with attacker-controlled argv, CWE-78",
+        );
+        assert_eq!(semgrep.dedup_key, full_mode.dedup_key);
+        assert_ne!(semgrep.fingerprint, full_mode.fingerprint);
+
+        persist_observed(
+            target.path(),
+            &workspace,
+            &store,
+            "run-folded",
+            &[semgrep, full_mode],
+        );
+
+        let ledger = store.list_findings_for_scan_id("run-folded").unwrap();
+        assert_eq!(ledger.len(), 1, "the pair merged into one finding");
+        let delta = only_delta(target.path(), "run-folded");
+        assert_eq!((delta.added, delta.updated, delta.removed), (1, 0, 0));
+    }
+
     #[test]
     fn a_clean_run_still_commits_a_zero_delta() {
         let target = tempfile::tempdir().unwrap();

@@ -10,18 +10,15 @@ pub(crate) fn persist_agentic_sast_findings(
     };
     workspace.ensure_state_dir()?;
     let run_id = ctx.finding_run_id();
-    let (findings_added, findings_updated) = store.fingerprint_delta(findings)?;
-    store.with_run_lifecycle(&run_id, target, || {
-        for finding in findings {
-            store.insert_finding(&run_id, finding)?;
-        }
-        Ok(((), findings.len()))
+    let delta = store.with_run_lifecycle(&run_id, target, || {
+        let delta = store.insert_findings_measuring_delta(&run_id, findings)?;
+        Ok((delta, findings.len()))
     })?;
 
     Ok(Some(AgenticSastPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
-        findings_added,
-        findings_updated,
+        findings_added: delta.added,
+        findings_updated: delta.updated,
     }))
 }

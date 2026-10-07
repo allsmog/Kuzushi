@@ -5,20 +5,30 @@ impl FindingStore {
         self.v3_finding_by_fingerprint(fingerprint)
     }
 
-    /// Split the produced distinct fingerprints into store-new vs re-observed,
-    /// checked against the store before this run's observations are appended.
-    pub(crate) fn fingerprint_delta(&self, findings: &[Finding]) -> Result<(u64, u64)> {
+    /// Which of the batch's fingerprints the store already holds, checked
+    /// before this run's observations are appended. A fingerprint in this set
+    /// is a re-observation; the rest are new to the store.
+    ///
+    /// This answers only the fingerprint question. How many *findings* a batch
+    /// changes is a different number, because cross-channel dedup merges two
+    /// fingerprints sharing a `dedup_key` into one finding, and only the
+    /// insertion knows which merges happened. `insert_findings_measuring_delta`
+    /// is the measurement a receipt should carry.
+    pub(in crate::findings::persistence::open) fn reobserved_fingerprints<'a>(
+        &self,
+        findings: &'a [Finding],
+    ) -> Result<std::collections::BTreeSet<&'a str>> {
         let produced = findings
             .iter()
             .map(|finding| finding.fingerprint.as_str())
             .collect::<std::collections::BTreeSet<_>>();
-        let mut updated = 0_u64;
-        for fingerprint in &produced {
+        let mut reobserved = std::collections::BTreeSet::new();
+        for fingerprint in produced {
             if self.get_finding_by_fingerprint(fingerprint)?.is_some() {
-                updated += 1;
+                reobserved.insert(fingerprint);
             }
         }
-        Ok((produced.len() as u64 - updated, updated))
+        Ok(reobserved)
     }
 
     pub fn get_finding_by_reference(&self, reference: &str) -> Result<Option<Finding>> {

@@ -132,18 +132,18 @@ pub(crate) fn persist_full_mode_report(
     };
     let store = FindingStore::open(workspace.findings_db_path())?;
     let scan_id = ctx.finding_run_id();
-    let counts = store.fingerprint_delta(&report.findings)?;
-    store.with_run_lifecycle(&scan_id, workspace.root(), || {
-        for finding in &mut report.findings {
-            finding.id = Some(store.insert_finding(&scan_id, finding)?);
-        }
-        Ok(((), report.findings.len()))
+    let delta = store.with_run_lifecycle(&scan_id, workspace.root(), || {
+        let delta = store.insert_findings_measuring_delta(&scan_id, &report.findings)?;
+        Ok((delta, report.findings.len()))
     })?;
+    for (finding, id) in report.findings.iter_mut().zip(&delta.row_ids) {
+        finding.id = Some(*id);
+    }
     crate::findings::emit_finding_delta(
         ctx.run_observation().as_ref(),
         &store,
         &report.findings,
-        counts,
+        (delta.added, delta.updated),
     )
 }
 
