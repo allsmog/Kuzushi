@@ -43,7 +43,7 @@ fn regular_workbench_keybindings(
         Some(binding) => replace_enter_binding(&mut bindings, binding),
         None => bindings.retain(|binding| binding.key != "Enter"),
     }
-    if ready_map_gallery_is_visible(app) {
+    if map_gallery_is_visible(app) {
         apply_map_gallery_controls(&mut bindings, app);
     }
     prioritize_phase_controls(&mut bindings, plan);
@@ -51,9 +51,13 @@ fn regular_workbench_keybindings(
     bindings
 }
 
-pub(super) fn ready_map_gallery_is_visible(app: &ShellApp) -> bool {
+/// The footer names the gallery's controls exactly while the gallery is the
+/// canvas being drawn — the same condition that decides whether it owns those
+/// keys — so an action-required Map advertises them too instead of leaving
+/// them unnamed while they work.
+pub(super) fn map_gallery_is_visible(app: &ShellApp) -> bool {
     active_workbench_page(app) == WorkbenchPage::Map
-        && crate::ui_view_models::map_gallery_is_primary(app)
+        && crate::ui_view_models::map_gallery_is_canvas(app)
 }
 
 fn append_workbench_commands(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {

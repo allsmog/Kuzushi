@@ -453,14 +453,18 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], selection: SelectedFindingHin
 }
 
 /// `Tab` cycles the Map projection, and `z` zooms the selected projection,
-/// only while the embedded gallery owns keys. A Map that still requires action
-/// consumes `Tab` nowhere and has no selected view to zoom — there `z` opens
-/// the Map viz deck, which is what the Navigate footer and the keymap already
-/// say. The hint row must promise neither; the remaining Map hints stay true
-/// in both states.
+/// only while Map has a gallery body. This row is a header row, so the body
+/// area the composition solves is sized from it and it cannot ask which
+/// composition won; it names only what a ready Map guarantees at every
+/// terminal size. Where the gallery is the canvas of an action-required Map
+/// its own header advertises those keys — this row stays silent about them
+/// rather than naming a key that a Map with only its readiness card would
+/// refuse. There `z` opens the Map viz deck, which is what the Navigate
+/// footer and the keymap already say. The remaining Map hints stay true in
+/// both states.
 fn page_command_bar_hints(app: &ShellApp, page: WorkbenchPage) -> Vec<WorkbenchHint> {
     let hints = page_command_bar_hint_slice(page).to_vec();
-    if page != WorkbenchPage::Map || super::map_gallery_is_primary(app) {
+    if page != WorkbenchPage::Map || super::ready_map_gallery_is_primary(app) {
         return hints;
     }
     hints

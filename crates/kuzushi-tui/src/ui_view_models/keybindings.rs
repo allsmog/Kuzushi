@@ -69,7 +69,7 @@ fn focused_reader_needs_paging(app: &ShellApp) -> bool {
         return app.router.workbench().focus_for(page) == super::PhaseSurfaceId::ReviewDetail;
     }
     app.current_map_viz_page() == crate::scene3d::VizPage::EntryPoints
-        && workbench::ready_map_gallery_is_visible(app)
+        && workbench::map_gallery_is_visible(app)
 }
 
 fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
@@ -147,9 +147,7 @@ fn prompt_tab_action(app: &ShellApp) -> &'static str {
     if app.shell_view() == crate::ShellView::RunDiff {
         return "findings / sources";
     }
-    if app.shell_view() == crate::ShellView::Workbench
-        && workbench::ready_map_gallery_is_visible(app)
-    {
+    if app.shell_view() == crate::ShellView::Workbench && workbench::map_gallery_is_visible(app) {
         "map view"
     } else {
         "complete"
@@ -324,7 +322,7 @@ fn prompt_editor_escape_label(app: &ShellApp) -> Option<String> {
 fn map_summary_navigation_available(app: &ShellApp) -> bool {
     app.shell_view() == crate::ShellView::Workbench
         && super::active_workbench_page(app) == crate::app::WorkbenchPage::Map
-        && super::map_gallery_is_primary(app)
+        && super::map_gallery_is_canvas(app)
         && app.current_map_viz_page() == crate::scene3d::VizPage::Summary
 }
 

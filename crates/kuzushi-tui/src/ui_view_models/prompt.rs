@@ -77,7 +77,7 @@ pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
         return prove_detail_prompt_label(app);
     }
     let controls = if workbench_prompt_mode(app) == Some(WorkbenchPage::Map)
-        && super::map_gallery_is_primary(app)
+        && super::map_gallery_is_canvas(app)
     {
         map_navigation_controls(app)
     } else {
