@@ -153,12 +153,14 @@ struct EntryListSection<'a> {
 }
 
 /// The display rows (section headers plus entries) a viewport of `visible`
-/// rows shows around the selection, and how many rows it leaves out.
+/// rows shows around the selection, and the catalog entries it leaves out
+/// above and below.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EntryListWindow {
     start: usize,
     end: usize,
-    total: usize,
+    hidden_above: usize,
+    hidden_below: usize,
 }
 
 fn entry_list_window(
@@ -170,15 +172,32 @@ fn entry_list_window(
     let total = model.entries.len().saturating_add(sections.len());
     let selected_row = selected_display_row(&sections, selection);
     let start = viewport_start(total, visible, selected_row);
+    let end = start.saturating_add(visible).min(total);
     EntryListWindow {
         start,
-        end: start.saturating_add(visible).min(total),
-        total,
+        end,
+        hidden_above: entries_before_row(&sections, start),
+        hidden_below: model
+            .entries
+            .len()
+            .saturating_sub(entries_before_row(&sections, end)),
     }
 }
 
-/// The list title names the selection and, when the viewport clips the list,
-/// how many rows sit above and below it — a hidden row is never silent.
+/// The catalog entries that sit above display row `row`. A disposition header
+/// spends a display row without being a catalog entry, so scrolling one past
+/// the top of the viewport hides pane chrome, not an entry.
+fn entries_before_row(sections: &[EntryListSection<'_>], row: usize) -> usize {
+    let headers = sections
+        .iter()
+        .filter(|section| section.row_start < row)
+        .count();
+    row.saturating_sub(headers)
+}
+
+/// The list title names the selection and, when the viewport clips the
+/// catalog, how many entries sit above and below it — a hidden entry is never
+/// silent, and nothing the operator can already see is reported as hidden.
 fn entry_list_title(
     model: &EntryPointBreakdown,
     selection: usize,
@@ -189,11 +208,11 @@ fn entry_list_title(
         selection.saturating_add(1),
         model.entries.len()
     )];
-    if window.start > 0 {
-        parts.push(format!("+{} above", window.start));
+    if window.hidden_above > 0 {
+        parts.push(format!("+{} above", window.hidden_above));
     }
-    if window.end < window.total {
-        parts.push(format!("+{} below", window.total - window.end));
+    if window.hidden_below > 0 {
+        parts.push(format!("+{} below", window.hidden_below));
     }
     format!(" {} ", parts.join(" · "))
 }
@@ -426,30 +445,64 @@ mod tests {
     };
 
     #[test]
-    fn a_clipped_entry_list_names_the_rows_it_hides() {
-        let model = sample_model();
-        let total = model.entries.len() + model.dispositions.len();
-        assert!(total > 1, "fixture needs more than one display row");
+    fn a_clipped_entry_list_names_the_entries_it_hides() {
+        let model = large_catalog_model(40);
+        let entries = model.entries.len();
 
         let clipped = entry_list_window(&model, 0, 1);
-        let above = clipped.start;
-        let below = clipped.total - clipped.end;
-        assert_eq!(above + below, total - 1, "one visible row hides the rest");
         let title = entry_list_title(&model, 0, clipped);
-        for (count, side) in [(above, "above"), (below, "below")] {
-            assert_eq!(
-                title.contains(&format!("+{count} {side}")),
-                count > 0,
-                "{title}"
-            );
-        }
+        assert_eq!(clipped.hidden_below, entries - 1, "{clipped:?}");
+        assert!(
+            title.contains(&format!("+{} below", entries - 1)),
+            "{title}"
+        );
 
-        let whole = entry_list_window(&model, 0, total);
+        let whole = entry_list_window(&model, 0, entries + model.dispositions.len());
         let title = entry_list_title(&model, 0, whole);
         assert!(
             !title.contains("below") && !title.contains("above"),
             "{title}"
         );
+    }
+
+    /// The defect this guards: on the first of 1250 entries an 80x24 viewport
+    /// titled the list `+1 above`, because the disposition header scrolled
+    /// past the top of the window counted as a hidden catalog entry. Nothing
+    /// precedes the first entry, so no viewport height may claim otherwise.
+    #[test]
+    fn the_first_entry_is_never_reported_as_having_entries_above_it() {
+        let model = large_catalog_model(1250);
+
+        for visible in 1..=24 {
+            let window = entry_list_window(&model, 0, visible);
+            assert_eq!(window.hidden_above, 0, "visible={visible} {window:?}");
+            let title = entry_list_title(&model, 0, window);
+            assert!(!title.contains("above"), "visible={visible} {title}");
+        }
+    }
+
+    /// Hidden counts partition the catalog: what the title says is clipped
+    /// plus what the viewport formats is the whole catalog, across every
+    /// selection and viewport height, with headers belonging to neither side.
+    #[test]
+    fn hidden_entry_counts_account_for_the_whole_catalog() {
+        let model = two_disposition_model();
+        let entries = model.entries.len();
+
+        for selection in 0..entries {
+            for visible in 1..=entries + 2 {
+                let window = entry_list_window(&model, selection, visible);
+                let shown = visible_entry_list_lines(&model, selection, 60, visible)
+                    .iter()
+                    .filter(|line| line.to_string().contains("entry "))
+                    .count();
+                assert_eq!(
+                    window.hidden_above + shown + window.hidden_below,
+                    entries,
+                    "selection={selection} visible={visible} shown={shown} {window:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -540,15 +593,7 @@ mod tests {
 
     #[test]
     fn large_catalog_viewport_reaches_the_last_of_six_hundred_rows() {
-        let mut model = sample_model();
-        model.entries = (0..600)
-            .map(|index| EntryPointItem {
-                id: format!("EP-{index:03}"),
-                name: format!("entry {index:03}"),
-                ..model.entries[0].clone()
-            })
-            .collect();
-        model.dispositions[0].count = 600;
+        let model = large_catalog_model(600);
 
         let text = render_to_text(
             EntryPointBrowser {
@@ -632,6 +677,39 @@ mod tests {
 
         assert!(row.ends_with("dispatch.rs:1180"), "{row}");
         assert_eq!(display_width(&row), 46, "{row}");
+    }
+
+    /// One disposition group holding `entries` rows, named so a formatted row
+    /// is told apart from the group header above it.
+    fn large_catalog_model(entries: usize) -> EntryPointBreakdown {
+        let template = sample_model();
+        let mut model = template.clone();
+        model.entries = (0..entries)
+            .map(|index| EntryPointItem {
+                id: format!("EP-{index:03}"),
+                name: format!("entry {index:03}"),
+                ..template.entries[0].clone()
+            })
+            .collect();
+        model.dispositions[0].count = entries;
+        model
+    }
+
+    /// Two disposition groups, so the clip math meets more than one header
+    /// row and a viewport can sit below both of them.
+    fn two_disposition_model() -> EntryPointBreakdown {
+        let mut model = large_catalog_model(9);
+        model.dispositions = vec![
+            EntryPointGroup {
+                name: "modeled".into(),
+                count: 4,
+            },
+            EntryPointGroup {
+                name: "extracted only".into(),
+                count: 5,
+            },
+        ];
+        model
     }
 
     fn generic_title_model() -> EntryPointBreakdown {
