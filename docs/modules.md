@@ -420,6 +420,11 @@ completed outcome; this does not certify complete repository coverage. Partial
 absence cannot resolve earlier findings. The operator must explicitly
 acknowledge a partial attempt before using it for the guided journey.
 
+Study-filtered Review includes retained observations from authenticated attempts,
+including partial scans. Completed-pass recurrence remains separate. An
+incomplete observation can be reviewed without increasing completed-pass counts;
+unavailable study receipts produce an error and hide stale list membership.
+
 For a selected Semgrep task, `semgrepConfig` declares rule files or selectors
 and `semgrepBinary` declares the executable through shared prepared dispatch.
 Use absolute local rule paths when scanning directory scopes. Local rules

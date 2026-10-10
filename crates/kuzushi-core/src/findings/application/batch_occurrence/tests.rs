@@ -576,6 +576,10 @@ fn gate_policy(path: std::path::PathBuf) -> crate::capabilities::campaign::ScanB
 }
 
 fn gate_fixture_store(root: &Path) -> FindingStore {
+    gate_fixture_store_with_last_status(root, "completed")
+}
+
+fn gate_fixture_store_with_last_status(root: &Path, last_status: &str) -> FindingStore {
     let expected = planned_config_sha256(root);
     for run_id in [
         "run-trial-1-a1",
@@ -584,7 +588,12 @@ fn gate_fixture_store(root: &Path) -> FindingStore {
         "run-trial-3-a1",
         "run-trial-3-a2",
     ] {
-        write_trial_receipt(root, run_id, &expected);
+        let status = if run_id == "run-trial-3-a2" {
+            last_status
+        } else {
+            "completed"
+        };
+        write_trial_receipt_with_status(root, run_id, &expected, status);
     }
     let store = FindingStore::open(root.join("findings.db")).unwrap();
     for run_id in ["run-trial-1-a1", "run-trial-1-a2", "run-trial-2-a1"] {
@@ -622,6 +631,10 @@ fn persist_current_gate(
 }
 
 fn write_trial_receipt(root: &Path, run_id: &str, config_sha256: &str) {
+    write_trial_receipt_with_status(root, run_id, config_sha256, "completed");
+}
+
+fn write_trial_receipt_with_status(root: &Path, run_id: &str, config_sha256: &str, status: &str) {
     write_child_equivalence_receipt(root, run_id);
     let record = crate::run_artifacts::ToolRunRecord::new(root, run_id, "run", "sast:scan");
     crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
@@ -634,9 +647,48 @@ fn write_trial_receipt(root: &Path, run_id: &str, config_sha256: &str) {
     .unwrap();
     crate::run_artifacts::try_record_tool_run_complete(
         record,
-        &json!({"status": "completed", "data": {"engines": ["secret-scan"]}}),
+        &json!({"status": status, "data": {"engines": ["secret-scan"]}}),
     )
     .unwrap();
+}
+
+#[test]
+fn retained_observations_include_partial_attempts_without_increasing_recurrence() {
+    let target = tempfile::tempdir().unwrap();
+    seed_batch_documents(target.path());
+    let store = gate_fixture_store_with_last_status(target.path(), "partial");
+    store
+        .record_run_started("run-trial-3-a2", target.path(), "partial")
+        .unwrap();
+    let finding = Finding::new_semgrep(
+        "owned/signal",
+        "fixture.rs",
+        1,
+        None,
+        Severity::Info,
+        "Owned incomplete observation",
+    );
+    store.insert_finding("run-trial-3-a2", &finding).unwrap();
+    store
+        .record_run_started("outside-study", target.path(), "completed")
+        .unwrap();
+    let outside = Finding::new_semgrep(
+        "owned/outside",
+        "other.rs",
+        1,
+        None,
+        Severity::Info,
+        "Owned unrelated observation",
+    );
+    store.insert_finding("outside-study", &outside).unwrap();
+    let report = derive_batch_occurrence_report(target.path(), "batch-test", &store).unwrap();
+    let fingerprints = report
+        .retained_observation_fingerprints(target.path(), &store)
+        .unwrap();
+    assert!(fingerprints.contains(&finding.fingerprint));
+    assert!(!fingerprints.contains(&outside.fingerprint));
+    assert_eq!((report.completed, report.failed), (2, 1));
+    assert!(report.rows.is_empty());
 }
 
 fn write_child_equivalence_receipt(root: &Path, run_id: &str) {

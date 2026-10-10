@@ -228,6 +228,66 @@ fn active_batch_scopes_review_and_exposes_occurrence_and_run_facets() {
 }
 
 #[test]
+fn incomplete_batch_observations_stay_visible_without_a_completed_occurrence() {
+    let mut retained = finding("owned-incomplete", Severity::Info, 20);
+    retained.fingerprint = "retained-fingerprint".into();
+    let mut outside = finding("owned-outside", Severity::Info, 20);
+    outside.fingerprint = "outside-fingerprint".into();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![retained, outside];
+    let mut report = batch_report_for("unused");
+    report.rows.clear();
+    report.completed = 0;
+    report.failed = report.planned;
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some(report.batch_id.clone());
+    deck.active_batch_report = Some(report);
+    assert!(review_queue_model(&app, ReviewQueueMode::All)
+        .rows
+        .is_empty());
+    app.router
+        .campaign_mut()
+        .active_batch_observation_fingerprints
+        .insert("retained-fingerprint".into());
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].rule, "owned-incomplete");
+    assert!(model.rows[0].occurrence.is_none());
+    assert_eq!(
+        app.router
+            .campaign()
+            .active_batch_report()
+            .unwrap()
+            .completed,
+        0
+    );
+    app.router.campaign_mut().clear_active_batch();
+    assert!(app
+        .router
+        .campaign()
+        .active_batch_observation_fingerprints
+        .is_empty());
+    assert_eq!(review_queue_model(&app, ReviewQueueMode::All).rows.len(), 2);
+}
+
+#[test]
+fn unavailable_batch_report_hides_stale_retained_membership() {
+    let mut retained = finding("owned-incomplete", Severity::Info, 20);
+    retained.fingerprint = "retained-fingerprint".into();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![retained];
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some("unavailable-batch".into());
+    deck.active_batch_report = None;
+    deck.active_batch_observation_fingerprints
+        .insert("retained-fingerprint".into());
+
+    assert!(review_queue_model(&app, ReviewQueueMode::All)
+        .rows
+        .is_empty());
+}
+
+#[test]
 fn occurrence_ratio_is_metadata_only_for_a_tied_review_result() {
     let mut tied = finding("tied-result", Severity::High, 20);
     tied.fingerprint = "batch-finding".to_string();

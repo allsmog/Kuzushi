@@ -47,6 +47,8 @@ pub struct CampaignRouteState {
     /// refreshes until the operator clears it or switches targets.
     pub(crate) active_batch_id: Option<String>,
     pub(crate) active_batch_report: Option<kuzushi_core::findings::BatchOccurrenceReport>,
+    /// Recorded observation membership, independent of completed-pass recurrence.
+    pub(crate) active_batch_observation_fingerprints: BTreeSet<String>,
 }
 
 impl Default for CampaignRouteState {
@@ -69,6 +71,7 @@ impl Default for CampaignRouteState {
             setup_context_study: None,
             active_batch_id: None,
             active_batch_report: None,
+            active_batch_observation_fingerprints: BTreeSet::new(),
         }
     }
 }
@@ -163,6 +166,7 @@ impl CampaignRouteState {
     pub(crate) fn clear_active_batch(&mut self) {
         self.active_batch_id = None;
         self.active_batch_report = None;
+        self.active_batch_observation_fingerprints.clear();
     }
 }
 

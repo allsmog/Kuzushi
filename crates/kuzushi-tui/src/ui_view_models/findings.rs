@@ -931,6 +931,7 @@ fn batch_scoped_finding_alias_indices(
         .rows
         .iter()
         .flat_map(|row| row.fingerprints.iter())
+        .chain(deck.active_batch_observation_fingerprints.iter())
         .collect::<std::collections::HashSet<_>>();
     candidates
         .into_iter()
@@ -1335,8 +1336,12 @@ fn active_batch_cache_value(app: &ShellApp) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        " batch:{}:{}/{}/{}:{fingerprints}",
-        report.batch_id, report.completed, report.planned, report.failed
+        " batch:{}:{}/{}/{}:{fingerprints}:retained:{:?}",
+        report.batch_id,
+        report.completed,
+        report.planned,
+        report.failed,
+        app.router.campaign().active_batch_observation_fingerprints
     )
 }
 

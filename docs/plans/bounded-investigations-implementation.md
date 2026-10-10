@@ -3382,3 +3382,27 @@ tools with evidence assigned to 67; no module is promoted or retired. All nine
 broad milestones and complete real-model/reference-quality acceptance remain
 open. The newer remote Map keyboard fix is being integrated after preserving
 this checkpoint on main.
+
+### Partial study Review and verification signer, October 10, 2026
+
+The incomplete-observation list gap is repaired. Shared application loading
+resolves recorded parent and engine observation membership after authenticated
+batch receipt checks. Review includes these findings while completed-trial
+recurrence remains unchanged. Cache refresh, batch clearing and unavailable
+report states preserve honest membership.
+
+Final sequential J174 has 28 machine passes, zero failures and 51 live captures.
+Enter opens the finding from the study-filtered list. Six-size Review and resize
+recovery preserve identity; scripted human triage, selected-study export and
+no-color restart retain three observations, zero complete passes and zero provider
+requests. Compact lower-detail paging and complete product acceptance remain
+unqualified. There are 63 focused Core, TUI and receipt checks, a passing
+workspace build and a passing four-file production risk proxy. See the
+[partial study assessment](../assessments/partial-study-review-2026-10-10.md).
+
+The operator explicitly approved creation and enrollment of a dedicated receipt
+key. Its private file remains outside the repository; public trust is restricted
+to the approved identity and verification namespace. Positive and negative real
+signature checks pass. Final Git publication remains subject to a fresh signed
+verification receipt for the clean commit. No module is promoted or retired,
+and all nine broad delivery milestones remain open.

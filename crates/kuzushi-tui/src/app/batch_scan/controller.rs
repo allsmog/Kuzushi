@@ -5,6 +5,11 @@ use crate::app::state_transitions::{InputUpdate, ViewHotkeyAction};
 use crate::app::{ShellApp, ShellView};
 use kuzushi_core::findings::derive_batch_occurrence_report;
 
+type BatchReviewScope = (
+    kuzushi_core::findings::BatchOccurrenceReport,
+    std::collections::BTreeSet<String>,
+);
+
 impl ShellApp {
     pub(crate) fn open_selected_scopes_study(
         &mut self,
@@ -251,6 +256,8 @@ impl ShellApp {
         let deck = self.router.campaign_mut();
         deck.detail = true;
         deck.active_batch_id = Some(batch_id.to_string());
+        deck.active_batch_report = None;
+        deck.active_batch_observation_fingerprints.clear();
         self.refresh_active_batch_report();
     }
 
@@ -266,22 +273,25 @@ impl ShellApp {
         else {
             return;
         };
-        let report = self
-            .open_store()
-            .and_then(|store| derive_batch_occurrence_report(&target, &batch_id, &store));
+        let report = self.open_store().and_then(|store| {
+            let report = derive_batch_occurrence_report(&target, &batch_id, &store)?;
+            let fingerprints = report.retained_observation_fingerprints(&target, &store)?;
+            Ok((report, fingerprints))
+        });
         self.apply_batch_report(batch_id, report);
     }
 
-    fn apply_batch_report(
-        &mut self,
-        batch_id: String,
-        report: anyhow::Result<kuzushi_core::findings::BatchOccurrenceReport>,
-    ) {
+    fn apply_batch_report(&mut self, batch_id: String, report: anyhow::Result<BatchReviewScope>) {
         match report {
-            Ok(report) => self.router.campaign_mut().active_batch_report = Some(report),
+            Ok((report, fingerprints)) => {
+                let deck = self.router.campaign_mut();
+                deck.active_batch_report = Some(report);
+                deck.active_batch_observation_fingerprints = fingerprints;
+            }
             Err(error) => {
                 let deck = self.router.campaign_mut();
                 deck.active_batch_report = None;
+                deck.active_batch_observation_fingerprints.clear();
                 deck.notice = Some(format!("batch {batch_id} report unavailable: {error:#}"));
             }
         }

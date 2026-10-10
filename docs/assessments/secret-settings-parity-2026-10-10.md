@@ -50,10 +50,12 @@ premature workspace-history selection during report loading, and incorrect
 export/raw-plan schema assumptions. No journey or helper was edited while its
 process was live. Each failure was kept and the complete journey was rerun.
 
-The batch-filtered list still omits observations from incomplete trials.
+At this checkpoint, the batch-filtered list omitted observations from incomplete trials.
 Direct finding access permits Review, and restart's unfiltered list shows the
-finding and all three sources. This remains a product gap, not full TUI
-acceptance. Comprehensive option combinations, source races, complete monorepo
+finding and all three sources. The subsequent
+[partial study Review assessment](partial-study-review-2026-10-10.md) records
+the list repair and its verification. Comprehensive option combinations,
+source races, complete monorepo
 and real-model investigation quality remain unqualified. No module is promoted
 or retired; all nine broad delivery milestones remain open. See the separate
 [live lesson receipt](live-lesson-retry-2026-10-10.md) for the approved single
