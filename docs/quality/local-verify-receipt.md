@@ -91,9 +91,11 @@ Failures are listed individually, followed by a non-zero exit.
 
 ## Trusting a signing key
 
-`.github/allowed_signers` currently trusts nobody: no signing key is configured
-in this repository, so listing one would be a guess. Until the owner adds a key,
-`verify` refuses every receipt and says so.
+The owner enrolled a dedicated Ed25519 verification key on 2026-10-10.
+`.github/allowed_signers` trusts its public key for the owner's Git email,
+restricted to the `kuzushi-verify` namespace. Its private key stays outside the
+repository. This checkout selects it through repository-local Git settings;
+other checkouts must configure their own approved signer.
 
 ```sh
 git config gpg.format ssh
@@ -101,8 +103,9 @@ git config user.signingkey ~/.ssh/<your-key>
 pnpm verify:receipt:sign          # prints the exact allowed_signers line
 ```
 
-Then paste that line into `.github/allowed_signers` and commit it. Public keys
-only.
+For an additional signer, have the owner approve its public key before adding
+it to `.github/allowed_signers`. Restrict the entry with
+`namespaces="kuzushi-verify"`. Commit public keys only.
 
 ## The pre-push hook
 
