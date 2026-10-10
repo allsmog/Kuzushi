@@ -2,9 +2,10 @@
 //! attack-surface page is drawn frame-level (see `render_scene_view`); every
 //! other page is a 2D box-drawing diagram rendered here as styled lines.
 
-use super::components::component_tree_lines;
+use super::components::component_tree_rows;
 use super::diagrams::{attack_path_lines, heatmap_lines};
 use super::entry_points::entry_point_lines;
+use super::line_page::LinePageRows;
 use super::worklist::worklist_lines;
 use super::*;
 use crate::scene3d::VizPage;
@@ -89,12 +90,52 @@ pub(crate) fn scene_page_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec
     lines
 }
 
+/// The page's body as the rows it projects. Only the component tree wraps a
+/// value across display lines today; every other line page fits each value to
+/// the canvas, so one of its display lines is one row.
+pub(super) fn page_body_rows(app: &ShellApp, area: Rect, page: VizPage) -> LinePageRows {
+    if page == VizPage::Components {
+        return component_tree_rows(area.width as usize, &component_stack(app));
+    }
+    LinePageRows::from_lines(page_body_lines(app, area, page))
+}
+
+/// Full-frame projection of a line page: the gallery header stays pinned and
+/// the body is windowed by its rows, so the zoom states the same total Map's
+/// embedded canvas does. `None` for a frame-rendered page, which has no row
+/// model and keeps the generic pinned document viewport.
+pub(crate) fn scene_line_page_viewport_lines(
+    app: &ShellApp,
+    area: Rect,
+    scroll: usize,
+) -> Option<Vec<Line<'static>>> {
+    let page = app.router.scene().page();
+    if page.is_frame_rendered() {
+        return None;
+    }
+    let mut lines = gallery_header_lines(app, area.width as usize);
+    lines.push(Line::from(String::new()));
+    let body_height = area.height.saturating_sub(lines.len() as u16);
+    let rows = page_body_rows(app, area, page);
+    match rows.window(body_height, scroll) {
+        None => lines.extend(rows.into_lines().into_iter().take(body_height as usize)),
+        Some(window) => {
+            lines.push(Line::styled(window.position_label, theme::muted()));
+            lines.extend(window.lines);
+        }
+    }
+    // A canvas too short for the header itself keeps the generic viewport's
+    // bound rather than overflowing it.
+    lines.truncate(area.height as usize);
+    Some(lines)
+}
+
 pub(super) fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'static>> {
     let width = area.width as usize;
     match page {
         VizPage::AttackPath => attack_path_lines(width, &taint_flow_path(app)),
         VizPage::EntryPoints => entry_point_lines(width, &entry_point_breakdown(app)),
-        VizPage::Components => component_tree_lines(width, &component_stack(app)),
+        VizPage::Components => component_tree_rows(width, &component_stack(app)).into_lines(),
         VizPage::Heatmap => heatmap_lines(width, &cached_findings_heatmap(app)),
         VizPage::Worklist => worklist_lines(width, &worklist_model(app)),
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw

@@ -5,7 +5,7 @@
 
 use super::diagram::{DfdDiagram, DfdSummary, TreeDiagram};
 use super::entry_points::EntryPointBrowser;
-use super::gallery::{gallery_header_lines, map_gallery_header_lines, page_body_lines};
+use super::gallery::{gallery_header_lines, map_gallery_header_lines, page_body_rows};
 use super::scene_color::to_color;
 use super::*;
 use crate::scene3d::{
@@ -124,33 +124,21 @@ fn render_line_page_body(
     page: VizPage,
     line_scroll: u16,
 ) {
-    let lines = page_body_lines(app, area, page);
-    let Some(window) =
-        super::gallery_layout::line_page_window(area.height, lines.len(), line_scroll)
-    else {
-        render_scrolled_lines(frame, area, lines, 0);
+    let rows = page_body_rows(app, area, page);
+    let Some(window) = rows.window(area.height, line_scroll as usize) else {
+        render_lines(frame, area, rows.into_lines());
         return;
     };
     let sections = super::gallery_layout::line_page_position_sections(area);
-    render_scrolled_lines(frame, sections[0], lines, window.start);
+    render_lines(frame, sections[0], window.lines);
     frame.render_widget(
         Paragraph::new(Line::styled(window.position_label, crate::theme::muted())),
         sections[1],
     );
 }
 
-fn render_scrolled_lines(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    lines: Vec<Line<'static>>,
-    scroll: u16,
-) {
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
-        area,
-    );
+fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 // ── 3D terrain body: rasterize via scene3d, then overlay labels ────────────
@@ -307,6 +295,34 @@ mod tests {
         );
         let position = rendered.last().expect("a rendered canvas").trim_end();
         assert_eq!(position, " rows 10-16/16", "{rendered:#?}");
+        drop(temp);
+    }
+
+    /// The defect this guards: the total came from the display lines a canvas
+    /// wrapped the tree into, so one real 2731-component tree read
+    /// `rows 1-10/2731` embedded in Map, `rows 1-25/2732` in the full-frame
+    /// zoom at the same terminal size, and `rows 1-4/2737` at 80 columns. The
+    /// rows belong to the model, so every width and both projections agree.
+    #[test]
+    fn every_width_and_projection_states_the_same_component_row_total() {
+        let (temp, mut app) = app_with_component_inventory();
+        app.router.scene_mut().set_page(VizPage::Components);
+
+        for width in [24, 40, 60] {
+            let rendered = render_embedded_gallery(&app, width, 10, 0);
+            let position = rendered.last().expect("a rendered canvas").trim_end();
+            assert!(position.ends_with("/16"), "width={width} {position}");
+        }
+
+        let zoom =
+            super::super::gallery::scene_line_page_viewport_lines(&app, Rect::new(0, 0, 24, 10), 0)
+                .expect("a line page has a row-windowed zoom");
+        let position = zoom
+            .iter()
+            .map(|line| line.to_string())
+            .find(|text| text.contains("rows "))
+            .expect("the zoom discloses its window");
+        assert!(position.trim_end().ends_with("/16"), "{position}");
         drop(temp);
     }
 
