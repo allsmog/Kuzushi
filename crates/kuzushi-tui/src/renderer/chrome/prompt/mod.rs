@@ -197,6 +197,15 @@ fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::St
 }
 
 fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
+    if crate::ui_view_models::compact_review_reading(app, app.viewport().rows) {
+        return Line::from(vec![
+            Span::styled("▣ REVIEW · ", theme::mode_review()),
+            Span::styled(
+                crate::ui_view_models::navigation_prompt_label(app),
+                theme::disabled(),
+            ),
+        ]);
+    }
     if app.shell_view() == crate::ShellView::RunDiff {
         return disabled_prompt_line("SCAN COMPARISON · Tab changes view · Esc back");
     }

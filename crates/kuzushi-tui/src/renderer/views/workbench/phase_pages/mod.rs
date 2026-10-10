@@ -15,7 +15,7 @@ mod hunt;
 mod map;
 mod scan;
 
-pub(in crate::renderer::views) use header::phase_header_lines;
+pub(in crate::renderer::views) use header::{compact_review_header_lines, phase_header_lines};
 
 #[derive(Debug, Clone, Copy)]
 pub(in crate::renderer::views) struct PhaseRenderState<'a> {

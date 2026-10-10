@@ -73,6 +73,9 @@ pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
 }
 
 pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
+    if super::compact_review_reading(app, app.viewport().rows) {
+        return compact_review_prompt_label(app);
+    }
     if app.prove_detail_owns_controls() {
         return prove_detail_prompt_label(app);
     }
@@ -93,6 +96,16 @@ pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
         text.push_str(" prompt");
     }
     text
+}
+
+fn compact_review_prompt_label(app: &ShellApp) -> String {
+    let keys = app
+        .ui()
+        .keymap_binding_labels("composer", "prompt_mode", &["Esc"]);
+    if keys.is_empty() {
+        return "NAVIGATE · type command".into();
+    }
+    format!("NAVIGATE · {} prompt", keys.join("/"))
 }
 
 fn prove_detail_prompt_label(app: &ShellApp) -> String {

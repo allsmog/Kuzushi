@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn compact_review_header_keeps_identity_and_stale_revision_warning() {
+    let mut header = scan_header(None);
+    header.phase = kuzushi_core::WorkflowPhase::Review;
+    header.reality_phase = Some(kuzushi_core::WorkflowPhase::Review);
+    header.next_action = "open Report after review".into();
+    let ordinary = compact_review_header_lines(&header, 40);
+    assert_eq!(ordinary.len(), 1);
+    assert!(ordinary[0].to_string().contains("Viewing Review"));
+    header.checkpoint_drift = Some(crate::ui_view_models::CheckpointDrift {
+        phase: kuzushi_core::WorkflowPhase::Scan,
+        accepted_revision: Some("abcdef012345".into()),
+        current_revision: Some("123456789abc".into()),
+        dirty_changed: false,
+        relationship: Some(kuzushi_core::workspace::RevisionRelationship::AheadBy(1)),
+    });
+    let stale = compact_review_header_lines(&header, 40);
+    assert_eq!(stale.len(), 2);
+    assert!(stale[1].to_string().contains("Scan stale"));
+    assert!(stale[1].to_string().contains("rerun Scan"));
+}
+
+#[test]
 fn scan_receipt_stays_compact_and_discloses_details_without_crowding_out_evidence() {
     let card = keyed_result_card();
     let rows = result_card_render_rows(

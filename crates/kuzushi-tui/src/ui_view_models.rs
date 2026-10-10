@@ -166,8 +166,9 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
-    compact_gallery_notice, keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
-    transcript_chrome_height, RAIL_AUTO_MIN_WIDTH, RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
+    compact_gallery_notice, compact_review_reading, keybind_footer_chrome_height, rail_width,
+    status_footer_chrome_height, transcript_chrome_height, RAIL_AUTO_MIN_WIDTH,
+    RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
 };
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{

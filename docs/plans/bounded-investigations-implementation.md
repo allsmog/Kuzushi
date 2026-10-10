@@ -3434,3 +3434,25 @@ reference parity remain open. See the
 [live investigation assessment](../assessments/live-owned-investigation-2026-10-10.md).
 No module is promoted or retired. This is meaningful live workflow evidence,
 not production precision or completion of the nine broad milestones.
+
+### Compact finding reading, October 10, 2026
+
+Idle Review navigation at 12 rows reclaims passive status and repeated workflow
+guidance. The 40x12 detail body grows from three to six lines, with one finding
+identity, stale-source warnings, local keys and the composer retained. Typing,
+work and decision gates keep ordinary chrome. Shared geometry also sets page
+distance; resize preserves selection, scroll, draft and cursor. Compact prompt
+copy follows configured or unbound controls and fits the default 40-column view.
+
+Sixty-four distinct focused tests, workspace build and the seven-file production
+risk proxy pass. Final readonly J177 has 18 machine passes, zero failures and
+34 live captures across six sizes and no-color restart. Compact paging now
+reaches the complete source commit and final decision snapshot, with a verified
+stable tail. The completed live investigation retains four settled calls, two
+protected Review calls, three observations and one fixture decision, with no
+source/configuration change or new request. See the
+[compact reading assessment](../assessments/compact-review-reading-2026-10-10.md).
+
+This closes the observed compact density and final provenance reading gaps for
+that fixture. Physical contrast, motion, broad control remapping, complete
+reference parity and the nine broad delivery milestones remain open.

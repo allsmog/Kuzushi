@@ -154,3 +154,37 @@ fn navigation_prompt_uses_the_remapped_prompt_binding() {
         "NAVIGATE · Shift+Tab phase→ Tab/[/] pane · x prompt"
     );
 }
+
+#[test]
+fn compact_review_navigation_label_uses_remapped_and_unbound_controls() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(crate::ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
+    assert_eq!(navigation_prompt_label(&app), "NAVIGATE · Esc prompt");
+    let remapped = compact_review_with_prompt_keys(vec!["x".into()]);
+    assert_eq!(navigation_prompt_label(&remapped), "NAVIGATE · x prompt");
+    let unbound = compact_review_with_prompt_keys(Vec::new());
+    assert_eq!(navigation_prompt_label(&unbound), "NAVIGATE · type command");
+}
+
+fn compact_review_with_prompt_keys(bindings: Vec<String>) -> ShellApp {
+    let mut config = V2Config::default();
+    config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+        context: "composer".into(),
+        action: "prompt_mode".into(),
+        bindings,
+    }];
+    let mut remapped = ShellApp::new(config, None);
+    remapped.set_shell_view(crate::ShellView::Workbench);
+    remapped
+        .router
+        .workbench_mut()
+        .set_page(Some(crate::WorkbenchPage::Review));
+    remapped.set_input_mode(crate::InputMode::Navigate);
+    remapped.set_viewport(crate::TerminalViewport::new(40, 12));
+    remapped
+}

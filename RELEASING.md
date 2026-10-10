@@ -5,6 +5,12 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- Idle compact Review navigation reclaims passive status and repeated workflow
+  guidance for the finding. Source drift, local paging/back keys and the composer
+  remain visible; decision gates, active work and typing keep ordinary chrome.
+  The shared rendered geometry also sets PageDown distance. Compact prompt copy
+  follows configured and unbound keys. No persisted format or dispatch changes.
+
 - `sast:scan` adds optional `agenticMaxModelTurns`, with the
   `agentic_max_model_turns` alias and range 1 through 40. It requires the agentic
   task, reaches its existing per-query limit, and leaves omitted defaults intact.
