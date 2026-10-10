@@ -34,8 +34,8 @@ shared limits across two directory roots without contaminating the study ledger.
 Explicit partial acknowledgement, direct finding access, a scripted human
 false-positive decision, selected-study JSON export and no-color restart retain
 source, plan, observations and spending. The study receipt records its frozen
-plan digest and all three observations. No source or credential is executed or
-validated. Exploit development, reproduction and vulnerability patching remain
+plan digest and all three observations. Source remains inert, and no credential
+validity check occurs. Exploit development, reproduction and vulnerability patching remain
 excluded.
 
 There are 76 distinct passing focused Rust checks: 69 Core and seven TUI. The
