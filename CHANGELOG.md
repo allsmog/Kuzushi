@@ -45,6 +45,23 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Map's embedded gallery owns the keys it advertises. The renderer draws the
+  Summary/DFD/Entry/Components gallery as Map's page body for every
+  composition that gives `MapDfd` the canvas role — a ready Map and an
+  action-required Map (which keeps its readiness card in a drawer beneath the
+  gallery) both do — and its header advertises `Tab cycles · z zoom` in both.
+  Interaction, though, was gated on `map_requires_action`, so in the second
+  state the gallery rendered as the body while every key it named went
+  elsewhere: `Tab` cycled the sibling panes and the per-page selection keys
+  (`j/k`, `g/G`, `Enter`, `PgUp/PgDn`) never reached it. That state is the one
+  any fresh engagement sits in — findings recorded, no threat model yet — so
+  the gallery was inert exactly when an operator first meets it, reachable
+  only by zooming out to `/scene`. The gate, the `z` zoom, the footer
+  keybindings, and the Navigate prompt label now all ask the composition the
+  renderer solved. Map's command bar keeps the narrower ready-Map answer,
+  because its hints are header rows that the solved body area is measured
+  from and so cannot depend on that composition. Reported twice against real
+  targets in #172 (2026-10-05, 2026-10-06).
 - CI's `quality-gauntlet` reserves hosted-runner disk before it restores the
   Rust toolchain. `8e07bd36` added that cleanup to `rust-tests` but not to the
   gauntlet, which also restores the toolchain with its cache: the runner's own

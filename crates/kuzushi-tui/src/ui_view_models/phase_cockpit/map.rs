@@ -38,8 +38,42 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     }
 }
 
-pub(crate) fn map_gallery_is_primary(app: &ShellApp) -> bool {
+/// Whether a *ready* Map leads with its gallery. The command bar and plain
+/// output ask this, because neither can ask the layout: the command bar's
+/// hints are header rows, so the body area the composition solves is sized
+/// from them, and plain output has no composition at all. It is therefore a
+/// model-level answer that holds at every terminal size, and it is not the
+/// question an interaction gate asks — use `map_gallery_is_canvas` there.
+pub(crate) fn ready_map_gallery_is_primary(app: &ShellApp) -> bool {
     !map_requires_action(&map_phase_model(app))
+}
+
+/// Whether Map's embedded gallery is the canvas the renderer is drawing.
+///
+/// Every composition that gives `MapDfd` the canvas role renders the gallery
+/// as Map's body, header hint included, and both a ready Map
+/// (`ready_map_composition`) and a Map that still requires action
+/// (`actionable_map_composition`, which puts the readiness card in a drawer
+/// beneath it) do. Gating interaction on `map_requires_action` instead left
+/// the second state rendered but inert: its header advertised
+/// `Tab cycles · z zoom` while `Tab` cycled sibling panes and the gallery's
+/// own selection keys never reached it. Ask the solved composition instead,
+/// so the keys the gallery advertises are the keys it owns.
+///
+/// Derives the plan from the recorded viewport, exactly as the footer
+/// keybindings and mouse hit testing already do, so it must not be called
+/// while building the workbench presentation snapshot itself.
+pub(crate) fn map_gallery_is_canvas(app: &ShellApp) -> bool {
+    let viewport = app.viewport();
+    crate::renderer::workbench_phase_plan_for_app(
+        app,
+        ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+    )
+    .is_some_and(|plan| {
+        plan.composition
+            .role_of(crate::ui_view_models::PhaseSurfaceId::MapDfd)
+            == crate::ui_view_models::SurfaceRole::Canvas
+    })
 }
 
 /// The card's heading and its artifact status line, which it always renders.

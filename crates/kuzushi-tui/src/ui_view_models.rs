@@ -265,8 +265,8 @@ pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    map_context_fit, map_gallery_is_primary, phase_cockpit_model_for_phase,
-    phase_presentation_plan, phase_surface_specs, AttentionMode, ChainArtifactsModel,
+    map_context_fit, map_gallery_is_canvas, phase_cockpit_model_for_phase, phase_presentation_plan,
+    phase_surface_specs, ready_map_gallery_is_primary, AttentionMode, ChainArtifactsModel,
     ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
     EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
     MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,

@@ -83,7 +83,7 @@ pub(super) fn plain_lines(
     if let Some(issue) = model.recorded_context_issue.as_deref() {
         return recorded_context_issue_lines(issue, width);
     }
-    if crate::ui_view_models::map_gallery_is_primary(app) {
+    if crate::ui_view_models::ready_map_gallery_is_primary(app) {
         let mut lines = crate::renderer::views::scene::map_summary_plain_lines(app, width);
         lines.push(map_artifact_status_line(model, width));
         return lines;
