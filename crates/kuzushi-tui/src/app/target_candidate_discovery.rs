@@ -24,6 +24,7 @@ pub(crate) struct TargetCandidateFacts {
     pub(crate) prior_artifacts: Vec<String>,
     pub(crate) component_inventory: Option<kuzushi_core::SbomScanReport>,
     pub(crate) component_inventory_error: Option<String>,
+    pub(crate) component_inventory_from_tool: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +39,7 @@ pub(crate) struct ActiveTargetFactsState {
     path: Option<PathBuf>,
     facts: Option<TargetCandidateFacts>,
     loading: bool,
+    component_override: Option<Result<kuzushi_core::SbomScanReport, String>>,
 }
 
 impl ActiveTargetFactsState {
@@ -46,12 +48,16 @@ impl ActiveTargetFactsState {
         self.path = Some(path);
         self.facts = None;
         self.loading = true;
+        self.component_override = None;
     }
 
-    pub(crate) fn apply(&mut self, stamped: StampedTargetCandidateFacts) -> bool {
+    pub(crate) fn apply(&mut self, mut stamped: StampedTargetCandidateFacts) -> bool {
         if self.generation != stamped.generation || self.path.as_ref() != Some(&stamped.facts.path)
         {
             return false;
+        }
+        if let Some(update) = &self.component_override {
+            apply_component_update(&mut stamped.facts, update);
         }
         self.facts = Some(stamped.facts);
         self.loading = false;
@@ -62,6 +68,21 @@ impl ActiveTargetFactsState {
         self.facts.as_ref()
     }
 
+    pub(crate) fn apply_component_inventory(
+        &mut self,
+        target: &std::path::Path,
+        result: Result<kuzushi_core::SbomScanReport, String>,
+    ) -> bool {
+        if self.path.as_deref() != Some(target) {
+            return false;
+        }
+        if let Some(facts) = self.facts.as_mut() {
+            apply_component_update(facts, &result);
+        }
+        self.component_override = Some(result);
+        true
+    }
+
     pub(crate) fn loading(&self) -> bool {
         self.loading
     }
@@ -69,6 +90,23 @@ impl ActiveTargetFactsState {
     #[cfg(test)]
     pub(crate) fn path(&self) -> Option<&std::path::Path> {
         self.path.as_deref()
+    }
+}
+
+fn apply_component_update(
+    facts: &mut TargetCandidateFacts,
+    update: &Result<kuzushi_core::SbomScanReport, String>,
+) {
+    facts.component_inventory_from_tool = true;
+    match update {
+        Ok(report) => {
+            facts.component_inventory = Some(report.clone());
+            facts.component_inventory_error = None;
+        }
+        Err(error) => {
+            facts.component_inventory = None;
+            facts.component_inventory_error = Some(error.clone());
+        }
     }
 }
 
@@ -152,6 +190,7 @@ fn inspect_target_candidate(path: PathBuf) -> TargetCandidateFacts {
         prior_artifacts,
         component_inventory,
         component_inventory_error,
+        component_inventory_from_tool: false,
         path,
     }
 }
@@ -614,6 +653,73 @@ mod tests {
         assert!(!should_descend_for_facts(&target.path().join(".claude")));
         assert!(!should_descend_for_facts(&target.path().join("dist")));
         assert!(!should_descend_for_facts(&target.path().join("bazel-out")));
+    }
+
+    #[test]
+    fn completed_component_result_survives_late_inspection_and_resets_on_explicit_refresh() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(
+            target.path().join("package.json"),
+            r#"{"dependencies":{"old-library":"^1"}}"#,
+        )
+        .unwrap();
+        let old = inspect_target_candidate(target.path().to_path_buf());
+        std::fs::write(
+            target.path().join("package.json"),
+            r#"{"dependencies":{"new-library":"^2"}}"#,
+        )
+        .unwrap();
+        let report =
+            kuzushi_core::scan_sbom(target.path(), &kuzushi_core::ScanCancellation::default())
+                .unwrap();
+        let mut state = ActiveTargetFactsState::default();
+        state.begin(target.path().to_path_buf(), 2);
+        assert!(state.apply_component_inventory(target.path(), Ok(report)));
+        assert!(state.apply(StampedTargetCandidateFacts {
+            generation: 2,
+            facts: old
+        }));
+        let facts = state.facts().unwrap();
+        assert!(facts.component_inventory_from_tool);
+        assert_eq!(
+            facts.component_inventory.as_ref().unwrap().components[0].name,
+            "new-library"
+        );
+        state.begin(target.path().to_path_buf(), 3);
+        let fresh = inspect_target_candidate(target.path().to_path_buf());
+        assert!(state.apply(StampedTargetCandidateFacts {
+            generation: 3,
+            facts: fresh
+        }));
+        assert!(!state.facts().unwrap().component_inventory_from_tool);
+    }
+
+    #[test]
+    fn component_failures_clear_stale_results_and_ignore_foreign_targets() {
+        let target = tempfile::tempdir().unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::write(
+            target.path().join("package.json"),
+            r#"{"dependencies":{"old-library":"^1"}}"#,
+        )
+        .unwrap();
+        let old = inspect_target_candidate(target.path().to_path_buf());
+        let mut state = ActiveTargetFactsState::default();
+        state.begin(target.path().to_path_buf(), 2);
+        assert!(!state.apply_component_inventory(foreign.path(), Err("foreign failure".into())));
+        assert!(
+            state.apply_component_inventory(target.path(), Err("Owned malformed manifest".into()))
+        );
+        assert!(state.apply(StampedTargetCandidateFacts {
+            generation: 2,
+            facts: old
+        }));
+        let facts = state.facts().unwrap();
+        assert!(facts.component_inventory.is_none());
+        assert_eq!(
+            facts.component_inventory_error.as_deref(),
+            Some("Owned malformed manifest")
+        );
     }
 
     #[test]

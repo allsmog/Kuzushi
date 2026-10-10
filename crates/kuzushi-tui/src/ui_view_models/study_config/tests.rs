@@ -2,6 +2,21 @@ use super::*;
 use kuzushi_core::allowance::{AllowanceLimits, AllowanceSnapshot};
 use ratatui::{backend::TestBackend, Terminal};
 
+#[test]
+fn preparation_preview_uses_frozen_limits_and_keeps_legacy_unknowns_honest() {
+    let input = serde_json::json!({"tasks":["agentic"],"maxInventoryFiles":1,"maxBytesPerFile":64});
+    let summary = agentic_preparation_summary(&input).unwrap();
+    assert!(summary.contains("snippet limit 1"));
+    assert!(summary.contains("byte limit 64"));
+    assert!(summary.contains("later agent reads are separate"));
+    assert!(
+        agentic_preparation_summary(&serde_json::json!({"tasks":["agentic"]}))
+            .unwrap()
+            .contains("not recorded")
+    );
+    assert!(agentic_preparation_summary(&serde_json::json!({"tasks":["secret-scan"]})).is_none());
+}
+
 fn configured_study() -> (tempfile::TempDir, BatchScanConfig) {
     let target = tempfile::tempdir().unwrap();
     let mut config = BatchScanConfig::load(target.path(), None);
@@ -76,7 +91,7 @@ fn compact_large_allowances_keep_exact_call_counts_and_failed_accounting_never_l
     config.study.accounting_error = Some("Labeled missing receipt".into());
     assert_eq!(
         study_allowance_summary(&config, 36),
-        "Accounting unavailable · work blocked"
+        "Last read 123456/1000000 · blocked"
     );
     config.study.accounting_error = None;
     config.study.allowance = None;
@@ -84,4 +99,54 @@ fn compact_large_allowances_keep_exact_call_counts_and_failed_accounting_never_l
         study_allowance_summary(&config, 36),
         "Allowance not approved"
     );
+}
+
+#[test]
+fn failed_accounting_keeps_last_known_consumption_visible_with_an_honest_label() {
+    let (_target, mut config) = configured_study();
+    config.study.accounting_error = Some("Labeled missing receipt".into());
+    for width in [36, 56, 76, 92, 116, 156] {
+        let label = study_allowance_summary(&config, width);
+        assert!(
+            label.contains("Last read") && label.contains("blocked"),
+            "{label}"
+        );
+        assert!(
+            label.contains("1/8") || label.contains("1 committed / 8 total"),
+            "{label}"
+        );
+        assert!(label.chars().count() <= width, "{width}: {label}");
+    }
+    let lines = allowance_status_lines(&config).join("\n");
+    for text in [
+        "unverified",
+        "1 committed / 8 total",
+        "protected review: 2",
+        "revision 1",
+        "r retries",
+    ] {
+        assert!(lines.contains(text), "{lines}");
+    }
+}
+#[test]
+fn supporting_context_projection_shows_frozen_text_and_omissions() {
+    let frozen = serde_json::json!({"scanContextRef":{"schemaVersion":1}});
+    let lines =
+        super::supporting_context_lines(&frozen, Some("Recorded architecture\nRecorded boundary"));
+    assert!(lines[0].contains("exact frozen text"));
+    assert_eq!(&lines[1..], &["Recorded architecture", "Recorded boundary"]);
+    assert!(super::supporting_context_lines(&frozen, None)[0].contains("no supplemental text"));
+    assert!(
+        super::supporting_context_lines(&serde_json::json!({}), None)[0].contains("legacy live")
+    );
+}
+
+#[test]
+fn scoped_agentic_summary_distinguishes_discovery_from_context_before_execution() {
+    let input = serde_json::json!({"tasks":["agentic"],"scanScopeRef":{"scopeId":"app"}});
+    let summary = super::agentic_scope_summary(&input).unwrap();
+    assert!(summary.contains("Exact read scope: app"));
+    assert!(summary.contains("Shared files provide context only"));
+    assert!(summary.contains("MCP tools are unavailable"));
+    assert!(super::agentic_scope_summary(&serde_json::json!({"tasks":["secret-scan"]})).is_none());
 }

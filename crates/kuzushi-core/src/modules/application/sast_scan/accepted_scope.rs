@@ -27,6 +27,9 @@ pub(in crate::modules) fn validate_exact_scope_request(input: &Value) -> Result<
         .context("scanScopeRef must identify an exact accepted revision and scope")?;
     let selected = requested_scope_contracts(input)?;
     selected.ensure_non_empty()?;
+    if selected.run_agentic {
+        crate::capabilities::agentic_sast::validate_agentic_scope_options(input)?;
+    }
     ensure_exact_membership_supported(&selected)
 }
 
@@ -69,7 +72,7 @@ fn resolve_selection(
 }
 
 fn ensure_exact_membership_supported(selected: &SastTaskSelection) -> Result<()> {
-    anyhow::ensure!(!selected.run_agentic && !selected.run_carlini && !selected.run_systems_hunt && !selected.run_taint_iris_next,
+    anyhow::ensure!(!selected.run_carlini && !selected.run_systems_hunt && !selected.run_taint_iris_next,
         "selected model-backed engine has no exact-file discovery contract yet. Choose an exact-file engine or review a separately approved whole-repository job. No scan started.");
     for scanner in &selected.scanners {
         anyhow::ensure!(scanner.supports_exact_files(), "{} cannot honor accepted file membership. Choose a supported engine or review a separately approved whole-repository job. No scan started.", scanner.id());

@@ -167,10 +167,9 @@ fn has_catalog_source(input: &BuildInput, expected: &str) -> bool {
 fn load_current_or_explicit_catalog(
     input: &BuildInput,
 ) -> Result<crate::capabilities::entry_points::EntryPointCatalogResolution> {
-    let resolution =
-        crate::capabilities::entry_points::ensure_current_entry_point_catalog(
-            input.workspace_root(),
-        )?;
+    let resolution = crate::capabilities::entry_points::ensure_current_entry_point_catalog(
+        input.workspace_root(),
+    )?;
     if resolution.catalog.is_none() && has_catalog_source(input, "entry-points") {
         return crate::capabilities::entry_points::load_explicit_entry_point_catalog(
             input.workspace_root(),
@@ -347,7 +346,8 @@ fn catalog_receipt(
         snapshot_timestamp: Some(catalog.snapshot_timestamp),
         context_sha256: Some(provenance.context_snapshot_sha256.clone()),
         tree_hash: provenance.context_snapshot_tree_hash.clone(),
-        selection_policy: crate::capabilities::entry_points::ENTRY_POINT_SELECTION_POLICY.to_string(),
+        selection_policy: crate::capabilities::entry_points::ENTRY_POINT_SELECTION_POLICY
+            .to_string(),
         revision: provenance.revision.clone(),
         revision_dirty: provenance.revision_dirty,
     }
@@ -926,7 +926,8 @@ mod tests {
             snapshot_timestamp: 9,
             total: entry_points.len(),
             entry_points,
-            snapshot_coverage: crate::capabilities::entry_points::EntryPointSnapshotCoverage::Complete,
+            snapshot_coverage:
+                crate::capabilities::entry_points::EntryPointSnapshotCoverage::Complete,
             provenance: crate::capabilities::entry_points::EntryPointCatalogProvenance {
                 built_at_ms: 10,
                 sha256,
@@ -1196,21 +1197,16 @@ mod tests {
     #[test]
     fn context_off_honors_an_explicit_self_validating_catalog() {
         let target = tempfile::tempdir().unwrap();
-        let mut surface = surface_row(
-            "one",
-            AttackSurfaceKind::HttpRoute,
-            "src/one.rs",
-            90,
-        );
-        surface.metadata = json!({"sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY});
+        let mut surface = surface_row("one", AttackSurfaceKind::HttpRoute, "src/one.rs", 90);
+        surface.metadata =
+            json!({"sourcePolicy": crate::workspace::rust_surface_policy::RUST_SURFACE_POLICY});
         surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
         let mut catalog = catalog(vec![surface]);
         catalog.target = target.path().canonicalize().unwrap().display().to_string();
         catalog.provenance.revision = None;
         catalog.provenance.revision_dirty = None;
-        catalog.provenance.context_snapshot_tree_hash = Some(
-            crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap(),
-        );
+        catalog.provenance.context_snapshot_tree_hash =
+            Some(crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap());
         let path = crate::workspace::workspace_state_root(target.path()).join("entry-points.json");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_vec_pretty(&catalog).unwrap()).unwrap();

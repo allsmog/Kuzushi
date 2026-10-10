@@ -118,15 +118,21 @@ impl ShellApp {
 
     fn current_page_step(&self) -> usize {
         crate::renderer::workbench_scroll_page_rows(self)
+            .or_else(|| crate::renderer::finding_group_page_rows(self))
             .or_else(|| {
                 crate::renderer::activity_output_scroll(self).map(|scroll| scroll.page_rows)
             })
             .or_else(|| crate::renderer::run_artifact_page_rows(self))
+            .or_else(|| crate::renderer::recommendation_page_rows(self))
+            .or_else(|| crate::renderer::strategy_queue_page_rows(self))
             .or_else(|| crate::renderer::logs_reader_scroll(self).map(|reader| reader.page_rows))
             .or_else(|| crate::renderer::keymap_reader_scroll(self).map(|reader| reader.page_rows))
             .or_else(|| {
                 crate::renderer::campaign_reader_scroll(self).map(|reader| reader.page_rows)
             })
+            .or_else(|| crate::renderer::coverage_page_rows(self))
+            .or_else(|| crate::renderer::context_page_rows(self))
+            .or_else(|| crate::renderer::scene_page_rows(self))
             .unwrap_or(VIEWPORT_PAGE_LINES)
     }
 
@@ -227,6 +233,9 @@ impl ShellApp {
 }
 
 const SCROLLABLE_SHELL_VIEWS: &[ShellView] = &[
+    ShellView::Recommend,
+    ShellView::Relationships,
+    ShellView::Lessons,
     ShellView::Catalog,
     ShellView::Help,
     ShellView::Module,
@@ -259,7 +268,66 @@ const SCROLLABLE_SHELL_VIEWS: &[ShellView] = &[
     ShellView::Tune,
     ShellView::ActorDetail,
     ShellView::Campaign,
+    ShellView::Coverage,
     ShellView::ModuleRun,
     ShellView::Report,
     ShellView::Workbench,
 ];
+
+#[cfg(test)]
+mod coverage_scroll_tests {
+    use super::*;
+
+    #[test]
+    fn component_gallery_paging_keeps_the_draft_and_covers_each_visible_row() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Scene);
+        app.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::Components);
+        app.set_viewport(crate::TerminalViewport::new(40, 12));
+        app.set_input_mode(InputMode::Navigate);
+        app.set_input("saved component draft");
+        let rows = crate::renderer::scene_page_rows(&app).unwrap();
+        assert!(rows < VIEWPORT_PAGE_LINES);
+        app.page_down_current_view();
+        assert_eq!(usize::from(app.router.default_scroll().offset()), rows);
+        app.page_up_current_view();
+        assert_eq!(app.router.default_scroll().offset(), 0);
+        assert_eq!(app.input(), "saved component draft");
+    }
+
+    #[test]
+    fn context_paging_does_not_skip_body_rows_or_change_a_preserved_draft() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Context);
+        app.set_viewport(crate::TerminalViewport::new(40, 12));
+        app.set_input_mode(InputMode::Navigate);
+        app.set_input("saved context draft");
+        let visible = crate::renderer::context_page_rows(&app).unwrap();
+        assert!(visible < VIEWPORT_PAGE_LINES);
+        app.page_down_current_view();
+        assert_eq!(usize::from(app.router.default_scroll().offset()), visible);
+        app.page_up_current_view();
+        assert_eq!(app.router.default_scroll().offset(), 0);
+        assert_eq!(app.input(), "saved context draft");
+        assert_eq!(app.shell_view(), ShellView::Context);
+    }
+
+    #[test]
+    fn coverage_reader_owns_page_and_line_navigation_without_changing_the_draft() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Coverage);
+        app.set_input_mode(InputMode::Navigate);
+        app.set_input("saved draft");
+        assert!(app.is_scrollable_view());
+        app.page_down_current_view();
+        assert!(app.router.default_scroll().offset() > 0);
+        app.page_up_current_view();
+        assert_eq!(app.router.default_scroll().offset(), 0);
+        app.handle_generic_scroll_hotkey(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.router.default_scroll().offset(), 1);
+        assert_eq!(app.input(), "saved draft");
+        assert_eq!(app.shell_view(), ShellView::Coverage);
+    }
+}

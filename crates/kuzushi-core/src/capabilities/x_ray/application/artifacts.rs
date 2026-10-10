@@ -117,9 +117,8 @@ fn x_ray_cost_label(data: &XRayReportData) -> String {
 
 pub(crate) fn render_x_ray_read_summary(data: &XRayReportData) -> String {
     format!(
-        "x-ray:read loaded artifacts for {} ({})\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}",
+        "x-ray:read loaded artifacts for {}\n  Recorded report tier: {}{}\n  Entry points parsed from report: {}\n  Invariants parsed from report: {}\nSource freshness: not assessed. Report claims do not establish a finding verdict or accept Map.\nOriginal generation spend, model, runtime and context: unknown. The reader makes no provider requests.\nArchitecture file is bounded; graph semantics are not assessed.\nTarget: {}\nFiles under x-ray/:\n  {}\n  {}\n  {}\n  {}",
         data.repo_name,
-        data.target,
         data.verdict.tier.as_deref().unwrap_or("unknown"),
         if data.verdict.summary.is_empty() {
             String::new()
@@ -128,6 +127,11 @@ pub(crate) fn render_x_ray_read_summary(data: &XRayReportData) -> String {
         },
         data.entry_point_counts.total,
         data.invariant_counts.total,
+        data.target,
+        REQUIRED_X_RAY_MD,
+        REQUIRED_ENTRY_POINTS_MD,
+        REQUIRED_INVARIANTS_MD,
+        REQUIRED_ARCHITECTURE_SVG,
     )
 }
 
@@ -141,6 +145,12 @@ pub fn read_x_ray_report_artifacts(
     let artifact_dir = repo_root.join("x-ray");
     let paths = x_ray_artifact_paths(&artifact_dir);
     ensure_required_artifacts_exist(&repo_root, &paths)?;
+    crate::bounded_file::read_regular_bytes_within(
+        &repo_root,
+        Path::new(&paths.architecture_svg),
+        8 * 1024 * 1024,
+    )
+    .context("Unable to read bounded architecture artifact")?;
     let markdown = read_x_ray_markdown(&repo_root, &paths)?;
 
     Ok(XRayReportData {

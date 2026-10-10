@@ -1,8 +1,7 @@
 use crate::modules::ToolCallIdentity;
 use crate::run_lifecycle::{
-    CallKind, ModelUsage, RunCallId, RunId, RunItemId, RunItemRecord, RunItemSource,
-    RunItemStatus, RunItemV1, RunObservationHandle, RunProjection, SafeText,
-    WorkflowContinuation,
+    CallKind, ModelUsage, RunCallId, RunId, RunItemId, RunItemRecord, RunItemSource, RunItemStatus,
+    RunItemV1, RunObservationHandle, RunProjection, SafeText, WorkflowContinuation,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -24,7 +23,7 @@ pub(crate) fn emit_recovered_interruption(
         return Ok(());
     }
     let observation = RunObservationHandle::jsonl(target.to_path_buf(), run_id.to_string())?;
-    interrupt_open_calls(&observation, &projection)?;
+    interrupt_open_calls(&observation, &projection, target, run_id)?;
     interrupt_open_tasks(&observation, &projection, reason)?;
     interrupt_open_plan(&observation, &projection)?;
     observation.emit_and_flush(RunItemRecord::new(
@@ -46,13 +45,16 @@ pub(crate) fn emit_recovered_interruption(
 fn interrupt_open_calls(
     observation: &RunObservationHandle,
     projection: &RunProjection,
+    target: &Path,
+    run_id: &str,
 ) -> Result<()> {
     for call_id in &projection.call_order {
         let call = &projection.calls[call_id];
         if call.status.is_terminal() {
             continue;
         }
-        observation.emit_and_flush(interrupted_call_record(*call_id, call)?)?;
+        let result = recovered_root_result_reference(target, run_id, call)?;
+        observation.emit_and_flush(interrupted_call_record(*call_id, call, result)?)?;
     }
     Ok(())
 }
@@ -60,13 +62,14 @@ fn interrupt_open_calls(
 fn interrupted_call_record(
     call_id: RunCallId,
     call: &crate::run_lifecycle::CallProjection,
+    result: Option<crate::run_lifecycle::ArtifactReference>,
 ) -> Result<RunItemRecord> {
     let item = match (call.kind, call.status) {
         (CallKind::Tool, RunItemStatus::Pending) => RunItemV1::ToolCallRejected {
             reason_class: SafeText::operator_visible("process_interrupted"),
             detail: SafeText::operator_visible("execution stopped before the tool started"),
         },
-        (CallKind::Tool, _) => interrupted_tool_finish(),
+        (CallKind::Tool, _) => interrupted_tool_finish(result),
         (CallKind::Model, _) => interrupted_model_finish(call),
     };
     Ok(scope_call_record(
@@ -76,11 +79,27 @@ fn interrupted_call_record(
     ))
 }
 
-fn interrupted_tool_finish() -> RunItemV1 {
+fn recovered_root_result_reference(
+    target: &Path,
+    run_id: &str,
+    call: &crate::run_lifecycle::CallProjection,
+) -> Result<Option<crate::run_lifecycle::ArtifactReference>> {
+    if call.kind != CallKind::Tool
+        || call.parent_item_id.is_some()
+        || call.status == RunItemStatus::Pending
+    {
+        return Ok(None);
+    }
+    // The host's recovered result belongs only to the root call. Nested
+    // engines retain missing results; no engine membership is reconstructed.
+    verified_result_artifact_reference(target, run_id, call.item_id).map(Some)
+}
+
+fn interrupted_tool_finish(result: Option<crate::run_lifecycle::ArtifactReference>) -> RunItemV1 {
     RunItemV1::ToolCallFinished {
         status: RunItemStatus::Interrupted,
         cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
-        result_artifact: None,
+        result_artifact: result,
         preview: vec![SafeText::operator_visible("tool execution was interrupted")],
         warning_count: 0,
         error_count: 1,
@@ -159,7 +178,11 @@ fn interrupt_open_plan(
     observation: &RunObservationHandle,
     projection: &RunProjection,
 ) -> Result<()> {
-    let Some(plan) = projection.plan.as_ref().filter(|plan| !plan.status.is_terminal()) else {
+    let Some(plan) = projection
+        .plan
+        .as_ref()
+        .filter(|plan| !plan.status.is_terminal())
+    else {
         return Ok(());
     };
     observation.emit_and_flush(RunItemRecord::new(

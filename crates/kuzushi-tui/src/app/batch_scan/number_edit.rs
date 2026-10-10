@@ -38,6 +38,7 @@ impl BatchScanConfigRow {
             (Self::ProviderCalls, 1, 1_000_000),
             (Self::ReviewCalls, 0, 1_000_000),
             (Self::Attempts, 1, 10),
+            (Self::CasePasses, 1, 100),
         ]
         .into_iter()
         .find(|(row, _, _)| *row == self)
@@ -58,9 +59,13 @@ impl BatchScanConfig {
     }
 
     fn apply_number(&mut self, row: BatchScanConfigRow, value: usize) {
+        if self.apply_case_number(row, value) {
+            return;
+        }
         match row {
             BatchScanConfigRow::Trials => {
                 self.trials = value;
+                super::scope_study::update_passes(self, value);
                 self.study.invalidate_plan();
             }
             BatchScanConfigRow::Workers => {
@@ -69,6 +74,17 @@ impl BatchScanConfig {
             }
             _ => self.apply_allowance_number(row, value),
         }
+    }
+
+    fn apply_case_number(&mut self, row: BatchScanConfigRow, value: usize) -> bool {
+        if row != BatchScanConfigRow::CasePasses {
+            return false;
+        };
+        if let Some(case) = self.study.matrix.cases.get_mut(self.study.matrix.cursor) {
+            case.passes = value;
+            self.study.invalidate_plan();
+        }
+        true
     }
 
     fn apply_allowance_number(&mut self, row: BatchScanConfigRow, value: usize) {

@@ -633,7 +633,13 @@ impl SastScanExecutionInput<'_> {
             cost: scan_stage_cost(reports)?,
             target_snapshot,
         };
-        record_sast_scan_stage(artifacts, outcome, run_refs, scan)?;
+        record_sast_scan_stage(artifacts, outcome, run_refs, scan.clone())?;
+        super::reconcile_completed_scan::after_receipt(
+            self.store,
+            self.primary_run_id,
+            outcome,
+            &scan,
+        )?;
         self.emit_finding_delta(finding_delta, core_findings)
     }
 
@@ -1039,7 +1045,22 @@ fn scan_report_engine_detail(
         .native
         .as_ref()
         .and_then(|report| report.coverage.engine_detail(engine))
+        .or_else(|| agentic_preparation_detail(reports, engine))
         .or_else(|| scan_engine_outcome_detail(outcome))
+}
+
+fn agentic_preparation_detail(reports: &SastPipelineReports, engine: &str) -> Option<String> {
+    if engine != "agentic" {
+        return None;
+    }
+    let report = reports.agentic.as_ref()?;
+    let coverage = report.inventory_coverage.as_ref()?;
+    let extent = coverage
+        .truncation
+        .as_deref()
+        .unwrap_or("snippet selection finished within preparation limits");
+    let scope = report.scope_summary().unwrap_or_default();
+    Some(format!("{scope} Preparation: {} snippets, {} skipped entries. {extent}. Snippets do not establish repository coverage; full limits remain in the run receipt.", coverage.selected_files, coverage.skipped_entries).trim().into())
 }
 
 fn scan_stage_outcome(reports: &SastPipelineReports) -> SastPhaseStageOutcome {
@@ -1227,9 +1248,13 @@ struct SastScanResultParts<'a> {
     lines: Vec<String>,
 }
 
-fn sast_scan_result(parts: SastScanResultParts<'_>) -> Result<Value> {
+fn sast_scan_result(mut parts: SastScanResultParts<'_>) -> Result<Value> {
     let cost = sast_cost_report(parts.reports, parts.post_processing)?;
     let partial = sast_scan_has_partial_engine(parts.reports);
+    super::native_inspections::append_inspection_lines(
+        &parts.reports.native_inspections,
+        &mut parts.lines,
+    );
     let output = sast_terminal_output(&parts.lines, partial);
     let summary = output
         .lines()
@@ -1330,6 +1355,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
         "nativeCoverage": parts.reports.native.as_ref().map(|report| &report.coverage),
+        "nativeInspections": parts.reports.native_inspections,
         "skippedEngines": parts.reports.skipped_engines.iter().map(|skipped| skipped.id).collect::<Vec<_>>(),
         "agentic": parts.reports.agentic.as_ref().map(|report| json!(report)),
         "carliniThreatHunt": parts.reports.carlini.as_ref().map(|report| json!(report)),
@@ -1687,6 +1713,7 @@ mod scan_result_outcome_tests {
         outcomes: &[(&'static str, ScanEngineStageOutcome)],
     ) -> SastPipelineReports {
         SastPipelineReports {
+            native_inspections: Vec::new(),
             native: None,
             agentic: None,
             carlini: None,

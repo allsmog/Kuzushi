@@ -20,7 +20,7 @@ impl ShellApp {
             || (self.shell_view() == ShellView::Campaign
                 && self
                     .context_generation()
-                    .is_some_and(|generation| generation.is_scope_proposal()))
+                    .is_some_and(|generation| generation.allows_model_choice()))
         {
             self.sync_view_change();
             return Some(ConfigModelPickerOrigin {
@@ -55,7 +55,7 @@ impl ShellApp {
         *self.router.navigation_mut() = origin.navigation;
         self.router.default_scroll_mut().set(origin.scroll);
         if origin.model != self.config().model {
-            self.refresh_scope_proposal_model();
+            self.refresh_context_generation_model();
         }
         true
     }

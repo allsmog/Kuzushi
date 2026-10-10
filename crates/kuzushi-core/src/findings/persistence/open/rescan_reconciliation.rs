@@ -124,14 +124,14 @@ struct RecordedScanEvidence {
 
 /// Only engines the receipt records as `Complete` prove a re-examination: a
 /// partial, skipped, or failed engine stage examined an unknown subset.
-fn receipt_scan_evidence(scan: ScanStageData) -> RecordedScanEvidence {
+fn receipt_scan_evidence(scan: &ScanStageData) -> RecordedScanEvidence {
     RecordedScanEvidence {
-        paths: scan.scope.paths,
+        paths: scan.scope.paths.clone(),
         engines: scan
             .engines
-            .into_iter()
+            .iter()
             .filter(|engine| engine.outcome == ScanEngineStageOutcome::Complete)
-            .map(|engine| engine.engine)
+            .map(|engine| engine.engine.clone())
             .collect(),
     }
 }
@@ -150,11 +150,58 @@ impl FindingStore {
             // Unknown scope → cannot establish parity → never reconcile.
             return Ok(RescanReconciliation::default());
         };
-        let tools = self.engines_proven_by_run(completed_run_id, &scope)?;
+        self.reconcile_completed_scope(completed_run_id, &scope)
+    }
+
+    /// The prepared executor calls this only after saving its own coverage
+    /// receipt. Its outer artifact manifest may still be finalizing.
+    pub(crate) fn reconcile_completed_scan_coverage(
+        &self,
+        run_id: &str,
+        outcome: crate::run_artifacts::PhaseStageOutcome,
+        scan: &ScanStageData,
+    ) -> Result<RescanReconciliation> {
+        if outcome != crate::run_artifacts::PhaseStageOutcome::Completed {
+            return Ok(RescanReconciliation::default());
+        }
+        let Some(target) = self.completed_receipt_target(run_id, scan)? else {
+            return Ok(RescanReconciliation::default());
+        };
+        let evidence = receipt_scan_evidence(scan);
+        let scope = CompletedScanScope {
+            target,
+            paths: evidence.paths,
+            receipt_engines: evidence.engines,
+        };
+        self.reconcile_completed_scope(run_id, &scope)
+    }
+
+    fn completed_receipt_target(
+        &self,
+        run_id: &str,
+        scan: &ScanStageData,
+    ) -> Result<Option<String>> {
+        if self.v3_storage_paths().is_none() {
+            return Ok(None);
+        }
+        if self.run_status(run_id)?.as_deref() != Some("completed") {
+            return Ok(None);
+        }
+        Ok(self
+            .run_target(run_id)?
+            .filter(|target| target == &scan.scope.target))
+    }
+
+    fn reconcile_completed_scope(
+        &self,
+        run_id: &str,
+        scope: &CompletedScanScope,
+    ) -> Result<RescanReconciliation> {
+        let tools = self.engines_proven_by_run(run_id, scope)?;
         if tools.is_empty() {
             return Ok(RescanReconciliation::default());
         }
-        let disappeared = self.retire_candidates(completed_run_id, &tools, &scope)?;
+        let disappeared = self.retire_candidates(run_id, &tools, scope)?;
         Ok(RescanReconciliation {
             disappeared,
             tools_exercised: tools.into_iter().collect(),
@@ -182,10 +229,7 @@ impl FindingStore {
     /// unknown, the run's artifacts are gone, or its Scan stage receipt exists
     /// but cannot be read — each means parity cannot be established, so nothing
     /// is retired.
-    pub(crate) fn completed_scan_scope(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<CompletedScanScope>> {
+    pub(crate) fn completed_scan_scope(&self, run_id: &str) -> Result<Option<CompletedScanScope>> {
         let Some(target) = self.run_target(run_id)? else {
             return Ok(None);
         };
@@ -221,7 +265,7 @@ impl FindingStore {
         Ok(Some(
             receipt
                 .and_then(|receipt| receipt.scan)
-                .map(receipt_scan_evidence)
+                .map(|scan| receipt_scan_evidence(&scan))
                 .unwrap_or_default(),
         ))
     }
@@ -251,9 +295,12 @@ impl FindingStore {
     }
 
     pub(crate) fn scan_reassessment_receipt(
-        &self, run_id: &str,
+        &self,
+        run_id: &str,
     ) -> Result<Option<crate::run_artifacts::PhaseStageReceipt>> {
-        let Some(root) = self.v3_workspace_root() else { return Ok(None); };
+        let Some(root) = self.v3_workspace_root() else {
+            return Ok(None);
+        };
         crate::run_artifacts::load_scan_stage_data(root, run_id)
     }
 

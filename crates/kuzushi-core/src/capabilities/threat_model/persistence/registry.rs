@@ -15,8 +15,8 @@ use super::{
     load_scope_threat_model, persistent_threat_model_path, threat_model_object_path, ScopeRef,
     ThreatModelRef,
 };
-use anyhow::{Context, Result};
 use crate::capabilities::threat_model::current_scope_ref_for_path;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 

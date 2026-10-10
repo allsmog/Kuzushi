@@ -17,12 +17,31 @@ pub(super) fn adopt_mirror_locked(
         .find(|model| model.model_id == active.model_id)
         .context("active threat-model lineage is absent from manifest")?;
     validate_persisted_threat_model(&document, &model.methodology)?;
+    let observed_mirror_sha256 = document_sha256(&document)?;
+    let document = reviewed_adoption_document(document, &active.sha256)?;
     let object = write_object(root, &document)?;
+    append_adopted_revision(
+        manifest,
+        &active,
+        &object.sha256,
+        &document,
+        actor,
+        root,
+        &observed_mirror_sha256,
+    )
+}
+
+fn reviewed_adoption_document(mut document: Value, active_sha256: &str) -> Result<Value> {
     anyhow::ensure!(
-        object.sha256 != active.sha256,
+        document_sha256(&document)? != active_sha256,
         "compatibility mirror already matches the active threat model"
     );
-    append_adopted_revision(manifest, &active, &object.sha256, &document, actor, root)
+    let object = document
+        .as_object_mut()
+        .context("adopted context is not an object")?;
+    object.remove("verification");
+    object.insert("userEdited".into(), serde_json::json!(true));
+    Ok(document)
 }
 
 fn append_adopted_revision(
@@ -32,15 +51,17 @@ fn append_adopted_revision(
     document: &Value,
     actor: &str,
     root: &Path,
+    observed_mirror_sha256: &str,
 ) -> Result<ThreatModelCommitResult> {
     let model_ref = append_adopted_model_revision(manifest, active, sha256, document, actor)?;
-    commit_manifest_update(
+    commit_manifest_update_with_observed(
         root,
         manifest.clone(),
         Some(model_ref.clone()),
         actor,
         ActivationSource::Adopt,
         None,
+        Some(observed_mirror_sha256),
     )?;
     Ok(ThreatModelCommitResult {
         model_ref,

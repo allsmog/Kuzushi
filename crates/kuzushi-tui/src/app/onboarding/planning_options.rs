@@ -225,7 +225,9 @@ impl ShellApp {
             .is_some_and(|object| object.contains_key(option_name))
     }
 
-    fn current_planning_tool_options(&self) -> Option<impl Iterator<Item = &OptionSpec>> {
+    pub(super) fn current_planning_tool_options(
+        &self,
+    ) -> Option<impl Iterator<Item = &OptionSpec>> {
         let row = self.engagement.planning_picker().current_row()?;
         let tool = self.registry().resolve_tool(row.tool_name)?;
         Some(

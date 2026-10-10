@@ -1,6 +1,23 @@
 use super::*;
 
 impl SastTaskSelection {
+    pub(in crate::modules) fn configure_secret_scan(&mut self, input: &Value) -> Result<()> {
+        let settings = secret_scan_settings(input);
+        let selected = self
+            .scanners
+            .iter()
+            .any(|scanner| scanner.id() == "secret-scan");
+        anyhow::ensure!(settings.as_object().unwrap().is_empty() || selected,
+            "Secret inspection options require the secret-scan task. Clear those options or explicitly select that task.");
+        for scanner in &mut self.scanners {
+            if scanner.id() == "secret-scan" {
+                *scanner = Box::new(crate::secret_scan::ConfiguredSecretScanScanner::new(
+                    crate::secret_scan::SecretScanOptions::from_tool_input(&settings)?,
+                ));
+            }
+        }
+        Ok(())
+    }
     pub(in crate::modules) fn configure_semgrep(&mut self, input: &Value) -> Result<()> {
         if input.get("semgrepConfig").is_none() && input.get("semgrepBinary").is_none() {
             return Ok(());
@@ -132,6 +149,21 @@ impl SastTaskSelection {
     }
 }
 
+fn secret_scan_settings(input: &Value) -> Value {
+    let mut settings = serde_json::Map::new();
+    for (parent, child) in [
+        ("secretScanMaxFileBytes", "maxFileBytes"),
+        ("secretScanMaxFindings", "maxFindings"),
+        ("secretScanMaxEntries", "maxEntries"),
+        ("secretScanMaxTotalBytes", "maxTotalBytes"),
+    ] {
+        if let Some(value) = input.get(parent) {
+            settings.insert(child.into(), value.clone());
+        }
+    }
+    Value::Object(settings)
+}
+
 fn semgrep_non_null_options(mut input: Value) -> Value {
     if let Some(options) = input.as_object_mut() {
         options.retain(|_, value| !value.is_null());
@@ -148,10 +180,8 @@ pub(in crate::modules) fn selected_native_scanners(
         return Ok(empty_scan_engine_selection());
     }
     match source {
-        SastTaskSelectionSource::Automatic => Ok(select_default_scan_engines()),
-        SastTaskSelectionSource::FilteredAutomatic => {
-            Ok(filtered_default_scan_engines(native_tasks))
-        }
+        SastTaskSelectionSource::Automatic => select_default_scan_engines_checked(None),
+        SastTaskSelectionSource::FilteredAutomatic => filtered_default_scan_engines(native_tasks),
         SastTaskSelectionSource::Explicit => explicit_native_scanners(native_tasks),
     }
 }
@@ -173,15 +203,15 @@ fn empty_scan_engine_selection() -> DefaultScanEngineSelection {
     }
 }
 
-fn filtered_default_scan_engines(native_tasks: &[String]) -> DefaultScanEngineSelection {
-    let mut selection = select_default_scan_engines();
+fn filtered_default_scan_engines(native_tasks: &[String]) -> Result<DefaultScanEngineSelection> {
+    let mut selection = select_default_scan_engines_checked(Some(native_tasks))?;
     selection
         .engines
         .retain(|scanner| native_tasks.iter().any(|task| task == scanner.id()));
     selection
         .skipped
         .retain(|skipped| native_tasks.iter().any(|task| task == skipped.id));
-    selection
+    Ok(selection)
 }
 
 pub(in crate::modules) fn fill_agentic_reports(

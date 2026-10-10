@@ -57,7 +57,7 @@ pub(crate) fn divider(title: &str, width: u16) -> Line<'static> {
     let safe_width = width.max(8) as usize;
     let lead = "── ";
     let label = format!("{title} ");
-    let used = 1 + lead.chars().count() + label.chars().count();
+    let used = 1 + display_width(lead) + display_width(&label);
     let fill = safe_width.saturating_sub(used).max(1);
     Line::from(vec![
         Span::raw(" "),
@@ -137,6 +137,13 @@ mod detail_wrapped_tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    #[test]
+    fn unicode_heading_uses_terminal_columns_for_its_rule() {
+        for width in [40, 60, 80, 96, 120, 160] {
+            assert_eq!(divider("BATCH 日本語-αβ", width).width(), width as usize);
+        }
     }
 
     #[test]

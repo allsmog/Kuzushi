@@ -34,6 +34,7 @@ impl SetupRowId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SetupEditor {
+    Details,
     Target,
     Plan,
     ThreatModel,
@@ -69,10 +70,21 @@ pub struct SetupRouteState {
     budget_error: Option<String>,
     budget_return_view: Option<crate::app::ShellView>,
     map_run_config: MapRunConfigRouteState,
+    detail_scroll: [usize; 8],
 }
 
 impl SetupRouteState {
+    pub(crate) fn detail_scroll(&self) -> usize {
+        self.detail_scroll[self.cursor.min(SetupRowId::ALL.len() - 1)]
+    }
+
+    pub(crate) fn set_detail_scroll(&mut self, scroll: usize) {
+        let index = self.cursor.min(SetupRowId::ALL.len() - 1);
+        self.detail_scroll[index] = scroll;
+    }
+
     pub(crate) fn open(&mut self) {
+        self.detail_scroll.fill(0);
         self.focus = PickerFocus::List;
         self.editor = None;
         self.budget_draft = crate::app::FieldEditor::default();

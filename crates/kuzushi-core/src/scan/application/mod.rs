@@ -3,7 +3,11 @@ use super::*;
 mod prepare_scan_workspace;
 mod run_scan_engines_with_options;
 mod run_semgrep_scan;
+mod scan_context;
 mod scan_scope;
+pub(crate) use scan_context::{
+    freeze_scan_context, inspect_scan_context, read_bound_scan_context, selected_scan_context,
+};
 pub(crate) use scan_scope::{
     normalized_scan_path, require_directory_scope, resolve_scan_scopes, ScanScope,
 };
@@ -27,5 +31,5 @@ pub use run_semgrep_scan::{
     ScanRunOptions,
 };
 pub(crate) use run_semgrep_scan::{
-    select_default_scan_engines, DefaultScanEngineSelection, SkippedDefaultScanEngine,
+    select_default_scan_engines_checked, DefaultScanEngineSelection, SkippedDefaultScanEngine,
 };

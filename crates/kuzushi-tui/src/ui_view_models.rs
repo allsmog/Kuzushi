@@ -10,8 +10,13 @@ pub(crate) use answers::*;
 mod active_stage;
 mod allowance_review;
 pub(crate) mod context_generation;
+pub(crate) mod context_goal;
+mod context_matrix;
 pub(crate) mod scope_review;
 pub(crate) mod study_config;
+pub(crate) use context_matrix::{context_matrix_conditions, context_matrix_lines};
+pub(crate) use context_matrix::{matrix_result_lines, matrix_result_state};
+pub(crate) mod scope_context;
 pub(crate) mod study_context;
 pub(crate) mod study_engines;
 pub(crate) use allowance_review::{
@@ -35,17 +40,23 @@ mod ambient_progress;
 mod attack_surface;
 mod auth;
 mod boot_splash;
+mod campaign_job;
 mod catalog;
+pub(crate) mod study_resource_picker;
+pub(crate) use campaign_job::campaign_job_scope_label;
 mod chrome_layout;
 mod command_palette;
 mod config;
 mod confirm_card;
 mod confirm_dialog;
+pub(crate) mod context_edit;
+pub(crate) mod context_history;
 mod context_snapshot;
 mod context_strip;
 mod cost;
 mod display_text;
 mod failure_handoff;
+pub(crate) mod finding_review_source;
 mod finding_search;
 mod finding_summary;
 mod findings;
@@ -146,8 +157,8 @@ pub(crate) use attack_surface::{
     attack_surface_risk_model, AttackSurfaceRiskModel, AttackSurfaceRow,
 };
 pub(crate) use auth::{
-    auth_env_summary, auth_login_model, auth_provider_rows, model_auth_status, oauth_summary,
-    AuthLoginModel, AuthProviderRow, AuthProviderTone,
+    auth_env_summary, auth_login_model, auth_provider_rows, model_auth_status, oauth_model_status,
+    oauth_summary, AuthLoginModel, AuthProviderRow, AuthProviderTone,
 };
 pub(crate) use boot_splash::{boot_splash_model, BootSplashModel};
 pub(crate) use catalog::{
@@ -155,7 +166,7 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
-    keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
+    compact_gallery_notice, keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
     transcript_chrome_height, RAIL_AUTO_MIN_WIDTH, RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
 };
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
@@ -298,7 +309,8 @@ pub(crate) use recent_module_activity::{
 };
 pub(crate) use recommendation::{
     recommendation_artifact_needs_refresh, recommendation_components, recommendation_model,
-    ComponentRecommendationRow, RecommendationModel, RecommendationRow, NO_REASON_RECORDED,
+    recommendation_run_id, ComponentRecommendationRow, RecommendationModel, RecommendationRow,
+    NO_REASON_RECORDED,
 };
 pub(crate) use report_preview::{
     report_preview_model, ReportPreviewCounts, ReportPreviewModel, ReportPreviewRow,
@@ -396,14 +408,14 @@ pub(crate) use viz_data::{
     dfd_overview_component_at, dfd_overview_component_count, dfd_security_items_for_selection,
     dfd_selectable_count, dfd_selected_item, dfd_selection_for_key, display_target,
     entry_point_breakdown, risk_by_module, taint_flow_path, taint_flow_path_for_finding,
-    worklist_model, AttackChain, AttackTree, ComponentItem, ComponentScope, ComponentSource,
-    ComponentSourceKind, ComponentStack, DfdBoundaryModel, DfdContextCounts, DfdFlowModel, DfdKind,
-    DfdLinkState, DfdModel, DfdNodeModel, DfdOverview, DfdOverviewComponent, DfdOverviewFlow,
-    DfdOverviewZone, DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow,
-    EntryPointArtifactStatus, EntryPointBreakdown, EntryPointComposition, EntryPointCounts,
-    EntryPointDisposition, EntryPointFreshness, EntryPointGroup, EntryPointItem, EntryPointReceipt,
-    EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule, TaintFlowPath,
-    TaintStageModel, WorklistRowModel, WorklistViewModel,
+    worklist_artifact_version, worklist_model, AttackChain, AttackTree, ComponentItem,
+    ComponentScope, ComponentSource, ComponentSourceKind, ComponentStack, DfdBoundaryModel,
+    DfdContextCounts, DfdFlowModel, DfdKind, DfdLinkState, DfdModel, DfdNodeModel, DfdOverview,
+    DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone, DfdSecurityItem, DfdSecurityKind,
+    DfdSelected, DfdZoneFlow, EntryPointArtifactStatus, EntryPointBreakdown, EntryPointComposition,
+    EntryPointCounts, EntryPointDisposition, EntryPointFreshness, EntryPointGroup, EntryPointItem,
+    EntryPointReceipt, EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule,
+    TaintFlowPath, TaintStageModel, WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, active_workbench_page_with_reality_phase,

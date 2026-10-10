@@ -61,6 +61,8 @@ pub struct BatchEquivalenceComponents {
     pub runtime_identity: BatchRuntimeIdentity,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threat_model: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supporting_context_sha256: Option<String>,
     pub prompt_overrides_sha256: String,
     pub house_rules_sha256: String,
     pub scope_sha256: String,
@@ -133,7 +135,7 @@ pub fn acquire_scan_batch_threat_model_lease(
 }
 
 pub fn compile_scan_batch_plan(spec: ScanBatchPlanSpec<'_>) -> Result<CampaignPlanHandle> {
-    compile_batch_plan(spec, false, None, None)
+    compile_batch_plan(spec, false, None, None, None, None)
 }
 
 #[cfg(test)]
@@ -141,18 +143,39 @@ pub(super) fn compile_study_plan(
     spec: ScanBatchPlanSpec<'_>,
     investigation: Option<&str>,
 ) -> Result<CampaignPlanHandle> {
-    compile_batch_plan(spec, true, investigation, None)
+    compile_batch_plan(spec, true, investigation, None, None, None)
 }
 
 pub(super) fn compile_study_plan_with_baseline(
     spec: ScanBatchPlanSpec<'_>,
     investigation: Option<&str>,
     baseline: Option<&str>,
+    brief: Option<&super::BriefRevision>,
 ) -> Result<CampaignPlanHandle> {
     if let Some(run) = baseline {
         crate::run_artifacts::resolve_run_artifact_path(spec.root, run, "run.json")?;
     }
-    compile_batch_plan(spec, true, investigation, baseline)
+    compile_batch_plan(spec, true, investigation, baseline, None, brief)
+}
+
+pub(super) fn compile_context_candidate_plan(
+    spec: ScanBatchPlanSpec<'_>,
+    investigation: Option<&str>,
+    resource_baseline: Option<&str>,
+    context_baseline: &str,
+    brief: Option<&super::BriefRevision>,
+) -> Result<CampaignPlanHandle> {
+    if let Some(run) = resource_baseline {
+        crate::run_artifacts::resolve_run_artifact_path(spec.root, run, "run.json")?;
+    }
+    compile_batch_plan(
+        spec,
+        true,
+        investigation,
+        resource_baseline,
+        Some(context_baseline),
+        brief,
+    )
 }
 
 fn compile_batch_plan(
@@ -160,6 +183,8 @@ fn compile_batch_plan(
     requires_work_approval: bool,
     investigation: Option<&str>,
     baseline: Option<&str>,
+    context_baseline: Option<&str>,
+    brief: Option<&super::BriefRevision>,
 ) -> Result<CampaignPlanHandle> {
     validate_trial_count(spec.trials)?;
     let batch_id = spec.batch_id.clone().unwrap_or_else(generated_batch_id);
@@ -177,6 +202,19 @@ fn compile_batch_plan(
         &spec.gate_policy,
     );
     bind_study_metadata(&mut plan, requires_work_approval, investigation, baseline)?;
+    if let Some(brief) = brief {
+        plan["investigationBrief"] = serde_json::to_value(brief)?;
+    }
+    if let Some(run) = context_baseline {
+        let receipt = super::context_experiment::bind_context_experiment(
+            spec.root,
+            run,
+            &base_input,
+            &equivalence_key,
+        )?;
+        super::context_experiment::bind_investigation(&mut plan, &receipt)?;
+        plan["contextExperiment"] = serde_json::to_value(receipt)?;
+    }
     let plan_path = campaign_plan_path(spec.root, &batch_id);
     anyhow::ensure!(
         !plan_path.exists(),
@@ -205,6 +243,7 @@ fn prepare_batch_scan_input(
     let lease = acquire_plan_threat_model_lease(spec.root, &spec.prepared_input)?;
     equivalence::force_discovery_only(&mut input)?;
     bind_threat_model_ref(&mut input, lease.model_ref())?;
+    crate::scan::freeze_scan_context(spec.root, &mut input)?;
     Ok((input, lease))
 }
 
@@ -228,7 +267,7 @@ fn bind_study_metadata(
     Ok(())
 }
 
-fn acquire_plan_threat_model_lease(
+pub(super) fn acquire_plan_threat_model_lease(
     root: &Path,
     input: &Value,
 ) -> Result<crate::capabilities::threat_model::ThreatModelReadLease> {
@@ -252,19 +291,26 @@ fn batch_parallel_safety(
     spec: &ScanBatchPlanSpec<'_>,
     input: &Value,
 ) -> Result<super::ParallelSafetyResolution> {
-    let mut resolution =
+    let resolution =
         super::resolve_parallel_safety(spec.registry, SCAN_TOOL, input, spec.requested_workers)?;
-    if resolution.effective_workers > spec.trials {
-        resolution.effective_workers = spec.trials;
-        resolution.clamp_reason = Some(format!(
-            "effective workers limited to {} planned logical trials",
-            spec.trials
-        ));
-    }
-    Ok(resolution)
+    Ok(limit_parallel_safety_to_jobs(resolution, spec.trials))
 }
 
-fn bind_threat_model_ref(
+pub(super) fn limit_parallel_safety_to_jobs(
+    mut resolution: super::ParallelSafetyResolution,
+    jobs: usize,
+) -> super::ParallelSafetyResolution {
+    if resolution.effective_workers > jobs {
+        resolution.effective_workers = jobs;
+        resolution.clamp_reason = Some(format!(
+            "effective workers limited to {} planned logical trials",
+            jobs
+        ));
+    }
+    resolution
+}
+
+pub(super) fn bind_threat_model_ref(
     input: &mut Value,
     model_ref: Option<&crate::capabilities::threat_model::ThreatModelRef>,
 ) -> Result<()> {
@@ -362,7 +408,7 @@ fn generated_batch_id() -> String {
     format!("batch-{}", &uuid[..8])
 }
 
-fn epoch_ms() -> u64 {
+pub(super) fn epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)

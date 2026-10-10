@@ -1,0 +1,124 @@
+# Four fixed offline static scans across actual owned Git revisions. No provider calls.
+name: Real Git revisions retain human review, absence and report source history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/git_review_history.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 20 AWS Access Key | baseline-review
+submit: decision confirmed Owned documentation example reviewed on baseline
+require-live-snap: 25 No later observation | baseline-decision
+expect: recorded: confirmed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/git_review_history.py @TMP_TARGET @ART committed
+submit: findings
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 different commit | changed-commit
+expect: git-base
+expect: git-committed
+expect: Reassess this verdict
+ask: Does Review retain the human verdict while clearly identifying two actual commits, even though the cited file is unchanged?
+submit: runs diff git-base git-committed
+require-live-snap: 25 SEEN AGAIN | committed-comparison
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 20 content: | committed-source-identities
+expect: main, clean
+expect-not: content:unknown
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/git_review_history.py @TMP_TARGET @ART dirty
+submit: runs diff git-committed git-dirty
+require-live-snap: 25 SEEN AGAIN | dirty-comparison
+keys: Tab
+require-live-snap: 20 main, dirty | dirty-source-identities
+expect: main, clean
+expect-not: content:unknown
+ask: Does comparison show the same full SHA with distinct captured content and clean versus dirty states, without claiming a fix?
+keys: Escape
+submit: findings
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 DECISION SOURCE | dirty-review
+expect: Reassess this verdict
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 20 SELECTED FINDING | selected-reader
+resize: 40x12
+live-snap: review-40x12
+keys: NPage
+live-snap: decision-page-1
+keys: NPage
+live-snap: decision-page-2
+keys: NPage
+live-snap: decision-page-3
+keys: NPage
+live-snap: decision-page-4
+keys: NPage
+live-snap: decision-page-5
+keys: NPage
+live-snap: decision-page-6
+keys: NPage
+live-snap: decision-page-7
+expect: Later commit:
+keys: NPage
+live-snap: decision-page-8
+keys: NPage
+live-snap: decision-page-9
+keys: NPage
+live-snap: decision-page-10
+ask: At all six sizes, can the operator inspect the retained verdict, original source and later dirty observation without losing the selected finding?
+resize: 120x36
+submit: decision deferred Owned dirty revision deliberately deferred
+nav-mode:
+keys: g
+require-live-snap: 25 Owned dirty revision deliberately deferred | dirty-decision
+expect: recorded: deferred
+require-shell: python3 -B @REPO/scripts/devex/fixtures/git_review_history.py @TMP_TARGET @ART gap
+submit: findings
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 not observed | retained-gap
+expect: recorded: deferred
+expect: Absence does not establish a fix.
+ask: Does the fourth planned scan retain the finding and human decision when the documentation example is absent, with no fixed or removed state?
+submit: report
+require-live-snap: 25 Enter export | report
+keys: j j j
+require-live-snap: 20 format json | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/git_review_history.py @TMP_TARGET @ART exported
+ask: Do local JSON, confirmed SARIF and Markdown exports carry the recorded full SHAs and dirty states, while disclosing that current-checkout applicability was not assessed?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 Owned dirty revision deliberately deferred | recovered-review
+expect: not observed
+resize: 40x12
+live-snap: no-color-40x12
+resize: 120x36
+submit: report
+require-live-snap: 25 Enter export | recovered-report
+require-live-snap: 25 1 finding · 1 reviewed | recovered-report-ready
+expect: Scope: workspace history
+expect: Workspace spend: total unavailable
+require-shell: python3 -B @REPO/scripts/devex/fixtures/git_review_history.py @TMP_TARGET @ART recovered
+ask: Does no-color restart retain exactly four scans, three observations and two human decisions without more discovery or source changes?
+keys: C-c
+require-exit: 10

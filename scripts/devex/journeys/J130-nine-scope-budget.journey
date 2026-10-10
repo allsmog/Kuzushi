@@ -1,0 +1,106 @@
+name: Nine fixed scope boundaries halt at allowance and resume only after explicit revision
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART seed @TMP_HOME budget
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/large-scope-command.txt
+keys: Enter
+require-live-snap: 25 2 completed | stopped-work
+expect: 25 parked
+nav-mode:
+keys: L
+require-live-snap: 20 allowance exhausted | refused-resume
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART refused
+ask: Does the maximum nine-boundary plan stop at two committed calls without consuming pending job attempts, adding work, or using protected Review capacity?
+keys: a
+require-live-snap: 25 APPROVED STUDY | original-allowance
+keys: Down Down Down Enter
+require-live-snap: 25 SCOPE CONTEXT | frozen-nine-contexts
+keys: Down Down Down Down Down Down Down Down Down
+require-live-snap: 20 Boundary: integration | ninth-boundary
+resize: 160x48
+live-snap: scopes-160x48
+resize: 96x89
+live-snap: scopes-96x89
+resize: 80x24
+live-snap: scopes-80x24
+resize: 60x20
+live-snap: scopes-60x20
+resize: 40x12
+live-snap: scopes-40x12
+expect: integration
+ask: Can keyboard navigation reach the ninth boundary and its frozen context while retaining readable selection, paging and back controls at every size?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 APPROVED STUDY | allowance-back
+keys: Escape
+require-live-snap: 20 25 parked | jobs-back
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT partial | partial-result
+nav-mode:
+keys: u
+require-live-snap: 25 partial acknowledged | partial-accepted
+keys: Escape
+submit: report
+require-live-snap: 25 2 committed / 4 calls | partial-report
+expect: 2 protected review remaining
+expect: 9 boundaries
+ask: Does the partial report preserve per-boundary three-pass denominators, unstarted work and uncertain dollar cost without implying complete coverage or a fix?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/large-scope-command.txt
+keys: Enter
+require-live-snap: 25 25 parked | recovered-halt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART restarted
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | recovered-allowance
+keys: Down Down Down Down Enter
+type: 29
+keys: Enter L End
+require-live-snap: 25 y approve | revised-approval
+expect: Total provider calls: 29
+expect: Protected review calls: 2
+expect: 27 fixed jobs
+ask: Is the exact revised ceiling separately approved while the original 27 jobs and two committed calls remain unchanged?
+keys: y
+require-live-snap: 25 Approval saved | approved-revision
+keys: L
+require-live-snap: 25 Plan approved | original-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | resumed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART progress-6
+keys: r
+live-snap: progress-6
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART progress-12
+keys: r
+live-snap: progress-12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART progress-18
+keys: r
+live-snap: progress-18
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART progress-24
+keys: r
+live-snap: progress-24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART finished
+keys: r
+require-live-snap: 25 27 completed | completed
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT READY | completed-result
+nav-mode:
+keys: u
+require-live-snap: 25 result selected | accepted-complete
+keys: Escape
+submit: report
+require-live-snap: 25 27 committed / 29 calls | complete-report
+expect: 2 protected review remaining
+ask: Does the completed report retain all nine independent denominators, exact spending and earlier partial acceptance without expanding the plan?
+keys: C-c
+require-exit: 10

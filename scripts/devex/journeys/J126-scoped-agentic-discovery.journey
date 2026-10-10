@@ -1,0 +1,84 @@
+name: Accepted file membership, inherited context, finite discovery and Report recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scoped_discovery.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | initialized
+submit: campaign scoped-study
+require-live-snap: 30 3 job(s) | fixed-plan
+nav-mode:
+keys: a
+require-live-snap: 30 APPROVED STUDY | approved-study
+keys: Down Down Down
+require-live-snap: 30 Exact read scope: app | exact-read-policy
+expect: Shared files provide context only
+ask: Can the operator inspect the accepted scope, constrained tools, frozen snippet limits and allowance before starting the three fixed jobs?
+keys: L
+require-live-snap: 30 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 30 dispatcher pid | running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scoped_discovery.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 3 completed | completed
+keys: Escape
+submit: workbench
+require-live-snap: 30 RESULT READY | scan-result
+nav-mode:
+keys: u
+keys: Escape
+paste-file: @ART/open-finding.txt
+keys: Enter
+require-live-snap: 30 Labeled scope observation | finding
+submit: dismiss false_positive Owned workflow fixture; no security defect claimed
+require-live-snap: 30 rejected_false_positive | reviewed-finding
+submit: report
+require-live-snap: 30 Scope: study scoped-study | report
+expect: 6 committed / 8 calls
+expect: 2 protected review remaining
+keys: p
+require-live-snap: 30 observations outside discovery | scoped-report-details
+ask: Does the report distinguish accepted findings from retained observations outside discovery, while preserving exact scope and protected spending?
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-1-40x12
+keys: NPage
+live-snap: report-page-2-40x12
+keys: NPage
+live-snap: report-page-3-40x12
+keys: NPage
+live-snap: report-page-4-40x12
+keys: NPage
+live-snap: report-page-5-40x12
+keys: NPage
+live-snap: report-page-6-40x12
+keys: NPage
+live-snap: report-page-7-40x12
+keys: NPage
+live-snap: report-page-8-40x12
+keys: NPage
+live-snap: report-page-9-40x12
+ask: Are scope, retained observations and spending reachable at 40x12 without overlapping controls or implying complete coverage?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1
+resize: 80x24
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 30 Scope: study scoped-study | recovered-report
+expect: 6 committed / 8 calls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scoped_discovery.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the selected scoped study, review decision and accounting without starting additional work?
+keys: C-c
+require-exit: 10

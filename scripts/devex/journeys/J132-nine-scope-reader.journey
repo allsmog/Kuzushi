@@ -1,0 +1,101 @@
+name: Nine-boundary job identity and complete narrow Report paging
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART seed @TMP_HOME budget
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/large-scope-command.txt
+keys: Enter
+require-live-snap: 25 25 parked | paused-work
+type: held boundary draft
+nav-mode:
+keys: C-_
+keys: Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down Down
+resize: 120x36
+live-snap: selected-job-120x36
+expect: integration-trial-003
+expect: work paused
+resize: 160x48
+live-snap: selected-job-160x48
+expect: integration-trial-003
+expect: work paused
+resize: 96x89
+live-snap: selected-job-96x89
+expect: integration-trial-003
+expect: work paused
+resize: 80x24
+live-snap: selected-job-80x24
+expect: integration-trial-003
+expect: work paused
+resize: 60x20
+live-snap: selected-job-60x20
+expect: integration-trial-003
+expect: work paused
+resize: 40x12
+live-snap: selected-job-40x12
+expect: integration-trial-003
+expect: work paused
+ask: Does the last job retain a distinct full trial identity, paused-work controls and keyboard selection across all six sizes without losing the composer draft?
+resize: 120x36
+keys: Escape
+live-snap: restored-draft
+expect: held boundary draft
+keys: C-u
+submit: report
+require-live-snap: 25 2 committed / 4 calls | partial-report
+resize: 40x12
+live-snap: report-page-00
+keys: PgDn
+live-snap: report-page-01
+keys: PgDn
+live-snap: report-page-02
+keys: PgDn
+live-snap: report-page-03
+keys: PgDn
+live-snap: report-page-04
+keys: PgDn
+live-snap: report-page-05
+keys: PgDn
+live-snap: report-page-06
+keys: PgDn
+live-snap: report-page-07
+keys: PgDn
+live-snap: report-page-08
+keys: PgDn
+live-snap: report-page-09
+keys: PgDn
+live-snap: report-page-10
+keys: PgDn
+live-snap: report-page-11
+keys: PgDn
+live-snap: report-page-12
+keys: PgDn
+live-snap: report-page-13
+keys: PgDn
+live-snap: report-page-14
+keys: PgDn
+live-snap: report-page-15
+keys: PgDn
+live-snap: report-page-16
+keys: PgDn
+live-snap: report-page-17
+keys: PgDn
+live-snap: report-page-18
+keys: PgDn
+live-snap: report-page-19
+keys: PgDn
+live-snap: report-page-20
+keys: PgDn
+live-snap: report-page-21
+keys: PgDn
+live-snap: report-page-22
+keys: PgDn
+live-snap: report-page-23
+keys: PgDn
+live-snap: report-page-24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_scopes.py @TMP_TARGET @ART reader-pages
+ask: Can narrow Report paging reach every boundary and its three-pass denominator while preserving partial work and unknown dollar cost?
+keys: C-c
+require-exit: 10

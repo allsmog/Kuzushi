@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn suppression_label_survives_compact_and_wide_queue_rendering() {
+    let mut row = review_row();
+    row.proof_confidence = ProofConfidence::Dismissed;
+    row.proof_confidence_label = "suppressed".into();
+    row.decision = "needs_review".into();
+    row.decision_author = "-".into();
+    for width in [28, 40, 60, 80, 120, 160] {
+        let text = lines_text(populated_review_queue_pane_lines(
+            &review_model(vec![row.clone()]),
+            Rect::new(0, 0, width, 16),
+        ));
+        assert!(text.contains("suppressed"), "{width}: {text}");
+        let finding_row = text.lines().find(|line| line.contains("F-0001")).unwrap();
+        assert!(!finding_row.contains("dismissed"), "{width}: {text}");
+        assert!(!finding_row.contains("false-pos"), "{width}: {text}");
+    }
+}
+
+#[test]
 fn compact_reading_shows_both_claims_before_secondary_facets() {
     let mut first = review_row();
     first.title = "Descriptor policy allows inconsistent approval settings".into();

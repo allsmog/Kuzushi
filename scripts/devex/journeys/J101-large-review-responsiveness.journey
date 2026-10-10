@@ -1,0 +1,94 @@
+# Run with KUZUSHI_DEVEX_TARGET pointing at the prepared, labeled 1000-finding fixture.
+name: Large Review ledger, external decisions and input ownership
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py prepare @TARGET @ART/fixture
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 30 Synthetic Review candidate | large-review
+ask: Does Review disclose that the ledger contains 1000 findings while the current list loads only 500, with a usable way to reach omitted findings?
+expect-echo-within: 300 probe-idle
+live-snap: idle-input
+expect: probe-idle
+keys: C-u
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-writer @TARGET @ART/fixture
+wait: 1
+expect-echo-within: 300 probe-one
+live-snap: writer-input-one
+expect: probe-one
+keys: C-u
+wait: 2
+expect-echo-within: 300 probe-two
+live-snap: writer-input-two
+expect: probe-two
+keys: C-u
+wait: 2
+expect-echo-within: 300 probe-three
+live-snap: writer-input-three
+expect: probe-three
+keys: C-u
+wait: 2
+expect-echo-within: 300 probe-four
+live-snap: writer-input-four
+expect: probe-four
+ask: During six bounded external decisions, does the composer retain input ownership without focus changes, lost text or misleading progress?
+keys: C-u
+resize: 160x48
+wait: 1
+require-live-snap: 20 ENGAGEMENT | large-160x48
+resize: 96x89
+wait: 1
+require-live-snap: 20 Synthetic Review candidate | large-96x89
+resize: 80x24
+wait: 1
+require-live-snap: 20 KUZUSHI | large-80x24
+resize: 60x20
+wait: 1
+require-live-snap: 20 KUZUSHI | large-60x20
+resize: 40x12
+wait: 1
+require-live-snap: 20 KUZUSHI | large-40x12
+expect-echo-within: 300 tiny-probe
+live-snap: tiny-input
+expect: tiny-probe
+ask: Can the operator understand the loaded list and retain the draft at 40x12, with navigation and filtering controls that remain usable?
+keys: C-u
+nav-mode:
+live-snap: tiny-filter-control
+expect: Ctrl+F
+resize: 120x36
+nav-mode:
+live-snap: global-filter-control
+expect: Ctrl+F
+keys: C-f
+require-live-snap: 20 findings filter | global-filter-draft
+type: name:0000
+keys: Enter
+require-live-snap: 20 Synthetic Review candidate 0000 | omitted-finding-filter-loading
+wait: 1
+require-live-snap: 20 large-b | omitted-finding-filter
+expect: Synthetic Review candidate 0000
+ask: Can the global filter retrieve an omitted finding while keeping ledger counts distinct from the filtered result?
+submit: findings filter unknown:invalid
+require-live-snap: 20 Refresh failed | filter-error
+expect: Synthetic Review candidate 0000
+ask: Does a failed background filter clearly retain previous results, explain the error and offer a keyboard retry without claiming completion?
+submit: findings filter name:0000
+wait: 1
+require-live-snap: 20 large-b | filter-recovered
+expect: Synthetic Review candidate 0000
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: findings
+require-live-snap: 20 Synthetic Review candidate | no-color-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py verify @TARGET @ART/fixture
+ask: Does no-color restart retain all observations and decisions without changing source or starting new work?
+keys: C-c
+require-exit: 10

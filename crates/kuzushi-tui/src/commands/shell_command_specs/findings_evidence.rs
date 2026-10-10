@@ -108,6 +108,24 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
             "coverage matrix: shards × threat sources with campaign progress + finding counts",
     },
     ShellCommandSpec {
+        command: "relationships",
+        aliases: &["/relationships"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "review and undo finding relationships while preserving finding verdicts",
+    },
+    ShellCommandSpec {
+        command: "lessons",
+        aliases: &["/lessons"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "draft, review and selectively reuse lessons from confirmed findings",
+    },
+    ShellCommandSpec {
+        command: "groups",
+        aliases: &["/groups"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "browse accepted duplicate groups and their independent observations",
+    },
+    ShellCommandSpec {
         command: "jobs -k <runId>",
         aliases: &["jobs kill <runId>", "jobs cancel <runId>"],
         category: ShellCommandCategory::FindingsEvidence,
@@ -225,7 +243,8 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         command: "threats models",
         aliases: &["/threats models"],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "list immutable threat-model lineages and their active head",
+        description:
+            "browse saved context revisions, inspect documents and compare a selected baseline",
     },
     ShellCommandSpec {
         command: "threats diff",

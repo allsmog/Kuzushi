@@ -50,11 +50,11 @@ fn append_resource_terms(app: &ShellApp, input: &serde_json::Value, confirm: &mu
     let Some(config) = app.router.campaign().batch_scan_config.as_ref() else {
         return;
     };
-    let Some(receipt) = &config.study.receipt else {
+    let Some((campaign_id, plan_sha256, _)) = config.study.plan_identity() else {
         return;
     };
-    if input["campaignId"].as_str() != Some(receipt.campaign_id.as_str())
-        || input["campaignPlanSha256"].as_str() != Some(receipt.plan_sha256.as_str())
+    if input["campaignId"].as_str() != Some(campaign_id)
+        || input["campaignPlanSha256"].as_str() != Some(plan_sha256)
     {
         return;
     }

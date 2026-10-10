@@ -6,13 +6,21 @@ use ratatui::prelude::{Line, Span, Style};
 
 pub(super) fn component_tree_lines(width: usize, model: &ComponentStack) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
-        return crate::renderer::empty_state_panel(
+        let lines = crate::renderer::empty_state_panel(
             "no component stack",
             &[hint],
-            &[("sbom-scan:scan", "inventory manifests and lockfiles")],
+            &[("run sbom-scan:scan", "inventory manifests and lockfiles")],
         );
+        return crate::renderer::shared::text::wrap_document_lines(lines, width as u16);
     }
     let mut lines = component_summary_lines(width, model);
+    if model.from_tool {
+        lines.extend(styled_wrapped_lines(
+            "From the latest completed SBOM result. Source freshness is unverified.",
+            width,
+            theme::muted(),
+        ));
+    }
     lines.push(Line::from(String::new()));
     lines.push(Line::styled(
         crate::renderer::shared::text::fit(&format!("◆ {}", model.target), width),
@@ -207,6 +215,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn narrow_failure_retains_the_full_cause_and_rerun_action() {
+        let cause =
+            "Component inventory failed: /owned/long/path/package.json exceeds its read limit.";
+        let model = ComponentStack {
+            empty_hint: Some(cause.into()),
+            ..Default::default()
+        };
+        let lines = component_tree_lines(40, &model);
+        assert!(lines.iter().all(|line| line.width() <= 40));
+        let text = lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<String>();
+        let compact = text.split_whitespace().collect::<String>();
+        assert!(compact.contains(&cause.split_whitespace().collect::<String>()));
+        assert!(compact.contains("runsbom-scan:scan"));
+    }
+
+    #[test]
     fn tree_preserves_version_semantics_at_narrow_width() {
         let model = ComponentStack {
             target: "demo".into(),
@@ -231,6 +258,7 @@ mod tests {
             resolved_count: 1,
             ecosystems: vec!["npm".into()],
             empty_hint: None,
+            from_tool: false,
         };
 
         let lines = component_tree_lines(28, &model);

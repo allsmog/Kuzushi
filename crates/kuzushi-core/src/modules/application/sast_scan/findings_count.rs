@@ -49,6 +49,7 @@ pub(in crate::modules) fn prepare_sast_task_selection(input: &Value) -> Result<S
     let request = parse_sast_tasks(input)?;
     let mut selected = SastTaskSelection::from_tasks(request.tasks, request.source)?;
     selected.configure_semgrep(input)?;
+    selected.configure_secret_scan(input)?;
     Ok(selected)
 }
 
@@ -90,6 +91,11 @@ fn initial_sast_pipeline_reports(
         .map(|engine| (*engine, native_engine_outcome(native.as_ref(), engine)))
         .collect();
     SastPipelineReports {
+        native_inspections: selected
+            .scanners
+            .iter()
+            .flat_map(|scanner| scanner.inspection_receipts())
+            .collect(),
         native,
         agentic: None,
         carlini: None,

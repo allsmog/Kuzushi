@@ -17,6 +17,8 @@ pub struct StudyPlanReceipt {
     pub equivalence: BatchEquivalenceKey,
     pub approval_required: bool,
     pub scan_input: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supporting_context: Option<String>,
 }
 
 /// Authenticate the frozen jobs before exposing them for operator review.
@@ -25,7 +27,7 @@ pub fn load_study_plan_receipt(root: &Path, id: &str) -> Result<StudyPlanReceipt
     let document = super::approved_work::read_bounded_plan(root, id)?;
     let plan = validate_scan_batch_execution_plan(id, &document)?;
     let components = serde_json::from_value(document["equivalence"].clone())?;
-    Ok(StudyPlanReceipt {
+    let receipt = StudyPlanReceipt {
         campaign_id: plan.batch_id,
         investigation_id: document["investigationId"].as_str().map(str::to_owned),
         plan_path: campaign_plan_path(root, id),
@@ -41,8 +43,15 @@ pub fn load_study_plan_receipt(root: &Path, id: &str) -> Result<StudyPlanReceipt
             components,
         },
         approval_required: document["requiresWorkApproval"] == Value::Bool(true),
+        supporting_context: crate::scan::inspect_scan_context(root, &plan.base_input)?,
         scan_input: plan.base_input,
-    })
+    };
+    super::context_experiment::load_frozen_experiment(
+        &document,
+        &receipt.scan_input,
+        &receipt.equivalence,
+    )?;
+    Ok(receipt)
 }
 
 pub fn load_study_resource_baseline(

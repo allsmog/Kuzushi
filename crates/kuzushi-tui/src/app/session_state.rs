@@ -162,6 +162,15 @@ impl SessionState {
         self.active_target_facts.facts()
     }
 
+    pub(crate) fn apply_component_inventory(
+        &mut self,
+        target: &Path,
+        result: Result<kuzushi_core::SbomScanReport, String>,
+    ) -> bool {
+        self.active_target_facts
+            .apply_component_inventory(target, result)
+    }
+
     pub(crate) fn active_target_facts_loading(&self) -> bool {
         self.active_target_facts.loading()
     }

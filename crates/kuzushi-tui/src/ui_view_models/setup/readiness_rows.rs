@@ -21,6 +21,16 @@ fn threat_model_row(
     app: &ShellApp,
     selected_rows: &[&crate::app::PlanningTaskRow],
 ) -> SetupReadinessRow {
+    if app.context_import_selected() {
+        return super::context_import::import_row(app);
+    }
+    generated_context_row(app, selected_rows)
+}
+
+fn generated_context_row(
+    app: &ShellApp,
+    selected_rows: &[&crate::app::PlanningTaskRow],
+) -> SetupReadinessRow {
     let selected = selected_rows
         .iter()
         .any(|row| row.id == crate::app::PlanningTaskId::BuildThreatModel);
@@ -201,6 +211,15 @@ fn invalid_option_row(
     app: &ShellApp,
     selected_rows: &[&crate::app::PlanningTaskRow],
 ) -> Option<SetupReadinessRow> {
+    let tasks = selected_rows.iter().map(|row| row.id).collect::<Vec<_>>();
+    if let Err(error) = app.validate_context_import_plan(&tasks) {
+        return Some(blocked_row(
+            SetupRowId::Plan,
+            "Map plan",
+            "OPTIONS",
+            error.to_string(),
+        ));
+    }
     selected_rows.iter().find_map(|row| {
         app.resolved_input_for_planning_task(row.id)
             .err()
@@ -283,16 +302,32 @@ fn credential_row(
         );
     }
     if readiness.is_ready() {
-        return ready_row(
+        return present_credential_row(readiness);
+    }
+    if readiness == CredentialReadiness::OAuthRepair {
+        return blocked_row(
             SetupRowId::Credentials,
             "Credentials",
-            readiness.label(),
-            readiness.label(),
+            "REPAIR",
+            readiness.detail(),
         );
     }
     let detail = missing_credential_detail(app)
         .unwrap_or_else(|| "selected provider: credentials required".to_string());
     blocked_row(SetupRowId::Credentials, "Credentials", "MISSING", detail)
+}
+
+fn present_credential_row(readiness: CredentialReadiness) -> SetupReadinessRow {
+    let mut row = ready_row(
+        SetupRowId::Credentials,
+        "Credentials",
+        readiness.label(),
+        readiness.detail(),
+    );
+    if readiness == CredentialReadiness::OAuthRefreshable {
+        row.tone = SetupReadinessTone::Attention;
+    }
+    row
 }
 
 fn missing_credential_detail(app: &ShellApp) -> Option<String> {
@@ -370,7 +405,7 @@ fn observed_budget_row(app: &ShellApp) -> SetupReadinessRow {
     )
 }
 
-fn ready_row(
+pub(super) fn ready_row(
     id: SetupRowId,
     label: &'static str,
     status: &str,
@@ -395,7 +430,7 @@ fn optional_row(
     )
 }
 
-fn blocked_row(
+pub(super) fn blocked_row(
     id: SetupRowId,
     label: &'static str,
     status: &str,

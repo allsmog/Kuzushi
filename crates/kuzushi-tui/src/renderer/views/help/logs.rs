@@ -28,11 +28,17 @@ fn logs_header(app: &ShellApp, area: Rect, summary: &str) -> Vec<Line<'static>> 
     let follow = if app.router.logs().is_following() {
         "following"
     } else {
-        "paused — G follows"
+        "paused · G follows"
     };
+    if app.router.logs().reader_open() {
+        return vec![muted(&fit(
+            &format!("{summary} · {follow}"),
+            usize::from(area.width),
+        ))];
+    }
     if area.height <= 16 {
         return vec![muted(&fit(
-            &format!("LOGS · {summary} · {follow}"),
+            &format!("LOGS · z expand · {summary} · {follow}"),
             usize::from(area.width),
         ))];
     }
@@ -40,7 +46,7 @@ fn logs_header(app: &ShellApp, area: Rect, summary: &str) -> Vec<Line<'static>> 
     lines.push(blank());
     lines.push(divider("LOGS", area.width));
     let hint = format!(
-        "{} · {follow} · / filter · j/k scroll · g/G jump · back to return",
+        "{} · {follow} · z expand · / filter · j/k scroll · g/G jump · back to return",
         summary
     );
     lines.push(muted(&fit(&hint, area.width as usize)));
@@ -64,10 +70,8 @@ pub(crate) fn logs_reader_scroll(app: &ShellApp) -> Option<LogsReaderScroll> {
         return None;
     }
     let viewport = app.viewport();
-    let area = crate::renderer::workbench_primary_area(
-        app,
-        Rect::new(0, 0, viewport.columns, viewport.rows),
-    );
+    let full = Rect::new(0, 0, viewport.columns, viewport.rows);
+    let area = logs_reading_area(app, full);
     let rows = logs_lines(app, area).len();
     let pinned = logs_pinned_rows(app, area);
     let height = usize::from(area.height);
@@ -81,6 +85,13 @@ pub(crate) fn logs_reader_scroll(app: &ShellApp) -> Option<LogsReaderScroll> {
         max_offset,
         page_rows: body_height,
     })
+}
+
+fn logs_reading_area(app: &ShellApp, full: Rect) -> Rect {
+    if app.router.logs().reader_open() {
+        return crate::renderer::logs_reader::reader_area(full);
+    }
+    crate::renderer::workbench_primary_area(app, full)
 }
 
 fn wrapped_log_lines(

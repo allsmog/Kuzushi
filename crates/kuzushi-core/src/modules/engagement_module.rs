@@ -5,16 +5,16 @@ pub(crate) fn engagement_module() -> BuiltinModule {
         "engagement",
         "Engagement",
         ModuleKind::Intel,
-        "Seed target-scoped engagement planning artifacts.",
+        "Retain legacy target-scoped harness metadata. Use campaign:study for finite investigation plans.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Map,
+                ToolPhase::Operate,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             ),
             vec![tool_with_options(
                 "engagement:aim",
-                "Seed engagement/harness.toml with focus, engine, and budget metadata.",
+                "Write legacy engagement/harness.toml metadata. Recorded budget is not enforced and approves no scan work. Use campaign:study for finite work and allowance approval.",
                 vec![
                 opt(
                     "focus",
@@ -29,11 +29,11 @@ pub(crate) fn engagement_module() -> BuiltinModule {
                 opt(
                     "budget",
                     OptionType::Float,
-                    "Optional USD budget for the engagement harness.",
+                    "Legacy USD budget metadata only; this does not enforce a spending limit or approve work.",
                 )
                 .aliases(&["budgetUsd", "budget_usd"]),
                 ],
-            )],
+            ).without_phase_result().with_discovery_maturity(ModuleMaturity::Compatibility)],
         ),
         vec![],
     )

@@ -51,30 +51,6 @@ pub(in crate::modules) fn failed_tool_output(
     )
 }
 
-pub(in crate::modules) fn should_skip_path(name: &str) -> bool {
-    matches!(
-        name,
-        ".git"
-            | ".kuzushi"
-            | ".next"
-            | ".turbo"
-            | "coverage"
-            | "dist"
-            | "native"
-            | "node_modules"
-            | "target"
-    ) || crate::incremental_index::is_bazel_output_component(name)
-}
-
-/// Directory-only companion to [`should_skip_path`]: hidden directories hold
-/// VCS, editor, and agent state (`.claude`, `.ccsec-*`), never product code,
-/// and on tool-heavy monorepos they eat the walk budget before real source
-/// roots. Hidden FILES (`.env`, `.bazelrc`) stay — they are evidence.
-/// `.github` stays too: CI workflows are attack surface.
-pub(in crate::modules) fn should_skip_hidden_dir(name: &str) -> bool {
-    name.starts_with('.') && name != ".github"
-}
-
 pub(in crate::modules) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -131,15 +107,6 @@ authorization: Default::default(),
         let resolved = resolve_tool_target(&Value::Null, &ctx).unwrap();
 
         assert_eq!(resolved, workspace.root());
-    }
-
-    #[test]
-    fn recognizes_generated_and_dependency_directories_to_skip() {
-        for name in [".git", ".kuzushi", "node_modules", "target", "dist"] {
-            assert!(should_skip_path(name), "{name} should be skipped");
-        }
-
-        assert!(!should_skip_path("src"));
     }
 
     #[test]

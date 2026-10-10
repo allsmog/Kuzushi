@@ -7,6 +7,7 @@ pub(crate) fn parse_build_input(
 ) -> Result<BuildInput> {
     let mut build = parse_generation_build_input(input)?;
     apply_target_build_input(&mut build, input, ctx, flavor)?;
+    build.operator_brief = load_operator_brief(input, ctx)?;
     super::super::application::rejected_output::validate(&build, ctx)?;
     Ok(build)
 }
@@ -202,7 +203,7 @@ fn normalized_scope_path(value: &str) -> Result<String> {
     Ok(path.to_string_lossy().replace('\\', "/"))
 }
 
-fn canonical_analysis_root(workspace_root: &Path, rel_path: &Path) -> Result<PathBuf> {
+pub(super) fn canonical_analysis_root(workspace_root: &Path, rel_path: &Path) -> Result<PathBuf> {
     let workspace = std::fs::canonicalize(workspace_root).with_context(|| {
         format!(
             "could not resolve workspace root {}",

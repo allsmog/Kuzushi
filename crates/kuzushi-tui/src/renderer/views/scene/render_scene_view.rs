@@ -379,6 +379,7 @@ mod tests {
             prior_artifacts: Vec::new(),
             component_inventory: Some(component_report()),
             component_inventory_error: None,
+            component_inventory_from_tool: false,
         }
     }
 

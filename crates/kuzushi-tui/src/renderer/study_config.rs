@@ -1,8 +1,8 @@
 use super::*;
 use crate::app::{BatchScanConfig, BatchScanConfigRow};
 use crate::ui_view_models::study_config::{
-    study_allowance_summary, study_config_area, study_config_layout, study_controls_hint,
-    study_detail_lines, study_projection, study_row_value,
+    study_allowance_summary, study_config_area, study_controls_hint, study_detail_lines,
+    study_projection, study_read_hint, study_reader_layout, study_row_value, study_surface_title,
 };
 use ratatui::widgets::{Block, Borders, Clear};
 
@@ -31,28 +31,157 @@ fn render_study_surface(
     config: &BatchScanConfig,
     area: Rect,
 ) {
-    if app.study_engine_picker().is_some() && !app.notice_captures_escape() {
-        super::study_engines::render_engine_picker(frame, app);
+    if config.context_result_cursor.is_some() {
+        render_context_results(frame, app, area);
         return;
     }
-    if app.context_generation().is_some() && !app.notice_captures_escape() {
-        super::context_generation::render_context_generation(frame, app, area);
-        return;
-    }
-    if app.study_context_picker().is_some() && !app.notice_captures_escape() {
-        super::study_context::render_context_picker(frame, app, area);
+    if !app.study_notice_captures_escape() && render_study_picker(frame, app, area) {
         return;
     }
     render_study_chrome(frame, &config, area);
-    render_config_body(frame, &config, area, app.notice_captures_escape());
+    render_config_body(frame, &config, area, app.study_notice_captures_escape());
+}
+
+fn render_study_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) -> bool {
+    if let Some(config) = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .filter(|config| config.study.matrix.open)
+    {
+        render_context_matrix(frame, app, config, area);
+        return true;
+    }
+    render_remaining_study_picker(frame, app, area)
+}
+
+fn render_remaining_study_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) -> bool {
+    if render_study_auxiliary_picker(frame, app, area) {
+        return true;
+    }
+    if app.context_generation().is_some() {
+        super::context_generation::render_context_generation(frame, app, area);
+        return true;
+    }
+    if app.study_context_picker().is_some() {
+        super::study_context::render_context_picker(frame, app, area);
+        return true;
+    }
+    super::scope_context::render(frame, app, area)
+}
+
+fn render_study_auxiliary_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) -> bool {
+    super::study_brief::render(frame, app, area) || render_configuration_picker(frame, app)
+}
+
+fn render_context_matrix(
+    frame: &mut Frame<'_>,
+    app: &ShellApp,
+    config: &BatchScanConfig,
+    area: Rect,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" CONTEXT CASES ");
+    let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
+    frame.render_widget(block, area);
+    let lines = matrix_surface_lines(app, config, inner);
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(lines.join("\n")),
+        Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(3),
+        ),
+    );
+    if config.study.matrix.results {
+        render_matrix_result_controls(frame, inner);
+    } else {
+        render_matrix_controls(frame, inner)
+    };
+}
+
+fn matrix_surface_lines(app: &ShellApp, config: &BatchScanConfig, inner: Rect) -> Vec<String> {
+    if config.study.matrix.results {
+        return crate::ui_view_models::matrix_result_lines(
+            app,
+            inner.width as usize,
+            inner.height.saturating_sub(3) as usize,
+        );
+    }
+    crate::ui_view_models::context_matrix_lines(
+        config,
+        inner.width as usize,
+        inner.height.saturating_sub(3) as usize,
+    )
+}
+
+fn render_matrix_result_controls(frame: &mut Frame<'_>, inner: Rect) {
+    let hints = "↑↓ · Enter pass · b base · R report\nPgUp/PgDn detail · r refresh · Esc";
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(hints),
+        Rect::new(inner.x, inner.bottom().saturating_sub(2), inner.width, 2),
+    );
+}
+
+fn render_matrix_controls(frame: &mut Frame<'_>, inner: Rect) {
+    let (hints, height) = if inner.width < 50 {
+        (
+            "↑↓ · a add · b baseline · p passes\nx remove · c clear · v results\nL next · Esc back",
+            3,
+        )
+    } else {
+        (
+            "↑↓ case · a add · b baseline · p passes\nx remove · c clear · v results · L next · Esc back",
+            2,
+        )
+    };
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(hints),
+        Rect::new(
+            inner.x,
+            inner.bottom().saturating_sub(height),
+            inner.width,
+            height,
+        ),
+    );
+}
+
+fn render_context_results(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" COMPARE CONTEXT EXPERIMENT ");
+    let inner = block.inner(area).inner(ratatui::layout::Margin::new(1, 0));
+    frame.render_widget(block, area);
+    let lines = crate::ui_view_models::study_config::context_result_lines(
+        app,
+        inner.width as usize,
+        inner.height.saturating_sub(2) as usize,
+    );
+    frame.render_widget(
+        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()),
+        Rect {
+            height: inner.height.saturating_sub(2),
+            ..inner
+        },
+    );
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from("↑↓ pass · Enter compare · Esc back"),
+            Line::from("r refresh · x clear · no work starts"),
+        ]),
+        Rect {
+            y: inner.bottom().saturating_sub(2),
+            height: 2,
+            ..inner
+        },
+    );
 }
 
 fn render_study_chrome(frame: &mut Frame<'_>, config: &BatchScanConfig, area: Rect) {
-    let title = if config.study.approved() {
-        "APPROVED STUDY"
-    } else {
-        "PLAN A STUDY"
-    };
+    let title = study_surface_title(config);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::subtle())
@@ -104,7 +233,7 @@ fn render_config_body(
     area: Rect,
     attention: bool,
 ) {
-    let layout = study_config_layout(area);
+    let layout = study_reader_layout(area, config.detail_reader_scroll.is_some());
     let count = layout.list.height as usize;
     let start = config.cursor.saturating_sub(count.saturating_sub(1));
     let rows = BatchScanConfigRow::ALL
@@ -117,7 +246,10 @@ fn render_config_body(
     frame.render_widget(Paragraph::new(rows), layout.list);
     let lines = study_detail_lines(config, layout.detail.width as usize);
     let maximum = lines.len().saturating_sub(layout.detail.height as usize);
-    let offset = config.detail_scroll.min(maximum);
+    let offset = config
+        .detail_reader_scroll
+        .unwrap_or(config.detail_scroll)
+        .min(maximum);
     let visible = lines
         .into_iter()
         .skip(offset)
@@ -125,27 +257,21 @@ fn render_config_body(
         .map(|line| Line::styled(line, theme::primary()))
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible), layout.detail);
-    render_study_controls(
-        frame,
-        config.selected_row(),
-        layout.controls,
-        (offset, maximum),
-        attention,
-    );
+    render_study_controls(frame, config, layout.controls, (offset, maximum), attention);
 }
 
 fn render_study_controls(
     frame: &mut Frame<'_>,
-    row: BatchScanConfigRow,
+    config: &BatchScanConfig,
     area: Rect,
     position: (usize, usize),
     attention: bool,
 ) {
     let (offset, maximum) = position;
-    let edit = study_controls_hint(row, area.width as usize, attention);
+    let edit = study_controls_hint(config.selected_row(), area.width as usize, attention);
     let controls = vec![
         Line::styled(
-            format!("↑↓ choose · PgUp/Dn {}/{}", offset + 1, maximum + 1),
+            study_read_hint(config, attention, offset, maximum),
             theme::muted(),
         ),
         Line::styled(edit, theme::accent()),
@@ -213,3 +339,15 @@ fn render_number_editor(frame: &mut Frame<'_>, config: &BatchScanConfig, area: R
 
 #[cfg(test)]
 mod tests;
+
+fn render_configuration_picker(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
+    if app.study_resource_picker().is_some() {
+        super::study_resources::render_resource_picker(frame, app);
+        return true;
+    }
+    if app.study_engine_picker().is_some() {
+        super::study_engines::render_engine_picker(frame, app);
+        return true;
+    }
+    false
+}

@@ -16,6 +16,7 @@ mod dedupe_prompt;
 mod dedupe_result;
 mod escalate;
 mod link;
+mod proposals;
 #[cfg(test)]
 mod tests;
 mod validate;
@@ -24,7 +25,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::findings::Finding;
+use crate::findings::{Finding, FindingStore};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::AgentRuntime;
 
@@ -57,19 +58,32 @@ pub fn execute_triage_dedupe(
         &by_fingerprint,
         &options,
     )?;
-    let report = link::link_groups(
-        store,
-        &ctx.finding_run_id(),
-        &confirmed.groups,
-        &by_fingerprint,
-        options.dry_run,
-    )?;
+    let report = record_dedupe_groups(store, ctx, &confirmed.groups, &by_fingerprint, &options)?;
     Ok(dedupe_result::dedupe_result(
         &confirmed,
         &report,
         candidates.len(),
         cost,
     ))
+}
+
+fn record_dedupe_groups(
+    store: &FindingStore,
+    ctx: &ToolExecutionContext<'_>,
+    groups: &[DuplicateGroup],
+    findings: &BTreeMap<&str, &Finding>,
+    options: &DedupeOptions,
+) -> Result<link::LinkReport> {
+    if options.legacy_rekey {
+        return link::link_groups(
+            store,
+            &ctx.finding_run_id(),
+            groups,
+            findings,
+            options.dry_run,
+        );
+    }
+    proposals::record_groups(store, ctx, groups, findings, options.dry_run)
 }
 
 fn dedupe_context<'a>(
@@ -115,15 +129,15 @@ fn judge_and_escalate(
         groups: Vec::new(),
         dropped: BTreeMap::new(),
     };
-    let mut cost =
-        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO);
+    let mut cost = crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO);
     for batch in bucket_batches(candidates) {
         let remaining = options.max_groups.saturating_sub(judged.groups.len());
         if remaining == 0 {
             break;
         }
         let request = dedupe_prompt::dedupe_request(model, root, batch);
-        let batch_judged = dedupe_prompt::query_dedupe(runtime, request, remaining, by_fingerprint)?;
+        let batch_judged =
+            dedupe_prompt::query_dedupe(runtime, request, remaining, by_fingerprint)?;
         cost = cost.checked_add(batch_judged.cost_report()?, "dedupe judge batch cost")?;
         let batch_value = batch_judged.value;
         judged.groups.extend(batch_value.groups);
@@ -203,11 +217,16 @@ struct DedupeOptions {
     max_candidates: usize,
     max_escalations: usize,
     dry_run: bool,
+    legacy_rekey: bool,
 }
 
 impl DedupeOptions {
     fn from_input(input: &Value) -> Result<Self> {
         Ok(Self {
+            legacy_rekey: input
+                .get("legacyRekey")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             max_groups: bounded_count(input, "maxGroups", DEFAULT_MAX_GROUPS)?,
             max_candidates: bounded_count(input, "maxCandidates", DEFAULT_MAX_CANDIDATES)?,
             max_escalations: bounded_count(input, "maxEscalations", DEFAULT_MAX_ESCALATIONS)?,

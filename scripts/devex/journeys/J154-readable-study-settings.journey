@@ -1,0 +1,148 @@
+name: Readable frozen settings, exact JSON and independent reading positions
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign owned-settings-reader
+require-live-snap: 25 owned-settings-reader | unapproved-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | study-form
+keys: Down Down Down
+require-live-snap: 5 SOURCE OVERVIEW | source-overview
+keys: Tab Tab z
+require-live-snap: 10 PREPARED SETTINGS | settings-120x36
+expect: current tool descriptors
+expect: SCAN SETTINGS
+expect: Tab JSON
+ask: Do the frozen values and current descriptor help read as settings, with exact field names and a visibly separate JSON view, without implying approval or execution?
+resize: 160x48
+wait: 0.5
+keys: Home
+live-snap: settings-160x48
+resize: 96x89
+wait: 0.5
+keys: Home
+live-snap: settings-96x89
+resize: 80x24
+wait: 0.5
+keys: Home
+live-snap: settings-80x24
+resize: 60x20
+wait: 0.5
+keys: Home
+live-snap: settings-60x20
+resize: 40x12
+wait: 0.5
+keys: Home
+live-snap: settings-40x12
+keys: Home
+live-snap: settings-page-40x12-0
+keys: NPage
+live-snap: settings-page-40x12-1
+keys: NPage
+live-snap: settings-page-40x12-2
+keys: NPage
+live-snap: settings-page-40x12-3
+keys: NPage
+live-snap: settings-page-40x12-4
+keys: NPage
+live-snap: settings-page-40x12-5
+keys: NPage
+live-snap: settings-page-40x12-6
+keys: NPage
+live-snap: settings-page-40x12-7
+keys: NPage
+live-snap: settings-page-40x12-8
+keys: NPage
+live-snap: settings-page-40x12-9
+keys: NPage
+live-snap: settings-page-40x12-10
+keys: NPage
+live-snap: settings-page-40x12-11
+keys: NPage
+live-snap: settings-page-40x12-12
+keys: NPage
+live-snap: settings-page-40x12-13
+keys: NPage
+live-snap: settings-page-40x12-14
+keys: NPage
+live-snap: settings-page-40x12-15
+keys: NPage
+live-snap: settings-page-40x12-16
+keys: NPage
+live-snap: settings-page-40x12-17
+keys: NPage
+live-snap: settings-page-40x12-18
+keys: NPage
+live-snap: settings-page-40x12-19
+keys: NPage
+live-snap: settings-page-40x12-20
+keys: NPage
+live-snap: settings-page-40x12-21
+keys: NPage
+live-snap: settings-page-40x12-22
+keys: NPage
+live-snap: settings-page-40x12-23
+keys: NPage
+live-snap: settings-page-40x12-24
+keys: NPage
+live-snap: settings-page-40x12-25
+keys: PPage
+live-snap: settings-before-json-40x12
+keys: Tab Home
+require-live-snap: 10 EXACT PREPARED OPTIONS | raw-page-40x12-0
+expect: Tab Overview
+keys: NPage
+live-snap: raw-page-40x12-1
+keys: NPage
+live-snap: raw-page-40x12-2
+keys: NPage
+live-snap: raw-page-40x12-3
+keys: NPage
+live-snap: raw-page-40x12-4
+keys: NPage
+live-snap: raw-page-40x12-5
+keys: NPage
+live-snap: raw-page-40x12-6
+keys: NPage
+live-snap: raw-page-40x12-7
+keys: BTab
+live-snap: settings-retained-position-40x12
+keys: End
+live-snap: settings-end-40x12
+expect-not: kz> End
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings.py @TMP_TARGET @ART paged
+ask: Can every recorded setting and every exact JSON field be read at 40x12, with independent scroll positions and visible back controls?
+resize: 120x36
+keys: Home
+require-live-snap: 10 PREPARED SETTINGS | settings-returned-wide
+keys: z
+require-live-snap: 10 PLAN A STUDY | returned-settings-form
+expect: PREPARED SETTINGS
+keys: Tab z Home
+require-live-snap: 10 EXACT PREPARED OPTIONS | raw-120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings.py @TMP_TARGET @ART read-only
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: campaign owned-settings-reader
+require-live-snap: 25 owned-settings-reader | no-color-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | no-color-form
+keys: Down Down Down Tab Tab z
+require-live-snap: 10 PREPARED SETTINGS | no-color-settings
+expect: current tool descriptors
+keys: Tab
+require-live-snap: 10 EXACT PREPARED OPTIONS | no-color-json
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings.py @TMP_TARGET @ART recovered
+ask: Does restart keep the same unapproved plan, values and readable settings in no-color mode without new jobs, approvals, scanner or provider work?
+keys: C-c
+require-exit: 10

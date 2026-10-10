@@ -7,6 +7,8 @@ use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+const FINDING_READ_LIMIT: usize = 10_000;
+
 /// Gather the deterministic inputs for a target and fold them into ranked
 /// scan recommendations. Read-only: a missing ledger means every scope is
 /// simply unscanned; it is never created here.
@@ -66,17 +68,14 @@ fn snapshot_surface_files(target: &Path) -> Option<BTreeMap<String, usize>> {
         .map(|map| map.summary.by_file)
 }
 
-fn finding_files(
-    target: &Path,
-    findings_store: Option<&FindingStore>,
-) -> Result<BTreeSet<String>> {
+fn finding_files(target: &Path, findings_store: Option<&FindingStore>) -> Result<BTreeSet<String>> {
     let Some(store) = findings_store else {
         return Ok(BTreeSet::new());
     };
-    let findings = store.list_all_findings()?;
-    Ok(findings
+    let paths = store.recommendation_finding_paths(FINDING_READ_LIMIT)?;
+    Ok(paths
         .iter()
-        .map(|finding| target_relative(&finding.file_path, target))
+        .map(|path| target_relative(path, target))
         .collect())
 }
 

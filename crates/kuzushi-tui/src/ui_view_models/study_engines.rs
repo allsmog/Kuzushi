@@ -140,14 +140,18 @@ fn path_conflict_lines(picker: &crate::app::StudyEnginePicker) -> Vec<String> {
 }
 
 pub(crate) fn engine_apply_controls(app: &ShellApp) -> &'static str {
-    if app
+    let paths = app
         .study_engine_picker()
         .and_then(|picker| picker.conflicting_paths())
-        .is_some()
-    {
-        "a apply · x clear · Esc cancel"
-    } else {
-        "a apply choices · Esc cancel"
+        .is_some();
+    let files = app
+        .study_engine_picker()
+        .is_some_and(|picker| picker.needs_scoped_file_tools());
+    match (paths, files) {
+        (true, true) => "a apply · x clear · m files · Esc",
+        (true, false) => "a apply · x clear · Esc cancel",
+        (false, true) => "a apply choices · m files · Esc",
+        (false, false) => "a apply choices · Esc cancel",
     }
 }
 

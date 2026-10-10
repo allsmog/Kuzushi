@@ -5,6 +5,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+mod read_only;
+mod source_validity;
+
 fn revision(sha: &str, dirty: bool) -> RunTargetGitMetadata {
     RunTargetGitMetadata {
         sha: sha.to_string(),
@@ -74,8 +77,7 @@ fn ledger_survives_reopen() {
 }
 
 fn summary(status: &str, tool: Option<&str>, git: Option<RunTargetGitMetadata>) -> RunSummary {
-    let mut summary =
-        RunSummary::running("run-1", "tool", tool.map(str::to_string), "/tmp/target");
+    let mut summary = RunSummary::running("run-1", "tool", tool.map(str::to_string), "/tmp/target");
     summary.status = status.to_string();
     summary.target_git = git;
     summary.completed_at_unix = Some(500);
@@ -320,7 +322,9 @@ fn guards_survive_while_the_file_is_unchanged_and_expire_on_edit() {
     fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(dir.path().join("src/a.c"), "guarded contents\n").unwrap();
     let ledger = CoverageLedger::open(dir.path()).unwrap();
-    ledger.record_guard(dir.path(), &guard("src/a.c", 100)).unwrap();
+    ledger
+        .record_guard(dir.path(), &guard("src/a.c", 100))
+        .unwrap();
 
     let (active, expired) = ledger.active_guards(dir.path()).unwrap();
     assert_eq!(active.len(), 1);
@@ -338,7 +342,9 @@ fn fresh_findings_inside_a_live_guard_window_are_conflicts() {
     fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(dir.path().join("src/a.c"), "guarded contents\n").unwrap();
     let ledger = CoverageLedger::open(dir.path()).unwrap();
-    ledger.record_guard(dir.path(), &guard("src/a.c", 100)).unwrap();
+    ledger
+        .record_guard(dir.path(), &guard("src/a.c", 100))
+        .unwrap();
     let (active, _) = ledger.active_guards(dir.path()).unwrap();
 
     assert!(guard_conflict(&active, "src/a.c", 110).is_some());

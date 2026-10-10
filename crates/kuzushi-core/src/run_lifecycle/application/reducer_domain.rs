@@ -43,8 +43,8 @@ fn apply_artifact(
         .calls
         .iter_mut()
         .find(|(_, call)| call.item_id == artifact.producing_item_id);
-    let (call_id, call) = producer
-        .ok_or_else(|| anyhow::anyhow!("artifact references an unknown producing call"))?;
+    let (call_id, call) =
+        producer.ok_or_else(|| anyhow::anyhow!("artifact references an unknown producing call"))?;
     validate_artifact_call_scope(envelope, *call_id)?;
     validate_producing_call(call, artifact)?;
     call.related_artifact_ids.push(envelope.item_id);
@@ -76,6 +76,9 @@ fn validate_producing_call(
     call: &crate::run_lifecycle::CallProjection,
     artifact: &crate::run_lifecycle::ArtifactReference,
 ) -> Result<()> {
+    if is_scan_start_source(call, artifact) {
+        return Ok(());
+    }
     anyhow::ensure!(
         call.status.is_terminal(),
         "artifact producer call is not terminal"
@@ -91,6 +94,18 @@ fn validate_producing_call(
         );
     }
     Ok(())
+}
+
+fn is_scan_start_source(
+    call: &crate::run_lifecycle::CallProjection,
+    artifact: &crate::run_lifecycle::ArtifactReference,
+) -> bool {
+    use crate::run_lifecycle::{CallKind, RunItemStatus};
+    matches!(
+        (call.kind, call.status, call.label.as_str()),
+        (CallKind::Tool, RunItemStatus::Running, "sast:scan")
+    ) && artifact.path.as_str()
+        == crate::artifact_contract::scan_start_source_artifact_leaf(call.item_id)
 }
 
 fn apply_question(projection: &mut RunProjection, envelope: &RunItemEnvelopeV1) -> Result<()> {

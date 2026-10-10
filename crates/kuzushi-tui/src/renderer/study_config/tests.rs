@@ -82,17 +82,62 @@ fn study_failure_is_readable_and_dismisses_without_losing_the_draft() {
         "tool",
         "Unknown scan task. Select a supported scanner before preparing the draft.",
     );
-    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
-    terminal
-        .draw(|frame| crate::renderer::render_app(frame, &app))
-        .unwrap();
-    let text = format!("{:?}", terminal.backend().buffer());
-    assert!(text.contains("ATTENTION: Unknown scan task"), "{text}");
-    assert!(text.contains("Esc dismiss"));
+    app.study_preparation_failed(
+        "campaign:study",
+        "Unknown scan task. Select a supported scanner before preparing the draft.",
+    );
+    app.clear_notice();
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 36), (160, 48), (96, 89)] {
+        app.reduce_resize(width, height);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        assert!(text.contains("ATTENTION: Unknown scan task"), "{text}");
+        assert!(text.contains("Esc dismiss"));
+    }
+    let plain = crate::renderer::render_plain_app(&app, 80);
+    assert!(plain.contains("ATTENTION: Unknown scan task"), "{plain}");
     let blocked = app.reduce_key(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
     assert!(blocked.effects.is_empty());
     app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(app.batch_config_open());
     assert!(!app.notice_captures_escape());
+    assert!(!app.study_notice_captures_escape());
     assert_eq!(app.input(), "keep my draft");
+}
+
+#[test]
+fn expanded_detail_names_the_selected_setting_and_keeps_return_controls_visible() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.open_batch_scan_config(None);
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .cursor = 3;
+    app.reduce_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE));
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 36), (160, 48), (96, 89)] {
+        app.reduce_resize(width, height);
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let text = format!("{:?}", terminal.backend().buffer());
+        for label in ["Source and context", "z form", "↑↓/PgUp/Dn", "PgUp/Dn"] {
+            assert!(
+                text.contains(label),
+                "{width}x{height} lost {label}: {text}"
+            );
+        }
+        assert!(!text.contains("Discovery passes"));
+    }
+    let plain = crate::renderer::render_plain_app(&app, 40);
+    assert!(plain.contains("Source and context"));
+    assert!(!plain.contains("Discovery passes"));
+    assert!(plain.contains("Allowance not approved"));
 }

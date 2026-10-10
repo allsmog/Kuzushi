@@ -119,6 +119,54 @@ fn corpus_rebuild_is_a_swap_and_skips_unreachable_targets() {
 }
 
 #[test]
+fn fleet_revision_comparison_retains_both_observations_of_one_identity() {
+    use crate::run_artifacts::{write_run_summary, RunSummary, RunTargetGitMetadata};
+    let fleet = fleet_dir();
+    let workspace = fleet_dir();
+    fs::create_dir_all(workspace.path().join(".kuzushi/v3")).unwrap();
+    let store = FindingStore::open(crate::workspace::workspace_findings_db_path(
+        workspace.path(),
+    ))
+    .unwrap();
+    for (run, sha) in [
+        ("owned-base", "a".repeat(40)),
+        ("owned-head", "b".repeat(40)),
+    ] {
+        store
+            .insert_scan_run(run, workspace.path(), "completed")
+            .unwrap();
+        let mut finding = Finding::new_tool(
+            "owned-policy",
+            "license-policy",
+            "package.json",
+            1,
+            None,
+            Severity::Low,
+            "Owned package policy observation",
+        );
+        finding.scan_id = Some(run.into());
+        store.insert_finding(run, &finding).unwrap();
+        let summary = RunSummary::running(
+            run,
+            "scan",
+            Some("license-scan:scan".into()),
+            workspace.path().display().to_string(),
+        )
+        .with_target_git(Some(RunTargetGitMetadata {
+            sha,
+            branch: Some("owned".into()),
+            dirty: false,
+        }))
+        .complete();
+        write_run_summary(workspace.path(), &summary).unwrap();
+    }
+    rebuild_corpus(fleet.path(), &[target("owned", workspace.path())]).unwrap();
+    let report = diff_findings(fleet.path(), "owned", &"a".repeat(40), &"b".repeat(40)).unwrap();
+    assert_eq!(report.entries.len(), 1);
+    assert_eq!(report.entries[0].lead, FindingLead::Both);
+}
+
+#[test]
 fn fleet_status_folds_corpus_counts_and_ledger_baselines() {
     let fleet = fleet_dir();
     let workspace = workspace_with_findings(&[

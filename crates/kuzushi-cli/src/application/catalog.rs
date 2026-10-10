@@ -51,7 +51,7 @@ pub(crate) fn tools_command(json: bool, all: bool) -> Result<()> {
             .iter()
             .map(|(module, tool)| ToolCatalogRow {
                 module_id: &module.metadata().id,
-                maturity: module.maturity(),
+                maturity: tool.effective_maturity(module.maturity()),
                 tool,
             })
             .collect::<Vec<_>>();
@@ -102,7 +102,7 @@ fn print_tool(module: &BuiltinModule, tool: &ToolDescriptor, show_maturity: bool
         println!(
             "{} [{}] - {}",
             tool.name,
-            module.maturity().as_str(),
+            tool.effective_maturity(module.maturity()).as_str(),
             tool.description
         );
     } else {

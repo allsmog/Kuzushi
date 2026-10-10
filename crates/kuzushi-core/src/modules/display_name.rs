@@ -68,7 +68,7 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("fuzz:status", "Fuzzing workspace status"),
     ("deep-audit:run", "Run deep audit"),
     ("dep-hygiene:check", "Check dependency hygiene"),
-    ("engagement:aim", "Set engagement aim"),
+    ("engagement:aim", "Save legacy harness metadata"),
     ("entry-points:extract", "Extract entry points"),
     ("exploit-chain:scan", "Scan for exploit chains"),
     ("findings:chains", "Show finding chains"),
@@ -184,6 +184,10 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("threat-leads:build", "Build threat leads"),
     ("threat-leads:read", "Read threat leads"),
     ("threat-model:build", "Build threat model"),
+    (
+        "threat-model:regenerate",
+        "Regenerate selected context text",
+    ),
     ("threat-model:models", "List threat models"),
     ("threat-model:activate", "Activate threat model"),
     ("threat-model:revisions", "List threat-model revisions"),
@@ -191,6 +195,7 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("threat-model:restore", "Restore threat-model revision"),
     ("threat-model:adopt", "Adopt threat-model mirror edits"),
     ("threat-model:import", "Import threat model"),
+    ("threat-model:revise", "Edit an exact context copy"),
     (
         "threat-model:methodologies",
         "List threat-model methodologies",

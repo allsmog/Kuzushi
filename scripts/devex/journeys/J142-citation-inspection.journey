@@ -1,0 +1,72 @@
+name: Bounded citation inspection, truthful partial work and immutable finding history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: run findings:ground {"limit":1}
+submit: logs
+keys: End
+require-live-snap: 25 Additional ledger candidates | limited
+expect: checked 1 citation(s)
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART limited
+ask: Does the bounded window disclose unchecked candidates without claiming repository coverage or changing finding verdicts?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART change-citations
+paste-file: @ART/ground-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 unavailable=1 | changed
+expect: file_missing=1
+expect: line_drift=1
+expect: Finding verdicts remain unchanged
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART changed
+ask: Can the operator distinguish a stale anchor, missing file and unavailable source, with preserved raw observations and source-bound inspection receipts?
+resize: 160x48
+live-snap: inspection-160x48
+resize: 96x89
+live-snap: inspection-96x89
+resize: 80x24
+live-snap: inspection-80x24
+resize: 60x20
+live-snap: inspection-60x20
+resize: 40x12
+live-snap: inspection-40x12
+keys: Escape
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | expanded-inspection-40x12
+keys: PPage PPage
+live-snap: inspection-page-40x12
+ask: Are the result, uncertainty and paging readable across all six sizes, with no completed Review claim?
+resize: 120x36
+keys: Escape
+paste-file: @ART/ground-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 unavailable=1 | repeated
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART repeat
+paste-file: @ART/import-command.txt
+keys: Enter
+require-live-snap: 20 CONFIRM | import-review
+keys: y
+submit: logs
+keys: End
+require-live-snap: 25 imported 3 finding(s) | imported-again
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART imported-again
+ask: Do repeated checks stay idempotent for the same source, and does explicit import preserve existing observations and auxiliary phase ownership?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: findings
+require-live-snap: 20 citation fixture | no-color-findings
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/citation_inspection.py @TMP_TARGET @ART recovered
+ask: Does restart retain all three original findings and the two source-bound citation audits without scans or model work?
+keys: C-c
+require-exit: 10

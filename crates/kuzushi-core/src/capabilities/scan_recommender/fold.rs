@@ -42,10 +42,7 @@ fn coverage_gap_rows(inputs: &RecommenderInputs<'_>) -> Vec<ScanRecommendation> 
         .collect()
 }
 
-fn coverage_gap_row(
-    inputs: &RecommenderInputs<'_>,
-    scope_id: &str,
-) -> Option<ScanRecommendation> {
+fn coverage_gap_row(inputs: &RecommenderInputs<'_>, scope_id: &str) -> Option<ScanRecommendation> {
     if scanned(inputs, scope_id, WorkflowPhase::Scan) {
         return None;
     }
@@ -97,7 +94,9 @@ fn staleness_rows(inputs: &RecommenderInputs<'_>) -> Vec<ScanRecommendation> {
                     short_sha(&entry.baseline_sha)
                 ),
             )),
-            SweepVerdict::Current | SweepVerdict::BaselineUnreachable => None,
+            SweepVerdict::Current
+            | SweepVerdict::BaselineUnreachable
+            | SweepVerdict::SourceUnverified { .. } => None,
         })
         .collect()
 }

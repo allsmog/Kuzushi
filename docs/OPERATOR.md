@@ -122,7 +122,7 @@ run`.
 | `x` | include/exclude the selected job from dispatch |
 | `w` | cycle dispatcher worker count |
 | `L` | launch the detached dispatcher (`kuzushi campaign run`) |
-| `K` | kill the running dispatcher |
+| `K` | request Stop for the dispatcher launched by this shell |
 | `e` | preview the job's (seasoned) prompt |
 | `r` | refresh from disk |
 
@@ -282,6 +282,61 @@ preflight. Internal provider turns and retries each consume a call. Review and
 Report can use the protected allocation; discovery cannot. Missing price receipts
 remain unavailable. Revising an allowance requires its current revision and new
 exact totals; previous commitments remain counted.
+
+Use `scopes` to review repository boundaries and coverage before planning
+discovery. **Use whole repository** combines the boundaries while preserving
+explicit exclusions and their reasons. To restore omitted files deliberately,
+choose **Include an excluded file or directory** and submit the exact recorded
+exclusion path. The new revision recomputes coverage and needs acceptance;
+existing approved plans keep their earlier membership. Other exclusion rules
+remain in force. This action starts no scans or model requests.
+
+The study form's **Goal and priorities** row opens a target-local investigation
+brief. Enter your goal, priorities and open questions as ordinary text. Ctrl+S
+reviews the proposed text alongside the prior revision; Enter saves and selects
+it for a new study. Esc preserves the draft and editing position. Selecting a
+saved revision requires matching saved text; unsaved edits must be reviewed
+first. A compiled plan keeps its exact brief even when a later revision is saved.
+
+`campaign:brief` is the shared headless read/save surface. Reads default to the
+`repository` brief; `briefRef` reads an exact revision. Save mode requires
+`expectedRevision` and `text`. Text is limited to 8192 UTF-8 bytes. Concurrent or
+stale saves refuse without replacing prior revisions. No model calls, finding
+verdicts, scanner prompts, work or allowance are changed by brief editing.
+
+`campaign:study` and `campaign:context-study` accept the selected `briefRef`.
+The complete plan and report retain this revision as operator intent. It guides
+human planning and priorities; accepted source context and evidence remain
+separate. Brief text is not silently added to scanner/model prompts.
+
+To guide a new repository or file-group context draft, enable **Goal guidance**
+explicitly in the generation form. `b` reviews/selects a goal before preparation;
+`g` toggles guidance. Preparing the plan freezes the exact selected revision.
+After preparation, `b` opens its preserved planned text, including after later
+goal edits. This reader restores the allowance scroll position and consumes no
+model calls. The context request uses the entire reviewed text as priorities
+and questions, separate from source evidence and finding decisions. It requires
+its own approved fixed plan and shared allowance before execution.
+
+Headless planning uses `campaign:context-study useBriefGuidance=true` with
+`briefRef`; default false retains metadata only. Guided jobs declare
+`threat-model:build operatorBriefRef`. The shared boundary requires a fixed
+approved work item and reserves each provider attempt. Other generation tools
+keep their own explicit guidance inputs. Generated context provenance records
+the exact goal reference and text byte count; saving that draft does not accept
+it or activate global context.
+
+Context inspection shows recorded goal guidance before the document details.
+It authenticates the saved revision and displays its exact text. This read
+does not independently prove that a model used that goal. Imported provenance
+can record the same reference. Missing guidance remains an explicit receipt;
+the exact context stays readable and no current goal is substituted. Summary
+and complete-document views retain the qualification.
+
+Investigation reports preserve guidance from their frozen context references.
+Scope and context-matrix cases each retain their own receipt. An explicitly
+omitted context and historical input without a bound context have distinct
+labels. Reports do not inspect the active context to fill either state.
 
 To draft three discovery passes without starting them, use:
 
@@ -606,6 +661,22 @@ not operator-facing): `pipeline:approval-before-verification`,
 `codeql:create-db`), `cargo-audit:scan`, `govulncheck:scan`,
 `iac-scan:scan`, `license-scan:scan`, `sbom-scan:scan`,
 `secret-scan:scan`, `dep-hygiene:check`, `wasm-plugin:analyze`.
+
+Secret inspection uses no model and does not test whether a credential is valid.
+Its matches stay signal-only until human review. Direct shell/run options include
+`maxFileBytes` (512 KiB default), `maxFindings` (1000), `maxEntries` (100,000)
+and `maxTotalBytes` (512 MiB). The last two have hard ceilings of 100,000 entries
+and 512 MiB. Content reservations conservatively include one growth-detection
+byte, including failed reads. The output shows consumption and exclusions.
+Limits and unread paths produce partial receipts that retain findings.
+
+The direct tool scans its resolved contained target directory. Accepted exact
+file membership uses the Scan umbrella adapter; `scanScopeRef` is not a direct
+secret-tool option. Umbrella/exact adapters retain their existing per-file
+defaults and use the same aggregate entry/content ceilings. Their custom limit
+interface still requires qualification. Binary content, symlinks, configured
+extensions and build/vendor directories are excluded. These exclusions and
+partial coverage cannot establish that the repository contains no secrets.
 
 **Hunting engines (model-backed)** — `carlini-threat-hunt:run`
 (adversarial per-threat review), `systems-hunt:systems-hunt` and its

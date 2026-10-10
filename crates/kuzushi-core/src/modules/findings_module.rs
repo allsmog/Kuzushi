@@ -1,17 +1,22 @@
 use super::*;
 
 pub(crate) fn findings_module() -> BuiltinModule {
+    let mut tools = vec![
+        findings_list_tool(),
+        findings_dismiss_tool(),
+        findings_ground_tool(),
+        findings_chains_tool(),
+    ];
+    tools.extend(super::findings_relationships::relationship_tools());
+    tools.push(super::findings_groups::groups_tool());
+    tools.extend(super::findings_lessons::lesson_tools());
+    tools.push(super::findings_lessons::generation_tool());
     builtin_module(
         "findings",
         "Findings",
         ModuleKind::Defense,
         "Persist and inspect findings in SQLite.",
-        vec![
-            findings_list_tool(),
-            findings_dismiss_tool(),
-            findings_ground_tool(),
-            findings_chains_tool(),
-        ],
+        tools,
         vec![],
     )
 }
@@ -42,6 +47,7 @@ fn findings_dismiss_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Required,
     ))
+    .without_phase_result()
 }
 
 fn findings_ground_tool() -> ToolDescriptor {
@@ -50,7 +56,7 @@ fn findings_ground_tool() -> ToolDescriptor {
         "Re-check every open finding's citation against the target \
          tree at the current revision. Reports grounded / line-drift \
          / file-missing counts and audits newly stale anchors. \
-         Descriptive only — never retires a finding.",
+         Citation inspection only; never retires a finding or changes its verdict.",
         findings_ground_options(),
     )
     .with_policy(workspace_policy(
@@ -58,6 +64,7 @@ fn findings_ground_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Required,
     ))
+    .without_phase_result()
 }
 
 fn findings_chains_tool() -> ToolDescriptor {
@@ -79,10 +86,13 @@ fn findings_ground_options() -> Vec<OptionSpec> {
     vec![opt(
         "limit",
         OptionType::Int,
-        "Maximum findings to re-ground in one pass.",
+        "Maximum ledger candidates selected in stable identity order (0 to 100000). Suppressed/rekeyed rows are excluded after selection; additional candidates require a separate request.",
     )
     .default(json!(500))
-    .advanced()]
+    .advanced(),
+    opt("maxBytesPerFile", OptionType::Int, "Exact citation source read limit per file, from 1 to 8388608 bytes.").default(json!(8 * 1024 * 1024)).advanced(),
+    opt("maxTotalBytes", OptionType::Int, "Shared source read limit from 1 to 536870912 bytes. Repeated citations share one captured file.").default(json!(64 * 1024 * 1024)).advanced(),
+    ]
 }
 
 fn findings_chains_options() -> Vec<OptionSpec> {
@@ -147,6 +157,7 @@ fn findings_dismiss_options() -> Vec<OptionSpec> {
 
 fn findings_list_options() -> Vec<OptionSpec> {
     let mut options = findings_basic_options();
+    options.extend(findings_page_options());
     options.extend(findings_triage_options());
     options.extend(findings_provenance_options());
     options.push(
@@ -187,6 +198,30 @@ fn findings_basic_options() -> Vec<OptionSpec> {
             OptionType::StringList,
             "Severity filter: critical, high, medium, low, info.",
         ),
+    ]
+}
+
+fn findings_page_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "cursor",
+            OptionType::String,
+            "Continue a findings page from its returned cursor.",
+        )
+        .advanced(),
+        opt(
+            "anchor",
+            OptionType::String,
+            "Reload an exact finding anchor. Continuity anchors follow one unambiguous identity after a generation is replaced.",
+        )
+        .advanced(),
+        opt(
+            "order",
+            OptionType::Enum,
+            "Order findings before selecting a page.",
+        )
+        .choices(&["ledger", "confidence"])
+        .default(json!("ledger")),
     ]
 }
 

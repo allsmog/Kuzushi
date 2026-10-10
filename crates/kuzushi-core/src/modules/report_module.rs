@@ -59,28 +59,38 @@ fn report_sarif_tool() -> ToolDescriptor {
     )
 }
 
-pub(in crate::modules) fn build_report_tool(
+#[cfg(test)]
+fn build_report_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    build_report_with_registry(&ModuleRegistry::with_v2_builtins(), input, ctx)
+}
+
+fn build_report_with_registry(
+    registry: &ModuleRegistry,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
     let run_id = string_input_any(input, &["runId", "run_id"]);
-    let report = crate::report::build_run_report_with_source_filter(
-        &target,
-        run_id.as_deref(),
-        &is_analysis_tool,
-    )?;
+    let report =
+        crate::report::build_run_report_with_source_filter(&target, run_id.as_deref(), &|tool| {
+            is_analysis_tool(registry, tool)
+        })?;
     Ok(report.to_tool_json())
 }
 
-/// Exports and read-only listings describe existing results, so the implicit
-/// latest run is never one of them. Classification comes from the registered
-/// descriptors that shared dispatch also uses.
-fn is_analysis_tool(tool: &str) -> bool {
-    use super::autonomy::{classify, ToolClassification};
+/// Auxiliary actions cannot replace the implicit analysis source. Result
+/// ownership and effect come from the same registry used for dispatch.
+fn is_analysis_tool(registry: &ModuleRegistry, tool: &str) -> bool {
+    use super::autonomy::{classify_descriptor, ToolClassification};
+    let Some(descriptor) = registry.resolve_tool(tool) else {
+        return true;
+    };
+    if !descriptor.phase_result {
+        return false;
+    }
     !matches!(
-        classify(tool),
-        Some(ToolClassification::Report | ToolClassification::Read)
+        classify_descriptor(descriptor),
+        Some(ToolClassification::Report | ToolClassification::Read | ToolClassification::Operate)
     )
 }
 
@@ -95,31 +105,37 @@ pub(in crate::modules) fn run_report_sarif_tool(
         .findings_store
         .context("report:sarif requires a findings store")?;
     let receipt = string_input_any(input, &["campaignId", "campaign_id"])
-        .map(|campaign| crate::workspace::load_investigation_report(workspace, campaign.trim()))
+        .map(|campaign| {
+            crate::workspace::load_investigation_report_document(workspace, campaign.trim())
+        })
         .transpose()?;
     let findings = match &receipt {
         Some(receipt) => {
-            store.list_distinct_findings_for_scan_ids(&receipt.observation_run_refs)?
+            store.list_distinct_findings_for_scan_ids(receipt.summary().observation_run_refs)?
         }
         None => store.list_all_findings()?,
     };
     let records = store.list_review_decisions_for_findings(&findings)?;
-    let selection = crate::report::ConfirmedSarifSelection {
-        findings: &findings,
-        records: &records,
-        investigation: receipt.as_ref(),
-    };
-    crate::report::export_confirmed_sarif(workspace.root(), input, &selection)
+    let metadata =
+        crate::workspace::read_workspace_finding_export_records(workspace, store, &findings)?;
+    crate::report::export_confirmed_sarif_document(
+        workspace.root(),
+        input,
+        &findings,
+        &records,
+        receipt.as_ref(),
+        &metadata,
+    )
 }
 
 pub(in crate::modules) fn execute_report_build_tool(
-    _registry: &ModuleRegistry,
+    registry: &ModuleRegistry,
     _name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     _runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    build_report_tool(input, ctx)
+    build_report_with_registry(registry, input, ctx)
 }
 
 pub(in crate::modules) fn execute_report_sarif_tool(
@@ -176,5 +192,59 @@ mod tests {
 
         let explicit = build_report_tool(&json!({"runId": "b-export"}), &ctx).unwrap();
         assert_eq!(explicit["data"]["sourceRunId"], "b-export");
+    }
+
+    #[test]
+    fn implicit_report_source_skips_campaign_tracking_runs() {
+        let root = tempfile::tempdir().unwrap();
+        completed(root.path(), "a-scan", "sast:scan", 100);
+        for (run, tool) in [
+            ("b-status", "campaign:status"),
+            ("c-coverage", "campaign:coverage"),
+        ] {
+            completed(root.path(), run, tool, 200);
+        }
+        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+        let config = crate::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let report = build_report_tool(&json!({}), &ctx).unwrap();
+        assert_eq!(report["data"]["sourceRunId"], "a-scan", "{report:#}");
+    }
+
+    #[test]
+    fn implicit_report_source_skips_auxiliary_review_writes() {
+        let root = tempfile::tempdir().unwrap();
+        completed(root.path(), "a-scan", "sast:scan", 100);
+        for (run, tool) in [
+            ("b-add", "suppress:add"),
+            ("c-list", "suppress:list"),
+            ("d-remove", "suppress:remove"),
+            ("e-relationship", "findings:relationship"),
+            ("f-lesson", "findings:lesson-save"),
+            ("g-dismissal", "findings:dismiss"),
+        ] {
+            completed(root.path(), run, tool, 200);
+        }
+        let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
+        let config = crate::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let report = build_report_tool(&json!({}), &ctx).unwrap();
+        assert_eq!(report["data"]["sourceRunId"], "a-scan");
+        let explicit = build_report_tool(&json!({"runId": "c-list"}), &ctx).unwrap();
+        assert_eq!(explicit["data"]["sourceRunId"], "c-list");
     }
 }

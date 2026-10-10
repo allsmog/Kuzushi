@@ -21,9 +21,42 @@ impl ShellApp {
         &mut self,
         open: OpenFindingReference,
     ) -> Vec<ShellEffect> {
-        vec![ShellEffect::FinalizeOpenFinding(
-            self.resolve_open_finding(open.reference),
-        )]
+        let finalized = self.resolve_open_finding(open.reference);
+        if let Some(anchor) = self.page_anchor_for_explicit_open(&finalized) {
+            self.runtime_state.requested_findings_page =
+                Some(kuzushi_core::findings::FindingPageRequest {
+                    anchor: Some(anchor),
+                    order: kuzushi_core::findings::FindingPageOrder::Confidence,
+                    ..Default::default()
+                });
+            return vec![
+                ShellEffect::RefreshFindings(FindingsRefresh {
+                    announce: false,
+                    filter: None,
+                }),
+                ShellEffect::FinalizeOpenFinding(finalized),
+            ];
+        }
+        vec![ShellEffect::FinalizeOpenFinding(finalized)]
+    }
+
+    fn page_anchor_for_explicit_open(&self, open: &OpenFindingFinalize) -> Option<String> {
+        if !self.explicit_open_can_load_page() {
+            return None;
+        }
+        let OpenFindingOutcome::Found(finding) = &open.outcome else {
+            return None;
+        };
+        let anchor = kuzushi_core::findings::finding_page_anchor(finding);
+        (!self
+            .findings()
+            .iter()
+            .any(|loaded| kuzushi_core::findings::finding_page_anchor(loaded) == anchor))
+        .then_some(anchor)
+    }
+
+    fn explicit_open_can_load_page(&self) -> bool {
+        self.active_findings_filter().is_none() && self.domain().findings_page().is_some()
     }
 
     pub(crate) fn finalize_open_finding_effect(
@@ -31,7 +64,11 @@ impl ShellApp {
         open: OpenFindingFinalize,
     ) -> Vec<ShellEffect> {
         match open.outcome {
-            OpenFindingOutcome::Found(finding) => return self.apply_found_finding(finding),
+            OpenFindingOutcome::Found(finding) => {
+                let effects = self.apply_found_finding(finding);
+                self.bind_selected_finding_reference(open.reference);
+                return effects;
+            }
             OpenFindingOutcome::ChainAlias(chain) => self.log_opened_chain_alias(&chain),
             OpenFindingOutcome::Missing => self.log_missing_finding(&open.reference),
             OpenFindingOutcome::MissingChainAlias { alias } => self.log_missing_chain_alias(alias),
@@ -52,11 +89,34 @@ impl ShellApp {
         if let Some(outcome) = self.chain_alias_outcome(reference) {
             return outcome;
         }
-        let reference = match self.resolved_finding_reference(reference) {
-            Ok(reference) => reference,
-            Err(outcome) => return outcome,
-        };
-        self.finding_lookup_outcome(&reference)
+        if parse_finding_alias(reference).is_some() {
+            return self.ledger_alias_outcome(reference);
+        }
+        self.finding_lookup_outcome(reference)
+    }
+
+    fn ledger_alias_outcome(&self, reference: &str) -> OpenFindingOutcome {
+        let loaded = self
+            .finding_aliases()
+            .iter()
+            .position(|alias| alias == reference)
+            .and_then(|index| self.findings().get(index))
+            .cloned();
+        if let Some(finding) = loaded {
+            return OpenFindingOutcome::Found(finding);
+        }
+        let result = open_finding_store_for_target_read_only(self.target_path_buf()).and_then(
+            |(_, store)| {
+                store.finding_for_alias_with_identity_policy(reference, self.identity_fold_policy())
+            },
+        );
+        match result {
+            Ok(Some(finding)) => OpenFindingOutcome::Found(finding),
+            Ok(None) => OpenFindingOutcome::MissingFindingAlias {
+                alias: reference.to_owned(),
+            },
+            Err(error) => OpenFindingOutcome::Error(error.to_string()),
+        }
     }
 
     fn chain_alias_outcome(&self, reference: &str) -> Option<OpenFindingOutcome> {
@@ -72,18 +132,6 @@ impl ShellApp {
         )
     }
 
-    fn resolved_finding_reference(&self, reference: &str) -> Result<String, OpenFindingOutcome> {
-        let Some(index) = parse_finding_alias(reference) else {
-            return Ok(reference.to_string());
-        };
-        let Some(finding) = resolve_finding_alias(self.findings(), reference) else {
-            return Err(OpenFindingOutcome::MissingFindingAlias {
-                alias: format_finding_alias(index),
-            });
-        };
-        Ok(finding.fingerprint.clone())
-    }
-
     fn finding_lookup_outcome(&self, reference: &str) -> OpenFindingOutcome {
         match finding_by_reference_for_target(self.target_path_buf(), reference) {
             Ok(Some(finding)) => OpenFindingOutcome::Found(finding),
@@ -95,19 +143,18 @@ impl ShellApp {
     /// `open <ref>` resolved to a finding. Like Enter on the queue, this is a
     /// substantive open and starts a review session.
     fn apply_found_finding(&mut self, finding: Finding) -> Vec<ShellEffect> {
+        let from_relationships = self.shell_view() == ShellView::Relationships
+            && self.input_mode() == InputMode::Navigate;
         *self.selected_finding_mut() = Some(finding.clone());
         self.sync_findings_cursor_to_selected();
         self.set_shell_view(ShellView::Workbench);
+        if from_relationships {
+            self.set_input_mode(InputMode::Navigate);
+        }
         self.router
             .workbench_mut()
             .set_page(Some(crate::app::WorkbenchPage::Review));
-        self.router
-            .workbench_mut()
-            .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewDetail);
-        self.router
-            .workbench_mut()
-            .scroll_mut()
-            .set(crate::ui_view_models::PhaseSurfaceId::ReviewDetail, 0);
+        self.focus_workbench_details_for_opened_finding();
         let effects = self.review_session_start_effects(&finding);
         self.log_opened_finding(&finding);
         effects

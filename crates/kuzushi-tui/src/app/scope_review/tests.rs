@@ -5,6 +5,74 @@ use kuzushi_core::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use ratatui::{backend::TestBackend, Terminal};
 mod suggestion;
 
+#[test]
+fn inclusion_form_preserves_literal_path_whitespace() {
+    let (_root, app) = fixture();
+    let scope = app
+        .scope_review()
+        .unwrap()
+        .review
+        .as_ref()
+        .unwrap()
+        .record
+        .draft
+        .scopes[0]
+        .clone();
+    let mut form = ScopeEditForm::for_scope(ScopeEditKind::IncludePath, &scope);
+    form.fields[0].1 = FieldEditor::new(" auth/owned.rs ");
+    assert_eq!(
+        form.edit(2).unwrap(),
+        kuzushi_core::workspace::ScanScopeEdit::IncludePath {
+            path: " auth/owned.rs ".into()
+        }
+    );
+}
+
+#[test]
+fn whole_repository_keeps_exclusions_until_the_operator_includes_a_recorded_path() {
+    let (root, mut app) = fixture();
+    let update = app.send_scope_edit(kuzushi_core::workspace::ScanScopeEdit::ExcludePath {
+        path: "auth/login.rs".into(),
+        reason: "Defer owned fixture file".into(),
+    });
+    finish(&mut app, root.path(), update).unwrap();
+    let update = app.apply_scope_menu(7);
+    finish(&mut app, root.path(), update).unwrap();
+    let review = app.scope_review().unwrap().review.as_ref().unwrap();
+    assert_eq!(review.coverage.excluded_files.files, vec!["auth/login.rs"]);
+    assert_eq!(
+        review.coverage.discovery_members["repository"].files,
+        vec!["README.md"]
+    );
+    assert!(review.record.acceptance.is_none());
+    assert!(app.apply_scope_menu(11).effects.is_empty());
+    assert_eq!(
+        app.scope_review().unwrap().form.as_ref().unwrap().fields[0]
+            .1
+            .text(),
+        "auth/login.rs"
+    );
+    fill_form(&mut app, &["missing.rs"]);
+    let update = press(&mut app, KeyCode::Enter);
+    let error = finish(&mut app, root.path(), update).unwrap_err();
+    app.scope_review_failed("pack:scopes", &format!("{error:#}"));
+    assert_eq!(
+        app.scope_review().unwrap().form.as_ref().unwrap().fields[0]
+            .1
+            .text(),
+        "missing.rs"
+    );
+    fill_form(&mut app, &["auth/login.rs"]);
+    let update = press(&mut app, KeyCode::Enter);
+    finish(&mut app, root.path(), update).unwrap();
+    let review = app.scope_review().unwrap().review.as_ref().unwrap();
+    assert_eq!(review.coverage.excluded_files.total, 0);
+    assert_eq!(review.coverage.discovery_members["repository"].total, 2);
+    assert!(review.record.acceptance.is_none());
+    assert!(app.findings().is_empty());
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}
+
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("auth")).unwrap();
@@ -134,6 +202,31 @@ fn accepted_scope_study_binds_the_selected_revision_and_back_restores_reading_st
     app.apply_batch_scan_hotkey(ViewHotkeyAction::CampaignBackToList);
     assert!(app.scope_review_is_visible());
     assert_eq!(app.scope_review().unwrap().scroll, 7);
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}
+
+#[test]
+fn marked_boundaries_compile_one_six_job_draft_and_back_preserves_the_selection() {
+    use crate::app::state_transitions::ViewHotkeyAction;
+    let (root, mut app) = fixture();
+    split(&mut app, root.path());
+    app.open_scope_acceptance();
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::End);
+    let update = press(&mut app, KeyCode::Enter);
+    finish(&mut app, root.path(), update).unwrap();
+    press(&mut app, KeyCode::Char(' '));
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.scope_review().unwrap().study_scope_ids.len(), 2);
+    let update = press(&mut app, KeyCode::Char('p'));
+    assert!(update.effects.is_empty());
+    let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
+    assert_eq!(config.study.scope_draft.as_ref().unwrap().job_count(), 6);
+    assert!(config.study.scope_receipt.is_none());
+    app.apply_batch_scan_hotkey(ViewHotkeyAction::CampaignBackToList);
+    assert!(app.scope_review_is_visible());
+    assert_eq!(app.scope_review().unwrap().study_scope_ids.len(), 2);
     assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
 }
 
@@ -302,6 +395,8 @@ fn scope_review_viewports_keep_controls_and_plain_output_keeps_recorded_source()
             .collect::<String>();
         assert!(text.contains("SCOPES"), "{width}x{height}");
         assert!(text.contains("Esc back"), "{width}x{height}");
+        assert!(text.contains("Enter menu"), "{width}x{height}");
+        assert!(text.contains("p plan"), "{width}x{height}");
         press(&mut app, KeyCode::Char('a'));
         terminal
             .draw(|frame| crate::render_app(frame, &app))

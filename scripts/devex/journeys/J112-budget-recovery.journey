@@ -1,0 +1,89 @@
+name: Exhausted discovery allowance preserves partial work and requires a specific revision
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/budget_recovery.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/budget-command.txt
+keys: Enter
+require-live-snap: 25 2 completed | stopped-jobs
+expect: 7 parked
+ask: Does the stopped plan distinguish completed work from seven unstarted jobs, preserve the limit and make remaining work inspectable?
+nav-mode:
+keys: L
+require-live-snap: 20 allowance exhausted | exhausted-launch-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/budget_recovery.py @TMP_TARGET @ART refused
+ask: Does trying to resume with no discovery calls left explain the limit and preserve the protected review allocation without starting a dispatcher?
+keys: a
+require-live-snap: 25 APPROVED STUDY | saved-allowance
+ask: Does reopening show two committed calls and two protected review calls within the same four-call allowance without spending again?
+keys: Escape Escape
+submit: workbench
+require-live-snap: 25 RESULT partial | partial-result
+nav-mode:
+live-snap: partial-decision
+ask: Does Scan require explicit acknowledgement of partial work instead of claiming nine jobs completed?
+keys: u
+require-live-snap: 25 partial acknowledged | acknowledged-partial
+expect: Viewing Scan
+keys: Escape
+submit: report
+require-live-snap: 25 2 committed / 4 calls | partial-report
+expect: 2 raw observations
+expect: 0 failed · 3 pending
+expect: 2 protected review remaining
+ask: Does the report preserve partial coverage, unavailable dollar cost, raw observations and protected review without claiming a fix or a complete scan?
+resize: 40x12
+require-live-snap: 20 sarif | narrow-report
+keys: End
+live-snap: narrow-report-controls
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/budget-command.txt
+keys: Enter
+require-live-snap: 25 2 completed | recovered-jobs
+expect: 7 parked
+require-shell: python3 -B @REPO/scripts/devex/fixtures/budget_recovery.py @TMP_TARGET @ART restarted
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | recovered-allowance
+keys: Down Down Down Down Enter
+require-live-snap: 20 Total calls | edit-specific-limit
+keys: 1 1 Enter L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | revised-approval
+keys: End
+require-live-snap: 20 y approve | revised-terms
+expect: Total provider calls: 11
+expect: Protected review calls: 2
+expect: 9 fixed jobs
+ask: Is the specific eleven-call revision separate from the original approval, with committed calls preserved and no automatic cap doubling or new jobs?
+keys: y
+require-live-snap: 25 Approval saved | revised-approved
+keys: L
+require-live-snap: 25 Plan approved | remaining-approved
+keys: L
+require-live-snap: 25 dispatcher pid | resumed-work
+require-shell: python3 -B @REPO/scripts/devex/fixtures/budget_recovery.py @TMP_TARGET @ART finished
+keys: r
+require-live-snap: 25 9 completed | completed-original-plan
+ask: Does the revised allowance finish only the original remaining jobs while preserving the first two attempts and the earlier partial selection?
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT READY | completed-result
+nav-mode:
+keys: u
+require-live-snap: 25 result selected | accepted-complete
+keys: Escape
+submit: report
+require-live-snap: 25 9 committed / 11 calls | final-report
+expect: 6 raw observations
+expect: 2 protected review remaining
+ask: Does the completed report retain separate case recurrence, the existing finding decision state and exact shared consumption after explicit approval?
+keys: C-c
+require-exit: 10

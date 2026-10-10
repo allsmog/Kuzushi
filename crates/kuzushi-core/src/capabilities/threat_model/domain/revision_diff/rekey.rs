@@ -30,7 +30,12 @@ pub(super) fn display_id_rekeys<'a>(
         .into_iter()
         .filter_map(|(id, (from_key, threat))| {
             let (to_key, paired) = unmatched_after.remove(&id)?;
-            Some(ThreatRekey { from_key, to_key, before: threat, after: paired })
+            Some(ThreatRekey {
+                from_key,
+                to_key,
+                before: threat,
+                after: paired,
+            })
         })
         .collect()
 }

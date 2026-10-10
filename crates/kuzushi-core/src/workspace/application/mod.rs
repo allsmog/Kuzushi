@@ -7,19 +7,35 @@ use std::path::{Path, PathBuf};
 
 mod changed_scan_scope;
 mod export_decision_basis;
+mod review_source_applicability;
+pub use review_source_applicability::WorkspaceReviewSourceApplicability;
 mod export_evidence_origin;
 mod export_investigation_receipt;
+mod export_lessons;
 mod export_markdown_bundle;
 mod export_metadata;
 mod export_projection;
 mod export_projection_model;
+mod export_relationships;
 mod export_review_context;
 mod export_sarif;
 mod export_vuln_findings;
 mod export_workspace_findings;
+mod finding_lessons;
+mod finding_relationships;
+pub use finding_lessons::{execute_lesson_action, load_finding_lessons};
 mod investigation_report;
+pub use finding_relationships::{
+    load_finding_relationships, record_finding_relationship_batch_review,
+    record_finding_relationship_review, FindingRelationshipBatchReviewRequest,
+    FindingRelationshipReviewRequest,
+};
 pub use investigation_report::{
-    load_investigation_report, load_investigation_report_for_runs, InvestigationReportReceipt,
+    load_investigation_report, load_investigation_report_document,
+    load_investigation_report_document_for_runs, load_investigation_report_for_runs,
+    ContextMatrixInvestigationReceipt, InvestigationContextCase, InvestigationReportDocument,
+    InvestigationReportEvidence, InvestigationReportReceipt, InvestigationReportSummary,
+    InvestigationWorkCounts, ScopeStudyInvestigationReceipt,
 };
 mod load_program_scope;
 mod nested_scope;
@@ -31,7 +47,11 @@ mod since_filter;
 mod status;
 
 pub use changed_scan_scope::{changed_scan_input, ChangedScanScope};
-pub use export_decision_basis::{WorkspaceObservedSource, WorkspaceReviewDecisionBasis};
+pub use export_decision_basis::{
+    read_finding_review_source, WorkspaceObservedSource, WorkspaceReviewDecisionBasis,
+    WorkspaceReviewSourceComparison,
+};
+pub use export_lessons::WorkspaceLessonExportRecord;
 #[cfg(test)]
 pub(crate) use export_markdown_bundle::write_markdown_bundle;
 pub use export_metadata::workspace_export_omitted_fields;
@@ -45,12 +65,14 @@ pub use export_projection_model::{
     WorkspaceVerificationExportSummary,
 };
 pub use export_review_context::WorkspaceFindingReviewContext;
+pub(crate) use export_workspace_findings::read_workspace_finding_export_records;
 #[cfg(test)]
 pub(crate) use export_workspace_findings::sanitize_csv_field;
 pub use export_workspace_findings::{
     export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
     export_workspace_findings, export_workspace_findings_with_options,
-    preview_workspace_findings_export, WorkspaceFindingsExportPreview,
+    preview_workspace_findings_export, review_completion_for_findings,
+    WorkspaceFindingsExportPreview, WorkspaceReviewCompletion,
 };
 pub use load_program_scope::{load_program_scope, write_program_scope_scaffold};
 pub use nested_scope::{

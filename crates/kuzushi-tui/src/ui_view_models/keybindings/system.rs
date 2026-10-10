@@ -54,6 +54,7 @@ fn report_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("s", "study/history"),
         bind("p", "provenance"),
         bind("e", "edit path"),
+        bind("S", "save choices"),
         bind("o", "reveal"),
     ]
 }
@@ -73,6 +74,7 @@ fn setup_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     vec![
         bind("↑/↓", "move"),
+        bind("Tab", "details"),
         bind("type", "command"),
         bind("Enter", "open/start"),
         bind("Esc", "workbench"),
@@ -81,6 +83,14 @@ fn setup_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 }
 
 fn setup_value_editor_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if app.router.setup().editor() == Some(crate::app::SetupEditor::Details) {
+        return Some(vec![
+            bind("PgUp/PgDn", "read"),
+            bind("↑/↓", "line"),
+            bind("Home/End", "ends"),
+            bind("Tab/Esc", "Setup"),
+        ]);
+    }
     if app.router.setup().editor() == Some(crate::app::SetupEditor::ThreatModel) {
         return Some(map_run_config_keybindings(app));
     }
@@ -426,6 +436,7 @@ fn non_dfd_scene_keybindings(
     let mut bindings = Vec::new();
     if !page.is_frame_rendered() {
         bindings.push(bind("j/k/↑/↓", "scroll"));
+        bindings.push(bind("PgUp/PgDn", "page"));
         bindings.push(bind("g/G", "ends"));
     }
     if app.active_viz_pages().len() > 1 {

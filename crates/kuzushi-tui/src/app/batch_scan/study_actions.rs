@@ -19,7 +19,7 @@ impl ShellApp {
     }
 
     fn advance_study(&mut self, config: BatchScanConfig) -> InputUpdate {
-        if config.study.receipt.is_none() {
+        if config.study.plan_identity().is_none() {
             return self.prepare_study_draft(&config);
         }
         if config.study.approved() {
@@ -58,6 +58,7 @@ impl ShellApp {
     }
 
     fn dispatch_study_action(&mut self, tool: &str, input: Value) -> InputUpdate {
+        self.clear_study_preparation_error();
         self.set_batch_config_notice("Preparing the selected action. No scan jobs started.");
         InputUpdate::handled_with_effects(
             self.reduce_run_tool(Some(tool.into()), Some(input.to_string())),
@@ -65,12 +66,17 @@ impl ShellApp {
     }
 
     fn open_approved_study_jobs(&mut self, config: &BatchScanConfig) -> InputUpdate {
-        let Some(receipt) = &config.study.receipt else {
+        let Some((id, _, _)) = config.study.plan_identity() else {
             return InputUpdate::handled();
         };
-        let id = receipt.campaign_id.clone();
+        let id = id.to_owned();
         self.router.campaign_mut().batch_scan_config = None;
-        self.open_batch_results(&id);
+        if config.study.matrix.receipt.is_some() || config.study.scope_receipt.is_some() {
+            self.open_campaign_view(Some(id));
+            self.router.campaign_mut().detail = true;
+        } else {
+            self.open_batch_results(&id);
+        }
         self.router.campaign_mut().notice = Some(
             "Plan approved. L starts its fixed jobs; a reopens the plan and allowance.".into(),
         );
@@ -80,24 +86,37 @@ impl ShellApp {
 
 fn allowance_input(config: &BatchScanConfig, selected_model: Option<&str>) -> Result<Value> {
     let study = &config.study;
-    let receipt = study
-        .receipt
-        .as_ref()
+    let (id, digest, jobs) = study
+        .plan_identity()
         .context("Prepare a study draft first.")?;
-    let model = receipt
-        .equivalence
-        .components
-        .model
-        .as_deref()
+    let model = study
+        .scope_receipt
+        .as_ref()
+        .and_then(|receipt| receipt.scope_study.first().ok())
+        .and_then(|case| case.equivalence.components.model.as_deref())
+        .or_else(|| {
+            study
+                .matrix
+                .receipt
+                .as_ref()
+                .and_then(|receipt| receipt.matrix.baseline().ok())
+                .and_then(|case| case.equivalence.components.model.as_deref())
+        })
+        .or_else(|| {
+            study
+                .receipt
+                .as_ref()
+                .and_then(|receipt| receipt.equivalence.components.model.as_deref())
+        })
         .or(selected_model)
         .filter(|model| !model.trim().is_empty())
         .context("Select a model in Setup before approving an allowance.")?;
     let mut input = allowance_terms(study, model)?;
     input["reason"] =
         json!("Operator reviewed the finite discovery study and its total call allowance.");
-    input["campaignId"] = json!(receipt.campaign_id);
-    input["campaignPlanSha256"] = json!(receipt.plan_sha256);
-    input["campaignJobs"] = json!(receipt.job_count);
+    input["campaignId"] = json!(id);
+    input["campaignPlanSha256"] = json!(digest);
+    input["campaignJobs"] = json!(jobs);
     input["maxJobAttempts"] = json!(study.max_job_attempts);
     Ok(input)
 }

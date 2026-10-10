@@ -5,7 +5,9 @@
 
 use super::domain::{Contributor, ContributorState, Worklist};
 use super::fold::{rank, RecommendationsStatus, WorklistInputs};
-use crate::capabilities::scan_recommender::{recommend_scans_for_target, scope_paths, ScanRecommendation};
+use crate::capabilities::scan_recommender::{
+    recommend_scans_for_target, scope_paths, ScanRecommendation,
+};
 use crate::capabilities::systems_hunt::{rank_systems_surfaces_lite, RankedSystemsSurface};
 use crate::findings::FindingStore;
 use crate::workspace::{load_attack_surface_map_detailed, AttackSurface, AttackSurfaceMapLoad};
@@ -16,7 +18,7 @@ use std::path::Path;
 pub struct WorklistOptions {
     pub limit: usize,
     pub deep: bool,
-    /// Reserved for Phase B call-graph fan-in; not consumed yet.
+    /// Unimplemented. Explicit requests are refused rather than ignored.
     pub include_fan_in: bool,
 }
 
@@ -34,6 +36,14 @@ pub fn rank_worklist_for_target(
     options: &WorklistOptions,
     findings_store: Option<&FindingStore>,
 ) -> Result<Worklist> {
+    anyhow::ensure!(
+        !options.include_fan_in,
+        "call-graph fan-in is not implemented"
+    );
+    anyhow::ensure!(
+        (1..=500).contains(&options.limit),
+        "worklist limit must be between 1 and 500"
+    );
     let (surfaces, surface_reason) = load_surfaces(target);
     let coverage = gather_coverage(target, findings_store);
     let systems = gather_systems(target, options)?;

@@ -31,6 +31,9 @@ pub use domain::{
     READ_ONLY_ASK_POLICY_ID, READ_ONLY_ASK_POLICY_PROTOCOL_VERSION, READ_ONLY_ASK_TOOLS,
     REQUEST_USER_INPUT_TOOL_NAME,
 };
+pub use domain::{
+    AgentReadScope, MAX_READ_SCOPE_BYTES, MAX_READ_SCOPE_FILES, READ_ONLY_SCOPE_POLICY_ID,
+};
 pub use mcp_probe::{
     mcp_attachment_plan_for_target, plan_contains, try_mcp_attachment_plan_for_target,
     McpArtifactSpec, MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES,

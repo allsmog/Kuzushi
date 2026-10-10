@@ -46,15 +46,15 @@ pub use query::{
     load_threat_model_by_selector, load_threat_model_manifest, load_threat_model_revision,
     resolve_unique_build_lineage,
 };
+#[cfg(test)]
+pub(crate) use read_lease::threat_model_store_accepts_commits;
 pub(crate) use read_lease::{
     acquire_exact_threat_model_read_lease, acquire_threat_model_read_lease, ThreatModelReadLease,
 };
-#[cfg(test)]
-pub(crate) use read_lease::threat_model_store_accepts_commits;
 use recovery::*;
 use revision::*;
-use storage::*;
 pub(super) use storage::validate_sha256;
+use storage::*;
 pub use types::*;
 
 pub fn threat_model_store_path(root: &Path) -> PathBuf {
@@ -82,14 +82,40 @@ pub fn commit_threat_model_revision(
     document: &Value,
     request: ThreatModelCommit,
 ) -> Result<ThreatModelCommitResult> {
+    commit_threat_model_revision_cancellable(root, document, request, &|| false)
+}
+
+pub(crate) fn commit_threat_model_revision_cancellable(
+    root: &Path,
+    document: &Value,
+    request: ThreatModelCommit,
+    canceled: &dyn Fn() -> bool,
+) -> Result<ThreatModelCommitResult> {
+    commit_checked_threat_model_revision(root, document, request, canceled, &|| Ok(()))
+}
+
+pub(crate) fn commit_checked_threat_model_revision(
+    root: &Path,
+    document: &Value,
+    request: ThreatModelCommit,
+    canceled: &dyn Fn() -> bool,
+    before_publication: &dyn Fn() -> Result<()>,
+) -> Result<ThreatModelCommitResult> {
+    anyhow::ensure!(!canceled(), "Context save was canceled before publication");
     validate_persisted_threat_model(document, &request.methodology)?;
     prepare_store_directories(root)?;
-    let _guard = acquire_store_lock(root)?;
+    let _guard = crate::file_lock::ExclusiveFileLock::acquire_cancellable(
+        &threat_model_store_path(root).join(STORE_LOCK),
+        canceled,
+    )?;
     let mut manifest = load_or_migrate_manifest_locked(root)?;
     reconcile_locked(root, &manifest)?;
+    anyhow::ensure!(!canceled(), "Context save was canceled before publication");
     let object = write_object(root, document)?;
     let model_ref = append_requested_revision(&mut manifest, document, &object.sha256, &request)?;
     let activate = should_activate_revision(&manifest, &model_ref, request.activate);
+    before_publication()?;
+    anyhow::ensure!(!canceled(), "Context save was canceled before publication");
     commit_manifest_update(
         root,
         manifest,
@@ -516,7 +542,9 @@ mod tests {
                 threat_model_manifest_path(root.path()),
                 crate::fs_atomic::AtomicWriteFaultPoint::AfterRename,
             );
-            assert!(commit_threat_model_revision(root.path(), &next, next_request(&first)).is_err());
+            assert!(
+                commit_threat_model_revision(root.path(), &next, next_request(&first)).is_err()
+            );
         }
 
         assert_recovered_active(root.path(), &next);
@@ -570,7 +598,9 @@ mod tests {
                 super::super::store::persistent_threat_model_path(root.path()),
                 crate::fs_atomic::AtomicWriteFaultPoint::AfterTempSync,
             );
-            assert!(commit_threat_model_revision(root.path(), &next, next_request(&first)).is_err());
+            assert!(
+                commit_threat_model_revision(root.path(), &next, next_request(&first)).is_err()
+            );
         }
 
         assert_recovered_active(root.path(), &next);
@@ -587,7 +617,9 @@ mod tests {
                 super::super::store::persistent_threat_model_path(root.path()),
                 crate::fs_atomic::AtomicWriteFaultPoint::AfterRename,
             );
-            assert!(commit_threat_model_revision(root.path(), &next, next_request(&first)).is_err());
+            assert!(
+                commit_threat_model_revision(root.path(), &next, next_request(&first)).is_err()
+            );
         }
 
         assert_recovered_active(root.path(), &next);
@@ -848,13 +880,45 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .document,
-            model_document("edited")
+            {
+                let mut edited = model_document("edited");
+                edited["userEdited"] = json!(true);
+                edited
+            }
         );
         let manifest = load_threat_model_manifest(root.path()).unwrap().unwrap();
         assert_eq!(
             manifest.models[0].revisions.last().unwrap().source,
             ThreatModelRevisionSource::Adopt
         );
+    }
+
+    #[test]
+    fn adoption_refuses_mirror_drift_before_commit_without_withdrawing_it() {
+        let root = tempfile::tempdir().unwrap();
+        let original =
+            commit_threat_model_revision(root.path(), &model_document("original"), request())
+                .unwrap();
+        let observed = model_document("observed edits");
+        let expected = document_sha256(&observed).unwrap();
+        let changed = model_document("later operator edits");
+        super::super::store::save_persistent_threat_model(root.path(), &changed, true).unwrap();
+        let mut planned = load_threat_model_manifest(root.path()).unwrap().unwrap();
+        planned.generation += 1;
+        planned.last_activation = Some(new_activation(
+            planned.generation,
+            original.model_ref.clone(),
+            Some(original.model_ref),
+            "owned fixture",
+            ActivationSource::Adopt,
+            None,
+        ));
+        assert!(begin_mirror_commit_with_observed(root.path(), &planned, Some(&expected)).is_err());
+        assert_eq!(
+            super::super::store::try_load_legacy_threat_model(root.path()).unwrap(),
+            Some(changed)
+        );
+        assert!(!pending_mirror_commit_path(root.path()).exists());
     }
 
     #[test]

@@ -300,14 +300,20 @@ mod version_tests {
 
         restore_threat_model_version(workspace.path(), id).unwrap();
 
-        let manifest = load_threat_model_manifest(workspace.path()).unwrap().unwrap();
+        let manifest = load_threat_model_manifest(workspace.path())
+            .unwrap()
+            .unwrap();
         let preserved_edit = manifest.models.iter().any(|model| {
-            load_threat_model_revision(workspace.path(), &model.model_id, None)
-                .is_ok_and(|revision| {
+            load_threat_model_revision(workspace.path(), &model.model_id, None).is_ok_and(
+                |revision| {
                     revision.document["threats"][0]["title"] == edited["threats"][0]["title"]
-                })
+                },
+            )
         });
-        assert!(preserved_edit, "the migrated hand edit must remain immutable history");
+        assert!(
+            preserved_edit,
+            "the migrated hand edit must remain immutable history"
+        );
         let mut live = load_persistent_threat_model(workspace.path())
             .unwrap()
             .unwrap();

@@ -1,0 +1,129 @@
+name: Bounded dependency failure, cache identity refusal and frozen engine facts
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME PATH=@ART/bin:/usr/bin:/bin:/usr/sbin:/sbin KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | automatic-draft
+keys: L
+require-live-snap: 25 Dependency inspection failed | bounded-probe-failure
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART probe-refused
+wait: 22
+require-live-snap: 5 Dependency inspection failed | retained-probe-failure
+ask: Does a stalled installed dependency fail preparation promptly, preserve the study draft and explain recovery without publishing jobs or consuming model allowance?
+resize: 160x48
+live-snap: failure-160x48
+resize: 96x89
+live-snap: failure-96x89
+resize: 80x24
+live-snap: failure-80x24
+resize: 60x20
+live-snap: failure-60x20
+resize: 40x12
+live-snap: failure-40x12
+keys: z Home
+require-live-snap: 5 PREPARATION DETAILS | expanded-failure-40x12
+expect: z form
+keys: PgDn
+live-snap: failure-tail-40x12
+keys: z
+ask: Is the failure readable by paging at all six sizes, with the return to the retained draft visible?
+resize: 120x36
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART oversized
+keys: L
+require-live-snap: 25 134217728-byte | cache-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART cache-refused
+wait: 22
+require-live-snap: 5 134217728-byte | retained-cache-failure
+ask: Does oversized comparison input stop preparation before a plan or scan job exists, retaining source and spending rather than publishing a partial identity?
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART frozen
+keys: Escape
+submit: campaign owned-engine-inputs
+require-live-snap: 25 owned-engine-inputs | actual-frozen-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | reopened-plan
+keys: Down Down Down
+require-live-snap: 5 SOURCE OVERVIEW | source-overview
+keys: Tab
+require-live-snap: 25 RECORDED ENGINE INPUTS | frozen-engine-facts
+expect: semgrep: located at
+resize: 160x48
+live-snap: engine-source-160x48
+resize: 96x89
+live-snap: engine-source-96x89
+resize: 80x24
+live-snap: engine-source-80x24
+keys: PgDn
+live-snap: engine-source-page-1-80x24
+keys: PgDn
+live-snap: engine-source-page-2-80x24
+keys: PgDn
+live-snap: engine-source-page-3-80x24
+resize: 60x20
+keys: PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp
+live-snap: engine-source-60x20
+keys: PgDn
+live-snap: engine-source-page-1-60x20
+keys: PgDn
+live-snap: engine-source-page-2-60x20
+keys: PgDn
+live-snap: engine-source-page-3-60x20
+keys: PgDn
+live-snap: engine-source-page-4-60x20
+keys: PgDn
+live-snap: engine-source-page-5-60x20
+keys: PgDn
+live-snap: engine-source-page-6-60x20
+resize: 40x12
+keys: PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp PgUp
+live-snap: engine-source-40x12
+keys: z Home
+require-live-snap: 5 z form | expanded-engine-source-40x12
+expect: ↑↓/PgUp/Dn
+keys: PgDn
+live-snap: reader-engine-source-page-1-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-2-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-3-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-4-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-5-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-6-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-7-40x12
+keys: PgDn
+live-snap: reader-engine-source-page-8-40x12
+keys: z
+require-live-snap: 5 PLAN A STUDY | reader-return-to-form
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART inspected
+ask: Can the operator inspect the selected executable's recorded path and content, with comparison facts clearly separated from engine health and coverage?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME PATH=@ART/bin:/usr/bin:/bin:/usr/sbin:/sbin NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-restart
+submit: campaign owned-engine-inputs
+require-live-snap: 25 owned-engine-inputs | recovered-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | recovered-draft
+keys: Down Down Down
+require-live-snap: 5 SOURCE OVERVIEW | recovered-source-overview
+keys: Tab
+require-live-snap: 25 RECORDED ENGINE INPUTS | recovered-engine-facts
+keys: z
+require-live-snap: 5 z form | recovered-detail-reader
+require-shell: python3 -B @REPO/scripts/devex/fixtures/preparation_inputs.py @TMP_TARGET @ART recovered
+ask: Does no-color restart recover the same unapproved finite plan and engine facts without requesting a model, starting a scanner or expanding work?
+keys: C-c
+require-exit: 10

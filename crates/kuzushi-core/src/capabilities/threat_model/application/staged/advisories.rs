@@ -22,17 +22,13 @@ pub(crate) fn fetch_osv_advisories(input: &BuildInput) -> Result<Vec<AdvisoryRec
         return Ok(Vec::new());
     }
     let mut packages = fixture_package_queries(input.advisory_fixtures.as_ref());
-    packages.extend(
-        direct_dependencies(input.analysis_root())?
-            .into_iter()
-            .map(
-                |(ecosystem, name)| crate::capabilities::threat_intel::OsvPackageQuery {
-                    ecosystem,
-                    name,
-                    version: None,
-                },
-            ),
-    );
+    packages.extend(direct_dependencies(input.analysis_root())?.into_iter().map(
+        |(ecosystem, name)| crate::capabilities::threat_intel::OsvPackageQuery {
+            ecosystem,
+            name,
+            version: None,
+        },
+    ));
     packages.sort();
     packages.dedup();
     packages.truncate(MAX_QUERIED_PACKAGES);

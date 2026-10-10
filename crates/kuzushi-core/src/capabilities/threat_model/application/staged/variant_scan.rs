@@ -66,9 +66,7 @@ fn sanitized_patterns(threat: &Value) -> Vec<String> {
                 .iter()
                 .filter_map(Value::as_str)
                 .map(str::trim)
-                .filter(|pattern| {
-                    (MIN_PATTERN_LEN..=MAX_PATTERN_LEN).contains(&pattern.len())
-                })
+                .filter(|pattern| (MIN_PATTERN_LEN..=MAX_PATTERN_LEN).contains(&pattern.len()))
                 .take(MAX_PATTERNS_PER_THREAT)
                 .map(str::to_string)
                 .collect()
@@ -94,7 +92,8 @@ fn scan_files(
         })
         .collect();
     for file in inventory.source_files.iter().take(MAX_SCAN_FILES) {
-        let Ok(text) = crate::bounded_file::read_utf8_text(&target.join(&file.path), MAX_FILE_BYTES)
+        let Ok(text) =
+            crate::bounded_file::read_utf8_text(&target.join(&file.path), MAX_FILE_BYTES)
         else {
             continue;
         };
@@ -216,6 +215,9 @@ mod tests {
     #[test]
     fn too_short_patterns_are_rejected_as_noise() {
         let threat = json!({"variantScan": {"patterns": ["ab", "  ", "real_pattern("]}});
-        assert_eq!(sanitized_patterns(&threat), vec!["real_pattern(".to_string()]);
+        assert_eq!(
+            sanitized_patterns(&threat),
+            vec!["real_pattern(".to_string()]
+        );
     }
 }

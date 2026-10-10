@@ -15,9 +15,24 @@ struct PendingMirrorCommit {
 }
 
 pub(super) fn begin_mirror_commit(root: &Path, manifest: &ThreatModelManifest) -> Result<()> {
+    begin_mirror_commit_with_observed(root, manifest, None)
+}
+
+pub(super) fn begin_mirror_commit_with_observed(
+    root: &Path,
+    manifest: &ThreatModelManifest,
+    observed_mirror_sha256: Option<&str>,
+) -> Result<()> {
     let activation = matching_activation(manifest)?;
     let mirror_before_sha256 = inspect_mirror_sha256(root)?;
-    ensure_authorized_mirror(activation, mirror_before_sha256.as_deref())?;
+    match observed_mirror_sha256 {
+        Some(observed) => anyhow::ensure!(
+            activation.source == ActivationSource::Adopt
+                && mirror_before_sha256.as_deref() == Some(observed),
+            "compatibility mirror changed before adoption commit"
+        ),
+        None => ensure_authorized_mirror(activation, mirror_before_sha256.as_deref())?,
+    }
     let pending = PendingMirrorCommit {
         schema_version: MIRROR_COMMIT_SCHEMA_VERSION,
         manifest_generation: manifest.generation,
@@ -123,12 +138,18 @@ fn read_pending_mirror_commit(root: &Path) -> Result<Option<PendingMirrorCommit>
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
         Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
-            let body = crate::bounded_file::read_utf8_text_within(root, &path, MAX_STORE_JSON_BYTES)?;
+            let body =
+                crate::bounded_file::read_utf8_text_within(root, &path, MAX_STORE_JSON_BYTES)?;
             serde_json::from_str(&body)
-                .with_context(|| format!("Threat-model mirror commit {} is malformed", path.display()))
+                .with_context(|| {
+                    format!("Threat-model mirror commit {} is malformed", path.display())
+                })
                 .map(Some)
         }
-        Ok(_) => anyhow::bail!("Threat-model mirror commit {} is not a regular file", path.display()),
+        Ok(_) => anyhow::bail!(
+            "Threat-model mirror commit {} is not a regular file",
+            path.display()
+        ),
     }
 }
 
@@ -141,7 +162,10 @@ fn withdraw_mirror(root: &Path) -> Result<()> {
             fs::remove_file(&path)?;
             crate::fs_atomic::sync_parent_dir(&path).map_err(Into::into)
         }
-        Ok(_) => anyhow::bail!("Threat-model mirror {} is not a regular file", path.display()),
+        Ok(_) => anyhow::bail!(
+            "Threat-model mirror {} is not a regular file",
+            path.display()
+        ),
     }
 }
 
@@ -154,7 +178,10 @@ fn clear_pending_mirror_commit(root: &Path) -> Result<()> {
             fs::remove_file(&path)?;
             crate::fs_atomic::sync_parent_dir(&path).map_err(Into::into)
         }
-        Ok(_) => anyhow::bail!("Threat-model mirror commit {} is not a regular file", path.display()),
+        Ok(_) => anyhow::bail!(
+            "Threat-model mirror commit {} is not a regular file",
+            path.display()
+        ),
     }
 }
 

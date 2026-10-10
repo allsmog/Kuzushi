@@ -1,0 +1,137 @@
+name: Boundary context inheritance, inactive edits, exact binding and revised approval
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_context.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 30 ACCEPTED SCOPES | accepted
+keys: Space Down Space p Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | engines
+keys: m Down Down Down Down Down Down Down Down Down Space a Down Enter
+require-live-snap: 20 SCOPE CONTEXT | boundary-context
+expect: Common context
+expect: app · inherits common
+expect: other · inherits common
+ask: Does the boundary list distinguish inherited, overridden and omitted context, with common context separately accessible?
+keys: Down Enter Up Enter
+require-live-snap: 25 CONTEXT SUMMARY | exact-alpha
+expect: Alpha
+keys: e Enter C-u
+type: Owned boundary context
+keys: C-s
+require-live-snap: 20 REVIEW CONTEXT CHANGES | edit-review
+expect: Owned boundary context
+keys: Enter
+require-live-snap: 30 Edited copy saved | inactive-copy
+keys: Enter
+require-live-snap: 25 Owned boundary context | inspected-copy
+keys: a
+require-live-snap: 20 Context selected for app | app-override
+expect: app · exact override
+keys: Down o
+require-live-snap: 20 other · omitted | other-omitted
+keys: Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | omitted-picker
+keys: Escape
+require-live-snap: 20 other · omitted | cancelled-picker
+ask: Can the operator edit an inactive copy for one boundary, inspect it before use, omit a sibling, and cancel inspection without changing associations or global context?
+resize: 160x48
+live-snap: context-160x48
+resize: 96x89
+live-snap: context-96x89
+resize: 80x24
+live-snap: context-80x24
+resize: 60x20
+live-snap: context-60x20
+resize: 40x12
+require-live-snap: 20 i inherit · o omit · Esc back | context-40x12
+keys: NPage
+live-snap: context-page-40x12
+resize: 120x36
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | budget-draft
+keys: Down Enter
+require-live-snap: 20 Enter save · Esc cancel | total-call-editor
+type: 8
+keys: Enter Down Enter
+type: 2
+keys: Enter L
+require-live-snap: 30 Scope draft ready | frozen-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_context.py @TMP_TARGET @ART planned
+keys: L End
+require-live-snap: 30 y approve | exact-approval
+expect: 6 fixed jobs
+keys: y
+require-live-snap: 30 Approval saved | approved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_context.py @TMP_TARGET @ART approved
+keys: Up Up Enter
+require-live-snap: 20 SCOPE CONTEXT | frozen-context
+keys: Up
+require-live-snap: 20 Context actually frozen for scans | frozen-app
+expect: Source identity:
+keys: i
+require-live-snap: 20 app · inherits common | inheritance-restored
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | changed-draft
+keys: L
+require-live-snap: 30 Scope draft ready | revised-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_context.py @TMP_TARGET @ART revised
+ask: Does changing an approved override back to inheritance require a new plan while retaining allowance, explicit sibling omission and all work unstarted?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/scope-resume.txt
+keys: Enter
+nav-mode:
+keys: a Down Down Down Enter Down
+require-live-snap: 20 SCOPE CONTEXT | recovered-app
+expect: app · inherits common
+expect: other · omitted
+expect: Context actually frozen for scans
+resize: 40x12
+require-live-snap: 20 i inherit · o omit · Esc back | recovered-40x12
+keys: NPage
+live-snap: recovered-page-40x12
+keys: NPage
+live-snap: recovered-page-2-40x12
+keys: NPage
+live-snap: recovered-page-3-40x12
+keys: NPage
+live-snap: recovered-page-4-40x12
+keys: NPage
+live-snap: recovered-page-5-40x12
+keys: NPage
+live-snap: recovered-page-6-40x12
+keys: NPage
+live-snap: recovered-page-7-40x12
+keys: NPage
+live-snap: recovered-page-8-40x12
+keys: NPage
+live-snap: recovered-page-9-40x12
+keys: NPage
+live-snap: recovered-page-10-40x12
+keys: NPage
+live-snap: recovered-page-11-40x12
+keys: NPage
+live-snap: recovered-page-12-40x12
+keys: NPage
+live-snap: recovered-page-13-40x12
+keys: NPage
+live-snap: recovered-page-14-40x12
+keys: NPage
+live-snap: recovered-page-15-40x12
+keys: NPage
+live-snap: recovered-page-16-40x12
+keys: NPage
+live-snap: recovered-page-17-40x12
+keys: NPage
+live-snap: recovered-page-18-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_context.py @TMP_TARGET @ART restarted
+ask: Does restart retain the exact associations and frozen source/context provenance in a no-color process, with readable paging and keyboard controls at 40x12?
+keys: C-c
+require-exit: 10

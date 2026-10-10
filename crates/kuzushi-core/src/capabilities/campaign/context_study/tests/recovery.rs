@@ -4,6 +4,50 @@ use crate::capabilities::threat_model::{
 };
 
 #[test]
+fn regenerated_origin_must_match_frozen_parent_model_run_and_field_set() {
+    let receipt = ContextStudyReceipt {
+        brief_guidance: None,
+        scope_study_origin: None,
+        generation_tool: "threat-model:regenerate".into(),
+        campaign_id: "draft".into(),
+        investigation_id: "investigation".into(),
+        plan_sha256: "digest".into(),
+        source_identity: "source".into(),
+        config_sha256: "config".into(),
+        model: MODEL.into(),
+        input: json!({"threatModelRef":{"exact":"parent"},"fields":["/systemContext"]}),
+        preparation_jobs: Vec::new(),
+    };
+    let document = json!({"provenance":{"regeneration":{"sourceModelRef":receipt.input["threatModelRef"],
+        "receipt":{"model":MODEL,"runId":"generated-run","selectedFields":["/systemContext"]}}}});
+    super::super::recovery::validate_generated_origin(&receipt, "generated-run", &document)
+        .unwrap();
+    for (pointer, value) in [
+        (
+            "/provenance/regeneration/sourceModelRef",
+            json!({"exact":"other-parent"}),
+        ),
+        (
+            "/provenance/regeneration/receipt/model",
+            json!("other-model"),
+        ),
+        ("/provenance/regeneration/receipt/runId", json!("other-run")),
+        (
+            "/provenance/regeneration/receipt/selectedFields",
+            json!(["/dfd/nodes/0/purpose"]),
+        ),
+    ] {
+        let mut changed = document.clone();
+        *changed.pointer_mut(pointer).unwrap() = value;
+        assert!(
+            super::super::recovery::validate_generated_origin(&receipt, "generated-run", &changed)
+                .is_err(),
+            "{pointer}"
+        );
+    }
+}
+
+#[test]
 fn unfinished_context_has_no_result_but_completed_missing_output_is_an_error() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("main.rs"), "fn main() {}\n").unwrap();

@@ -198,7 +198,17 @@ mod tests {
             &serde_json::json!({ "enrichment": true }),
             &config,
         ));
-        assert!(!tool_uses_agent_runtime("module-recommender:recommend"));
+        assert!(tool_uses_agent_runtime("module-recommender:recommend"));
+        assert!(!registry.tool_wants_runtime(
+            "module-recommender:recommend",
+            &serde_json::json!({}),
+            &config
+        ));
+        assert!(registry.tool_wants_runtime(
+            "module-recommender:recommend",
+            &serde_json::json!({"useModelRanking":true}),
+            &config
+        ));
         assert!(!tool_uses_agent_runtime("findings:list"));
         assert!(!tool_uses_agent_runtime("taint-iris-next:dataflow-plan"));
         assert!(!tool_uses_agent_runtime(

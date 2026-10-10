@@ -7,11 +7,15 @@
 //! `campaign:status` and the cockpit fold over the plan. Deterministic by
 //! construction: the dispatcher itself never calls a model.
 
+mod allowance_pause;
 mod approved_work;
 mod budget;
 mod child;
+#[cfg(test)]
+mod matrix_tests;
 mod policy;
 mod queue;
+mod shutdown;
 
 use crate::application::run_exit::RunCommandExit;
 use crate::command::CampaignCommand;
@@ -149,7 +153,7 @@ fn standard_batch_dispatch_settings(workers: usize) -> Result<DispatchSettings> 
         retry_backoff_secs: 5,
         budget_usd: None,
         job_budget_usd: None,
-        resume: false,
+        resume: true,
     })
 }
 
@@ -188,6 +192,7 @@ struct PlanJob {
 
 struct LoadedPlan {
     context_study: bool,
+    case_study: bool,
     jobs: Vec<PlanJob>,
     batch_guard: Option<ScanBatchGuard>,
 }
@@ -203,7 +208,10 @@ fn authorize_loaded_plan(
     authority: DispatchAuthority,
     campaign_id: &str,
 ) -> Result<()> {
-    if plan.batch_guard.is_some() && authority == DispatchAuthority::PublicCampaign {
+    if plan.batch_guard.is_some()
+        && !plan.case_study
+        && authority == DispatchAuthority::PublicCampaign
+    {
         anyhow::bail!(
             "scan batch {campaign_id} must run through `kuzushi campaign batch {campaign_id}`; raw `campaign run` is refused"
         );
@@ -229,14 +237,14 @@ fn campaign_dir(target: &Path, campaign_id: &str) -> PathBuf {
 /// priority, and re-deriving rank here would let the two drift apart.
 fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result<LoadedPlan> {
     let plan_path = campaign_dir(target, campaign_id).join("plan.json");
-    let body = std::fs::read_to_string(&plan_path).with_context(|| {
-        format!(
-            "no campaign plan at {} — run `kuzushi run campaign:plan` first",
-            plan_path.display()
-        )
-    })?;
-    let plan: Value = serde_json::from_str(&body)
-        .with_context(|| format!("{} is malformed", plan_path.display()))?;
+    let plan =
+        kuzushi_core::capabilities::campaign::read_campaign_plan_document(target, campaign_id)
+            .with_context(|| {
+                format!(
+                    "no campaign plan at {} — run `kuzushi run campaign:plan` first",
+                    plan_path.display()
+                )
+            })?;
     let batch_guard = scan_batch_guard(campaign_id, &plan, filter)?;
     let rows = plan
         .get("jobs")
@@ -253,6 +261,13 @@ fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result
         jobs,
         batch_guard,
         context_study: plan["kind"] == "context-study",
+        case_study: matches!(
+            plan["kind"].as_str(),
+            Some(
+                kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND
+                    | kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND
+            )
+        ),
     })
 }
 
@@ -261,6 +276,12 @@ fn scan_batch_guard(
     plan: &Value,
     filter: &[String],
 ) -> Result<Option<ScanBatchGuard>> {
+    if plan["kind"] == kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND {
+        return scope_dispatch_guard(campaign_id, plan, filter).map(Some);
+    }
+    if plan["kind"] == kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND {
+        return matrix_dispatch_guard(campaign_id, plan, filter).map(Some);
+    }
     if plan.get("kind").and_then(Value::as_str)
         != Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND)
     {
@@ -280,6 +301,44 @@ fn scan_batch_guard(
         effective_workers: checked.effective_workers,
         trials_planned: checked.trials_planned,
     }))
+}
+
+fn scope_dispatch_guard(id: &str, plan: &Value, filter: &[String]) -> Result<ScanBatchGuard> {
+    anyhow::ensure!(
+        filter.is_empty(),
+        "Scope studies cannot exclude jobs; revise and approve remaining work explicitly"
+    );
+    let scopes = kuzushi_core::capabilities::campaign::validate_scope_study_plan(id, plan)?;
+    let first = scopes.first()?;
+    Ok(ScanBatchGuard {
+        expected_key: first.equivalence.sha256.clone(),
+        base_input: first.base_input.clone(),
+        effective_workers: plan["effectiveWorkers"]
+            .as_u64()
+            .context("Scope workers missing")? as usize,
+        trials_planned: plan["jobCount"]
+            .as_u64()
+            .context("Scope job count missing")? as usize,
+    })
+}
+
+fn matrix_dispatch_guard(id: &str, plan: &Value, filter: &[String]) -> Result<ScanBatchGuard> {
+    anyhow::ensure!(
+        filter.is_empty(),
+        "Context matrices cannot exclude jobs; revise and approve the remaining work explicitly"
+    );
+    let matrix = kuzushi_core::capabilities::campaign::validate_context_matrix_plan(id, plan)?;
+    let baseline = matrix.baseline()?;
+    Ok(ScanBatchGuard {
+        expected_key: baseline.equivalence.sha256.clone(),
+        base_input: baseline.base_input.clone(),
+        effective_workers: plan["effectiveWorkers"]
+            .as_u64()
+            .context("Context matrix workers missing")? as usize,
+        trials_planned: plan["jobCount"]
+            .as_u64()
+            .context("Context matrix job count missing")? as usize,
+    })
 }
 
 fn enforce_scan_batch_worker_boundary(
@@ -361,6 +420,7 @@ struct Dispatcher {
     logs_dir: PathBuf,
     plan_jobs: Vec<PlanJob>,
     batch_guard: Option<ScanBatchGuard>,
+    case_study: bool,
     store: QueueStore,
     settings: DispatchSettings,
     wall: QuotaWall,
@@ -397,10 +457,11 @@ impl Dispatcher {
             logs_dir,
             plan_jobs: loaded_plan.jobs,
             batch_guard: loaded_plan.batch_guard,
+            case_study: loaded_plan.case_study,
             store,
             settings,
             wall,
-            shutdown_rx: spawn_ctrl_c_watch(),
+            shutdown_rx: shutdown::spawn(lease.control()),
             _lease: lease,
         })
     }
@@ -449,12 +510,30 @@ impl Dispatcher {
     }
 
     fn next_job_for_dispatch(&mut self) -> Result<Option<PlanJob>> {
+        if self.stop_before_dispatch()? {
+            return Ok(None);
+        }
         self.verify_scan_batch_before_launch()?;
         if let Some(reason) = self.dispatch_stop_reason() {
             self.park_pending(reason)?;
             return Ok(None);
         }
-        Ok(self.next_ready_job())
+        let Some(job) = self.next_ready_job() else {
+            return Ok(None);
+        };
+        if let Some(reason) = allowance_pause::stop_reason(&self.target, &self.campaign_id, &job)? {
+            self.park_pending(reason)?;
+            return Ok(None);
+        }
+        Ok(Some(job))
+    }
+
+    fn stop_before_dispatch(&mut self) -> Result<bool> {
+        if !*self.shutdown_rx.borrow() && !shutdown::requested_or_invalid(&self._lease.control()) {
+            return Ok(false);
+        }
+        self.park_pending("interrupted")?;
+        Ok(true)
     }
 
     fn dispatch_stop_reason(&self) -> Option<&'static str> {
@@ -771,6 +850,7 @@ impl Dispatcher {
             }),
         )?;
         self.print_finish_summary(&summary, cost, provider_spend_unresolved);
+        self.publish_case_study_result()?;
         let completed = counts.get("completed").copied().unwrap_or(0);
         let total: usize = counts.values().sum();
         if completed == total {
@@ -782,6 +862,21 @@ impl Dispatcher {
             format!("campaign {}: {summary}", self.campaign_id),
         )
         .into())
+    }
+
+    fn publish_case_study_result(&self) -> Result<()> {
+        if !self.case_study {
+            return Ok(());
+        }
+        let workspace = kuzushi_core::WorkspaceTarget::new(&self.target)?;
+        let findings = kuzushi_core::FindingStore::open_read_only(workspace.findings_db_path())?;
+        kuzushi_core::capabilities::campaign::record_scan_batch_phase_result(
+            &self.target,
+            &self.campaign_id,
+            &findings,
+        )
+        .context("could not save matrix results for explicit Scan acceptance")?;
+        Ok(())
     }
 
     fn print_finish_summary(&self, summary: &str, cost: f64, unresolved: bool) {
@@ -970,20 +1065,6 @@ async fn job_future(
 ) -> (String, String, Result<ChildReport>) {
     let report = run_child(&spec, shutdown).await;
     (job_id, run_id, report)
-}
-
-/// Ctrl+C flips a watch flag every child future selects on. Children live in
-/// their own process groups (terminal SIGINT does not reach them), so this
-/// explicit forwarding is what guarantees no orphaned scanner survives.
-fn spawn_ctrl_c_watch() -> tokio::sync::watch::Receiver<bool> {
-    let (tx, rx) = tokio::sync::watch::channel(false);
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            eprintln!("campaign: interrupt received — killing job children and saving state");
-            let _ = tx.send(true);
-        }
-    });
-    rx
 }
 
 async fn sleep_or_shutdown(wait: Duration, shutdown: &mut tokio::sync::watch::Receiver<bool>) {

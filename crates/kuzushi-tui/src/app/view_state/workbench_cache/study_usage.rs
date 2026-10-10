@@ -4,10 +4,16 @@ impl WorkbenchCache {
     pub(super) fn record_failed_study_usage(&mut self, failure: &ViewHydrationFailure) {
         let error = "Usage reader failed. Refresh to retry.".to_string();
         let value = match &failure.key {
+            ViewHydrationKey::StudyHistory => ViewHydrationValue::StudyHistory(Err(error)),
             ViewHydrationKey::StudyUsageCatalogue => {
                 ViewHydrationValue::StudyUsageCatalogue(Err(error))
             }
             ViewHydrationKey::StudyUsageRun { .. } => ViewHydrationValue::StudyUsageRun(Err(error)),
+            ViewHydrationKey::ContextMatrixReport { .. } => {
+                ViewHydrationValue::ContextMatrixReport(Err(
+                    "Matrix reader failed. r refreshes results without starting work.".into(),
+                ))
+            }
             _ => return,
         };
         self.apply_study_usage_hydration(failure.target.clone(), failure.key.clone(), value);
@@ -52,6 +58,10 @@ impl WorkbenchCache {
         key: &ViewHydrationKey,
     ) -> bool {
         match key {
+            ViewHydrationKey::StudyHistory => self.cached_study_history(target).is_not_requested(),
+            ViewHydrationKey::ContextMatrixReport { .. } => {
+                self.cached_matrix_report(target, key).is_not_requested()
+            }
             ViewHydrationKey::StudyUsageCatalogue => {
                 self.cached_study_usage_catalogue(target).is_not_requested()
             }
@@ -69,6 +79,18 @@ impl WorkbenchCache {
         value: ViewHydrationValue,
     ) {
         match (key, value) {
+            (ViewHydrationKey::StudyHistory, ViewHydrationValue::StudyHistory(state)) => {
+                self.study_history = Some((target, state))
+            }
+            (
+                key @ ViewHydrationKey::ContextMatrixReport { .. },
+                ViewHydrationValue::ContextMatrixReport(state),
+            ) => insert_bounded(
+                &mut self.matrix_reports,
+                (target, key),
+                state,
+                MAX_RUN_CACHE_ENTRIES,
+            ),
             (
                 ViewHydrationKey::StudyUsageCatalogue,
                 ViewHydrationValue::StudyUsageCatalogue(state),
@@ -87,6 +109,7 @@ impl WorkbenchCache {
     }
 
     pub(crate) fn invalidate_study_usage(&mut self, target: &Path) {
+        self.invalidate_study_history(target);
         if self
             .study_usage_catalogue
             .as_ref()
@@ -95,5 +118,17 @@ impl WorkbenchCache {
             self.study_usage_catalogue = None;
         }
         self.study_usage_runs.retain(|(root, _), _| root != target);
+        self.matrix_reports.retain(|(root, _), _| root != target);
+    }
+
+    pub(crate) fn cached_matrix_report(
+        &self,
+        target: &Path,
+        key: &ViewHydrationKey,
+    ) -> ViewDataState<Result<kuzushi_core::findings::ContextMatrixOccurrenceReport, String>> {
+        if let Some(value) = self.matrix_reports.get(&(target.into(), key.clone())) {
+            return ViewDataState::Ready(value.clone());
+        }
+        self.loading_state(target, key)
     }
 }

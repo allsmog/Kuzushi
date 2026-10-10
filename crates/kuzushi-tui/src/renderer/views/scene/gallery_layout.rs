@@ -1,6 +1,6 @@
 //! Shared geometry for gallery rendering and keyboard paging.
 use crate::{ShellApp, ShellView};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 
 pub(in crate::renderer::views) fn map_canvas_sections(area: Rect) -> [Rect; 2] {
     split_rows(area, [Constraint::Min(0), Constraint::Length(1)])
@@ -30,11 +30,11 @@ fn split_rows(area: Rect, constraints: [Constraint; 2]) -> [Rect; 2] {
     [areas[0], areas[1]]
 }
 
-pub(super) fn entry_point_browser_area(app: &ShellApp) -> Option<Rect> {
+pub(super) fn gallery_body_area(app: &ShellApp) -> Option<Rect> {
     let viewport = app.viewport();
     let full = Rect::new(0, 0, viewport.columns, viewport.rows);
     match app.shell_view() {
-        ShellView::Workbench => embedded_entry_area(app, full),
+        ShellView::Workbench => embedded_gallery_body_area(app, full),
         ShellView::Scene => {
             Some(gallery_sections(crate::renderer::workbench_primary_area(app, full), false)[1])
         }
@@ -42,11 +42,37 @@ pub(super) fn entry_point_browser_area(app: &ShellApp) -> Option<Rect> {
     }
 }
 
-fn embedded_entry_area(app: &ShellApp, full: Rect) -> Option<Rect> {
+fn embedded_gallery_body_area(app: &ShellApp, full: Rect) -> Option<Rect> {
     let plan = crate::renderer::workbench_phase_plan_for_app(app, full)?;
     let canvas = plan.surface(crate::ui_view_models::PhaseSurfaceId::MapDfd)?;
     let gallery = map_canvas_sections(canvas.rect)[0];
     Some(gallery_sections(gallery, true)[1])
+}
+
+pub(super) fn summary_document_area(area: Rect) -> Rect {
+    if area.height <= 4 {
+        return area;
+    }
+    area.inner(Margin::new(1, 1))
+}
+
+pub(crate) fn summary_page_rows(app: &ShellApp) -> Option<usize> {
+    let area = gallery_body_area(app)?;
+    Some(super::diagram::summary_reading_rows(
+        area,
+        &crate::ui_view_models::dfd_model(app),
+    ))
+}
+
+pub(crate) fn scene_page_rows(app: &ShellApp) -> Option<usize> {
+    if app.shell_view() != ShellView::Scene || app.router.scene().page().is_frame_rendered() {
+        return None;
+    }
+    let viewport = app.viewport();
+    let full = Rect::new(0, 0, viewport.columns, viewport.rows);
+    let area = crate::renderer::workbench_primary_area(app, full);
+    // Three pinned header rows and one position row precede the document body.
+    Some(usize::from(area.height.saturating_sub(4)).max(1))
 }
 
 /// The scrolled window an embedded line page shows, when the page is taller
@@ -97,6 +123,30 @@ pub(super) fn line_page_position_sections(area: Rect) -> [Rect; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_gallery_paging_uses_visible_body_rows_at_every_supported_size() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Scene);
+        app.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::Components);
+        for (width, height) in [(120, 36), (160, 48), (96, 89), (80, 24), (60, 20), (40, 12)] {
+            app.set_viewport(crate::TerminalViewport::new(width, height));
+            let area =
+                crate::renderer::workbench_primary_area(&app, Rect::new(0, 0, width, height));
+            assert_eq!(
+                scene_page_rows(&app),
+                Some(usize::from(area.height.saturating_sub(4)).max(1))
+            );
+        }
+        app.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::Dfd);
+        assert_eq!(scene_page_rows(&app), None);
+        app.set_shell_view(ShellView::Context);
+        assert_eq!(scene_page_rows(&app), None);
+    }
 
     #[test]
     fn a_page_that_fits_its_canvas_states_no_position() {

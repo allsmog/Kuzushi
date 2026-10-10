@@ -3,6 +3,8 @@ use kuzushi_core::{CodeqlScanner, ScanEngine, SemgrepScanner};
 use kuzushi_core::{LatestRunPointerIssue, LatestRunPointerState};
 
 mod completion_io;
+mod groups;
+mod review_source;
 mod study_usage;
 mod workspace_io;
 use completion_io::*;
@@ -42,6 +44,9 @@ fn read_regular_cancellable(
         return TargetProfile::detect_cancellable(target, || cancellation.is_canceled())
             .map(ViewHydrationValue::TargetProfile);
     }
+    if let Some(value) = groups::read_groups(target, key, cancellation) {
+        return Some(value);
+    }
     if key != &ViewHydrationKey::FileCompletionValues {
         return Some(reader.read(target, key));
     }
@@ -54,13 +59,49 @@ fn read_regular_cancellable(
 }
 
 fn read_artifact_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
-    study_usage::read_study_usage(target, key, &ViewHydrationCancellation::default())
-        .flatten()
+    if let Some(value) = read_lesson_value(target, key)
+        .or_else(|| groups::read_groups(target, key, &ViewHydrationCancellation::default()))
+    {
+        return Some(value);
+    }
+    if let ViewHydrationKey::FindingRelationships { finding_id, offset } = key {
+        let result = kuzushi_core::WorkspaceTarget::new(target)
+            .and_then(|workspace| {
+                kuzushi_core::workspace::load_finding_relationships(
+                    &workspace,
+                    *finding_id,
+                    *offset,
+                )
+            })
+            .map_err(|e| format!("{e:#}"));
+        return Some(ViewHydrationValue::FindingRelationships(result));
+    }
+    if let ViewHydrationKey::FindingsProjection(request) = key {
+        return Some(ViewHydrationValue::FindingsProjection(
+            super::super::findings::read_findings_projection(target, request)
+                .map_err(|error| format!("{error:#}")),
+        ));
+    }
+    review_source::read_review_source(target, key)
+        .or_else(|| {
+            study_usage::read_study_usage(target, key, &ViewHydrationCancellation::default())
+                .flatten()
+        })
         .or_else(|| read_completion_value(target, key))
         .or_else(|| read_report_value(target, key))
         .or_else(|| read_run_value(target, key))
         .or_else(|| read_project_value(target, key))
         .or_else(|| read_workspace_file_value(target, key))
+}
+
+fn read_lesson_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    let ViewHydrationKey::FindingLessons { offset } = key else {
+        return None;
+    };
+    let result = kuzushi_core::WorkspaceTarget::new(target)
+        .and_then(|workspace| kuzushi_core::workspace::load_finding_lessons(&workspace, *offset))
+        .map_err(|error| format!("{error:#}"));
+    Some(ViewHydrationValue::FindingLessons(result))
 }
 
 fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
@@ -104,17 +145,39 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
 
 fn read_report_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
     match key {
-        ViewHydrationKey::InvestigationReport { run_refs } => {
+        ViewHydrationKey::InvestigationReport { run_refs, .. } => {
             Some(read_investigation_report(target, run_refs))
         }
+        ViewHydrationKey::InvestigationStudyReport {
+            campaign_id,
+            plan_sha256,
+            ..
+        } => Some(read_study_report(target, campaign_id, plan_sha256)),
         _ => None,
     }
+}
+
+fn read_study_report(target: &Path, campaign: &str, digest: &str) -> ViewHydrationValue {
+    let receipt = kuzushi_core::WorkspaceTarget::new(target)
+        .and_then(|workspace| {
+            let document =
+                kuzushi_core::workspace::load_investigation_report_document(&workspace, campaign)?;
+            anyhow::ensure!(
+                document.summary().plan_sha256 == digest,
+                "Selected study changed; reopen its report from the current plan"
+            );
+            Ok(Some(document))
+        })
+        .map_err(|error| format!("{error:#}"));
+    ViewHydrationValue::InvestigationReport(receipt)
 }
 
 fn read_investigation_report(target: &Path, run_refs: &[String]) -> ViewHydrationValue {
     let receipt = kuzushi_core::WorkspaceTarget::new(target)
         .and_then(|workspace| {
-            kuzushi_core::workspace::load_investigation_report_for_runs(&workspace, run_refs)
+            kuzushi_core::workspace::load_investigation_report_document_for_runs(
+                &workspace, run_refs,
+            )
         })
         .map_err(|error| error.to_string());
     ViewHydrationValue::InvestigationReport(receipt)

@@ -42,11 +42,16 @@ pub struct AllowanceApprovalV1 {
 
 impl AllowanceApprovalV1 {
     pub(super) fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.schema_version == 1, "unsupported allowance approval version");
+        anyhow::ensure!(
+            self.schema_version == 1,
+            "unsupported allowance approval version"
+        );
         validate_identifier(&self.investigation_id)?;
         validate_text(&self.model, "explicit allowance model", 256)?;
         validate_text(&self.reason, "allowance approval reason", 4096)?;
-        if let Some(plan) = &self.work_plan { plan.validate()?; }
+        if let Some(plan) = &self.work_plan {
+            plan.validate()?;
+        }
         self.limits.validate()
     }
 }
@@ -84,7 +89,12 @@ pub struct AllowanceCall {
 
 impl AllowanceCall {
     pub(super) fn validate(&self) -> Result<()> {
-        for value in [&self.investigation_id, &self.request_id, &self.run_id, &self.work_id] {
+        for value in [
+            &self.investigation_id,
+            &self.request_id,
+            &self.run_id,
+            &self.work_id,
+        ] {
             validate_identifier(value)?;
         }
         validate_text(&self.model, "explicit request model", 256)
@@ -123,16 +133,45 @@ pub struct AllowanceSnapshot {
 }
 
 impl AllowanceSnapshot {
+    pub fn non_review_remaining(&self) -> u32 {
+        self.remaining_calls()
+            .saturating_sub(self.protected_review_remaining())
+    }
+
     pub fn remaining_calls(&self) -> u32 {
-        self.limits.max_provider_calls.saturating_sub(self.committed_calls)
+        self.limits
+            .max_provider_calls
+            .saturating_sub(self.committed_calls)
     }
 
     pub fn protected_review_remaining(&self) -> u32 {
-        self.limits.protected_review_calls.saturating_sub(self.review_calls)
+        self.limits
+            .protected_review_calls
+            .saturating_sub(self.review_calls)
     }
 
     pub fn remaining_discovery_calls(&self) -> u32 {
-        self.remaining_calls().saturating_sub(self.protected_review_remaining())
+        self.remaining_calls()
+            .saturating_sub(self.protected_review_remaining())
+    }
+
+    /// A preflight hint, never authorization to send a provider request.
+    /// Transport still needs a fresh atomic reservation after this check.
+    pub fn require_call_capacity(&self, work: InvestigationWork) -> Result<()> {
+        let remaining = if work.is_review() {
+            self.remaining_calls()
+        } else {
+            self.remaining_discovery_calls()
+        };
+        if remaining > 0 {
+            return Ok(());
+        }
+        Err(AllowanceError::Exhausted {
+            committed: self.committed_calls,
+            limit: self.limits.max_provider_calls,
+            protected: self.protected_review_remaining(),
+        }
+        .into())
     }
 }
 
@@ -140,10 +179,16 @@ impl AllowanceSnapshot {
 pub enum AllowanceError {
     #[error("investigation {0:?} has no approved allowance")]
     NotApproved(String),
-    #[error("allowance revision changed: expected {expected}, current {current}; review remaining work")]
+    #[error(
+        "allowance revision changed: expected {expected}, current {current}; review remaining work"
+    )]
     StaleRevision { expected: u32, current: u32 },
     #[error("allowance exhausted: {committed} calls committed, limit {limit}, {protected} reserved for review; finish and report or approve revised work")]
-    Exhausted { committed: u32, limit: u32, protected: u32 },
+    Exhausted {
+        committed: u32,
+        limit: u32,
+        protected: u32,
+    },
     #[error("request {0:?} was already reserved; a retry requires a new reservation")]
     AlreadyReserved(String),
     #[error("request model differs from the approved allowance model")]
@@ -153,14 +198,22 @@ pub enum AllowanceError {
 pub(super) fn validate_identifier(value: &str) -> Result<()> {
     validate_text(value, "allowance identity", 128)?;
     anyhow::ensure!(
-        value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)),
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)),
         "allowance identities accept only letters, digits, dot, underscore, colon and dash"
     );
     Ok(())
 }
 
 fn validate_text(value: &str, label: &str, maximum: usize) -> Result<()> {
-    anyhow::ensure!(!value.is_empty() && value.len() <= maximum, "invalid {label} length");
-    anyhow::ensure!(value.trim() == value && !value.chars().any(char::is_control), "invalid {label}");
+    anyhow::ensure!(
+        !value.is_empty() && value.len() <= maximum,
+        "invalid {label} length"
+    );
+    anyhow::ensure!(
+        value.trim() == value && !value.chars().any(char::is_control),
+        "invalid {label}"
+    );
     Ok(())
 }

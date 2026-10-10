@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::application::sanitize_csv_field;
     use super::super::*;
     use crate::findings::{
         DismissReason, Finding, FindingEvidence, FindingStore, PatchLifecycleFile,
@@ -9,7 +10,6 @@ mod tests {
     use crate::run_artifacts::{write_run_summary, RunLlmCallAudit, RunSummary};
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
     use std::fs;
-    use super::super::application::sanitize_csv_field;
 
     #[test]
     fn missing_workspace_target_reports_domain_failure_with_actionable_cli_guidance() {
@@ -355,7 +355,6 @@ mod tests {
         assert_eq!(exported["metadata"]["includedCount"], 0);
         assert_eq!(exported["metadata"]["totalCount"], 0);
     }
-
 
     /// Export provenance: the block appears only when a session actually ran
     /// with the signal armed, and it never claims these rows were reordered —
@@ -1534,7 +1533,10 @@ mod tests {
         assert!(body.contains("'=cmd"), "rule id not guarded: {body}");
         assert!(body.contains("'=1+1"), "title not guarded: {body}");
         // The raw, unguarded formula never appears at a cell boundary.
-        assert!(!body.contains(",=cmd,"), "unguarded rule id present: {body}");
+        assert!(
+            !body.contains(",=cmd,"),
+            "unguarded rule id present: {body}"
+        );
         assert!(!body.contains(",=1+1,"), "unguarded title present: {body}");
     }
 
@@ -1971,7 +1973,10 @@ mod tests {
             "exploitScenario",
             "preconditions",
         ] {
-            assert!(!omitted.contains(&rendered), "rendered field listed as omitted: {rendered}");
+            assert!(
+                !omitted.contains(&rendered),
+                "rendered field listed as omitted: {rendered}"
+            );
         }
         let files = manifest["files"].as_array().unwrap();
         assert_eq!(files.len(), 3);
@@ -2094,9 +2099,7 @@ mod tests {
         match value {
             serde_json::Value::String(text) => vec![text.clone()],
             serde_json::Value::Array(items) => items.iter().flat_map(string_leaves).collect(),
-            serde_json::Value::Object(fields) => {
-                fields.values().flat_map(string_leaves).collect()
-            }
+            serde_json::Value::Object(fields) => fields.values().flat_map(string_leaves).collect(),
             _ => Vec::new(),
         }
     }
@@ -2142,6 +2145,8 @@ mod tests {
             priority: "sentinel-priority".to_string(),
             lifecycle_status: "sentinel-lifecycle-status".to_string(),
             review_decision: "sentinel-review-decision".to_string(),
+            relationships: Vec::new(),
+            lessons: Vec::new(),
             triage_state: "sentinel-triage-state".to_string(),
             observation_gap: Some(crate::findings::FindingObservationGap {
                 event_seq: 7,
@@ -2157,11 +2162,25 @@ mod tests {
             review_decision_basis: Some(crate::workspace::WorkspaceReviewDecisionBasis {
                 run_id: "sentinel-decision-basis-run".to_string(),
                 snapshot_hash: "sentinel-decision-basis-snapshot".to_string(),
+                source_git: Some(crate::RunTargetGitMetadata {
+                    sha: "1".repeat(40),
+                    branch: Some("sentinel-decision-branch".into()),
+                    dirty: false,
+                }),
                 later_observation: Some(crate::workspace::WorkspaceObservedSource {
                     run_id: "sentinel-decision-later-run".to_string(),
                     snapshot_hash: "sentinel-decision-later-snapshot".to_string(),
+                    source_git: Some(crate::RunTargetGitMetadata {
+                        sha: "2".repeat(40),
+                        branch: Some("sentinel-later-branch".into()),
+                        dirty: true,
+                    }),
                 }),
                 source_changed_since_decision: true,
+                source_comparison:
+                    crate::workspace::WorkspaceReviewSourceComparison::DifferentCitedSource,
+                source_applicability:
+                    crate::workspace::WorkspaceReviewSourceApplicability::ReassessmentRequired,
             }),
             triage_verdict: Some("sentinel-triage-verdict".to_string()),
             suppressed: true,
@@ -2295,13 +2314,29 @@ mod tests {
             .unwrap();
         let markdown = fs::read_to_string(output.join(enriched_path)).unwrap();
         assert!(markdown.contains("## Security context"), "{markdown}");
-        assert!(markdown.contains("**Recommended change:** Bind `id` and notify &#64;security then retest"), "{markdown}");
-        assert!(markdown.contains("**Impact:** An attacker can read \\[private\\] rows"), "{markdown}");
-        assert!(markdown.contains("**Exploit scenario:** A crafted id reaches the query"), "{markdown}");
+        assert!(
+            markdown
+                .contains("**Recommended change:** Bind `id` and notify &#64;security then retest"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("**Impact:** An attacker can read \\[private\\] rows"),
+            "{markdown}"
+        );
+        assert!(
+            markdown.contains("**Exploit scenario:** A crafted id reaches the query"),
+            "{markdown}"
+        );
         assert!(markdown.contains("**Category:** injection"), "{markdown}");
-        assert!(markdown.contains("  - Network access to `GET /orders`"), "{markdown}");
+        assert!(
+            markdown.contains("  - Network access to `GET /orders`"),
+            "{markdown}"
+        );
         let sparse_markdown = fs::read_to_string(output.join(sparse_path)).unwrap();
-        assert!(!sparse_markdown.contains("## Security context"), "{sparse_markdown}");
+        assert!(
+            !sparse_markdown.contains("## Security context"),
+            "{sparse_markdown}"
+        );
     }
 
     #[test]

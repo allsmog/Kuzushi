@@ -31,7 +31,9 @@ pub fn execute_campaign_status(input: &Value, ctx: &ToolExecutionContext<'_>) ->
 /// `trendHistory`; a history write failure degrades to history-less status
 /// rather than failing the read.
 fn workspace_trend_json(root: &Path, ctx: &ToolExecutionContext<'_>) -> (Value, Value) {
-    let read = ctx.findings_store.map(FindingStore::list_all_review_decisions);
+    let read = ctx
+        .findings_store
+        .map(FindingStore::list_all_review_decisions);
     let metrics = super::trend::trend_metrics_from_ledger(
         decision_ledger(&read),
         super::trend::workspace_campaign_spend_report(root),
@@ -75,7 +77,8 @@ fn all_campaigns_status(root: &Path, trend: Value, trend_history: Value) -> Resu
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({ "campaigns": rows, "trend": trend, "trendHistory": trend_history }),
+        json!({ "campaigns": rows, "trend": trend, "trendHistory": trend_history,
+            "historyWindow": super::trend_history::history_window_json() }),
     ))
 }
 
@@ -114,6 +117,7 @@ fn single_campaign_status(
             "providerSpendUnresolved": snapshot.provider_spend_unresolved,
             "trend": trend,
             "trendHistory": trend_history,
+            "historyWindow": super::trend_history::history_window_json(),
             "jobs": job_rows(root, &snapshot),
         }),
     ))

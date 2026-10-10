@@ -1,10 +1,12 @@
 mod input;
+mod read_tool;
 mod run_tool;
 mod tool;
 
 pub use tool::execute_x_ray_tool;
 
 pub(crate) use input::*;
+pub(crate) use read_tool::*;
 pub(crate) use run_tool::*;
 
 use crate::capabilities::x_ray::application::*;

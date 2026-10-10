@@ -39,7 +39,8 @@ pub(super) fn settle_stage_budget(
 fn stage_cost(costed: &Result<CostedStructuredJson<Value>>) -> Result<RuntimeCostReport> {
     match costed {
         Ok(costed) => costed.cost_report(),
-        Err(error) => Ok(error.downcast_ref::<StructuredOutputError>()
+        Err(error) => Ok(error
+            .downcast_ref::<StructuredOutputError>()
             .map(StructuredOutputError::cost_report)
             .unwrap_or(RuntimeCostReport::INCOMPLETE_ZERO)),
     }
@@ -61,7 +62,10 @@ pub(super) fn settle_gap_fill_cost(
 pub(super) fn is_spend_cap_exhausted(error: &anyhow::Error) -> bool {
     matches!(
         error.downcast_ref::<crate::spend::SpendError>(),
-        Some(crate::spend::SpendError::Exceeded { .. } | crate::spend::SpendError::HardCeilingExceeded { .. })
+        Some(
+            crate::spend::SpendError::Exceeded { .. }
+                | crate::spend::SpendError::HardCeilingExceeded { .. }
+        )
     )
 }
 
@@ -96,14 +100,23 @@ mod tests {
     #[test]
     fn successful_stage_with_unknown_cost_keeps_its_reservation() {
         let ledger = ledger();
-        settle_stage(&ledger, Ok(CostedStructuredJson::from_cost_report(Value::Null, RuntimeCostReport::INCOMPLETE_ZERO)));
+        settle_stage(
+            &ledger,
+            Ok(CostedStructuredJson::from_cost_report(
+                Value::Null,
+                RuntimeCostReport::INCOMPLETE_ZERO,
+            )),
+        );
         assert_eq!(ledger.total_spent_all().unwrap(), 1.0);
     }
 
     #[test]
     fn structured_failure_settles_only_complete_cost_receipts() {
         let ledger = ledger();
-        let error = StructuredOutputError::from_source_and_cost(anyhow::anyhow!("invalid structured result"), exact(0.25));
+        let error = StructuredOutputError::from_source_and_cost(
+            anyhow::anyhow!("invalid structured result"),
+            exact(0.25),
+        );
         settle_stage(&ledger, Err(error.into()));
         assert_eq!(ledger.total_spent_all().unwrap(), 0.25);
     }
@@ -111,7 +124,10 @@ mod tests {
     #[test]
     fn incomplete_structured_failure_does_not_refund_its_subtotal() {
         let ledger = ledger();
-        let error = StructuredOutputError::from_source_and_cost(anyhow::anyhow!("repair failed"), exact(0.25).mark_incomplete());
+        let error = StructuredOutputError::from_source_and_cost(
+            anyhow::anyhow!("repair failed"),
+            exact(0.25).mark_incomplete(),
+        );
         settle_stage(&ledger, Err(error.into()));
         assert_eq!(ledger.total_spent_all().unwrap(), 1.0);
     }
@@ -119,7 +135,13 @@ mod tests {
     #[test]
     fn explicit_zero_is_distinct_from_unknown_cost() {
         let ledger = ledger();
-        settle_stage(&ledger, Ok(CostedStructuredJson::from_cost_report(Value::Null, exact(0.0))));
+        settle_stage(
+            &ledger,
+            Ok(CostedStructuredJson::from_cost_report(
+                Value::Null,
+                exact(0.0),
+            )),
+        );
         assert_eq!(ledger.total_spent_all().unwrap(), 0.0);
     }
 

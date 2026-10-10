@@ -1,0 +1,100 @@
+name: Checked context copies retain spending, exact selection and explicit work approval
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | first-form
+keys: Down Down Down Enter Down Enter
+require-live-snap: 25 Alpha · regeneration draft | generated-copy
+keys: d
+require-live-snap: 25 Labeled regeneration | compared-copy
+expect: Before:
+expect: After:
+keys: Escape
+require-live-snap: 25 CONTEXT SUMMARY | comparison-back
+keys: c
+require-live-snap: 30 Enter inspects the saved check | checked-copy
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART checked
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-check
+expect: Alpha · regeneration draft
+keys: m
+require-live-snap: 30 RESULT READY | pending-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART pending
+ask: Does checking the inactive regenerated copy require inspection and explicit Map acceptance, while keeping the original, globally active context and single recorded request intact?
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART accepted
+keys: Escape
+submit: scan batch
+require-live-snap: 25 1 committed / 5 total | inherited-spending
+expect: 2 protected review
+expect: 3 passes · 1 worker
+keys: Down Down Down Down
+require-live-snap: 20 revision 1 | budget-details
+resize: 160x48
+live-snap: budget-160x48
+resize: 96x89
+live-snap: budget-96x89
+resize: 80x24
+live-snap: budget-80x24
+resize: 60x20
+live-snap: budget-60x20
+resize: 40x12
+live-snap: budget-40x12
+keys: z
+require-live-snap: 20 ┌ Total calls | narrow-budget-reader
+keys: End
+live-snap: narrow-budget-tail
+ask: Are consumed calls, protected Review capacity, unknown dollars and separate work approval readable across six viewport sizes without losing the selected context?
+keys: Escape
+resize: 120x36
+keys: L
+require-live-snap: 30 Draft ready | three-pass-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART draft
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | review-new-work
+keys: End
+require-live-snap: 20 y approve | approval-tail
+expect: 3 fixed jobs
+keys: y
+require-live-snap: 25 APPROVED STUDY | approved-new-work
+expect: 1 committed / 5 total
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART approved
+ask: Does approving three new jobs preserve the earlier context request and limits while leaving execution as a separate action?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 3 job(s) · 3 planned | recovered-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | recovered-study
+expect: 1 committed / 5 total
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART recovered
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART damage
+submit: scan batch
+require-live-snap: 25 cannot be authenticated | damaged-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART damaged
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART repair
+submit: scan batch
+require-live-snap: 25 1 committed / 5 total | repaired-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_accounting.py @TMP_TARGET @ART repaired
+ask: Does restart retain approved but unstarted work, refuse damaged spending provenance without starting fresh accounting, and recover the same budget after the exact receipt is restored?
+keys: C-c
+require-exit: 10

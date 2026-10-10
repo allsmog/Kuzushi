@@ -1,0 +1,57 @@
+name: Recent history reader with a large synthetic replay
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recent_history_reader.py @TARGET @ART before
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | recovered-investigation
+submit: campaign
+require-live-snap: 30 HISTORY recent | recent-history-120x36
+expect: 90 snapshot(s)
+expect: spend >=
+nav-mode:
+resize: 160x48
+live-snap: recent-history-160x48
+resize: 96x89
+live-snap: recent-history-96x89
+resize: 80x24
+live-snap: recent-history-80x24
+resize: 60x20
+live-snap: recent-history-60x20
+resize: 40x12
+live-snap: recent-history-40x12
+keys: NPage
+live-snap: recent-history-page-1-40x12
+keys: NPage
+live-snap: recent-history-page-2-40x12
+keys: NPage
+live-snap: recent-history-page-3-40x12
+keys: NPage
+live-snap: recent-history-page-4-40x12
+keys: NPage
+live-snap: recent-history-page-5-40x12
+keys: NPage
+live-snap: recent-history-page-6-40x12
+keys: NPage
+live-snap: recent-history-page-7-40x12
+keys: NPage
+live-snap: recent-history-page-8-40x12
+ask: Does the campaign reader qualify its sparkline as recent history and retain unresolved spending without changing the investigation?
+resize: 120x36
+keys: PPage
+keys: PPage
+keys: PPage
+keys: PPage
+keys: PPage
+keys: PPage
+keys: PPage
+keys: PPage
+keys: Escape
+submit: report
+require-live-snap: 30 4 committed / 6 calls | original-investigation-report
+expect: 2 reviewed
+expect: 4 producer observations
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recent_history_reader.py @TARGET @ART after
+keys: C-c
+require-exit: 10

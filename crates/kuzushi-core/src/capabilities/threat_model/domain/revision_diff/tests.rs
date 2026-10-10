@@ -40,7 +40,10 @@ fn identical_documents_produce_an_empty_diff() {
 #[test]
 fn reports_added_removed_and_changed_threats_by_stable_id() {
     let from = document(
-        json!([threat("tm-a", "SQLi", "high"), threat("tm-b", "XSS", "medium")]),
+        json!([
+            threat("tm-a", "SQLi", "high"),
+            threat("tm-b", "XSS", "medium")
+        ]),
         &["app"],
     );
     let mut edited = threat("tm-a", "SQLi in login", "critical");
@@ -59,7 +62,10 @@ fn reports_added_removed_and_changed_threats_by_stable_id() {
 
 #[test]
 fn falls_back_to_display_id_and_counts_unkeyed_threats() {
-    let from = document(json!([{"id": "T9", "title": "Old"}, {"title": "orphan"}]), &[]);
+    let from = document(
+        json!([{"id": "T9", "title": "Old"}, {"title": "orphan"}]),
+        &[],
+    );
     let to = document(json!([{"id": "T9", "title": "New"}]), &[]);
 
     let threats = diff_threat_model_documents(&from, &to).threats;

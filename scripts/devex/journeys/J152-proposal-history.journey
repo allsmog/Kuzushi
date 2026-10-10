@@ -1,0 +1,81 @@
+name: Regeneration preserves reviewed proposal history and creates unapproved drafts
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/proposal_history.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+submit: strategy keep review-cargo-audit-scan
+submit: strategy skip review-dep-hygiene-check
+require-shell: python3 -B @REPO/scripts/devex/fixtures/proposal_history.py @TMP_TARGET @ART decisions
+require-shell: python3 -B @REPO/scripts/devex/fixtures/proposal_history.py @TMP_TARGET @ART regenerate
+submit: strategy
+require-live-snap: 25 12 proposed, 1 approved | regenerated-queue
+expect: STRATEGY QUEUE
+expect: 1 approved
+expect: 1 rejected
+expect-not: Map 1/3
+ask: Does the regenerated queue distinguish new drafts from retained decisions and clearly disclose that earlier approval and outcomes belong to original ids?
+submit: strategy inspect review-cargo-audit-scan
+require-live-snap: 25 approved $0.5000 | retained-approval
+expect: operator-retained-context-preference
+expect: STRATEGY PROPOSAL
+submit: strategy inspect review-secret-scan-scan
+require-live-snap: 25 owned-synthetic-result | retained-outcome
+expect: approved $0.6000
+expect: actual $0.2000
+expect: 1/2 confirmed
+nav-mode:
+resize: 160x48
+wait: 0.5
+require-live-snap: 10 owned-synthetic-result | queue-160x48
+resize: 96x89
+wait: 0.5
+require-live-snap: 10 owned-synthetic-result | queue-96x89
+resize: 80x24
+wait: 0.5
+require-live-snap: 10 owned-synthetic-result | queue-80x24
+resize: 60x20
+wait: 0.5
+require-live-snap: 10 STRATEGY PROPOSAL | queue-60x20
+resize: 40x12
+wait: 0.5
+live-snap: queue-40x12
+keys: NPage
+live-snap: queue-page-40x12
+expect: $0.6000
+expect: actual $0.2000
+expect: outcome: 1/2 confirmed
+keys: NPage
+live-snap: queue-outcome-40x12
+expect: result run: owned-synthetic-result
+keys: G
+live-snap: queue-tail-40x12
+expect-not: kz> G
+ask: Can the operator page through complete ids, costs, correction and historical result references across all six sizes without changing input ownership?
+resize: 120x36
+submit: strategy inspect review-semgrep-scan
+require-live-snap: 25 OWNED_SYNTHETIC_FAILURE_EVIDENCE | retained-failure
+expect: owned-synthetic-failure-run
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-still-needed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/proposal_history.py @TMP_TARGET @ART after
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted
+submit: strategy
+require-live-snap: 25 1 approved | restarted-queue
+expect: 1 rejected
+expect: Regenerated suggestions are new drafts
+require-shell: python3 -B @REPO/scripts/devex/fixtures/proposal_history.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain real operator decisions and labeled historical receipts, while new drafts remain unapproved and no tool execution occurs?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

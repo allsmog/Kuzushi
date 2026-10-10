@@ -16,5 +16,6 @@ pub use crate::findings::FindingListReport;
 pub use crate::pr_comment::build_pr_comment;
 pub use crate::run_artifacts::{load_run_artifacts, load_run_summary, RunArtifactManifest};
 pub use application::{build_run_report, build_run_report_with_source_filter};
+pub(crate) use confirmed_sarif::export_confirmed_sarif_document;
 pub use confirmed_sarif::{export_confirmed_sarif, ConfirmedSarifSelection};
 pub use domain::{CanonicalReportArtifact, ReportFailureHandoff, RunReportBuild};

@@ -61,8 +61,18 @@ fn route_cwes(surface: &AttackSurface) -> Vec<&'static str> {
     append_route_cwes(&mut cwes, surface, SECRET_ROUTE_MARKERS, &["CWE-522"]);
     append_route_cwes(&mut cwes, surface, FILE_INGEST_ROUTE_MARKERS, &["CWE-434"]);
     append_route_cwes(&mut cwes, surface, DATA_EGRESS_ROUTE_MARKERS, &["CWE-200"]);
-    append_route_cwes(&mut cwes, surface, CALLBACK_ROUTE_MARKERS, &["CWE-601", "CWE-918"]);
-    append_route_cwes(&mut cwes, surface, AUTHORIZATION_ROUTE_MARKERS, &["CWE-862", "CWE-863"]);
+    append_route_cwes(
+        &mut cwes,
+        surface,
+        CALLBACK_ROUTE_MARKERS,
+        &["CWE-601", "CWE-918"],
+    );
+    append_route_cwes(
+        &mut cwes,
+        surface,
+        AUTHORIZATION_ROUTE_MARKERS,
+        &["CWE-862", "CWE-863"],
+    );
     append_route_cwes(&mut cwes, surface, TENANT_ROUTE_MARKERS, &["CWE-639"]);
     cwes
 }
@@ -120,16 +130,15 @@ const SECRET_ROUTE_MARKERS: &[&str] = &["api-key", "apikey", "credential", "cred
 const FILE_INGEST_ROUTE_MARKERS: &[&str] = &[
     "archive", "avatar", "backup", "file", "import", "parse", "restore", "upload",
 ];
-const DATA_EGRESS_ROUTE_MARKERS: &[&str] =
-    &[
-        "asset",
-        "download",
-        "export",
-        "files/",
-        "metrics",
-        "prometheus",
-        "static",
-    ];
+const DATA_EGRESS_ROUTE_MARKERS: &[&str] = &[
+    "asset",
+    "download",
+    "export",
+    "files/",
+    "metrics",
+    "prometheus",
+    "static",
+];
 const CALLBACK_ROUTE_MARKERS: &[&str] = &[
     "callback",
     "connect",

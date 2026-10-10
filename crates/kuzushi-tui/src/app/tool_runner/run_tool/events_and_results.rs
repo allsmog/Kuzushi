@@ -4,7 +4,9 @@ use kuzushi_core::run_artifacts::{
 };
 use std::path::{Path, PathBuf};
 
+mod result_receipt;
 mod trace_receipt;
+use result_receipt::rendered_tool_result;
 
 struct ToolEventState {
     abort_reason: Option<AbortReason>,
@@ -217,7 +219,7 @@ impl ShellApp {
             },
         )];
         effects.extend(self.apply_tool_result_state(&tool_name, state.run_id.as_deref(), &result));
-        self.finish_completed_tool_ui(&tool_name, state.abort_reason.is_some());
+        self.finish_completed_tool_ui(&tool_name, state.abort_reason.is_some(), &result);
         effects.extend(self.finished_tool_continuation(&tool_name, state.abort_reason.is_none()));
         effects
     }
@@ -229,6 +231,7 @@ impl ShellApp {
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
         let message = failure_like_result_message(&result);
+        self.cache_lesson_planning_failure(&tool_name, &message);
         if let Some(reason) = state.abort_reason {
             return self.apply_aborted_tool_event(state, tool_name, message, reason);
         }
@@ -257,6 +260,7 @@ impl ShellApp {
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
         let message = failure_like_result_message(&result);
+        self.cache_component_inventory_result(&tool_name, &result);
         if let Some(reason) = state.abort_reason {
             return self.apply_aborted_tool_event(state, tool_name, message, reason);
         }
@@ -272,7 +276,7 @@ impl ShellApp {
         self.mark_tool_activity_failed(&tool_name, &message);
         self.log_tool_failure(
             &tool_name,
-            with_next_step(message.clone(), "tools, options <tool>, or model <n>"),
+            with_next_step(message.clone(), &self.tool_failure_next_step(&tool_name)),
             false,
         );
         self.set_failed_activity(tool_name.clone(), "tool returned a failed result");
@@ -323,11 +327,18 @@ impl ShellApp {
         effects
     }
 
-    fn finish_completed_tool_ui(&mut self, tool_name: &str, abort_requested: bool) {
+    fn finish_completed_tool_ui(
+        &mut self,
+        tool_name: &str,
+        abort_requested: bool,
+        result: &serde_json::Value,
+    ) {
         self.set_completed_activity(tool_name.to_string(), "tool result applied");
         self.mark_tool_activity_complete(tool_name);
         self.record_tool_duration_and_notify(tool_name, abort_requested);
-        self.auto_open_viz_for_tool(tool_name);
+        if self.worklist_visualization_matches_target(tool_name, result) {
+            self.auto_open_viz_for_tool(tool_name);
+        }
     }
 
     fn finished_tool_continuation(
@@ -353,6 +364,27 @@ impl ShellApp {
     /// snapshot cache ran inside `apply_tool_result` above, so we can check
     /// whether it actually produced data — a zero-flow hunt or empty chain run
     /// shouldn't yank the operator to a "run the tool" empty page.
+    fn worklist_visualization_matches_target(
+        &mut self,
+        tool_name: &str,
+        result: &serde_json::Value,
+    ) -> bool {
+        if tool_name != "worklist:rank" {
+            return true;
+        }
+        if super::snapshots::worklist_result_matches_target(
+            self,
+            result.get("data").unwrap_or(result),
+        ) {
+            return true;
+        }
+        self.log(
+            "scene",
+            "worklist belongs to another target; inspect its run receipt",
+        );
+        false
+    }
+
     fn auto_open_viz_for_tool(&mut self, tool_name: &str) {
         if tool_name == "threat-model:build" {
             self.log(
@@ -405,14 +437,12 @@ impl ShellApp {
         }
     }
 
-    /// Feed the ETA history and — when the operator is on another view —
-    /// raise the completion banner so background work announces itself
-    /// instead of finishing silently (ambient-progress story).
+    /// Record available timing and announce completion without changing focus.
     fn record_tool_duration_and_notify(&mut self, tool_name: &str, completed_after_cancel: bool) {
-        let Some(secs) = self.completed_tool_secs(tool_name) else {
-            return;
-        };
-        self.record_task_duration_secs(tool_name, secs);
+        let secs = self.completed_tool_secs(tool_name);
+        if let Some(secs) = secs {
+            self.record_task_duration_secs(tool_name, secs);
+        }
         if matches!(self.shell_view(), ShellView::Activity) {
             return;
         }
@@ -440,6 +470,7 @@ impl ShellApp {
         tool_name: String,
         error: String,
     ) -> Vec<ShellEffect> {
+        self.cache_lesson_planning_failure(&tool_name, &error);
         if let Some(reason) = state.abort_reason {
             return self.apply_aborted_tool_event(state, tool_name, error, reason);
         }
@@ -455,7 +486,7 @@ impl ShellApp {
         self.mark_tool_activity_failed(&tool_name, &error);
         self.log_tool_failure(
             &tool_name,
-            with_next_step(error.clone(), "tools, options <tool>, or model <n>"),
+            with_next_step(error.clone(), &self.tool_failure_next_step(&tool_name)),
             false,
         );
         self.set_failed_activity(
@@ -514,7 +545,16 @@ impl ShellApp {
         error: String,
         reason: AbortReason,
     ) -> Vec<ShellEffect> {
+        self.study_preparation_failed(
+            &tool_name,
+            &format!("Preparation stopped ({}): {error}", reason.label()),
+        );
         self.scope_review_failed(&tool_name, &error);
+        self.context_edit_save_failed(&tool_name, &error);
+        self.brief_save_failed(&tool_name, &error);
+        self.context_check_failed(&tool_name, &error);
+        self.context_comparison_failed(&tool_name, &error);
+        self.context_history_failed(&tool_name, &error);
         self.record_failed_tool_spent_cost(&state);
         self.abort_pending_chain(&tool_name);
         if reason.records_canceled() {
@@ -643,8 +683,32 @@ impl ShellApp {
         let _ = (tool_name, error);
     }
 
+    fn tool_failure_next_step(&self, tool_name: &str) -> String {
+        if let Some(step) = self.study_failure_next_step(tool_name) {
+            return step.to_string();
+        }
+        if tool_name == "campaign:allowance"
+            && self
+                .router
+                .campaign()
+                .batch_scan_config
+                .as_ref()
+                .is_some_and(|config| config.study.baseline_allowance_pending)
+        {
+            return "Esc dismisses this message; r retries the baseline allowance read. Your draft and spending account are kept; no work starts.".to_string();
+        }
+        format!("failure for recorded details; options {tool_name} to inspect inputs")
+    }
+
     fn log_tool_failure(&mut self, tool_name: &str, message: String, abort_requested: bool) {
         self.scope_review_failed(tool_name, &message);
+        self.context_edit_save_failed(tool_name, &message);
+        self.brief_save_failed(tool_name, &message);
+        self.context_check_failed(tool_name, &message);
+        self.context_comparison_failed(tool_name, &message);
+        self.context_history_failed(tool_name, &message);
+        self.context_baseline_allowance_failed(tool_name, &message);
+        self.study_preparation_failed(tool_name, &message);
         if abort_requested {
             // The operator asked for the abort — record it, but don't pop an
             // error banner for an outcome they initiated.
@@ -654,13 +718,6 @@ impl ShellApp {
             );
         } else {
             self.set_error_notice("tool", message);
-        }
-    }
-
-    fn log_failure_context(&mut self, context: Option<FailureToLlmContext>) {
-        if let Some(context) = context {
-            self.log("failure-context", render_failure_context(&context));
-            self.set_pending_failure_context(context);
         }
     }
 
@@ -818,7 +875,7 @@ impl ShellApp {
         self.log_tool_result(&result);
         match persistence {
             Ok(context) => {
-                self.log_failure_context(context);
+                self.capture_failure_context(context);
                 Ok(())
             }
             Err(error) => Err(error),
@@ -839,7 +896,7 @@ impl ShellApp {
         self.log_tool_result(&result);
         match persistence {
             Ok(context) => {
-                self.log_failure_context(context);
+                self.capture_failure_context(context);
                 Ok(())
             }
             Err(error) => Err(error),
@@ -951,16 +1008,19 @@ impl ShellApp {
     }
 }
 
-/// Completion banner text. When the operator requested an abort but the tool
-/// ignored the cancel token and returned a result anyway, the banner must not
-/// claim a plain "✓ finished" — the Activity DAG row shows the run as
-/// Canceled, and the two signifiers must not disagree about the same run.
-fn tool_completion_notice(tool_name: &str, secs: u64, completed_after_cancel: bool) -> String {
-    let elapsed = crate::app::compact_secs(secs);
+/// Completion retains cancellation and never invents missing timing.
+fn tool_completion_notice(
+    tool_name: &str,
+    secs: Option<u64>,
+    completed_after_cancel: bool,
+) -> String {
+    let elapsed = secs
+        .map(crate::app::compact_secs)
+        .map_or_else(String::new, |duration| format!(" in {duration}"));
     if completed_after_cancel {
-        format!("{tool_name} completed after cancel in {elapsed} — `/a` for the run feed")
+        format!("{tool_name} completed after cancel{elapsed}; /a for the run feed")
     } else {
-        format!("✓ {tool_name} finished in {elapsed} — `/a` for the run feed")
+        format!("✓ {tool_name} finished{elapsed}; /a for the run feed")
     }
 }
 
@@ -1018,77 +1078,6 @@ fn tool_run_record_effect(
 /// Lines of a tool result kept inline in the transcript. A structured artifact
 /// can pretty-print to hundreds of rows; spending the whole scrollback on one
 /// payload buries the run it belongs to.
-const MAX_RESULT_LOG_LINES: usize = 12;
-/// Byte ceiling for the same body, so one enormous single line cannot slip past
-/// the line cap.
-const MAX_RESULT_LOG_BYTES: usize = 2_000;
-
-/// Renders a tool result for the transcript.
-///
-/// A tool that wrote an `output` string chose what the operator should read, so
-/// that text is passed through whole however long it runs. The clip applies
-/// only to the last-resort JSON dump of a structured artifact, which is a
-/// machine payload nobody composed for reading and which can otherwise expand
-/// into hundreds of rows and bury the run it belongs to.
-fn rendered_tool_result(result: &serde_json::Value) -> String {
-    if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
-        return output.to_string();
-    }
-    if let Some(receipt) = generic_count_receipt(result) {
-        return receipt;
-    }
-    let dumped = serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string());
-    if result_carries_a_remedy(result) {
-        return dumped;
-    }
-    clip_result_body(&dumped)
-}
-
-/// Failed and partial results carry the operator's remedy — failed stage,
-/// cause, and fallback context. That narrative is the whole value of the line,
-/// so it is never clipped no matter how long it runs.
-fn result_carries_a_remedy(result: &serde_json::Value) -> bool {
-    matches!(
-        kuzushi_core::tool_result_status(result),
-        kuzushi_core::ToolResultStatus::Failed | kuzushi_core::ToolResultStatus::Partial
-    )
-}
-
-/// Clips on line count and byte length, disclosing what was left out and where
-/// the complete payload is. The full result is already persisted to the run's
-/// `result.json`, so this elides a copy rather than losing anything.
-fn clip_result_body(body: &str) -> String {
-    let lines = body.lines().collect::<Vec<_>>();
-    let line_clipped = lines.len() > MAX_RESULT_LOG_LINES;
-    let mut clipped = lines
-        .iter()
-        .take(MAX_RESULT_LOG_LINES)
-        .copied()
-        .collect::<Vec<_>>()
-        .join("\n");
-    let byte_clipped = clipped.len() > MAX_RESULT_LOG_BYTES;
-    if byte_clipped {
-        clipped.truncate(floor_char_boundary(&clipped, MAX_RESULT_LOG_BYTES));
-    }
-    if !line_clipped && !byte_clipped {
-        return clipped;
-    }
-    let omitted = lines.len().saturating_sub(MAX_RESULT_LOG_LINES);
-    format!("{clipped}\n… {omitted} more lines · full result in the run's result.json")
-}
-
-fn floor_char_boundary(text: &str, limit: usize) -> usize {
-    (0..=limit)
-        .rev()
-        .find(|at| text.is_char_boundary(*at))
-        .unwrap_or_default()
-}
-
-fn generic_count_receipt(result: &serde_json::Value) -> Option<String> {
-    let count = result.pointer("/data/count")?.as_u64()?;
-    Some(format!("completed · {count} records"))
-}
-
 fn result_with_fallback_context(
     target: Option<&Path>,
     run_id: Option<&str>,
@@ -1131,93 +1120,6 @@ mod tests {
         load_run_summary, try_record_tool_run_canceled,
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
     };
-
-    #[test]
-    fn short_tool_output_reaches_the_transcript_unchanged() {
-        let result = serde_json::json!({"output": "completed · 3 findings"});
-
-        assert_eq!(rendered_tool_result(&result), "completed · 3 findings");
-    }
-
-    #[test]
-    fn triage_advisory_report_reaches_the_tui_transcript_unchanged() {
-        let output = "triage complete\nCross-tool candidates: 1 cluster(s), report only; no verdict inheritance.\nReviewed refutation (human): 82% (9/11 reviewed; 11/37 emitted).";
-        let result = serde_json::json!({"output": output});
-
-        assert_eq!(rendered_tool_result(&result), output);
-    }
-
-    #[test]
-    fn a_long_structured_artifact_is_clipped_with_a_pointer_to_the_full_record() {
-        // A pretty-printed artifact used to expand into hundreds of transcript
-        // rows and evict the run it belonged to.
-        let records = (0..200)
-            .map(|index| serde_json::json!({"id": index}))
-            .collect::<Vec<_>>();
-        let result = serde_json::json!({"data": {"records": records}});
-
-        let rendered = rendered_tool_result(&result);
-
-        assert!(
-            rendered.lines().count() <= MAX_RESULT_LOG_LINES + 1,
-            "rendered {} lines",
-            rendered.lines().count()
-        );
-        assert!(rendered.contains("more lines · full result in the run's result.json"));
-    }
-
-    #[test]
-    fn a_curated_tool_report_is_never_clipped_however_long_it_runs() {
-        // A tool that writes `output` chose what the operator should read;
-        // clipping it would cut the report off mid-narrative.
-        let report = (0..40)
-            .map(|index| format!("line-{index}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let result = serde_json::json!({ "output": report });
-
-        let rendered = rendered_tool_result(&result);
-
-        assert!(rendered.contains("line-39"));
-        assert!(!rendered.contains("full result in the run's result.json"));
-    }
-
-    #[test]
-    fn one_enormous_dumped_line_is_clipped_by_bytes_even_though_it_is_a_single_line() {
-        let result = serde_json::json!({"data": {"blob": "x".repeat(50_000)}});
-
-        let rendered = rendered_tool_result(&result);
-
-        assert!(rendered.len() < 50_000, "rendered {} bytes", rendered.len());
-        assert!(rendered.contains("full result in the run's result.json"));
-    }
-
-    #[test]
-    fn a_failed_result_keeps_its_whole_remedy_narrative() {
-        // Stage, cause, and fallback context are what the operator acts on.
-        let result = serde_json::json!({
-            "status": "failed",
-            "fallback_context": {
-                "failedStage": "semgrep:scan",
-                "cause": "semgrep binary missing",
-                "detail": "x".repeat(40_000),
-            }
-        });
-
-        let rendered = rendered_tool_result(&result);
-
-        assert!(rendered.contains("\"failedStage\": \"semgrep:scan\""));
-        assert!(rendered.contains("semgrep binary missing"));
-        assert!(!rendered.contains("full result in the run's result.json"));
-    }
-
-    #[test]
-    fn clipping_never_splits_a_multibyte_character() {
-        let result = serde_json::json!({"data": {"blob": "é".repeat(MAX_RESULT_LOG_BYTES)}});
-
-        // Panics on a bad boundary; reaching the assert is the real check.
-        assert!(rendered_tool_result(&result).len() <= MAX_RESULT_LOG_BYTES + 128);
-    }
 
     fn app_with_tool_session(tool_name: &str, run_id: &str) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -1501,6 +1403,43 @@ mod tests {
             "plain success keeps the existing wording, got: {}",
             notice.message
         );
+    }
+
+    #[test]
+    fn successful_tool_without_activity_keeps_a_completion_notice_and_draft() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.set_input("unfinished operator draft");
+        let view = app.shell_view();
+        app.apply_tool_event(ToolEvent::Finished {
+            tool_name: "report:sarif".into(),
+            result: serde_json::json!({"ok":true,"status":"completed","output":"Owned export"}),
+        });
+        let notice = app
+            .advisory()
+            .notice
+            .as_ref()
+            .expect("completion notice without timing");
+        assert!(
+            notice.message.contains("report:sarif finished"),
+            "{}",
+            notice.message
+        );
+        assert!(
+            !notice.message.contains(" in 0"),
+            "unknown duration stays unknown"
+        );
+        assert_eq!(app.input(), "unfinished operator draft");
+        assert_eq!(app.shell_view(), view);
+    }
+
+    #[test]
+    fn completion_without_timing_preserves_cancellation() {
+        let message = tool_completion_notice("report:sarif", None, true);
+        assert!(message.contains("completed after cancel"));
+        assert!(!message.contains('✓'));
+        assert!(!message.contains(" in "));
+        assert!(message.contains("/a"));
     }
 
     #[test]

@@ -1301,6 +1301,104 @@ active context, and zero provider work. See the
 [context handoff assessment](../assessments/existing-context-map-2026-10-06.md)
 for native hashes and remaining acceptance limits.
 
+## J96: Actual OAuth context, inspection origin and Map acceptance
+
+Inspect the completed diagnostic on the owned live source fixture with a
+credential-free home. Navigate the exact DFD, read its full small-screen detail,
+return to the saved result, accept Map explicitly and restart without color.
+No new model or scan work may start. This is a stateful acceptance test; do not
+reset the selected Map or its spending to replay pending assertions.
+
+Evidence: `/tmp/kuzushi-experiment-main-20261006/tui/20261006-113921/J96/` records
+21 machine passes and seven separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains. Seven live requests, five work attempts and two
+protected Review requests remain unchanged. All six sizes and actual detail
+paging to 40-45/45 are covered. Earlier fixture/driver failures and the lost
+inspection-origin defect remain recorded. See the
+[live context assessment](../assessments/live-context-validation-2026-10-06.md)
+for identities, limitations and the unapproved three-pass follow-up.
+
+## J97: Accepted context, repository index and readable Summary
+
+Read J96's already accepted exact revision without credentials or new work.
+Distinguish absent optional repository index from accepted threat model, read the
+full system description at wide sizes, and verify fresh-session accounting.
+At 40x12, Page Up stays at the start, Page Down reads contiguous rows, Page Up
+returns exactly and arrows reveal component identity. Resize and restart
+without color while preserving source, acceptance and investigation spending.
+
+Evidence: `/tmp/kuzushi-experiment-main-20261006/tui/20261006-131153/J97/` has
+32 machine passes and six separate passing screen judgments, with raw
+`REVIEW_REQUIRED` unchanged. All six sizes are inspected. Earlier resize,
+narrow-reader and session-accounting failures remain recorded. Seven requests,
+five attempts, revision-three allowance and two protected Review requests remain
+unchanged. See the
+[reader assessment](../assessments/accepted-context-reading-2026-10-06.md).
+
+## J98: Decision source and later revisions
+
+Use a credential-free, labeled synthetic finding with two real captured source
+versions and synthetic commit metadata. Retain the human decision on source A
+despite a later imported assessment. Read the decision/later source warning at
+all six sizes, reveal hidden detail with Enter at 60 columns and page
+contiguously at 40x12. Explicitly defer against source B with a reason, restart
+without color and verify all three decisions, source bytes and original metadata
+are retained. No scanner, provider call or source execution occurs.
+
+Evidence: `/tmp/kuzushi-experiment-main-20261006/tui/20261006-144339/J98/`
+has 26 machine passes and four separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains unchanged. Failed predecessors retain their failures.
+See the [source provenance assessment](../assessments/review-source-provenance-2026-10-06.md)
+for the real store regressions, narrow-opening fix and synthetic-evidence limits.
+
+## J99: Capability recovery and input ownership
+
+Read selected model/input preparation, retain the full recovery command and
+move/load/back controls across six sizes, and load a command without executing
+it. The draft must own editing and remove the Enter-load cue. Restart without
+color under an isolated synthetic unsupported model and inspect its diagnostic
+route. Finally browse without a target: Enter must reopen explicit target
+selection, preserving the absence of consent. No executor or provider runs.
+
+Evidence: `/tmp/kuzushi-experiment-main-20261006/tui/20261006-152837/J99/`
+records 39 machine passes and six separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains. Failed and incomplete predecessor reviews remain
+recorded. See the
+[capability recovery assessment](../assessments/capability-recovery-guidance-2026-10-06.md).
+
+## J100: Source reassessment and causal Review completion
+
+Use the labeled synthetic decision-source fixture and shift the older projection
+display date to 2099 while keeping its event provenance intact. Retain the old
+verdict, label the row for reassessment and keep NEXT in Review on later source.
+Read all six viewport sizes and page the detail contiguously at 40x12. Explicitly
+defer against source B with a reason; the recorded event order must govern despite
+the old future display date. Restart without color and compare export, all three
+decisions, source bytes and earlier provenance. No provider, scanner or source
+program runs.
+
+Evidence: `/tmp/kuzushi-experiment-main-20261006/tui/20261006-164751/J100/`
+records 24 machine passes and four separate passing screen judgments. Raw
+`REVIEW_REQUIRED` remains. The preceding `162338` run retains its failed screen
+review for the misleading compact `open` label. This verifies synthetic source
+and clock behavior, with an actual findings store and captured file versions;
+real Git transitions and scanner precision remain open. See the
+[Review completion assessment](../assessments/review-source-completion-2026-10-06.md).
+
+## J101: Large Review ledger and global filtering
+
+Use the prepared labeled 1,000-finding fixture and six bounded external decision
+writes. Read loaded/matching counts at all six sizes, sample key-to-echo latency,
+retain draft ownership, expose the global filter shortcut at 40x12, retrieve an
+omitted row through the canonical filter, then restart without color. Source and
+observations remain unchanged. No model, scanner or target source runs.
+
+Evidence: `/tmp/kuzushi-experiment-main-20261006/tui/20261006-175449/J101/`
+records 29 machine passes and five separate passing screen judgments. Raw
+`REVIEW_REQUIRED` and predecessor failures remain intact. See the
+[large-ledger assessment](../assessments/large-review-ledger-2026-10-06.md)
+for measured costs, limits and remaining responsiveness work.
+
 ## J95: Accepted scope in the study report
 
 Accept a whole-repository scope with one operator exclusion through real
@@ -1320,3 +1418,404 @@ Evidence: `/tmp/kuzushi-bounded-investigations-tui/20261006-101326/J95/` records
 remains. Run `20261006-061350` keeps the original failing source-change
 judgment, and earlier runs keep their journey-script failures. See the
 [report scope assessment](../assessments/report-scope-2026-10-06.md).
+
+
+## J102: Complete Review ledger paging
+
+Uses the existing labeled 1,000-finding fixture. Navigate both 500-row windows,
+open the omitted finding by its whole-ledger alias, return through both pages,
+inspect all six viewports, preserve a tiny-terminal draft, change the global
+query and restart without color. Source hashes and observation/decision counts
+must remain unchanged; opening details can record normal review-session history.
+No scanner, provider or target-source execution occurs. Read every ask capture
+and all detail-focused resize frames. Hidden controls, subset alias resolution,
+wrong exact drafts or page/query mismatches fail the UX audit even if substring
+machine checks pass. The harness remains unchanged. See the
+[complete paging assessment](../assessments/complete-review-paging-2026-10-06.md).
+
+## J103: Manual decision saves and input ownership
+
+Uses the owned labeled 1,000-finding fixture for eight explicit human decisions
+on one identity. Inspect saving versus recorded state, drafts at all six sizes,
+rail identity, false-positive reversal and no-color restart. Six bounded 2-second
+SQLite locks expose real pending commits without changing rows. The verifier checks
+exact verdict/reason/author order, source hashes, unchanged observations and
+bounded decision-count growth. Read every ask and related pending/draft frame.
+Do not infer responsiveness from a completed save alone. No scanner, provider
+or target-source execution occurs. The harness remains unchanged. See the
+[manual decision assessment](../assessments/manual-decision-responsiveness-2026-10-06.md).
+
+## J104: Filtered Review navigation and external decisions
+
+Uses the owned labeled 1,000-finding fixture to open an identity outside a
+one-row query. Inspect detail, action target, filter disclosure, draft ownership
+and list navigation across six sizes. Two explicit synthetic human decisions
+through the real CLI remove a row from an open-only query while the TUI runs.
+Passive refresh must recover once with a notice; explicit invalid anchors and
+cursors remain errors. Restart in no-color and verify exact decisions, unchanged
+observations and source hashes. Read every ask and related resize capture.
+No scanner, provider or target-source execution occurs. The driver stays unchanged.
+
+## J105: Exact context editing, copy review and study binding
+
+Imports two labeled contexts through real shared dispatch, edits the inactive
+one through the native TUI and reviews the actual text changes before saving.
+Inspect multiline Unicode input, retained draft/cursor, all six sizes, the
+copy boundary and its new unverified state. Saving must preserve both original
+objects, their metadata, the active pointer and compatibility mirror. Inspection
+and study selection remain separate. Compile a three-pass draft bound to the
+new exact reference and recover it after a real no-color restart. No jobs,
+model requests or target-source execution run. Read every ask and related frame;
+the fixture oracle verifies exact text, parent/copy references and durable
+consumer binding. Keep raw failures and review-required status separate from
+manual judgments. The driver stays unchanged.
+
+## J106: Exact context source checks and historical source binding
+
+Imports two labeled contexts, creates an inactive edited copy, and checks that
+exact copy through shared dispatch in the native TUI. Review the action menu at
+all six sizes, including reaching its final action at 40x12. Saving must retain
+original objects, active context, source binding and mirror; inspection and
+study selection remain separate. Compile an unapproved three-pass draft, then
+change fixture content at the same SHA and make an empty fixture commit with
+identical original content. Both changes must stop another check without
+publishing a revision or rebinding history. A fresh no-color process recovers
+the exact historical revision and unchanged unstarted draft. No jobs, model
+requests or target-source execution run. Inspect every ask and related frame,
+preserve raw results and use the fixture oracle for source/store claims.
+
+## J112: Discovery allowance exhaustion and partial recovery
+
+Run a fixed nine-job matrix against owned greeting source with intercepted
+transport. Approve four calls, including two protected review calls. Two
+discovery passes complete; the remaining seven must stay unstarted when
+discovery capacity reaches zero. Reopening without another allowance must not
+consume an attempt. Inspect saved limits, acknowledge partial evidence and
+open a faithful scoped report. Restart without color, then explicitly review
+and approve eleven total calls with the same protected allocation. Finish only
+the original remaining jobs and inspect the complete report. Provider output
+is labeled synthetic, every fetch is intercepted and no target source executes.
+Read every ask and related capture; retain raw failures and review-required
+status separately from screen judgments. Cancellation is a separate next
+check. The driver stays unchanged.
+
+## J111: Completed matrix handoff and explicit Scan acceptance
+
+Generate fresh owned, labeled synthetic matrix receipts with nine completed
+jobs, then recover them through the native dispatcher. Run recovery twice and
+verify that it creates one unselected Scan
+attempt, preserves the exact nine run references and starts no children or
+provider requests. The labeled fixture explicitly skips Map; it does not claim
+an accepted Map. Use the Scan result in Navigate mode, then open the ordinary
+Report surface and check separate case recurrence and the shared allowance.
+Inspect controls at narrow sizes and restart in no-color. Source, accepted
+contexts, job attempts and provider accounting remain unchanged. No provider
+transport runs. An initial archive-copy attempt failed because artifact paths
+still named the original target; preserve that failure rather than rebinding
+the historical receipts. Read every ask and related capture. Preserve raw failures and
+review-required status separately from manual judgments. The driver stays
+unchanged. Partial outcomes and source drift also have focused core tests;
+this native journey covers completed-work recovery only.
+
+## J108: Explicit context candidate, shared spending and historical comparison
+
+Runs three Alpha baseline passes through the native SAST executor, then uses
+the TUI to select and separately approve three Beta candidate passes while Gamma
+remains globally active. The greeting source is owned and never executed; all
+provider transport is intercepted and observations are labeled synthetic.
+Before drafting, hide and restore the fixture's allowance table. Inspect the
+read failure, work block and explicit retry without replacing the spending
+account or losing commitments. Review comparison conditions at all six sizes,
+including the final page at 40x12, and the unchanged eight-call allowance with
+two protected review calls. Select actual candidate passes, compare source and
+exact context receipts, and return to the same selected pass. Restart in no-color
+and recover completed jobs and six committed intercepted requests. Read every
+ask and related capture; preserve raw failures and review-required status. The
+driver stays unchanged. This is one historical baseline pass versus fixed
+candidate repetitions, not full matrix, live quality or complete investigation
+acceptance.
+
+## J113: Cooperative campaign Stop and reservation recovery
+
+Launch a fixed nine-job matrix on owned greeting source with intercepted model
+transport. One pass completes and the second request waits. Request Stop from
+its visible deck control, preserve the composer draft and let the dispatcher
+settle children and queue state without blocking the shell. Check that the
+remaining seven jobs never start, the completed observation survives and the
+in-flight reservation remains unresolved. Inspect the partial Scan receipt,
+report, narrow layout and no-color restart. The synthetic transport has a
+ninety-second ceiling; no live provider request or target-source execution runs.
+Read every ask and related capture. Keep raw failures and review-required status
+separate from manual screen judgments. The driver stays unchanged.
+
+## J114: Reversible relationship review and independent finding verdicts
+
+Import two labeled synthetic observations on owned greeting data and perform
+one native dedupe request through intercepted transport. Review the proposed
+relationship, refuse an empty reason, paste a multiline note at 40x12, accept
+and explicitly unlink it. Read the recorded runs through paging. Check two
+unchanged observations/identities, no rekeys and no finding verdicts throughout.
+Inspect JSON, JSONL, SARIF, Markdown and CSV outputs, then recover the removed
+relationship in no-color without another model request. Follow this reader's
+advertised Escape control; the generic Navigate helper assumes `Esc prompt`
+and is unsuitable here. Read every ask and related text/ANSI capture. Keep raw
+failures and REVIEW_REQUIRED separate from manual verdicts. The driver stays
+unchanged. This is metadata/control evidence, not live finding quality or
+complete grouped Review and learning acceptance.
+
+## J115: Complete grouped Review and exact member navigation
+
+Import sixty-five labeled observations on owned greeting data. One intercepted
+dedupe request proposes sixty-three links; shared prepared commands accept them
+as grouping metadata. Check two groups with sixty-five original findings, page
+all sixty-four duplicate members, read a selected member at 40x12 and open its
+exact generation in ordinary Review. Return with `G`, unlink that member's
+relationship with a reason, refresh stale grouping and recover three groups in
+no-color. No finding verdict, rekey, new scan job or live provider request is
+permitted. Read every ask and related text/ANSI capture. Keep raw failures and
+REVIEW_REQUIRED separate from manual judgments. The driver is unchanged.
+
+## J116: Selected run history and displayed observations
+
+Record three labeled observations of one owned greeting. Select the middle
+observation's parent Scan receipt. Grouped Review must show one finding,
+explicitly distinguish selected history from its latest displayed observation,
+and retain that distinction when opening a member, returning and restarting.
+Read both identities at 40x12 through paging and inspect no-color recovery.
+The real ledger, authenticated receipt reader and prepared group dispatch run
+without a model. The fixture records no finding verdict or rekey and executes
+no source. Keep raw REVIEW_REQUIRED separate from manual judgments.
+
+## J117: Bounded atomic relationship review
+
+Record four labeled greeting observations and three duplicate proposals.
+Explicitly select the page, inspect each captured pair, require a reason and
+preview the final confirmation before any write. Read the receipt at 40x12.
+Accept the selection in one event, then attempt a held unlink batch after a
+separate review changes one relationship. The entire stale batch must refuse.
+Cancel, clear, refresh and review a fresh selection before unlinking it.
+No-color restart must retain all observations and reviewed relationships.
+The real writer, prepared dispatch and TUI run without a provider or source
+execution. Read every ask and related text/ANSI capture; raw review status
+remains separate from the manual judgment.
+
+## J126: Exact agentic discovery with inherited context
+
+Use owned source files and an accepted boundary with one discovery file and one
+shared context file. Inspect the frozen three-pass, one-worker plan before
+starting it. The native OAuth bridge uses intercepted transport and returns
+two model turns per pass. It must read the shared context, refuse an unapproved
+file, mount only Read/LS/Glob/Grep, and retain observations outside discovery
+without importing them into the findings ledger. Inspect recurrence, a human
+FP decision, allowance accounting, detailed Report at six terminal sizes, and
+no-color restart. Six calls are approved within an eight-call allowance with
+two protected for Review. No live inference, accepted Map, source execution,
+recursive jobs, or SHA transition is demonstrated by this fixture. Read every
+ask and authenticated text/ANSI capture. Preserve raw REVIEW_REQUIRED status
+separately from implementation judgments. The driver stays unchanged.
+
+## J127: Operator-selected finite scope study
+
+Mark two accepted discovery boundaries in the scope tree. Open one study,
+choose the constrained agentic engine, inspect the selected workload, set an
+eight-call shared allowance with two protected for Review, and approve exactly
+six jobs. Run three fresh passes per boundary on owned source with fully
+intercepted transport. Check per-scope three-pass recurrence, the unplanned
+integration boundary, durable human decisions, Report at six sizes, and
+no-color restart. No live inference, accepted Map, source execution, recursive
+work, SHA transition or scanner precision claim is supported. Read every ask
+and authenticated capture. Preserve raw harness status separately from scoped
+implementation judgments. The driver stays unchanged.
+
+## J128: Per-boundary context associations
+
+Select two accepted boundaries and open Source and context. Inspect an exact
+revision, edit an inactive copy for one boundary, inspect and select that copy,
+and explicitly omit context for the sibling. Check the common context, original
+objects and sources stay unchanged. Review six viewport sizes, prepare and
+approve the six-job draft with an eight-call allowance and two protected Review
+calls, then restore inheritance for the overridden boundary. Check that the
+new plan requires separate approval and retains the original accounting.
+Restart without color and inspect the restored exact references and source
+provenance. No jobs, model requests or source execution are performed. Read
+each ask and authenticated capture; preserve the raw human-review status.
+
+## J129: Accepted file-group context generation
+
+Mark two accepted boundaries, including a group with disjoint paths. Preserve
+an explicit sibling context omission while planning one bounded context
+synthesis for the selected group. Review the model, source, inheritance and
+shared allowance at six sizes. Approve one context job and run the real native
+executor with fully intercepted transport. Check that only selected discovery
+and shared-context excerpts reach the request, with no tools or repair call.
+Restart without color, recover the result and the full scope draft, inspect its
+DFD and source identity, and explicitly associate the revision with one boundary.
+Prepare the six-job discovery draft and prove it is still unapproved and
+unstarted, with shared spending and sibling omission intact. No live inference,
+source execution or scanner-quality claim is supported. Read each ask and
+authenticated capture separately from the machine checks.
+
+## J130: Nine-boundary allowance halt and explicit resume
+
+Prepare eight primary boundaries and one explicitly enabled shared discovery
+boundary, with three fresh passes each and one worker. Approve four provider
+calls with two protected for Review. Run two owned intercepted requests, verify
+that 25 jobs remain unstarted, and refuse resume under the exhausted allowance.
+Inspect the ninth boundary and frozen contexts at all six terminal sizes.
+Acknowledge the partial result, inspect Report, and restart without color.
+Explicitly approve a 29-call ceiling for the same 27 jobs, then resume the
+remaining work. Bounded observation checkpoints watch the same dispatcher;
+they neither retry work nor extend its allowance. Confirm three observations
+per boundary and two protected Review calls still available. Preserve raw
+human-review status. No live inference or source execution is performed.
+
+## J131: Nine-boundary Stop and interrupted accounting
+
+Launch the same 27-job plan with owned intercepted transport. Keep the second
+request waiting, invoke the visible Stop action, and type a composer draft
+while cancellation settles. Verify transport children exit, one pass completed,
+one attempt interrupted, and 25 jobs remain unstarted. Preserve both committed
+calls and the unresolved active reservation. Inspect the partial result and
+Report, restart without color, and prove recovery launches no work. Machine
+input latency checks and separately read captures establish only the observed
+fixture behavior. They do not establish reference parity, live model quality,
+or complete monorepo coverage. The journey driver stays unchanged.
+
+## J132: Complete job identity and narrow Report reading
+
+Use the owned halted nine-boundary plan. Navigate to the final integration
+trial after restoring the cleared composer draft with Ctrl+_. Resize through
+all six sizes and verify the
+selected job remains distinct, with paused-work controls still visible. Open
+the partial Report, page its entire 40x12 projection, and verify every boundary
+can be read. Confirm source, fixed jobs and committed calls remain unchanged.
+All transport is intercepted; this reader regression starts no further work.
+Read both human questions independently from machine substring checks.
+
+## J133: Per-case historical spending scenarios
+
+Run six native jobs over two owned discovery boundaries with fully intercepted
+transport. Keep integration discovery unplanned while its shared file provides
+context. Prepare a second six-job plan using the first study as explicit usage
+evidence. Verify three matched complete samples per case, a six-request
+historical scenario, and unavailable dollar cost. Inspect the selectable prior
+study and cancel across all six terminal sizes. Review a proposed 14-call
+allowance beside six prior commitments, two protected Review calls and six
+remaining discovery calls. Cancel approval, restart without color and inspect
+the same frozen evidence. Assert no additional model requests or jobs started.
+Read the four human questions and authenticated captures separately from raw
+machine checks. The harness driver stays unchanged.
+
+## J134: Cold prior-study history and failure recovery
+
+Create owned prior receipts with six intercepted requests, 150 unstarted study
+copies and one malformed record. Open the scope tree, mark two boundaries and
+choose Usage evidence without visiting Campaign. Verify direct background
+history loading, explicit selection, the retained prior study and partial-history
+disclosure across all six sizes, including actual 40x12 paging. Temporarily make
+the owned history directory unreadable as a directory, refresh, inspect the
+failure with the previous selection retained, restore it and refresh again.
+Cancel and select explicitly without approving or starting new jobs. Restart
+without color and repeat the cold path. Assert source files and the original
+six requests remain unchanged. Read the four human questions separately from
+machine checks; raw `REVIEW_REQUIRED` remains unchanged.
+
+## J135: Suppression module contracts and consumers
+
+Import two labeled observations over owned comment-only source, record one
+human dismissal, and exercise suppression add, list, remove and expiry through
+the native shell. Inspect Review at all six sizes and restart without color.
+Shared dispatch must retain both observations and the human decision. Exports
+must reflect the managed rule state, and the implicit report must retain the
+import analysis rather than an auxiliary review action. Check canonical paging,
+missing rule identifiers and unknown options without any scanner, provider
+request or source execution. Read the four human questions independently of
+the raw machine verdict. The journey driver stays unchanged.
+
+## J136: Bounded preparation inputs and recorded engine facts
+
+Use an owned stalled version-probe fixture to exercise automatic study
+preparation failure. Verify the dependency check stops, no plan is published,
+and the draft and source remain intact. Wait past the temporary banner expiry
+and verify that the failure remains readable until dismissal. Inspect it at six sizes and
+expand its narrow reader with z, page its full failure and return to the same
+draft. Replace the owned helper with a successful version
+probe and create one oversized sparse CPG file; preparation must refuse its
+comparison identity before jobs or requests exist. Prepare a new explicit
+Semgrep plan only after dismissing the retained failure, using native dispatch
+and an owned metadata-only executable. Its limits and navigation must remain intact.
+Open its Source panel and inspect its actual recorded path and digest at all
+six sizes, including expanded keyboard reading at 40x12 and return to the
+original selected setting and scroll. Restart without color, open the selected
+section reader again and retain the
+same unapproved fixed plan. No scanner or model request is executed. Read
+the five human questions separately from machine checks and keep the raw
+review status. The journey driver stays unchanged.
+
+## J137: Study Source sections
+
+Prepare an unapproved three-job plan over owned comment-only source using a
+metadata-only executable that is never run. Inspect Source Overview without a
+raw options document, switch to recorded Inputs, then read complete prepared
+Options. Tab and Shift+Tab preserve the selected field, draft and separate
+positions; z expands the current view and returns to the form. Inspect all six
+sizes, every prepared-option key through 40x12 paging, and no-color restart.
+Preparation and view changes start no scanner or model request. The native
+receipt, source hash and absence of a queue are authoritative. Read the three
+human questions independently of raw REVIEW_REQUIRED. Run sequentially before
+the J136 preparation regression; the driver stays unchanged.
+
+## J138: Credential readiness
+
+Use isolated, clearly synthetic OAuth metadata and an owned comment-only target.
+Select model-backed Map work without starting it. Inspect an expired token with
+a refresh token through Setup, Health and the credential chooser. Remove the
+refresh token and verify repair blocks model-backed Setup. Inspect a locally
+unexpired token as stored and unverified, then restart without color. All six
+sizes must preserve the selected model, credential state and complete recovery
+explanation. Confirm exit explicitly for the unsaved test selection. Verify that
+source, credential bytes and allowance are unchanged and secret values never
+appear in captures. No sign-in, refresh, model request or scanner runs. Read
+the five human questions separately from raw REVIEW_REQUIRED; the driver stays
+unchanged.
+
+
+## J164: Compact campaign recovery in a finite native investigation
+
+Use an isolated home and owned inert package/header metadata. Enter normal
+Setup, import and accept its supplied context, then approve three license-policy
+jobs with one worker and all provider-call capacity protected for Review.
+Introduce an inert source comment change and inspect the real dispatcher refusal
+at all six viewport sizes. At 40x12, inspect the expanded reader, return to the
+composer, retain a draft through navigation and the command palette, then page
+through the complete failure. Restore exact source bytes, execute the original
+three jobs, review the consolidated policy finding, export and restart without
+color. Inspect each judgment separately from machine results. No model request,
+credential renewal, source execution, exploitation or vulnerability patching is
+part of this journey. The harness stays unchanged.
+
+## J165: Complete Campaign overview and policy receipts
+
+Follow J164's owned finite package-policy investigation with an isolated home,
+accepted imported context, three approved one-attempt jobs and one worker.
+After real completion, inspect the Campaign overview at all six sizes and page
+through the full identity, frozen workers, reported cost, plan policy and
+occurrence evidence at 40x12. Preserve visible actions and selected jobs.
+Inspect the same overview after no-color restart, then confirm the retained
+Review decision and exported report. Judge reading and hierarchy separately
+from machine checks. No provider request, real credential renewal, source
+execution, exploitation or vulnerability patching occurs. The driver stays
+unchanged.
+
+## J166: Finite planning and protected allowance capacity
+
+Seed only owned inert package/header metadata in an isolated home. Use real
+shared CLI dispatch to draft three policy jobs and one context-generation job,
+approve the exact policy plan, and refuse stale revisions, wrong digests,
+invalid limits, unknown options and source drift. Start no jobs or model work.
+Inspect allowance through the shell and transcript reader at all six sizes,
+including complete 40x12 paging and no-color restart. Show capacity available
+outside protected Review/Report and disclose unavailable legacy run evidence.
+Verify unchanged source, exact approval, zero observations/reservations/work
+attempts/decisions and absent dispatcher queues. Keep genuine Map acceptance
+uncreated. Judge the three screen questions separately from machine checks.

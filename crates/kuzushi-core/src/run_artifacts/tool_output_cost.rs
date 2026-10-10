@@ -9,6 +9,7 @@ use serde_json::Value;
 /// must agree, malformed or invalid money is rejected, and an output with no
 /// cost claim is `UNAVAILABLE` rather than an inferred zero.
 pub fn tool_run_output_cost_report(output: &Value) -> Result<RuntimeCostReport> {
+    validate_data_cost_scope(output)?;
     let exact = mirrored_cost(output, "costUsd")?;
     let observed = mirrored_cost(output, "observedCostUsd")?;
     let unresolved = mirrored_bool(output, "providerSpendUnresolved")?.unwrap_or(false);
@@ -32,6 +33,16 @@ pub fn tool_run_output_cost_report(output: &Value) -> Result<RuntimeCostReport> 
         (None, None) => RuntimeCostReport::UNAVAILABLE,
         (Some(_), Some(_)) => unreachable!("contradictory cost fields rejected above"),
     })
+}
+
+fn validate_data_cost_scope(output: &Value) -> Result<()> {
+    if let Some(scope) = output.get("dataCostScope") {
+        anyhow::ensure!(
+            scope == "projection",
+            "Unsupported tool-result dataCostScope"
+        );
+    }
+    Ok(())
 }
 
 fn mirrored_cost(output: &Value, key: &str) -> Result<Option<RuntimeCost>> {
@@ -76,6 +87,7 @@ fn mirrored_values<'a>(output: &'a Value, key: &str) -> Vec<(&'static str, &'a V
     }
     if let Some(value) = output
         .get("data")
+        .filter(|_| output.get("dataCostScope").and_then(Value::as_str) != Some("projection"))
         .and_then(Value::as_object)
         .and_then(|data| data.get(key))
         .filter(|value| !value.is_null())
@@ -89,6 +101,23 @@ fn mirrored_values<'a>(output: &'a Value, key: &str) -> Vec<(&'static str, &'a V
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn historical_projection_never_becomes_current_execution_spend() {
+        let data = json!({"totalCostUsd":1.0,"providerSpendUnresolved":true});
+        assert!(tool_run_output_cost_report(&json!({"data":data})).is_err());
+        let mut output = json!({"data":data,"dataCostScope":"projection"});
+        assert!(tool_run_output_cost_report(&output)
+            .unwrap()
+            .is_unavailable());
+        output["costUsd"] = json!(0.25);
+        assert_eq!(
+            tool_run_output_cost_report(&output).unwrap().exact_usd(),
+            Some(0.25)
+        );
+        output["dataCostScope"] = json!(true);
+        assert!(tool_run_output_cost_report(&output).is_err());
+    }
 
     #[test]
     fn parses_exact_incomplete_and_unavailable_states() {

@@ -372,10 +372,22 @@ mod selector_tests {
         let lineage_error = error(root.path(), missing_model.as_str());
         let malformed_error = error(root.path(), "latest");
 
-        assert!(revision_error.contains("as a revision id across 1 lineage"), "{revision_error}");
-        assert!(revision_error.contains(missing_revision.as_str()), "{revision_error}");
-        assert!(lineage_error.contains("as a lineage id (head revision)"), "{lineage_error}");
-        assert!(malformed_error.contains("neither a threat-model lineage id"), "{malformed_error}");
+        assert!(
+            revision_error.contains("as a revision id across 1 lineage"),
+            "{revision_error}"
+        );
+        assert!(
+            revision_error.contains(missing_revision.as_str()),
+            "{revision_error}"
+        );
+        assert!(
+            lineage_error.contains("as a lineage id (head revision)"),
+            "{lineage_error}"
+        );
+        assert!(
+            malformed_error.contains("neither a threat-model lineage id"),
+            "{malformed_error}"
+        );
     }
 
     fn commit(root: &Path, threat: &str, model_id: Option<ThreatModelId>) -> ThreatModelRef {
@@ -385,7 +397,10 @@ mod selector_tests {
     }
 
     fn error(root: &Path, selector: &str) -> String {
-        format!("{:#}", load_threat_model_by_selector(root, selector).unwrap_err())
+        format!(
+            "{:#}",
+            load_threat_model_by_selector(root, selector).unwrap_err()
+        )
     }
 
     fn document(threat: &str) -> Value {

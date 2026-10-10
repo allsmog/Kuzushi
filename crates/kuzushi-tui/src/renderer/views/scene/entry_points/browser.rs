@@ -72,7 +72,7 @@ fn render_browser(
 }
 
 pub(crate) fn entry_point_page_scroll(app: &crate::ShellApp, direction: i32) -> Option<usize> {
-    let area = super::super::gallery_layout::entry_point_browser_area(app)?;
+    let area = super::super::gallery_layout::gallery_body_area(app)?;
     let model = crate::ui_view_models::entry_point_breakdown(app);
     let selection = app
         .router

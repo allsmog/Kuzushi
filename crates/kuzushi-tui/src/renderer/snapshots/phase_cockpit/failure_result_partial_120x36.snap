@@ -4,7 +4,7 @@ contract: failure-path decision cards render honest outcome copy and recovery ac
 scenario: result_partial
 size: 120x36
 ---
-KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
+KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · repo index not built · model unconfigured
  Map ● · Scan ○ · Review × · Report
  ▸ NEXT acknowledge the partial Scan
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts

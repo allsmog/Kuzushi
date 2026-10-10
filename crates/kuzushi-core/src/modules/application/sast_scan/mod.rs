@@ -9,7 +9,7 @@ use crate::findings::StaticProofState;
 use crate::proof::whitebox_policy::{apply_whitebox_static_sast_policy, WhiteboxStaticPolicy};
 use crate::scan::{
     run_native_scan_files_with_cancellation, run_native_scan_with_cancellation,
-    scan_engines_for_tasks, select_default_scan_engines, DefaultScanEngineSelection,
+    scan_engines_for_tasks, select_default_scan_engines_checked, DefaultScanEngineSelection,
     NativeScanReport, ScanEngine, ScanRunOptions,
 };
 use anyhow::{Context, Result};
@@ -24,13 +24,17 @@ use serde_json::{json, Value};
 pub(in crate::modules) use taint_iris_next_hunt_input::*;
 mod findings_count;
 mod from_tasks;
+mod native_inspections;
 mod optional_positive_count;
 mod prompt_overrides;
+mod reconcile_completed_scan;
 mod run_sast_scan;
 mod run_sast_verification_and_patch;
 mod sastpipelinereports;
 mod scan_threat_model_lease;
 mod scope_guard;
+#[cfg(test)]
+mod secret_settings_tests;
 pub(in crate::modules) use scope_guard::{bind_sast_scope_input, requested_scope_contracts};
 #[cfg(test)]
 mod context_tests;

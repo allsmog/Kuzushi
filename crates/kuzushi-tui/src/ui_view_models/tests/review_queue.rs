@@ -21,6 +21,62 @@ fn finding(rule: &str, severity: Severity, line: u32) -> Finding {
     Finding::new_tool("semgrep", rule, "src/lib.rs", line, None, severity, rule)
 }
 
+#[test]
+fn partial_review_queue_names_loaded_and_matching_populations() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut()
+        .set_findings(vec![finding("loaded", Severity::High, 1)]);
+    app.domain_mut().set_findings_total_count(1000);
+    let queue = review_queue_model(&app, ReviewQueueMode::All);
+    assert!(
+        queue.header.contains("1 of 1000 matching findings loaded"),
+        "{}",
+        queue.header
+    );
+}
+
+#[test]
+fn empty_open_subset_never_claims_unloaded_findings_are_reviewed() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut().set_findings(vec![human_confirmed(
+        finding("loaded", Severity::High, 1),
+        0.9,
+    )]);
+    app.domain_mut().set_findings_total_count(1000);
+    let queue = review_queue_model(&app, ReviewQueueMode::Open);
+    assert!(queue
+        .empty_reason
+        .as_deref()
+        .unwrap()
+        .contains("loaded portion"));
+}
+
+#[test]
+fn review_ledger_filter_shortcut_loads_a_draft_in_navigation() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_workbench_page(WorkbenchPage::Review);
+    app.set_input_mode(InputMode::Navigate);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
+    app.reduce_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    assert_eq!(app.input(), "findings filter ");
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+}
+
+#[test]
+fn review_ledger_filter_shortcut_preserves_composer_editing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_workbench_page(WorkbenchPage::Review);
+    app.set_input_mode(InputMode::Prompt);
+    app.set_input("preserved draft");
+    app.set_cursor(0);
+    app.reduce_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    assert_eq!(app.input(), "preserved draft");
+    assert_eq!(app.cursor(), 1);
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+}
+
 fn confirmed(mut finding: Finding) -> Finding {
     finding.triage = Some(TriageOutcome {
         first_link: None,
@@ -403,7 +459,7 @@ fn zero_result_search_clamps_cursor_without_retargeting_pin() {
     let disclosure = review
         .selection_disclosure
         .expect("pinned finding disclosure");
-    assert_eq!(disclosure.filter, "search:no-such-result");
+    assert_eq!(disclosure.filter.as_deref(), Some("search:no-such-result"));
     assert!(disclosure.message.contains("outside"));
 }
 

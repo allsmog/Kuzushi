@@ -230,6 +230,7 @@ mod tool_policy_receipt_tests {
             read_roots: authorization.policy.mcp_read_roots.clone(),
             write_shell_tools_mounted: true,
             mcp_tools_mounted: false,
+            read_scope_sha256: None,
         };
 
         assert!(tool_policy_receipt(response(Some(receipt)), &authorization).is_err());
@@ -288,8 +289,36 @@ mod tool_policy_receipt_tests {
                 read_roots: vec![target.path().canonicalize().unwrap()],
                 write_shell_tools_mounted: false,
                 mcp_tools_mounted: false,
+                read_scope_sha256: None,
             }
         );
+    }
+
+    #[test]
+    fn ordinary_scoped_query_requires_its_executing_membership_acknowledgement() {
+        let target = tempfile::tempdir().unwrap();
+        let scope = kuzushi_core::runtime::AgentReadScope::new(["app/owned.rs".into()]).unwrap();
+        let authorization =
+            AgentToolPolicyAuthorization::read_only_scope(target.path(), scope).unwrap();
+        for acknowledges in [true, false] {
+            let script = format!(
+                r#"let b='';process.stdin.on('data',c=>b+=c);process.stdin.on('end',()=>{{let r=JSON.parse(b),a=r.authorization;let ack={{protocolVersion:a.protocolVersion,policyId:a.policyId,effectiveTools:a.policy.tools,readRoots:a.policy.mcpReadRoots,writeShellToolsMounted:false,mcpToolsMounted:false}};if({acknowledges})ack.readScopeSha256=a.policy.readScope.sha256;process.stdout.write(JSON.stringify({{ok:true,text:'bound',structured:null,error:null,toolPolicyAcknowledgement:ack}}))}})"#
+            );
+            let config = kuzushi_core::RuntimeConfig {
+                api_key_env: "OPENAI_API_KEY".into(),
+                langgraph_bridge_command: Some(vec!["node".into(), "-e".into(), script]),
+                ..Default::default()
+            };
+            let runtime = LangGraphRuntime::from_runtime_config(&config, target.path()).unwrap();
+            let request =
+                AgentQueryRequest::new("openai:gpt-test", target.path(), "system", "question")
+                    .with_tool_policy(authorization.policy.clone());
+            let result = runtime.query_blocking(request);
+            assert_eq!(result.is_ok(), acknowledges);
+            if let Err(error) = result {
+                assert!(error.to_string().contains("exact read membership"));
+            }
+        }
     }
 }
 
@@ -502,6 +531,11 @@ impl LangGraphRuntime {
         request: AgentQueryRequest,
         authorization: Option<AgentToolPolicyAuthorization>,
     ) -> Result<(BridgeResponse, String)> {
+        let authorization = match authorization {
+            Some(value) => Some(value),
+            None => AgentToolPolicyAuthorization::for_scoped_policy(&request.tool_policy)?,
+        };
+        let expected_authorization = authorization.clone();
         let model = request.model.clone();
         let credential = self.credential_for_model(&request.model)?;
         let request = bridge_request_from(self, request, credential, authorization);
@@ -513,6 +547,9 @@ impl LangGraphRuntime {
             self.response_text.as_ref(),
             self.allowance.as_ref(),
         )?;
+        if let Some(expected) = expected_authorization {
+            execution_tool_policy_receipt(&response, &expected)?;
+        }
         Ok((response, model))
     }
 

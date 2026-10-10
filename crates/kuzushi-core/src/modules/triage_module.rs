@@ -51,10 +51,7 @@ fn triage_chain_hunt_tool() -> ToolDescriptor {
 fn triage_dedupe_tool() -> ToolDescriptor {
     tool_with_options(
         "triage:dedupe",
-        "Model-driven corpus dedupe across all runs and tools: a judge proposes duplicate \
-         groups over the fingerprint-keyed ledger, low-confidence groups escalate to one \
-         code-reading confirmation pass, and confirmed duplicates rekey onto their canonical \
-         finding with a false_positive/duplicate verdict.",
+        "Propose duplicate relationships across recorded findings. An operator accepts or undoes relationships separately from finding verdicts.",
         dedupe_options(),
     )
 }
@@ -64,7 +61,7 @@ fn dedupe_options() -> Vec<OptionSpec> {
         opt(
             "maxGroups",
             OptionType::Int,
-            "Maximum accepted duplicate groups per run.",
+            "Maximum proposed duplicate groups per run.",
         )
         .aliases(&["max_groups"])
         .default(json!(16)),
@@ -87,10 +84,11 @@ fn dedupe_options() -> Vec<OptionSpec> {
         opt(
             "dryRun",
             OptionType::Bool,
-            "Report proposed duplicate groups without writing rekeys or verdicts.",
+            "Report duplicate candidates without recording relationship proposals.",
         )
         .aliases(&["dry_run"])
         .default(json!(false)),
+        opt("legacyRekey",OptionType::Bool,"Compatibility: use legacy identity rekeys and duplicate verdicts instead of reversible proposals.").default(json!(false)).advanced(),
         model_option(),
     ]
 }

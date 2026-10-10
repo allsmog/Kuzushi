@@ -16,6 +16,7 @@ mod patch_reverification;
 mod patch_status;
 mod persisted_results;
 mod proof_confidence;
+mod relationship;
 mod review_decision;
 mod static_proof_state;
 mod triage_outcome;
@@ -30,15 +31,17 @@ pub use extract_cwe::extract_cwe;
 pub(crate) use finding_identity::finding_identity_key_for_finding;
 pub(crate) use finding_identity::finding_identity_key_for_finding_at_target;
 pub use finding_identity::{
-    compute_finding_identity_id, finding_identity_alias, FindingIdentityBasis,
-    FindingIdentityMatchTier,
+    compute_finding_identity_id, finding_identity_alias, finding_observation_identity,
+    FindingIdentityBasis, FindingIdentityMatchTier,
 };
 pub use finding_record::{
     compute_class_dedup_key, compute_dedup_key, compute_root_cause_key, compute_source_signature,
-    is_attack_chain_finding, normalize_cwe, Finding, FindingEvidence, FindingObservationGap, FindingSource,
+    is_attack_chain_finding, normalize_cwe, Finding, FindingEvidence, FindingObservationGap,
+    FindingSource,
 };
 pub use from_semgrep::{Severity, VulnSource};
 pub(crate) use grounding::safe_target_path;
+pub(crate) use grounding::{ground_against_source, grounding_read_error};
 pub use grounding::{ground_finding_location, grounding_prompt_note, GroundingStatus};
 pub use identity_propagation::auto_triage_propagation_basis;
 pub(crate) use now_isoish::now_isoish;
@@ -57,6 +60,19 @@ pub use persisted_results::{
     VerificationProvenance,
 };
 pub use proof_confidence::ProofConfidence;
+pub use relationship::{
+    FindingRelationship, FindingRelationshipEndpoint, FindingRelationshipKind,
+    FindingRelationshipState, FINDING_RELATIONSHIP_SUBJECT,
+};
+mod lesson;
+mod relationship_batch;
+pub(crate) use lesson::FINDING_LESSON_SUBJECT;
+pub use lesson::{
+    FindingLesson, LessonContent, LessonGeneration, LessonOrigin, LessonRef, LessonState,
+};
+pub(crate) use relationship_batch::{
+    validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT,
+};
 pub use review_decision::{
     DismissReason, ReviewDecision, ReviewDecisionPropagation, ReviewDecisionProvenance,
     ReviewDecisionRecord, ReviewDecisionSubject, ReviewDecisionVerdict,

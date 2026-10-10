@@ -60,38 +60,6 @@ impl ShellApp {
         state.open = true;
         state.notice = Some("Review the suggested boundaries, uncovered files, overlap and input limitations. Acceptance remains separate from scan planning and spending.".into());
     }
-
-    pub(crate) fn refresh_scope_proposal_model(&mut self) {
-        let model = self.config().model.clone();
-        let Some(generation) = self
-            .router
-            .campaign_mut()
-            .batch_scan_config
-            .as_mut()
-            .and_then(|config| config.context_generation.as_mut())
-            .filter(|generation| generation.is_scope_proposal())
-        else {
-            return;
-        };
-        if generation.context_input["model"].as_str() == model.as_deref() {
-            return;
-        }
-        generation.bind_completed_scope_reference();
-        generation.receipt = None;
-        generation.campaign_id = None;
-        generation.generated_scopes = None;
-        generation.result_error = None;
-        match model {
-            Some(model) => generation.context_input["model"] = json!(model),
-            None => {
-                generation
-                    .context_input
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("model");
-            }
-        }
-    }
 }
 
 impl StudyContextGeneration {

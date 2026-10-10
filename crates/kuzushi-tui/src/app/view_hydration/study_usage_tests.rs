@@ -37,6 +37,91 @@ impl ViewArtifactReader for DelayedUsageReader {
     }
 }
 
+#[derive(Debug, Default)]
+struct DelayedHistoryReader(DelayedUsageReader);
+
+impl ViewArtifactReader for DelayedHistoryReader {
+    fn read(&self, target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue {
+        if key == &ViewHydrationKey::StudyHistory {
+            let _ = self.0.read(target, &ViewHydrationKey::StudyUsageCatalogue);
+        }
+        tests::missing_value(key)
+    }
+}
+
+#[test]
+fn direct_study_history_load_is_requested_only_for_an_open_picker_and_cancel_is_responsive() {
+    use crate::app::StudyResourcePicker;
+    let root = tempfile::tempdir().unwrap();
+    let reader = Arc::new(DelayedHistoryReader::default());
+    let mut app = study_app(root.path());
+    app.set_view_artifact_reader_for_test(reader.clone());
+    assert!(!active_view_hydration_keys(&app).contains(&ViewHydrationKey::StudyHistory));
+    study_config_mut(&mut app).resource_picker = Some(StudyResourcePicker {
+        choices: vec![],
+        cursor: 0,
+        scroll: 0,
+        history: ViewDataState::NotRequested,
+    });
+    assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::StudyHistory));
+    app.set_input("held history draft");
+    app.schedule_active_view_hydration();
+    wait_for(|| reader.0.entered.load(Ordering::Acquire));
+    let before = Instant::now();
+    app.handle_batch_config_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(before.elapsed() < Duration::from_millis(250));
+    assert!(app.study_resource_picker().is_none());
+    assert!(app.router.campaign().batch_scan_config.is_some());
+    assert_eq!(app.input(), "held history draft");
+    let origin = app.shell_view();
+    reader.0.release();
+    wait_for(|| reader.0.completed.load(Ordering::Acquire));
+    app.apply_view_hydration_results();
+    assert_eq!(app.shell_view(), origin);
+    assert!(app.study_resource_picker().is_none());
+}
+
+#[test]
+fn history_results_are_scoped_to_the_target_and_failures_remain_retryable() {
+    let root = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let mut app = study_app(root.path());
+    app.apply_view_hydration_drain(ViewHydrationDrain {
+        results: vec![ViewHydrationResult {
+            target: other.path().into(),
+            key: ViewHydrationKey::StudyHistory,
+            value: ViewHydrationValue::StudyHistory(Ok(Default::default())),
+        }],
+        failures: vec![],
+    });
+    assert!(app
+        .workbench_cache()
+        .borrow()
+        .cached_study_history(root.path())
+        .is_not_requested());
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: root.path().into(),
+            key: ViewHydrationKey::StudyHistory,
+            value: ViewHydrationValue::StudyHistory(Err("Owned failed history read".into())),
+        });
+    assert!(matches!(
+        app.workbench_cache()
+            .borrow()
+            .cached_study_history(root.path()),
+        ViewDataState::Ready(Err(_))
+    ));
+    app.workbench_cache()
+        .borrow_mut()
+        .invalidate_study_history(root.path());
+    assert!(app
+        .workbench_cache()
+        .borrow()
+        .cached_study_history(root.path())
+        .is_not_requested());
+}
+
 fn wait_for(mut check: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while !check() {

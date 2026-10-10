@@ -365,7 +365,7 @@ fn attemptless_pending_parked_and_prelaunch_failed_trials_remain_visible() {
     let report = derive_batch_occurrence_report(target.path(), "batch-test", &store).unwrap();
 
     assert_eq!((report.planned, report.completed), (3, 0));
-    assert_eq!((report.failed, report.pending), (2, 1));
+    assert_eq!((report.failed, report.pending), (1, 2));
     assert!(report.all_attempt_run_ids().is_empty());
 }
 
@@ -388,7 +388,9 @@ fn completed_trial_cannot_claim_success_without_an_authenticated_attempt() {
 
     let error = derive_batch_occurrence_report(target.path(), "batch-test", &store).unwrap_err();
 
-    assert!(error.to_string().contains("no authenticated attempt receipt"));
+    assert!(error
+        .to_string()
+        .contains("no authenticated attempt receipt"));
 }
 
 #[test]
@@ -410,7 +412,9 @@ fn attempt_counter_without_attempt_identity_fails_closed() {
 
     let error = derive_batch_occurrence_report(target.path(), "batch-test", &store).unwrap_err();
 
-    assert!(error.to_string().contains("attempts without attempt run ids"));
+    assert!(error
+        .to_string()
+        .contains("attempts without attempt run ids"));
 }
 
 #[test]
@@ -446,8 +450,8 @@ fn explicitly_abandoned_receiptless_attempt_remains_in_retry_history() {
 fn completed_trial_needs_one_non_abandoned_authenticated_attempt() {
     let target = tempfile::tempdir().unwrap();
     seed_batch_documents(target.path());
-    let path = crate::capabilities::campaign::campaign_dir(target.path(), "batch-test")
-        .join("queue.json");
+    let path =
+        crate::capabilities::campaign::campaign_dir(target.path(), "batch-test").join("queue.json");
     let mut queue: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     for attempt in queue["jobs"]["trial-001"]["attemptRuns"]
@@ -465,7 +469,9 @@ fn completed_trial_needs_one_non_abandoned_authenticated_attempt() {
 
     let error = derive_batch_occurrence_report(target.path(), "batch-test", &store).unwrap_err();
 
-    assert!(error.to_string().contains("no authenticated attempt receipt"));
+    assert!(error
+        .to_string()
+        .contains("no authenticated attempt receipt"));
 }
 
 #[test]

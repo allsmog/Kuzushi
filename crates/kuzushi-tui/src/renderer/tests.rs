@@ -24,6 +24,7 @@ use crate::ui_view_models::{
 use super::*;
 
 mod activity_reader;
+mod compact_notice;
 mod keymap_reader;
 mod prove_detail_controls;
 
@@ -1060,6 +1061,28 @@ fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
     assert!(rendered.contains("Deep threat map"));
     assert!(rendered.contains("▸ Quick map"));
     assert!(!rendered.contains("agentic-sast"));
+}
+
+#[test]
+fn catalog_compact_footer_keeps_move_load_and_back_controls() {
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_viewport(crate::app::TerminalViewport::new(40, 12));
+    app.set_target(Some(std::path::PathBuf::from(".")));
+    app.set_shell_view(ShellView::Workbench);
+    assert!(submit_shell_line(&mut app, "modules"));
+    app.move_catalog_cursor(2);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+    for control in [
+        "↑/↓ action",
+        "Enter load",
+        "Esc back",
+        "options recon:import",
+    ] {
+        assert!(rendered.contains(control), "missing {control}: {rendered}");
+    }
 }
 
 #[test]
@@ -2632,6 +2655,7 @@ fn renders_context_status_readably_at_80_columns() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
     app.set_shell_view(ShellView::Context);
 
@@ -2859,6 +2883,7 @@ fn plain_context_status_has_no_ansi_or_box_drawing() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
     app.set_shell_view(ShellView::Context);
 
@@ -3346,7 +3371,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("Enter open detail"), "{rendered}");
-    assert!(rendered.contains("j/k/↑/↓ move"), "{rendered}");
+    assert!(rendered.contains("Ctrl+F filter ledger"), "{rendered}");
     assert!(rendered.contains("Shift+Tab phase→"), "{rendered}");
     assert!(rendered.contains("] pane"), "{rendered}");
     assert!(rendered.contains("Tab/[/] pane"), "{rendered}");
@@ -3583,7 +3608,7 @@ fn recommend_view_renders_latest_recommendations_artifact() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("RECOMMEND"));
+    assert!(rendered.contains("GENERATED SUGGESTIONS"));
     assert!(rendered.contains("semgrep:scan"));
     assert!(rendered.contains("surface risk"));
     assert!(rendered.contains("1 high/critical"));
@@ -3689,6 +3714,12 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::ActorDetail, "ACTOR 0", None, None),
         (ShellView::Runs, "RUN TIMELINE", None, None),
         (ShellView::RunDiff, "RUN DIFF", None, None),
+        (
+            ShellView::Relationships,
+            "FINDING RELATIONSHIPS",
+            None,
+            None,
+        ),
         (ShellView::Replay, "REPLAY", None, None),
         (ShellView::Trace, "TRACE", None, None),
         (ShellView::Help, "HELP", None, None),
@@ -7372,7 +7403,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
         rendered.contains("checking durable map artifacts"),
         "un-hydrated Map shows the neutral placeholder, not an evidence verdict: {rendered}"
     );
-    assert!(rendered.contains("context:missing"), "{rendered}");
+    assert!(rendered.contains("repo index:missing"), "{rendered}");
     assert!(rendered.contains("context build"), "{rendered}");
 }
 

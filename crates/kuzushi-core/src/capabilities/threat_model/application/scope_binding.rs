@@ -79,9 +79,7 @@ pub(crate) fn root_scope() -> crate::workspace::NestedProjectScope {
     }
 }
 
-fn scope_tree_sha256(
-    tree: Option<&crate::workspace::NestedProjectScopeTree>,
-) -> Result<String> {
+fn scope_tree_sha256(tree: Option<&crate::workspace::NestedProjectScopeTree>) -> Result<String> {
     let fallback;
     let tree = match tree {
         Some(tree) => tree,

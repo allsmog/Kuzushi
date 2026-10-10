@@ -18,10 +18,39 @@ const MIN_KEYWORD_CHARS: usize = 4;
 /// Words too common in source to discriminate a vulnerable call site:
 /// language keywords and the request/response plumbing every handler has.
 const KEYWORD_STOPLIST: &[&str] = &[
-    "async", "await", "body", "class", "const", "default", "else", "export", "extends", "false",
-    "from", "function", "import", "interface", "next", "nextfunction", "null", "private",
-    "public", "request", "require", "response", "return", "self", "static", "that", "then",
-    "this", "true", "type", "undefined", "void", "with",
+    "async",
+    "await",
+    "body",
+    "class",
+    "const",
+    "default",
+    "else",
+    "export",
+    "extends",
+    "false",
+    "from",
+    "function",
+    "import",
+    "interface",
+    "next",
+    "nextfunction",
+    "null",
+    "private",
+    "public",
+    "request",
+    "require",
+    "response",
+    "return",
+    "self",
+    "static",
+    "that",
+    "then",
+    "this",
+    "true",
+    "type",
+    "undefined",
+    "void",
+    "with",
 ];
 
 /// What a confirmed finding contributes to its threat.
@@ -60,7 +89,8 @@ pub(crate) fn code_keywords(code: &str) -> Vec<String> {
 }
 
 fn is_distinctive(word: &str) -> bool {
-    word.len() >= MIN_KEYWORD_CHARS && !KEYWORD_STOPLIST.contains(&word.to_ascii_lowercase().as_str())
+    word.len() >= MIN_KEYWORD_CHARS
+        && !KEYWORD_STOPLIST.contains(&word.to_ascii_lowercase().as_str())
 }
 
 pub(crate) fn variant_pattern_json(seed: &VariantPatternSeed<'_>) -> Value {
@@ -86,7 +116,10 @@ fn call_site_code(code: &str) -> Option<String> {
 }
 
 fn is_function_declaration(line: &str) -> bool {
-    line.contains("=>") || line.split_whitespace().any(|word| word == "function" || word == "fn")
+    line.contains("=>")
+        || line
+            .split_whitespace()
+            .any(|word| word == "function" || word == "fn")
 }
 
 /// Append `pattern` to the threat unless its finding is already recorded or
@@ -95,7 +128,10 @@ pub(crate) fn record_variant_pattern(threat: &mut Value, pattern: Value) -> bool
     if !threat.get("variantPatterns").is_some_and(Value::is_array) {
         threat["variantPatterns"] = json!([]);
     }
-    let Some(patterns) = threat.get_mut("variantPatterns").and_then(Value::as_array_mut) else {
+    let Some(patterns) = threat
+        .get_mut("variantPatterns")
+        .and_then(Value::as_array_mut)
+    else {
         return false;
     };
     let duplicate = patterns
@@ -150,7 +186,16 @@ mod tests {
 
         assert_eq!(
             code_keywords(code),
-            vec!["models", "sequelize", "query", "SELECT", "Products", "WHERE", "name", "LIKE"]
+            vec![
+                "models",
+                "sequelize",
+                "query",
+                "SELECT",
+                "Products",
+                "WHERE",
+                "name",
+                "LIKE"
+            ]
         );
         assert!(code_keywords("return this").is_empty());
         assert!(code_keywords("import { UserModel } from '../models/user'")
@@ -171,7 +216,8 @@ mod tests {
 
     #[test]
     fn a_line_without_a_call_contributes_no_code() {
-        let pattern = variant_pattern_json(&seed("fp-2", Some("import * as utils from '../lib/utils'")));
+        let pattern =
+            variant_pattern_json(&seed("fp-2", Some("import * as utils from '../lib/utils'")));
 
         assert!(pattern["code"].is_null());
         assert_eq!(pattern["keywords"], json!([]));
@@ -182,9 +228,14 @@ mod tests {
     fn handler_declarations_and_request_plumbing_are_not_call_sites() {
         let handler = "return async (req: Request, res: Response, next: NextFunction) => {";
         assert!(variant_pattern_json(&seed("fp-4", Some(handler)))["code"].is_null());
-        assert!(variant_pattern_json(&seed("fp-5", Some("export function login(req) {")))["code"]
-            .is_null());
-        assert_eq!(code_keywords("render(req.body.next, response)"), vec!["render"]);
+        assert!(
+            variant_pattern_json(&seed("fp-5", Some("export function login(req) {")))["code"]
+                .is_null()
+        );
+        assert_eq!(
+            code_keywords("render(req.body.next, response)"),
+            vec!["render"]
+        );
     }
 
     #[test]
@@ -193,15 +244,24 @@ mod tests {
 
         let pattern = variant_pattern_json(&seed("fp-3", Some(snippet)));
 
-        assert_eq!(pattern["code"], "models.sequelize.query(`SELECT ${criteria}`)");
+        assert_eq!(
+            pattern["code"],
+            "models.sequelize.query(`SELECT ${criteria}`)"
+        );
     }
 
     #[test]
     fn a_threat_records_each_finding_once_up_to_its_cap() {
         let mut threat = json!({"id": "T-1"});
 
-        assert!(record_variant_pattern(&mut threat, variant_pattern_json(&seed("fp-1", None))));
-        assert!(!record_variant_pattern(&mut threat, variant_pattern_json(&seed("fp-1", None))));
+        assert!(record_variant_pattern(
+            &mut threat,
+            variant_pattern_json(&seed("fp-1", None))
+        ));
+        assert!(!record_variant_pattern(
+            &mut threat,
+            variant_pattern_json(&seed("fp-1", None))
+        ));
         for index in 2..=MAX_VARIANT_PATTERNS_PER_THREAT + 1 {
             let fingerprint = format!("fp-{index}");
             record_variant_pattern(&mut threat, variant_pattern_json(&seed(&fingerprint, None)));
@@ -212,6 +272,9 @@ mod tests {
             MAX_VARIANT_PATTERNS_PER_THREAT
         );
         let document = json!({"threats": [threat, {"id": "T-2"}]});
-        assert_eq!(threat_variant_patterns(&document).len(), MAX_VARIANT_PATTERNS_PER_THREAT);
+        assert_eq!(
+            threat_variant_patterns(&document).len(),
+            MAX_VARIANT_PATTERNS_PER_THREAT
+        );
     }
 }

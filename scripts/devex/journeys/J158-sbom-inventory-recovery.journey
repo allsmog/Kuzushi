@@ -1,0 +1,142 @@
+name: Dependency inventory updates Components, keeps honest failures and recovers without discovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | initial-gallery
+keys: Tab
+require-live-snap: 25 Component inventory failed | initial-failure
+expect: run sbom-scan:scan
+ask: Is the failed dependency inventory reachable with a concrete rerun command, without presenting old package data or phase completion?
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART repair
+submit: logs
+require-live-snap: 20 LOGS | repair-origin
+submit: run sbom-scan:scan
+require-live-snap: 35 sbom-scan: 2 components | inventory-produced
+submit: scene
+require-live-snap: 25 COMPONENT STACK | repaired-components
+expect: owned-library
+expect: declared ^1.0
+expect: 1.2.3
+expect: Source freshness is unverified
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART repaired
+ask: Does the actual tool result repair the cached failure and distinguish the declared constraint from observed lockfile versions without claiming current source freshness?
+keys: Escape
+expect-echo-within: 300 dependency-draft
+live-snap: preserved-draft
+nav-mode:
+keys: C-_
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART revise
+submit: logs
+require-live-snap: 20 LOGS | revised-origin
+submit: run sbom-scan:scan
+require-live-snap: 35 sbom-scan: 2 components | revised-inventory-produced
+submit: scene
+require-live-snap: 25 declared ^2.0 | revised-components
+expect: 2.2.3
+expect-not: declared ^1.0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART revised
+resize: 160x48
+live-snap: components-160x48
+resize: 96x89
+live-snap: components-96x89
+resize: 80x24
+live-snap: components-80x24
+resize: 60x20
+live-snap: components-60x20
+resize: 40x12
+live-snap: components-40x12
+expect: PgUp/PgDn page
+keys: NPage
+live-snap: components-page-1-40x12
+keys: NPage
+live-snap: components-page-2-40x12
+keys: NPage
+live-snap: components-page-3-40x12
+keys: NPage
+live-snap: components-page-4-40x12
+keys: NPage
+live-snap: components-page-5-40x12
+keys: NPage
+live-snap: components-page-6-40x12
+keys: NPage
+live-snap: components-page-7-40x12
+keys: NPage
+live-snap: components-page-8-40x12
+keys: NPage
+live-snap: components-page-9-40x12
+keys: NPage
+live-snap: components-page-10-40x12
+keys: NPage
+live-snap: components-page-11-40x12
+keys: NPage
+live-snap: components-page-12-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART pages
+ask: Are the inventory receipt, source-freshness limitation, manifest constraints and lockfile versions readable through keyboard paging across six terminal sizes?
+resize: 120x36
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART corrupt
+submit: logs
+require-live-snap: 20 LOGS | failed-origin
+submit: run sbom-scan:scan
+require-live-snap: 35 parse package.json | failed-run
+submit: scene
+require-live-snap: 25 Component inventory failed | failed-components
+expect: run sbom-scan:scan
+expect-not: owned-library
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART failed
+keys: g
+resize: 40x12
+live-snap: failure-40x12
+expect: PgUp/PgDn page
+keys: NPage
+live-snap: failure-page-1-40x12
+keys: NPage
+live-snap: failure-page-2-40x12
+keys: NPage
+live-snap: failure-page-3-40x12
+keys: NPage
+live-snap: failure-page-4-40x12
+keys: NPage
+live-snap: failure-page-5-40x12
+keys: NPage
+live-snap: failure-page-6-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART failure-pages
+resize: 120x36
+ask: Does a real failed rerun clear current package claims while retaining previous successful receipts and a visible recovery action?
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART repair
+submit: logs
+require-live-snap: 20 LOGS | recovery-origin
+submit: run sbom-scan:scan
+require-live-snap: 35 sbom-scan: 2 components | recovered-run
+submit: scene
+require-live-snap: 25 declared ^1.0 | recovered-components
+expect: 1.2.3
+expect-not: declared ^2.0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART recovered
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | restarted-gallery
+keys: Tab
+require-live-snap: 25 declared ^1.0 | restarted-components
+expect: 1.2.3
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_inventory.py @TMP_TARGET @ART restarted
+ask: Does no-color restart read the repaired repository again and retain all run receipts without provider calls, discovery jobs, source execution or manufactured workflow completion?
+keys: C-c
+require-exit: 10

@@ -1,0 +1,70 @@
+name: Bounded agentic preparation and honest partial source receipts
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/agentic_preparation.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | initialized
+submit: campaign preparation-study
+require-live-snap: 30 2 job(s) | fixed-plan
+nav-mode:
+keys: a
+require-live-snap: 30 APPROVED STUDY | approved-study
+expect: 2
+keys: Down Down Down
+require-live-snap: 30 Agentic preparation: snippet limit 1 | preparation-options
+expect: byte limit 64
+ask: Can the operator inspect the frozen preparation options and allowance before starting the two fixed jobs?
+keys: L
+require-live-snap: 30 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 30 dispatcher pid | running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/agentic_preparation.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 2 completed | completed
+keys: Escape
+submit: workbench
+wait: 0.5
+require-live-snap: 30 RESULT READY | result
+nav-mode:
+keys: u
+keys: Escape
+submit: report
+require-live-snap: 30 Scope: study preparation-study | report
+keys: p
+require-live-snap: 30 Plan digest: | report-details
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-1-40x12
+keys: NPage
+live-snap: report-page-2-40x12
+keys: NPage
+live-snap: report-page-3-40x12
+keys: NPage
+live-snap: report-page-4-40x12
+keys: NPage
+live-snap: report-page-5-40x12
+keys: NPage
+live-snap: report-page-6-40x12
+keys: NPage
+live-snap: report-page-7-40x12
+keys: NPage
+live-snap: report-page-8-40x12
+keys: NPage
+live-snap: report-page-9-40x12
+keys: NPage
+live-snap: report-tail-40x12
+ask: Are completion and unknown coverage distinguished, with the finite workload and protected spending retained?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/agentic_preparation.py @TMP_TARGET @ART report
+keys: C-c
+require-exit: 10

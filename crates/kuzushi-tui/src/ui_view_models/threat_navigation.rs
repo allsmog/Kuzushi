@@ -36,7 +36,7 @@ pub(crate) fn threat_nav_model(active: ThreatView) -> [ThreatNavItem; 6] {
         nav_item(active, ThreatView::Scope, "3 SCOPE"),
         nav_item(active, ThreatView::Summary, "4 SUMMARY"),
         nav_item(active, ThreatView::Versions, "5 VERSIONS"),
-        nav_item(active, ThreatView::Models, "MODELS"),
+        nav_item(active, ThreatView::Models, "6 MODELS"),
     ]
 }
 

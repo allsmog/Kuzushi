@@ -1,3 +1,5 @@
+use super::super::{ModuleRegistry, ToolPhase};
+
 #[cfg(test)]
 mod tests {
     use super::super::*;
@@ -117,22 +119,12 @@ mod tests {
         };
         let input = json!({});
 
-        let default = module.tool_executors["demo:default"](
-            &registry,
-            "demo:default",
-            &input,
-            &ctx,
-            None,
-        )
-        .unwrap();
-        let special = module.tool_executors["demo:special"](
-            &registry,
-            "demo:special",
-            &input,
-            &ctx,
-            None,
-        )
-        .unwrap();
+        let default =
+            module.tool_executors["demo:default"](&registry, "demo:default", &input, &ctx, None)
+                .unwrap();
+        let special =
+            module.tool_executors["demo:special"](&registry, "demo:special", &input, &ctx, None)
+                .unwrap();
 
         assert_eq!(default, json!("a"));
         assert_eq!(special, json!("b"));
@@ -147,10 +139,7 @@ mod tests {
                 .required()
                 .workspace_read()],
         )
-        .with_policy(read_policy(
-            ToolPhase::Scan,
-            WorkspaceRequirement::Required,
-        ));
+        .with_policy(read_policy(ToolPhase::Scan, WorkspaceRequirement::Required));
 
         assert_eq!(
             serde_json::to_value(descriptor).unwrap(),
@@ -317,5 +306,64 @@ mod tests {
             Some(json!(false))
         );
         assert_eq!(mcp_tool_timeout_ms_option().default, Some(json!(60000)));
+    }
+}
+#[test]
+fn campaign_tracking_and_legacy_planning_have_distinct_discovery_roles() {
+    let registry = ModuleRegistry::with_v2_builtins();
+    for name in ["campaign:status", "campaign:coverage"] {
+        assert_eq!(
+            registry.resolve_tool(name).unwrap().phase,
+            ToolPhase::Operate
+        );
+    }
+    assert!(registry.tool_is_discoverable("campaign:study"));
+    assert!(registry.tool_is_discoverable("campaign:status"));
+    for name in ["campaign:plan", "campaign:coverage"] {
+        assert!(
+            !registry.tool_is_discoverable(name),
+            "Legacy shard tools should not enter the default investigation workflow"
+        );
+        assert!(
+            registry.resolve_tool(name).is_some(),
+            "Exact dispatch remains available"
+        );
+    }
+}
+
+#[test]
+fn individual_tool_tiers_preserve_the_owner_ceiling_and_exact_catalog() {
+    use super::*;
+    let core = tool("tier:core", "Supported action");
+    let labs = core.clone().with_discovery_maturity(ModuleMaturity::Labs);
+    assert_eq!(
+        labs.effective_maturity(ModuleMaturity::Core),
+        ModuleMaturity::Labs
+    );
+    assert_eq!(
+        core.effective_maturity(ModuleMaturity::Labs),
+        ModuleMaturity::Labs
+    );
+    assert_eq!(
+        core.effective_maturity(ModuleMaturity::Compatibility),
+        ModuleMaturity::Compatibility
+    );
+    assert!(serde_json::to_value(&core)
+        .unwrap()
+        .get("discoveryMaturity")
+        .is_none());
+    let encoded = serde_json::to_value(&labs).unwrap();
+    assert_eq!(encoded["discoveryMaturity"], "labs");
+    assert_eq!(
+        serde_json::from_value::<ToolDescriptor>(encoded).unwrap(),
+        labs
+    );
+    assert_ne!(core, labs);
+    let registry = ModuleRegistry::with_v2_builtins();
+    for name in ["campaign:plan", "campaign:coverage"] {
+        assert!(registry
+            .catalog_tools_with_modules()
+            .any(|(_, tool)| tool.name == name));
+        assert!(!registry.discoverable_tools().any(|tool| tool.name == name));
     }
 }

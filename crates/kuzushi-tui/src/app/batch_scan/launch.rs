@@ -26,7 +26,33 @@ pub(super) fn study_input(
     if let Some(run) = &config.prior_run_id {
         input["baselineRunId"] = serde_json::json!(run);
     }
+    bind_brief_input(&mut input, config);
+    if let Some(campaign) = &config.prior_campaign_id {
+        input["resourceBaselineCampaignId"] = serde_json::json!(campaign);
+    }
+    if let Some(run) = &config.study.context_baseline_run_id {
+        input["contextBaselineRunId"] = serde_json::json!(run);
+    }
+    bind_matrix_input(&mut input, config);
+    super::scope_study::bind_scope_input(&mut input, config);
     Ok(input)
+}
+
+pub(super) fn bind_brief_input(input: &mut serde_json::Value, config: &BatchScanConfig) {
+    if let Some(brief) = &config.study.brief {
+        input["briefRef"] = serde_json::json!(brief.reference);
+    }
+}
+
+fn bind_matrix_input(input: &mut serde_json::Value, config: &BatchScanConfig) {
+    if !config.study.matrix.cases.is_empty() {
+        input["contextCases"] = serde_json::json!(config.study.matrix.cases);
+        input["baselineCaseId"] = serde_json::json!(config.study.matrix.baseline_case_id);
+        if let Some(object) = input["scanInput"].as_object_mut() {
+            object.remove("threatModelRef");
+            object.remove("threat_model_ref");
+        }
+    }
 }
 
 pub(super) fn resolve_config_workers(
@@ -35,12 +61,13 @@ pub(super) fn resolve_config_workers(
     config: &BatchScanConfig,
 ) -> Result<BatchWorkerResolution> {
     initialized_workspace(target)?;
-    let prepared_input = configured_scan_input(app, config)?;
+    let prepared_input =
+        super::scope_study::picker_input(config, configured_scan_input(app, config)?);
     resolve_batch_workers(
         app.registry(),
         &prepared_input,
         config.requested_workers,
-        config.trials,
+        super::scope_study::job_count(config),
     )
 }
 

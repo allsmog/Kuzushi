@@ -1,7 +1,7 @@
 use super::*;
 use crate::capabilities::threat_model::{
-    commit_threat_model_revision, load_active_threat_model, threat_model_object_path,
-    ScopeRef, ThreatModelCommit, ThreatModelRevisionSource,
+    commit_threat_model_revision, load_active_threat_model, threat_model_object_path, ScopeRef,
+    ThreatModelCommit, ThreatModelRevisionSource,
 };
 use serde_json::json;
 
@@ -25,10 +25,23 @@ fn selected_revision_and_explicit_absence_ignore_later_activation() {
     let first = commit_test_model(root.path(), "accepted-a");
     let second = commit_test_model(root.path(), "accepted-b");
     let selected = ThreatModelSelection::from_input(&json!({"threatModelRef": first})).unwrap();
-    assert_eq!(load_selected_threat_model(root.path(), &selected).unwrap().unwrap()["title"], "accepted-a");
+    assert_eq!(
+        load_selected_threat_model(root.path(), &selected)
+            .unwrap()
+            .unwrap()["title"],
+        "accepted-a"
+    );
     let none = ThreatModelSelection::from_input(&json!({"threatModelRef": null})).unwrap();
-    assert!(load_selected_threat_model(root.path(), &none).unwrap().is_none());
-    assert_eq!(load_active_threat_model(root.path()).unwrap().unwrap().model_ref, second);
+    assert!(load_selected_threat_model(root.path(), &none)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        load_active_threat_model(root.path())
+            .unwrap()
+            .unwrap()
+            .model_ref,
+        second
+    );
 }
 
 #[test]
@@ -38,7 +51,10 @@ fn explicit_reference_never_falls_back_after_missing_or_corrupt_objects() {
     commit_test_model(root.path(), "accepted-b");
     let path = threat_model_object_path(root.path(), &first.sha256).unwrap();
     std::fs::write(&path, b"{}").unwrap();
-    assert!(load_exact_threat_model(root.path(), &first).unwrap_err().to_string().contains("SHA verification"));
+    assert!(load_exact_threat_model(root.path(), &first)
+        .unwrap_err()
+        .to_string()
+        .contains("SHA verification"));
     std::fs::remove_file(path).unwrap();
     assert!(load_exact_threat_model(root.path(), &first).is_err());
 }
@@ -48,13 +64,25 @@ fn reference_digest_must_match_the_recorded_revision() {
     let root = tempfile::tempdir().unwrap();
     let mut first = commit_test_model(root.path(), "accepted-a");
     first.sha256 = format!("sha256:{}", "0".repeat(64));
-    assert!(load_exact_threat_model(root.path(), &first).unwrap_err().to_string().contains("immutable object verification"));
+    assert!(load_exact_threat_model(root.path(), &first)
+        .unwrap_err()
+        .to_string()
+        .contains("immutable object verification"));
 }
 
 #[test]
 fn malformed_and_conflicting_references_are_errors() {
     assert!(ThreatModelSelection::from_input(&json!({"threatModelRef": "active"})).is_err());
-    assert!(ThreatModelSelection::from_input(&json!({"threatModelRef": null, "threat_model_ref": {}})).is_err());
-    assert!(matches!(ThreatModelSelection::from_input(&json!({"threat_model_ref": null})).unwrap(), ThreatModelSelection::None));
-    assert!(matches!(ThreatModelSelection::from_input(&json!({})).unwrap(), ThreatModelSelection::Active));
+    assert!(ThreatModelSelection::from_input(
+        &json!({"threatModelRef": null, "threat_model_ref": {}})
+    )
+    .is_err());
+    assert!(matches!(
+        ThreatModelSelection::from_input(&json!({"threat_model_ref": null})).unwrap(),
+        ThreatModelSelection::None
+    ));
+    assert!(matches!(
+        ThreatModelSelection::from_input(&json!({})).unwrap(),
+        ThreatModelSelection::Active
+    ));
 }

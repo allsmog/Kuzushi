@@ -59,10 +59,7 @@ pub fn import_ledger_jsonl(
         .with_context(|| format!("Could not read findings ledger {}", path.display()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = ledger_import_run_id(tool_label, &body);
-    let grounding = LedgerGrounding::for_target(workspace.root());
-    let (imported, skipped) = store.with_run_lifecycle(&run_id, workspace.root(), || {
-        persist_ledger_rows(&store, &run_id, &body, tool_label, &grounding)
-    })?;
+    let (imported, skipped) = import_or_replay(&store, workspace, &run_id, &body, tool_label)?;
     Ok(LedgerImportSummary {
         run_id,
         imported,
@@ -70,6 +67,34 @@ pub fn import_ledger_jsonl(
         source_path: path.display().to_string(),
         tool: tool_label.to_string(),
     })
+}
+
+fn import_or_replay(
+    store: &FindingStore,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    body: &str,
+    tool_label: &str,
+) -> Result<(usize, usize)> {
+    if store.run_status(run_id)?.as_deref() == Some("completed") {
+        return Ok(ledger_row_counts(body));
+    }
+    let grounding = LedgerGrounding::for_target(workspace.root());
+    store.with_run_lifecycle(run_id, workspace.root(), || {
+        persist_ledger_rows(store, run_id, body, tool_label, &grounding)
+    })
+}
+
+fn ledger_row_counts(body: &str) -> (usize, usize) {
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .fold((0, 0), |(valid, skipped), line| {
+            match parse_ledger_row(line) {
+                Some(_) => (valid + 1, skipped),
+                None => (valid, skipped + 1),
+            }
+        })
 }
 
 /// Deterministic, content-addressed import run id. Same ledger bytes + tool
@@ -80,6 +105,14 @@ pub(crate) fn ledger_import_run_id(tool_label: &str, body: &str) -> String {
         &[tool_label.as_bytes(), body.as_bytes()],
     );
     format!("ledger-{}", &hash.as_str()[..16])
+}
+
+/// Recognize the reserved content-addressed import namespace, which records
+/// external history and does not establish a local discovery scan.
+pub fn is_ledger_import_run_id(value: &str) -> bool {
+    value.strip_prefix("ledger-").is_some_and(|suffix| {
+        suffix.len() == 16 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 fn persist_ledger_rows(

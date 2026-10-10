@@ -1,0 +1,88 @@
+name: Exact context history selection, full inspection, baseline comparison and recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: threats summary
+require-live-snap: 20 6 MODELS | visible-history-entry
+keys: 6
+require-live-snap: 20 b baseline | history
+expect: Beta · revision 1 · active
+expect: Alpha · revision 1
+ask: Does history distinguish keyboard selection from the active context, with inspection, baseline comparison and explicit writes visible?
+keys: Home b End c
+require-live-snap: 25 Reviewed overview α | complete-compare
+expect: Before:
+expect: After:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART compared
+ask: Can the operator compare Alpha to the inactive reviewed copy without entering identifiers or changing the active context?
+resize: 160x48
+live-snap: compare-160x48
+resize: 96x89
+live-snap: compare-96x89
+resize: 80x24
+live-snap: compare-80x24
+resize: 60x20
+live-snap: compare-60x20
+resize: 40x12
+live-snap: compare-40x12
+keys: NPage
+live-snap: compare-page-40x12
+keys: End
+live-snap: compare-end-40x12
+keys: Up
+live-snap: compare-up-from-end-40x12
+ask: Do all six sizes retain readable text and visible controls, with usable paging and an honest coverage disclosure?
+keys: Escape
+live-snap: selected-copy-40x12
+resize: 120x36
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-copy
+keys: Tab End
+require-live-snap: 20 Second line | full-document-end
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART inspected
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART hide-copy
+keys: Enter
+require-live-snap: 25 Attention: | missing-object
+expect: Enter retries
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART return-copy
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | retried-copy
+keys: Tab End
+require-live-snap: 20 Second line | retried-document-end
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART retried
+ask: Does a missing immutable object remain an actionable error, with explicit retry of the same revision and no substitution?
+keys: Escape
+require-live-snap: 20 b baseline | before-activation
+keys: Home
+require-live-snap: 20 Alpha · revision 1 · inactive | selected-alpha
+keys: a
+require-live-snap: 25 Activated Alpha · revision 1. | activated
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART activated
+keys: r
+require-live-snap: 25 Restored Alpha · revision 1 | restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART restored
+ask: Are activation and restore visibly explicit, do they preserve selection and original objects, and does restore append a new active revision?
+paste-file: @ART/operator-draft.txt
+require-live-snap: 20 preserved draft α | preserved-composer
+ask: Does paste leave the history reader and preserve the exact operator draft without submitting it?
+keys: C-u
+submit: threats models
+require-live-snap: 20 b baseline | reopened
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: threats models
+require-live-snap: 20 b baseline | no-color-history
+resize: 40x12
+live-snap: no-color-history-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_history.py @TMP_TARGET @ART recovered
+ask: Does no-color restart retain the restored active revision and accessible history without new provider work?
+keys: C-c
+require-exit: 10

@@ -1,0 +1,87 @@
+name: Context uses one bounded inventory and discloses sampling, Git scope and stale source
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: run context:build {"sampleLimit":1,"enrichment":false}
+require-live-snap: 35 run receipt | context-produced
+submit: context status
+require-live-snap: 25 Enumeration: Git tracked files | context-receipt
+expect: Untracked source is outside
+expect: Sample: 1 of 2
+expect: 262144
+expect: in part: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART built
+ask: Does the actual native context result distinguish tracked enumeration, one sampled file, the partial per-file inspection and source freshness without claiming complete repository coverage or running a model?
+submit: run context:build {"sampleLimit":0}
+require-live-snap: 25 must be at least 1, got 0 | invalid-limit
+submit: context status
+require-live-snap: 25 Enumeration: Git tracked files | retained-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART invalid
+resize: 160x48
+live-snap: context-160x48
+resize: 96x89
+live-snap: context-96x89
+resize: 80x24
+live-snap: context-80x24
+resize: 60x20
+live-snap: context-60x20
+resize: 40x12
+live-snap: context-40x12
+keys: NPage
+live-snap: context-page-1-40x12
+keys: NPage
+live-snap: context-page-2-40x12
+keys: NPage
+live-snap: context-page-3-40x12
+keys: NPage
+live-snap: context-page-4-40x12
+keys: NPage
+live-snap: context-page-5-40x12
+keys: NPage
+live-snap: context-page-6-40x12
+keys: NPage
+live-snap: context-page-7-40x12
+keys: NPage
+live-snap: context-page-8-40x12
+keys: NPage
+live-snap: context-page-9-40x12
+keys: NPage
+live-snap: context-page-10-40x12
+keys: NPage
+live-snap: context-page-11-40x12
+keys: NPage
+live-snap: context-page-12-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART pages
+ask: Are all receipt values and recovery controls readable through the supported keyboard controls across six viewport sizes?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART drift
+submit: context status
+require-live-snap: 25 snapshot content tree differs | stale-context
+submit: run context:build {"scope":"app-model"}
+require-live-snap: 25 current deterministic snapshot | refused-stale-slice
+submit: context status
+require-live-snap: 25 snapshot content tree differs | retained-stale-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART stale
+ask: Does invalid input or stale-slice regeneration leave the prior bytes intact and give an explicit recovery action, without switching a runtime or model?
+submit: run context:build {"scope":"repo","sampleLimit":2}
+require-live-snap: 35 Sample: 2 of 2 | explicit-rebuild
+submit: context status
+require-live-snap: 25 Sample: 2 of 2 | rebuilt-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART rebuilt
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: context status
+require-live-snap: 25 Sample: 2 of 2 | recovered-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_inventory.py @TMP_TARGET @ART recovered
+ask: Does no-color restart retain the rebuilt source binding and inspection receipt with no additional work or automatic acceptance?
+keys: C-c
+require-exit: 10

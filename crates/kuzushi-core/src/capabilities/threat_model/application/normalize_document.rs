@@ -129,7 +129,10 @@ pub(crate) fn sort_threats_by_risk(threats: &mut [Value]) {
 
 fn threat_risk_rank(threat: &Value) -> (u8, u8) {
     let field = |key: &str| threat.get(key).and_then(Value::as_str).unwrap_or("");
-    (impact_rank(field("impact")), likelihood_rank(field("likelihood")))
+    (
+        impact_rank(field("impact")),
+        likelihood_rank(field("likelihood")),
+    )
 }
 
 fn impact_rank(impact: &str) -> u8 {
@@ -222,7 +225,9 @@ fn normalize_mitigation_row(row: Value, warnings: &mut Vec<String>) -> Option<Va
         Value::String(text) => Some(json!({"mitigation": text, "threatIds": []})),
         Value::Object(fields) => Some(structured_mitigation(fields, warnings)),
         other => {
-            warnings.push(format!("dropped malformed recommendedMitigations row {other}"));
+            warnings.push(format!(
+                "dropped malformed recommendedMitigations row {other}"
+            ));
             None
         }
     }
@@ -274,7 +279,9 @@ fn mitigation_closes_class(
     fields: &Map<String, Value>,
     warnings: &mut Vec<String>,
 ) -> Option<Value> {
-    let raw = fields.get("closesClass").or_else(|| fields.get("closes_class"))?;
+    let raw = fields
+        .get("closesClass")
+        .or_else(|| fields.get("closes_class"))?;
     if let Some(flag) = raw.as_bool() {
         return Some(json!(if flag { "yes" } else { "partial" }));
     }

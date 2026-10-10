@@ -1,0 +1,92 @@
+name: Explicit atomic review of a bounded relationship selection
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py prepare @TMP_TARGET @ART
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: relationships
+require-live-snap: 25 FINDING RELATIONSHIPS | proposals
+require-live-snap: 25 3 relationships | loaded-proposals
+keys: Escape
+require-live-snap: 20 RELATIONSHIPS · PgUp/PgDn details · Esc back | navigation-owner
+type: *
+require-live-snap: 25 3 selected | selected-page
+keys: A
+require-live-snap: 20 REVIEW 3 RELATIONSHIPS | review-selection
+keys: ] Enter
+require-live-snap: 20 SELECTED FINDING | recorded-source
+keys: G
+require-live-snap: 20 REVIEW 3 RELATIONSHIPS | returned-review
+expect: Inspecting destination
+keys: j
+live-snap: second-pair
+keys: j
+live-snap: third-pair
+ask: Does the bulk reader expose exactly three captured relationship revisions and let the operator inspect each pair without implying finding confirmation?
+keys: a
+require-live-snap: 20 Reason (required) | empty-reason
+keys: Enter
+require-live-snap: 20 Enter a reason | reason-required
+paste-file: @ART/accept-note.txt
+keys: Enter
+require-live-snap: 20 CONFIRM Accept 3 | acceptance-confirmation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py pending @TMP_TARGET @ART
+ask: Does the confirmation show the target, exact revisions, reason, zero model calls and independent finding verdicts before any write?
+resize: 40x12
+live-snap: narrow-confirmation
+keys: PageDown
+live-snap: narrow-terms
+keys: PageDown
+live-snap: narrow-reason
+keys: PageDown
+live-snap: narrow-captured-selection
+ask: At 40x12 are the confirmation terms and reason readable through paging, with the action and cancel owner always clear?
+resize: 120x36
+keys: Home
+keys: Enter
+require-live-snap: 25 Duplicate · Accepted | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py accepted @TMP_TARGET @ART
+type: *
+keys: A
+require-live-snap: 20 REVIEW 3 RELATIONSHIPS | unlink-review
+keys: u
+paste-file: @ART/unlink-note.txt
+keys: Enter
+require-live-snap: 20 CONFIRM Unlink 3 | unlink-confirmation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py stale-write @TMP_TARGET @ART
+keys: Enter
+require-live-snap: 25 Relationship selection changed | stale-refusal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py stale @TMP_TARGET @ART
+ask: Does one stale relationship refuse the entire held batch and preserve its reason and captured versions, with no partially unlinked prefix?
+keys: Escape
+require-live-snap: 20 Unlink 3 relationships · reason | retained-reason
+keys: Escape
+require-live-snap: 20 REVIEW 3 RELATIONSHIPS | retained-review
+keys: Escape
+require-live-snap: 20 FINDING RELATIONSHIPS | returned-browser
+keys: c R
+require-live-snap: 25 Duplicate · Rejected | refreshed
+type: *
+keys: A
+require-live-snap: 20 REVIEW 3 RELATIONSHIPS | reviewed-refresh
+keys: u
+paste-file: @ART/unlink-note.txt
+keys: Enter
+require-live-snap: 20 CONFIRM Unlink 3 | fresh-unlink-confirmation
+keys: Enter
+require-live-snap: 25 Duplicate · Removed | removed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py removed @TMP_TARGET @ART
+ask: Does explicit review of the fresh selection atomically unlink all three while retaining four observations and all independent finding verdicts?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: relationships
+require-live-snap: 25 Duplicate · Removed | recovered
+require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py restarted @TMP_TARGET @ART
+ask: Does no-color restart preserve all reviewed relationships and observations without another model call or automatic finding decision?
+keys: C-c
+require-exit: 10

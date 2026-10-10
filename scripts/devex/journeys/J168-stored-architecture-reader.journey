@@ -1,0 +1,98 @@
+name: Bounded stored architecture reports and honest unknown provenance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_reader.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_reader.py @TMP_TARGET @ART before
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup-unaccepted
+expect-not: Map ✓
+submit: run x-ray:read
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Recorded report tier: READY | stored-report
+expect: Source freshness: not assessed
+expect: Original generation spend
+expect: unknown
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | stored-reader
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+keys: End
+live-snap: report-tail-40x12
+keys: PPage
+live-snap: report-page-1-40x12
+keys: PPage
+live-snap: report-page-2-40x12
+keys: PPage
+live-snap: report-page-3-40x12
+keys: PPage
+live-snap: report-page-4-40x12
+keys: PPage
+live-snap: report-page-5-40x12
+keys: PPage
+live-snap: report-page-6-40x12
+keys: PPage
+live-snap: report-page-7-40x12
+keys: PPage
+live-snap: report-page-8-40x12
+keys: PPage
+live-snap: report-page-9-40x12
+keys: PPage
+live-snap: report-page-10-40x12
+keys: PPage
+live-snap: report-page-11-40x12
+ask: Can the recorded tier, parsed counts, unassessed freshness, unknown generation spend and artifact locations be read at every size without implying current source evidence?
+keys: q
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_reader.py @TMP_TARGET @ART broken
+submit: run x-ray:read
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 missing or has unsafe required artifact | missing-artifact
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_reader.py @TMP_TARGET @ART restore
+submit: run x-ray:read
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Recorded report tier: READY | recovered-report
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-after-read
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_reader.py @TMP_TARGET @ART verify
+ask: Does a missing required artifact fail honestly, with deliberate restoration recovering the reader while Map remains unaccepted?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted-setup
+expect-not: Map ✓
+submit: run x-ray:read
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Original generation spend | restarted-report
+expect: unknown
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_reader.py @TMP_TARGET @ART verify
+ask: Does no-color restart preserve the same manually supplied report and unknown provenance without model, scanner, decision or Map work?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

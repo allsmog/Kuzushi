@@ -1,10 +1,25 @@
 pub use application::scan_reassessment_block;
 mod application;
 mod domain;
+pub(crate) use domain::FINDING_LESSON_SUBJECT;
+pub(crate) use domain::{validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT};
+pub use domain::{
+    FindingLesson, LessonContent, LessonGeneration, LessonOrigin, LessonRef, LessonState,
+};
+pub use persistence::FindingLessonPage;
 pub mod import;
 pub mod ingest_contract;
-mod persistence;
+pub(crate) mod persistence;
+pub use domain::{
+    FindingRelationship, FindingRelationshipEndpoint, FindingRelationshipKind,
+    FindingRelationshipState, FINDING_RELATIONSHIP_SUBJECT,
+};
 pub mod presentation;
+pub use application::{
+    read_finding_groups, read_finding_groups_cancellable, FindingGroupDiagnostics,
+    FindingGroupMember, FindingGroupsPage, FindingGroupsRequest, FindingReviewGroup,
+};
+pub use persistence::FindingRelationshipPage;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -19,19 +34,20 @@ pub use application::{
 pub use application::{
     audit_finding_identities, compare_scan_runs, decision_is_review_actionable,
     derive_batch_gate_binding, derive_batch_occurrence_report,
-    derive_batch_occurrence_report_for_controller, derive_cross_tool_cluster_report,
-    derive_reviewed_refutation_report, finding_confidence_label, finding_cwe_label,
-    finding_evidence_preview, finding_is_review_actionable, finding_location,
+    derive_batch_occurrence_report_for_controller, derive_context_matrix_occurrence_report,
+    derive_cross_tool_cluster_report, derive_reviewed_refutation_report, finding_confidence_label,
+    finding_cwe_label, finding_evidence_preview, finding_is_review_actionable, finding_location,
     finding_projection_key, finding_remediation_hint, finding_source_label, finding_verdict_label,
-    project_finding, review_decision_history_for, review_verdict_is_actionable, severity_badge,
-    severity_icon, BatchOccurrenceReport, BatchOccurrenceRow, BatchTrialReport, ComparedFinding,
-    CrossToolCandidateCluster, CrossToolClusterBasis, CrossToolClusterMember,
-    CrossToolClusterReport, EffectiveReviewDecision, EffectiveReviewStateIndex,
-    FindingIdentityAuditApprovalReceipt, FindingIdentityAuditApprovalRequest,
-    FindingIdentityAuditDisposition, FindingIdentityAuditEvidence, FindingIdentityAuditGroup,
-    FindingIdentityAuditGroupDisposition, FindingIdentityAuditIssueKind,
-    FindingIdentityAuditReport, FindingProjection, IdentityFoldPolicy,
-    IdentityPolicyApprovalStatus, IdentityPolicyDefaults, RefutationCohortFact,
+    project_finding, read_context_matrix_occurrence_report, review_decision_history_for,
+    review_verdict_is_actionable, severity_badge, severity_icon, BatchOccurrenceReport,
+    BatchOccurrenceRow, BatchTrialReport, ComparedFinding, ContextCaseOccurrenceReport,
+    ContextMatrixOccurrenceReport, CrossToolCandidateCluster, CrossToolClusterBasis,
+    CrossToolClusterMember, CrossToolClusterReport, EffectiveReviewDecision,
+    EffectiveReviewStateIndex, FindingIdentityAuditApprovalReceipt,
+    FindingIdentityAuditApprovalRequest, FindingIdentityAuditDisposition,
+    FindingIdentityAuditEvidence, FindingIdentityAuditGroup, FindingIdentityAuditGroupDisposition,
+    FindingIdentityAuditIssueKind, FindingIdentityAuditReport, FindingProjection,
+    IdentityFoldPolicy, IdentityPolicyApprovalStatus, IdentityPolicyDefaults, RefutationCohortFact,
     RefutationCohortKey, RefutationPopulation, RefutationPopulationStats, ReviewDecisionConflict,
     ReviewedRefutationCohort, ReviewedRefutationPrior, ReviewedRefutationReport,
     ScanComparisonClass, ScanFindingSignature, ScanRunComparison, ScanUncertainMatch,
@@ -45,23 +61,33 @@ pub(crate) use application::{
     FindingReviewGate, GenericPersistedRun, ReviewConfirmation, ToolFindingsSink,
     MISSING_CONFIRMATION_GUIDANCE,
 };
+pub use application::{
+    derive_scope_study_occurrence_report, read_scope_study_occurrence_report,
+    ScopeStudyOccurrenceReport,
+};
+pub use application::{
+    finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
+    read_finding_page, FindingListPage, FindingPageAnchorMissing, FindingPageMetadata,
+    FindingPageOrder, FindingPageRequest,
+};
 #[cfg(test)]
 pub(crate) use domain::test_verified_receipt;
 pub(crate) use domain::{
-    all_components_deterministic, is_deterministic_scanner, is_runtime_proof_state, now_isoish,
-    safe_target_path, tool_components,
+    all_components_deterministic, ground_against_source, grounding_read_error,
+    is_deterministic_scanner, is_runtime_proof_state, now_isoish, safe_target_path,
+    tool_components,
 };
 pub use domain::{
     auto_triage_propagation_basis, compute_dedup_key, compute_root_cause_key,
-    compute_source_signature, derive_triage_state, extract_cwe, ground_finding_location,
-    grounding_prompt_note, is_attack_chain_finding, normalize_cwe, ConfidenceBand, DismissReason,
-    Finding, FindingEvidence, FindingIdentityBasis, FindingObservationGap, FindingSource,
-    FindingTriageState, GroundingStatus, PatchAttempt, PatchAttemptSummary,
-    PatchDetectorReplayOutcome, PatchEmpiricalOutcome, PatchLifecycleFile, PatchLifecycleRecord,
-    PatchLifecycleState, PatchProvenance, PatchResult, PatchReverificationCaseKind,
-    PatchReverificationFileHash, PatchReverificationReceipt, PatchReverificationStep,
-    PatchReverificationTarget, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision,
+    compute_source_signature, derive_triage_state, extract_cwe, finding_observation_identity,
+    ground_finding_location, grounding_prompt_note, is_attack_chain_finding, normalize_cwe,
+    ConfidenceBand, DismissReason, Finding, FindingEvidence, FindingIdentityBasis,
+    FindingObservationGap, FindingSource, FindingTriageState, GroundingStatus, PatchAttempt,
+    PatchAttemptSummary, PatchDetectorReplayOutcome, PatchEmpiricalOutcome, PatchLifecycleFile,
+    PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult,
+    PatchReverificationCaseKind, PatchReverificationFileHash, PatchReverificationReceipt,
+    PatchReverificationStep, PatchReverificationTarget, PatchStatus, PersistedProofVerdict,
+    PersistedSandboxBackend, PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision,
     ReviewDecisionPropagation, ReviewDecisionProvenance, ReviewDecisionRecord,
     ReviewDecisionSubject, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
     StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,

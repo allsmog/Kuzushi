@@ -558,7 +558,10 @@ pub fn accepts_scope(scope: &str) -> bool {
         assert!(output.contains(&target));
         assert!(output.contains("partial — inadequate evidence"));
         assert!(output.contains("previous model preserved"));
-        assert!(output.contains("Cost:     cost unavailable (metering incomplete)"), "{output}");
+        assert!(
+            output.contains("Cost:     cost unavailable (metering incomplete)"),
+            "{output}"
+        );
         assert!(!output.contains("Cost:     >=$0.0000"), "{output}");
         assert!(!output.contains("threat-model:build complete"));
         let lifecycle = crate::run_lifecycle::read_run_items(workspace.root(), run_id)
@@ -13045,7 +13048,10 @@ pub fn accepts_scope(scope: &str) -> bool {
             )
             .unwrap_err();
 
-        assert!(format!("{error:#}").contains("below minCoverage 0.5"), "{error:#}");
+        assert!(
+            format!("{error:#}").contains("below minCoverage 0.5"),
+            "{error:#}"
+        );
         assert!(
             crate::capabilities::threat_model::try_load_persistent_threat_model(temp.path())
                 .unwrap()

@@ -82,7 +82,7 @@ fn run_native_scan_on_roots(
     workspace.ensure_state_dir()?;
 
     let run_id = scan_run_id(options);
-    store.with_run_lifecycle_status(&run_id, workspace.root(), || {
+    store.with_scan_lifecycle_before_receipt(&run_id, workspace.root(), || {
         settle_native_scan(
             workspace,
             store,

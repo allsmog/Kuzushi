@@ -54,6 +54,15 @@ pub(crate) fn indexed_review_decision_complete(
     effective_review_decision_complete(finding, decision.as_ref())
 }
 
+pub(crate) fn source_qualified_review_complete(
+    app: &crate::ShellApp,
+    finding: &Finding,
+    decision: Option<&EffectiveReviewDecision>,
+) -> bool {
+    effective_review_decision_complete(finding, decision)
+        && !app.domain().review_source_needs_reassessment(finding)
+}
+
 pub(crate) fn review_confidence_label(finding: &Finding) -> String {
     finding
         .triage

@@ -26,9 +26,11 @@ pub struct CampaignRouteState {
     /// cleared when the campaign selection changes).
     pub(crate) excluded: BTreeSet<String>,
     pub(crate) workers: usize,
-    /// Pid of the dispatcher THIS deck launched (kill target for `K`).
+    /// Pid of the dispatcher THIS deck launched (Stop target for `K`).
     /// Dispatchers started elsewhere are visible only through queue state.
     pub(crate) dispatcher_pid: Option<u32>,
+    pub(crate) dispatcher_stop_requested: bool,
+    pub(crate) dispatcher_failure: Option<(std::path::PathBuf, String, String)>,
     pub(crate) notice: Option<String>,
     /// Workspace-level effectiveness trend (FP rate, cost per confirmed),
     /// refreshed with the deck and on Report entry; `None` until a target
@@ -58,6 +60,8 @@ impl Default for CampaignRouteState {
             excluded: BTreeSet::new(),
             workers: CAMPAIGN_DEFAULT_WORKERS,
             dispatcher_pid: None,
+            dispatcher_stop_requested: false,
+            dispatcher_failure: None,
             notice: None,
             trend: None,
             trend_history: Vec::new(),
@@ -70,6 +74,12 @@ impl Default for CampaignRouteState {
 }
 
 impl CampaignRouteState {
+    pub(crate) fn has_dispatcher_failure_notice(&self) -> bool {
+        self.dispatcher_failure
+            .as_ref()
+            .is_some_and(|(_, _, message)| self.notice.as_ref() == Some(message))
+    }
+
     pub(crate) fn selected_campaign(&self) -> Option<&CampaignSnapshot> {
         self.campaigns.get(self.selected_campaign)
     }

@@ -155,6 +155,7 @@ impl ShellApp {
         match self.prepare_background_tool_input(tool_name, input, workspace) {
             Ok(input) => Some(input),
             Err(error) => {
+                self.context_history_failed(tool_name, &error.to_string());
                 self.log(
                     "error",
                     with_next_step(error.to_string(), "tools, options <tool>, or run <tool> {}"),

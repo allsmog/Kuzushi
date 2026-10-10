@@ -1,0 +1,45 @@
+name: Curated operational tools and honest historical shard progress
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/module_audit_readers.py @TARGET @ART before
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | recovered-investigation
+submit: coverage
+wait: 0.5
+require-live-snap: 30 HISTORICAL SHARD PROGRESS | historical-progress
+expect: 6 preparation, unclassified or non-shard job(s) excluded
+expect: not repository coverage
+nav-mode:
+ask: Does the historical reader disclose excluded modern studies and avoid claiming source coverage or inventing a column?
+resize: 160x48
+live-snap: progress-160x48
+resize: 96x89
+live-snap: progress-96x89
+resize: 80x24
+live-snap: progress-80x24
+resize: 60x20
+live-snap: progress-60x20
+resize: 40x12
+live-snap: progress-40x12
+keys: NPage
+wait: 0.2
+live-snap: progress-page-1-40x12
+keys: NPage
+wait: 0.2
+live-snap: progress-page-2-40x12
+keys: NPage
+wait: 0.2
+live-snap: progress-tail-40x12
+ask: Is the compatibility reader readable by paging at all six sizes, with historical limitations and the supported study/report route reachable?
+resize: 120x36
+keys: Escape
+submit: report
+require-live-snap: 30 4 committed / 6 calls | original-investigation-report
+expect: 2 reviewed
+expect: 4 producer observations
+require-shell: python3 -B @REPO/scripts/devex/fixtures/module_audit_readers.py @TARGET @ART after
+ask: Does Report retain the original scan, decisions and budget after operational reads, without model requests or new scan work?
+keys: C-c
+require-exit: 10

@@ -45,26 +45,13 @@ fn x_ray_agent_request(input: &XRayRunInput, prompt: String) -> AgentQueryReques
     })
 }
 
-pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let target = resolve_target(&input, ctx)?;
-    let repo_name = repo_name(&target);
-    let data = read_x_ray_report_artifacts(&target, Some(&repo_name), "rust", 0.0)?;
-    x_ray_response(
-        render_x_ray_read_summary(&data),
-        json!(data),
-        &data,
-        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
-    )
-}
-
-fn x_ray_response(
+pub(super) fn x_ray_response(
     output: String,
     data: Value,
     report: &XRayReportData,
     cost: crate::runtime::RuntimeCostReport,
 ) -> Result<Value> {
-    let mut result =
-        crate::module_result::completed_output_result(output.clone(), output, data);
+    let mut result = crate::module_result::completed_output_result(output.clone(), output, data);
     result["artifacts"] = json!([
         { "label": "x-ray", "path": report.artifact_paths.x_ray },
         { "label": "entry points", "path": report.artifact_paths.entry_points },
@@ -102,7 +89,10 @@ fn finish_x_ray_run(
     x_ray_response(render_x_ray_run_summary(&data), data_json, &data, cost)
 }
 
-fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_x_ray_start(
+    ctx: &ToolExecutionContext<'_>,
+    input: &XRayRunInput,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -122,7 +112,10 @@ fn emit_x_ray_progress(
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return;
     };
-    let _ = trace.child(parent).step("tool-progress", "run", label.into()).emit();
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "run", label.into())
+        .emit();
 }
 
 fn begin_x_ray_agent_scope(

@@ -58,7 +58,7 @@ fn render_shell_app(frame: &mut Frame<'_>, app: &ShellApp) {
     if full.height == 0 || full.width == 0 {
         return;
     }
-    if render_priority_overlay(frame, app) {
+    if render_priority_overlay(frame, app) || super::campaign_reader::render(frame, app) {
         return;
     }
 
@@ -84,6 +84,8 @@ fn render_priority_overlay(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
         || super::allowance_review::render_allowance_review(frame, app)
         || super::scope_review::render_scope_review(frame, app)
         || super::study_config::render_study_config(frame, app)
+        || super::context_history::render(frame, app)
+        || super::logs_reader::render(frame, app)
 }
 
 /// Splits the full frame into (body, rail): the context rail takes a

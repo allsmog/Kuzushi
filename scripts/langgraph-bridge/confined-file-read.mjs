@@ -20,10 +20,10 @@ export function canonicalPathWithinRoots(path, roots) {
   return pathIsWithinRoots(canonical, roots) ? canonical : null;
 }
 
-export function readConfinedText(path, roots, maxBytes, afterValidation) {
+export function readConfinedText(path, roots, maxBytes, afterValidation, authorizeOpenedPath) {
   const fd = openSync(path, secureReadFlags());
   try {
-    const stats = validateOpenedFile(fd, path, roots);
+    const stats = validateOpenedFile(fd, path, roots, authorizeOpenedPath);
     if (maxBytes !== null && stats.size > BigInt(maxBytes)) return null;
     afterValidation?.();
     return maxBytes === null ? readFileSync(fd, "utf8") : readBoundedText(fd, maxBytes);
@@ -39,10 +39,11 @@ function secureReadFlags() {
   return constants.O_RDONLY | constants.O_NOFOLLOW;
 }
 
-function validateOpenedFile(fd, path, roots) {
+function validateOpenedFile(fd, path, roots, authorizeOpenedPath) {
   const opened = fstatSync(fd, { bigint: true });
   if (!opened.isFile()) throw new Error("workspace read target is not a regular file");
   const canonical = openedCanonicalPath(fd, path, roots);
+  authorizeOpenedPath?.(canonical, path);
   const rebound = statSync(canonical, { bigint: true });
   if (!sameFileIdentity(opened, rebound)) {
     throw new Error("workspace read target changed during authorization");

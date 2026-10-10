@@ -47,6 +47,10 @@ fn compact_reading_hides_transcript(app: &ShellApp, height: u16) -> bool {
         || (app.shell_view() == ShellView::Scene && height < 20)
 }
 
+pub(crate) fn compact_gallery_notice(app: &ShellApp, height: u16) -> bool {
+    app.shell_view() == ShellView::Scene && height <= 12
+}
+
 pub(crate) fn keybind_footer_chrome_height(
     app: &ShellApp,
     terminal_height: u16,

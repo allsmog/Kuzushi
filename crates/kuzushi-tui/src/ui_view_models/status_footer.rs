@@ -28,9 +28,7 @@ pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
 /// The operator's ceiling must survive truncation of routing and diagnostics.
 fn leading_footer_segments(app: &ShellApp) -> Vec<String> {
     let mut segments = Vec::new();
-    if !setup_is_in_progress(app) {
-        segments.extend(autonomy_footer_segment(app));
-    }
+    segments.extend(autonomy_footer_segment(app));
     segments.push(routing_mode_segment(app));
     segments
 }
@@ -80,11 +78,10 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
-    let onboarding = setup_is_in_progress(app);
     [
         attention_footer_segment(app),
         notification_availability_footer_segment(app),
-        (!onboarding).then(|| journey_footer_segment(app)).flatten(),
+        journey_footer_segment(app),
         review_conflict_footer_segment(app),
         workspace_stale_footer_segment(app),
     ]
@@ -93,11 +90,10 @@ fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
 }
 
 fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
-    let onboarding = setup_is_in_progress(app);
     [
         attention_footer_segment(app),
         notification_availability_footer_segment(app),
-        (!onboarding).then(|| journey_footer_segment(app)).flatten(),
+        journey_footer_segment(app),
         scope_footer_segment(app),
         project_scope_footer_segment(app),
         review_conflict_footer_segment(app),
@@ -114,11 +110,6 @@ fn attention_footer_segment(app: &ShellApp) -> Option<String> {
 fn notification_availability_footer_segment(app: &ShellApp) -> Option<String> {
     (app.ui().notify_enabled() && app.ui().terminal_focus() == crate::app::FocusState::Unknown)
         .then(|| "notify:unavailable · focus unknown".to_string())
-}
-
-fn setup_is_in_progress(app: &ShellApp) -> bool {
-    matches!(app.shell_view(), ShellView::TargetPicker | ShellView::Setup)
-        || app.router.setup().editor().is_some()
 }
 
 fn scope_footer_segment(app: &ShellApp) -> Option<String> {

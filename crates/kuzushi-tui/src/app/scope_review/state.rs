@@ -10,6 +10,7 @@ pub(crate) struct ScopeReviewState {
     pub open: bool,
     pub review: Option<Arc<ScanScopeReview>>,
     pub cursor: usize,
+    pub study_scope_ids: std::collections::BTreeSet<String>,
     pub scroll: usize,
     pub menu: Option<usize>,
     pub merge_target: Option<usize>,
@@ -29,6 +30,7 @@ impl ScopeReviewState {
             open: true,
             review: None,
             cursor: 0,
+            study_scope_ids: Default::default(),
             scroll: 0,
             menu: None,
             merge_target: None,
@@ -43,6 +45,13 @@ impl ScopeReviewState {
     }
 
     pub fn install(&mut self, review: ScanScopeReview) {
+        self.study_scope_ids.retain(|id| {
+            review
+                .coverage
+                .discovery_members
+                .get(id)
+                .is_some_and(|members| members.total > 0)
+        });
         let selected = self.selected_id().map(str::to_owned);
         self.cursor = selected
             .and_then(|id| scope_ids(&review).position(|next| next == id))
@@ -100,6 +109,7 @@ pub(crate) enum ScopeEditKind {
     Split,
     Exclude,
     ExcludePath,
+    IncludePath,
     Boundary,
 }
 

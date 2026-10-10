@@ -7,8 +7,8 @@
 //! paired by an identical display `id` and counted as re-keyed. DFD elements
 //! are matched by `id`.
 
-use serde::Serialize;
 use rekey::{display_id_rekeys, ThreatRekey};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -168,8 +168,16 @@ fn diff_threats(from: &Value, to: &Value) -> ThreatSetDiff {
     let mut changed = changed_threats(&before, &after);
     changed.extend(rekeys.iter().filter_map(ThreatRekey::change));
     ThreatSetDiff {
-        added: missing_from(&after, &before, &rekeys.iter().map(|r| r.to_key.clone()).collect()),
-        removed: missing_from(&before, &after, &rekeys.iter().map(|r| r.from_key.clone()).collect()),
+        added: missing_from(
+            &after,
+            &before,
+            &rekeys.iter().map(|r| r.to_key.clone()).collect(),
+        ),
+        removed: missing_from(
+            &before,
+            &after,
+            &rekeys.iter().map(|r| r.from_key.clone()).collect(),
+        ),
         changed,
         rekeyed: rekeys.len(),
         unkeyed: UnkeyedThreatCounts {

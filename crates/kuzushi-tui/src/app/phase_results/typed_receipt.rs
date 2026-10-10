@@ -152,7 +152,7 @@ fn receipt_detail_lines(receipt: &PhaseReceiptProjection) -> Vec<String> {
     // The continuation is NOT repeated here: the card's trailing `next:` row
     // already carries `receipt.continuation` via the receipt policy.
     vec![format!(
-        "receipt · {} · {} run(s) · {} · {} · {} artifact(s) · {} interaction(s)",
+        "receipt · {} · {} run(s) · {} · {} · {} artifact links · {} interaction(s)",
         receipt.status.label(),
         receipt.run_ids.len(),
         kuzushi_core::run_lifecycle::cost_label(receipt.cost),

@@ -1,0 +1,72 @@
+name: Confirmed SARIF retains review provenance after source changes
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/confirmed_sarif.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 20 Labeled observation | retained-review
+ask: Does Review keep the human confirmation and source-change limitations without treating the later observation as a fix or a new confirmation?
+paste-file: @ART/shell-command.txt
+keys: Enter
+require-live-snap: 20 CONFIRM · descriptor-declared effect | export-approval
+require-shell: test ! -e @TMP_TARGET/shell-confirmed.sarif
+keys: y
+require-live-snap: 25 run receipt | native-shell-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/confirmed_sarif.py @TMP_TARGET @ART exported
+ask: Does the real native export retain exactly one recorded confirmation, its authority and source basis, with explicit historical scope and no current-checkout assessment claim?
+submit: findings
+require-live-snap: 20 Labeled observation | returned-review
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+resize: 40x12
+live-snap: review-40x12
+expect: F-0001
+nav-mode:
+keys: Enter
+require-live-snap: 20 SELECTED FINDING | finding-focus-40x12
+expect: F-0001
+keys: NPage
+live-snap: decision-40x12-page-1
+keys: NPage
+live-snap: decision-40x12-page-2
+keys: NPage
+live-snap: decision-40x12-page-3
+keys: NPage
+live-snap: decision-40x12-page-4
+keys: NPage
+live-snap: decision-40x12-page-5
+ask: At all six sizes, can the operator identify the retained observation and inspect its decision and source limitation without losing navigation?
+resize: 120x36
+keys: q
+require-live-snap: 20 Labeled observation | returned-list
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: findings
+require-live-snap: 20 Labeled observation | no-color-review
+resize: 160x48
+live-snap: no-color-160x48
+resize: 96x89
+live-snap: no-color-96x89
+resize: 80x24
+live-snap: no-color-80x24
+resize: 60x20
+live-snap: no-color-60x20
+resize: 40x12
+live-snap: no-color-40x12
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/confirmed_sarif.py @TMP_TARGET @ART recovered
+ask: Does no-color restart retain the same two observations, one human decision and both report files, without additional work or source changes?
+keys: C-c
+require-exit: 10

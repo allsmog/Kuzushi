@@ -5,8 +5,10 @@
 //! Read-only, no model calls; the tool result fails when any ERROR row
 //! exists so `kuzushi run pack:lint` exits nonzero in CI.
 
+mod resources;
 use crate::modules::ToolExecutionContext;
 use anyhow::Result;
+use resources::{LintLimits, LintResources};
 use serde_json::{json, Value};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -59,9 +61,18 @@ pub fn execute_pack_lint(input: &Value, ctx: &ToolExecutionContext<'_>) -> Resul
         anyhow::bail!("pack:lint requires packDir=<pack directory>");
     };
     let product = string_input(input, &["product"]);
-    let target_root = ctx.workspace.map(|workspace| workspace.root().to_path_buf());
-    let rows = lint_pack(&pack_dir, product.as_deref(), target_root.as_deref());
-    Ok(lint_result(&pack_dir, &rows))
+    let target_root = ctx
+        .workspace
+        .map(|workspace| workspace.root().to_path_buf());
+    let limits = LintLimits::parse(input)?;
+    let canceled = || ctx.is_cancelled();
+    let resources = LintResources::new(&pack_dir, limits, &canceled);
+    let rows = lint_with_resources(product.as_deref(), target_root.as_deref(), &resources);
+    Ok(lint_result_with_coverage(
+        &pack_dir,
+        &rows,
+        Some(resources.coverage()),
+    ))
 }
 
 fn pack_dir_input(input: &Value) -> Option<PathBuf> {
@@ -77,36 +88,83 @@ fn string_input(input: &Value, keys: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
+#[cfg(test)]
 fn lint_result(pack_dir: &Path, rows: &[LintRow]) -> Value {
+    lint_result_with_coverage(pack_dir, rows, None)
+}
+
+fn lint_result_with_coverage(pack_dir: &Path, rows: &[LintRow], coverage: Option<Value>) -> Value {
     let errors = rows.iter().filter(|r| r.level == LintLevel::Error).count();
     let warnings = rows.iter().filter(|r| r.level == LintLevel::Warn).count();
-    let output = format!(
-        "{}\npack:lint {} — {} error(s), {} warning(s), {} check(s)",
+    let mut output = format!(
+        "{}\npack:lint {}: {} error(s), {} warning(s), {} check(s)",
         render_table(rows),
         pack_dir.display(),
         errors,
         warnings,
         rows.len()
     );
-    let data = json!({
+    let mut data = json!({
         "packDir": pack_dir.display().to_string(),
         "errors": errors,
         "warnings": warnings,
         "rows": rows.iter().map(row_json).collect::<Vec<_>>(),
     });
+    let partial = coverage
+        .as_ref()
+        .is_some_and(|value| value["complete"] == false);
+    if let Some(coverage) = coverage {
+        output.push_str(&coverage_text(&coverage));
+        data["coverage"] = coverage;
+    }
+    finish_lint_result(errors, warnings, partial, output, data)
+}
+
+fn coverage_text(coverage: &Value) -> String {
+    let mut output = format!(
+        "\nInspection: complete={} | entries {}/{} | captured bytes {} | reserved bytes {}/{}\nIgnored hidden entries: {} | omitted checks: {} | canceled={}\n{}",
+        coverage["complete"], coverage["entriesExamined"], coverage["maxWalkEntries"],
+        coverage["capturedReadBytes"], coverage["reservedReadBytes"], coverage["maxReadBytes"],
+        coverage["ignoredHiddenEntries"], coverage["omittedChecks"], coverage["canceled"],
+        coverage["meaning"].as_str().unwrap_or_default(),
+    );
+    if let Some(reasons) = coverage["reasonSamples"].as_array() {
+        for reason in reasons.iter().filter_map(Value::as_str) {
+            output.push_str(&format!("\nNot inspected: {reason}"));
+        }
+    }
+    output
+}
+
+fn finish_lint_result(
+    errors: usize,
+    warnings: usize,
+    partial: bool,
+    output: String,
+    data: Value,
+) -> Value {
     if errors > 0 {
-        crate::module_result::failed_output_result(
+        return crate::module_result::failed_output_result(
             format!("pack:lint found {errors} error(s)"),
             output,
             data,
-        )
-    } else {
-        crate::module_result::completed_output_result(
-            format!("pack:lint clean — {warnings} warning(s)"),
-            output,
-            data,
-        )
+        );
     }
+    if partial {
+        return crate::module_result::partial_output_result(
+            "pack:lint incomplete",
+            output,
+            vec![json!(
+                "Some pack or target checks were not inspected; see coverage."
+            )],
+            data,
+        );
+    }
+    crate::module_result::completed_output_result(
+        format!("pack:lint checked: {warnings} warning(s)"),
+        output,
+        data,
+    )
 }
 
 fn row_json(row: &LintRow) -> Value {
@@ -133,28 +191,64 @@ fn render_table(rows: &[LintRow]) -> String {
         .join("\n")
 }
 
-pub fn lint_pack(pack_dir: &Path, product: Option<&str>, target_root: Option<&Path>) -> Vec<LintRow> {
+pub fn lint_pack(
+    pack_dir: &Path,
+    product: Option<&str>,
+    target_root: Option<&Path>,
+) -> Vec<LintRow> {
+    let resources = LintResources::new(pack_dir, LintLimits::default(), &|| false);
+    lint_with_resources(product, target_root, &resources)
+}
+
+fn lint_with_resources(
+    product: Option<&str>,
+    target_root: Option<&Path>,
+    resources: &LintResources<'_>,
+) -> Vec<LintRow> {
     let mut rows = Vec::new();
-    let Some(manifest) = lint_pack_manifest(pack_dir, &mut rows) else {
-        return rows;
-    };
-    lint_products(pack_dir, &manifest, product, target_root, &mut rows);
+    if let Some(manifest) = lint_pack_manifest(&resources.root, resources, &mut rows) {
+        lint_products(
+            &resources.root,
+            &manifest,
+            product,
+            target_root,
+            resources,
+            &mut rows,
+        );
+    }
+    if resources.partial() {
+        rows.push(row(LintLevel::Warn, "coverage", "inspection", "Incomplete inspection. Some checks were omitted; finding validity and repository coverage are not assessed."));
+    }
     rows
 }
 
-fn lint_pack_manifest(pack_dir: &Path, rows: &mut Vec<LintRow>) -> Option<toml::Value> {
+fn lint_pack_manifest(
+    pack_dir: &Path,
+    resources: &LintResources<'_>,
+    rows: &mut Vec<LintRow>,
+) -> Option<toml::Value> {
     let path = pack_dir.join("pack.toml");
-    let body = match std::fs::read_to_string(&path) {
+    let body = match resources.read(&path) {
         Ok(body) => body,
         Err(error) => {
-            rows.push(row(LintLevel::Error, "pack.toml", "pack.toml", format!("unreadable: {error}")));
+            rows.push(row(
+                LintLevel::Error,
+                "pack.toml",
+                "pack.toml",
+                format!("unreadable: {error}"),
+            ));
             return None;
         }
     };
     let manifest = match toml::from_str::<toml::Value>(&body) {
         Ok(manifest) => manifest,
         Err(error) => {
-            rows.push(row(LintLevel::Error, "pack.toml", "pack.toml", format!("parse error: {error}")));
+            rows.push(row(
+                LintLevel::Error,
+                "pack.toml",
+                "pack.toml",
+                format!("parse error: {error}"),
+            ));
             return None;
         }
     };
@@ -170,7 +264,12 @@ fn lint_pack_header(manifest: &toml::Value, rows: &mut Vec<LintRow>) {
         .map(str::trim)
         .unwrap_or_default();
     if name.is_empty() {
-        rows.push(row(LintLevel::Error, "pack.toml", "[pack].name", "missing or empty"));
+        rows.push(row(
+            LintLevel::Error,
+            "pack.toml",
+            "[pack].name",
+            "missing or empty",
+        ));
     } else {
         rows.push(row(LintLevel::Ok, "pack.toml", "[pack].name", name));
     }
@@ -181,10 +280,16 @@ fn lint_products(
     manifest: &toml::Value,
     filter: Option<&str>,
     target_root: Option<&Path>,
+    resources: &LintResources<'_>,
     rows: &mut Vec<LintRow>,
 ) {
     let Some(products) = manifest.get("products").and_then(toml::Value::as_table) else {
-        rows.push(row(LintLevel::Error, "pack.toml", "[products]", "no [products.<name>] blocks"));
+        rows.push(row(
+            LintLevel::Error,
+            "pack.toml",
+            "[products]",
+            "no [products.<name>] blocks",
+        ));
         return;
     };
     let mut matched = false;
@@ -193,7 +298,7 @@ fn lint_products(
             continue;
         }
         matched = true;
-        lint_product(pack_dir, name, product, target_root, rows);
+        lint_product(pack_dir, name, product, target_root, resources, rows);
     }
     if !matched {
         rows.push(row(
@@ -210,30 +315,51 @@ fn lint_product(
     name: &str,
     product: &toml::Value,
     target_root: Option<&Path>,
+    resources: &LintResources<'_>,
     rows: &mut Vec<LintRow>,
 ) {
     if product_str(product, "target_hint").is_none() {
-        rows.push(row(LintLevel::Warn, "product", name, "no target_hint (which checkout are shard paths relative to?)"));
+        rows.push(row(
+            LintLevel::Warn,
+            "product",
+            name,
+            "no target_hint (which checkout are shard paths relative to?)",
+        ));
     }
     match declared_file(pack_dir, product, "shards") {
-        DeclaredFile::Ok(path) => lint_shards_file(name, &path, target_root, rows),
+        DeclaredFile::Ok(path) => lint_shards_file(name, &path, target_root, resources, rows),
         DeclaredFile::Missing(path) => {
-            rows.push(row(LintLevel::Error, "shards", name, format!("declared file missing: {}", path.display())));
+            rows.push(row(
+                LintLevel::Error,
+                "shards",
+                name,
+                format!("declared file missing: {}", path.display()),
+            ));
         }
         DeclaredFile::Undeclared => {
             rows.push(row(LintLevel::Warn, "shards", name, "no shards= declared"));
         }
     }
     match declared_file(pack_dir, product, "threat_model") {
-        DeclaredFile::Ok(path) => lint_threat_model_closure(name, &path, rows),
+        DeclaredFile::Ok(path) => lint_threat_model_closure(name, &path, resources, rows),
         DeclaredFile::Missing(path) => {
-            rows.push(row(LintLevel::Error, "threat-model", name, format!("declared file missing: {}", path.display())));
+            rows.push(row(
+                LintLevel::Error,
+                "threat-model",
+                name,
+                format!("declared file missing: {}", path.display()),
+            ));
         }
         DeclaredFile::Undeclared => {
-            rows.push(row(LintLevel::Warn, "threat-model", name, "no threat_model= declared"));
+            rows.push(row(
+                LintLevel::Warn,
+                "threat-model",
+                name,
+                "no threat_model= declared",
+            ));
         }
     }
-    lint_prompts_dir(name, &product_dir_guess(pack_dir, product), rows);
+    lint_prompts_dir(name, &product_dir_guess(pack_dir, product), resources, rows);
 }
 
 enum DeclaredFile {
@@ -247,10 +373,9 @@ fn declared_file(pack_dir: &Path, product: &toml::Value, key: &str) -> DeclaredF
         return DeclaredFile::Undeclared;
     };
     let path = pack_dir.join(relative);
-    if path.is_file() {
-        DeclaredFile::Ok(path)
-    } else {
-        DeclaredFile::Missing(path)
+    match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => DeclaredFile::Missing(path),
+        _ => DeclaredFile::Ok(path),
     }
 }
 
@@ -275,30 +400,52 @@ fn lint_shards_file(
     product: &str,
     path: &Path,
     target_root: Option<&Path>,
+    resources: &LintResources<'_>,
     rows: &mut Vec<LintRow>,
 ) {
-    let manifest = match std::fs::read_to_string(path)
+    let manifest = match resources
+        .read(path)
         .map_err(|e| e.to_string())
         .and_then(|body| toml::from_str::<toml::Value>(&body).map_err(|e| e.to_string()))
     {
         Ok(manifest) => manifest,
         Err(error) => {
-            rows.push(row(LintLevel::Error, "shards", product, format!("{}: {error}", path.display())));
+            rows.push(row(
+                LintLevel::Error,
+                "shards",
+                product,
+                format!("{}: {error}", path.display()),
+            ));
             return;
         }
     };
     let Some(shards) = manifest.get("shards").and_then(toml::Value::as_table) else {
-        rows.push(row(LintLevel::Error, "shards", product, "no [shards.<name>] tables"));
+        rows.push(row(
+            LintLevel::Error,
+            "shards",
+            product,
+            "no [shards.<name>] tables",
+        ));
         return;
     };
     if shards.is_empty() {
-        rows.push(row(LintLevel::Error, "shards", product, "empty shard manifest"));
+        rows.push(row(
+            LintLevel::Error,
+            "shards",
+            product,
+            "empty shard manifest",
+        ));
         return;
     }
     for (shard_name, shard) in shards {
-        lint_shard(product, shard_name, shard, target_root, rows);
+        lint_shard(product, shard_name, shard, target_root, resources, rows);
     }
-    rows.push(row(LintLevel::Ok, "shards", product, format!("{} shard(s)", shards.len())));
+    rows.push(row(
+        LintLevel::Ok,
+        "shards",
+        product,
+        format!("{} shard(s)", shards.len()),
+    ));
 }
 
 fn lint_shard(
@@ -306,36 +453,64 @@ fn lint_shard(
     shard_name: &str,
     shard: &toml::Value,
     target_root: Option<&Path>,
+    resources: &LintResources<'_>,
     rows: &mut Vec<LintRow>,
 ) {
     let subject = format!("{product}/{shard_name}");
     let paths = shard_paths(shard);
     if paths.is_empty() {
-        rows.push(row(LintLevel::Error, "shard", &subject, "empty or missing paths = [...]"));
+        rows.push(row(
+            LintLevel::Error,
+            "shard",
+            &subject,
+            "empty or missing paths = [...]",
+        ));
         return;
     }
     let Some(root) = target_root else {
-        return; // existence/size checks need a --target; pack shape is still linted
+        resources.omit("No active target: shard path existence and file counts were not checked");
+        return;
     };
-    lint_shard_scope(&subject, &paths, root, rows);
+    lint_shard_scope(&subject, &paths, root, resources, rows);
 }
 
-fn lint_shard_scope(subject: &str, paths: &[String], root: &Path, rows: &mut Vec<LintRow>) {
+fn lint_shard_scope(
+    subject: &str,
+    paths: &[String],
+    root: &Path,
+    resources: &LintResources<'_>,
+    rows: &mut Vec<LintRow>,
+) {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut files = 0usize;
     for relative in paths {
         let scope = root.join(relative);
-        if !scope.exists() {
-            rows.push(row(LintLevel::Error, "shard-path", subject, format!("missing under target: {relative}")));
+        if let Err(error) = std::fs::symlink_metadata(&scope) {
+            resources.omit(format!("Target scope not inspected: {relative}: {error}"));
+            rows.push(row(
+                LintLevel::Error,
+                "shard-path",
+                subject,
+                format!("unavailable under target: {relative}: {error}"),
+            ));
             continue;
         }
-        files = files.saturating_add(count_files(&scope, SHARD_FILE_COUNT_CAP - files));
+        files += resources
+            .walk(
+                &root,
+                &scope,
+                SHARD_FILE_COUNT_CAP.saturating_sub(files),
+                true,
+                true,
+            )
+            .len();
     }
     if files > SHARD_FILE_WARN_THRESHOLD {
         rows.push(row(
             LintLevel::Warn,
             "shard-size",
             subject,
-            format!("{}{} files in scope (> {SHARD_FILE_WARN_THRESHOLD}; model-backed jobs get expensive)",
+            format!("{}{} inspected files in scope (> {SHARD_FILE_WARN_THRESHOLD}; model-backed jobs get expensive)",
                 files,
                 if files >= SHARD_FILE_COUNT_CAP { "+" } else { "" }),
         ));
@@ -358,46 +533,28 @@ fn shard_paths(shard: &toml::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn count_files(scope: &Path, budget: usize) -> usize {
-    if budget == 0 {
-        return 0;
-    }
-    if scope.is_file() {
-        return 1;
-    }
-    let Ok(entries) = std::fs::read_dir(scope) else {
-        return 0;
-    };
-    let mut count = 0usize;
-    for entry in entries.flatten() {
-        if entry.file_name().to_string_lossy().starts_with('.') {
-            continue;
-        }
-        count += count_files(&entry.path(), budget - count);
-        if count >= budget {
-            break;
-        }
-    }
-    count
-}
-
 /// Lint the top-level threat model together with an optional sibling
 /// `threat-models/` directory: campaign planning needs threats[] from at
 /// least one of them.
-fn lint_threat_model_closure(product: &str, path: &Path, rows: &mut Vec<LintRow>) {
-    let top_threats = lint_threat_model_file(product, path, rows);
+fn lint_threat_model_closure(
+    product: &str,
+    path: &Path,
+    resources: &LintResources<'_>,
+    rows: &mut Vec<LintRow>,
+) {
+    let top_threats = lint_threat_model_file(product, path, resources, rows);
     let models_dir = path.parent().map(|dir| dir.join("threat-models"));
     let dir_threats = models_dir
         .as_deref()
-        .filter(|dir| dir.is_dir())
-        .map(|dir| lint_models_dir(product, dir, rows))
+        .filter(|dir| resources.optional_directory(dir))
+        .map(|dir| lint_models_dir(product, dir, resources, rows))
         .unwrap_or(0);
     match (top_threats, dir_threats) {
         (0, 0) => rows.push(row(
             LintLevel::Error,
             "threats",
             product,
-            "no threats[] in the threat model or a threat-models/ directory — campaign:plan would produce zero jobs",
+            "no threats[] in the threat model or a threat-models/ directory; campaign:plan would produce zero jobs",
         )),
         (0, n) => rows.push(row(
             LintLevel::Ok,
@@ -410,15 +567,26 @@ fn lint_threat_model_closure(product: &str, path: &Path, rows: &mut Vec<LintRow>
 }
 
 /// Returns the number of threats found; schema problems land as rows.
-fn lint_threat_model_file(product: &str, path: &Path, rows: &mut Vec<LintRow>) -> usize {
+fn lint_threat_model_file(
+    product: &str,
+    path: &Path,
+    resources: &LintResources<'_>,
+    rows: &mut Vec<LintRow>,
+) -> usize {
     let subject = format!("{product}/{}", file_stem(path));
-    let document: Value = match std::fs::read_to_string(path)
+    let document: Value = match resources
+        .read(path)
         .map_err(|e| e.to_string())
         .and_then(|body| serde_json::from_str(&body).map_err(|e| e.to_string()))
     {
         Ok(document) => document,
         Err(error) => {
-            rows.push(row(LintLevel::Error, "threat-model", &subject, format!("{}: {error}", path.display())));
+            rows.push(row(
+                LintLevel::Error,
+                "threat-model",
+                &subject,
+                format!("{}: {error}", path.display()),
+            ));
             return 0;
         }
     };
@@ -432,25 +600,25 @@ fn lint_threat_model_file(product: &str, path: &Path, rows: &mut Vec<LintRow>) -
     threats.len()
 }
 
-fn lint_models_dir(product: &str, dir: &Path, rows: &mut Vec<LintRow>) -> usize {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|iter| {
-            iter.flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-                .collect()
-        })
-        .unwrap_or_default();
-    entries.sort();
+fn lint_models_dir(
+    product: &str,
+    dir: &Path,
+    resources: &LintResources<'_>,
+    rows: &mut Vec<LintRow>,
+) -> usize {
+    let entries = resources.walk(&resources.root, dir, usize::MAX, false, false);
     let mut total = 0usize;
-    for path in &entries {
-        let count = lint_threat_model_file(product, path, rows);
+    for path in entries
+        .iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+    {
+        let count = lint_threat_model_file(product, path, resources, rows);
         if count == 0 {
             rows.push(row(
                 LintLevel::Warn,
                 "threat-model",
                 &format!("{product}/{}", file_stem(path)),
-                "no threats[] — contributes nothing to compound planning",
+                "no inspected threats[]; contributes nothing to compound planning",
             ));
         }
         total += count;
@@ -468,7 +636,12 @@ fn lint_threat(subject: &str, index: usize, threat: &Value, rows: &mut Vec<LintR
     if threat_string(threat, &["title", "name"]).is_empty()
         && threat_string(threat, &["description", "summary", "detail"]).is_empty()
     {
-        rows.push(row(LintLevel::Warn, "threat", &label, "no title/name or description"));
+        rows.push(row(
+            LintLevel::Warn,
+            "threat",
+            &label,
+            "no title/name or description",
+        ));
     }
     lint_threat_severity(&label, threat, rows);
     lint_threat_cwes(&label, threat, rows);
@@ -477,13 +650,21 @@ fn lint_threat(subject: &str, index: usize, threat: &Value, rows: &mut Vec<LintR
 fn lint_threat_severity(label: &str, threat: &Value, rows: &mut Vec<LintRow>) {
     let severity = threat_string(threat, &["severity", "risk", "priority"]).to_lowercase();
     if severity.is_empty() {
-        rows.push(row(LintLevel::Warn, "severity", label, "missing (job priority falls to the default band)"));
+        rows.push(row(
+            LintLevel::Warn,
+            "severity",
+            label,
+            "missing (job priority falls to the default band)",
+        ));
     } else if !VALID_SEVERITIES.contains(&severity.as_str()) {
         rows.push(row(
             LintLevel::Error,
             "severity",
             label,
-            format!("invalid value {severity:?} (accepted: {})", VALID_SEVERITIES.join("/")),
+            format!(
+                "invalid value {severity:?} (accepted: {})",
+                VALID_SEVERITIES.join("/")
+            ),
         ));
     }
 }
@@ -502,7 +683,12 @@ fn lint_threat_cwes(label: &str, threat: &Value, rows: &mut Vec<LintRow>) {
             for item in items {
                 match item.as_str() {
                     Some(token) => lint_cwe_token(label, token, rows),
-                    None => rows.push(row(LintLevel::Error, "cwe", label, format!("non-string entry: {item}"))),
+                    None => rows.push(row(
+                        LintLevel::Error,
+                        "cwe",
+                        label,
+                        format!("non-string entry: {item}"),
+                    )),
                 }
             }
         }
@@ -522,40 +708,39 @@ fn lint_cwe_token(label: &str, token: &str, rows: &mut Vec<LintRow>) {
         .strip_prefix("CWE-")
         .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()));
     if !well_formed {
-        rows.push(row(LintLevel::Warn, "cwe", label, format!("{trimmed:?} is not CWE-<digits>")));
+        rows.push(row(
+            LintLevel::Warn,
+            "cwe",
+            label,
+            format!("{trimmed:?} is not CWE-<digits>"),
+        ));
     }
 }
 
-fn lint_prompts_dir(product: &str, product_dir: &Path, rows: &mut Vec<LintRow>) {
-    let prompts = product_dir.join("prompts");
-    if !prompts.is_dir() {
-        return;
-    }
-    let mut fragments = 0usize;
-    walk_prompt_files(&prompts, &prompts, product, &mut fragments, rows);
-    if fragments > 0 {
-        rows.push(row(LintLevel::Ok, "prompts", product, format!("{fragments} fragment(s)")));
-    }
-}
-
-fn walk_prompt_files(
-    root: &Path,
-    dir: &Path,
+fn lint_prompts_dir(
     product: &str,
-    fragments: &mut usize,
+    product_dir: &Path,
+    resources: &LintResources<'_>,
     rows: &mut Vec<LintRow>,
 ) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let prompts = product_dir.join("prompts");
+    if !resources.optional_directory(&prompts) {
         return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk_prompt_files(root, &path, product, fragments, rows);
-        } else {
-            *fragments += 1;
-            lint_prompt_fragment(root, &path, product, rows);
-        }
+    }
+    let files = resources.walk(&resources.root, &prompts, usize::MAX, true, false);
+    for path in &files {
+        lint_prompt_fragment(&prompts, path, product, rows);
+    }
+    if !files.is_empty() {
+        rows.push(row(
+            LintLevel::Ok,
+            "prompts",
+            product,
+            format!(
+                "{} inspected fragment destination(s); contents not checked",
+                files.len()
+            ),
+        ));
     }
 }
 
@@ -691,7 +876,10 @@ threat_model = "products/core/threat-model.json"
         let rows = lint_pack(tmp.path(), None, None);
 
         assert_eq!(error_count(&rows), 0, "{rows:?}");
-        assert_eq!(levels(&rows, "threats"), vec![(LintLevel::Ok, "2 threat(s)".to_string())]);
+        assert_eq!(
+            levels(&rows, "threats"),
+            vec![(LintLevel::Ok, "2 threat(s)".to_string())]
+        );
     }
 
     #[test]
@@ -721,7 +909,10 @@ shards = "products/broken/shards.toml"
 threat_model = "products/broken/threat-model.json"
 "#,
         );
-        write(&tmp.path().join("products/broken/shards.toml"), "[shards.empty]\n");
+        write(
+            &tmp.path().join("products/broken/shards.toml"),
+            "[shards.empty]\n",
+        );
         write(
             &tmp.path().join("products/broken/threat-model.json"),
             r#"{ "threats": [
@@ -739,10 +930,22 @@ threat_model = "products/broken/threat-model.json"
             .join("\n");
         assert!(details.contains("ERROR pack.toml [pack].name"), "{details}");
         assert!(details.contains("ERROR shard broken/empty"), "{details}");
-        assert!(details.contains("ERROR severity") && details.contains("urgent"), "{details}");
-        assert!(details.contains("ERROR cwe") && details.contains("non-string"), "{details}");
-        assert!(details.contains("WARN cwe") && details.contains("\"787\""), "{details}");
-        assert!(details.contains("WARN product broken no target_hint"), "{details}");
+        assert!(
+            details.contains("ERROR severity") && details.contains("urgent"),
+            "{details}"
+        );
+        assert!(
+            details.contains("ERROR cwe") && details.contains("non-string"),
+            "{details}"
+        );
+        assert!(
+            details.contains("WARN cwe") && details.contains("\"787\""),
+            "{details}"
+        );
+        assert!(
+            details.contains("WARN product broken no target_hint"),
+            "{details}"
+        );
     }
 
     #[test]
@@ -762,7 +965,10 @@ threat_model = "products/gappy/threat-model.json"
         );
         // shards file missing entirely; threat model exists but has no threats
         // and there is no threat-models/ directory.
-        write(&tmp.path().join("products/gappy/threat-model.json"), r#"{ "name": "empty" }"#);
+        write(
+            &tmp.path().join("products/gappy/threat-model.json"),
+            r#"{ "name": "empty" }"#,
+        );
 
         let rows = lint_pack(tmp.path(), None, None);
 
@@ -771,7 +977,10 @@ threat_model = "products/gappy/threat-model.json"
             .map(|row| format!("{} {} {}", row.level, row.check, row.detail))
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(details.contains("ERROR shards declared file missing"), "{details}");
+        assert!(
+            details.contains("ERROR shards declared file missing"),
+            "{details}"
+        );
         assert!(details.contains("ERROR threats no threats[]"), "{details}");
     }
 
@@ -793,7 +1002,7 @@ threat_model = "products/gappy/threat-model.json"
         assert_eq!(error_count(&rows), 0, "{rows:?}");
         let sizes = levels(&rows, "shard-size");
         assert_eq!(sizes.len(), 1);
-        assert!(sizes[0].1.contains("53 files"), "{sizes:?}");
+        assert!(sizes[0].1.contains("53 inspected files"), "{sizes:?}");
 
         // Now point the shard at a path the target does not have.
         write(
@@ -811,7 +1020,11 @@ threat_model = "products/gappy/threat-model.json"
         let tmp = tempfile::tempdir().unwrap();
         template_shaped_pack(tmp.path());
         write(&tmp.path().join("products/example/prompts/loose.md"), "x");
-        write(&tmp.path().join("products/example/prompts/triage/deep/run.md"), "x");
+        write(
+            &tmp.path()
+                .join("products/example/prompts/triage/deep/run.md"),
+            "x",
+        );
 
         let rows = lint_pack(tmp.path(), None, None);
 
@@ -828,7 +1041,9 @@ threat_model = "products/gappy/threat-model.json"
         template_shaped_pack(tmp.path());
 
         let rows = lint_pack(tmp.path(), Some("nope"), None);
-        assert!(rows.iter().any(|row| row.level == LintLevel::Error && row.detail.contains("nope")));
+        assert!(rows
+            .iter()
+            .any(|row| row.level == LintLevel::Error && row.detail.contains("nope")));
 
         let failed = lint_result(tmp.path(), &rows);
         assert_eq!(failed["ok"], false);

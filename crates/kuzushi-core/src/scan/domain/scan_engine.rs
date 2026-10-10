@@ -3,6 +3,11 @@ use super::*;
 pub trait ScanEngine: Send + Sync {
     fn id(&self) -> &'static str;
 
+    /// Operator-facing receipts of actual bounded inspection, when emitted.
+    fn inspection_receipts(&self) -> Vec<serde_json::Value> {
+        Vec::new()
+    }
+
     fn preflight(&self) -> Result<()> {
         Ok(())
     }

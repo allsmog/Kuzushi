@@ -224,8 +224,22 @@ fn credential_row(app: &ShellApp, checks: Option<&ViewHealthChecks>) -> HealthRo
 
 fn configured_credential_row(app: &ShellApp, api_key_env: &str) -> Option<HealthRow> {
     let detail = match configured_model_credential_readiness(app) {
-        CredentialReadiness::Session => "session credential accepted; value hidden".to_string(),
-        CredentialReadiness::OAuth => "OAuth ready; value hidden".to_string(),
+        CredentialReadiness::Session => "session key present; acceptance unverified".to_string(),
+        CredentialReadiness::OAuth => "OAuth stored; acceptance unverified".to_string(),
+        CredentialReadiness::OAuthRefreshable => {
+            "OAuth access token expired; refresh required".to_string()
+        }
+        CredentialReadiness::OAuthEnvironment => {
+            "OAuth environment token present; acceptance unverified".to_string()
+        }
+        CredentialReadiness::OAuthRepair => {
+            return Some(health_row(
+                HealthTone::Fail,
+                "credentials",
+                "OAuth invalid or unable to refresh",
+                "open Credentials to repair; selected model is retained",
+            ))
+        }
         CredentialReadiness::ApiKey => format!("{api_key_env}=set; value hidden"),
         CredentialReadiness::NotRequired => {
             return Some(health_row(
@@ -238,10 +252,10 @@ fn configured_credential_row(app: &ShellApp, api_key_env: &str) -> Option<Health
         CredentialReadiness::Missing => return None,
     };
     Some(health_row(
-        HealthTone::Pass,
+        HealthTone::Warn,
         "credentials",
         detail,
-        "run tools normally",
+        "credentials are checked during execution; values stay hidden",
     ))
 }
 

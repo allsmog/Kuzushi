@@ -10,6 +10,13 @@ impl ShellApp {
     }
 
     pub(crate) fn finish_shell_quit_effect(&mut self) {
+        if self.review_decision_write_pending() {
+            self.set_warn_notice(
+                "review",
+                "A decision is saving. Wait for the save result before exiting.",
+            );
+            return;
+        }
         if !self.should_quit() {
             self.log("system", "exit requested; closing shell");
         }

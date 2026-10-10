@@ -51,6 +51,7 @@ impl ShellApp {
 
     fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
         match view {
+            ShellView::Relationships => relationship_keybindings(),
             ShellView::Campaign => campaign_keybindings(),
             ShellView::RunDiff => vec![
                 bind(
@@ -69,7 +70,9 @@ impl ShellApp {
             ShellView::Catalog => catalog_keybindings(self.router.catalog().is_expanded()),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(self),
-            ShellView::Recommend => recommend_keybindings(),
+            ShellView::Recommend => recommend_keybindings(
+                !crate::ui_view_models::recommendation_components(self).is_empty(),
+            ),
             ShellView::Threat => threat_keybindings(),
             ShellView::ModuleRun => self.module_run_keybindings(),
             ShellView::ActorDetail => actor_detail_keybindings(),

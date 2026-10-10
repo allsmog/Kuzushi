@@ -5,7 +5,7 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
     }
-    if let Some(line) = inactive_prompt_line(app) {
+    if let Some(line) = inactive_prompt_line(app, area.width) {
         frame.render_widget(Paragraph::new(line), area);
         return;
     }
@@ -36,19 +36,102 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     frame.render_widget(Paragraph::new(line), area);
 }
 
-fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
-    if let Some(text) = captured_overlay_prompt(app.shell_view()) {
+fn inactive_prompt_line(app: &ShellApp, width: u16) -> Option<Line<'static>> {
+    if let Some(text) = captured_overlay_prompt(app.shell_view())
+        .or_else(|| relationship_prompt(app))
+        .or_else(|| lesson_prompt(app))
+        .or_else(|| setup_prompt(app, width))
+    {
         return Some(disabled_prompt_line(text));
     }
     if let Some(text) = captured_field_prompt(app) {
         return Some(disabled_prompt_line(text));
     }
     if app.is_picker_view() {
-        return (!app.picker_prompt_focused()).then(|| {
-            disabled_prompt_line("type a command · ↑/↓ moves the picker · Enter selects")
-        });
+        return (!app.picker_prompt_focused())
+            .then(|| disabled_prompt_line(picker_prompt_hint(width)));
     }
     (app.input_mode() == crate::InputMode::Navigate).then(|| navigation_prompt_line(app))
+}
+
+fn setup_prompt(app: &ShellApp, width: u16) -> Option<&'static str> {
+    if app.shell_view() != crate::ShellView::Setup {
+        return None;
+    }
+    match app.router.setup().editor() {
+        Some(crate::app::SetupEditor::Details) => Some("PgUp/PgDn read · Tab/Esc Setup"),
+        None if !app.picker_prompt_focused() => Some(setup_overview_prompt(width)),
+        _ => None,
+    }
+}
+
+fn setup_overview_prompt(width: u16) -> &'static str {
+    if width < 72 {
+        "↑↓ move · Tab details · Enter · type cmd"
+    } else {
+        "↑/↓ move · Tab details · Enter open/start · type command"
+    }
+}
+
+fn picker_prompt_hint(width: u16) -> &'static str {
+    if width < 72 {
+        "↑/↓ move · Enter select · type command"
+    } else {
+        "type a command · ↑/↓ moves the picker · Enter selects"
+    }
+}
+
+fn lesson_prompt(app: &ShellApp) -> Option<&'static str> {
+    if app.shell_view() != crate::ShellView::Lessons {
+        return None;
+    }
+    (app.router.lessons.form_visible || app.router.lessons.context_selecting)
+        .then_some("LESSON REVIEW · Enter inspects or confirms · Esc returns")
+}
+
+fn relationship_prompt(app: &ShellApp) -> Option<&'static str> {
+    if app.shell_view() != crate::ShellView::Relationships {
+        return None;
+    }
+    if let Some(prompt) = relationship_dialog_prompt(app) {
+        return Some(prompt);
+    }
+    if app.router.relationships.show_groups {
+        return group_prompt(app);
+    }
+    (app.input_mode() == crate::InputMode::Navigate)
+        .then_some("RELATIONSHIPS · PgUp/PgDn details · Esc back")
+}
+
+fn relationship_dialog_prompt(app: &ShellApp) -> Option<&'static str> {
+    if let Some(review) = &app.router.relationships.bulk {
+        return Some(match review.stage {
+            crate::app::RelationshipBulkStage::Review => {
+                "REVIEW SELECTION · j/k pairs · a accept · r separate · u unlink"
+            }
+            crate::app::RelationshipBulkStage::Reason => {
+                "editing reason · Enter reviews confirmation · Esc back"
+            }
+            crate::app::RelationshipBulkStage::Confirm => {
+                "CONFIRM SELECTION · Enter records all · Esc edits reason"
+            }
+        });
+    }
+    app.router
+        .relationships
+        .note
+        .as_ref()
+        .map(|_| "editing reason · Enter record · Esc cancel")
+}
+
+fn group_prompt(app: &ShellApp) -> Option<&'static str> {
+    if app.input_mode() != crate::InputMode::Navigate {
+        return None;
+    }
+    if app.router.relationships.groups.request.group_id.is_some() {
+        return Some("MEMBERS · Enter finding · Esc group list");
+    }
+    Some("GROUPS · Enter members · Esc back")
 }
 
 #[cfg(test)]

@@ -8,21 +8,27 @@ pub(crate) fn coverage_module() -> BuiltinModule {
         "coverage",
         "Coverage Ledger",
         ModuleKind::Intel,
-        "Receipt-backed scan coverage: per-scope baselines and a deterministic staleness sweep.",
+        "Historical Git baselines and explicit source-staleness checks. These records alone do not establish complete scan coverage.",
         vec![
-            coverage_sweep_tool().with_policy(workspace_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Optional,
-            )),
-            coverage_baselines_tool().with_policy(read_policy(
-                ToolPhase::Map,
-                WorkspaceRequirement::Required,
-            )),
-            coverage_recommend_tool().with_policy(read_policy(
-                ToolPhase::Map,
-                WorkspaceRequirement::Required,
-            )),
+            coverage_sweep_tool()
+                .with_policy(workspace_policy(
+                    ToolPhase::Operate,
+                    RuntimeRequirement::Never,
+                    FindingStoreRequirement::Optional,
+                ))
+                .without_phase_result(),
+            coverage_baselines_tool()
+                .with_policy(read_policy(
+                    ToolPhase::Operate,
+                    WorkspaceRequirement::Required,
+                ))
+                .without_phase_result(),
+            coverage_recommend_tool()
+                .with_policy(read_policy(
+                    ToolPhase::Operate,
+                    WorkspaceRequirement::Required,
+                ))
+                .without_phase_result(),
         ],
         vec![],
     )
@@ -31,9 +37,7 @@ pub(crate) fn coverage_module() -> BuiltinModule {
 fn coverage_sweep_tool() -> ToolDescriptor {
     tool_with_options(
         "coverage:sweep",
-        "Decide per scope and phase whether the target changed since its recorded scan \
-         baseline. Verdicts: changed, current, or baseline-unreachable. Diffs are always \
-         whole-repo, never pathspec-limited.",
+        "Inspect historical Git baselines. Dirty sources and unavailable scopes remain unverified. Unchanged tracked source does not establish complete scan coverage or a fixed finding. Diffs are whole-repository.",
         vec![opt(
             "writeSkips",
             OptionType::Bool,
@@ -63,7 +67,8 @@ fn coverage_recommend_tool() -> ToolDescriptor {
             OptionType::Int,
             "Maximum recommendations to return.",
         )
-        .default(json!(20))],
+        .default(json!(20))
+        .integer_range(1, 500)],
     )
 }
 
@@ -84,7 +89,8 @@ pub(in crate::modules) fn run_coverage_sweep(
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({ "report": report, "skipsWritten": skips_written }),
+        json!({ "report": report, "skipsWritten": skips_written,
+            "sourceMeaning":"historical-git-baseline-check", "scopeCoverageVerified":false, "findingFixVerified":false }),
     ))
 }
 
@@ -96,14 +102,12 @@ pub(in crate::modules) fn run_coverage_baselines(ctx: &ToolExecutionContext<'_>)
         Some(ledger) => ledger.latest_baselines()?,
         None => Vec::new(),
     };
-    let output = format!(
-        "coverage:baselines · {} baseline(s) recorded",
-        baselines.len()
-    );
+    let output = baseline_output(&baselines);
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({ "baselines": baselines.iter().map(baseline_json).collect::<Vec<_>>() }),
+        json!({ "baselines": baselines.iter().map(baseline_json).collect::<Vec<_>>(),
+            "sourceMeaning":"historical-git-baseline-records", "scopeCoverageVerified":false }),
     ))
 }
 
@@ -124,7 +128,9 @@ pub(in crate::modules) fn run_coverage_recommend(
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({ "recommendations": shown }),
+        json!({ "recommendations": shown, "recommendationTotal": recommendations.len(),
+            "target": workspace.root(), "sourceFreshnessVerified":false,
+            "sourceMeaning":"advisory-persisted-context-and-historical-baselines" }),
     ))
 }
 
@@ -143,7 +149,7 @@ fn recommend_output_line(
 ) -> String {
     match recommendations.first() {
         Some(top) => format!(
-            "coverage:recommend · {shown} of {} recommendation(s) · top: {} {} ({}) — {}",
+            "coverage:recommend · {shown} of {} recommendation(s) · top: {} {} ({}) · {}",
             recommendations.len(),
             top.scope_id,
             top.phase.word(),
@@ -167,12 +173,15 @@ fn sweep_output_line(report: &SweepReport, skips_written: Option<usize>) -> Stri
         .map(|written| format!(" · {written} skip row(s) written"))
         .unwrap_or_default();
     format!(
-        "coverage:sweep · head {} · {} changed · {} current · {} unreachable · {} never-scanned{skips}",
-        short_sha(&report.head.sha),
+        "Historical Git baseline check\nHEAD: {} · {}\n{} changed · {} source unchanged · {} unreachable · {} source unverified · {} without a baseline{skips}\n{}\nUnchanged tracked source does not establish complete scan coverage or a fixed finding.",
+        report.head.sha,
+        if report.head.dirty { "dirty" } else { "clean" },
         counts.changed,
         counts.current,
         counts.unreachable,
+        counts.unverified,
         report.unbaselined_scopes.len(),
+        report.entries.iter().map(sweep_entry_output).collect::<Vec<_>>().join("\n"),
     )
 }
 
@@ -180,26 +189,80 @@ struct VerdictCounts {
     changed: usize,
     current: usize,
     unreachable: usize,
+    unverified: usize,
 }
 
 fn verdict_counts(report: &SweepReport) -> VerdictCounts {
-    let mut counts = VerdictCounts {
-        changed: 0,
-        current: 0,
-        unreachable: 0,
-    };
-    for entry in &report.entries {
-        match entry.verdict {
-            SweepVerdict::Changed { .. } => counts.changed += 1,
-            SweepVerdict::Current => counts.current += 1,
-            SweepVerdict::BaselineUnreachable => counts.unreachable += 1,
-        }
+    VerdictCounts {
+        changed: report
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry.verdict, SweepVerdict::Changed { .. }))
+            .count(),
+        current: report
+            .entries
+            .iter()
+            .filter(|entry| entry.verdict == SweepVerdict::Current)
+            .count(),
+        unreachable: report
+            .entries
+            .iter()
+            .filter(|entry| entry.verdict == SweepVerdict::BaselineUnreachable)
+            .count(),
+        unverified: report
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry.verdict, SweepVerdict::SourceUnverified { .. }))
+            .count(),
     }
-    counts
 }
 
-fn short_sha(sha: &str) -> &str {
-    sha.get(..8).unwrap_or(sha)
+fn sweep_entry_output(entry: &crate::workspace::coverage_ledger::ScopeSweepEntry) -> String {
+    format!(
+        "{} · {} · {}\n  baseline: {}",
+        entry.scope_id,
+        entry.phase.word(),
+        sweep_verdict_label(entry.verdict),
+        entry.baseline_sha,
+    )
+}
+
+fn sweep_verdict_label(verdict: SweepVerdict) -> String {
+    match verdict {
+        SweepVerdict::Changed { files } => format!("source changed: {files} file(s)"),
+        SweepVerdict::Current => "tracked source unchanged".into(),
+        SweepVerdict::BaselineUnreachable => "baseline unreachable".into(),
+        SweepVerdict::SourceUnverified { reason } => {
+            format!("source unverified: {}", source_issue_label(reason))
+        }
+    }
+}
+
+fn source_issue_label(issue: crate::workspace::coverage_ledger::SourceCheckIssue) -> &'static str {
+    use crate::workspace::coverage_ledger::SourceCheckIssue;
+    match issue {
+        SourceCheckIssue::DirtyWorkingTree => "working tree is dirty",
+        SourceCheckIssue::DirtyBaseline => "baseline was captured dirty",
+        SourceCheckIssue::ScopeUnavailable => "scope is unavailable",
+    }
+}
+
+fn baseline_output(rows: &[crate::workspace::coverage_ledger::BaselineRow]) -> String {
+    let records = rows
+        .iter()
+        .map(|row| {
+            format!(
+                "{} · {} · {} · run {}\n  commit: {}",
+                row.scope_id,
+                row.phase.word(),
+                if row.revision.dirty { "dirty" } else { "clean" },
+                row.run_id,
+                row.revision.sha,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("Historical Git baseline records: {}\n{records}\nRun summaries alone do not establish complete scope coverage.", rows.len())
 }
 
 fn baseline_json(row: &crate::workspace::coverage_ledger::BaselineRow) -> Value {

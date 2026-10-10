@@ -274,6 +274,7 @@ impl ShellApp {
     }
 
     fn report_tool_launch_persistence_failure(&mut self, tool_name: &str, error: anyhow::Error) {
+        self.context_history_failed(tool_name, &error.to_string());
         let message =
             format!("{tool_name} launch blocked: could not initialize run artifacts: {error}");
         self.log("error", message.clone());
@@ -414,7 +415,7 @@ impl ShellApp {
         // before the worker existed, so a fast dispatch error could strand the
         // operator on an empty Activity view. Flipping after thread::spawn
         // guarantees the run is in flight before the view becomes visible.
-        if self.run_focus_is_background_owned() {
+        if self.run_focus_is_background_owned() || self.context_history().is_some() {
             return;
         }
         let committed_plan = self.engagement.running_tool().is_some();

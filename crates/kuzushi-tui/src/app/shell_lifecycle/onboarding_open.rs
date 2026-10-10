@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod setup_facts_tests;
+
 impl ShellApp {
     /// Inspect config + workspace + auth state and transition into the
     /// appropriate first-run view. Called by `with_registry` after the
@@ -89,6 +92,7 @@ impl ShellApp {
             self.open_target_picker();
             return;
         };
+        self.refresh_cached_target_facts(&target_root);
         let (profile, pending) = self.phase_picker_target_profile(&target_root);
         let (rows, selected) =
             self.phase_picker_input(crate::app::WorkflowPhase::Map, profile, &target_root, false);
@@ -187,6 +191,12 @@ impl ShellApp {
         let generation = self.runtime_state.start_active_target_facts(path.clone());
         self.session_mut()
             .begin_active_target_facts(path, generation);
+    }
+
+    fn refresh_cached_target_facts(&mut self, target: &std::path::Path) {
+        if self.active_target_facts().is_some() {
+            self.start_active_target_facts(target.to_path_buf());
+        }
     }
 
     pub(crate) fn active_target_facts(&self) -> Option<&crate::app::TargetCandidateFacts> {
@@ -618,7 +628,10 @@ impl ShellApp {
         };
         !workspace_has_persisted_findings_for_startup(target)
             && !map_artifact_exists_for_startup(target)
-            && !run_summary_exists_for_startup(target)
+            && !self
+                .registry()
+                .investigation_history_requires_resume(target)
+                .unwrap_or(true)
     }
 }
 
@@ -655,10 +668,6 @@ fn fresh_phase_preselection(
         }
     }
     phase_preselection(phase, profile, &fresh_rows)
-}
-
-fn run_summary_exists_for_startup(target: &std::path::Path) -> bool {
-    kuzushi_core::run_summary_history_exists(target).unwrap_or(true)
 }
 
 fn guided_phase_to_workflow_phase(phase: kuzushi_core::GuidedPhase) -> crate::app::WorkflowPhase {
@@ -725,6 +734,23 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn operational_history_does_not_bypass_fresh_target_setup() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(root.path()).unwrap();
+        let summary = kuzushi_core::RunSummary::running(
+            "read-only-status",
+            "tool",
+            Some("workspace:status".into()),
+            workspace.root().display().to_string(),
+        )
+        .complete();
+        kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+        kuzushi_core::list_recent_run_summary_entries(workspace.root(), 1).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        assert!(app.workspace_is_fresh_for_auto_planner());
+    }
 
     #[derive(Debug)]
     struct ProfileReader {
@@ -844,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn large_undecomposed_repo_keeps_decomposition_available_but_unselected() {
+    fn large_undecomposed_repo_keeps_compatibility_decomposition_out_of_default_plan() {
         let target = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
@@ -856,21 +882,19 @@ mod tests {
         assert!(!picker
             .selected()
             .contains(&PlanningTaskId::DecomposeModules));
-        let decompose = picker
+        assert!(!picker
             .tasks()
             .iter()
-            .position(|row| row.id == PlanningTaskId::DecomposeModules)
-            .unwrap();
-        let threat_model = picker
+            .any(|row| row.id == PlanningTaskId::DecomposeModules));
+        assert!(picker
             .tasks()
             .iter()
-            .position(|row| row.id == PlanningTaskId::BuildThreatModel)
-            .unwrap();
-        assert!(decompose < threat_model);
+            .any(|row| row.id == PlanningTaskId::BuildThreatModel));
+        assert!(app.registry().resolve_tool("pack:suggest-shards").is_some());
     }
 
     #[test]
-    fn returned_planner_reads_decomposition_from_the_canonical_v3_path() {
+    fn retained_decomposition_reader_uses_the_canonical_path_without_default_dispatch() {
         let target = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
@@ -888,13 +912,13 @@ mod tests {
 
         app.open_phase_picker(crate::app::WorkflowPhase::Map);
 
-        let row = app
+        assert!(!app
             .engagement
             .planning_picker()
             .tasks()
             .iter()
-            .find(|row| row.id == PlanningTaskId::DecomposeModules)
-            .unwrap();
+            .any(|row| row.id == PlanningTaskId::DecomposeModules));
+        let row = PlanningTaskRow::for_task(PlanningTaskId::DecomposeModules, target.path());
         assert_eq!(
             row.artifact_state,
             crate::app::PlanningArtifactState::Cached

@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: scan
 size: 120x36
 ---
-KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
+KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready
  Map ✓ · Scan ✓ · Review ● · Report
  ▸ NEXT review 6 remaining findings (6 total)
  run sast:scan {} scan now · next → Review · z open findings heatmap · jobs inspect run receipts · report open Report

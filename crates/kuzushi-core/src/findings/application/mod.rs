@@ -5,9 +5,30 @@ pub use scan_assessment::scan_reassessment_block;
 use serde::Serialize;
 
 mod batch_occurrence;
+mod context_matrix_occurrence;
+mod scope_study_occurrence;
+pub use context_matrix_occurrence::{
+    derive_context_matrix_occurrence_report, read_context_matrix_occurrence_report,
+    ContextCaseOccurrenceReport, ContextMatrixOccurrenceReport,
+};
+pub use scope_study_occurrence::{
+    derive_scope_study_occurrence_report, read_scope_study_occurrence_report,
+    ScopeStudyOccurrenceReport,
+};
 mod cross_tool_clusters;
 mod effective_review_state;
+mod finding_page;
+mod review_groups;
+pub use review_groups::{
+    read_finding_groups, read_finding_groups_cancellable, FindingGroupDiagnostics,
+    FindingGroupMember, FindingGroupsPage, FindingGroupsRequest, FindingReviewGroup,
+};
 mod finding_review_gate;
+pub use finding_page::{
+    finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
+    read_finding_page, FindingListPage, FindingPageAnchorMissing, FindingPageMetadata,
+    FindingPageOrder, FindingPageRequest,
+};
 mod generic_tool_findings;
 mod identity_audit;
 mod identity_fold_projection;

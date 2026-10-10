@@ -5,9 +5,8 @@ use crate::V2Config;
 
 impl ModuleRegistry {
     pub fn tool_requires_finding_store(&self, name: &str) -> bool {
-        self.resolve_tool(name).is_some_and(|tool| {
-            tool.finding_store_requirement == FindingStoreRequirement::Required
-        })
+        self.resolve_tool(name)
+            .is_some_and(|tool| tool.finding_store_requirement == FindingStoreRequirement::Required)
     }
 
     pub fn tool_requires_workspace(&self, name: &str) -> bool {
@@ -48,8 +47,7 @@ impl ModuleRegistry {
 
     /// Default discovery surface: visible tools owned by Core modules only.
     pub fn discoverable_tools(&self) -> impl Iterator<Item = &ToolDescriptor> {
-        self.tools()
-            .filter(|tool| self.is_tool_discoverable(tool))
+        self.tools().filter(|tool| self.is_tool_discoverable(tool))
     }
 
     /// Complete operator-visible tool catalog with owning maturity metadata.
@@ -74,7 +72,7 @@ impl ModuleRegistry {
         &self,
     ) -> impl Iterator<Item = (&BuiltinModule, &ToolDescriptor)> {
         self.catalog_tools_with_modules()
-            .filter(|(module, _)| module.maturity().is_core())
+            .filter(|(module, tool)| tool.effective_maturity(module.maturity()).is_core())
     }
 
     /// Iterate every operator-visible `(module metadata, tool)` pair.
@@ -163,7 +161,7 @@ impl ModuleRegistry {
         };
         self.modules
             .get(module_id)
-            .is_some_and(|module| module.maturity().is_core())
+            .is_some_and(|module| tool.effective_maturity(module.maturity()).is_core())
     }
 
     fn dynamic_specifier_for_module(&self, module_id: &str) -> Option<String> {

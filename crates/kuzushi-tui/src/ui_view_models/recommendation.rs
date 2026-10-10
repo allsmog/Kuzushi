@@ -10,13 +10,19 @@ use std::path::{Path, PathBuf};
 pub(crate) const NO_REASON_RECORDED: &str = "No reason recorded.";
 
 const RECOMMENDATION_COLUMN_COUNT: usize = 5;
+
+mod receipt;
+mod source_run;
+#[cfg(test)]
+mod source_tests;
+pub(crate) use source_run::run_id as recommendation_run_id;
 const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
     ["priority", "tool", "runtime", "signal", "reason"];
 const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
     ["run <tool> [key=value]", "trace <run>", "runs", "back"];
 const RECOMMENDATION_COMPONENT_COMMANDS: [&str; 4] =
     ["Enter component", "p promote", "run <tool>", "back"];
-const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
+const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] = ["r refresh deterministic", "runs", "back"];
 const RECOMMENDATION_TARGETLESS_COMMANDS: [&str; 3] = ["target <path>", "demo", "back"];
 const RECOMMENDATION_RUNNING_COMMANDS: [&str; 3] = ["activity", "runs", "back"];
 
@@ -66,9 +72,13 @@ pub(crate) struct ComponentRecommendationRow {
 
 pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
-    let artifact = source.artifact_json(app, recommendations_artifact_leaf());
-    let report = read_recommendations(artifact.clone());
-    let source_detail = artifact_detail_label(&source.path, source.target.as_deref(), &artifact);
+    let artifact = source.recommendation_artifact(app);
+    let report = read_recommendations(artifact.clone(), source.report_leaf(app));
+    let source_detail = artifact_detail_label(
+        &source.report_path(app),
+        source.target.as_deref(),
+        &artifact,
+    );
     let components = report
         .as_ref()
         .map(|view| view.components.clone())
@@ -78,18 +88,23 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     } else {
         RECOMMENDATION_COMPONENT_COMMANDS
     };
+    let mut detail_rows = recommendation_detail_rows(
+        source_detail,
+        source.run_id.clone(),
+        source.latest_pointer_invalid,
+    );
+    detail_rows.extend(receipt::rows(&artifact));
+    if let Some(notice) = source_run::history_notice(app, source.run_id.as_deref()) {
+        detail_rows.push(recommendation_detail_row("history", notice));
+    }
     RecommendationModel {
-        title: "RECOMMEND",
-        detail_rows: recommendation_detail_rows(
-            source_detail,
-            source.run_id.clone(),
-            source.latest_pointer_invalid,
-        ),
+        title: "GENERATED SUGGESTIONS",
+        detail_rows,
         attack_surface: attack_surface_risk_model(source.artifact_json(app, "attack-surface.json")),
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
         report_commands,
-        empty_state: recommendation_empty_state(recommender_running(app), app.target().is_some()),
+        empty_state: reader_empty_state(app),
         components,
         rows: report.map(|view| view.rows).unwrap_or_default(),
     }
@@ -97,7 +112,7 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
 
 pub(crate) fn recommendation_components(app: &ShellApp) -> Vec<ComponentRecommendationRow> {
     let source = RecommendationSource::from_app(app);
-    read_recommendations(source.artifact_json(app, recommendations_artifact_leaf()))
+    read_recommendations(source.recommendation_artifact(app), source.report_leaf(app))
         .map(|view| view.components)
         .unwrap_or_default()
 }
@@ -108,7 +123,7 @@ pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
     }
     let source = RecommendationSource::from_app(app);
     matches!(
-        source.artifact_json(app, recommendations_artifact_leaf()),
+        source.recommendation_artifact(app),
         JsonFileState::Missing | JsonFileState::NonFile | JsonFileState::Unreadable
     )
 }
@@ -117,6 +132,24 @@ pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
 /// a "ranking…" state instead of inviting the operator to (re-)run it.
 fn recommender_running(app: &ShellApp) -> bool {
     app.running_tool_name() == Some("module-recommender:recommend")
+}
+
+fn reader_empty_state(app: &ShellApp) -> RecommendationEmptyState {
+    if source_run::loading(app) {
+        return RecommendationEmptyState {
+            title: "loading generated suggestions",
+            explanations: [
+                "Reading saved run history and result artifacts.",
+                "No discovery work is started.",
+            ],
+            actions: [
+                ("runs", "inspect persisted runs"),
+                ("back", "return to the previous view"),
+            ],
+            commands: ["runs", "back", ""],
+        };
+    }
+    recommendation_empty_state(recommender_running(app), app.target().is_some())
 }
 
 fn recommendation_detail_rows(
@@ -192,13 +225,13 @@ fn missing_recommendation_empty_state() -> RecommendationEmptyState {
     RecommendationEmptyState {
         title: "no recommendations artifact",
         explanations: [
-            "recommend will run module-recommender:recommend for this workspace.",
+            "Press r in Navigate mode to generate deterministic suggestions without a model request.",
             "results appear here after the background run finishes.",
         ],
         actions: [
             (
-                "recommend",
-                "rank modules for the active workspace and write recommendations.json",
+                "r",
+                "rank modules for the active workspace and save the run result",
             ),
             ("runs", "inspect persisted runs"),
         ],
@@ -219,13 +252,13 @@ fn artifact_detail_label(path: &Path, target: Option<&Path>, artifact: &JsonFile
     }
 }
 
-fn read_recommendations(artifact: JsonFileState) -> Option<RecommendationView> {
+fn read_recommendations(artifact: JsonFileState, leaf: &str) -> Option<RecommendationView> {
     let value = match artifact {
         JsonFileState::Present(value) => value,
         JsonFileState::Missing => return None,
-        JsonFileState::NonFile => return Some(non_file_recommendations_view()),
+        JsonFileState::NonFile => return Some(non_file_recommendations_view(leaf)),
         JsonFileState::Malformed | JsonFileState::Unreadable => {
-            return Some(malformed_recommendations_view())
+            return Some(malformed_recommendations_view(leaf))
         }
     };
     let report = recommendation_report_value(&value);
@@ -242,14 +275,14 @@ fn read_recommendations(artifact: JsonFileState) -> Option<RecommendationView> {
     })
 }
 
-fn non_file_recommendations_view() -> RecommendationView {
+fn non_file_recommendations_view(leaf: &str) -> RecommendationView {
     RecommendationView {
-        summary: Some(format!("{} is not a file", recommendations_artifact_leaf())),
+        summary: Some(format!("{leaf} is not a file")),
         components: Vec::new(),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
-                recommendations_artifact_leaf().to_string(),
+                leaf.to_string(),
                 "no".to_string(),
                 "artifact".to_string(),
                 "Artifact path is not a file; regenerate recommendations through module-recommender:recommend."
@@ -259,14 +292,14 @@ fn non_file_recommendations_view() -> RecommendationView {
     }
 }
 
-fn malformed_recommendations_view() -> RecommendationView {
+fn malformed_recommendations_view(leaf: &str) -> RecommendationView {
     RecommendationView {
-        summary: Some(format!("malformed {}", recommendations_artifact_leaf())),
+        summary: Some(format!("malformed {leaf}")),
         components: Vec::new(),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
-                recommendations_artifact_leaf().to_string(),
+                leaf.to_string(),
                 "no".to_string(),
                 "artifact".to_string(),
                 "Malformed JSON; regenerate recommendations through module-recommender:recommend."
@@ -462,7 +495,7 @@ impl RecommendationSource {
             ViewDataState::NotRequested | ViewDataState::Loading => LatestRunPointerState::Missing,
         };
         let run_id = match &latest {
-            LatestRunPointerState::Ready(run_id) => Some(run_id.as_str().to_string()),
+            LatestRunPointerState::Ready(_) => recommendation_run_id(app),
             LatestRunPointerState::Missing | LatestRunPointerState::Invalid(_) => None,
         };
         let run_dir = run_id
@@ -477,6 +510,25 @@ impl RecommendationSource {
         }
     }
 
+    fn recommendation_artifact(&self, app: &ShellApp) -> JsonFileState {
+        let canonical = self.artifact_json(app, "result.json");
+        if canonical_report(&canonical) {
+            return canonical;
+        }
+        self.artifact_json(app, recommendations_artifact_leaf())
+    }
+
+    fn report_path(&self, app: &ShellApp) -> PathBuf {
+        self.path.with_file_name(self.report_leaf(app))
+    }
+
+    fn report_leaf(&self, app: &ShellApp) -> &'static str {
+        if canonical_report(&self.artifact_json(app, "result.json")) {
+            return "result.json";
+        }
+        recommendations_artifact_leaf()
+    }
+
     fn artifact_json(&self, app: &ShellApp, leaf: &str) -> JsonFileState {
         let (Some(target), Some(run_id)) = (self.target.as_deref(), self.run_id.as_deref()) else {
             return JsonFileState::Missing;
@@ -489,6 +541,16 @@ impl RecommendationSource {
             ViewDataState::Ready(state) => state,
             ViewDataState::NotRequested | ViewDataState::Loading => JsonFileState::Missing,
         }
+    }
+}
+
+fn canonical_report(artifact: &JsonFileState) -> bool {
+    match artifact {
+        JsonFileState::Present(value) => {
+            has_recommendation_items(recommendation_report_value(value))
+        }
+        JsonFileState::Missing => false,
+        JsonFileState::Malformed | JsonFileState::Unreadable | JsonFileState::NonFile => true,
     }
 }
 
@@ -548,7 +610,10 @@ mod tests {
 
         let idle = recommendation_empty_state(false, true);
         assert_eq!(idle.title, "no recommendations artifact");
-        assert!(idle.commands.iter().any(|c| *c == "recommend"));
+        assert!(idle
+            .commands
+            .iter()
+            .any(|c| *c == "r refresh deterministic"));
 
         let targetless = recommendation_empty_state(false, false);
         assert_eq!(targetless.title, "choose a target first");
@@ -805,7 +870,7 @@ mod tests {
         let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         let model = recommendation_model(&app);
 
-        assert_eq!(model.title, "RECOMMEND");
+        assert_eq!(model.title, "GENERATED SUGGESTIONS");
         assert_eq!(model.detail_rows[0].cells[0], "recommendations");
         assert_eq!(
             model.report_headers,

@@ -61,15 +61,15 @@ fn model_auth_status_reports_choice_auth_for_unknown_provider() {
 fn model_oauth_status_preserves_expired_and_invalid_states() {
     assert_eq!(
         oauth_model_status(OauthCredentialStatus::Ready),
-        "OAuth ready"
+        "OAuth stored"
     );
     assert_eq!(
         oauth_model_status(OauthCredentialStatus::Refreshable),
-        "OAuth ready (refreshes on use)"
+        "OAuth refresh required"
     );
     assert_eq!(
         oauth_model_status(OauthCredentialStatus::Environment),
-        "OAuth ready (environment token)"
+        "OAuth token present (environment)"
     );
     assert_eq!(
         oauth_model_status(OauthCredentialStatus::Invalid),
@@ -81,6 +81,17 @@ fn model_oauth_status_preserves_expired_and_invalid_states() {
     );
     assert_eq!(
         anthropic_model_auth_status(false, OauthCredentialStatus::Refreshable),
-        "OAuth ready (refreshes on use)"
+        "OAuth refresh required"
     );
+}
+
+#[test]
+fn credential_presence_never_becomes_a_connection_claim() {
+    assert_eq!(AuthProviderTone::Present.label(), "present");
+    assert_ne!(AuthProviderTone::Present.label(), "connected");
+    assert_eq!(
+        anthropic_model_auth_status(true, OauthCredentialStatus::Refreshable),
+        "ANTHROPIC_API_KEY present"
+    );
+    assert!(!oauth_model_status(OauthCredentialStatus::Refreshable).contains("ready"));
 }

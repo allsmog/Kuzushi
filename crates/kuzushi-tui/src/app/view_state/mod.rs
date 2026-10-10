@@ -101,6 +101,7 @@ pub(crate) use routes::ConfigModelPickerOrigin;
 pub(crate) use routes::FilePickerPurpose;
 pub(crate) use routes::PendingTargetIntent;
 pub(crate) use routes::ReportOrigin;
+pub(crate) use routes::ReportStudyRef;
 pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,

@@ -9,7 +9,7 @@ use crate::app::{FindingLedgerCounts, PlanningTaskId, ViewDataState, WorkflowPha
 use crate::ui_view_models::review_state::{
     decision_is_review_actionable, indexed_review_decision_complete, EffectiveReviewStateIndex,
 };
-use crate::{RunSummaryEntriesState, ShellApp};
+use crate::{RunSummaryEntriesState, ShellApp, ShellView};
 use kuzushi_core::findings::ReviewDecisionVerdict;
 use kuzushi_core::workflow_attempts::{PhaseAttemptDisposition, PhaseAttemptOutcome};
 use kuzushi_core::{
@@ -228,11 +228,24 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
         current,
         destination,
         progress,
-        next_summary: destination_next_summary(destination, progress, &next_action),
+        next_summary: source_qualified_next_summary(app, destination, progress, &next_action),
         next_action,
         next_tools: projected_next_tools(app, destination),
         checkpoint_drift,
     })
+}
+
+fn source_qualified_next_summary(
+    app: &ShellApp,
+    destination: JourneyDestination,
+    progress: JourneyProgress,
+    next_action: &str,
+) -> String {
+    let count = app.domain().review_source_reassessment_count();
+    if destination == JourneyDestination::Phase(WorkflowPhase::Review) && count > 0 {
+        return format!("{count} recorded decisions require source reassessment; earlier verdicts remain in history");
+    }
+    destination_next_summary(destination, progress, next_action)
 }
 
 pub(crate) fn journey_reality_projection(app: &ShellApp) -> Option<JourneyRealityProjection> {
@@ -556,10 +569,10 @@ pub(crate) fn finding_ledger_counts(
         remediated: 0,
         remediation_projection_complete: false,
         durable_scan_evidence: findings.iter().any(|finding| {
-            finding
-                .scan_id
-                .as_deref()
-                .is_some_and(|scan_id| !scan_id.trim().is_empty())
+            finding.scan_id.as_deref().is_some_and(|scan_id| {
+                !scan_id.trim().is_empty()
+                    && !kuzushi_core::findings::import::is_ledger_import_run_id(scan_id)
+            })
         }),
     }
 }
@@ -723,7 +736,7 @@ fn phase_access(app: &ShellApp, progress: JourneyProgress) -> [JourneyPhaseAcces
         available_for(
             app,
             WorkflowPhase::Review,
-            app.findings_total_count() > 0,
+            progress.finding_total > 0,
             "no vulnerabilities to review; complete Scan or import findings",
         ),
     ]
@@ -786,9 +799,15 @@ pub(crate) fn phase_complete_or_passed(
     }
 }
 
-/// [`phase_complete_or_passed`] over the app's cached reality projection;
-/// false without a target.
+/// Open existing phase evidence before proposing more work. Reading a pending
+/// result does not select it or advance the journey. False without a target.
 pub(crate) fn phase_verb_opens_page(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    if app.target().is_none() {
+        return false;
+    }
+    if app.engagement.unresolved_phase_attempt(phase).is_some() {
+        return true;
+    }
     journey_reality_projection(app)
         .is_some_and(|reality| phase_complete_or_passed(phase, reality.destination))
 }
@@ -979,6 +998,9 @@ pub(crate) fn journey_phase_segment(phase: WorkflowPhase) -> String {
 }
 
 pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
+    if !investigation_chrome_is_visible(app) {
+        return None;
+    }
     let journey = journey_model(app)?;
     Some(match journey.destination {
         JourneyDestination::Phase(_) => journey_phase_segment(journey.current),
@@ -989,6 +1011,9 @@ pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
 }
 
 pub fn autonomy_footer_segment(app: &ShellApp) -> Option<String> {
+    if !investigation_chrome_is_visible(app) {
+        return None;
+    }
     let journey = journey_model(app)?;
     let posture = app.autonomy();
     let mut segment = format!("⛭ autonomy:{}", posture.label());
@@ -998,9 +1023,34 @@ pub fn autonomy_footer_segment(app: &ShellApp) -> Option<String> {
     Some(segment)
 }
 
+pub(super) fn investigation_chrome_is_visible(app: &ShellApp) -> bool {
+    app.target().is_some_and(|_| {
+        !matches!(app.shell_view(), ShellView::TargetPicker | ShellView::Setup)
+            && app.router.setup().editor().is_none()
+            && !app.engagement.planning_picker().returns_to_setup()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn imported_ledger_ids_do_not_establish_local_discovery_checkpoints() {
+        let mut finding = Finding::new_tool(
+            "external-fixture",
+            "owned-citation",
+            "owned.txt",
+            1,
+            None,
+            Severity::Low,
+            "Labeled external history",
+        );
+        finding.scan_id = Some("ledger-0123456789abcdef".into());
+        let counts = finding_ledger_counts(&[finding.clone()], &[], 1);
+        assert!(!counts.durable_scan_evidence);
+        finding.scan_id = Some("legacy-source-scan".into());
+        assert!(finding_ledger_counts(&[finding], &[], 1).durable_scan_evidence);
+    }
     use crate::ViewHydrationKey;
     use kuzushi_core::workflow_attempts::{
         append_phase_attempt_completed, append_phase_attempt_disposition,
@@ -1449,6 +1499,16 @@ mod tests {
         assert!(statuses[2..]
             .iter()
             .all(|status| status.state == JourneyPhaseState::Skipped));
+    }
+
+    #[test]
+    fn an_empty_query_keeps_review_available_for_the_full_ledger() {
+        let app = ShellApp::new(V2Config::default(), None);
+        assert_eq!(app.findings_total_count(), 0);
+        let populated = phase_access(&app, progress(true, true, 6, 6, 6, 0, 0, 0));
+        assert_eq!(populated[2], JourneyPhaseAccess::Available);
+        let empty = phase_access(&app, progress(true, true, 0, 0, 0, 0, 0, 0));
+        assert!(matches!(empty[2], JourneyPhaseAccess::Locked { .. }));
     }
 
     #[test]

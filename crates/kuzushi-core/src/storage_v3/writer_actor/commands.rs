@@ -30,6 +30,10 @@ pub enum ControlCommand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecisionCommand {
+    FindingLesson {
+        record: crate::findings::FindingLesson,
+        expected: Option<crate::findings::LessonRef>,
+    },
     ReviewDecision(DecisionWrite),
     /// Ordered with decisions on purpose: a session and the verdict it
     /// precedes are one causal chain of operator review.
@@ -41,6 +45,14 @@ pub enum DecisionCommand {
     RecordRunLifecycle(RunLifecycleWrite),
     RecordFindingLifecycle(FindingLifecycleWrite),
     RekeyFinding(RekeyWrite),
+    FindingRelationship {
+        record: crate::findings::FindingRelationship,
+        expected_revision: u64,
+    },
+    FindingRelationshipBatch {
+        selected: Vec<crate::findings::FindingRelationship>,
+        records: Vec<crate::findings::FindingRelationship>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

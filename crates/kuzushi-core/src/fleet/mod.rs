@@ -8,16 +8,20 @@
 
 mod corpus;
 mod diff_findings;
+mod history;
+#[cfg(test)]
+mod native_fixture;
 mod registry;
 mod status;
 #[cfg(test)]
 mod tests;
 
 pub use corpus::{query_corpus_rows, rebuild_corpus, CorpusFindingRow, CorpusReport};
-pub use diff_findings::{diff_findings, DiffFindingEntry, DiffFindingsReport, FindingLead};
+pub use diff_findings::{
+    diff_findings, diff_findings_bounded, DiffFindingEntry, DiffFindingsReport, FindingLead,
+};
 pub use registry::{
-    default_fleet_dir, load_fleet_targets, register_fleet_target, FleetTarget,
-    FLEET_TARGETS_FILE,
+    default_fleet_dir, load_fleet_targets, register_fleet_target, FleetTarget, FLEET_TARGETS_FILE,
 };
 pub use status::{fleet_status, FleetStatusReport, FleetTargetStatus};
 

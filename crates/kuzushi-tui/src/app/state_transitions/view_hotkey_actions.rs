@@ -52,6 +52,9 @@ fn is_movement_hotkey(action: ViewHotkeyAction) -> bool {
             | PromptsCursorNext
             | ThreatModelNext
             | ThreatModelPrevious
+            | FindingGroupsOpen
+            | RelationshipsOpen
+            | LessonsOpen
             | Back
     )
 }
@@ -91,10 +94,30 @@ impl ShellApp {
     }
 
     pub(super) fn apply_view_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
+        if let Some(update) = self.apply_relationship_surface_hotkey(action) {
+            return update;
+        }
         if let Some(update) = self.apply_workbench_hotkey(action) {
             return update;
         }
         self.apply_focused_view_hotkey(action)
+    }
+
+    fn apply_relationship_surface_hotkey(
+        &mut self,
+        action: ViewHotkeyAction,
+    ) -> Option<InputUpdate> {
+        match action {
+            ViewHotkeyAction::FindingGroupsOpen => {
+                if !self.return_to_relationship_bulk_review() {
+                    self.open_finding_groups();
+                }
+            }
+            ViewHotkeyAction::RelationshipsOpen => self.open_relationships(),
+            ViewHotkeyAction::LessonsOpen => self.open_lessons(),
+            _ => return None,
+        }
+        Some(InputUpdate::handled())
     }
 
     /// The `bool`-returning handlers, tried in order; each mutates and reports
@@ -135,6 +158,12 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
             ViewHotkeyAction::WorkbenchReviewSearch => self.open_review_search(),
+            ViewHotkeyAction::WorkbenchReviewLedgerFilter => self.draft_review_ledger_filter(),
+            ViewHotkeyAction::WorkbenchFindingsPageNext
+            | ViewHotkeyAction::WorkbenchFindingsPagePrevious => self.move_findings_page(matches!(
+                action,
+                ViewHotkeyAction::WorkbenchFindingsPageNext
+            )),
             ViewHotkeyAction::WorkbenchCompareObservations => {
                 self.open_review_observation_comparison()
             }
@@ -768,6 +797,11 @@ impl ShellApp {
         }
     }
 
+    fn draft_review_ledger_filter(&mut self) {
+        self.set_input("findings filter ");
+        self.set_input_mode(InputMode::Prompt);
+    }
+
     /// Item 13: `/` opens the palette-style search capture over the queue.
     fn open_review_search(&mut self) {
         self.router
@@ -1104,8 +1138,31 @@ impl ShellApp {
             }
             ViewHotkeyAction::RecommendScanComponent => self.scan_recommend_component(),
             ViewHotkeyAction::RecommendPromoteComponent => self.promote_recommend_component(),
+            ViewHotkeyAction::RecommendRefresh => self.refresh_generated_recommendations(),
             _ => InputUpdate::ignored(),
         }
+    }
+
+    fn refresh_generated_recommendations(&mut self) -> InputUpdate {
+        if self.tool_is_running() {
+            self.log(
+                "recommend",
+                "current work is still active; no extra refresh was queued",
+            );
+            return InputUpdate::handled();
+        }
+        let Some(target) = self.target_owned() else {
+            self.set_warn_notice(
+                "recommend",
+                "Select a target before generating suggestions.",
+            );
+            return InputUpdate::handled();
+        };
+        match WorkspaceTarget::new(target) {
+            Ok(workspace) => self.start_deterministic_recommender(workspace),
+            Err(error) => self.set_error_notice("recommend", error.to_string()),
+        }
+        InputUpdate::handled()
     }
 
     fn move_recommend_cursor(&mut self, delta: isize) {
@@ -1272,6 +1329,7 @@ impl ShellApp {
             ViewHotkeyAction::CatalogActivate => self.load_catalog_action(),
             ViewHotkeyAction::CatalogToggleExpert => self.toggle_catalog_expert(),
             ViewHotkeyAction::ThreatView(view) => {
+                self.prepare_context_history_view(view);
                 self.router.threat_mut().open(view);
                 self.set_shell_view(ShellView::Threat);
                 InputUpdate::handled()

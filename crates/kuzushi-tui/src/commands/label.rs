@@ -49,6 +49,7 @@ pub enum ShellCommand {
     Back,
     Modules,
     Recommend,
+    RecommendationReport,
     Tools(Option<String>),
     /// Toggle a tool as a favorite on the per-workspace shelf.
     FavoriteTool(String),
@@ -150,6 +151,9 @@ pub enum ShellCommand {
     /// Leave batch-scoped Review and return to the workspace finding set.
     ClearBatchScope,
     ShowCoverage,
+    ShowRelationships,
+    ShowLessons,
+    ShowFindingGroups,
     /// Queue a command to dispatch after the current run finishes. `queue
     /// <tool|verb>`.
     QueueCommand(String),

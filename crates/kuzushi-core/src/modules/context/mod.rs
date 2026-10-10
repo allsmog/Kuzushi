@@ -6,6 +6,8 @@ pub(in crate::modules) use package_json_dependency_names::*;
 pub(in crate::modules) use register_context_modules::*;
 mod attack_surface_routes;
 mod build_context_snapshot;
+mod context_file_sample;
+use context_file_sample::{inventory_file_sample, ContextFileSample, MAX_CONTEXT_SAMPLE_FILES};
 mod enrichment;
 mod ingest_file;
 mod package_json_dependency_names;

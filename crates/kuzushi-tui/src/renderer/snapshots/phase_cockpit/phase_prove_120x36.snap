@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: prove
 size: 120x36
 ---
-KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
+KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready
  Map ✓ · Scan ✓ · Review ● · Report
  ▸ NEXT review 6 remaining findings (6 total)
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report

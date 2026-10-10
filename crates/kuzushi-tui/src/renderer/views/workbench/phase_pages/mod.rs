@@ -174,25 +174,26 @@ pub(super) fn selection_disclosure_lines(
     let Some(disclosure) = disclosure else {
         return Vec::new();
     };
-    vec![
-        Line::styled(
-            fit(&format!("⚠ {}", disclosure.message), width),
-            theme::warn(),
-        ),
-        Line::from(vec![
-            Span::styled(
-                fit(
-                    &format!("filter:{} · ", disclosure.filter),
-                    width.saturating_sub(disclosure.reveal_command.len() + 10),
-                ),
-                theme::muted(),
-            ),
-            Span::styled(
-                format!("▸ {} reveal", disclosure.reveal_command),
-                theme::accent(),
-            ),
-        ]),
-    ]
+    let mut lines =
+        crate::renderer::shared::text::wrap_text(&format!("⚠ {}", disclosure.message), width)
+            .into_iter()
+            .map(|line| Line::styled(line, theme::warn()))
+            .collect::<Vec<_>>();
+    let filter = disclosure
+        .filter
+        .as_ref()
+        .map(|filter| format!("filter:{filter} · "))
+        .unwrap_or_default();
+    let recovery = format!(
+        "{filter}▸ {} {}",
+        disclosure.reveal_command, disclosure.reveal_label
+    );
+    lines.extend(
+        crate::renderer::shared::text::wrap_text(&recovery, width)
+            .into_iter()
+            .map(|line| Line::styled(line, theme::accent())),
+    );
+    lines
 }
 
 fn clamped_scroll(scroll: u16, rows: usize, viewport: u16) -> u16 {
@@ -205,6 +206,47 @@ fn clamped_scroll(scroll: u16, rows: usize, viewport: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_disclosure_keeps_identity_and_action_target_when_wrapped() {
+        let disclosure = crate::ui_view_models::SelectionDisclosureModel {
+            message: "F-0952 pinned outside list; decisions use this detail".into(),
+            filter: Some("name:0656".into()),
+            reveal_command: "findings".into(),
+            reveal_label: "reveal",
+        };
+        let lines = selection_disclosure_lines(Some(&disclosure), 34);
+        let text = lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("F-0952 pinned outside list"), "{text}");
+        assert!(text.contains("decisions use this detail"), "{text}");
+        assert!(lines.iter().all(|line| line.width() <= 34));
+    }
+
+    #[test]
+    fn historical_disclosure_wraps_the_current_observation_command_without_a_filter_claim() {
+        let disclosure = crate::ui_view_models::SelectionDisclosureModel {
+            message: "F-0601 shows an earlier observation; decisions stay bound to it".into(),
+            filter: None,
+            reveal_command: "open F-0601".into(),
+            reveal_label: "inspect current",
+        };
+        for width in [18, 34, 38, 78] {
+            let lines = selection_disclosure_lines(Some(&disclosure), width);
+            let text = lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(text.contains("open F-0601"), "{text}");
+            assert!(text.contains("inspect current"), "{text}");
+            assert!(!text.contains("filter:"), "{text}");
+            assert!(lines.iter().all(|line| line.width() <= width));
+        }
+    }
 
     #[test]
     fn maximum_scroll_reaches_final_row_after_indented_wrapping() {

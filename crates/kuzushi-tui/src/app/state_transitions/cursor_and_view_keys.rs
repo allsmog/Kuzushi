@@ -612,9 +612,10 @@ impl ShellApp {
     }
 
     fn scroll_summary(&mut self, direction: i32) {
-        self.router
-            .scene_mut()
-            .scroll_summary(direction, VIEWPORT_PAGE_LINES);
+        let rows = crate::renderer::summary_page_rows(self)
+            .unwrap_or(VIEWPORT_PAGE_LINES)
+            .min(VIEWPORT_PAGE_LINES);
+        self.router.scene_mut().scroll_summary(direction, rows);
     }
 
     fn cycle_scene(&mut self, direction: i32) {

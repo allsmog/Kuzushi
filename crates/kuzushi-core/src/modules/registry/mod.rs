@@ -45,11 +45,17 @@ pub(in crate::modules) use module_registry::*;
 pub(in crate::modules) use run_taint_iris_tool::*;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+#[cfg(test)]
+mod coverage_contract_tests;
 mod dispatch_catalog_tool;
 mod dispatch_plugin_prompt_tool;
 #[cfg(test)]
 mod map_source_identity_tests;
 mod module_registry;
+#[cfg(test)]
+mod operational_contract_tests;
+#[cfg(test)]
+mod recommendation_contract_tests;
 mod run_taint_iris_tool;
 #[cfg(test)]
 mod scan_scope_proposal_tests;

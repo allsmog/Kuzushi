@@ -10,6 +10,7 @@ pub(in crate::renderer::views::workbench) fn review_detail_lines(
     let mut lines = detail_title_lines(detail, budget);
     push_observation_gap(&mut lines, detail, budget);
     push_review_decision(&mut lines, detail, budget);
+    push_decision_source(&mut lines, detail, budget);
     push_source_section(&mut lines, detail, budget);
     push_evidence_section(
         &mut lines,
@@ -28,6 +29,7 @@ pub(in crate::renderer::views::workbench) fn review_detail_lines(
     push_review_yield_section(&mut lines, detail.review_yield.as_ref(), budget);
     push_message_section(&mut lines, detail, budget);
     push_provenance_section(&mut lines, detail, budget);
+    push_decision_source_provenance(&mut lines, detail, budget);
     lines
 }
 
@@ -66,6 +68,35 @@ fn push_review_fallback(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMo
         );
     }
     push_wrapped(lines, &triage.rationale, width, "  ", theme::muted());
+}
+
+fn push_decision_source(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, width: usize) {
+    let Some(source) = &detail.decision_basis else {
+        return;
+    };
+    push_section_header(lines, "DECISION SOURCE");
+    let style = if source.warning {
+        theme::warn()
+    } else {
+        theme::muted()
+    };
+    push_wrapped(lines, &source.notice, width, "  ", style);
+    for row in &source.rows {
+        push_wrapped(lines, row, width, "  ", theme::muted());
+    }
+}
+
+fn push_decision_source_provenance(
+    lines: &mut Vec<Line<'static>>,
+    detail: &FindingDetailModel,
+    width: usize,
+) {
+    let Some(source) = &detail.decision_basis else {
+        return;
+    };
+    for row in &source.provenance {
+        push_wrapped(lines, row, width, "  ", theme::muted());
+    }
 }
 
 fn push_review_actions(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, width: usize) {

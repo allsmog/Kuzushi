@@ -910,6 +910,199 @@ acknowledgement for partial evidence. A missing producing run, damaged result
 or changed source explains why a current Map receipt cannot be recorded.
 Reading historical context remains available. All controls, including Map
 review and back, remain visible in the narrow layout.
+Inspecting a generated revision retains its originating completed result.
+Back restores that result's options and scroll without selecting context or
+changing allowance. Explicit **use** leaves the inspector for study preparation.
 A pending Map can be inspected without replacing the accepted revision used by
 a new study. Missing accepted evidence blocks preparation. Existing frozen
 study inputs are retained when reopening their plan.
+
+The shell's **repo index** status names its optional source index separately
+from accepted threat-model context. Stale and unverified indexes retain those
+qualifications. Summary uses a pageable document when its description cannot
+fit; Page Up at the document start stays there, and page steps follow visible
+rows. The sidebar's session dollar cap and recorded session spend describe the
+current shell process. Report owns prior investigation usage and allowance.
+
+Review's **Decision source** names the recorded observation, commit, branch and
+dirty state behind the effective verdict. A later observation is separate and
+can prompt reassessment. Full commits and snapshot ids remain in provenance.
+Missing captures and unreadable metadata stay explicit; no new verdict is
+created automatically. An explicit `decision <verdict> <reason>` records the
+operator's new decision against the displayed observation and retains earlier
+decisions. At narrow widths, Enter or `open <id>` reveals finding detail and
+PgUp/PgDn reads its complete document. Reading this history performs no model
+work and does not repair run metadata.
+
+
+## Findings navigation
+
+`findings:list` declares `cursor` and `anchor` as advanced string options and
+`order` as `ledger|confidence`, defaulting to `ledger`. Pages retain the 500-row
+ceiling. A returned cursor continues the same target/query/ledger snapshot;
+changes require a fresh request. An anchor keeps its finding in the current
+query after an update. Do not combine cursor and anchor. The shared registry
+validates these options in shell/run dispatch.
+
+The interactive Review list uses confidence order over all matching rows.
+Ctrl+N and Ctrl+P move between pages in empty Navigate mode. Local search is
+page-local; Ctrl+F prepares the complete-ledger filter. Query changes reset page
+position. This navigation performs local reads and never adds scan jobs or
+model spending.
+
+An explicitly opened finding can stay pinned outside the query or component.
+Review detail and manual decisions use that identity. The list discloses the pin
+and its action target; list navigation releases it. Aliases are withheld after
+the ledger or grouping policy changes. The captured read watermark remains, so
+an older pin cannot overwrite a newer decision without reopening the finding.
+The cache keeps current findings' decision history independently of the list.
+
+Passive refresh can recover once to the first page when its selected row leaves
+the query. It retains the filter and recorded decisions and publishes a notice.
+Explicit cursor or anchor requests remain strict errors when invalid or missing.
+Recovery does not issue model requests or create discovery work.
+
+### Manual context copies
+
+In study context, inspect the exact revision with Enter, then use `e` to edit.
+Enter opens a field; multiline paste and cursor keys stay in that field.
+Ctrl+S opens the change review. Enter there saves a new inactive copy through
+`threat-model:revise`; it does not update an accepted plan or the active model.
+Inspect the new copy, then explicitly select it with `a` for a new study draft.
+Back keeps session drafts and cursors. `d` opens a separate discard confirmation.
+An interrupted or failed save keeps edits and asks for catalog inspection before
+retrying. The global active-context editors retain their existing explicit
+behavior. Copied context retains its original source binding and needs a new
+grounding check after edits.
+
+In the manual copy editor, `g` prepares regeneration of the selected explanatory
+field. Save or explicitly discard pending human text first. The generation form
+offers `G` for multiline guidance, `M` for the model, `t` for total calls, `r` for
+protected review calls, `Tab` for exact options and page keys for the full plan.
+Guidance uses Enter for a newline and Ctrl+S to include it. Back keeps its draft
+and cursor; an unsaved guidance draft blocks plan preparation. Each new plan
+requires review, allowance approval and an explicit job start. Saving the result
+does not select or activate it. Inspect it, use `d` in the context chooser to
+compare before/after text, then `a` to bind it to a separately approved study.
+Comparison reads the exact saved parent without a model request. A failed parent
+read offers Enter to retry locally or Esc to return to the candidate.
+
+In the study context browser, `c` checks the inspected exact revision against
+its recorded source. `Space` lists every action with keyboard selection and
+back. Checking makes no model requests. A saved check stays inactive and needs
+inspection before `a` can select it for a new study plan. Failed structural
+checks remain visible. A changed content tree, even at the same SHA, or a new
+SHA, even with identical content, stops checking historical context. The check
+does not refresh that context or claim that findings were fixed. Inspect
+Activity and the catalog after a canceled or uncertain outcome before retrying.
+The browser distinguishes the last recorded check from source identity captured
+at inspection. Changed SHA, content, dirty state and unknown identity remain
+visible after an exact read and restart. Source is rechecked on the next action;
+an inspection receipt is not continuous filesystem monitoring.
+
+### Interactive manual decision saves
+
+`decision` and `dismiss` retain the selected finding, target, read watermark and
+review session while one background save settles. Review shows `saving <alias>`
+and keeps its recorded decision separate. A second decision or suppression is
+refused with an instruction to retry from command history. There is no pending
+write queue or automatic retry. Exit waits for the save result. A changed target
+receives a notice naming the original target without changing its current view.
+A missing result requires ledger inspection before retrying. Synchronous callers
+use the same Core service and journal guards. Suppression-rule writes are still
+synchronous; their aliases resolve across the complete policy-projected ledger.
+
+### Budgeted lesson drafts and exports
+
+Open a human-confirmed finding in Review, then `lessons`. Press `g` for one
+model-proposed lesson. The existing study form owns the selected model,
+generation options, guidance and allowance. Prepare the fixed job, inspect its
+exact confirmation and observation, approve its allowance, then start it
+separately. Generation uses Learning calls, preserving the protected Review
+allocation. It returns a draft; `a`, `r` and `t` still require a reason and an
+explicit confirmation. Acceptance and inclusion in a context copy are separate.
+
+`findings:lesson-generate` declares `findingId`, optional frozen `originRef`,
+`guidance`, `maxSourceBytes`, `maxOutputTokens`, `thinkingLevel`, `model` and
+required `allowanceRef`. It uses recorded captured source, discloses omissions,
+and makes one tool-free synthesis request. Invalid output has no repair loop.
+The adapter may not enforce the requested output-token ceiling; provider calls
+and attempts remain limited by the approved allowance. Dollar consumption is
+uncertain. A failed job stays visible, and another draft needs separate approval.
+
+Report includes current lesson records linked to its included finding
+generations. JSON, JSONL, SARIF and Markdown bundle retain text, exact references,
+origin, review state, generation receipt and current context eligibility. CSV
+and the compatibility findings format disclose that lessons are omitted.
+Historical guidance does not establish a finding verdict or a fix at another
+source revision. Exported lessons stay outside automatic artifact context.
+
+### Context comparison in a fixed study
+
+The declared `campaign:study contextBaselineRunId` option names one completed,
+authenticated SAST run. `baselineRunId` remains the separate historical usage
+selector. Selecting another usage record does not change the context baseline.
+Candidate context is selected through `scanInput.threatModelRef`; only that
+condition may differ. Planning and approval reject other condition changes.
+
+The study form's **Context comparison** row binds the explicit baseline and
+reads its existing allowance. It does not approve work. Choose a different
+exact context, prepare the draft, review the retained call limits and protected
+review allocation, approve that specific plan, and start its frozen jobs
+explicitly. A read failure keeps the draft and spending account, blocks work,
+and offers `r` for a read-only retry. Esc dismisses an error banner when needed.
+
+Once frozen, Enter on Context comparison opens actual candidate passes. Arrows
+select, Enter compares with the named baseline, `r` refreshes recorded outcomes,
+Esc returns, and `x` clears the comparison. Comparison preserves decisions and
+selection on return and makes no model request. Completed work and spending
+survive edits and restart. A changed context can change consumption; historical
+usage is not a calibrated candidate estimate. Dollars remain unknown without
+complete price receipts. Every candidate still requires its own explicit finite
+plan and allowance approval within the shared investigation.
+
+### Context cases and recorded outcomes
+
+**Context cases** opens the finite case editor. Inspect an exact context in the
+existing reader, then `+` includes it or `b` includes it as the explicit baseline.
+In the case editor, arrows select; `b` chooses the baseline, `p` edits only that
+case's repetitions, `x` removes it, and `c` clears the cases while retaining
+spending. **Discovery passes** sets the default for newly added cases. Existing
+cases retain their own counts.
+
+`v` reads recorded results after the plan is frozen. Arrows select a case and
+Enter opens its pass list. `b` chooses a completed baseline pass explicitly;
+Enter on a candidate pass opens the existing comparison. Esc restores the exact
+case/pass selection. `PgUp/PgDn` reads long selected-case details, `r` refreshes
+results, and no comparison action starts work. Pending or unavailable finding
+snapshots display pending counts instead of an apparent zero result.
+
+Every case retains a separate recurrence denominator and exact context. The
+entire workload shares the approved allowance. Failed accounting reads retain
+known consumption and limits; `r` retries the read. Unknown dollar costs remain
+unavailable. Edits need a replacement plan approval and cannot grant additional
+work implicitly.
+
+From recorded matrix results, `R` opens Report for the exact saved plan. The
+reader checks its digest in the background. Esc restores the selected case and
+pass. Reopening refreshes decisions and outcomes without starting jobs. A missing
+or changed receipt blocks the scoped export; `s` explicitly chooses workspace
+history. The report names recorded source and does not imply current-source
+applicability when it has not been checked. `p` shows per-case context and
+condition references. All export formats retain the investigation receipt.
+
+Matrix dispatch saves its completed or partial result for explicit Scan
+acceptance. The Scan result controls offer Use only when the recorded source
+can support progression. Partial work requires acknowledgement. Reopening a
+completed plan does not add jobs or select the result. After acceptance,
+ordinary Report entry uses the matrix's exact run set and keeps every case's
+recurrence separate. Historical or unverifiable source remains disclosed.
+
+At the discovery call limit, fixed model work pauses before another job attempt.
+Protected review calls remain available for their intended phase. The campaign
+surface offers plan/allowance review and partial/report access. Starting with an
+exhausted allowance is refused before a dispatcher launches. A specific approved
+revision can resume the original unstarted jobs; it does not add jobs or repeat
+completed ones. Unstarted parked work appears as pending in occurrence reports.
+Runtime-free work can continue without provider capacity. Cancellation and
+unresolved reservations never return committed calls to the allowance.

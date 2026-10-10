@@ -1,5 +1,5 @@
 use crate::findings::{Finding, Severity, StaticProofState};
-use crate::scan::engines::coverage_gaps::{read_dir_entries, CoverageGapKind, CoverageGaps};
+use crate::scan::engines::coverage_gaps::{CoverageGapKind, CoverageGaps};
 use crate::scan::{ScanCancellation, ScanEngine, ScanEngineOutput};
 use anyhow::{Context, Result};
 pub(crate) use assignment_detection::*;
@@ -19,12 +19,15 @@ mod assignment_detection;
 mod cancellation_stops_native_scan;
 mod canonical_directory;
 mod classify_token;
+mod configured;
+pub(crate) use configured::ConfiguredSecretScanScanner;
 mod id;
 mod is_token_char;
 mod output;
 mod scan_for_secrets;
 mod scanner_options;
 mod secret_scan_report;
+mod traversal;
 pub(in crate::scan::engines::secret_scan) use is_token_char::*;
 #[cfg(test)]
 mod tests;
@@ -37,4 +40,5 @@ pub use scan_for_secrets::scan_for_secrets;
 pub use scanner_options::SecretScanOptions;
 pub use scanner_options::SecretScanScanner;
 pub(crate) use scanner_options::MAX_SUPPORTED_FILE_BYTES;
+pub use secret_scan_report::SecretScanInspection;
 pub use secret_scan_report::SecretScanReport;

@@ -216,15 +216,37 @@ fn derive_batch_occurrence_report_inner(
     let checked =
         crate::capabilities::campaign::validate_scan_batch_execution_plan(batch_id, &plan)?;
     let queue = read_optional_batch_document(root, batch_id, "queue.json")?;
+    let mut report = derive_occurrence_from_documents(
+        root,
+        batch_id,
+        store,
+        &plan,
+        queue.as_ref(),
+        checked.equivalence_key,
+    )?;
+    if hydrate_gate {
+        report.gate = load_batch_gate(root, batch_id, &plan, store, &report)?;
+    }
+    Ok(report)
+}
+
+pub(super) fn derive_occurrence_from_documents(
+    root: &Path,
+    batch_id: &str,
+    store: &FindingStore,
+    plan: &Value,
+    queue: Option<&Value>,
+    equivalence_key: String,
+) -> Result<BatchOccurrenceReport> {
     let policy = IdentityFoldPolicy::parse(plan.get("identityFold").and_then(Value::as_str))?;
-    let mut trials = trial_reports(&plan, queue.as_ref());
+    let mut trials = trial_reports(plan, queue);
     hydrate_finding_run_ids(root, &mut trials);
-    validate_batch_trial_receipts(root, &plan, queue.as_ref(), &trials)?;
+    validate_batch_trial_receipts(root, plan, queue, &trials)?;
     let counts = LogicalTrialCounts::from_trials(&trials);
-    let mut report = BatchOccurrenceReport {
+    Ok(BatchOccurrenceReport {
         schema_version: 1,
         batch_id: batch_id.to_string(),
-        equivalence_key: checked.equivalence_key,
+        equivalence_key,
         identity_fold: policy,
         planned: counts.planned,
         completed: counts.completed,
@@ -233,11 +255,11 @@ fn derive_batch_occurrence_report_inner(
         gate: None,
         rows: occurrence_rows(store, &trials, policy, counts)?,
         trials,
-    };
-    if hydrate_gate {
-        report.gate = load_batch_gate(root, batch_id, &plan, store, &report)?;
-    }
-    Ok(report)
+    })
+}
+
+pub(super) fn read_occurrence_queue(root: &Path, id: &str) -> Result<Option<Value>> {
+    read_optional_batch_document(root, id, "queue.json")
 }
 
 fn load_batch_gate(

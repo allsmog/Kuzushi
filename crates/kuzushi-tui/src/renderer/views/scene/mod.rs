@@ -14,4 +14,5 @@ pub(in crate::renderer) use diagram::{DfdDiagram, TreeDiagram};
 pub(crate) use entry_points::entry_point_page_scroll;
 pub(crate) use gallery::{map_summary_plain_lines, scene_page_lines};
 pub(in crate::renderer::views) use gallery_layout::map_canvas_sections;
+pub(crate) use gallery_layout::{scene_page_rows, summary_page_rows};
 pub(crate) use render_scene_view::{render_embedded_map_gallery, render_scene_view};

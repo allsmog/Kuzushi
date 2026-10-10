@@ -273,7 +273,7 @@ fn scope_header_suffix(status: &str) -> String {
         .unwrap_or_default()
 }
 
-fn verification_label(revision: &ThreatModelRevisionMetadata) -> String {
+pub(crate) fn verification_label(revision: &ThreatModelRevisionMetadata) -> String {
     revision.verification.as_ref().map_or_else(
         || "unverified".to_string(),
         |verification| {

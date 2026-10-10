@@ -98,7 +98,17 @@ fn review_queue_chrome_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<
 }
 
 fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
-    let mut lines = vec![format!("{} of {}", model.visible_count, model.total_count)];
+    let mut lines = model
+        .decision_save_label
+        .iter()
+        .map(|label| format!("Saving {label} · awaiting result"))
+        .collect::<Vec<_>>();
+    lines.extend(model.refresh_status.iter().cloned());
+    lines.extend(model.page.map(|page| page.label()));
+    lines.push(match model.partial_load {
+        Some(partial) => partial.label(),
+        None => format!("{} of {}", model.visible_count, model.total_count),
+    });
     for chip in &model.active_filter_chips {
         append_or_wrap(&mut lines, &format!("[{chip}]"), width);
     }
@@ -374,12 +384,12 @@ fn authority_marker(row: &ReviewQueueRow) -> &'static str {
     }
 }
 
-fn compact_proof_confidence_label(row: &ReviewQueueRow) -> &'static str {
+fn compact_proof_confidence_label(row: &ReviewQueueRow) -> &str {
     match row.proof_confidence {
         ProofConfidence::Confirmed => "runtime",
         ProofConfidence::Likely => "static",
         ProofConfidence::Unverified => "signal",
-        ProofConfidence::Dismissed => "dismissed",
+        ProofConfidence::Dismissed => row.proof_confidence_label.as_str(),
     }
 }
 
@@ -457,6 +467,7 @@ fn review_queue_compact_decision(row: &ReviewQueueRow) -> &'static str {
         return "conflict";
     }
     match row.decision.as_str() {
+        value if value.ends_with(" · reassess") => "reassess",
         "confirmed" => "confirmed",
         "rejected_false_positive" | "false_positive" => "false-pos",
         "suppressed" => "suppressed",
@@ -550,6 +561,10 @@ mod tests {
         let selected_row = rows.iter().position(|row| row.selected);
         ReviewQueueModel {
             navigation_active: true,
+            refresh_status: None,
+            decision_save_label: None,
+            page: None,
+            partial_load: None,
             total_count: rows.len(),
             visible_count: rows.len(),
             open_count: rows.len(),
@@ -835,6 +850,10 @@ mod tests {
     fn empty_state_says_only_queue_is_empty() {
         let model = ReviewQueueModel {
             navigation_active: true,
+            refresh_status: None,
+            decision_save_label: None,
+            page: None,
+            partial_load: None,
             total_count: 2,
             visible_count: 0,
             open_count: 0,

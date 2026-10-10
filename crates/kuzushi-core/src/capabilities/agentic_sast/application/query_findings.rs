@@ -29,18 +29,32 @@ fn agentic_sast_query_request(
         run.model.clone(),
         run.target.clone(),
         run.system_prompt.clone(),
-        build_agentic_sast_prompt(
-            &run.target,
-            &run.options,
-            &run.inventory,
-            review_context,
-            run.whitebox_static,
-            &run.enrichment,
-        ),
+        prepared_scan_prompt(run, review_context),
     )
     .with_stage(stage)
     .with_tool_policy(run.tool_policy.clone())
     .with_max_model_turns(run.options.max_model_turns)
+}
+
+fn prepared_scan_prompt(run: &AgenticSastRun, review_context: Option<&str>) -> String {
+    let prompt = build_agentic_sast_prompt(
+        &run.target,
+        &run.options,
+        &run.inventory,
+        review_context,
+        run.whitebox_static,
+        &run.enrichment,
+    );
+    let scope = run
+        .scope
+        .as_ref()
+        .map(scoped_prompt_lines)
+        .unwrap_or_default()
+        .join("\n");
+    format!(
+        "{}\n{scope}\n\n{prompt}",
+        run.inventory_coverage.reading_lines().join("\n")
+    )
 }
 
 fn normalize_and_filter_agentic_sast_findings(

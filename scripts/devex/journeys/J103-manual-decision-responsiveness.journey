@@ -1,0 +1,100 @@
+name: Bounded manual decision saves and input ownership
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py prepare @TARGET @ART/fixture
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 30 rows 1-500 of 1000 | first-page
+submit: open F-0952
+require-live-snap: 20 Synthetic Review candidate 0000 | selected
+wait: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-contention @TARGET @ART/fixture
+submit: decision deferred J103 wide
+require-live-snap: 10 saving F-0952 | saving-wide
+expect-echo-within: 300 wide-save-draft
+live-snap: wide-draft
+expect: wide-save-draft
+ask: Does the pending save remain distinct from the recorded verdict while typing keeps ownership of the composer and selected finding?
+keys: C-u
+wait: 1
+require-live-snap: 20 J103 wide | saved-wide
+resize: 160x48
+wait: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-contention @TARGET @ART/fixture
+submit: decision confirmed J103 rail
+require-live-snap: 10 saving F-0952 | saving-rail
+expect: scope: F-0952
+expect-echo-within: 300 rail-save-draft
+live-snap: rail-draft
+keys: C-u
+wait: 1
+require-live-snap: 20 J103 rail | saved-rail
+ask: At 160 columns, do rail and detail agree on identity and show the actual recorded result without moving focus?
+resize: 96x89
+wait: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-contention @TARGET @ART/fixture
+submit: decision deferred J103 tall
+require-live-snap: 10 saving F-0952 | saving-tall
+expect-echo-within: 300 tall-save-draft
+live-snap: tall-draft
+keys: C-u
+wait: 1
+require-live-snap: 20 J103 tall | saved-tall
+resize: 80x24
+wait: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-contention @TARGET @ART/fixture
+submit: decision confirmed J103 medium
+require-live-snap: 10 saving F-0952 | saving-medium
+expect-echo-within: 300 medium-save-draft
+live-snap: medium-draft
+keys: C-u
+wait: 1
+require-live-snap: 20 confirmed | saved-medium
+resize: 60x20
+wait: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-contention @TARGET @ART/fixture
+submit: decision deferred J103 narrow
+require-live-snap: 10 saving F-0952 | saving-narrow
+expect-echo-within: 300 narrow-save-draft
+live-snap: narrow-draft
+keys: C-u
+wait: 1
+require-live-snap: 20 deferred | saved-narrow
+ask: At 80 and 60 columns, are pending and recorded states readable with the intended alias and usable navigation?
+resize: 40x12
+wait: 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py start-contention @TARGET @ART/fixture
+type: decision confirmed J103 tiny
+keys: Enter
+require-live-snap: 10 saving F-0952 | saving-tiny
+expect-echo-within: 300 tiny-save-draft
+live-snap: tiny-draft
+expect: tiny-save-draft
+ask: At 40x12, does the save label retain the finding identity while the complete draft stays editable?
+keys: C-u
+wait: 1
+resize: 120x36
+wait: 1
+require-live-snap: 20 J103 tiny | saved-tiny
+submit: dismiss false_positive J103 false positive
+wait: 1
+require-live-snap: 20 J103 false positive | false-positive
+submit: decision confirmed J103 restored
+wait: 1
+require-live-snap: 20 J103 restored | restored
+ask: Can an explicit human decision supersede the false-positive decision while preserving both records and observation evidence?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0952
+wait: 1
+require-live-snap: 20 J103 restored | restart-recorded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py verify-manual-decisions @TARGET @ART/fixture
+ask: Does no-color restart show the durable final decision and source evidence, backed by exactly eight explicit writes on one identity and no new observations or model calls?
+keys: C-c
+require-exit: 10

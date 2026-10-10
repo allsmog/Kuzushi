@@ -21,6 +21,40 @@ fn incomplete_trials_never_create_a_complete_scan_verdict() {
 }
 
 #[test]
+fn all_partial_attempts_remain_reviewable_without_becoming_complete() {
+    let target = tempfile::tempdir().unwrap();
+    let record = ToolRunRecord::new(target.path(), "partial-only", "tool", "sast:scan");
+    record_tool_run_started(record, &json!({}));
+    record_tool_run_complete(
+        record,
+        &json!({"ok":true,"status":"partial","data":{"findingsCount":0}}),
+    );
+    let runs = vec!["partial-only".into()];
+    let outcome = persisted_batch_outcome(target.path(), &runs, 0, 3).unwrap();
+    assert_eq!(outcome, PhaseAttemptOutcome::Partial);
+    let id = persist_result(target.path(), &runs, outcome, None).unwrap();
+    let ledger = load_phase_attempt_ledger(target.path()).unwrap();
+    assert_eq!(
+        ledger.attempt(&id).unwrap().completed.outcome,
+        PhaseAttemptOutcome::Partial
+    );
+    assert!(ledger.attempt(&id).unwrap().disposition.is_none());
+}
+
+#[test]
+fn failed_or_unreadable_attempts_cannot_forge_partial_acceptance() {
+    let target = tempfile::tempdir().unwrap();
+    let record = ToolRunRecord::new(target.path(), "failed-only", "tool", "sast:scan");
+    record_tool_run_started(record, &json!({}));
+    record_tool_run_complete(record, &json!({"ok":false,"status":"failed"}));
+    assert_eq!(
+        persisted_batch_outcome(target.path(), &["failed-only".into()], 0, 3).unwrap(),
+        PhaseAttemptOutcome::Failed
+    );
+    assert!(persisted_batch_outcome(target.path(), &["unavailable".into()], 0, 3).is_err());
+}
+
+#[test]
 fn persisted_scan_remains_unselected_and_reentry_does_not_duplicate_it() {
     let target = tempfile::tempdir().unwrap();
     completed_run(target.path(), "trial-one");

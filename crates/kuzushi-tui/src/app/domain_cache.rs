@@ -165,9 +165,12 @@ pub struct DomainCache {
     findings_revision: u64,
     findings_total: usize,
     findings_read_watermark: Option<u64>,
+    findings_page: Option<kuzushi_core::findings::FindingPageMetadata>,
     review_decisions: Vec<ReviewDecisionRecord>,
     review_decisions_revision: u64,
     finding_ledger_counts: Option<FindingLedgerCounts>,
+    review_source_applicabilities:
+        BTreeMap<String, kuzushi_core::workspace::WorkspaceReviewSourceApplicability>,
     patch_lifecycles_by_reverify_run: BTreeMap<String, PatchLifecycleRecord>,
     workspace_stale: Option<WorkspaceStaleSummary>,
     /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
@@ -211,9 +214,11 @@ impl DomainCache {
             findings_revision: 0,
             findings_total: 0,
             findings_read_watermark: None,
+            findings_page: None,
             review_decisions: Vec::new(),
             review_decisions_revision: 0,
             finding_ledger_counts: None,
+            review_source_applicabilities: BTreeMap::new(),
             patch_lifecycles_by_reverify_run: BTreeMap::new(),
             workspace_stale: None,
             tool_shelf: ToolShelf::default(),
@@ -267,9 +272,11 @@ impl DomainCache {
         self.bump_findings_revision();
         self.findings_total = 0;
         self.findings_read_watermark = None;
+        self.findings_page = None;
         self.review_decisions.clear();
         self.bump_review_decisions_revision();
         self.finding_ledger_counts = None;
+        self.review_source_applicabilities.clear();
         self.patch_lifecycles_by_reverify_run.clear();
     }
 
@@ -637,6 +644,14 @@ impl DomainCache {
         self.findings_total.max(self.findings.len())
     }
 
+    pub(crate) fn findings_page(&self) -> Option<&kuzushi_core::findings::FindingPageMetadata> {
+        self.findings_page.as_ref()
+    }
+
+    pub(crate) fn set_findings_page(&mut self, page: kuzushi_core::findings::FindingPageMetadata) {
+        self.findings_page = Some(page);
+    }
+
     pub(crate) fn findings_are_partial(&self) -> bool {
         self.findings_total_count() > self.findings.len()
     }
@@ -646,11 +661,13 @@ impl DomainCache {
     }
 
     pub(crate) fn findings_mut(&mut self) -> &mut Vec<Finding> {
+        self.findings_page = None;
         self.bump_findings_revision();
         &mut self.findings
     }
 
     pub(crate) fn set_findings(&mut self, findings: Vec<Finding>) {
+        self.findings_page = None;
         self.findings_total = findings.len();
         self.findings = findings;
         self.finding_aliases.clear();
@@ -711,6 +728,28 @@ impl DomainCache {
         self.finding_ledger_counts = Some(counts);
     }
 
+    pub(crate) fn set_review_source_applicabilities(
+        &mut self,
+        values: BTreeMap<String, kuzushi_core::workspace::WorkspaceReviewSourceApplicability>,
+    ) {
+        self.review_source_applicabilities = values;
+    }
+
+    pub(crate) fn review_source_needs_reassessment(&self, finding: &Finding) -> bool {
+        self.review_source_applicabilities
+            .get(kuzushi_core::findings::finding_observation_identity(
+                finding,
+            ))
+            .is_some_and(|value| value.needs_reassessment())
+    }
+
+    pub(crate) fn review_source_reassessment_count(&self) -> usize {
+        self.review_source_applicabilities
+            .values()
+            .filter(|value| value.needs_reassessment())
+            .count()
+    }
+
     pub(crate) fn set_patch_lifecycle_records(&mut self, records: &[PatchLifecycleRecord]) {
         self.patch_lifecycles_by_reverify_run.clear();
         for record in records {
@@ -764,6 +803,7 @@ fn empty_context_view(root: &std::path::Path) -> ContextSnapshotView {
         stale_slices: Vec::new(),
         enrichment_claims: 0,
         enrichment_model: None,
+        inspection: None,
     }
 }
 

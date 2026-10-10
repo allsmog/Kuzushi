@@ -1,8 +1,12 @@
+use super::bounded_regular_files::{
+    collect_regular_files, FileLimitBehavior, RegularFileWalkOptions,
+};
 use crate::findings::{Finding, Severity, StaticProofState};
 use crate::scan::{ScanCancellation, ScanEngine};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
+#[cfg(test)]
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -55,27 +59,31 @@ pub fn scan_licenses_with_options(
     options: LicenseScanOptions,
 ) -> Result<LicenseScanReport> {
     ensure_directory(target)?;
-    let mut manifests = Vec::new();
-    collect_manifests(target, target, &mut manifests, cancellation)?;
-    let findings = manifests
+    let files = collect_regular_files(target, cancellation, license_walk_options())?.files;
+    let mut manifests = files
         .iter()
-        .filter_map(|path| license_finding(target, path).transpose())
-        .chain(
-            repository_license_findings(target, &manifests)?
-                .into_iter()
-                .map(Ok),
-        )
-        .chain(
-            source_header_findings(
-                target,
-                &manifests,
-                cancellation,
-                options.require_source_spdx_headers,
-            )?
-            .into_iter()
-            .map(Ok),
-        )
+        .filter(|path| is_license_manifest(path))
+        .cloned()
+        .collect::<Vec<_>>();
+    manifests.sort_by_key(|path| relative_display(target, path));
+    let mut findings = manifests
+        .iter()
+        .filter_map(|path| license_finding(target, path, cancellation).transpose())
         .collect::<Result<Vec<_>>>()?;
+    findings.extend(repository_license_findings(
+        target,
+        &manifests,
+        &files,
+        cancellation,
+    )?);
+    findings.extend(source_header_findings(
+        target,
+        &manifests,
+        &files,
+        cancellation,
+        options.require_source_spdx_headers,
+    )?);
+    ensure_scan_active(cancellation)?;
     Ok(LicenseScanReport {
         target: target.display().to_string(),
         manifests_scanned: manifests.len(),
@@ -96,28 +104,20 @@ fn ensure_directory(target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect_manifests(
-    root: &Path,
-    dir: &Path,
-    manifests: &mut Vec<PathBuf>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("license-scan scan cancelled");
+fn license_walk_options() -> RegularFileWalkOptions {
+    RegularFileWalkOptions {
+        operation: "license-scan",
+        max_entries: 100_000,
+        max_files: 50_000,
+        max_depth: 64,
+        file_limit: FileLimitBehavior::Error,
+        ignored_dir,
     }
-    for entry in
-        fs::read_dir(dir).with_context(|| format!("license-scan: read {}", dir.display()))?
-    {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() && !ignored_dir(&path) {
-            collect_manifests(root, &path, manifests, cancellation)?;
-        } else if file_type.is_file() && is_license_manifest(&path) {
-            manifests.push(path);
-        }
-    }
-    manifests.sort_by_key(|path| relative_display(root, path));
+}
+
+fn ensure_scan_active(cancellation: &ScanCancellation) -> Result<()> {
+    cancellation.wait_if_paused();
+    anyhow::ensure!(!cancellation.is_cancelled(), "license-scan scan cancelled");
     Ok(())
 }
 
@@ -127,13 +127,18 @@ fn ignored_dir(path: &Path) -> bool {
         .is_some_and(|name| {
             matches!(
                 name,
-                ".git" | "node_modules" | "vendor" | "target" | "dist" | "build"
+                ".git" | ".kuzushi" | "node_modules" | "vendor" | "target" | "dist" | "build"
             )
         })
 }
 
-fn license_finding(target: &Path, path: &Path) -> Result<Option<LicenseScanFinding>> {
-    let text = crate::bounded_file::read_utf8_text(path, MAX_LICENSE_MANIFEST_BYTES)
+fn license_finding(
+    target: &Path,
+    path: &Path,
+    cancellation: &ScanCancellation,
+) -> Result<Option<LicenseScanFinding>> {
+    ensure_scan_active(cancellation)?;
+    let text = crate::bounded_file::read_utf8_text_within(target, path, MAX_LICENSE_MANIFEST_BYTES)
         .with_context(|| format!("license-scan: read {}", path.display()))?;
     match manifest_license(path, &text)? {
         ManifestLicense::Skip => Ok(None),

@@ -1,6 +1,4 @@
-use super::{
-    ApprovalPolicy, FindingStoreRequirement, ToolDescriptor, WorkspaceRequirement,
-};
+use super::{ApprovalPolicy, FindingStoreRequirement, ToolDescriptor, WorkspaceRequirement};
 use anyhow::Result;
 
 pub(in crate::modules) fn validate_declared_policy(
@@ -29,13 +27,14 @@ pub(in crate::modules) fn validate_declared_policy(
             tool.name
         )
     }
+    anyhow::ensure!(
+        !tool.cost_data_projection || tool.runtime_requirement == super::RuntimeRequirement::Never,
+        "Historical cost projections require a runtime-free tool"
+    );
     validate_prompt_options(tool, "built-in tool")
 }
 
-pub(in crate::modules) fn validate_prompt_options(
-    tool: &ToolDescriptor,
-    kind: &str,
-) -> Result<()> {
+pub(in crate::modules) fn validate_prompt_options(tool: &ToolDescriptor, kind: &str) -> Result<()> {
     for prompt in &tool.prompts {
         if !tool
             .options

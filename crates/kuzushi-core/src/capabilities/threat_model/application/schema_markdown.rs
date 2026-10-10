@@ -59,7 +59,12 @@ fn assets_section(document: &Value) -> String {
             ])
         })
         .collect::<Vec<_>>();
-    section_with_table("## 2. Assets", "| asset | description | sensitivity |", 3, rows)
+    section_with_table(
+        "## 2. Assets",
+        "| asset | description | sensitivity |",
+        3,
+        rows,
+    )
 }
 
 fn entry_points_section(document: &Value) -> String {
@@ -165,7 +170,10 @@ fn deprioritized_section(document: &Value) -> String {
         .iter()
         .map(|row| {
             table_row(&[
-                object_str(row, &["threat", "title", "entryPoint", "entry_point", "boundary"]),
+                object_str(
+                    row,
+                    &["threat", "title", "entryPoint", "entry_point", "boundary"],
+                ),
                 object_str(row, &["reason"]),
             ])
         })
@@ -176,14 +184,7 @@ fn deprioritized_section(document: &Value) -> String {
 fn open_questions_section(document: &Value) -> String {
     let questions = array_rows(document, "openQuestions")
         .iter()
-        .filter_map(|entry| match entry {
-            Value::String(question) => Some(question.clone()),
-            Value::Object(_) => {
-                let question = object_str(entry, &["question", "text"]);
-                (!question.is_empty()).then_some(question)
-            }
-            _ => None,
-        })
+        .filter_map(open_question_text)
         .map(|question| format!("- {question}"))
         .collect::<Vec<_>>();
     if questions.is_empty() {
@@ -193,8 +194,30 @@ fn open_questions_section(document: &Value) -> String {
     }
 }
 
+fn open_question_text(entry: &Value) -> Option<String> {
+    if let Some(question) = entry.as_str() {
+        return Some(question.into());
+    }
+    let question = object_str(entry, &["question", "text"]);
+    if question.is_empty() {
+        return None;
+    }
+    let answer = object_str(entry, &["answer"]);
+    Some(question_with_answer(question, answer))
+}
+
+fn question_with_answer(question: String, answer: String) -> String {
+    if answer.is_empty() {
+        return question;
+    }
+    format!("{question}\n  Answer: {answer}")
+}
+
 fn provenance_section(document: &Value, target: &str) -> String {
-    let provenance = document.get("provenance").cloned().unwrap_or_else(|| json!({}));
+    let provenance = document
+        .get("provenance")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
     let mode = provenance
         .get("pipeline")
         .and_then(Value::as_str)
@@ -291,7 +314,12 @@ fn mitigation_table_row(row: &Value, display_ids: &BTreeMap<String, String>) -> 
             items
                 .iter()
                 .filter_map(Value::as_str)
-                .map(|id| display_ids.get(id).cloned().unwrap_or_else(|| id.to_string()))
+                .map(|id| {
+                    display_ids
+                        .get(id)
+                        .cloned()
+                        .unwrap_or_else(|| id.to_string())
+                })
                 .collect::<Vec<_>>()
                 .join(",")
         })
@@ -338,7 +366,12 @@ fn object_str(value: &Value, keys: &[&str]) -> String {
 
 fn section_with_table(heading: &str, header: &str, columns: usize, rows: Vec<String>) -> String {
     let separator = format!("|{}", "---|".repeat(columns));
-    let mut lines = vec![heading.to_string(), String::new(), header.to_string(), separator];
+    let mut lines = vec![
+        heading.to_string(),
+        String::new(),
+        header.to_string(),
+        separator,
+    ];
     lines.extend(rows);
     lines.join("\n")
 }
@@ -383,6 +416,13 @@ fn civil_from_days(days_from_epoch: i64) -> (i64, u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn operator_answers_remain_visible_beside_the_open_question() {
+        let document = serde_json::json!({"openQuestions":[{"question":"Who owns input?","answer":"The application owner"},"Other question"]});
+        let text = super::open_questions_section(&document);
+        assert!(text.contains("Who owns input?\n  Answer: The application owner"));
+        assert!(text.contains("Other question"));
+    }
     use super::*;
 
     fn sample_document() -> Value {

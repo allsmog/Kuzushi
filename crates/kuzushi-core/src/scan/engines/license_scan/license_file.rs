@@ -25,31 +25,43 @@ const LICENSE_KINDS: &[(&str, &str)] = &[
 pub(super) fn repository_license_findings(
     target: &Path,
     manifests: &[PathBuf],
+    files: &[PathBuf],
+    cancellation: &ScanCancellation,
 ) -> Result<Vec<LicenseScanFinding>> {
-    let declared = declared_manifest_licenses(manifests)?;
+    let declared = declared_manifest_licenses(target, manifests, cancellation)?;
     if declared.is_empty() {
         return Ok(Vec::new());
     }
-    let Some(license_file) = repository_license_file(target)? else {
+    let Some(license_file) = repository_license_file(target, files) else {
         return Ok(vec![missing_license_file_finding(
             target,
             &declared[0].path,
         )]);
     };
-    Ok(license_file_mismatch(target, &license_file, &declared)
+    ensure_scan_active(cancellation)?;
+    Ok(license_file_mismatch(target, license_file, &declared)?
         .map(|finding| vec![finding])
         .unwrap_or_default())
 }
 
-fn declared_manifest_licenses(manifests: &[PathBuf]) -> Result<Vec<DeclaredLicense>> {
+fn declared_manifest_licenses(
+    target: &Path,
+    manifests: &[PathBuf],
+    cancellation: &ScanCancellation,
+) -> Result<Vec<DeclaredLicense>> {
     manifests
         .iter()
-        .filter_map(|path| declared_manifest_license(path).transpose())
+        .filter_map(|path| declared_manifest_license(target, path, cancellation).transpose())
         .collect()
 }
 
-fn declared_manifest_license(path: &Path) -> Result<Option<DeclaredLicense>> {
-    let text = crate::bounded_file::read_utf8_text(path, MAX_LICENSE_MANIFEST_BYTES)
+fn declared_manifest_license(
+    target: &Path,
+    path: &Path,
+    cancellation: &ScanCancellation,
+) -> Result<Option<DeclaredLicense>> {
+    ensure_scan_active(cancellation)?;
+    let text = crate::bounded_file::read_utf8_text_within(target, path, MAX_LICENSE_MANIFEST_BYTES)
         .with_context(|| format!("license-scan: read {}", path.display()))?;
     match manifest_license(path, &text)? {
         ManifestLicense::Declared(license) => Ok(Some(DeclaredLicense {
@@ -65,16 +77,11 @@ struct DeclaredLicense {
     license: String,
 }
 
-fn repository_license_file(target: &Path) -> Result<Option<PathBuf>> {
-    for entry in
-        fs::read_dir(target).with_context(|| format!("license-scan: read {}", target.display()))?
-    {
-        let path = entry?.path();
-        if is_repository_license_file(&path) {
-            return Ok(Some(path));
-        }
-    }
-    Ok(None)
+fn repository_license_file<'a>(target: &Path, files: &'a [PathBuf]) -> Option<&'a Path> {
+    files
+        .iter()
+        .find(|path| path.parent() == Some(target) && is_repository_license_file(path))
+        .map(PathBuf::as_path)
 }
 
 fn is_repository_license_file(path: &Path) -> bool {
@@ -88,14 +95,18 @@ fn license_file_mismatch(
     target: &Path,
     license_file: &Path,
     declared: &[DeclaredLicense],
-) -> Option<LicenseScanFinding> {
-    let text = crate::bounded_file::read_utf8_text(license_file, MAX_LICENSE_FILE_BYTES).ok()?;
-    let file_kind = license_text_kind(&text)?;
-    declared.iter().find_map(|item| {
+) -> Result<Option<LicenseScanFinding>> {
+    let text =
+        crate::bounded_file::read_utf8_text_within(target, license_file, MAX_LICENSE_FILE_BYTES)
+            .with_context(|| format!("license-scan: read {}", license_file.display()))?;
+    let Some(file_kind) = license_text_kind(&text) else {
+        return Ok(None);
+    };
+    Ok(declared.iter().find_map(|item| {
         let manifest_kind = license_text_kind(&item.license)?;
         (manifest_kind != file_kind)
             .then(|| license_file_mismatch_finding(target, license_file, &item.license, file_kind))
-    })
+    }))
 }
 
 fn license_text_kind(text: &str) -> Option<&'static str> {

@@ -3,8 +3,10 @@ use crate::review_yield::domain::canonical_json_bytes;
 use serde_json::Map;
 
 mod engine;
+mod input_snapshot;
 
 use engine::{engine_cache_identity, executable_identities};
+use input_snapshot::InputBudget;
 
 const MAX_EQUIVALENCE_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -14,7 +16,8 @@ pub fn capture_batch_equivalence(
     config: &V2Config,
     registry: &ModuleRegistry,
 ) -> Result<BatchEquivalenceKey> {
-    let components = equivalence_components(root, base_input, config, registry)?;
+    let root = std::fs::canonicalize(root).context("could not resolve the study repository")?;
+    let components = equivalence_components(&root, base_input, config, registry)?;
     let sha256 = digest_serializable(&components)?;
     Ok(BatchEquivalenceKey { sha256, components })
 }
@@ -61,6 +64,7 @@ fn equivalence_components(
     registry: &ModuleRegistry,
 ) -> Result<BatchEquivalenceComponents> {
     let model = crate::tool_execution_model(SCAN_TOOL, base_input, config);
+    let mut budget = InputBudget::default();
     Ok(BatchEquivalenceComponents {
         prepared_input_sha256: digest_serializable(base_input)?,
         workspace_identity: crate::incremental_index::current_workspace_resume_identity(root)
@@ -72,23 +76,38 @@ fn equivalence_components(
         runtime_identity: runtime_identity(config, model.as_deref())?,
         model,
         threat_model: bound_threat_model_ref(root, base_input)?,
-        prompt_overrides_sha256: directory_digest(root, ".kuzushi/prompts")?,
-        house_rules_sha256: directory_digest(root, ".kuzushi/house-rules")?,
+        supporting_context_sha256: supporting_context_digest(root, base_input)?,
+        prompt_overrides_sha256: directory_digest(root, ".kuzushi/prompts", &mut budget)?,
+        house_rules_sha256: directory_digest(root, ".kuzushi/house-rules", &mut budget)?,
         scope_sha256: scope_sha256(root, base_input)?,
-        engine_identity: engine_identity(root, base_input)?,
+        engine_identity: engine_identity(root, base_input, &mut budget)?,
     })
 }
 
-fn engine_identity(root: &Path, input: &Value) -> Result<BatchEngineIdentity> {
+fn supporting_context_digest(root: &Path, input: &Value) -> Result<Option<String>> {
+    if let Some(reference) = input.get("scanContextRef") {
+        crate::scan::read_bound_scan_context(root, reference)?;
+        return digest_serializable(reference).map(Some);
+    }
+    crate::scan::selected_scan_context(root, input)?
+        .map(|text| digest_serializable(&text))
+        .transpose()
+}
+
+fn engine_identity(
+    root: &Path,
+    input: &Value,
+    budget: &mut InputBudget,
+) -> Result<BatchEngineIdentity> {
     Ok(BatchEngineIdentity {
         kuzushi_version: env!("CARGO_PKG_VERSION").to_string(),
         requested_selection: json!({
             "taskMode": input.get("taskMode").or_else(|| input.get("task_mode")),
             "tasks": input.get("tasks"),
             "mode": input.get("mode"),
-            "executables": executable_identities(input)?,
+            "executables": executable_identities(input, budget)?,
         }),
-        cache_identity: engine_cache_identity(root, input)?,
+        cache_identity: engine_cache_identity(root, input, budget)?,
     })
 }
 
@@ -120,7 +139,10 @@ fn bound_threat_model_ref(root: &Path, input: &Value) -> Result<Option<Value>> {
     Ok(None)
 }
 
-fn scope_sha256(root: &Path, input: &Value) -> Result<String> {
+pub(in crate::capabilities::campaign) fn scope_sha256(
+    root: &Path,
+    input: &Value,
+) -> Result<String> {
     let mut scope = Map::new();
     for key in [
         "paths",
@@ -167,70 +189,11 @@ fn bound_model_scope(
         .map(Some)
 }
 
-fn directory_digest(root: &Path, relative: &str) -> Result<String> {
+fn directory_digest(root: &Path, relative: &str, budget: &mut InputBudget) -> Result<String> {
     let path = root.join(relative);
-    if !path.exists() {
-        return digest_serializable(&Vec::<(String, String)>::new());
-    }
-    let mut rows = Vec::new();
-    collect_digest_rows(root, &path, &mut rows)?;
-    rows.sort();
+    let rows = input_snapshot::optional_tree_rows(root, &path, budget, MAX_EQUIVALENCE_FILE_BYTES)?
+        .unwrap_or_default();
     digest_serializable(&rows)
-}
-
-fn collect_digest_rows(root: &Path, path: &Path, rows: &mut Vec<(String, String)>) -> Result<()> {
-    for entry in sorted_directory_entries(path)? {
-        collect_digest_row(root, entry, rows)?;
-    }
-    Ok(())
-}
-
-fn collect_digest_row(
-    root: &Path,
-    entry: std::fs::DirEntry,
-    rows: &mut Vec<(String, String)>,
-) -> Result<()> {
-    let child = entry.path();
-    let file_type = entry.file_type()?;
-    anyhow::ensure!(
-        !file_type.is_symlink(),
-        "equivalence input {} must not be a symlink",
-        child.display()
-    );
-    if file_type.is_dir() {
-        return collect_digest_rows(root, &child, rows);
-    }
-    anyhow::ensure!(
-        file_type.is_file(),
-        "unsupported equivalence input {}",
-        child.display()
-    );
-    rows.push(digest_file_row(root, &child, entry.metadata()?.len())?);
-    Ok(())
-}
-
-fn sorted_directory_entries(path: &Path) -> Result<Vec<std::fs::DirEntry>> {
-    let mut entries = std::fs::read_dir(path)
-        .with_context(|| format!("could not read equivalence input {}", path.display()))?
-        .collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    Ok(entries)
-}
-
-fn digest_file_row(root: &Path, path: &Path, size: u64) -> Result<(String, String)> {
-    anyhow::ensure!(
-        size <= MAX_EQUIVALENCE_FILE_BYTES,
-        "equivalence input {} exceeds {} bytes",
-        path.display(),
-        MAX_EQUIVALENCE_FILE_BYTES
-    );
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("could not read equivalence input {}", path.display()))?;
-    let relative = path.strip_prefix(root)?.to_string_lossy().into_owned();
-    Ok((
-        relative,
-        crate::run_lifecycle::sha256_content_digest(&bytes),
-    ))
 }
 
 pub(in crate::capabilities::campaign) fn digest_serializable(

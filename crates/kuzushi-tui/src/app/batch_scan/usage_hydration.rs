@@ -2,6 +2,7 @@ use crate::app::ShellApp;
 
 impl ShellApp {
     pub(crate) fn refresh_study_usage_from_cache(&mut self) {
+        self.refresh_resource_picker_history();
         let Some(config) = &self.router.campaign().batch_scan_config else {
             return;
         };

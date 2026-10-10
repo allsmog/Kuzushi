@@ -18,6 +18,12 @@ use std::process::{Command, ExitStatus, Stdio};
 use uuid::Uuid;
 mod adapters;
 pub mod application;
+pub(crate) use application::{
+    freeze_scan_context, inspect_scan_context, read_bound_scan_context, selected_scan_context,
+};
+pub(crate) use domain::ScanContextDocument;
+pub use domain::ScanContextRef;
+pub(crate) use infrastructure::{load_scan_context, save_scan_context};
 pub mod domain;
 pub mod engines;
 pub mod infrastructure;
@@ -43,7 +49,7 @@ pub use application::{
 pub(crate) use application::{
     normalized_scan_path, parse_semgrep_report, require_directory_scope, resolve_scan_scopes,
     run_native_scan_files_with_cancellation, run_native_scan_with_cancellation,
-    select_default_scan_engines, semgrep_error_summaries, semgrep_findings_from_report,
+    select_default_scan_engines_checked, semgrep_error_summaries, semgrep_findings_from_report,
     DefaultScanEngineSelection, ScanScope, SkippedDefaultScanEngine,
 };
 pub(crate) use domain::{

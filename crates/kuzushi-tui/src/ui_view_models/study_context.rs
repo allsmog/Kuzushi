@@ -8,6 +8,117 @@ use serde_json::Value;
 use std::time::{Duration, SystemTime};
 
 pub(crate) mod diagram;
+pub(crate) const CONTEXT_ACTIONS: [(crossterm::event::KeyCode, &str); 10] = [
+    (
+        crossterm::event::KeyCode::Char('a'),
+        "a Use inspected revision for study",
+    ),
+    (
+        crossterm::event::KeyCode::Char('e'),
+        "e Edit an inactive context copy",
+    ),
+    (
+        crossterm::event::KeyCode::Char('c'),
+        "c Check source and save inactive",
+    ),
+    (
+        crossterm::event::KeyCode::Char('v'),
+        "v Inspect data flow diagram",
+    ),
+    (
+        crossterm::event::KeyCode::Char('m'),
+        "m Review producing run as Map",
+    ),
+    (
+        crossterm::event::KeyCode::Char('g'),
+        "g Draft budgeted context generation",
+    ),
+    (crossterm::event::KeyCode::Tab, "Tab Read complete document"),
+    (
+        crossterm::event::KeyCode::Char('d'),
+        "d Compare edited/regenerated text",
+    ),
+    (crossterm::event::KeyCode::Char('+'), "+ Add context case"),
+    (
+        crossterm::event::KeyCode::Char('b'),
+        "b Set matrix baseline",
+    ),
+];
+
+pub(crate) fn context_actions(app: &ShellApp) -> Vec<(crossterm::event::KeyCode, &'static str)> {
+    CONTEXT_ACTIONS
+        .into_iter()
+        .filter(|(key, _)| action_available(app, *key))
+        .collect()
+}
+
+fn action_available(app: &ShellApp, key: crossterm::event::KeyCode) -> bool {
+    use crossterm::event::KeyCode;
+    match key {
+        KeyCode::Char('+') | KeyCode::Char('b') => !app
+            .router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .is_some_and(|config| config.study.scope_draft.is_some()),
+        _ => true,
+    }
+}
+
+pub(crate) fn context_action_lines(app: &ShellApp) -> Vec<String> {
+    let mut lines = vec!["CONTEXT ACTIONS".into()];
+    lines.extend(
+        context_actions(app)
+            .iter()
+            .map(|(_, label)| (*label).into()),
+    );
+    lines.push("↑↓ choose · Enter act · Esc back".into());
+    lines
+}
+
+pub(crate) fn comparison_lines(
+    comparison: &crate::app::StudyContextComparison,
+    width: usize,
+) -> Vec<String> {
+    let mut lines = vec!["Compare saved text. Selection changes this study only.".into()];
+    append_comparison_content(&mut lines, comparison);
+    lines.extend([
+        String::new(),
+        format!("Parent: {}", comparison.parent.revision_id),
+        format!("Candidate: {}", comparison.candidate.revision_id),
+    ]);
+    lines
+        .into_iter()
+        .flat_map(|line| context_wrap(&line, width.max(1)))
+        .collect()
+}
+
+fn append_comparison_content(
+    lines: &mut Vec<String>,
+    comparison: &crate::app::StudyContextComparison,
+) {
+    if let Some(error) = &comparison.error {
+        lines.extend([
+            format!("Parent unavailable: {error}"),
+            "Enter retries this local read · Esc returns to the candidate. No model request."
+                .into(),
+        ]);
+        return;
+    }
+    let Some(changes) = comparison.differences.as_ref() else {
+        lines.push("Reading the authenticated parent. No model request.".into());
+        return;
+    };
+    for change in changes {
+        lines.extend([String::new(), change.label.clone(), "Before:".into()]);
+        lines.extend(change.before.lines().map(|line| format!("- {line}")));
+        lines.push("After:".into());
+        lines.extend(change.after.lines().map(|line| format!("+ {line}")));
+    }
+    if changes.is_empty() {
+        lines.push("No editable text differs from the recorded parent.".into());
+    }
+}
 
 pub(crate) fn context_diagram_model(
     document: &Value,
@@ -37,18 +148,21 @@ pub(crate) fn context_layout(
 pub(crate) struct ContextCatalog {
     pub(crate) rows: Vec<ContextRow>,
     pub(crate) status: String,
+    membership_known: bool,
 }
 
 pub(crate) struct ContextRow {
     pub(crate) reference: Option<ThreatModelRef>,
     pub(crate) label: String,
     pub(crate) details: Vec<String>,
+    pub(crate) copy_label: Option<String>,
 }
 
 pub(crate) fn context_catalog(app: &ShellApp) -> ContextCatalog {
     let mut catalog = ContextCatalog {
         rows: vec![omission_row()],
         status: String::new(),
+        membership_known: false,
     };
     let state = app
         .workbench_cache()
@@ -71,12 +185,13 @@ pub(crate) fn context_catalog(app: &ShellApp) -> ContextCatalog {
 
 fn omission_row() -> ContextRow {
     ContextRow {
-        reference: None, label: "Omit threat-model context".into(),
-        details: vec!["Discovery will receive no threat-model document. This is an explicit context experiment, not a claim that the repository has no threats.".into(), "a uses this omission for the study. No scan starts.".into()],
+        reference: None, label: "Omit threat-model context".into(), copy_label:None,
+        details: vec!["Discovery will receive no threat-model document for this selection. Omission does not establish finding verdicts or repository coverage.".into(), "a saves this explicit omission for the selected study or boundary. No scan starts.".into()],
     }
 }
 
 fn append_revisions(catalog: &mut ContextCatalog, manifest: &ThreatModelManifest) {
+    catalog.membership_known = true;
     for model in &manifest.models {
         for (index, revision) in model.revisions.iter().enumerate().rev() {
             let scope = revision.scope.as_ref().unwrap_or(&model.scope);
@@ -87,12 +202,13 @@ fn append_revisions(catalog: &mut ContextCatalog, manifest: &ThreatModelManifest
                     sha256: revision.sha256.clone(),
                 }),
                 label: format!("{} · revision {}", model.label, index + 1),
+                copy_label: Some(format!("{} · edited", model.label)),
                 details: vec![
                     format!("{} · {}", model.label, model.methodology),
                     format!("Scope: {}", scope.rel_path.display()),
                     format!("Recorded source revision: {}", scope.target_revision),
                     format!(
-                        "Grounding check: {}",
+                        "Last recorded check: {}",
                         revision
                             .verification
                             .as_ref()
@@ -122,11 +238,17 @@ fn context_age(recorded: &str) -> String {
 }
 
 pub(crate) fn context_detail_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    if let Some(draft) = app.context_edit_draft() {
+        return super::context_edit::context_edit_plain_lines(draft, width);
+    }
     let Some(picker) = app.study_context_picker() else {
         return Vec::new();
     };
     let catalog = context_catalog(app);
     let mut text = vec![catalog.status, String::new()];
+    if let Some(id) = &picker.scope_id {
+        text.insert(0, format!("Selection applies only to boundary {id}. a saves an exact override; Esc returns without changing its association."));
+    }
     if let Some(notice) =
         super::study_config::study_projection(app).and_then(|config| config.notice)
     {
@@ -136,7 +258,7 @@ pub(crate) fn context_detail_lines(app: &ShellApp, width: usize) -> Vec<String> 
         .rows
         .iter()
         .find(|row| row.reference == picker.selected);
-    append_selected_context(&mut text, selected, picker);
+    append_selected_context(&mut text, selected, picker, catalog.membership_known);
     text.into_iter()
         .flat_map(|line| context_wrap(&line, width.max(1)))
         .collect()
@@ -146,16 +268,24 @@ fn append_selected_context(
     text: &mut Vec<String>,
     selected: Option<&ContextRow>,
     picker: &crate::app::StudyContextPicker,
+    membership_known: bool,
 ) {
     match selected {
         Some(row) => text.extend(row.details.iter().take(4).cloned()),
-        None => text.push("The selected revision is unavailable in this catalog. It cannot be substituted with another revision.".into()),
+        None => text.push(missing_catalog_membership(membership_known)),
     }
+    text.extend(
+        picker
+            .preview
+            .as_ref()
+            .map(|preview| preview.source_state.clone()),
+    );
     text.extend(preview_lines(picker));
     if let Some(row) = selected {
         text.extend(row.details.iter().skip(4).cloned());
     }
     if picker.preview.is_some() {
+        text.push("c checks citations, links, source identity and bounded coverage. No model request. Source drift stops the check; the active context stays unchanged.".into());
         text.push(
             "a uses this exact revision. A new study plan must be approved before scanning.".into(),
         );
@@ -163,6 +293,14 @@ fn append_selected_context(
             "m reviews its producing run as Map for separate acceptance. No model request is made."
                 .into(),
         );
+    }
+}
+
+fn missing_catalog_membership(known: bool) -> String {
+    if known {
+        "The selected revision is unavailable in this catalog. It cannot be substituted with another revision.".into()
+    } else {
+        "Catalog membership is unavailable. The exact selected revision is kept; Enter can inspect it.".into()
     }
 }
 
@@ -187,7 +325,8 @@ fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
         return vec![String::new(), "Enter inspects this exact revision before it can be used. Reading makes no model requests.".into(), "Historical context may not cover the current source. Review its assumptions and boundaries.".into()];
     };
     if picker.raw {
-        let mut lines = vec!["Complete selected context document:".into()];
+        let mut lines = super::context_goal::context_goal_lines(&preview.goal_state);
+        lines.push("Complete selected context document:".into());
         lines.extend(preview.raw.clone());
         return lines;
     }
@@ -198,11 +337,12 @@ fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
     if let Some(notice) = preview.dfd.evidence_notice() {
         lines.push(notice.into());
     }
+    lines.extend(super::context_goal::context_goal_lines(&preview.goal_state));
     lines.extend(context_summary(&preview.document));
     lines
 }
 
-fn context_summary(document: &Value) -> Vec<String> {
+pub(crate) fn context_summary(document: &Value) -> Vec<String> {
     let mut lines = Vec::new();
     for key in ["title", "systemContext", "description", "context"] {
         if let Some(value) = document.get(key).and_then(Value::as_str) {
@@ -239,11 +379,19 @@ fn context_item(value: &Value) -> String {
         .iter()
         .find_map(|key| value.get(*key).and_then(Value::as_str));
     let description = value.get("description").and_then(Value::as_str);
-    [title, description]
+    let answer = value
+        .get("answer")
+        .and_then(Value::as_str)
+        .map(|answer| format!("Answer: {answer}"));
+    let mut text = [title, description]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
-        .join(" — ")
+        .join(" · ");
+    if let Some(answer) = answer {
+        text.push_str(&format!(" · {answer}"));
+    }
+    text
 }
 
 #[cfg(test)]
