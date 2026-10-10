@@ -3406,3 +3406,31 @@ to the approved identity and verification namespace. Positive and negative real
 signature checks pass. Final Git publication remains subject to a fresh signed
 verification receipt for the clean commit. No module is promoted or retired,
 and all nine broad delivery milestones remain open.
+
+### Actual model investigation and supported spending controls, October 10, 2026
+
+The fresh owned source now has a real clean Git commit. One real OAuth context
+generation, explicit inactive acceptance, three completed discovery passes,
+consolidated human fixture Review, selected-study export and restart consume
+four settled provider requests. The shared allowance remains 11 total with two
+protected Review requests, zero unresolved charges and no automatic follow-up.
+The model returns no findings on this benign fixture; three native observations
+of one public example retain recurrence and a reasoned fixture FP decision.
+
+Preparation exposed the missing SAST query-turn option. Canonical optional
+`agenticMaxModelTurns` now reaches the engine request, rejects invalid/unselected
+usage before work and preserves omitted defaults. The live plan uses two turns
+per query; internal repairs and retries still share the investigation allowance.
+Inspection also exposed unsupported saturation advice from six engine/parent
+records. Historical counts no longer become pass counts or a forced gap-fill
+recommendation. Public compatibility types remain intact.
+
+J175 has 34 machine passes and 27 native captures. The separate readonly J176
+has 10 machine passes and 55 captures across six sizes, with actual compact
+paging and no more requests. Eighteen focused Core checks, builds and the
+11-file production risk proxy pass. Captures retain raw REVIEW_REQUIRED;
+compact density, full final provenance, physical acceptance and complete
+reference parity remain open. See the
+[live investigation assessment](../assessments/live-owned-investigation-2026-10-10.md).
+No module is promoted or retired. This is meaningful live workflow evidence,
+not production precision or completion of the nine broad milestones.

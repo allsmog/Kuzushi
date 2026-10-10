@@ -1,6 +1,7 @@
 use super::*;
 
 mod agent_query;
+pub(crate) use agent_query::MAX_AGENT_MODEL_TURNS;
 mod agent_runtime;
 mod failure;
 mod model_usage;

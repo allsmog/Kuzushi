@@ -5,6 +5,17 @@ part of every release commit.
 
 ## Export compatibility notes
 
+- `sast:scan` adds optional `agenticMaxModelTurns`, with the
+  `agentic_max_model_turns` alias and range 1 through 40. It requires the agentic
+  task, reaches its existing per-query limit, and leaves omitted defaults intact.
+  Canonical prepared input, frozen plans and Settings retain it. Internal repairs
+  and retries still share the investigation allowance; no dollar ceiling is added.
+
+- Coverage recommendations no longer infer saturation or force gap-fill from
+  historical record counts. Parent/engine records cannot establish comparable
+  passes or diminishing returns. Existing `Saturated` and `all_baselines` public
+  contracts remain for compatibility; new recommendations do not use them.
+
 - Allowance approval and inspection receipts now state the calls available for
   context, scope, scans and lessons after protecting Review/Report capacity.
   The value uses the shared snapshot domain calculation. This adds a public

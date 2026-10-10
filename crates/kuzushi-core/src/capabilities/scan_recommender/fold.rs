@@ -11,7 +11,8 @@ pub struct RecommenderInputs<'a> {
     pub scope_paths: &'a BTreeMap<String, String>,
     /// Latest baseline per scope×phase (coverage ledger).
     pub latest_baselines: &'a [BaselineRow],
-    /// Every baseline row, for saturation counting.
+    /// Compatibility history input. Baseline counts do not establish comparable
+    /// discovery passes or diminishing returns, so recommendation ignores it.
     pub all_baselines: &'a [BaselineRow],
     pub sweep: Option<&'a SweepReport>,
     /// Repo-relative surface-bearing files → surface count.
@@ -25,7 +26,6 @@ pub fn recommend(inputs: &RecommenderInputs<'_>) -> Vec<ScanRecommendation> {
     rows.extend(coverage_gap_rows(inputs));
     rows.extend(staleness_rows(inputs));
     rows.extend(sink_gap_rows(inputs));
-    rows.extend(saturation_rows(inputs));
     rows.sort_by(|a, b| {
         b.score
             .total_cmp(&a.score)
@@ -154,32 +154,6 @@ fn surface_and_gap_counts(inputs: &RecommenderInputs<'_>, rel_path: &str) -> (us
 
 fn sink_gap_score(gap_files: usize) -> f32 {
     0.4 + (gap_files.min(20) as f32) / 20.0 * 0.2
-}
-
-fn saturation_rows(inputs: &RecommenderInputs<'_>) -> Vec<ScanRecommendation> {
-    let Some(head_sha) = inputs.sweep.map(|sweep| sweep.head.sha.as_str()) else {
-        return Vec::new();
-    };
-    let mut passes_at_head: BTreeMap<&str, usize> = BTreeMap::new();
-    for row in inputs.all_baselines {
-        if row.phase == WorkflowPhase::Scan && row.revision.sha == head_sha {
-            *passes_at_head.entry(row.scope_id.as_str()).or_default() += 1;
-        }
-    }
-    passes_at_head
-        .into_iter()
-        .filter(|(_, passes)| *passes >= 2)
-        .map(|(scope_id, passes)| ScanRecommendation {
-            suggested_mode: Some("sink-gap".to_string()),
-            ..recommendation(
-                scope_id,
-                WorkflowPhase::Scan,
-                ReasonTag::Saturated,
-                0.2,
-                format!("{passes} scan pass(es) at the current revision; prefer gap-fill only"),
-            )
-        })
-        .collect()
 }
 
 fn recommendation(

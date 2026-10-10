@@ -22,6 +22,7 @@ pub(in crate::modules) use sastpipelinereports::*;
 pub(in crate::modules) use scan_threat_model_lease::ScanThreatModelLease;
 use serde_json::{json, Value};
 pub(in crate::modules) use taint_iris_next_hunt_input::*;
+mod agentic_settings;
 mod findings_count;
 mod from_tasks;
 mod native_inspections;

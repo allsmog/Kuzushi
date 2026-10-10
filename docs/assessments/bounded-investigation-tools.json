@@ -351,7 +351,7 @@
       "module": "campaign",
       "declaredMaturity": "compatibility",
       "declaredPhase": "operate",
-      "purpose": "Coverage matrix: shards × threat sources with per-cell campaign progress and per-shard finding counts. Read-only; no model calls.",
+      "purpose": "Coverage matrix: shards \u00d7 threat sources with per-cell campaign progress and per-shard finding counts. Read-only; no model calls.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -739,7 +739,7 @@
       "module": "coverage",
       "declaredMaturity": "core",
       "declaredPhase": "operate",
-      "purpose": "Rank scope-level scan recommendations from deterministic signals: coverage gaps, staleness since baselines, surface-dense files with zero findings, and saturation. No model calls; every row carries its mechanical evidence.",
+      "purpose": "Rank scope-level scan recommendations from deterministic signals: coverage gaps, staleness since baselines, surface-dense files with zero findings. No model calls; every row carries its mechanical evidence.",
       "scope": "Default Read-only advisory metadata path; no model, scan scheduling or graph construction. Deep opt-in ranking remains outside this qualification.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -766,7 +766,10 @@
       },
       "declaredModuleMaturity": "core",
       "discoveryMaturityOverride": null,
-      "phaseResult": false
+      "phaseResult": false,
+      "resourceEvidence": [
+        "Live J176 exposed six parent/engine records mislabeled as passes. New recommendations do not infer saturation or additional discovery from record counts and no longer read full baseline history for that unsupported inference. Existing public compatibility values remain."
+      ]
     },
     {
       "tool": "coverage:sweep",
@@ -808,7 +811,7 @@
       "module": "cpg",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Build the cpg-rs Code Property Graphs for the active target — one graph per detected supported language (c, cpp, go, java, javascript, python, ruby, rust, scala, typescript), written below .kuzushi/cpg-rs/. Graphs are reused when fresh and rebuilt when sources changed or the engine shape version moved.",
+      "purpose": "Build the cpg-rs Code Property Graphs for the active target \u2014 one graph per detected supported language (c, cpp, go, java, javascript, python, ruby, rust, scala, typescript), written below .kuzushi/cpg-rs/. Graphs are reused when fresh and rebuilt when sources changed or the engine shape version moved.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -955,7 +958,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "Deterministically fold confirmed findings into ranked entry→pivot→impact chain candidates per code surface. Advisory leads only; no model calls.",
+      "purpose": "Deterministically fold confirmed findings into ranked entry\u2192pivot\u2192impact chain candidates per code surface. Advisory leads only; no model calls.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1031,7 +1034,7 @@
       "module": "findings",
       "declaredMaturity": "core",
       "declaredPhase": "review",
-      "purpose": "Re-check every open finding's citation against the target tree at the current revision. Reports grounded / line-drift / file-missing counts and audits newly stale anchors. Descriptive only — never retires a finding.",
+      "purpose": "Re-check every open finding's citation against the target tree at the current revision. Reports grounded / line-drift / file-missing counts and audits newly stale anchors. Descriptive only \u2014 never retires a finding.",
       "scope": "Owned citation and history management, auxiliary Review. No repository scan or finding-validity claim.",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -1722,7 +1725,7 @@
       "module": "fuzz",
       "declaredMaturity": "labs",
       "declaredPhase": "scan",
-      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits — the silent-wrong-data oracle the crash lane never fires on.",
+      "purpose": "Replay one engine target's corpus through N implementations (fork vs upstream, or one command as a metamorphic self-check) and rank the divergences: crash-split first, then validity- and output-splits \u2014 the silent-wrong-data oracle the crash lane never fires on.",
       "scope": "excluded-work",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -2872,7 +2875,8 @@
         "minEvidenceLevel",
         "mcps",
         "model",
-        "allowanceRef"
+        "allowanceRef",
+        "agenticMaxModelTurns"
       ],
       "executionEvidence": "J73 proves the real finite agentic-engine pipeline with accepted immutable context, three fresh bridge processes, consolidated ledger import, explicit Scan selection, human false-positive/deferral decisions, local finding export and restart. J74 proves real admission refusal preserves two completed jobs, a failed third attempt, protected review and explicit partial selection. Transport is fully intercepted and findings are synthetic. Other engines, scope enforcement, live precision and comprehensive option/phase readiness remain unproven. 2026-10-05: the native SAST trait path now retains reported coverage errors, persists usable partial observations and writes authenticated native-coverage.json. Focused tests prove nonempty and empty partial results, per-engine outcomes, no disappearance reconciliation and reopen. Installed Semgrep with explicit local rules reports one intentionally incompatible rule and retains one labeled source observation; J78 records 25 machine passes and 10 separate passing screen judgments across all six sizes, actual 40x12 paging, explicit partial selection, human review, settled Report and no-color restart. One scoped native scan and zero live provider calls are verified. This does not certify accepted-context isolation, scanner precision or report export. Standalone Semgrep partial/source-identity evidence is recorded in J79; other direct-engine scope and interface parity remains open. The subsequent native stopped-plan increment proves earlier observations survive fatal engine errors, cancellation/interruption and later indexing failure in focused tests. Shared prepared observed dispatch authenticates failed/canceled results and retained counts. J80 records 20 machine passes and 12 separately judged passing captures across six sizes, actual narrow paging, real Ctrl+C, stopped coverage in Report preview and no-color restart. Installed Semgrep analyzes scope a with a labeled local rule; scope b uses an explicit stop seam, and scope c never starts. Two finite plans are separately initiated with zero live provider calls. This does not prove standalone aborts, persistence-fault recovery, later delegated-failure receipt propagation, source-drift settlement, native resource limits, full coverage export or Git SHA transitions. October 10: canonical secret inspection limits reach fixed plans and selected/exact scope execution. J174 exposes original limits, cumulative consumption, partial acceptance, direct Review, study export and restart. All-partial Scan handoff is corrected; the batch-filtered list still omits incomplete observations.",
       "readinessVerdict": "scoped native execution and accounting verified with intercepted transport; real-model usefulness, all strategies and complete investigation acceptance pending",
@@ -2893,7 +2897,10 @@
       "liveOutcome": "One discovery pass completed after four underlying requests with zero findings. The other two finite passes failed before any provider reservation at the protected Review boundary. Model precision and useful finding production were not established.",
       "contextConsumerEvidence": "J108 runs the real agentic SAST executor six times through approved fixed campaigns and shared allowance admission with fully intercepted provider transport. The first three requests contain exact Alpha context and the next three exact Beta, with fresh sessions and unchanged globally active Gamma and source. Real run receipts feed the authoritative observation ledger and Run Diff. Synthetic observations are labeled; this demonstrates context delivery/accounting/artifact consumption, not detector accuracy, every adapter scope, live model quality or overall readiness.",
       "declaredModuleMaturity": "core",
-      "discoveryMaturityOverride": null
+      "discoveryMaturityOverride": null,
+      "resourceEvidence": [
+        "Optional 1-40 agentic query turns are canonicalized and validated before work, then delivered to the real scanner request; shared allowance still counts repairs and retries. J175 observed three completed real OAuth passes with one request each on owned inert source."
+      ]
     },
     {
       "tool": "sbom-scan:scan",
@@ -3360,7 +3367,7 @@
       "module": "threat-intel",
       "declaredMaturity": "core",
       "declaredPhase": "map",
-      "purpose": "Deterministic dependency inventory (npm/cargo/pip/go/Bazel) written to .kuzushi threat-intel candidates; it does NOT research CVEs — feed the candidates into threat-intel:harvest for that.",
+      "purpose": "Deterministic dependency inventory (npm/cargo/pip/go/Bazel) written to .kuzushi threat-intel candidates; it does NOT research CVEs \u2014 feed the candidates into threat-intel:harvest for that.",
       "scope": "audit-pending",
       "runtimeRequirement": "never",
       "headlessDeclared": true,
@@ -3634,7 +3641,7 @@
         "allowanceRef",
         "operatorBriefRef"
       ],
-      "executionEvidence": "Not yet functionally audited in this increment.",
+      "executionEvidence": "J175 executes deterministic context and entry-point producers, one real GPT-6 Luna/low OAuth synthesis, explicit inactive context acceptance, three scoped discovery passes, scripted human fixture triage, selected-study export and no-color restart. Source remains inert at a real clean Git commit. This proves a small owned workflow, not production precision or completeness.",
       "readinessVerdict": "one-live-fixture-draft-verified; reliability, precision and full workflow remain open",
       "resourceEvidence": [
         "Staged synthesis and conditional gap-fill use estimated stage deposits. Settlement now requires a complete cost receipt; transport failures and incomplete structured-output costs retain the reservation.",
@@ -5517,7 +5524,7 @@
       "Exact discovery campaign plans can now be attached to allowance approvals. Shared dispatch checks prepared input, indexed source identity and configuration, then claims attempts atomically across workers. Started attempts survive cancellation and restart; revisions cannot erase or repurpose them. The existing campaign dispatcher attaches references and counts quota failures against finite attempts."
     ],
     "limits": [
-      "Accepted discovery scan batches bind their jobs automatically. Context, review and learning job planning, immutable context isolation and the guided editor remain open. Unbound legacy calls retain prior behavior. Allowance-only approval requires 80×24; combined finite work approval requires 120×36 until the paged editor is implemented.",
+      "Accepted discovery scan batches bind their jobs automatically. Context, review and learning job planning, immutable context isolation and the guided editor remain open. Unbound legacy calls retain prior behavior. Allowance-only approval requires 80\u00d724; combined finite work approval requires 120\u00d736 until the paged editor is implemented.",
       "Existing dollar deposits are estimates, not conservative upper bounds. Legacy hard ceilings remain per-handle settings.",
       "Runtime query receipts may aggregate internal model turns and repair/retry attempts. Post-receipt stop checks cannot bound dollar overshoot.",
       "Unknown legacy spend retains the estimate, which may be below an observed incomplete subtotal. The investigation ledger separately records cost completeness."

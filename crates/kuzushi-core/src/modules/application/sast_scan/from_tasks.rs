@@ -573,7 +573,7 @@ fn scan_engine_outcome(output: &Value) -> crate::run_artifacts::ScanEngineStageO
 /// path and everything below it). The shared scope guard rejects conflicting
 /// explicit patterns before this adapter runs.
 fn agentic_scoped_input(input: &Value) -> Value {
-    let mut scoped = input.clone();
+    let mut scoped = super::agentic_settings::bind_turn_limit(input);
     let explicit = ["includePatterns", "include_patterns"].iter().any(|key| {
         input
             .get(key)

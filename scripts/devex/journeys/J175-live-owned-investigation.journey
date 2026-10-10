@@ -1,0 +1,95 @@
+name: Real OAuth context, finite repeated discovery, review and report on owned inert source
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | fresh-target
+submit: campaign live-owned-map-20261010
+require-live-snap: 25 live-owned-map-20261010 | unapproved-map
+nav-mode:
+keys: a
+require-live-snap: 25 GENERATE STUDY CONTEXT | exact-map-plan
+keys: t
+type: 11
+keys: Enter r
+type: 2
+keys: Enter Enter End
+require-live-snap: 25 y approve | exact-map-approval
+expect: Total provider calls: 11
+expect: Protected review calls: 2
+ask: Does the live model plan disclose its exact source, model, finite jobs, protected review allowance and uncertain dollar charge before approval?
+keys: y
+require-live-snap: 25 Open approved Map jobs | approved-map
+keys: Enter
+require-live-snap: 25 L starts | fixed-map-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | live-map-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART context-done
+keys: r
+require-live-snap: 25 3 completed | actual-map-results
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | real-context-result
+keys: m
+require-live-snap: 30 RESULT READY | pending-map
+ask: Does the actual model output reach a source-bound Map for explicit acceptance, with no synthetic response, activation or extra job?
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART prepare-scan
+submit: campaign live-owned-scans-20261010
+require-live-snap: 25 live-owned-scans-20261010 | finite-scan-draft
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | scan-review
+keys: Down Down Down Tab Tab z Home
+require-live-snap: 25 PREPARED SETTINGS | explicit-turn-limit
+expect: agenticMaxModelTurns
+resize: 40x12
+live-snap: compact-settings
+resize: 120x36
+keys: z L End
+require-live-snap: 25 y approve | exact-discovery-approval
+expect: Total provider calls: 11
+expect: Protected review calls: 2
+ask: Are three new passes, one worker, the accepted context and two-turn query limit visible without increasing the shared allowance?
+keys: y
+require-live-snap: 25 Approval saved | approved-discovery
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-discovery-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | live-discovery-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART scan-done
+keys: r
+live-snap: actual-discovery-outcomes
+ask: Do actual job outcomes, failed or partial work, model charges and retained observations remain honest without retries or extra jobs?
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT | scan-result
+nav-mode:
+keys: u
+submit: findings
+require-live-snap: 25 Viewing Review | real-review
+ask: Can the operator review actual model and native observations while keeping recurrence separate from confidence and finding verdicts?
+submit: open F-0001
+require-live-snap: 25 public-example.env | public-example-observation
+expect: signal-only
+submit: dismiss false_positive Owned public documentation example is not an active credential
+require-live-snap: 25 Owned public documentation example | recorded-fixture-decision
+submit: report
+require-live-snap: 30 Scope: study live-owned-scans-20261010 | live-report
+ask: Does Report retain the actual source SHA, accepted context, three finite attempts and unknown dollar charges?
+keys: j j j Enter
+require-live-snap: 25 EXPORTED | live-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+submit: report
+require-live-snap: 30 Scope: study live-owned-scans-20261010 | restarted-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART restarted
+ask: Does no-color restart preserve the actual source revision, decisions, context and durable spending without another model request?
+keys: C-c
+require-exit: 10

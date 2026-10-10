@@ -425,6 +425,13 @@ including partial scans. Completed-pass recurrence remains separate. An
 incomplete observation can be reviewed without increasing completed-pass counts;
 unavailable study receipts produce an error and hide stale list membership.
 
+`sast:scan` exposes optional `agenticMaxModelTurns` (`agentic_max_model_turns`
+alias), from 1 through 40. It requires the selected `agentic` task and reaches
+that scanner as `maxModelTurns` through shared prepared dispatch. Omission keeps
+the scanner's existing 20-turn default. The limit applies per query; structured
+output repairs and transport retries also consume the shared investigation
+allowance. It does not establish a token or dollar ceiling.
+
 For a selected Semgrep task, `semgrepConfig` declares rule files or selectors
 and `semgrepBinary` declares the executable through shared prepared dispatch.
 Use absolute local rule paths when scanning directory scopes. Local rules
@@ -2475,6 +2482,13 @@ returns both the shown recommendations and `recommendationTotal`. Results name
 the canonical `target` and set `sourceFreshnessVerified: false`. Missing baseline
 records do not establish that source was never scanned. Ranking is advisory and
 cannot establish complete coverage, confidence, a vulnerability or a fix.
+
+Historical Scan-phase record counts no longer generate saturation or a
+gap-fill-only recommendation. Parent scans and their engines can each produce
+a record, and these rows do not bind comparable context or finding yield.
+The public `Saturated` reason and `all_baselines` input remain compatibility
+surfaces. New recommendations ignore the latter, avoiding an unnecessary full
+history read. Actual study receipts retain their completed-pass recurrence.
 
 Coverage readers open existing SQLite databases read-only. They never initialize
 or migrate schema during recommendations, baseline listing or sweep inspection.

@@ -60,7 +60,7 @@ fn coverage_recommend_tool() -> ToolDescriptor {
     tool_with_options(
         "coverage:recommend",
         "Rank scope-level scan recommendations from deterministic signals: coverage gaps, \
-         staleness since baselines, surface-dense files with zero findings, and saturation. \
+         staleness since baselines, and surface-dense files with zero findings. \
          No model calls; every row carries its mechanical evidence.",
         vec![opt(
             "limit",

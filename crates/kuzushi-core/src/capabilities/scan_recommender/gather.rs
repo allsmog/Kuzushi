@@ -18,9 +18,9 @@ pub fn recommend_scans_for_target(
 ) -> Result<Vec<ScanRecommendation>> {
     let scope_paths = scope_paths(target)?;
     let ledger = CoverageLedger::open_if_exists(target)?;
-    let (latest, all) = match &ledger {
-        Some(ledger) => (ledger.latest_baselines()?, ledger.all_baselines()?),
-        None => (Vec::new(), Vec::new()),
+    let latest = match &ledger {
+        Some(ledger) => ledger.latest_baselines()?,
+        None => Vec::new(),
     };
     let sweep = sweep_if_covered(target, &ledger);
     let surface_files = surface_files(target);
@@ -28,7 +28,7 @@ pub fn recommend_scans_for_target(
     Ok(recommend(&RecommenderInputs {
         scope_paths: &scope_paths,
         latest_baselines: &latest,
-        all_baselines: &all,
+        all_baselines: &[],
         sweep: sweep.as_ref(),
         surface_files: &surface_files,
         finding_files: &finding_files,

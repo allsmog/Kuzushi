@@ -8,11 +8,18 @@ use std::sync::Mutex;
 #[derive(Default)]
 struct RecordingContextRuntime {
     captured: Mutex<Vec<String>>,
+    max_model_turns: Mutex<Vec<Option<u32>>>,
     change_source: Option<PathBuf>,
 }
 
 impl AgentRuntime for RecordingContextRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        self.max_model_turns.lock().unwrap().push(
+            request
+                .runtime_options
+                .as_ref()
+                .and_then(|options| options.max_model_turns),
+        );
         if let Some(path) = &self.change_source {
             std::fs::write(path, "pub fn changed_during_scan() {}\n")?;
         }
@@ -33,6 +40,66 @@ impl AgentRuntime for RecordingContextRuntime {
     fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
         panic!("discovery context test must not invoke triage")
     }
+}
+
+#[test]
+fn sast_agentic_turn_limit_reaches_engine_request() {
+    let fixture = ContextFixture::new("pub fn greeting() -> &'static str { \"hello\" }\n");
+    let runtime = RecordingContextRuntime::default();
+    fixture.run(
+        json!({"taskMode":"manual","tasks":["agentic"],"agenticMaxModelTurns":2,
+            "triage":false,"verify":false,"autoPatch":false}),
+        &runtime,
+    );
+    assert_eq!(*runtime.max_model_turns.lock().unwrap(), vec![Some(2)]);
+}
+
+#[test]
+fn sast_agentic_turn_limit_is_optional_canonical_and_selected() {
+    let fixture = ContextFixture::new("pub fn greeting() {}\n");
+    let mut input = json!({"taskMode":"manual","tasks":["agentic"],"agentic_max_model_turns":2});
+    let prepared = fixture
+        .registry
+        .prepare_dispatch_input("sast:scan", input.clone(), &fixture.ctx(), None)
+        .unwrap();
+    assert_eq!(prepared.value()["agenticMaxModelTurns"], 2);
+    input["tasks"] = json!(["secret-scan"]);
+    let error = fixture
+        .registry
+        .prepare_dispatch_input("sast:scan", input, &fixture.ctx(), None)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("requires the agentic task"),
+        "{error:#}"
+    );
+    let ordinary = fixture
+        .registry
+        .prepare_dispatch_input(
+            "sast:scan",
+            json!({"taskMode":"manual","tasks":["agentic"]}),
+            &fixture.ctx(),
+            None,
+        )
+        .unwrap();
+    assert!(ordinary.value().get("agenticMaxModelTurns").is_none());
+    assert!(!fixture.workspace.root().join(".kuzushi/v3/runs").exists());
+}
+
+#[test]
+fn sast_agentic_turn_limit_refuses_invalid_values_before_work() {
+    let fixture = ContextFixture::new("pub fn greeting() {}\n");
+    for value in [json!(0), json!(41), json!(1.5)] {
+        assert!(fixture
+            .registry
+            .prepare_dispatch_input(
+                "sast:scan",
+                json!({"taskMode":"manual","tasks":["agentic"],"agenticMaxModelTurns":value}),
+                &fixture.ctx(),
+                None
+            )
+            .is_err());
+    }
+    assert!(!fixture.workspace.root().join(".kuzushi/v3/runs").exists());
 }
 
 fn decoded_derived_context(prompt: &str) -> String {

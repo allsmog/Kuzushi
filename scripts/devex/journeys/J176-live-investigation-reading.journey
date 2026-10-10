@@ -1,0 +1,130 @@
+name: Read actual completed OAuth investigation at six sizes with no new requests
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+require-wrapper-flow:
+launch: --target @TARGET
+submit: map
+require-live-snap: 30 SYSTEM SUMMARY | real-map-summary
+resize: 160x48
+live-snap: summary-160x48
+resize: 96x89
+live-snap: summary-96x89
+resize: 80x24
+live-snap: summary-80x24
+resize: 60x20
+live-snap: summary-60x20
+resize: 40x12
+live-snap: summary-40x12
+nav-mode:
+keys: End
+live-snap: compact-summary-tail
+resize: 120x36
+keys: Tab
+require-live-snap: 25 DATA-FLOW DIAGRAM | real-dfd
+ask: Does the live-generated summary distinguish inspected greeting code from its unspecified caller, with source limits and readable graph navigation?
+submit: findings
+require-live-snap: 30 Viewing Review | actual-review-list
+require-live-snap: 30 FINDINGS · 1 | settled-review-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned public documentation example | actual-review-detail
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+resize: 40x12
+live-snap: review-40x12
+keys: NPage
+live-snap: compact-review-page-1
+keys: NPage
+live-snap: compact-review-page-2
+keys: NPage
+live-snap: compact-review-page-3
+keys: NPage
+live-snap: compact-review-page-4
+keys: NPage
+live-snap: compact-review-page-5
+keys: NPage
+live-snap: compact-review-page-6
+keys: NPage
+live-snap: compact-review-page-7
+keys: NPage
+live-snap: compact-review-page-8
+keys: NPage
+live-snap: compact-review-page-9
+keys: NPage
+live-snap: compact-review-page-10
+keys: NPage
+live-snap: compact-review-page-11
+keys: NPage
+live-snap: compact-review-page-12
+keys: NPage
+live-snap: compact-review-page-13
+keys: NPage
+live-snap: compact-review-page-14
+keys: NPage
+live-snap: compact-review-page-15
+keys: NPage
+live-snap: compact-review-page-16
+keys: NPage
+live-snap: compact-review-page-17
+keys: NPage
+live-snap: compact-review-page-18
+keys: NPage
+live-snap: compact-review-page-19
+keys: NPage
+live-snap: compact-review-page-20
+keys: NPage
+live-snap: compact-review-page-21
+keys: NPage
+live-snap: compact-review-page-22
+keys: NPage
+live-snap: compact-review-page-23
+keys: NPage
+live-snap: compact-review-page-24
+keys: NPage
+live-snap: compact-review-tail
+ask: Does compact paging reach the saved decision, original commit, source excerpt and final controls while retaining finding identity?
+resize: 120x36
+submit: report
+require-live-snap: 30 Scope: study live-owned-scans-20261010 | actual-report
+expect: 4 committed / 11 calls
+expect: 2 protected review remaining
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+keys: Home
+live-snap: compact-report-page-0
+keys: NPage
+live-snap: compact-report-page-1
+keys: NPage
+live-snap: compact-report-page-2
+keys: NPage
+live-snap: compact-report-page-3
+keys: NPage
+live-snap: compact-report-page-4
+keys: NPage
+live-snap: compact-report-page-5
+keys: NPage
+live-snap: compact-report-page-6
+keys: NPage
+live-snap: compact-report-page-7
+keys: End
+live-snap: compact-report-tail
+ask: Are real source/context, three completed passes, human decision, unknown dollars and protected capacity accessible at 40x12 without another request?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART reading
+keys: C-c
+require-exit: 10

@@ -518,6 +518,14 @@ fn sast_agent_policy_options() -> Vec<OptionSpec> {
 fn sast_agent_runtime_options() -> Vec<OptionSpec> {
     vec![
         opt(
+            "agenticMaxModelTurns",
+            OptionType::Int,
+            "Agentic scanner turns per query (1-40). Structured-output repairs also consume the shared allowance. Omitted keeps the scanner default.",
+        )
+        .aliases(&["agentic_max_model_turns"])
+        .integer_range(1, crate::runtime::domain::MAX_AGENT_MODEL_TURNS as i64)
+        .advanced(),
+        opt(
             "languages",
             OptionType::StringList,
             "Language filters for agentic SAST tasks.",
