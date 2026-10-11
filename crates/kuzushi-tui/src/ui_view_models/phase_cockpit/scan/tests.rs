@@ -334,6 +334,59 @@ fn legacy_projection_survives_external_cache_invalidation() {
     assert_eq!(after.empty_hint, before.empty_hint);
 }
 
+/// Issue #172 ([HIGH], reconfirmed 2026-10-10): on the typed-receipt path the
+/// panel read `findings +31 added · 0 updated` over its own `20 high ·
+/// 5 medium · 4 low` breakdown of the 29 findings the ledger attributes to
+/// the same runs. The renderer already falls back to the reconciled pair when
+/// the delta is absent; the builder never made it absent, so the recorded
+/// fingerprint delta always won the match and the breakdown beside it came
+/// from different evidence.
+#[test]
+fn a_typed_delta_the_ledger_folded_yields_to_the_count_its_breakdown_adds_up_to() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let run_id = "typed-scan-folded";
+    record_typed_scan_attempt(target.path(), run_id);
+
+    // The receipt records a 4 + 2 fingerprint delta; the ledger folded those
+    // six observations into four findings.
+    let mut app = app_with_hydrated_typed_attempt(&workspace, run_id);
+    app.set_findings(ledger_findings(run_id, 3, 1));
+    let attempt = scan_phase_model(&app).attempt.expect("typed Scan attempt");
+
+    assert_eq!(attempt.findings_added, None);
+    assert_eq!(attempt.findings_updated, None);
+    assert_eq!(attempt.findings, Some(4));
+    assert_eq!(attempt.findings_observed, Some(6));
+    let breakdown: u64 = attempt.severity_counts.iter().map(|(_, count)| count).sum();
+    assert_eq!(
+        breakdown,
+        attempt.findings.unwrap(),
+        "the breakdown must add up to the total beside it: {:?}",
+        attempt.severity_counts
+    );
+}
+
+/// The reconciliation only withholds a delta that stopped counting findings.
+/// A recorded delta the ledger agrees with still reaches the panel, so an
+/// attempt does not lose its `added`/`updated` split to a defensive rule.
+#[test]
+fn a_typed_delta_the_ledger_agrees_with_still_reaches_the_panel() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let run_id = "typed-scan-agreed";
+    record_typed_scan_attempt(target.path(), run_id);
+
+    let mut app = app_with_hydrated_typed_attempt(&workspace, run_id);
+    app.set_findings(ledger_findings(run_id, 4, 2));
+    let attempt = scan_phase_model(&app).attempt.expect("typed Scan attempt");
+
+    assert_eq!(attempt.findings_added, Some(4));
+    assert_eq!(attempt.findings_updated, Some(2));
+    assert_eq!(attempt.findings, Some(6));
+    assert_eq!(attempt.findings_observed, None);
+}
+
 fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
     let mut summary = RunSummary::running(
         run_id,

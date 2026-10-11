@@ -1,3 +1,4 @@
+use crate::app::finding_delta_in_ledger_unit;
 use crate::ui_view_models::{ScanAttemptModel, ScanEngineOutcomeModel};
 use crate::{ShellApp, ViewDataState};
 use kuzushi_core::run_artifacts::{PhaseStageReceipt, ScanEngineStageOutcome};
@@ -19,6 +20,11 @@ pub(super) fn scan_attempt_from_stage(
         .saturating_add(scan.finding_delta.updated);
     let run_refs = typed_run_refs(receipt, record);
     let facts = app.attempt_finding_facts(&run_refs, Some(findings));
+    let (findings_added, findings_updated) = finding_delta_in_ledger_unit(
+        facts.count,
+        scan.finding_delta.added,
+        scan.finding_delta.updated,
+    );
     Some(ScanAttemptModel {
         attempt_id: Some(record.completed.attempt_id.clone()),
         run_id: typed_run_id(receipt, record),
@@ -28,8 +34,8 @@ pub(super) fn scan_attempt_from_stage(
         freshness: attempt_freshness(app, &scan.target_snapshot),
         findings: facts.count,
         findings_observed: facts.observed,
-        findings_added: Some(scan.finding_delta.added),
-        findings_updated: Some(scan.finding_delta.updated),
+        findings_added,
+        findings_updated,
         severity_counts: typed_severity_counts(scan, facts.severity_counts),
         artifact_count: scan.artifact_delta.len(),
         artifact_paths: typed_artifact_paths(scan),
