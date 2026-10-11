@@ -387,6 +387,58 @@ fn a_typed_delta_the_ledger_agrees_with_still_reaches_the_panel() {
     assert_eq!(attempt.findings_observed, None);
 }
 
+/// Withholding the split must not take the panel with it. `scan_has_delta`
+/// read only the `added`/`updated` pair, artifacts, and the error, so an
+/// attempt that recorded no artifact lost the whole FINDING / ARTIFACT DELTA
+/// surface at the moment the reconciliation made it read honestly — and with
+/// it the reconciled total and the breakdown. AGENTS.md owes the Scan cockpit
+/// its finding delta. Reported by Codex review on `ac22d186`.
+#[test]
+fn an_artifact_free_folded_attempt_keeps_its_delta_surface() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let run_id = "typed-scan-no-artifacts";
+    record_typed_scan_attempt(target.path(), run_id);
+
+    // Re-publish the receipt with no artifact delta, so the surface has only
+    // the finding evidence to stand on.
+    let mut receipt = kuzushi_core::run_artifacts::load_scan_stage_data(target.path(), run_id)
+        .unwrap()
+        .unwrap();
+    let scan = receipt.scan.as_mut().unwrap();
+    scan.artifact_delta.clear();
+    crate::test_support::record_indexed_run(
+        target.path(),
+        run_id,
+        "sast:scan",
+        serde_json::json!({"ok": true, "data": {"phaseStages": [receipt]}}),
+    );
+
+    let mut app = app_with_hydrated_typed_attempt(&workspace, run_id);
+    app.set_findings(ledger_findings(run_id, 3, 1));
+    let model = scan_phase_model(&app);
+    let attempt = model.attempt.clone().expect("typed Scan attempt");
+
+    assert_eq!(attempt.artifact_count, 0);
+    assert_eq!(attempt.error, None);
+    assert_eq!(
+        (attempt.findings_added, attempt.findings_updated),
+        (None, None)
+    );
+    assert!(!attempt.severity_counts.is_empty());
+
+    let specs = crate::ui_view_models::phase_surface_specs(
+        &crate::ui_view_models::PhaseCockpitBody::Scan(model),
+    );
+    assert!(
+        specs
+            .iter()
+            .any(|spec| spec.id == crate::ui_view_models::PhaseSurfaceId::ScanDelta),
+        "the delta surface must survive a withheld split: {:?}",
+        specs.iter().map(|spec| spec.id).collect::<Vec<_>>()
+    );
+}
+
 fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
     let mut summary = RunSummary::running(
         run_id,

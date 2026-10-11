@@ -206,10 +206,18 @@ fn remediation_state(model: &FixPhaseModel) -> SurfaceState {
     }
 }
 
+/// A severity breakdown is delta evidence in its own right. The `added`/
+/// `updated` pair is withheld whenever it stops counting the same findings
+/// the breakdown describes, so keying the surface on that pair alone would
+/// take the whole panel away — the reconciled distinct/observation total and
+/// the breakdown with it — exactly when the panel finally reads honestly.
+/// The Scan cockpit owes the operator its finding delta (AGENTS.md § durable
+/// Scan page), so the surface follows the content, not the cleared fields.
 fn scan_has_delta(model: &ScanPhaseModel) -> bool {
     model.attempt.as_ref().is_some_and(|attempt| {
         attempt.findings_added.unwrap_or_default() > 0
             || attempt.findings_updated.unwrap_or_default() > 0
+            || !attempt.severity_counts.is_empty()
             || attempt.artifact_count > 0
             || attempt.error.is_some()
     })
