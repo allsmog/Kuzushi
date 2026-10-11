@@ -56,7 +56,11 @@ fn render_generic_system_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellA
     if lines.is_empty() || overlay_area.width < 8 || overlay_area.height < 3 {
         return;
     }
-    let modal = overlay_rect(overlay_area, lines.len());
+    let modal = if app.shell_view() == ShellView::Catalog {
+        catalog_overlay_rect(overlay_area, lines.len())
+    } else {
+        overlay_rect(overlay_area, lines.len())
+    };
     render_system_overlay_backdrop(frame, area, app.shell_view());
     frame.render_widget(Clear, modal);
     let block = Block::default()
@@ -114,7 +118,7 @@ fn contextual_overlay_body_area(area: Rect) -> Rect {
 /// context separate from the cursor-windowed rows so short terminals never
 /// scroll the selected action behind the header rails.
 fn catalog_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let capacity = usize::from(area.height.saturating_sub(4));
+    let capacity = usize::from(area.height.saturating_sub(2));
     if capacity == 0 {
         return Vec::new();
     }
@@ -129,7 +133,7 @@ fn catalog_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         .cursor()
         .min(rows.len().saturating_sub(1));
     let width = area.width as usize;
-    if capacity <= 3 {
+    if capacity <= 4 {
         return compact_catalog_overlay_lines(&model, &rows, cursor, width, capacity);
     }
     windowed_catalog_overlay_lines(&model, &rows, cursor, width, capacity)
@@ -155,11 +159,13 @@ fn compact_catalog_overlay_lines(
         return vec![selected];
     }
     let mut lines = Vec::new();
-    if capacity == 3 {
+    let readiness = catalog_readiness_lines(model, width);
+    if capacity > readiness.len() + 1 {
         lines.push(catalog_overlay_header(model, width));
     }
     lines.push(selected);
-    lines.push(catalog_overlay_readiness(model, width));
+    let remaining = capacity.saturating_sub(lines.len());
+    lines.extend(readiness.into_iter().take(remaining));
     lines
 }
 
@@ -171,23 +177,22 @@ fn windowed_catalog_overlay_lines(
     capacity: usize,
 ) -> Vec<Line<'static>> {
     let show_draft_hint = capacity >= 7;
-    let chrome = 3 + usize::from(show_draft_hint);
+    let readiness = catalog_readiness_lines(model, width);
+    let chrome = 2 + readiness.len() + usize::from(show_draft_hint);
     let row_capacity = capacity.saturating_sub(chrome).max(1).min(rows.len());
     let start = viewport_start_for_cursor(rows.len(), row_capacity, cursor);
     let end = start.saturating_add(row_capacity).min(rows.len());
-    let mut lines = vec![
-        catalog_overlay_header(model, width),
-        catalog_overlay_readiness(model, width),
-        catalog_overlay_position(start, end, cursor, rows.len(), width),
-    ];
+    let mut lines = vec![catalog_overlay_header(model, width)];
+    lines.extend(readiness);
+    lines.push(catalog_overlay_position(
+        start,
+        end,
+        cursor,
+        rows.len(),
+        width,
+    ));
     if show_draft_hint {
-        lines.push(Line::styled(
-            fit(
-                "Enter loads a draft · e expert · review inputs before execution",
-                width,
-            ),
-            theme::muted(),
-        ));
+        lines.push(Line::styled(fit(model.input_hint, width), theme::muted()));
     }
     lines.extend(
         rows[start..end]
@@ -228,18 +233,6 @@ fn catalog_overlay_header(
         ),
         theme::heading(),
     )
-}
-
-fn catalog_overlay_readiness(
-    model: &crate::ui_view_models::CatalogModel,
-    width: usize,
-) -> Line<'static> {
-    let Some(action) = model.selected_action.as_ref() else {
-        return Line::default();
-    };
-    let readiness = &action.readiness;
-    let text = format!("{} · {}", readiness.label, readiness.next);
-    Line::styled(fit(&text, width), theme::muted())
 }
 
 fn compact_catalog_action_line(
@@ -393,6 +386,12 @@ fn overlay_rect(area: Rect, line_count: usize) -> Rect {
     let width = area.width.saturating_sub(4).min(96);
     let requested = line_count.saturating_add(2).min(u16::MAX as usize) as u16;
     let height = requested.min(area.height.saturating_sub(2)).max(3);
+    centered_rect(area, width, height)
+}
+
+fn catalog_overlay_rect(area: Rect, line_count: usize) -> Rect {
+    let width = area.width.saturating_sub(4).min(96);
+    let height = line_count.saturating_add(2).min(usize::from(area.height)) as u16;
     centered_rect(area, width, height)
 }
 
@@ -642,6 +641,54 @@ mod tests {
         assert!(rendered.contains("CAPABILITIES"), "{rendered}");
         assert!(rendered.contains("Quick map"), "{rendered}");
         assert!(!rendered.contains("CHOOSE A TARGET"), "{rendered}");
+    }
+
+    #[test]
+    fn catalog_compact_capabilities_preserves_the_complete_input_recovery() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(std::path::PathBuf::from(".")));
+        app.set_shell_view(ShellView::Catalog);
+        app.move_catalog_cursor(2);
+        let area = Rect::new(0, 0, 34, 5);
+        let lines = catalog_overlay_lines(&app, area);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join(" ");
+
+        assert!(text.contains("INPUT REQUIRED"), "{text}");
+        assert!(text.contains("options recon:import"), "{text}");
+        assert!(text.contains("Import recon"), "{text}");
+        assert!(lines.len() <= 3, "{text}");
+        assert!(lines.iter().all(|line| line.width() <= 34), "{text}");
+    }
+
+    #[test]
+    fn catalog_minimum_native_body_keeps_the_recovery_command() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(std::path::PathBuf::from(".")));
+        app.set_shell_view(ShellView::Catalog);
+        app.move_catalog_cursor(2);
+        let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
+
+        terminal
+            .draw(|frame| render_system_overlay(frame, frame.area(), &app))
+            .unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("Import recon"), "{rendered}");
+        assert!(rendered.contains("INPUT REQUIRED"), "{rendered}");
+        assert!(rendered.contains("options recon:import"), "{rendered}");
+    }
+
+    #[test]
+    fn catalog_modal_draft_never_advertises_enter_as_a_load_action() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Catalog);
+        app.set_input("run context:build".to_string());
+        let lines = catalog_overlay_lines(&app, Rect::new(0, 0, 90, 30));
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("Editing a command"), "{text}");
+        assert!(!text.contains("Enter loads a draft"), "{text}");
+        assert_eq!(app.input(), "run context:build");
     }
 
     #[test]

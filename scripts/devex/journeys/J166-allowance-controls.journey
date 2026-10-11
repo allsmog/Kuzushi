@@ -1,0 +1,78 @@
+name: Audited finite planning and readable protected allowance capacity
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_controls.py @TMP_TARGET @ART before
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 Viewing Map | pending-map
+expect-not: Map ✓
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup-still-needed
+expect-not: Map ✓
+ask: Do completed drafting, approval and inspection receipts leave genuine Map acceptance and all investigation work uncreated?
+paste-file: @ART/read-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Calls available for context, scopes, scans and lessons: 2 | allowance-status
+expect: protected review remaining: 1
+expect: dollar ceiling: not enforced
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | reader
+resize: 160x48
+live-snap: allowance-160x48
+resize: 96x89
+live-snap: allowance-96x89
+resize: 80x24
+live-snap: allowance-80x24
+resize: 60x20
+live-snap: allowance-60x20
+resize: 40x12
+live-snap: allowance-40x12
+keys: End
+live-snap: allowance-tail-40x12
+keys: PPage
+live-snap: allowance-page-1-40x12
+keys: PPage
+live-snap: allowance-page-2-40x12
+keys: PPage
+live-snap: allowance-page-3-40x12
+keys: PPage
+live-snap: allowance-page-4-40x12
+keys: PPage
+live-snap: allowance-page-5-40x12
+ask: Can the exact fixed plan, two available calls, one protected Review call, unknown dollar charges and unavailable legacy run evidence be read at every size without implying new jobs or model requests?
+keys: q
+resize: 120x36
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-after-read
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_controls.py @TMP_TARGET @ART after
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 Viewing Map | restarted-pending-map
+expect-not: Map ✓
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted-setup
+expect-not: Map ✓
+paste-file: @ART/read-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Calls available for context, scopes, scans and lessons: 2 | restarted-allowance
+require-shell: python3 -B @REPO/scripts/devex/fixtures/allowance_controls.py @TMP_TARGET @ART after
+ask: Does no-color restart retain the exact allowance and protected capacity while observations, reservations, attempts and decisions remain zero?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

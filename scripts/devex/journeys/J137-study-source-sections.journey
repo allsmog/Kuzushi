@@ -1,0 +1,161 @@
+name: Source overview, recorded inputs and exact options without losing the draft
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME PATH=@ART/bin:/usr/bin:/bin:/usr/sbin:/sbin KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_sections.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign owned-engine-inputs
+require-live-snap: 25 owned-engine-inputs | frozen-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | plan-form
+keys: Down Down Down
+require-live-snap: 5 SOURCE OVERVIEW | source-overview-120x36
+expect-not: maxInventoryFiles
+expect-not: semgrep: located at
+expect: Tab Inputs
+keys: z
+require-live-snap: 5 Source and context: Overview | source-reader-overview-120x36
+expect: Source content:
+keys: Tab
+require-live-snap: 5 RECORDED ENGINE INPUTS | source-reader-inputs-120x36
+expect: semgrep: located at
+expect: Recorded content:
+expect: Tab Settings
+expect-not: maxInventoryFiles
+keys: Tab
+require-live-snap: 5 PREPARED SETTINGS | source-reader-settings-120x36
+expect: Tab JSON
+keys: Tab
+require-live-snap: 5 EXACT PREPARED OPTIONS | source-reader-options-120x36
+expect: maxInventoryFiles
+expect: Tab Overview
+keys: BTab BTab
+require-live-snap: 5 RECORDED ENGINE INPUTS | returned-inputs
+keys: z
+require-live-snap: 5 PLAN A STUDY | returned-form
+expect: RECORDED ENGINE INPUTS
+expect: Tab Settings
+keys: BTab
+require-live-snap: 5 SOURCE OVERVIEW | returned-overview
+ask: Are source identity, recorded engine facts and exact options visibly distinct, with full values accessible and each tab returning to its retained position?
+keys: z
+resize: 160x48
+keys: Home
+live-snap: source-overview-160x48
+keys: Tab Home
+live-snap: source-inputs-160x48
+keys: Tab Tab Home
+live-snap: source-options-160x48
+keys: Tab Home
+resize: 96x89
+keys: Home
+live-snap: source-overview-96x89
+keys: Tab Home
+live-snap: source-inputs-96x89
+keys: Tab Tab Home
+live-snap: source-options-96x89
+keys: Tab Home
+resize: 80x24
+keys: Home
+live-snap: source-overview-80x24
+keys: Tab Home
+live-snap: source-inputs-80x24
+keys: Tab Tab Home
+live-snap: source-options-80x24
+keys: Tab Home
+resize: 60x20
+keys: Home
+live-snap: source-overview-60x20
+keys: Tab Home
+live-snap: source-inputs-60x20
+keys: Tab Tab Home
+live-snap: source-options-60x20
+keys: Tab Home
+resize: 40x12
+keys: Home
+live-snap: source-overview-40x12
+keys: Tab Home
+live-snap: source-inputs-40x12
+keys: Tab Tab Home
+live-snap: source-options-40x12
+keys: Tab Home
+keys: Tab Home
+require-live-snap: 5 RECORDED ENGINE INPUTS | source-inputs-paged-40x12
+keys: PgDn
+live-snap: source-inputs-page-1-40x12
+keys: PgDn
+live-snap: source-inputs-page-2-40x12
+keys: PgDn
+live-snap: source-inputs-page-3-40x12
+keys: Tab Tab Home
+live-snap: source-options-page-40x12-0
+keys: PgDn
+live-snap: source-options-page-40x12-1
+keys: PgDn
+live-snap: source-options-page-40x12-2
+keys: PgDn
+live-snap: source-options-page-40x12-3
+keys: PgDn
+live-snap: source-options-page-40x12-4
+keys: PgDn
+live-snap: source-options-page-40x12-5
+keys: PgDn
+live-snap: source-options-page-40x12-6
+keys: PgDn
+live-snap: source-options-page-40x12-7
+keys: PgDn
+live-snap: source-options-page-40x12-8
+keys: PgDn
+live-snap: source-options-page-40x12-9
+keys: PgDn
+live-snap: source-options-page-40x12-10
+keys: PgDn
+live-snap: source-options-page-40x12-11
+keys: PgDn
+live-snap: source-options-page-40x12-12
+keys: PgDn
+live-snap: source-options-page-40x12-13
+keys: PgDn
+live-snap: source-options-page-40x12-14
+keys: PgDn
+live-snap: source-options-page-40x12-15
+keys: PgDn
+live-snap: source-options-page-40x12-16
+keys: PgDn
+live-snap: source-options-page-40x12-17
+keys: PgDn
+live-snap: source-options-page-40x12-18
+keys: PgDn
+live-snap: source-options-page-40x12-19
+keys: PgDn
+live-snap: source-options-page-40x12-20
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_sections.py @TMP_TARGET @ART inspect
+ask: At every viewport, can the operator switch and read these sections, inspect the complete prepared options and return without changing source, approval, jobs or spending?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME PATH=@ART/bin:/usr/bin:/bin:/usr/sbin:/sbin NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: campaign owned-engine-inputs
+require-live-snap: 25 owned-engine-inputs | no-color-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | no-color-form
+keys: Down Down Down
+require-live-snap: 5 SOURCE OVERVIEW | no-color-overview
+keys: Tab z
+require-live-snap: 5 RECORDED ENGINE INPUTS | no-color-inputs
+keys: Tab
+require-live-snap: 5 PREPARED SETTINGS | source-reader-settings-120x36
+expect: Tab JSON
+keys: Tab
+require-live-snap: 5 EXACT PREPARED OPTIONS | no-color-options
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_sections.py @TMP_TARGET @ART recover
+ask: Does restart retain the same unapproved plan and honest omissions, with all Source views available without color or additional work?
+keys: C-c
+require-exit: 10

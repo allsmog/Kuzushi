@@ -136,7 +136,7 @@ fn repeated_explicit_splits_still_cannot_exceed_the_scope_cap() {
 }
 
 #[test]
-fn exclusion_is_explicit_and_whole_repository_restores_the_reviewed_universe() {
+fn whole_repository_preserves_explicit_exclusions_and_their_reasons() {
     let initial = draft(vec![scope("app", &["app"])]);
     let inventory = inventory(&["app/a.rs", "loose.rs"]);
     let (excluded, coverage) = initial
@@ -155,9 +155,13 @@ fn exclusion_is_explicit_and_whole_repository_restores_the_reviewed_universe() {
         .edited(ScanScopeEdit::WholeRepository, &inventory)
         .unwrap();
     assert_eq!(whole.scopes.len(), 1);
-    assert!(coverage.excluded_files.files.is_empty());
+    assert_eq!(whole.exclusions, excluded.exclusions);
+    assert_eq!(coverage.excluded_files.files, vec!["app/a.rs"]);
     assert!(coverage.uncovered_files.files.is_empty());
-    assert_eq!(coverage.discovery_members["repository"].files.len(), 2);
+    assert_eq!(
+        coverage.discovery_members["repository"].files,
+        vec!["loose.rs"]
+    );
 }
 
 #[test]
@@ -181,6 +185,47 @@ fn invalid_metadata_edit_does_not_mutate_the_existing_draft() {
         )
         .is_err());
     assert!(!draft.shared_discovery);
+}
+
+#[test]
+fn explicit_inclusion_removes_one_rule_and_keeps_other_exclusions() {
+    let mut original = draft(vec![scope("repository", &["."])]);
+    original.exclusions = vec![
+        ScanScopeExclusion {
+            path: "app".into(),
+            reason: "Defer component".into(),
+        },
+        ScanScopeExclusion {
+            path: "app/a.rs".into(),
+            reason: "Retain specific omission".into(),
+        },
+    ];
+    let inventory = inventory(&["app/a.rs", "app/b.rs", "README.md"]);
+    let (included, coverage) = original
+        .edited(
+            ScanScopeEdit::IncludePath { path: "app".into() },
+            &inventory,
+        )
+        .unwrap();
+    assert_eq!(original.exclusions.len(), 2);
+    assert_eq!(included.exclusions, vec![original.exclusions[1].clone()]);
+    assert_eq!(coverage.excluded_files.files, vec!["app/a.rs"]);
+    assert_eq!(
+        coverage.discovery_members["repository"].files,
+        vec!["README.md", "app/b.rs"]
+    );
+    assert!(coverage
+        .ensure_acceptable(&ScopeCoverageApproval::default())
+        .is_err());
+    assert!(original
+        .edited(
+            ScanScopeEdit::IncludePath {
+                path: "unknown".into()
+            },
+            &inventory
+        )
+        .is_err());
+    assert_eq!(original.exclusions.len(), 2);
 }
 
 #[test]

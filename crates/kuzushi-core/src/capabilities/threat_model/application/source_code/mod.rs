@@ -3,21 +3,40 @@
 use super::{BuildInput, ToolExecutionContext};
 use crate::attack_surface::AttackSurface;
 use anyhow::{Context, Result};
-use model::{Candidate, CodeReport, CodeSource};
+use model::{Candidate, CodeReport};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 mod excerpts;
 mod model;
+mod scoped;
 mod selection;
+pub(crate) use scoped::collect_scoped_source;
 #[cfg(test)]
 mod tests;
 
 pub(crate) use model::CodeEvidence;
+pub(crate) use model::CodeSource;
 
 const MAX_READ_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 const REPORT_RESERVE_BYTES: usize = 256;
+
+pub(crate) fn collect_regeneration_source(
+    roots: super::ThreatModelBuildRoots,
+    max_source_bytes: usize,
+    context_limit: usize,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<(String, bool)> {
+    let input = BuildInput {
+        roots,
+        max_source_bytes,
+        context_limit,
+        ..Default::default()
+    };
+    let source = collect_source_code(&input, &[], None, ctx)?;
+    Ok((source.content, source.partial))
+}
 
 pub(super) fn collect_source_code(
     input: &BuildInput,

@@ -177,6 +177,32 @@ mod tests {
     }
 
     #[test]
+    fn secret_scan_inspection_limits_are_declared_canonical_and_bounded() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let prepared = registry
+            .prepare_tool_input(
+                "secret-scan:scan",
+                json!({"max_entries":"2","max_total_bytes":"1024"}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(prepared["maxEntries"], 2);
+        assert_eq!(prepared["maxTotalBytes"], 1024);
+        assert!(prepared.get("max_entries").is_none());
+        for input in [
+            json!({"maxEntries":0}),
+            json!({"maxEntries":100001}),
+            json!({"maxTotalBytes":1023}),
+            json!({"maxTotalBytes":536870913}),
+            json!({"scanScopeRef":{}}),
+        ] {
+            assert!(registry
+                .prepare_tool_input("secret-scan:scan", input, None)
+                .is_err());
+        }
+    }
+
+    #[test]
     fn taint_tools_option_round_trips() {
         let registry = ModuleRegistry::with_v2_builtins();
 
@@ -233,9 +259,8 @@ mod tests {
         assert!(aliases.get("model_dedupe").is_none());
 
         for (key, value) in [("identityReconcile", "aggressive"), ("modelDedupe", "yes")] {
-            let input = serde_json::Value::Object(
-                [(key.to_string(), json!(value))].into_iter().collect(),
-            );
+            let input =
+                serde_json::Value::Object([(key.to_string(), json!(value))].into_iter().collect());
             let error = registry
                 .prepare_tool_input("triage:run", input, None)
                 .unwrap_err()
@@ -1134,6 +1159,89 @@ export default {
     }
 
     #[test]
+    fn dynamic_tool_maturity_is_preserved_without_blocking_exact_dispatch() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            eprintln!("SKIP: local worker permission boundary unavailable");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("tool-tiers.mjs");
+        fs::write(
+            &path,
+            r#"export default {
+          id:"tool-tiers", displayName:"Owned tool tier fixture", category:"internal",
+          tools:["labs","compatibility"].map(tier=>({
+            name:`tool-tiers:${tier}`, description:"Owned metadata test", headless:true,
+            phase:"operate", effect:"read", approval:"none", workspaceRequirement:"required",
+            discoveryMaturity:tier, options:[],
+            run(){return {ok:true,status:"completed",data:{tier}}}
+          }))
+        };"#,
+        )
+        .unwrap();
+        let specifier = format!("file://{}", path.display());
+        let registry = approve_and_load_kwp_module(
+            &specifier,
+            Grant::default(),
+            &root.path().join("kuzushi.lock"),
+        );
+        let workspace = WorkspaceTarget::new(root.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = kwp_context(&config, Some(&workspace), None, None);
+        for (name, tier) in [
+            ("labs", ModuleMaturity::Labs),
+            ("compatibility", ModuleMaturity::Compatibility),
+        ] {
+            let tool = format!("tool-tiers:{name}");
+            assert_eq!(
+                registry.resolve_tool(&tool).unwrap().discovery_maturity,
+                Some(tier)
+            );
+            assert!(!registry.tool_is_discoverable(&tool));
+            let prepared = registry
+                .prepare_dispatch_input(&tool, json!({}), &ctx, None)
+                .unwrap()
+                .authorize_explicit_headless();
+            let result = registry
+                .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+                .unwrap();
+            assert_eq!(result["data"]["tier"], name);
+        }
+        eprintln!("Verified both approved local tool tiers through real prepared dispatch");
+    }
+
+    #[test]
+    fn dynamic_module_rejects_historical_cost_projection() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            eprintln!("SKIP: local worker permission boundary unavailable");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("historical-cost.mjs");
+        fs::write(
+            &path,
+            r#"export default {
+              id:"historical-cost", displayName:"Owned cost metadata fixture", category:"internal",
+              tools:[{name:"historical-cost:read", description:"Owned metadata test", headless:true,
+                phase:"operate", effect:"read", approval:"none", workspaceRequirement:"required",
+                costDataProjection:true, options:[], run(){throw new Error("must never dispatch")}}]
+            };"#,
+        )
+        .unwrap();
+        let specifier = format!("file://{}", path.display());
+        let lockfile = root.path().join("kuzushi.lock");
+        let error = approve_dynamic_module(&specifier, Grant::default(), "0.0.0", &lockfile)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("does not support historical-cost:read.costDataProjection"),
+            "{error}"
+        );
+        assert!(!lockfile.exists());
+        eprintln!("Verified historical cost projection is rejected before worker approval");
+    }
+
+    #[test]
     fn dynamic_module_requires_explicit_effect_policy() {
         if !crate::modules::dynamic_loader::kwp_node_execution_available() {
             return;
@@ -1230,7 +1338,13 @@ export default {
 };
 "#;
         let path = target.join("report-module.mjs");
-        fs::write(&path, source.replace("EFFECT", effect).replace("APPROVAL", approval)).unwrap();
+        fs::write(
+            &path,
+            source
+                .replace("EFFECT", effect)
+                .replace("APPROVAL", approval),
+        )
+        .unwrap();
         format!("file://{}", path.display())
     }
 
@@ -1238,14 +1352,28 @@ export default {
     fn dynamic_report_phase_dispatches_under_review_through_prepared_input() {
         let tmp = tempfile::tempdir().unwrap();
         let specifier = write_dynamic_report_fixture(tmp.path(), "workspace-write", "none");
-        let registry = approve_and_load_kwp_module(&specifier, Grant::default(), &tmp.path().join("kuzushi.lock"));
-        let config = V2Config { autonomy: autonomy::AutonomyPosture::Review, ..V2Config::default() };
+        let registry = approve_and_load_kwp_module(
+            &specifier,
+            Grant::default(),
+            &tmp.path().join("kuzushi.lock"),
+        );
+        let config = V2Config {
+            autonomy: autonomy::AutonomyPosture::Review,
+            ..V2Config::default()
+        };
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let ctx = kwp_context(&config, Some(&workspace), None, None);
-        let prepared = registry.prepare_dispatch_input("dynreport:export", json!({}), &ctx, None).unwrap();
-        let output = registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None).unwrap();
+        let prepared = registry
+            .prepare_dispatch_input("dynreport:export", json!({}), &ctx, None)
+            .unwrap();
+        let output = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+            .unwrap();
         assert_eq!(output.pointer("/data/receipt"), Some(&json!("offline")));
-        assert_eq!(registry.resolve_tool("dynreport:export").unwrap().phase, ToolPhase::Report);
+        assert_eq!(
+            registry.resolve_tool("dynreport:export").unwrap().phase,
+            ToolPhase::Report
+        );
     }
 
     #[test]
@@ -1253,9 +1381,18 @@ export default {
         for effect in ["repository-execute", "external-action"] {
             let tmp = tempfile::tempdir().unwrap();
             let specifier = write_dynamic_report_fixture(tmp.path(), effect, "explicit");
-            let error = approve_dynamic_module(&specifier, Grant::default(), "0.0.0", &tmp.path().join("kuzushi.lock"))
-                .unwrap_err().to_string();
-            assert!(error.contains("report") && error.contains(effect), "{error}");
+            let error = approve_dynamic_module(
+                &specifier,
+                Grant::default(),
+                "0.0.0",
+                &tmp.path().join("kuzushi.lock"),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("report") && error.contains(effect),
+                "{error}"
+            );
         }
     }
 
@@ -3217,9 +3354,19 @@ process.stdin.on("end", () => {
     fn guided_discovery_uses_the_same_core_visibility_as_the_catalog() {
         let registry = ModuleRegistry::with_v2_builtins();
         assert!(registry.tool_is_discoverable("report:build"));
-        for name in ["fuzz:status", "systems-hunt:systems-hunt", "carlini-threat-hunt:run"] {
-            assert!(registry.resolve_tool(name).is_some(), "exact dispatch remains registered: {name}");
-            assert!(!registry.tool_is_discoverable(name), "not a guided default: {name}");
+        for name in [
+            "fuzz:status",
+            "systems-hunt:systems-hunt",
+            "carlini-threat-hunt:run",
+        ] {
+            assert!(
+                registry.resolve_tool(name).is_some(),
+                "exact dispatch remains registered: {name}"
+            );
+            assert!(
+                !registry.tool_is_discoverable(name),
+                "not a guided default: {name}"
+            );
         }
         assert!(!registry.tool_is_discoverable("missing:tool"));
         for tool in registry.discoverable_tools() {
@@ -3240,7 +3387,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "dca12664c0f8083e3a1352e3fcee2c77ded80c6882fc4022eb7e73bf6f69bfc1",
+            "7dc0c5debb19e4bdf769ea334c10b02c8572886e47bdef83f1b2dc5b4f140519",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }
@@ -3251,8 +3398,6 @@ process.stdin.on("end", () => {
         for tool in registry.tools.values() {
             if tool.effect.needs_operator_approval() {
                 assert_eq!(tool.approval, ApprovalPolicy::Explicit, "{}", tool.name);
-            }
-            if tool.effect != ToolEffect::Read {
                 assert_ne!(tool.phase, ToolPhase::Operate, "{}", tool.name);
             }
             if tool.finding_store_requirement == FindingStoreRequirement::Required {

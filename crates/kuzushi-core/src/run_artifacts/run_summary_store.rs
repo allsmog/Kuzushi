@@ -210,7 +210,7 @@ fn load_run_summary_raw(target: &Path, run_id: &str) -> Result<(PathBuf, RunSumm
     Ok((path, summary))
 }
 
-pub(crate) fn load_run_summary_without_repair(target: &Path, run_id: &str) -> Result<RunSummary> {
+pub fn load_run_summary_without_repair(target: &Path, run_id: &str) -> Result<RunSummary> {
     load_run_summary_raw(target, run_id).map(|(_, summary)| summary)
 }
 
@@ -329,12 +329,7 @@ pub(super) fn visit_run_summary_entries_for_index(
     for entry in
         fs::read_dir(&root).with_context(|| format!("Could not read {}", root.display()))?
     {
-        visit(read_run_summary_entry(
-            target,
-            &entry?,
-            false,
-            &mut repairs,
-        ))?;
+        visit(read_run_summary_entry(target, &entry?, false, &mut repairs))?;
     }
     Ok(())
 }
@@ -483,8 +478,7 @@ fn materialize_current_prefix(
     let mut entries = Vec::with_capacity(indexed.len());
     let mut repairs = RepairJournal::default();
     for expected in indexed {
-        let actual =
-            read_indexed_run_summary_entry(target, expected.clone(), false, &mut repairs)?;
+        let actual = read_indexed_run_summary_entry(target, expected.clone(), false, &mut repairs)?;
         if !indexed_ordering_key_matches(&expected, &actual) {
             return Ok(None);
         }
@@ -663,8 +657,7 @@ fn retained_ordering_witness_matches(
     // Reading it prevents an unrequested row edit from reordering this page.
     let mut repairs = RepairJournal::default();
     for expected in retained {
-        let actual =
-            read_indexed_run_summary_entry(target, expected.clone(), false, &mut repairs)?;
+        let actual = read_indexed_run_summary_entry(target, expected.clone(), false, &mut repairs)?;
         if !indexed_ordering_key_matches(expected, &actual) {
             return Ok(false);
         }
@@ -946,15 +939,14 @@ fn repair_stale_running_summary(
     let (_, current) = load_run_summary_raw(target, &summary.run_id)?;
     let transitioned_running = current.status == "running";
     let repaired = recover_run_truth_under_lock(target, current)?;
-    let recovered = (transitioned_running && is_recovered_interruption(&repaired)).then(|| {
-        RecoveredRun {
+    let recovered =
+        (transitioned_running && is_recovered_interruption(&repaired)).then(|| RecoveredRun {
             run_id: repaired.run_id.clone(),
             reason: repaired
                 .error
                 .clone()
                 .unwrap_or_else(|| "run interrupted during process recovery".to_string()),
-        }
-    });
+        });
     Ok(RunSummaryRepair {
         summary: repaired,
         recovered,
@@ -970,10 +962,7 @@ fn needs_run_truth_recovery(target: &Path, summary: &RunSummary) -> bool {
             && !super::terminal_intent::has_typed_terminal_marker(target, &summary.run_id))
 }
 
-fn recover_run_truth_under_lock(
-    target: &Path,
-    current: RunSummary,
-) -> Result<RunSummary> {
+fn recover_run_truth_under_lock(target: &Path, current: RunSummary) -> Result<RunSummary> {
     let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, &current.run_id)?;
     if current.status == "running" && projection.terminal.is_some() {
         return recover_summary_from_terminal_intent(target, current, &projection);
@@ -1009,7 +998,10 @@ fn recover_summary_from_terminal_intent(
     current: RunSummary,
     projection: &crate::run_lifecycle::RunProjection,
 ) -> Result<RunSummary> {
-    let terminal = projection.terminal.as_ref().context("typed terminal is missing")?;
+    let terminal = projection
+        .terminal
+        .as_ref()
+        .context("typed terminal is missing")?;
     let intended = super::terminal_intent::load_terminal_intent(target, &current.run_id)?
         .context("typed terminal has no recoverable terminal intent")?;
     anyhow::ensure!(
@@ -1335,8 +1327,7 @@ mod liveness_tests {
     fn interrupted_recovery_preserves_an_existing_real_result() {
         let target = tempfile::tempdir().unwrap();
         let run_id = "run-preserve-real-result";
-        let running = RunSummary::running(run_id, "tool", None, "target")
-            .with_process_id(u32::MAX);
+        let running = RunSummary::running(run_id, "tool", None, "target").with_process_id(u32::MAX);
         write_run_summary(target.path(), &running).unwrap();
         let result_path = super::super::run_artifact_path(target.path(), run_id, "result.json");
         let real_result = br#"{"ok":true,"status":"completed","data":{"real":true}}"#;
@@ -1659,7 +1650,9 @@ mod liveness_tests {
 
         assert_eq!(first.newly_recovered.len(), 1);
         assert_eq!(first.newly_recovered[0].run_id, run_id);
-        assert!(first.newly_recovered[0].reason.contains("no longer running"));
+        assert!(first.newly_recovered[0]
+            .reason
+            .contains("no longer running"));
         assert!(second.newly_recovered.is_empty());
         assert!(matches!(
             &second.entries[0].state,

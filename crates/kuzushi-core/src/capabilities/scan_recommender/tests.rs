@@ -102,7 +102,9 @@ fn changed_sweep_entry_scores_with_file_volume_and_evidence() {
         .iter()
         .find(|row| row.reason == ReasonTag::Changed)
         .unwrap();
-    assert!(changed.evidence.contains("14 file(s) changed since aaaabbbb"));
+    assert!(changed
+        .evidence
+        .contains("14 file(s) changed since aaaabbbb"));
     assert!(changed.score > 0.5 && changed.score < 0.9);
 }
 
@@ -139,7 +141,7 @@ fn surface_files_without_findings_recommend_sink_gap_mode() {
 }
 
 #[test]
-fn repeated_passes_at_head_flag_saturation() {
+fn repeated_baseline_records_cannot_establish_scan_saturation() {
     let scopes = scope_paths(&[("root", ".")]);
     let all = vec![
         baseline("root", WorkflowPhase::Scan, "headhead", 100),
@@ -158,10 +160,8 @@ fn repeated_passes_at_head_flag_saturation() {
 
     let rows = recommend(&inputs);
 
-    let saturated = rows
-        .iter()
-        .find(|row| row.reason == ReasonTag::Saturated)
-        .unwrap();
-    assert_eq!(saturated.suggested_mode.as_deref(), Some("sink-gap"));
-    assert!(saturated.evidence.contains("2 scan pass(es)"));
+    assert!(
+        rows.is_empty(),
+        "history alone proposed extra work: {rows:?}"
+    );
 }

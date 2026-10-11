@@ -1,0 +1,63 @@
+# Read an already accepted real context. No credentials, jobs or ledger resets.
+name: Accepted threat model remains distinct from optional repository index
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_context_receipts.py @TARGET @ART seed @TMP_HOME
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: map
+require-live-snap: 25 accepted | accepted-map
+expect: Map ✓
+expect: repo index not built
+expect: repo index:missing
+expect: changing its title.
+expect-not: context not built
+ask: Does the accepted threat model show its full system description and distinct optional repository-index absence without prompting context regeneration?
+resize: 160x48
+require-live-snap: 20 KUZUSHI | accepted-160x48
+expect: SESSION COST
+expect: No spend recorded
+expect: session dollar cap unset
+expect: report · prior usage
+expect-not: $0.00 spent
+expect-not: budget not enforced
+ask: Does the fresh shell scope its session accounting and direct prior investigation usage to Report without implying zero lifetime spend or unenforced request limits?
+resize: 96x89
+require-live-snap: 20 KUZUSHI | accepted-96x89
+resize: 80x24
+require-live-snap: 20 KUZUSHI | accepted-80x24
+resize: 60x20
+require-live-snap: 20 KUZUSHI | accepted-60x20
+resize: 40x12
+require-live-snap: 20 KUZUSHI | accepted-40x12
+expect: accepted
+expect: This repository
+expect-not: context not built
+ask: At 40x12, does the accepted Map show actual system context with paging controls instead of spending its reading space on empty borders?
+keys: PageUp
+require-live-snap: 20 This repository | summary-start-boundary-40x12
+keys: PageDown
+require-live-snap: 20 private notes | summary-page-40x12
+ask: Does one Page Down expose the next contiguous context rows while the composer, acceptance and Summary tab remain intact?
+keys: PageUp
+require-live-snap: 20 This repository | summary-return-40x12
+keys: Down
+require-live-snap: 20 app.py note functions | selected-component-40x12
+ask: Can the operator select the next component at 40x12 and see its identity without changing the accepted context or starting work?
+resize: 120x36
+require-live-snap: 20 repo index not built | restored-wide-status
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 25 accepted | accepted-no-color
+expect: repo index not built
+expect: repo index:missing
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_context_receipts.py @TARGET @ART restarted
+ask: Does no-color restart retain accepted context and honest index status with unchanged source, seven live requests and two protected Review requests?
+keys: C-c
+require-exit: 10

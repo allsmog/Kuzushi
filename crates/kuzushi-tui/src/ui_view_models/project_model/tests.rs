@@ -86,6 +86,7 @@ fn project_model_aggregates_context_threat_dfd_and_findings() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
     write_threat_model(temp.path());
     *app.findings_mut() = vec![kuzushi_core::Finding::new_tool(

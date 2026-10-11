@@ -13,18 +13,17 @@ pub(crate) fn report_review_summary(app: &ShellApp) -> String {
     };
     let progress = reality.progress;
     format!(
-        "{} findings · {} reviewed · {} confirmed",
-        progress.finding_total, progress.reviewed_findings, progress.confirmed_findings,
+        "{} {} · {} reviewed · {} confirmed",
+        progress.finding_total,
+        super::finding_summary::finding_noun(progress.finding_total),
+        progress.reviewed_findings,
+        progress.confirmed_findings,
     )
 }
 
 fn study_review_summary(app: &ShellApp) -> Option<String> {
     match report_investigation_state(app) {
-        ViewDataState::Ready(Ok(Some(receipt))) => Some(format!(
-            "{} findings · {} reviewed · {} confirmed",
-            receipt.finding_count, receipt.reviewed_count, receipt.confirmed_count
-        )),
-        ViewDataState::Ready(Ok(None)) => None,
+        ViewDataState::Ready(Ok(document)) => loaded_review_summary(app, document),
         ViewDataState::Ready(Err(_)) => {
             Some("Study findings and decisions could not be loaded.".into())
         }
@@ -32,12 +31,32 @@ fn study_review_summary(app: &ShellApp) -> Option<String> {
     }
 }
 
+fn loaded_review_summary(
+    app: &ShellApp,
+    document: Option<kuzushi_core::workspace::InvestigationReportDocument>,
+) -> Option<String> {
+    if let Some(document) = document {
+        let receipt = document.summary();
+        return Some(format!(
+            "{} {} · {} reviewed · {} confirmed",
+            receipt.finding_count,
+            super::finding_summary::finding_noun(receipt.finding_count),
+            receipt.reviewed_count,
+            receipt.confirmed_count
+        ));
+    }
+    app.router
+        .report()
+        .study()
+        .map(|_| "Selected study findings and decisions are unavailable.".into())
+}
+
 pub(crate) fn report_investigation_state(
     app: &ShellApp,
-) -> ViewDataState<Result<Option<kuzushi_core::workspace::InvestigationReportReceipt>, String>> {
+) -> ViewDataState<Result<Option<kuzushi_core::workspace::InvestigationReportDocument>, String>> {
     app.workbench_cache()
         .borrow()
-        .cached_investigation_report(app.target(), &app.report_scan_run_refs())
+        .cached_selected_report(app.target(), &app.report_hydration_key())
 }
 
 pub(crate) fn report_export_campaign(app: &ShellApp) -> Result<Option<String>, String> {
@@ -45,10 +64,23 @@ pub(crate) fn report_export_campaign(app: &ShellApp) -> Result<Option<String>, S
         return Ok(None);
     }
     match report_investigation_state(app) {
-        ViewDataState::Ready(Ok(receipt)) => Ok(receipt.map(|receipt| receipt.campaign_id)),
+        ViewDataState::Ready(Ok(receipt)) => selected_export_campaign(receipt, app.router.report().study().is_some()),
         ViewDataState::Ready(Err(error)) => Err(format!("Study receipt unavailable: {error}. Press s to explicitly export workspace history instead.")),
         _ => Err("Study receipt is loading. Wait before exporting, or press s for workspace history.".into()),
     }
+}
+
+fn selected_export_campaign(
+    document: Option<kuzushi_core::workspace::InvestigationReportDocument>,
+    explicit: bool,
+) -> Result<Option<String>, String> {
+    if let Some(document) = document {
+        return Ok(Some(document.summary().campaign_id.to_owned()));
+    }
+    if explicit {
+        return Err("Selected study receipt is unavailable. Reopen it, or press s to explicitly export workspace history.".into());
+    }
+    Ok(None)
 }
 
 /// Cost records can include parent totals and the same work's child runs.

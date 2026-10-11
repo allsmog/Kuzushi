@@ -2,10 +2,19 @@ use super::*;
 use kuzushi_core::workspace::ProjectModelDocument;
 
 impl WorkbenchCache {
-    pub(crate) fn cached_investigation_report(
+    pub(crate) fn invalidate_investigation_report(&mut self, target: &Path) {
+        if self
+            .investigation_report
+            .as_ref()
+            .is_some_and(|(root, _, _)| root == target)
+        {
+            self.investigation_report = None;
+        }
+    }
+    pub(crate) fn cached_selected_report(
         &self,
         target: Option<&Path>,
-        runs: &[String],
+        key: &ViewHydrationKey,
     ) -> ViewDataState<InvestigationReportRead> {
         let Some(target) = target else {
             return ViewDataState::Ready(Ok(None));
@@ -13,16 +22,11 @@ impl WorkbenchCache {
         if let Some((_, _, state)) = self
             .investigation_report
             .as_ref()
-            .filter(|(path, refs, _)| path == target && refs == runs)
+            .filter(|(path, cached_key, _)| path == target && cached_key == key)
         {
             return ViewDataState::Ready(state.clone());
         }
-        self.loading_state(
-            target,
-            &ViewHydrationKey::InvestigationReport {
-                run_refs: runs.to_vec(),
-            },
-        )
+        self.loading_state(target, key)
     }
 
     pub(crate) fn cached_target_profile(

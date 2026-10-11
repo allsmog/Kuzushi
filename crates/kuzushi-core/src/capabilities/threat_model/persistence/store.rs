@@ -322,7 +322,10 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(outside.path()).unwrap(), "sentinel");
         let error = load_persistent_threat_model(workspace.path()).unwrap_err();
-        assert!(error.to_string().contains("must not be a symlink"), "{error:#}");
+        assert!(
+            error.to_string().contains("must not be a symlink"),
+            "{error:#}"
+        );
     }
 
     #[test]

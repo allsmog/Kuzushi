@@ -27,8 +27,25 @@ pub(crate) const GLOBAL_HEALTH_HYDRATION_SCOPE: &str = "global-health-view-data"
 
 pub(crate) type StudyUsageCatalogueRead =
     Result<kuzushi_core::capabilities::campaign::ScanUsageCatalogue, String>;
+pub(crate) type StudyHistoryRead =
+    Result<kuzushi_core::capabilities::campaign::StudyUsageCatalogue, String>;
 pub(crate) type StudyUsageRunRead =
     Result<kuzushi_core::capabilities::campaign::ScanResourceEvidence, String>;
+pub(crate) type FindingReviewSourceRead = Result<Option<FindingReviewSource>, String>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FindingReviewSource {
+    pub(crate) basis: kuzushi_core::workspace::WorkspaceReviewDecisionBasis,
+    pub(crate) decided_revision: RecordedSourceRevision,
+    pub(crate) later_revision: Option<RecordedSourceRevision>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RecordedSourceRevision {
+    Known(RunTargetGitMetadata),
+    NotRecorded,
+    Unreadable,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ViewDataState<T> {
@@ -162,17 +179,37 @@ impl ViewHydrationCancellation {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ViewHydrationKey {
+    FindingGroups(kuzushi_core::findings::FindingGroupsRequest),
+    FindingRelationships {
+        finding_id: Option<i64>,
+        offset: usize,
+    },
+    FindingLessons {
+        offset: usize,
+    },
+    FindingsProjection(super::findings::FindingsReadRequest),
     FileCompletionValues,
     FindingCompletionValues,
     RunIdCompletionValues,
     LatestRunPointer,
     RunSummaryEntries,
     StudyUsageCatalogue,
+    StudyHistory,
+    ContextMatrixReport {
+        campaign_id: String,
+        plan_sha256: String,
+    },
     StudyUsageRun {
         run_id: String,
     },
     InvestigationReport {
         run_refs: Vec<String>,
+        findings_watermark: Option<u64>,
+    },
+    InvestigationStudyReport {
+        campaign_id: String,
+        plan_sha256: String,
+        findings_watermark: Option<u64>,
     },
     RunArtifactText {
         run_id: String,
@@ -194,6 +231,11 @@ pub(crate) enum ViewHydrationKey {
     },
     FindingAuditDataflow {
         fingerprint: String,
+    },
+    FindingReviewSource {
+        stable_fp: String,
+        decision_watermark: u64,
+        observation_watermark: Option<u64>,
     },
     ScannedSnippet {
         stable_fp: String,
@@ -244,15 +286,21 @@ pub(crate) enum ViewHydrationKey {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ViewHydrationValue {
+    FindingGroups(Result<kuzushi_core::findings::FindingGroupsPage, String>),
+    FindingRelationships(Result<kuzushi_core::findings::FindingRelationshipPage, String>),
+    FindingLessons(Result<kuzushi_core::findings::FindingLessonPage, String>),
+    FindingsProjection(Result<super::findings::FindingsReadSnapshot, String>),
     FileCompletionValues(FileCompletionIndex),
     FindingCompletionValues(Vec<String>),
     RunIdCompletionValues(Vec<String>),
     LatestRunPointer(LatestRunPointerState),
     RunSummaryEntries(RunSummaryEntriesHydration),
     StudyUsageCatalogue(StudyUsageCatalogueRead),
+    StudyHistory(StudyHistoryRead),
+    ContextMatrixReport(Result<kuzushi_core::findings::ContextMatrixOccurrenceReport, String>),
     StudyUsageRun(StudyUsageRunRead),
     InvestigationReport(
-        Result<Option<kuzushi_core::workspace::InvestigationReportReceipt>, String>,
+        Result<Option<kuzushi_core::workspace::InvestigationReportDocument>, String>,
     ),
     RunArtifactText(RunArtifactTextRead),
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
@@ -262,6 +310,7 @@ pub(crate) enum ViewHydrationValue {
     ScanStageReceipt(ScanStageReceiptState),
     FindingPatchTruth(FindingPatchTruthState),
     FindingAuditDataflow(FindingAuditDataflowState),
+    FindingReviewSource(FindingReviewSourceRead),
     ScannedSnippet(ScannedSnippetState),
     SourceFile(Result<String, String>),
     GitMetadata(Option<RunTargetGitMetadata>),
@@ -372,9 +421,10 @@ impl ShellApp {
     }
 
     pub(crate) fn apply_view_hydration_results(&mut self) -> bool {
+        let scheduled = self.schedule_pending_findings_refresh();
         let drain = self.runtime_state.drain_view_hydration();
         if drain.results.is_empty() && drain.failures.is_empty() {
-            return false;
+            return scheduled;
         }
         self.apply_view_hydration_drain(drain);
         true
@@ -429,6 +479,7 @@ impl ShellApp {
     }
 
     fn apply_view_hydration_drain(&mut self, drain: ViewHydrationDrain) {
+        let drain = self.apply_findings_projection_drain(drain);
         let refresh_file_picker = drain
             .results
             .iter()

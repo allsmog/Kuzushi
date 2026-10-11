@@ -426,7 +426,14 @@ mod tests {
             gap("AS-admin", "GET /admin/debug", "src/admin.rs"),
             gap("AS-health", "GET /health", "src/health.rs"),
         ];
-        let outcome = merge_gap_fill(&mut document, &response, &gaps, crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::from_usd(0.1, "test").unwrap()));
+        let outcome = merge_gap_fill(
+            &mut document,
+            &response,
+            &gaps,
+            crate::runtime::RuntimeCostReport::known(
+                crate::runtime::RuntimeCost::from_usd(0.1, "test").unwrap(),
+            ),
+        );
         assert_eq!(outcome.added_threats, 1);
         assert_eq!(outcome.added_deprioritized, 1);
         assert_eq!(outcome.added_entry_points, 1);
@@ -490,7 +497,12 @@ mod tests {
         });
 
         let gaps = vec![gap("AS-admin", "GET /admin/debug", "src/admin.rs")];
-        let outcome = merge_gap_fill(&mut document, &response, &gaps, crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO));
+        let outcome = merge_gap_fill(
+            &mut document,
+            &response,
+            &gaps,
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        );
 
         assert_eq!(outcome.added_entry_points, 0);
         assert_eq!(
@@ -524,7 +536,12 @@ mod tests {
         });
         let gaps = vec![gap("AS-admin", "GET /admin/debug", "src/admin.rs")];
 
-        let outcome = merge_gap_fill(&mut document, &response, &gaps, crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO));
+        let outcome = merge_gap_fill(
+            &mut document,
+            &response,
+            &gaps,
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        );
 
         assert_eq!(outcome.added_threats, 1);
         assert_eq!(outcome.added_deprioritized, 0);

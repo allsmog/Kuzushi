@@ -23,6 +23,8 @@ pub(super) struct LinkReport {
     pub(super) skipped_conflict: usize,
     pub(super) skipped_human: usize,
     pub(super) verdicts_recorded: usize,
+    pub(super) proposed: usize,
+    pub(super) relationship_ids: Vec<String>,
 }
 
 pub(super) fn link_groups(
@@ -57,7 +59,9 @@ fn link_one_group(
         let Some(duplicate) = by_fingerprint.get(fingerprint.as_str()) else {
             continue;
         };
-        link_one_duplicate(store, run_id, group, canonical, &terminal, duplicate, report)?;
+        link_one_duplicate(
+            store, run_id, group, canonical, &terminal, duplicate, report,
+        )?;
     }
     Ok(())
 }
@@ -80,12 +84,13 @@ fn link_one_duplicate(
         }
         EdgeDisposition::Free if report.dry_run => report.linked += 1,
         EdgeDisposition::Free => {
-            store.record_model_rekey(&rekey_request(group, canonical, terminal, duplicate, run_id))?;
-            report.verdicts_recorded +=
-                store.record_auto_triage_for_fingerprint(
-                    &duplicate.fingerprint,
-                    &duplicate_verdict(group, canonical),
-                )?;
+            store.record_model_rekey(&rekey_request(
+                group, canonical, terminal, duplicate, run_id,
+            ))?;
+            report.verdicts_recorded += store.record_auto_triage_for_fingerprint(
+                &duplicate.fingerprint,
+                &duplicate_verdict(group, canonical),
+            )?;
             report.linked += 1;
         }
     }

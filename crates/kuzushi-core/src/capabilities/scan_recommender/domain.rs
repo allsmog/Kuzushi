@@ -12,8 +12,8 @@ pub enum ReasonTag {
     Changed,
     /// Surface-bearing files with zero findings citing them.
     SinkGap,
-    /// Repeated passes at the current revision found nothing new; only a
-    /// mode change (sink-gap focus) is worth further spend.
+    /// Legacy compatibility value. New recommendations do not infer saturation
+    /// from baseline counts, which lack pass grouping and finding-yield evidence.
     Saturated,
 }
 

@@ -1,0 +1,55 @@
+name: Reopening Setup refreshes revision facts without starting investigation work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/setup_source_refresh.py @TMP_TARGET @ART prepare @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 main@ | original-facts
+expect: SETUP
+require-shell: python3 -B @REPO/scripts/devex/fixtures/setup_source_refresh.py @TMP_TARGET @ART committed
+submit: setup
+require-live-snap: 25 later@ | refreshed-committed-facts
+expect: clean
+expect-not: main@
+expect-not: Map ✓
+ask: Does reopening Setup replace the old branch/revision facts with the actual later commit, without requiring restart or accepting Map?
+expect-echo-within: 300 keep-source-refresh-draft
+live-snap: retained-draft
+resize: 160x48
+live-snap: refreshed-160x48
+resize: 96x89
+live-snap: refreshed-96x89
+resize: 80x24
+live-snap: refreshed-80x24
+resize: 60x20
+live-snap: setup-60x20
+resize: 40x12
+live-snap: setup-40x12
+expect: keep-source-refresh-draft
+ask: Do wide Setup surfaces show the refreshed facts and compact layouts preserve the draft and usable readiness controls across all six sizes?
+keys: C-u
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/setup_source_refresh.py @TMP_TARGET @ART dirty
+submit: setup
+require-live-snap: 25 · dirty | refreshed-dirty-facts
+expect: later@
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/setup_source_refresh.py @TMP_TARGET @ART after
+ask: Does a same-SHA working-tree edit refresh to dirty source while preserving the selected model and creating no provider, scanner, finding or decision work?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 · dirty | restarted-dirty-facts
+expect: later@
+expect: SETUP
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/setup_source_refresh.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain current dirty revision facts and require real Map work, without model or scanner execution?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

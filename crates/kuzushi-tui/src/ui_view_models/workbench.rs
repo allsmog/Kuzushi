@@ -50,7 +50,7 @@ pub(crate) enum WorkLiveness {
 const EXTERNAL_SYNC_BADGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub(crate) fn work_liveness(app: &ShellApp) -> WorkLiveness {
-    if app.has_running_work() {
+    if app.has_running_work() || app.review_decision_write_pending() {
         WorkLiveness::Live
     } else if app.ui().recent_external_sync(EXTERNAL_SYNC_BADGE_WINDOW) {
         WorkLiveness::ExternalSync
@@ -110,7 +110,7 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("B", "review decision backlog"),
     hint("Enter", "finding details"),
-    hint("findings", "show full queue"),
+    hint("findings", "reset list"),
     hint("z", "open heatmap"),
 ];
 

@@ -257,6 +257,7 @@ mod agent_tool_policy_receipt_tests {
             read_roots: authorization.policy.mcp_read_roots,
             write_shell_tools_mounted: false,
             mcp_tools_mounted: false,
+            read_scope_sha256: None,
         };
         record_agent_run_started(
             Some(target.path()),

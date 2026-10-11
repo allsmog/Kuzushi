@@ -135,3 +135,89 @@ fn legacy_stage_only_runs_remain_readable_and_direct_tools_do_not_inherit_them()
     );
     assert_eq!(load_scan_stage_data(target.path(), "absent").unwrap(), None);
 }
+
+#[test]
+fn interrupted_recovery_authenticates_its_result_without_inventing_scan_membership() {
+    let target = tempfile::tempdir().unwrap();
+    let run = "interrupted-scan";
+    let record = ToolRunRecord::new(target.path(), run, "run", "sast:scan");
+    record_tool_run_started(record, &json!({}));
+    let observation = crate::run_lifecycle::RunObservationHandle::jsonl(target.path(), run)
+        .unwrap()
+        .start_root_task("Stopped Scan fixture")
+        .unwrap();
+    let call = crate::ApplicationToolCall::start(observation, "sast:scan", &json!({}), None, None)
+        .unwrap();
+    let config = crate::V2Config::default();
+    let trace = call.execution_observation().trace_handle();
+    let ctx = crate::ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: Some(&trace),
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    crate::workspace::source_snapshot::SourceSnapshot::capture(&ctx, "sast:scan", target.path())
+        .unwrap();
+    drop(trace);
+    let engine = crate::ApplicationToolCall::start(
+        call.execution_observation(),
+        "agentic-sast:scan",
+        &json!({}),
+        None,
+        None,
+    )
+    .unwrap();
+    drop(engine);
+    drop(call);
+    let summary = load_run_summary(target.path(), run)
+        .unwrap()
+        .with_process_id(u32::MAX);
+    write_run_summary(target.path(), &summary).unwrap();
+    let recovered = load_run_summary(target.path(), run).unwrap();
+    assert_eq!(recovered.status, "interrupted");
+    let projection =
+        crate::run_lifecycle::load_run_projection_unhydrated(target.path(), run).unwrap();
+    let root_call = projection
+        .calls
+        .values()
+        .find(|call| call.label.as_str() == "sast:scan")
+        .unwrap();
+    let engine_call = projection
+        .calls
+        .values()
+        .find(|call| call.label.as_str() == "agentic-sast:scan")
+        .unwrap();
+    assert!(root_call.result_artifact.is_some());
+    assert!(engine_call.result_artifact.is_none());
+    let identity =
+        crate::workflow_attempts::referenced_run_content_identity(target.path(), &[run.into()]);
+    assert!(identity.permits_cross_attempt_reuse());
+    assert_eq!(load_scan_stage_data(target.path(), run).unwrap(), None);
+    assert_eq!(
+        scan_finding_run_refs(target.path(), &[run.into()]).unwrap(),
+        vec![run.to_string()]
+    );
+    let start =
+        run_dir(target.path(), run).join(format!("source-start-{}.json", root_call.item_id));
+    let original = fs::read(&start).unwrap();
+    fs::write(&start, "{}").unwrap();
+    assert!(!crate::workflow_attempts::referenced_run_content_identity(
+        target.path(),
+        &[run.into()]
+    )
+    .permits_cross_attempt_reuse());
+    fs::write(&start, original).unwrap();
+    assert_eq!(
+        crate::workflow_attempts::referenced_run_content_identity(target.path(), &[run.into()]),
+        identity
+    );
+    fs::write(run_dir(target.path(), run).join("result.json"), "{}").unwrap();
+    assert!(load_scan_stage_data(target.path(), run).is_err());
+    assert!(!crate::workflow_attempts::referenced_run_content_identity(
+        target.path(),
+        &[run.into()]
+    )
+    .permits_cross_attempt_reuse());
+}

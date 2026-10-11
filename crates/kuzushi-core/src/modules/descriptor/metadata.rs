@@ -112,7 +112,10 @@ pub(in crate::modules) fn module(
             kind,
             description: description.to_string(),
         },
-        tools: tools.into_iter().map(super::super::allowance_dispatch::declare_allowance_option).collect(),
+        tools: tools
+            .into_iter()
+            .map(super::super::allowance_dispatch::declare_allowance_option)
+            .collect(),
         dag_nodes,
         tool_executors: BTreeMap::new(),
         dag_executors: BTreeMap::new(),
@@ -157,9 +160,12 @@ pub(in crate::modules) fn tool_with_options(
         description: description.to_string(),
         headless: true,
         hidden: false,
+        discovery_maturity: None,
+        cost_data_projection: false,
         runtime_requirement: RuntimeRequirement::Never,
         continuation: ContinuationSupport::None,
         phase: ToolPhase::default(),
+        allowance_category: None,
         phase_result: true,
         effect: ToolEffect::default(),
         approval: ApprovalPolicy::default(),

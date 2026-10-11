@@ -1,11 +1,8 @@
 //! Executors for `threat-model:verify` and `threat-model:import`.
 //!
-//! Verify grounds the live persisted document against the target and stamps
-//! the verdict back (no versions-ledger row — a timestamp-only change would
-//! defeat the ledger's sha dedupe). Import is the explicit front door for
-//! externally-authored documents: normalize → provenance(`import`) → verify
-//! → stamp → save (refusing to clobber a user-edited live doc without
-//! `force`) → ledger row `source='import'`.
+//! Unbound verification retains active/scoped context behavior. Exact-reference
+//! verification checks the recorded source and saves an inactive revision.
+//! Import normalizes, binds source provenance and saves an external document.
 
 use super::*;
 
@@ -15,6 +12,12 @@ pub(crate) fn verify_threat_model_adapter(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
+    if !matches!(
+        ThreatModelSelection::from_input(&input)?,
+        ThreatModelSelection::Active
+    ) {
+        return super::exact_verification::verify_exact_context(input, ctx);
+    }
     let workspace_root = verification_root(ctx)?;
     crate::workspace::source_snapshot::run_source_bound_tool(
         ctx,
@@ -338,17 +341,10 @@ fn import_label(input: &Value, methodology: &str) -> String {
 }
 
 fn import_document_value(input: &Value) -> Result<Value> {
-    if let Some(document) = input.get("document") {
-        if !document.is_null() {
-            return Ok(document.clone());
-        }
-    }
-    let path = input
-        .get("path")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .context("threat-model:import requires `path` or an inline `document`")?;
+    let path = match select_import_source(input)? {
+        ThreatModelImportSource::Inline(document) => return Ok(document.clone()),
+        ThreatModelImportSource::File(path) => path,
+    };
     let body = crate::bounded_file::read_utf8_text(Path::new(path), IMPORT_MAX_DOCUMENT_BYTES)
         .with_context(|| format!("Could not read threat-model document {path}"))?;
     serde_json::from_str(&body).with_context(|| format!("{path} is not valid JSON"))

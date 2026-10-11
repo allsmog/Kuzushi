@@ -31,11 +31,7 @@ pub fn render_plain_command_result(
 
 pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let width = width.max(40);
-    if let Some(lines) = crate::renderer::allowance_review::allowance_review_plain_lines(app, width)
-    {
-        return lines;
-    }
-    if let Some(lines) = super::super::scope_review::scope_review_plain_lines(app, width) {
+    if let Some(lines) = plain_overlay_lines(app, width) {
         return lines;
     }
     let mode = plain_render_mode(app);
@@ -63,6 +59,30 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
 
     lines = finalize_width_safe_plain_lines(lines, width);
     trim_plain_lines(lines)
+}
+
+fn plain_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
+    if let Some(lines) = crate::renderer::allowance_review::allowance_review_plain_lines(app, width)
+    {
+        return Some(lines);
+    }
+    if let Some(lines) = super::super::scope_review::scope_review_plain_lines(app, width) {
+        return Some(lines);
+    }
+    if let Some(lines) = crate::ui_view_models::context_history::history_plain_lines(app, width) {
+        return Some(lines);
+    }
+    app.brief_editor()
+        .map(|editor| crate::ui_view_models::study_config::brief::plain_lines(editor, width))
+        .or_else(|| context_edit_overlay_lines(app, width))
+}
+
+fn context_edit_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
+    if !app.batch_config_open() || app.advisory().pending_confirm.is_some() {
+        return None;
+    }
+    let draft = app.context_edit_draft()?;
+    Some(crate::ui_view_models::context_edit::context_edit_plain_lines(draft, width))
 }
 
 fn interactive_only_plain_lines(

@@ -1,16 +1,16 @@
-use super::registry::FleetTarget;
 use super::fleet_corpus_db_path;
+use super::registry::FleetTarget;
 use crate::findings::ingest_contract::{assign_clusters, classify};
 use crate::findings::{Finding, FindingStore};
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
 /// One normalized corpus row. Derived from a per-target finding plus its
 /// run's git provenance; never edited in place — the corpus is rebuilt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CorpusFindingRow {
     pub target_id: String,
@@ -44,14 +44,20 @@ pub fn rebuild_corpus(fleet_dir: &Path, targets: &[FleetTarget]) -> Result<Corpu
     std::fs::create_dir_all(fleet_dir)
         .with_context(|| format!("Could not create {}", fleet_dir.display()))?;
     let mut rows = Vec::new();
+    let mut history = Vec::new();
+    let mut included = Vec::new();
     let mut skipped = Vec::new();
     for target in targets {
         match target_rows(target) {
-            Ok(mut target_rows) => rows.append(&mut target_rows),
+            Ok(mut target_rows) => {
+                rows.append(&mut target_rows.current);
+                history.append(&mut target_rows.history);
+                included.push(target.id.clone());
+            }
             Err(error) => skipped.push(format!("{}: {error:#}", target.id)),
         }
     }
-    write_corpus(&fleet_corpus_db_path(fleet_dir), &rows)?;
+    write_corpus(&fleet_corpus_db_path(fleet_dir), &rows, &history, &included)?;
     Ok(CorpusReport {
         targets_ingested: targets.len() - skipped.len(),
         targets_skipped: skipped,
@@ -69,10 +75,14 @@ pub fn query_corpus_rows(
     severity: Option<&str>,
     limit: usize,
 ) -> Result<Vec<CorpusFindingRow>> {
+    anyhow::ensure!(
+        (1..=super::history::MAX_ROWS).contains(&limit),
+        "fleet row limit must be between 1 and 10000"
+    );
     let path = fleet_corpus_db_path(fleet_dir);
     anyhow::ensure!(
         path.exists(),
-        "no fleet corpus yet — run fleet:ingest first"
+        "No fleet corpus yet. Run fleet:ingest first."
     );
     let conn = crate::sqlite_connection::open_read_only_file(&path)?;
     let mut statement = conn.prepare(
@@ -109,33 +119,71 @@ fn corpus_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<CorpusFindin
     })
 }
 
-fn target_rows(target: &FleetTarget) -> Result<Vec<CorpusFindingRow>> {
+struct TargetRows {
+    current: Vec<CorpusFindingRow>,
+    history: Vec<super::history::HistoryRow>,
+}
+
+fn target_rows(target: &FleetTarget) -> Result<TargetRows> {
     let db_path = crate::workspace::workspace_findings_db_path(&target.path);
     anyhow::ensure!(db_path.exists(), "no findings store");
     let store = FindingStore::open_read_only(&db_path)?;
-    let findings = store.list_all_findings()?;
-    let revisions = run_revisions(&target.path);
+    let observations =
+        store.observation_history_window(super::history::MAX_ROWS, super::history::MAX_BYTES)?;
+    let (findings, has_more) = store.grounding_candidate_window(super::history::MAX_ROWS)?;
+    anyhow::ensure!(!has_more, "current fleet projection exceeds 10000 findings");
+    let revisions = run_revisions(&target.path, &findings, &observations);
     let cluster_inputs: Vec<(String, u32)> = findings
         .iter()
         .map(|finding| (finding.file_path.clone(), finding.start_line))
         .collect();
     let cluster_ids = assign_clusters(&cluster_inputs);
-    Ok(findings
+    let current = findings
         .iter()
         .zip(cluster_ids)
         .map(|(finding, cluster_id)| corpus_row(target, finding, cluster_id, &revisions))
-        .collect())
+        .collect();
+    let history = historical_rows(target, observations, &revisions);
+    Ok(TargetRows { current, history })
+}
+
+fn historical_rows(
+    target: &FleetTarget,
+    observations: Vec<(u64, Finding)>,
+    revisions: &BTreeMap<String, (String, Option<String>)>,
+) -> Vec<super::history::HistoryRow> {
+    let inputs = observations
+        .iter()
+        .map(|(_, finding)| (finding.file_path.clone(), finding.start_line))
+        .collect::<Vec<_>>();
+    observations
+        .into_iter()
+        .zip(assign_clusters(&inputs))
+        .map(
+            |((sequence, finding), cluster)| super::history::HistoryRow {
+                sequence,
+                finding: corpus_row(target, &finding, cluster, revisions),
+            },
+        )
+        .collect()
 }
 
 /// run_id → (sha, branch) from persisted run summaries: the revision join
 /// that makes findings SHA-addressable without a findings schema change.
-fn run_revisions(target_path: &Path) -> BTreeMap<String, (String, Option<String>)> {
-    let Ok(summaries) = crate::list_run_summaries(target_path) else {
-        return BTreeMap::new();
-    };
-    summaries
-        .into_iter()
-        .filter_map(|summary| {
+fn run_revisions(
+    target_path: &Path,
+    current: &[Finding],
+    history: &[(u64, Finding)],
+) -> BTreeMap<String, (String, Option<String>)> {
+    let ids = current
+        .iter()
+        .chain(history.iter().map(|(_, finding)| finding))
+        .filter_map(|finding| finding.scan_id.as_deref())
+        .collect::<std::collections::BTreeSet<_>>();
+    ids.into_iter()
+        .filter_map(|id| {
+            let summary =
+                crate::run_artifacts::load_run_summary_without_repair(target_path, id).ok()?;
             let git = summary.target_git?;
             Some((summary.run_id, (git.sha, git.branch)))
         })
@@ -204,13 +252,20 @@ const CORPUS_SCHEMA: &str = "CREATE TABLE corpus_findings (
 
 /// Rebuild into a scratch file, then swap: readers never observe a
 /// half-written corpus, and a crash leaves the previous corpus intact.
-fn write_corpus(path: &Path, rows: &[CorpusFindingRow]) -> Result<()> {
+fn write_corpus(
+    path: &Path,
+    rows: &[CorpusFindingRow],
+    history: &[super::history::HistoryRow],
+    targets: &[String],
+) -> Result<()> {
     let scratch = path.with_extension("rebuild");
     let _ = std::fs::remove_file(&scratch);
     let mut conn = Connection::open(&scratch)
         .with_context(|| format!("Could not create {}", scratch.display()))?;
     conn.execute_batch(CORPUS_SCHEMA)?;
+    super::history::create_schema(&conn)?;
     insert_rows(&mut conn, rows)?;
+    super::history::insert(&mut conn, history, targets)?;
     conn.close().map_err(|(_, error)| error)?;
     std::fs::rename(&scratch, path)
         .with_context(|| format!("Could not swap corpus into {}", path.display()))

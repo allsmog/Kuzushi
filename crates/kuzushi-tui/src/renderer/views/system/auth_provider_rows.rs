@@ -50,7 +50,7 @@ fn auth_provider_tone_styles(
     tone: AuthProviderTone,
 ) -> (&'static str, ratatui::style::Style, ratatui::style::Style) {
     match tone {
-        AuthProviderTone::Connected => (" ✓ ", theme::success(), theme::success()),
+        AuthProviderTone::Present => (" ○ ", theme::muted(), theme::primary()),
         AuthProviderTone::Missing => (" ✗ ", theme::danger(), theme::danger()),
         AuthProviderTone::Refreshable => (" ! ", theme::warn(), theme::warn()),
         AuthProviderTone::Incomplete => (" ! ", theme::warn(), theme::warn()),

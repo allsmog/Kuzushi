@@ -6,6 +6,8 @@
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+mod inspection;
+pub use inspection::{context_snapshot_inspection, ContextEnumeration, ContextSnapshotInspection};
 
 pub use crate::repository_inventory::*;
 pub use crate::static_context::*;

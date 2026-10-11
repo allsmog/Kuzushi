@@ -122,6 +122,11 @@ function describeTool(moduleId, tool) {
     description: stringField(tool.description ?? name, `${name}.description`),
     headless: booleanField(tool.headless, `${name}.headless`),
     hidden: optionalBooleanField(tool.hidden, false, `${name}.hidden`),
+    ...(tool.discoveryMaturity === undefined
+      ? {}
+      : {
+          discoveryMaturity: normalizeDiscoveryMaturity(tool.discoveryMaturity, name),
+        }),
     runtime_requirement: normalizeRuntimeRequirement(tool, name),
     phase: normalizePhase(tool.phase, effect, name),
     effect,
@@ -131,6 +136,13 @@ function describeTool(moduleId, tool) {
     options: normalizedOptions,
     ...(prompts.length > 0 ? { prompts } : {}),
   };
+}
+
+function normalizeDiscoveryMaturity(value, name) {
+  if (!["core", "labs", "compatibility"].includes(value)) {
+    throw new Error(`${name}.discoveryMaturity must be core, labs or compatibility`);
+  }
+  return value;
 }
 
 function normalizePrompts(prompts, moduleId, toolName, options) {
@@ -1176,7 +1188,11 @@ function rejectUnsupportedModuleSemantics(module) {
 }
 
 function rejectUnsupportedToolSemantics(tool) {
-  rejectDefinedFields(tool, ["init", "dag", "runLifecycle"], tool.name ?? "tool");
+  rejectDefinedFields(
+    tool,
+    ["init", "dag", "runLifecycle", "costDataProjection"],
+    tool.name ?? "tool",
+  );
 }
 
 function rejectDefinedFields(value, fields, label) {

@@ -23,6 +23,7 @@ pub fn execute_context_map(input: &Value, ctx: &ToolExecutionContext<'_>) -> Res
     let directory = campaign_dir(root, &id);
     let _lock = crate::file_lock::ExclusiveFileLock::acquire(&directory.join(".context-map.lock"))?;
     let receipt = load_context_study(root, &id)?;
+    ensure_map_generation(&receipt.generation_tool)?;
     anyhow::ensure!(
         input["expectedPlanSha256"] == receipt.plan_sha256,
         "context plan changed; inspect the current plan before reviewing Map"
@@ -43,6 +44,18 @@ pub fn execute_context_map(input: &Value, ctx: &ToolExecutionContext<'_>) -> Res
             "planSha256":receipt.plan_sha256,"attemptId":attempt,
             "runRefs":runs,"modelRef":reference}),
     ))
+}
+
+fn ensure_map_generation(tool: &str) -> Result<()> {
+    anyhow::ensure!(
+        tool != generation::LESSON_TOOL,
+        "Lesson drafts are reviewed as lessons and cannot complete Map"
+    );
+    anyhow::ensure!(
+        tool != generation::REGENERATE_TOOL,
+        "Regenerated text is an inactive draft. Compare it with its parent. Check the exact revision with threat-model:verify before reviewing the checked revision as Map."
+    );
+    Ok(())
 }
 
 fn completed_map_runs(root: &Path, receipt: &ContextStudyReceipt) -> Result<Vec<String>> {
@@ -170,4 +183,17 @@ fn pending_map_attempt(root: &Path, runs: &[String]) -> Result<String> {
         })
         .map(|attempt| attempt.attempt_id.to_string())
         .unwrap_or_else(|| RunAttemptId::new().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_drafts_keep_their_own_review_contracts() {
+        assert!(ensure_map_generation(TOOL).is_ok());
+        assert!(ensure_map_generation(generation::LESSON_TOOL).is_err());
+        let error = ensure_map_generation(generation::REGENERATE_TOOL).unwrap_err();
+        assert!(error.to_string().contains("Check the exact revision"));
+    }
 }

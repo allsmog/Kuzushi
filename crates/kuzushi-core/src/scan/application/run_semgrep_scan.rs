@@ -43,6 +43,20 @@ pub(crate) fn select_default_scan_engines() -> DefaultScanEngineSelection {
     )
 }
 
+pub(crate) fn select_default_scan_engines_checked(
+    tasks: Option<&[String]>,
+) -> Result<DefaultScanEngineSelection> {
+    let cargo_audit = if tasks.is_none_or(|tasks| tasks.iter().any(|task| task == "cargo-audit")) {
+        CargoAuditScanner::probe_binary_available()?
+    } else {
+        false
+    };
+    Ok(default_scan_engine_selection(
+        scanner_binary_available("semgrep"),
+        cargo_audit,
+    ))
+}
+
 fn default_scan_engine_selection(
     semgrep_available: bool,
     cargo_audit_available: bool,
@@ -64,7 +78,7 @@ fn default_scan_engine_selection(
     } else {
         skipped.push(SkippedDefaultScanEngine {
             id: "cargo-audit",
-            warning: "optional auto task cargo-audit skipped: `cargo audit` was not found; continuing with built-in scanners"
+            warning: "optional auto task cargo-audit skipped: the standalone dependency was unavailable; continuing with built-in scanners"
                 .to_string(),
         });
     }

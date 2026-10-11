@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: fix
 size: 120x36
 ---
-KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
+KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready
  Map ✓ · Scan ✓ · Review ● · Report
  ▸ NEXT review 6 remaining findings (6 total)
  patch apply write reviewed diff · patch reject discard candidate · patch regen replace candidate · report open Report

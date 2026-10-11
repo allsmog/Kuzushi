@@ -1,0 +1,123 @@
+name: Marked scope boundaries, exact six-job approval and per-scope recurrence
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 30 ACCEPTED SCOPES | accepted-scopes
+keys: Space Down Space
+require-live-snap: 20 2 boundaries marked | marked-boundaries
+ask: Can the operator mark only the intended discovery boundaries while shared context and unplanned siblings remain distinguishable?
+keys: p
+require-live-snap: 30 PLAN A STUDY | scope-study
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | engine-choice
+keys: m
+keys: Down Down Down Down Down Down Down Down Down Space
+require-live-snap: 20 [x] agentic | selected-agentic
+keys: a
+require-live-snap: 20 Engine choices updated | selected-engine
+keys: Down
+require-live-snap: 20 Selected boundaries: 2 | selected-workload
+expect: 6 fixed discovery jobs
+keys: Down Enter
+type: 8
+keys: Enter Down Enter
+type: 2
+keys: Enter L
+require-live-snap: 30 Scope draft ready | frozen-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART draft
+keys: L End
+require-live-snap: 30 y approve | exact-approval
+expect: 6 fixed jobs
+expect: Total provider calls: 8
+expect: Protected review calls: 2
+ask: Does approval show all six finite jobs and the shared allowance before any request, without approving sibling or follow-up work?
+keys: y
+require-live-snap: 30 Approval saved | approved
+keys: L
+require-live-snap: 30 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 30 dispatcher pid | running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 6 completed | completed
+keys: Escape
+submit: workbench
+require-live-snap: 30 RESULT READY | scan-result
+nav-mode:
+keys: u
+keys: Escape
+paste-file: @ART/open-app.txt
+keys: Enter
+require-live-snap: 30 Labeled app observation | app-finding
+submit: dismiss false_positive Owned workflow fixture; no defect claimed
+require-live-snap: 30 rejected_false_positive | app-decision
+paste-file: @ART/open-other.txt
+keys: Enter
+require-live-snap: 30 Labeled other observation | other-finding
+submit: dismiss false_positive Owned workflow fixture; no defect claimed
+require-live-snap: 30 rejected_false_positive | other-decision
+submit: report
+require-live-snap: 30 Scope study: | scope-report
+expect: 6 committed / 8 calls
+expect: 2 protected review remaining
+expect: 3 completed / 3 planned
+expect: Unplanned boundaries: integration
+ask: Does the report retain separate three-pass scope denominators, shared spending and the unplanned boundary, with no complete coverage claim?
+keys: p
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-1-40x12
+keys: NPage
+live-snap: report-page-2-40x12
+keys: NPage
+live-snap: report-page-3-40x12
+keys: NPage
+live-snap: report-page-4-40x12
+keys: NPage
+live-snap: report-page-5-40x12
+keys: NPage
+live-snap: report-page-6-40x12
+keys: NPage
+live-snap: report-page-7-40x12
+keys: NPage
+live-snap: report-page-8-40x12
+keys: NPage
+live-snap: report-page-9-40x12
+keys: NPage
+live-snap: report-page-10-40x12
+keys: NPage
+live-snap: report-page-11-40x12
+keys: NPage
+live-snap: report-page-12-40x12
+keys: NPage
+live-snap: report-page-13-40x12
+keys: NPage
+live-snap: report-page-14-40x12
+ask: At 40x12, can the operator page through scope, spending and context evidence without hidden actions or overlapping controls?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1
+resize: 80x24
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 30 Scope study: | recovered-report
+expect: 6 committed / 8 calls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART restarted
+ask: Does restart preserve the selected scope study, decisions, fixed workload and accounting without starting another model request?
+keys: C-c
+require-exit: 10

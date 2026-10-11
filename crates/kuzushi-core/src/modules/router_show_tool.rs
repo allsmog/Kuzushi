@@ -100,6 +100,26 @@ mod router_show_tests {
     use std::fs;
 
     #[test]
+    fn readable_routing_retains_selected_models_and_their_override_source() {
+        let role = json!({"role":"triage", "effective":"openai:operator-role", "operatorOverride":"openai:operator-role"});
+        let result = router_show_response(
+            Some("openai:operator-config".into()),
+            &crate::agent_router::AgentRouter::empty(),
+            vec![role.clone()],
+        );
+        let output = result["output"].as_str().unwrap();
+        assert!(output.contains("Config model: openai:operator-config"));
+        assert!(output.contains("triage: openai:operator-role (operator override)"));
+        assert!(output.contains("credentials and provider acceptance are not verified"));
+        assert_eq!(result["data"]["roles"][0], role);
+        assert_eq!(
+            route_override_label(&json!({"tomlPrimary":"openai:role"})),
+            " (models.toml role)"
+        );
+        assert_eq!(route_override_label(&json!({})), "");
+    }
+
+    #[test]
     fn router_option_override_reads_global_setg_value() {
         let mut options = crate::options::ToolOptionStore::new();
         options.set_value(
@@ -180,12 +200,36 @@ fn router_show_response(
         roles.len(),
         if roles.len() == 1 { "" } else { "s" }
     );
+    let output = format!("{summary}\nConfigured routing only; credentials and provider acceptance are not verified.\nConfig model: {}\n{}",
+        config_model.as_deref().unwrap_or("unconfigured"),
+        roles.iter().map(router_role_summary).collect::<Vec<_>>().join("\n"),
+    );
     let data = json!({
         "configModel": config_model,
         "tomlDefaultModel": router.default_model(),
         "roles": roles,
     });
-    crate::module_result::completed_output_result(summary.clone(), summary, data)
+    crate::module_result::completed_output_result(summary, output, data)
+}
+
+fn router_role_summary(role: &Value) -> String {
+    format!(
+        "  {}: {}{}",
+        role["role"].as_str().unwrap_or("unknown role"),
+        role["effective"].as_str().unwrap_or("unconfigured"),
+        route_override_label(role),
+    )
+}
+
+fn route_override_label(role: &Value) -> &'static str {
+    [
+        ("operatorOverride", " (operator override)"),
+        ("tomlPrimary", " (models.toml role)"),
+    ]
+    .into_iter()
+    .find(|(field, _)| role[*field].is_string())
+    .map(|(_, label)| label)
+    .unwrap_or("")
 }
 
 pub(crate) fn run_full_mode_hunt_tool(

@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: prove
 size: 160x48
 ---
-KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context │ ENGAGEMENT
+KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready               │ ENGAGEMENT
  Map ✓ · Scan ✓ · Review ● · Report                                                                                         │ phase-target
  ▸ NEXT review 6 remaining findings (6 total)                                                                               │ scope: F-0001 · Review
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report            │
@@ -22,7 +22,7 @@ KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ●
 │request_input -> database_query                                        │● 3 exploited                                      │ SESSION COST
 │attacker-controlled input reaches a security boundary                  │current [●●●] verified L4 · 1 source(s)            │ $0.37 of $2.00
 │                                                                       │                                                   │ 19% of budget
-│                                                                       │                                                   │
+│                                                                       │                                                   │ report · prior usage
 │                                                                       │                                                   │
 │                                                                       │                                                   │
 │                                                                       │PROOF · REPLAY                                     │

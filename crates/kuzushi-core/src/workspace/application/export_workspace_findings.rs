@@ -10,7 +10,6 @@ use super::export_sarif::{
     findings_to_sarif, findings_to_sarif_with_benchmark_spend, SarifBenchmarkSpend,
 };
 use super::*;
-use crate::findings::ReviewDecisionRecord;
 use crate::run_artifacts::load_run_summary;
 use std::collections::{BTreeSet, HashMap};
 
@@ -313,7 +312,7 @@ struct PreparedWorkspaceFindingsExport {
     findings: Vec<Finding>,
     records: Vec<WorkspaceFindingExportRecord>,
     total_count: usize,
-    investigation: Option<super::investigation_report::InvestigationReportReceipt>,
+    investigation: Option<super::investigation_report::InvestigationReportDocument>,
 }
 
 struct FilteredWorkspaceFindings {
@@ -328,9 +327,12 @@ fn prepare_workspace_findings_export(
 ) -> Result<PreparedWorkspaceFindingsExport> {
     if let Some(campaign) = options.campaign_id.as_deref() {
         let investigation =
-            super::investigation_report::load_investigation_report(workspace, campaign)?;
-        let mut prepared =
-            prepare_scan_findings_export(workspace, &investigation.observation_run_refs, options)?;
+            super::investigation_report::load_investigation_report_document(workspace, campaign)?;
+        let mut prepared = prepare_scan_findings_export(
+            workspace,
+            investigation.summary().observation_run_refs,
+            options,
+        )?;
         prepared.investigation = Some(investigation);
         return Ok(prepared);
     }
@@ -342,18 +344,7 @@ fn prepare_workspace_findings_export(
     let filtered =
         filter_export_findings(all_findings, all_reviews, positions, options.completeness);
     let run_contexts = workspace_run_export_contexts(workspace, &filtered.findings);
-    let mut records = workspace_finding_export_records_at_positions(
-        &filtered.findings,
-        &filtered.reviews,
-        &run_contexts,
-        &filtered.positions,
-    );
-    attach_remediation_records(&store, &mut records)?;
-    super::export_decision_basis::attach_review_decision_basis(
-        &store,
-        &filtered.findings,
-        &mut records,
-    )?;
+    let records = enriched_export_records(workspace, &store, &filtered, &run_contexts)?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
@@ -375,24 +366,61 @@ fn prepare_scan_findings_export(
     let filtered =
         filter_export_findings(all_findings, all_reviews, positions, options.completeness);
     let run_contexts = scan_run_export_contexts(workspace, &filtered.findings, run_ids);
-    let mut records = workspace_finding_export_records_at_positions(
-        &filtered.findings,
-        &filtered.reviews,
-        &run_contexts,
-        &filtered.positions,
-    );
-    attach_remediation_records(&store, &mut records)?;
-    super::export_decision_basis::attach_review_decision_basis(
-        &store,
-        &filtered.findings,
-        &mut records,
-    )?;
+    let records = enriched_export_records(workspace, &store, &filtered, &run_contexts)?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
         total_count,
         investigation: None,
     })
+}
+
+pub(crate) fn read_workspace_finding_export_records(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    findings: &[Finding],
+) -> Result<Vec<WorkspaceFindingExportRecord>> {
+    let filtered = FilteredWorkspaceFindings {
+        findings: findings.to_vec(),
+        reviews: effective_review_contexts(store, findings)?,
+        positions: workspace_finding_export_positions(findings),
+    };
+    let contexts = workspace_run_export_contexts(workspace, findings);
+    enriched_export_records(workspace, store, &filtered, &contexts)
+}
+
+fn enriched_export_records(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    filtered: &FilteredWorkspaceFindings,
+    contexts: &HashMap<String, WorkspaceRunExportContext>,
+) -> Result<Vec<WorkspaceFindingExportRecord>> {
+    let mut records = workspace_finding_export_records_at_positions(
+        &filtered.findings,
+        &filtered.reviews,
+        contexts,
+        &filtered.positions,
+    );
+    attach_remediation_records(store, &mut records)?;
+    super::export_relationships::attach_relationships(store, &filtered.findings, &mut records)?;
+    super::export_lessons::attach_lessons(store, &filtered.findings, &mut records)?;
+    attach_filtered_decision_basis(workspace, store, filtered, &mut records)?;
+    Ok(records)
+}
+
+fn attach_filtered_decision_basis(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    filtered: &FilteredWorkspaceFindings,
+    records: &mut [WorkspaceFindingExportRecord],
+) -> Result<()> {
+    super::export_decision_basis::attach_review_decision_basis(
+        workspace,
+        store,
+        &filtered.findings,
+        &filtered.reviews,
+        records,
+    )
 }
 
 fn attach_remediation_records(
@@ -535,7 +563,7 @@ fn write_export_with_receipt(
     target: &ExportTarget<'_>,
     receipt: Option<(
         &Path,
-        &super::investigation_report::InvestigationReportReceipt,
+        &super::investigation_report::InvestigationReportDocument,
     )>,
 ) -> Result<()> {
     use super::export_investigation_receipt::{attach_bundle_receipt, write_receipt};
@@ -665,35 +693,84 @@ fn effective_review_contexts(
     store: &FindingStore,
     findings: &[Finding],
 ) -> Result<Vec<Option<WorkspaceFindingReviewContext>>> {
-    let mut identity_reviews = HashMap::new();
-    findings
+    let records = store.list_review_decisions_for_findings(findings)?;
+    let index =
+        crate::findings::EffectiveReviewStateIndex::from_findings_and_decisions(findings, &records);
+    let by_id = records
         .iter()
-        .map(|finding| effective_review_context(store, finding, &mut identity_reviews))
-        .collect()
+        .map(|record| (record.id, record))
+        .collect::<HashMap<_, _>>();
+    Ok(findings
+        .iter()
+        .map(|finding| {
+            let decision = index.effective_decision_for(finding)?;
+            match decision.record_id().and_then(|id| by_id.get(&id)) {
+                Some(record) => Some(WorkspaceFindingReviewContext::from_record_for_finding(
+                    record, finding,
+                )),
+                None => Some(decision.export_review_context()),
+            }
+        })
+        .collect::<Vec<_>>())
 }
 
-pub(super) fn investigation_review_counts(
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceReviewCompletion {
+    pub reviewed: usize,
+    pub confirmed: usize,
+    pub reassessment_required: usize,
+    pub source_applicabilities:
+        std::collections::BTreeMap<String, super::WorkspaceReviewSourceApplicability>,
+}
+
+pub fn review_completion_for_findings(
+    workspace: &WorkspaceTarget,
     store: &FindingStore,
     findings: &[Finding],
-) -> Result<(usize, usize)> {
+) -> Result<WorkspaceReviewCompletion> {
+    let watermark = store.projection_meta()?.applied_seq;
     let reviews = effective_review_contexts(store, findings)?;
-    let terminal = findings
-        .iter()
-        .zip(&reviews)
-        .filter_map(|(finding, review)| {
-            review
-                .as_ref()
-                .filter(|review| review.is_terminal_for_finding(finding))
-        });
-    let mut reviewed = 0;
-    let mut confirmed = 0;
-    for review in terminal {
-        reviewed += 1;
-        if review.triage_verdict == Some(crate::findings::TriageVerdict::TruePositive) {
-            confirmed += 1;
-        }
+    let mut completion = WorkspaceReviewCompletion::default();
+    let mut reader = super::review_source_applicability::ReviewSourceReader::new(workspace);
+    for (finding, review) in findings.iter().zip(&reviews) {
+        let Some(review) = review
+            .as_ref()
+            .filter(|review| review.is_terminal_for_finding(finding))
+        else {
+            continue;
+        };
+        let applicability =
+            match super::export_decision_basis::decision_basis(store, finding, Some(review))? {
+                Some(basis) => reader.classify(&basis),
+                None => super::WorkspaceReviewSourceApplicability::UnrecordedSource,
+            };
+        update_review_completion(&mut completion, finding, review, applicability);
     }
-    Ok((reviewed, confirmed))
+    anyhow::ensure!(
+        store.projection_meta()?.applied_seq == watermark,
+        "Findings changed while checking decision sources; refresh the ledger"
+    );
+    Ok(completion)
+}
+
+fn update_review_completion(
+    completion: &mut WorkspaceReviewCompletion,
+    finding: &Finding,
+    review: &WorkspaceFindingReviewContext,
+    applicability: super::WorkspaceReviewSourceApplicability,
+) {
+    completion.source_applicabilities.insert(
+        crate::findings::finding_observation_identity(finding).to_owned(),
+        applicability,
+    );
+    if applicability.needs_reassessment() {
+        completion.reassessment_required += 1;
+        return;
+    }
+    completion.reviewed += 1;
+    if review.triage_verdict == Some(crate::findings::TriageVerdict::TruePositive) {
+        completion.confirmed += 1;
+    }
 }
 
 fn finding_matches_export_completeness(
@@ -705,48 +782,6 @@ fn finding_matches_export_completeness(
         WorkspaceExportCompleteness::All => true,
         WorkspaceExportCompleteness::Open => !has_terminal_review_decision(finding, review),
         WorkspaceExportCompleteness::Complete => has_terminal_review_decision(finding, review),
-    }
-}
-
-fn effective_review_context(
-    store: &FindingStore,
-    finding: &Finding,
-    identity_reviews: &mut HashMap<String, Option<ReviewDecisionRecord>>,
-) -> Result<Option<WorkspaceFindingReviewContext>> {
-    let latest = latest_stored_review_context(store, finding, identity_reviews)?;
-    Ok(latest.or_else(|| WorkspaceFindingReviewContext::from_finding(finding)))
-}
-
-fn latest_stored_review_context(
-    store: &FindingStore,
-    finding: &Finding,
-    identity_reviews: &mut HashMap<String, Option<ReviewDecisionRecord>>,
-) -> Result<Option<WorkspaceFindingReviewContext>> {
-    if let Some(identity_id) = finding.identity_id.as_ref() {
-        if let Some(record) = identity_reviews.get(identity_id) {
-            return Ok(record.as_ref().map(|record| {
-                WorkspaceFindingReviewContext::from_record_for_finding(record, finding)
-            }));
-        }
-        // Use human-only review decision: a later automated re-triage must
-        // not mask a human Confirmed/dismissal verdict (preventing export as "open"
-        // when a human previously confirmed the finding).
-        let record = finding.id.map_or_else(
-            || Ok(None),
-            |finding_id| store.latest_human_review_decision_for_finding_identity(finding_id),
-        )?;
-        let review = record
-            .as_ref()
-            .map(|record| WorkspaceFindingReviewContext::from_record_for_finding(record, finding));
-        identity_reviews.insert(identity_id.clone(), record);
-        return Ok(review);
-    }
-    match finding.id {
-        Some(finding_id) => Ok(store
-            .latest_human_review_decision_for_finding_identity(finding_id)?
-            .as_ref()
-            .map(WorkspaceFindingReviewContext::from_record)),
-        None => Ok(None),
     }
 }
 

@@ -1,0 +1,53 @@
+name: Review and undo duplicate relationships without changing finding truth
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationships.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: relationships
+require-live-snap: 25 Duplicate · Proposed | proposed-relationship
+ask: Does the relationship reader distinguish a model proposal from a human verdict and show the recorded observations, reason and next actions?
+keys: Escape
+require-live-snap: 20 RELATIONSHIPS · PgUp/PgDn | relationship-navigation
+keys: a
+require-live-snap: 20 Reason (required) | decision-note
+keys: Enter
+require-live-snap: 20 needs a reason | empty-note-refused
+ask: Does acceptance require a reason without losing the proposal, spending another model call or recording a finding verdict?
+resize: 40x12
+live-snap: narrow-note
+paste-file: @ART/accept-note.txt
+live-snap: pasted-note
+ask: Is the note field usable with multiline paste at 40x12, with record/cancel visible and no paste submitted to the shell?
+keys: Enter
+require-live-snap: 25 Duplicate · Accepted | accepted-relationship
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationships.py @TMP_TARGET @ART accepted
+keys: PageDown
+live-snap: narrow-recorded-detail
+ask: Does acceptance change only the relationship while preserving both original findings, source references and their undecided verdicts?
+resize: 120x36
+keys: Home
+keys: u
+require-live-snap: 20 Reason (required) | unlink-note
+paste-file: @ART/remove-note.txt
+keys: Enter
+require-live-snap: 25 Duplicate · Removed | removed-relationship
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationships.py @TMP_TARGET @ART removed
+ask: Is undo explicit and reversible, with the prior proposal/acceptance retained and no automatic false-positive or identity rewrite?
+keys: Escape
+submit: findings
+require-live-snap: 25 needs_review | unchanged-findings
+expect: Labeled synthetic greeting
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: relationships
+require-live-snap: 25 Duplicate · Removed | recovered-relationship
+require-shell: python3 -B @REPO/scripts/devex/fixtures/relationships.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the removed relationship and its source binding without new inference, lost findings or a silently reapplied merge?
+keys: C-c
+require-exit: 10

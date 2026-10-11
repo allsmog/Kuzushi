@@ -1,0 +1,100 @@
+name: Whole repository retains exclusions; explicit inclusion keeps old plans intact
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_inclusion.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scopes
+require-live-snap: 30 DRAFT SCOPES | initial-boundaries
+expect: Excluded · 1
+keys: Enter Down Down Down Down Down Down Down
+require-live-snap: 20 exclusions stay recorded. | whole-action
+keys: Enter
+require-live-snap: 30 r2 | whole-keeps-exclusion
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_inclusion.py @TMP_TARGET @ART whole
+expect: Whole repository · 2 files
+expect: Excluded · 1
+keys: Down Down f
+require-live-snap: 25 server/router.rs | excluded-membership
+ask: Does changing to whole-repository coverage retain the explicit exclusion and show its omitted file, without approving discovery?
+resize: 160x48
+live-snap: exclusions-160x48
+resize: 96x89
+live-snap: exclusions-96x89
+resize: 80x24
+live-snap: exclusions-80x24
+resize: 60x20
+live-snap: exclusions-60x20
+resize: 40x12
+live-snap: exclusions-40x12
+keys: NPage
+live-snap: exclusions-page-1-40x12
+keys: NPage
+live-snap: exclusions-page-2-40x12
+keys: NPage
+live-snap: exclusions-page-3-40x12
+resize: 120x36
+keys: Escape
+require-live-snap: 15 Uncovered 0 · excluded 1 · overlap 0 | files-closed
+keys: Home a
+require-live-snap: 20 Accept exact boundaries | exclusion-acceptance
+keys: Enter End Enter
+require-live-snap: 30 Action stopped | missing-exclusion-acknowledgement
+keys: Home Down Down Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | first-acceptance
+keys: Home p
+require-live-snap: 30 PLAN A STUDY | first-study
+keys: L
+require-live-snap: 30 Draft ready | first-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_inclusion.py @TMP_TARGET @ART first-plan
+keys: Escape
+require-live-snap: 20 ACCEPTED SCOPES | back-to-scopes
+keys: Enter End Up Enter
+require-live-snap: 20 Exact recorded exclusion path | inclusion-form
+expect: server/router.rs
+keys: C-u
+type: missing.rs
+keys: Enter
+require-live-snap: 30 Action stopped | invalid-path-preserved
+expect: missing.rs
+ask: Is inclusion deliberate and reversible, with the current path/reason visible and invalid input kept for correction?
+keys: C-u
+paste-file: @ART/include-path.txt
+keys: Enter
+require-live-snap: 30 r4 | included-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_inclusion.py @TMP_TARGET @ART included
+expect: Whole repository · 3 files
+expect: Excluded · 0
+keys: p
+require-live-snap: 20 Accept the exact scope revision | unaccepted-work-refused
+keys: a
+require-live-snap: 20 Accept exact boundaries | renewed-acceptance
+keys: Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | accepted-inclusion
+keys: Home p
+require-live-snap: 30 PLAN A STUDY | second-study
+keys: L
+require-live-snap: 30 Draft ready | second-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_inclusion.py @TMP_TARGET @ART second-plan
+keys: Escape
+require-live-snap: 20 ACCEPTED SCOPES | second-plan-return
+keys: Escape
+require-live-snap: 20 options[sast:scan] | scopes-closed
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: scopes
+require-live-snap: 30 ACCEPTED SCOPES | restarted-scopes
+expect: Whole repository · 3 files
+expect: Excluded · 0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_inclusion.py @TMP_TARGET @ART second-plan
+ask: After no-color restart, does the new accepted scope remain separate from the original plan/report and its exclusion, with zero discovery jobs or provider calls?
+keys: Escape
+keys: C-c
+require-exit: 10

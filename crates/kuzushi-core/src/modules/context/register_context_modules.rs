@@ -49,6 +49,7 @@ fn context_options() -> Vec<OptionSpec> {
             "Maximum source files to sample in the context snapshot.",
         )
         .aliases(&["limit", "sample_limit"])
+        .integer_range(1, MAX_CONTEXT_SAMPLE_FILES as i64)
         .default(json!(200)),
         opt("discovery", OptionType::Enum, "Repository discovery mode.")
             .choices(&["auto", "flat", "modules"])
@@ -102,6 +103,7 @@ fn context_lite_options() -> Vec<OptionSpec> {
             "Maximum source files to sample in the context snapshot.",
         )
         .aliases(&["limit", "sample_limit"])
+        .integer_range(1, MAX_CONTEXT_SAMPLE_FILES as i64)
         .default(json!(200)),
         opt("discovery", OptionType::Enum, "Repository discovery mode.")
             .choices(&["auto", "flat", "modules"])

@@ -95,13 +95,30 @@ impl ViewArtifactReader for CountingReader {
 
 pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
     match key {
+        ViewHydrationKey::FindingGroups(_) => {
+            ViewHydrationValue::FindingGroups(Err("missing fixture groups".into()))
+        }
+        ViewHydrationKey::FindingRelationships { .. } => {
+            ViewHydrationValue::FindingRelationships(Err("missing fixture relationships".into()))
+        }
+        ViewHydrationKey::FindingLessons { .. } => {
+            ViewHydrationValue::FindingLessons(Err("missing fixture lessons".into()))
+        }
+        ViewHydrationKey::ContextMatrixReport { .. } => {
+            ViewHydrationValue::ContextMatrixReport(Err("missing fixture matrix".into()))
+        }
+        ViewHydrationKey::FindingsProjection(_) => {
+            ViewHydrationValue::FindingsProjection(Err("missing fixture ledger".into()))
+        }
         ViewHydrationKey::StudyUsageCatalogue => {
             ViewHydrationValue::StudyUsageCatalogue(Ok(Default::default()))
         }
+        ViewHydrationKey::StudyHistory => ViewHydrationValue::StudyHistory(Ok(Default::default())),
         ViewHydrationKey::StudyUsageRun { .. } => {
             ViewHydrationValue::StudyUsageRun(Err("missing fixture usage".into()))
         }
-        ViewHydrationKey::InvestigationReport { .. } => {
+        ViewHydrationKey::InvestigationReport { .. }
+        | ViewHydrationKey::InvestigationStudyReport { .. } => {
             ViewHydrationValue::InvestigationReport(Ok(None))
         }
         ViewHydrationKey::FileCompletionValues => {
@@ -140,6 +157,9 @@ pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         }
         ViewHydrationKey::FindingAuditDataflow { .. } => {
             ViewHydrationValue::FindingAuditDataflow(FindingAuditDataflowState::Missing)
+        }
+        ViewHydrationKey::FindingReviewSource { .. } => {
+            ViewHydrationValue::FindingReviewSource(Ok(None))
         }
         ViewHydrationKey::ScannedSnippet { .. } => {
             ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Missing)

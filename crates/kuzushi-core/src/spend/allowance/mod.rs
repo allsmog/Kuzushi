@@ -7,6 +7,8 @@ mod admission;
 mod approval;
 mod binding;
 mod campaign_binding;
+#[cfg(test)]
+mod capacity_tests;
 pub use campaign_binding::CampaignAllowanceReport;
 mod domain;
 pub(super) mod persistence;

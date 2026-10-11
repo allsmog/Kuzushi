@@ -310,7 +310,10 @@ pub(in crate::modules) fn run_sbom_scan(
     emit_scan_start(ctx, "sbom-scan", &target);
     let report = match ctx.with_cancellation(|cancel| scan_sbom(&target, cancel)) {
         Ok(report) => report,
-        Err(error) => return Ok(failed_tool_output("sbom-scan:scan", &target, error)),
+        Err(error) => {
+            let detail = anyhow::anyhow!("{error:#}");
+            return Ok(failed_tool_output("sbom-scan:scan", &target, detail));
+        }
     };
     emit_scan_done(ctx, "sbom-scan", report.components.len());
     Ok(report.to_tool_json())
@@ -322,19 +325,25 @@ pub(in crate::modules) fn run_license_scan(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let options = license_scan_options_from_input(&input)?;
-    emit_scan_start(ctx, "license-scan", &target);
+    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "license-scan:scan", &target, || {
+        run_started_license_scan(&target, options, ctx)
+    })
+}
+
+fn run_started_license_scan(target: &Path, options: LicenseScanOptions, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    emit_scan_start(ctx, "license-scan", target);
     let report = match ctx
-        .with_cancellation(|cancel| scan_licenses_with_options(&target, cancel, options))
+        .with_cancellation(|cancel| scan_licenses_with_options(target, cancel, options))
     {
         Ok(report) => report,
-        Err(error) => return Ok(failed_tool_output("license-scan:scan", &target, error)),
+        Err(error) => return Ok(failed_tool_output("license-scan:scan", target, anyhow::anyhow!("{error:#}"))),
     };
     let findings = report
         .findings
         .iter()
         .map(|finding| finding.to_core_finding())
         .collect::<Vec<_>>();
-    let persisted = persist_iac_findings(&target, &findings, ctx)?;
+    let persisted = persist_iac_findings(target, &findings, ctx)?;
     emit_scan_done(ctx, "license-scan", findings.len());
     let mut output = report.to_tool_json();
     output["data"]["coreFindings"] = json!(findings);

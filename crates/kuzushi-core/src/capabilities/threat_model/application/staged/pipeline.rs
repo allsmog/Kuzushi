@@ -1,5 +1,8 @@
 use super::super::*;
-use super::budget::{is_spend_cap_exhausted, reserve_stage_budget, settle_gap_fill_cost, settle_stage_budget, staged_spend_limiter};
+use super::budget::{
+    is_spend_cap_exhausted, reserve_stage_budget, settle_gap_fill_cost, settle_stage_budget,
+    staged_spend_limiter,
+};
 use super::gap_fill::{run_gap_fill, GapFillOutcome};
 use super::research::{research_artifact_json, research_stats, run_research, ResearchDossier};
 use super::synthesis::staged_synthesis_prompt;
@@ -537,15 +540,22 @@ mod tests {
         use crate::runtime::{RuntimeCost, RuntimeCostReport};
         let usd = |value| RuntimeCost::from_usd(value, "test").unwrap();
         let estimated = |value| {
-            RuntimeCostReport::incomplete(RuntimeCost::ZERO).with_unmetered_estimate(Some(usd(value)))
+            RuntimeCostReport::incomplete(RuntimeCost::ZERO)
+                .with_unmetered_estimate(Some(usd(value)))
         };
 
         assert!(!budget_exhausted(None, RuntimeCostReport::INCOMPLETE_ZERO));
         assert!(!budget_exhausted(Some(1.0), estimated(0.4)));
         assert!(budget_exhausted(Some(1.0), estimated(1.2)));
-        assert!(budget_exhausted(Some(1.0), RuntimeCostReport::known(usd(1.0))));
+        assert!(budget_exhausted(
+            Some(1.0),
+            RuntimeCostReport::known(usd(1.0))
+        ));
         // Unmetered spend with no price cannot prove it is under budget.
-        assert!(budget_exhausted(Some(1.0), RuntimeCostReport::INCOMPLETE_ZERO));
+        assert!(budget_exhausted(
+            Some(1.0),
+            RuntimeCostReport::INCOMPLETE_ZERO
+        ));
     }
 
     fn catalog_grounding() -> crate::capabilities::entry_points::EntryPointCatalogGrounding {

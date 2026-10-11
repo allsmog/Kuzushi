@@ -1,0 +1,115 @@
+name: Recorded revision history and honest Fleet comparison recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/fleet_history.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/fleet_history.py @TMP_TARGET @ART before
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup-unaccepted
+expect-not: Map ✓
+paste-file: @ART/register-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 owned registered | registered
+submit: run fleet:status
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 0C 0H records | status
+submit: run fleet:findings {"limit":2}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 2 current row(s) | current-query
+expect: Bounded query of current records
+expect: Owned policy
+paste-file: @ART/comparison-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Fix status requires a separate human decision | comparison-result
+expect: base-only
+expect: head-only
+expect: both
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | comparison-reader
+resize: 160x48
+live-snap: comparison-160x48
+resize: 96x89
+live-snap: comparison-96x89
+resize: 80x24
+live-snap: comparison-80x24
+resize: 60x20
+live-snap: comparison-60x20
+resize: 40x12
+live-snap: comparison-40x12
+keys: End
+live-snap: comparison-tail-40x12
+keys: PPage
+live-snap: comparison-page-1-40x12
+keys: PPage
+live-snap: comparison-page-2-40x12
+keys: PPage
+live-snap: comparison-page-3-40x12
+keys: PPage
+live-snap: comparison-page-4-40x12
+keys: PPage
+live-snap: comparison-page-5-40x12
+keys: PPage
+live-snap: comparison-page-6-40x12
+keys: PPage
+live-snap: comparison-page-7-40x12
+keys: PPage
+live-snap: comparison-page-8-40x12
+keys: PPage
+live-snap: comparison-page-9-40x12
+keys: PPage
+live-snap: comparison-page-10-40x12
+keys: PPage
+live-snap: comparison-page-11-40x12
+keys: Home
+live-snap: comparison-start-40x12
+ask: Can an operator read both SHAs, all three recorded presence groups and matching uncertainty at every size without interpreting absence as a fix?
+keys: q
+resize: 120x36
+submit: run fleet:ingest
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Skipped target: skipped: | partial-ingest
+ask: Does partial ingestion identify the skipped target without claiming complete Fleet coverage or completing Map?
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-after-read
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/fleet_history.py @TMP_TARGET @ART verify
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted-setup
+expect-not: Map ✓
+paste-file: @ART/comparison-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Fix status requires a separate human decision | restarted-comparison
+expect: base-only
+expect: head-only
+expect: both
+require-shell: python3 -B @REPO/scripts/devex/fixtures/fleet_history.py @TMP_TARGET @ART verify
+ask: Does no-color restart preserve four observations and the same comparison while creating no fix decisions, model requests or Map acceptance?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

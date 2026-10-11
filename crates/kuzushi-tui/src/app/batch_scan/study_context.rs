@@ -12,6 +12,7 @@ pub(crate) use diagram::StudyContextDiagram;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct StudyContextPicker {
+    pub(crate) scope_id: Option<String>,
     pub(crate) scan_input: Value,
     pub(crate) selected: Option<ThreatModelRef>,
     pub(crate) preview: Option<Arc<StudyContextPreview>>,
@@ -19,7 +20,13 @@ pub(crate) struct StudyContextPicker {
     pub(crate) raw: bool,
     pub(crate) diagram: Option<StudyContextDiagram>,
     pub(crate) diagram_visible: bool,
+    pub(crate) editor_visible: bool,
+    pub(crate) actions_selected: Option<usize>,
+    pub(crate) pending_check: Option<ThreatModelRef>,
+    pub(crate) pending_check_origin: Option<super::context_check::ContextCheckReaderOrigin>,
+    pub(crate) comparison: Option<super::StudyContextComparison>,
     pub(crate) map_attempt_id: Option<String>,
+    pub(crate) return_generation: Option<Box<super::context_generation::StudyContextGeneration>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +34,9 @@ pub(crate) struct StudyContextPreview {
     pub(crate) document: Value,
     pub(crate) raw: Vec<String>,
     pub(crate) dfd: crate::ui_view_models::DfdModel,
+    pub(crate) source_state: String,
+    pub(crate) lesson_usable: bool,
+    pub(crate) goal_state: Value,
 }
 
 fn context_preview(
@@ -39,10 +49,29 @@ fn context_preview(
         .context("The exact context reader returned no document.")?;
     let text = serde_json::to_string_pretty(document)?;
     Ok(Arc::new(StudyContextPreview {
+        lesson_usable: data
+            .pointer("/lessonState/usable")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         document: document.clone(),
         raw: text.lines().map(str::to_string).collect(),
         dfd: crate::ui_view_models::study_context::context_diagram_model(document, target),
+        source_state: context_read_state(data),
+        goal_state: data["goalState"].clone(),
     }))
+}
+
+fn context_read_state(data: &Value) -> String {
+    let source=data.pointer("/sourceState/message").and_then(Value::as_str).unwrap_or("Source identity was not checked in this receipt. Treat the recorded check as historical.");
+    if data.pointer("/lessonState/usable").and_then(Value::as_bool) == Some(false) {
+        return format!(
+            "{source} Lesson context needs review: {}",
+            data.pointer("/lessonState/reason")
+                .and_then(Value::as_str)
+                .unwrap_or("origin unavailable")
+        );
+    }
+    source.into()
 }
 
 impl ShellApp {
@@ -69,7 +98,7 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn install_study_context_picker(&mut self, input: Value) {
+    pub(super) fn install_study_context_picker(&mut self, input: Value) {
         let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() else {
             return;
         };
@@ -89,26 +118,57 @@ impl ShellApp {
     }
 
     pub(super) fn handle_study_context_key(&mut self, code: KeyCode) -> InputUpdate {
-        if self.handle_study_diagram_key(code) {
-            return InputUpdate::handled();
+        if let Some(update) = self.handle_context_overlay_key(code) {
+            return update;
         }
         match code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.edit_context_picker(|config| config.context_picker = None)
-            }
+            KeyCode::Esc | KeyCode::Char('q') => self.close_study_context_picker(),
             KeyCode::Up | KeyCode::Char('k') => self.move_study_context(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_study_context(1),
             KeyCode::Enter => return self.inspect_study_context(),
             KeyCode::Char('g') => self.open_context_generation(),
             KeyCode::Char('v') => self.open_study_context_diagram(),
             KeyCode::Char('a') => self.accept_study_context(),
+            KeyCode::Char('e') => self.open_context_editor(),
+            KeyCode::Char('c') => return self.check_study_context(),
+            KeyCode::Char('d') => return self.compare_study_context(),
+            KeyCode::Char(' ') => self.open_context_actions(),
             KeyCode::Char('m') => return self.review_existing_context_map(),
+            KeyCode::Char('+') => self.add_inspected_context_case(false),
+            KeyCode::Char('b') => self.add_inspected_context_case(true),
             _ => self.handle_context_detail_key(code),
         }
         InputUpdate::handled()
     }
 
-    fn edit_context_picker(&mut self, edit: impl FnOnce(&mut super::BatchScanConfig)) {
+    fn handle_context_modal_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        self.handle_context_comparison_key(code)
+            .or_else(|| self.handle_context_actions_key(code))
+    }
+
+    fn handle_context_overlay_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        if let Some(update) = self.handle_context_modal_key(code) {
+            return Some(update);
+        }
+        if self.handle_study_diagram_key(code) || self.scope_context_action_unavailable(code) {
+            return Some(InputUpdate::handled());
+        }
+        None
+    }
+
+    fn close_study_context_picker(&mut self) {
+        self.edit_context_picker(|config| {
+            let generation = config
+                .context_picker
+                .take()
+                .and_then(|picker| picker.return_generation);
+            if let Some(generation) = generation {
+                config.context_generation = Some(*generation);
+            }
+        });
+    }
+
+    pub(super) fn edit_context_picker(&mut self, edit: impl FnOnce(&mut super::BatchScanConfig)) {
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
             edit(config);
         }
@@ -136,6 +196,8 @@ impl ShellApp {
                 picker.diagram = None;
                 picker.diagram_visible = false;
                 picker.map_attempt_id = None;
+                picker.editor_visible = false;
+                picker.comparison = None;
             }
         });
     }
@@ -183,6 +245,17 @@ impl ShellApp {
         if data["resolvedFrom"] != "exact-context" {
             return false;
         }
+        if self.cache_context_comparison(data) {
+            return true;
+        }
+        self.install_matching_context_preview(data);
+        true
+    }
+
+    fn install_matching_context_preview(&mut self, data: &Value) {
+        if data["target"].as_str().map(std::path::Path::new) != self.target() {
+            return;
+        }
         let target = self.target_owned();
         self.edit_context_picker(|config| {
             let Some(picker) = config.context_picker.as_mut() else {
@@ -205,15 +278,18 @@ impl ShellApp {
                 }
             }
         });
-        true
     }
 
     fn accept_study_context(&mut self) {
         let Some(picker) = self.study_context_picker().cloned() else {
             return;
         };
-        if picker.selected.is_some() && picker.preview.is_none() {
-            self.set_batch_config_notice("Inspect this exact revision with Enter before using it.");
+        if let Err(reason) = context_selection_ready(&picker) {
+            self.set_batch_config_notice(reason);
+            return;
+        }
+        if let Some(scope_id) = picker.scope_id.as_deref() {
+            self.apply_scope_context(scope_id, Some(json!(picker.selected)));
             return;
         }
         self.edit_context_picker(|config| {
@@ -266,6 +342,20 @@ impl ShellApp {
             };
         });
     }
+}
+
+fn context_selection_ready(picker: &StudyContextPicker) -> Result<(), &'static str> {
+    if picker.selected.is_some() && picker.preview.is_none() {
+        return Err("Inspect this exact revision with Enter before using it.");
+    }
+    if picker
+        .preview
+        .as_ref()
+        .is_some_and(|preview| !preview.lesson_usable)
+    {
+        return Err("This context contains a changed or retired lesson. Create a copy with a fresh reviewed selection before using it.");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

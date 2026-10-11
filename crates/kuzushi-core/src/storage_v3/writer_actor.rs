@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 mod commands;
 mod dispatch;
 mod lifecycle;
+mod lessons;
+mod relationships;
 mod staleness;
 #[cfg(test)]
 mod test_hooks;

@@ -7,6 +7,8 @@ use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+const FINDING_READ_LIMIT: usize = 10_000;
+
 /// Gather the deterministic inputs for a target and fold them into ranked
 /// scan recommendations. Read-only: a missing ledger means every scope is
 /// simply unscanned; it is never created here.
@@ -16,9 +18,9 @@ pub fn recommend_scans_for_target(
 ) -> Result<Vec<ScanRecommendation>> {
     let scope_paths = scope_paths(target)?;
     let ledger = CoverageLedger::open_if_exists(target)?;
-    let (latest, all) = match &ledger {
-        Some(ledger) => (ledger.latest_baselines()?, ledger.all_baselines()?),
-        None => (Vec::new(), Vec::new()),
+    let latest = match &ledger {
+        Some(ledger) => ledger.latest_baselines()?,
+        None => Vec::new(),
     };
     let sweep = sweep_if_covered(target, &ledger);
     let surface_files = surface_files(target);
@@ -26,7 +28,7 @@ pub fn recommend_scans_for_target(
     Ok(recommend(&RecommenderInputs {
         scope_paths: &scope_paths,
         latest_baselines: &latest,
-        all_baselines: &all,
+        all_baselines: &[],
         sweep: sweep.as_ref(),
         surface_files: &surface_files,
         finding_files: &finding_files,
@@ -66,17 +68,14 @@ fn snapshot_surface_files(target: &Path) -> Option<BTreeMap<String, usize>> {
         .map(|map| map.summary.by_file)
 }
 
-fn finding_files(
-    target: &Path,
-    findings_store: Option<&FindingStore>,
-) -> Result<BTreeSet<String>> {
+fn finding_files(target: &Path, findings_store: Option<&FindingStore>) -> Result<BTreeSet<String>> {
     let Some(store) = findings_store else {
         return Ok(BTreeSet::new());
     };
-    let findings = store.list_all_findings()?;
-    Ok(findings
+    let paths = store.recommendation_finding_paths(FINDING_READ_LIMIT)?;
+    Ok(paths
         .iter()
-        .map(|finding| target_relative(&finding.file_path, target))
+        .map(|path| target_relative(path, target))
         .collect())
 }
 

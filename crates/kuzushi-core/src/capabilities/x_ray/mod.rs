@@ -3,6 +3,8 @@ mod application;
 mod domain;
 
 #[cfg(test)]
+mod reader_contract_tests;
+#[cfg(test)]
 mod tests;
 
 pub use adapters::execute_x_ray_tool;

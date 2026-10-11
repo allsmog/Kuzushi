@@ -12,6 +12,7 @@ impl AgentToolPolicy {
             mcps: false,
             mcps_attached: Vec::new(),
             mcp_read_roots: Vec::new(),
+            read_scope: None,
         }
     }
 
@@ -83,6 +84,7 @@ impl Default for AgentToolPolicy {
             mcps: false,
             mcps_attached: Vec::new(),
             mcp_read_roots: Vec::new(),
+            read_scope: None,
         }
     }
 }

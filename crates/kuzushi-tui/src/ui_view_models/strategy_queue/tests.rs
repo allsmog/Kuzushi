@@ -28,7 +28,7 @@ fn strategy_queue_not_requested_does_not_claim_to_be_loading() {
 
     assert_eq!(
         model.summary,
-        "strategy queue not generated — run `recommend`"
+        "strategy queue has not been loaded; open `recommendations` to inspect suggestions"
     );
 }
 
@@ -71,6 +71,107 @@ fn strategy_queue_model_reads_persisted_proposals() {
     assert_eq!(model.rows[0].cells[10], "local pass");
     assert_eq!(model.rows[0].cells[11], "low");
     assert_eq!(model.rows[0].source_run, "rec-123");
+}
+
+#[test]
+fn retained_approval_result_and_unknown_cost_are_explicit_in_the_queue() {
+    let mut proposal = StrategyProposal::new(
+        StrategyPhase::Review,
+        "run context:build",
+        "retained metadata",
+    );
+    proposal.status = StrategyProposalStatus::Done;
+    proposal.approved_cost_usd = Some(0.5);
+    proposal.actual_cost_usd = Some(0.2);
+    proposal.result_run_id = Some("owned-result".into());
+    proposal.tool = Some("context:build".into());
+    let row = strategy_row_from_proposal(proposal);
+    assert_eq!(row.approved_cost, "$0.5000");
+    assert_eq!(row.cells[7], "$0.2000");
+    assert_eq!(row.result_run, "owned-result");
+    assert_eq!(row.tool, "context:build");
+    assert_eq!(cost_label(None), "unknown");
+    for cost in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(cost_label(Some(cost)), "unknown");
+    }
+}
+
+#[test]
+fn proposal_inspection_is_read_only_target_bound_and_discloses_unknown_ids() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut proposal =
+        StrategyProposal::new(StrategyPhase::Review, "run context:build", "owned metadata");
+    proposal.id = "owned-inspect".into();
+    proposal.status = StrategyProposalStatus::Done;
+    proposal.result_run_id = Some("owned-result".into());
+    append_strategy_proposal(&workspace, &proposal).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_input("held inspection draft");
+    let effects = app
+        .reduce_command_effects(&crate::commands::parse_command(
+            "strategy inspect owned-inspect",
+        ))
+        .unwrap();
+    assert!(effects.is_empty());
+    app.hydrate_all_view_data_for_test();
+    let model = strategy_queue_model(&app);
+    assert_eq!(model.title, "STRATEGY PROPOSAL");
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].result_run, "owned-result");
+    assert_eq!(app.input(), "held inspection draft");
+    assert!(!app.tool_is_running());
+    app.reduce_command_effects(&crate::commands::parse_command("strategy inspect unknown"))
+        .unwrap();
+    app.hydrate_all_view_data_for_test();
+    assert!(strategy_queue_model(&app).rows[0]
+        .rationale
+        .contains("No proposal named unknown"));
+    let other = tempfile::tempdir().unwrap();
+    app.set_target(Some(other.path().to_path_buf()));
+    assert_eq!(app.inspected_strategy_id(), None);
+}
+
+#[test]
+fn new_drafts_sort_before_older_unreviewed_suggestions() {
+    let mut old = StrategyProposal::new_at(1, StrategyPhase::Review, "run context:build", "old");
+    old.id = "old".into();
+    let mut new = StrategyProposal::new_at(2, StrategyPhase::Review, "run context:build", "new");
+    new.id = "new".into();
+    let rows = strategy_rows_from_proposals(vec![old, new]);
+    assert_eq!(rows[0].id, "new");
+    assert_eq!(rows[1].id, "old");
+}
+
+#[test]
+fn loaded_empty_queue_discloses_a_requested_missing_identity() {
+    let rows = inspected_rows(Vec::new(), Some("missing"), true);
+    assert!(rows[0].rationale.contains("No proposal named missing"));
+    assert!(inspected_rows(Vec::new(), Some("missing"), false).is_empty());
+}
+
+#[test]
+fn reopening_strategy_reads_external_decisions_and_preserves_composer_draft() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
+    assert!(strategy_queue_model(&app).rows.is_empty());
+    let mut proposal =
+        StrategyProposal::new(StrategyPhase::Review, "run context:build", "owned metadata");
+    proposal.status = StrategyProposalStatus::Approved;
+    append_strategy_proposal(&workspace, &proposal).unwrap();
+    app.set_input("held queue draft");
+    let effects = app
+        .reduce_command_effects(&crate::commands::parse_command("strategy"))
+        .unwrap();
+    assert!(effects.is_empty());
+    app.hydrate_all_view_data_for_test();
+    assert_eq!(strategy_queue_model(&app).rows[0].cells[0], "approved");
+    assert_eq!(app.input(), "held queue draft");
+    assert!(!app.tool_is_running());
 }
 
 #[test]

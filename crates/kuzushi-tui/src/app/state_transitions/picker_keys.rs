@@ -91,8 +91,10 @@ impl ShellApp {
     fn inline_picker_editor_owns_key(&self) -> bool {
         let editor = self.router.setup().editor();
         let planning_option = self.engagement.planning_picker().option_edit().is_some();
-        matches!(editor, Some(SetupEditor::Budget | SetupEditor::ThreatModel))
-            || planning_option
+        matches!(
+            editor,
+            Some(SetupEditor::Budget | SetupEditor::ThreatModel | SetupEditor::Details)
+        ) || planning_option
             || (editor == Some(SetupEditor::Credentials)
                 && self.router.auth_picker().is_api_key_row())
     }
@@ -258,6 +260,7 @@ impl ShellApp {
 
     fn handle_setup_key(&mut self, key: KeyEvent) -> InputUpdate {
         match self.router.setup().editor() {
+            Some(SetupEditor::Details) => return self.handle_setup_details_key(key),
             Some(SetupEditor::Model) => return self.handle_model_picker_key(key.code),
             Some(SetupEditor::Credentials) => return self.handle_auth_picker_key(key),
             Some(SetupEditor::Plan) => return self.handle_planning_picker_key(key),
@@ -269,6 +272,10 @@ impl ShellApp {
             return self.handle_setup_budget_key(key);
         }
         match code {
+            KeyCode::Tab => {
+                self.router.setup_mut().begin_editor(SetupEditor::Details);
+                InputUpdate::handled()
+            }
             KeyCode::Up => {
                 self.router.setup_mut().move_cursor(-1);
                 InputUpdate::handled()
@@ -346,6 +353,9 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             SetupRowId::Plan => self.open_setup_plan_editor(),
+            SetupRowId::ThreatModel if self.context_import_selected() => {
+                self.open_setup_import_options()
+            }
             SetupRowId::ThreatModel => match self.open_map_run_config() {
                 Ok(()) => InputUpdate::handled(),
                 Err(error) => {
@@ -1107,6 +1117,13 @@ impl ShellApp {
     }
 
     fn planning_execution_gate(&mut self, plan: &[PlanningTaskId]) -> Option<InputUpdate> {
+        if let Err(error) = self.validate_context_import_plan(plan) {
+            self.set_warn_notice(
+                "planning",
+                format!("Map plan needs review: {error}. No jobs started."),
+            );
+            return Some(InputUpdate::handled());
+        }
         if let Some(update) = self.review_model_backed_map(plan) {
             return Some(update);
         }

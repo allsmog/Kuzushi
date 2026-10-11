@@ -1,6 +1,7 @@
 use super::*;
 
 pub(in crate::modules) struct SastPipelineReports {
+    pub(in crate::modules) native_inspections: Vec<Value>,
     pub(in crate::modules) native: Option<NativeScanReport>,
     pub(in crate::modules) agentic: Option<AgenticSastReport>,
     pub(in crate::modules) carlini: Option<CarliniThreatHuntReport>,

@@ -10,6 +10,7 @@ pub(crate) fn bind_dispatch_scan_scope(
     if name != "sast:scan" {
         return Ok(input);
     }
+    validate_study_scan_selection(&input)?;
     let Some(workspace) = ctx.workspace else {
         return Ok(input);
     };
@@ -41,14 +42,13 @@ mod tests {
     #[test]
     fn capability_preview_uses_the_executor_scope_contract_without_reading_saved_objects() {
         let reference = json!({"proposal":{"proposalId":"absent","revision":1,"recordHash":"a".repeat(64)},"scopeId":"repository"});
-        for task in ["secret-scan", "semgrep"] {
+        for task in ["secret-scan", "semgrep", "agentic"] {
             validate_scan_scope_contract(
                 &json!({"taskMode":"manual","tasks":[task],"scanScopeRef":reference}),
             )
             .unwrap();
         }
         for task in [
-            "agentic",
             "offense-review",
             "systems-hunt",
             "codeql",

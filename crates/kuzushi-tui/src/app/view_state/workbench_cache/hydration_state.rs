@@ -3,6 +3,7 @@ use super::*;
 impl WorkbenchCache {
     pub(crate) fn view_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match hydration_group(key) {
+            HydrationGroup::Transient => false,
             HydrationGroup::Completion => self.completion_hydration_needed(target, key),
             HydrationGroup::Run => self.run_hydration_needed(target, key),
             HydrationGroup::StudyUsage => self.study_usage_hydration_needed(target, key),
@@ -26,6 +27,7 @@ impl WorkbenchCache {
             self.hydrating_view_data
                 .remove(&(failure.target.clone(), failure.key.clone()));
             self.record_failed_study_usage(failure);
+            self.record_failed_review_source(failure);
         }
     }
 
@@ -34,6 +36,7 @@ impl WorkbenchCache {
         self.hydrating_view_data
             .remove(&(target.clone(), key.clone()));
         match hydration_group(&key) {
+            HydrationGroup::Transient => {}
             HydrationGroup::Completion => self.apply_completion_hydration(target, key, value),
             HydrationGroup::Run => self.apply_run_hydration(target, key, value),
             HydrationGroup::StudyUsage => self.apply_study_usage_hydration(target, key, value),
@@ -45,8 +48,9 @@ impl WorkbenchCache {
 
     fn run_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
-            ViewHydrationKey::InvestigationReport { run_refs } => self
-                .cached_investigation_report(Some(target), run_refs)
+            ViewHydrationKey::InvestigationReport { .. }
+            | ViewHydrationKey::InvestigationStudyReport { .. } => self
+                .cached_selected_report(Some(target), key)
                 .is_not_requested(),
             ViewHydrationKey::LatestRunPointer => self
                 .cached_latest_run_pointer(Some(target))
@@ -103,6 +107,9 @@ impl WorkbenchCache {
 
     fn finding_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
+            key @ ViewHydrationKey::FindingReviewSource { .. } => self
+                .cached_finding_review_source(target, key)
+                .is_not_requested(),
             ViewHydrationKey::FindingPatchTruth {
                 fingerprint,
                 finding_scan_id,
@@ -141,6 +148,15 @@ impl WorkbenchCache {
 
     fn workspace_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
+            ViewHydrationKey::FindingLessons { offset } => !self
+                .lesson_pages
+                .contains_key(&(target.to_path_buf(), *offset)),
+            key @ ViewHydrationKey::FindingGroups(_) => !self
+                .group_pages
+                .contains_key(&(target.to_path_buf(), key.clone())),
+            ViewHydrationKey::FindingRelationships { finding_id, offset } => !self
+                .relationship_pages
+                .contains_key(&(target.to_path_buf(), *finding_id, *offset)),
             ViewHydrationKey::SourceFile { path } => {
                 self.cached_source_file(target, path).is_not_requested()
             }
@@ -195,10 +211,11 @@ impl WorkbenchCache {
     ) {
         match (key, value) {
             (
-                ViewHydrationKey::InvestigationReport { run_refs },
+                key @ (ViewHydrationKey::InvestigationReport { .. }
+                | ViewHydrationKey::InvestigationStudyReport { .. }),
                 ViewHydrationValue::InvestigationReport(state),
             ) => {
-                self.investigation_report = Some((target, run_refs, state));
+                self.investigation_report = Some((target, key, state));
             }
             (ViewHydrationKey::LatestRunPointer, ViewHydrationValue::LatestRunPointer(state)) => {
                 self.store_latest_run_pointer(target, state)
@@ -437,6 +454,10 @@ impl WorkbenchCache {
     ) {
         match (key, value) {
             (
+                key @ ViewHydrationKey::FindingReviewSource { .. },
+                ViewHydrationValue::FindingReviewSource(value),
+            ) => self.store_finding_review_source(target, key, value),
+            (
                 ViewHydrationKey::FindingAuditDataflow { fingerprint },
                 ViewHydrationValue::FindingAuditDataflow(state),
             ) => self.store_finding_audit_dataflow(&target, &fingerprint, state),
@@ -497,6 +518,33 @@ impl WorkbenchCache {
         value: ViewHydrationValue,
     ) {
         match (key, value) {
+            (
+                ViewHydrationKey::FindingLessons { offset },
+                ViewHydrationValue::FindingLessons(page),
+            ) => {
+                self.lesson_pages.insert((target, offset), page);
+            }
+            (key @ ViewHydrationKey::FindingGroups(_), ViewHydrationValue::FindingGroups(page)) => {
+                self.store_finding_groups(target, key, page)
+            }
+            (key, value) => self.apply_workspace_file_hydration(target, key, value),
+        }
+    }
+
+    fn apply_workspace_file_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
+            (
+                ViewHydrationKey::FindingRelationships { finding_id, offset },
+                ViewHydrationValue::FindingRelationships(page),
+            ) => {
+                self.relationship_pages
+                    .insert((target, finding_id, offset), page);
+            }
             (ViewHydrationKey::SourceFile { path }, ViewHydrationValue::SourceFile(state)) => {
                 self.source_file = Some(SourceFileCache { path, state });
             }
@@ -601,6 +649,7 @@ impl WorkbenchCache {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HydrationGroup {
+    Transient,
     Completion,
     Run,
     StudyUsage,
@@ -610,43 +659,59 @@ enum HydrationGroup {
 }
 
 fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
+    use ViewHydrationKey as Key;
     match key {
-        ViewHydrationKey::StudyUsageCatalogue | ViewHydrationKey::StudyUsageRun { .. } => {
-            HydrationGroup::StudyUsage
+        Key::FindingsProjection(_) => HydrationGroup::Transient,
+        Key::StudyHistory
+        | Key::StudyUsageCatalogue
+        | Key::StudyUsageRun { .. }
+        | Key::ContextMatrixReport { .. } => HydrationGroup::StudyUsage,
+        Key::FileCompletionValues | Key::FindingCompletionValues | Key::RunIdCompletionValues => {
+            HydrationGroup::Completion
         }
-        ViewHydrationKey::FileCompletionValues
-        | ViewHydrationKey::FindingCompletionValues
-        | ViewHydrationKey::RunIdCompletionValues => HydrationGroup::Completion,
-        ViewHydrationKey::LatestRunPointer
-        | ViewHydrationKey::InvestigationReport { .. }
-        | ViewHydrationKey::RunSummaryEntries
-        | ViewHydrationKey::RunArtifactText { .. }
-        | ViewHydrationKey::RunProjection { .. }
-        | ViewHydrationKey::PhaseReceiptOutcome { .. }
-        | ViewHydrationKey::ScanStageReceipt { .. } => HydrationGroup::Run,
-        ViewHydrationKey::GitMetadata
-        | ViewHydrationKey::RevisionRelationship { .. }
-        | ViewHydrationKey::ProjectScopeTree
-        | ViewHydrationKey::ThreatModelStore
-        | ViewHydrationKey::MapRunContext { .. }
-        | ViewHydrationKey::ProjectModelDocument { .. }
-        | ViewHydrationKey::StrategyQueue
-        | ViewHydrationKey::PromptMutations
-        | ViewHydrationKey::FindingPatchTruth { .. }
-        | ViewHydrationKey::FindingAuditDataflow { .. }
-        | ViewHydrationKey::ScannedSnippet { .. } => HydrationGroup::Project,
-        ViewHydrationKey::SourceFile { .. }
-        | ViewHydrationKey::HarnessFile
-        | ViewHydrationKey::JsonFile { .. }
-        | ViewHydrationKey::PathState { .. }
-        | ViewHydrationKey::DirectoryListing { .. }
-        | ViewHydrationKey::PromptOverrideHash { .. } => HydrationGroup::Workspace,
-        ViewHydrationKey::HealthChecks { .. }
-        | ViewHydrationKey::TargetProfile
-        | ViewHydrationKey::MapArtifacts
-        | ViewHydrationKey::CpgArtifacts
-        | ViewHydrationKey::ScanRecommendations
-        | ViewHydrationKey::TargetBase => HydrationGroup::Status,
+        Key::LatestRunPointer
+        | Key::InvestigationReport { .. }
+        | Key::InvestigationStudyReport { .. }
+        | Key::RunSummaryEntries
+        | Key::RunArtifactText { .. }
+        | Key::RunProjection { .. }
+        | Key::PhaseReceiptOutcome { .. }
+        | Key::ScanStageReceipt { .. } => HydrationGroup::Run,
+        key => artifact_hydration_group(key),
+    }
+}
+
+fn artifact_hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
+    use ViewHydrationKey as Key;
+    match key {
+        Key::GitMetadata
+        | Key::RevisionRelationship { .. }
+        | Key::ProjectScopeTree
+        | Key::ThreatModelStore
+        | Key::MapRunContext { .. }
+        | Key::ProjectModelDocument { .. }
+        | Key::StrategyQueue
+        | Key::PromptMutations
+        | Key::FindingPatchTruth { .. }
+        | Key::FindingAuditDataflow { .. }
+        | Key::FindingReviewSource { .. }
+        | Key::ScannedSnippet { .. } => HydrationGroup::Project,
+        Key::SourceFile { .. }
+        | Key::FindingGroups(_)
+        | Key::FindingRelationships { .. }
+        | Key::FindingLessons { .. }
+        | Key::HarnessFile
+        | Key::JsonFile { .. }
+        | Key::PathState { .. }
+        | Key::DirectoryListing { .. }
+        | Key::PromptOverrideHash { .. } => HydrationGroup::Workspace,
+        Key::HealthChecks { .. }
+        | Key::TargetProfile
+        | Key::MapArtifacts
+        | Key::CpgArtifacts
+        | Key::ScanRecommendations
+        | Key::TargetBase => HydrationGroup::Status,
+        _ => unreachable!("completion, transient and run keys are classified first"),
     }
 }
 

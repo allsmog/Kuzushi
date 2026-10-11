@@ -1,0 +1,68 @@
+name: Per-case historical spending review preserves work and approved allowance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_study.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resource-command.txt
+keys: Enter
+require-live-snap: 25 6 job(s) | unapproved-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | resource-plan
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 Full plan historical scenario | historical-scenario
+expect: 6 to 6 provider requests
+expect: Dollar estimate: unavailable
+ask: Does the preview distinguish the six-call historical scenario from future spending bounds and retain unknown prices and protected Review?
+keys: Enter
+require-live-snap: 20 HISTORICAL USAGE | prior-study-picker
+resize: 160x48
+live-snap: picker-160x48
+expect: Esc back
+resize: 96x89
+live-snap: picker-96x89
+expect: Esc back
+resize: 80x24
+live-snap: picker-80x24
+expect: Esc back
+resize: 60x20
+live-snap: picker-60x20
+expect: Esc back
+resize: 40x12
+live-snap: picker-40x12
+expect: Esc back
+keys: PgDn PgDn PgDn PgDn
+live-snap: picker-detail-tail
+ask: Can the operator inspect, page and cancel a named prior study without changing the plan, draft or spending?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | picker-cancelled
+keys: Up Up Up Enter
+type: 14
+keys: Enter L End
+require-live-snap: 25 y approve | review-proposed-limits
+expect: Full plan historical scenario
+expect: 6 context/scan calls available
+expect: Total provider calls: 14
+ask: Does the exact approval include the complete scenario, consumed calls and protected Review without claiming a dollar ceiling or starting jobs?
+keys: n
+require-live-snap: 20 PLAN A STUDY | cancelled-approval
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_study.py @TMP_TARGET @ART reviewed
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resource-command.txt
+keys: Enter
+require-live-snap: 25 6 job(s) | recovered-jobs
+nav-mode:
+keys: a Down Down Down Down Down Down Down
+require-live-snap: 25 Full plan historical scenario | recovered-scenario
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_study.py @TMP_TARGET @ART restarted
+ask: Does restart retain the exact prior study and frozen per-case observations while leaving its six paid fixture calls and unapproved new work unchanged?
+keys: C-c
+require-exit: 10

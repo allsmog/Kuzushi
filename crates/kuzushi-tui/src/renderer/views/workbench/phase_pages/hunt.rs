@@ -311,7 +311,7 @@ fn render_review_list(
     render_lines_pane(
         frame,
         area,
-        format!("FINDINGS · {}", model.review.visible_count),
+        review_queue_title(model, area.height.saturating_sub(2)),
         review_lines(
             model,
             area.width.saturating_sub(2) as usize,
@@ -322,8 +322,32 @@ fn render_review_list(
     );
 }
 
+fn review_queue_title(model: &ReviewPhaseModel, height: u16) -> String {
+    let title = model.review.population_title();
+    if height >= 5 {
+        return title;
+    }
+    let Some(disclosure) = model.selection_disclosure.as_ref() else {
+        return title;
+    };
+    let reference = model
+        .finding
+        .as_ref()
+        .map(|finding| finding.alias.as_deref().unwrap_or(&finding.identity_label))
+        .unwrap_or("selected");
+    let pin = if disclosure.filter.is_none() {
+        "earlier"
+    } else {
+        "pin"
+    };
+    format!(
+        "{} · {pin} {reference}",
+        title.strip_prefix("FINDINGS · ").unwrap_or(&title)
+    )
+}
+
 fn review_lines(model: &ReviewPhaseModel, width: usize, height: u16) -> Vec<Line<'static>> {
-    let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    let mut lines = review_queue_disclosure_lines(model, width, height);
     let disclosure_rows = lines.len().min(u16::MAX as usize) as u16;
     lines.extend(super::super::panes::review_queue_pane_lines(
         &model.review,
@@ -337,6 +361,19 @@ fn review_lines(model: &ReviewPhaseModel, width: usize, height: u16) -> Vec<Line
     lines
 }
 
+fn review_queue_disclosure_lines(
+    model: &ReviewPhaseModel,
+    width: usize,
+    height: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    if height != u16::MAX {
+        // Keep identity and title visible; detail and plain output retain the full notice.
+        lines.truncate(usize::from(height.saturating_sub(2)));
+    }
+    lines
+}
+
 fn render_review_detail(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -346,15 +383,27 @@ fn render_review_detail(
     render_lines_pane(
         frame,
         area,
-        model
-            .comparison_control
-            .as_ref()
-            .map(|control| format!("FINDING · {control}"))
-            .unwrap_or_else(|| "SELECTED FINDING".to_string()),
+        review_detail_title(model),
         review_detail_lines(model, area.width.saturating_sub(2) as usize),
         PhaseSurfaceId::ReviewDetail,
         state,
     );
+}
+
+fn review_detail_title(model: &ReviewPhaseModel) -> String {
+    let heading = model
+        .comparison_control
+        .as_ref()
+        .map(|control| format!("FINDING · {control}"))
+        .unwrap_or_else(|| "SELECTED FINDING".to_string());
+    model
+        .finding
+        .as_ref()
+        .map(|finding| {
+            let identity = finding.alias.as_deref().unwrap_or(&finding.identity_label);
+            format!("{identity} · {heading}")
+        })
+        .unwrap_or(heading)
 }
 
 fn review_detail_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'static>> {
@@ -365,7 +414,8 @@ fn review_detail_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'stat
             &[("Enter", "open selected finding")],
         );
     };
-    let mut lines = review_identity_lines(finding, width);
+    let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    lines.extend(review_identity_lines(finding, width));
     lines.extend(review_presence_lines(finding, width));
     lines.extend(super::super::detail_pane::review_detail_lines(
         finding, width,
@@ -431,6 +481,44 @@ mod tests {
     }
 
     #[test]
+    fn tiny_queue_keeps_the_selected_row_and_detail_keeps_full_recovery() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        *app.findings_mut() = vec![kuzushi_core::Finding::new_tool(
+            "fixture",
+            "resize",
+            "lib.rs",
+            1,
+            None,
+            kuzushi_core::Severity::Low,
+            "Chosen finding remains visible",
+        )];
+        let crate::ui_view_models::PhaseCockpitBody::Review(mut model) =
+            crate::ui_view_models::phase_cockpit_model_for_phase(
+                &app,
+                kuzushi_core::WorkflowPhase::Review,
+            )
+            .body
+        else {
+            panic!("Review expected");
+        };
+        model.selection_disclosure = Some(crate::ui_view_models::SelectionDisclosureModel {
+            message: "F-0001 shows an earlier observation; decisions stay bound to it".into(),
+            filter: None,
+            reveal_command: "open F-0001".into(),
+            reveal_label: "inspect current",
+        });
+        let queue = review_lines(&model, 38, 3);
+        assert!(review_queue_title(&model, 3).contains("earlier F-0001"));
+        assert!(queue.len() <= 3);
+        assert!(text(&queue).contains("earlier observation"));
+        assert!(text(&queue).contains("Chosen finding remains visible"));
+        let detail = text(&review_detail_lines(&model, 38));
+        assert!(detail.contains("decisions stay bound to it"));
+        assert!(detail.contains("open F-0001 inspect current"));
+        assert!(text(&plain_lines(&model, 38)).contains("open F-0001 inspect current"));
+    }
+
+    #[test]
     fn observation_gap_summary_fits_a_two_line_review_viewport() {
         let finding = crate::ui_view_models::FindingDetailModel {
             alias: Some("F-0001".to_string()),
@@ -446,6 +534,32 @@ mod tests {
         let body = text(&lines);
         assert!(body.contains("F-0001 · confirmed"));
         assert!(body.contains("Not seen; no fix established."));
+    }
+
+    #[test]
+    fn review_pane_title_keeps_selected_identity_when_body_scrolls() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let crate::ui_view_models::PhaseCockpitBody::Review(mut model) =
+            crate::ui_view_models::phase_cockpit_model_for_phase(
+                &app,
+                kuzushi_core::WorkflowPhase::Review,
+            )
+            .body
+        else {
+            panic!("Review model");
+        };
+        model.finding = Some(crate::ui_view_models::FindingDetailModel {
+            alias: Some("F-0001".into()),
+            ..Default::default()
+        });
+        assert_eq!(review_detail_title(&model), "F-0001 · SELECTED FINDING");
+        model.comparison_control = Some("v compare scans".into());
+        assert_eq!(
+            review_detail_title(&model),
+            "F-0001 · FINDING · v compare scans"
+        );
+        model.finding = None;
+        assert_eq!(review_detail_title(&model), "FINDING · v compare scans");
     }
 
     #[test]

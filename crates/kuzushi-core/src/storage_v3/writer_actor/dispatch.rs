@@ -31,6 +31,9 @@ impl StorageWriter {
 
     fn execute_decision_command(&mut self, command: DecisionCommand) -> Result<WriteReceipt> {
         match command {
+            DecisionCommand::FindingLesson { record, expected } => {
+                self.record_finding_lesson(record, expected)
+            }
             DecisionCommand::ReviewDecision(decision) => self.record_review_decision(decision),
             DecisionCommand::ReviewSessionStarted(session) => self.record_review_session(session),
             DecisionCommand::RecordVerification(verification) => {
@@ -46,6 +49,13 @@ impl StorageWriter {
                 self.record_finding_lifecycle(finding)
             }
             DecisionCommand::RekeyFinding(rekey) => self.record_rekey(rekey),
+            DecisionCommand::FindingRelationship {
+                record,
+                expected_revision,
+            } => self.record_finding_relationship(record, expected_revision),
+            DecisionCommand::FindingRelationshipBatch { selected, records } => {
+                self.record_finding_relationship_batch(selected, records)
+            }
         }
     }
 

@@ -24,10 +24,29 @@ impl FindingStore {
         target: &Path,
         operation: impl FnOnce() -> Result<(T, usize, crate::run_lifecycle::RunItemStatus)>,
     ) -> Result<T> {
+        self.with_terminal_reconciliation(id, target, operation, true)
+    }
+
+    pub(crate) fn with_scan_lifecycle_before_receipt<T>(
+        &self,
+        id: &str,
+        target: &Path,
+        operation: impl FnOnce() -> Result<(T, usize, crate::run_lifecycle::RunItemStatus)>,
+    ) -> Result<T> {
+        self.with_terminal_reconciliation(id, target, operation, false)
+    }
+
+    fn with_terminal_reconciliation<T>(
+        &self,
+        id: &str,
+        target: &Path,
+        operation: impl FnOnce() -> Result<(T, usize, crate::run_lifecycle::RunItemStatus)>,
+        reconcile: bool,
+    ) -> Result<T> {
         self.record_run_started(id, target, "running")?;
         match operation() {
             Ok((value, findings_count, status)) => {
-                self.finish_terminal_run(id, findings_count, status)?;
+                self.finish_terminal_run(id, findings_count, status, reconcile)?;
                 Ok(value)
             }
             Err(error) => Err(self.finish_failed_run(id, error)),
@@ -39,11 +58,16 @@ impl FindingStore {
         id: &str,
         findings_count: usize,
         status: crate::run_lifecycle::RunItemStatus,
+        reconcile: bool,
     ) -> Result<()> {
-        self.record_run_finished(id, status.label(), findings_count)
-            .inspect_err(|_| {
-                let _ = self.record_run_finished(id, "failed", findings_count);
-            })
+        let result = if reconcile {
+            self.record_run_finished(id, status.label(), findings_count)
+        } else {
+            self.record_terminal_run(id, status.label(), findings_count)
+        };
+        result.inspect_err(|_| {
+            let _ = self.record_run_finished(id, "failed", findings_count);
+        })
     }
 
     fn finish_failed_run(&self, id: &str, error: anyhow::Error) -> anyhow::Error {
@@ -73,6 +97,15 @@ impl FindingStore {
     }
 
     pub fn record_run_finished(&self, id: &str, status: &str, findings_count: usize) -> Result<()> {
+        self.record_terminal_run(id, status, findings_count)?;
+        // A disappearance needs completed work and its durable scope proof.
+        if status == "completed" && self.v3_storage_paths().is_some() {
+            self.reconcile_disappeared_findings(id)?;
+        }
+        Ok(())
+    }
+
+    fn record_terminal_run(&self, id: &str, status: &str, findings_count: usize) -> Result<()> {
         let event_kind = terminal_run_event_kind(status)?;
         self.record_v3_run_lifecycle(RunLifecycleWrite {
             event_kind,
@@ -83,12 +116,6 @@ impl FindingStore {
             terminal_item_hash: None,
             actor: "finding-store".to_string(),
         })?;
-        // Only a fully-completed re-scan can honestly retire a prior finding.
-        // Allowlist so partial work and canceled statuses can
-        // never silently enable reconciliation on this honesty-critical path.
-        if status == "completed" && self.v3_storage_paths().is_some() {
-            self.reconcile_disappeared_findings(id)?;
-        }
         Ok(())
     }
 

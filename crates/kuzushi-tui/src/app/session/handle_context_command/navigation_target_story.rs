@@ -512,6 +512,7 @@ impl ShellApp {
         };
         if matches!(raw, "all" | "clear" | "root" | ".") {
             self.set_active_scope(None);
+            self.router.findings_mut().clear_selection();
             self.router.findings_mut().reset();
             self.log("component", "cleared component filter");
             return self.open_workbench_effects();
@@ -524,6 +525,7 @@ impl ShellApp {
             return self.open_workbench_effects();
         };
         self.set_active_scope(Some(scope.clone()));
+        self.router.findings_mut().clear_selection();
         self.router.findings_mut().reset();
         self.log(
             "component",

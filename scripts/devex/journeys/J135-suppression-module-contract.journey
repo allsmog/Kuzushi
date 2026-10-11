@@ -1,0 +1,60 @@
+name: Suppression lifecycle, honest phase ownership and finding/report consumers
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 25 Rule managed observation | initial-review
+paste-file: @ART/add-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART added
+submit: findings
+require-live-snap: 25 I suppressed | suppressed-review
+nav-mode:
+keys: Down
+require-live-snap: 25 F-0002 · needs_review | selected-suppressed-finding
+expect: claim · suppressed
+expect-not: refuted
+ask: Does the shared tool result reach Review while retaining both observations, the independent human dismissal and the source identity?
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+resize: 40x12
+live-snap: review-40x12
+ask: Is the changed finding state readable and reachable at all six sizes without creating a replacement phase result or hiding the observation?
+resize: 120x36
+submit: run suppress:list {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART listed
+require-live-snap: 25 I suppressed | list-rules
+submit: run suppress:remove {"rule_id":"owned-rule"}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART removed
+require-live-snap: 25 I unverified | removed-rule
+paste-file: @ART/add-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART readded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART expire
+submit: run suppress:list {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART expired
+require-live-snap: 25 I unverified | reconciled-expiry
+ask: Does removing or expiring a rule reopen only its managed observation, preserve the human dismissal and retain the analysis source for Report?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-restart
+submit: findings
+require-live-snap: 25 Rule managed observation | recovered-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/suppression_modules.py @TMP_TARGET @ART restarted
+submit: run suppress:remove {}
+require-live-snap: 25 requires option id | missing-rule-id
+ask: Does restart retain the reopened finding and human dismissal, and does missing input fail without a model request or new observation?
+keys: C-u C-c
+require-exit: 10

@@ -1,0 +1,85 @@
+name: Check an exact edited context and preserve history across source changes
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks secret-scan
+submit: scan batch
+require-live-snap: 20 PLAN A STUDY | study
+keys: Down Down Down Enter Down Enter
+require-live-snap: 25 Operator-owned fixture overview | edited-context
+expect: c check
+expect: Space actions
+keys: Space
+require-live-snap: 20 CONTEXT ACTIONS | actions
+resize: 160x48
+live-snap: actions-160x48
+resize: 96x89
+live-snap: actions-96x89
+resize: 80x24
+live-snap: actions-80x24
+resize: 60x20
+live-snap: actions-60x20
+resize: 40x12
+live-snap: actions-40x12
+keys: Down Down Down Down Down Down
+require-live-snap: 20 ▸ Tab Read complete document | final-action-40x12
+ask: Are all seven context actions reachable at each size, with a clear selected action and working keyboard/back controls at 40x12?
+keys: Escape
+require-live-snap: 20 CHOOSE STUDY CONTEXT | browser-40x12
+expect: c check
+expect: Space actions
+ask: Do narrow context controls expose source checking and the complete actions menu without clipping, while retaining the selected context?
+resize: 120x36
+keys: Space Down Down Enter
+require-live-snap: 30 Enter inspects the saved check | saved-check
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART saved
+ask: Does checking save an inactive revision with an honest structural verdict and explicit inspection/use steps, while preserving the original context, active context and source?
+keys: a
+require-live-snap: 20 Inspect this exact revision | use-before-inspection
+keys: Enter
+require-live-snap: 25 Operator-owned fixture overview | inspected-check
+keys: a
+require-live-snap: 20 Context selected for this study | selected-check
+keys: L
+require-live-snap: 30 Draft ready | finite-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART plan
+keys: Enter Enter
+require-live-snap: 25 Operator-owned fixture overview | reopened-check
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART dirty
+keys: c
+require-live-snap: 30 source content changed | dirty-stop
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART dirty-stopped
+ask: Does a same-SHA content change visibly stop checking, preserve historical context and publish no new checked revision or jobs?
+keys: Escape
+require-live-snap: 20 CHOOSE STUDY CONTEXT | dirty-context-kept
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART sha
+keys: c
+require-live-snap: 30 source revision changed | sha-stop
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART sha-stopped
+ask: Does a new SHA with identical content stop rebinding too, and keep the earlier source reference without claiming a fix?
+keys: Escape
+require-live-snap: 20 CHOOSE STUDY CONTEXT | historical-context-kept
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MODEL=openai-codex:gpt-5.5
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+nav-mode:
+keys: a
+require-live-snap: 20 PLAN A STUDY | recovered-study
+keys: Down Down Down Enter Enter
+require-live-snap: 25 Operator-owned fixture overview | recovered-context
+expect: Source drift at inspection: SHA changed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_check.py @TMP_TARGET @ART plan
+ask: Does a fresh no-color process recover the exact checked historical revision for the saved unapproved three-pass plan, with source drift disclosed and all work unstarted?
+keys: C-c
+require-exit: 10

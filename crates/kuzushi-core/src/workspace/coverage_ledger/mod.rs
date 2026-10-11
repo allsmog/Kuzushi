@@ -1,8 +1,7 @@
-//! Coverage ledger: the durable record of what was scanned, at which
-//! revision, by which phase. Rows are written only from persisted run
-//! summaries (receipt-backed truth), so coverage can never claim more than
-//! the run artifacts prove. Sweep and the scan recommender read this store;
-//! nothing else writes it.
+//! Historical scope/phase Git baseline records from completed run summaries.
+//! These legacy rows do not identify exact source content, accepted context or
+//! complete scan scope. A sweep compares tracked source and may add explicit
+//! sweep-skip records; neither operation establishes coverage or a finding fix.
 
 mod guards;
 mod schema;
@@ -16,7 +15,8 @@ pub use guards::{guard_conflict, GuardRow};
 pub use store::{BaselineRow, CoverageLedger};
 pub use summary_intake::record_baseline_from_summary;
 pub use sweep::{
-    sweep_target, write_sweep_skips, ScopeSweepEntry, SweepReport, SweepVerdict, SWEEP_RUN_ID,
+    sweep_target, write_sweep_skips, ScopeSweepEntry, SourceCheckIssue, SweepReport, SweepVerdict,
+    SWEEP_RUN_ID,
 };
 
 use std::path::{Path, PathBuf};

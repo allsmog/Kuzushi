@@ -14,7 +14,7 @@ pub(super) fn unassessed() -> CatalogReadiness {
 
 pub(super) fn action_readiness(app: &ShellApp, spec: CapabilityActionSpec) -> CatalogReadiness {
     if app.target().is_none() {
-        return hint("TARGET REQUIRED", "Enter selects a target");
+        return hint("TARGET REQUIRED", "target <path> selects a repository");
     }
     let Some(tool) = spec.required_tool else {
         return navigation_hint(spec.command);
@@ -41,23 +41,24 @@ fn model_hint(app: &ShellApp, tool: &str, input: &serde_json::Value) -> CatalogR
     if model.is_none_or(|value| value.trim().is_empty()) {
         return hint("MODEL REQUIRED", "model selects a model");
     }
-    if kuzushi_core::runtime::resolve_explicit_model(
+    let Ok(model) = kuzushi_core::runtime::resolve_explicit_model(
         tool,
         inline_model.map(str::to_string),
         app.config().model.as_deref(),
-    )
-    .is_err()
-    {
+    ) else {
         return hint("MODEL CONFIG", "model selects a valid model");
+    };
+    if kuzushi_core::runtime::bind_model_auth(&model, &app.config().runtime.api_key_env).is_err() {
+        return hint("RUNTIME CONFIG", "doctor checks model and runtime");
     }
     hint("REVIEW INPUTS", &format!("options {tool}"))
 }
 
 fn navigation_hint(command: &str) -> CatalogReadiness {
     match command {
-        "next" | "scan" => hint("REVIEW PLAN", "Enter loads the planner command"),
-        "findings" => hint("OPEN REVIEW", "Enter loads the review command"),
-        _ => hint("REVIEW INPUTS", "Enter loads an editable command"),
+        "next" | "scan" => hint("REVIEW PLAN", "Review the plan before starting work"),
+        "findings" => hint("OPEN REVIEW", "findings opens the review queue"),
+        _ => hint("REVIEW INPUTS", "Review inputs before submitting"),
     }
 }
 

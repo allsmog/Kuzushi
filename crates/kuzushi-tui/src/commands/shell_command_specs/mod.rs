@@ -195,6 +195,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "catalog" | "modules" | "m" => Some(ShellCommand::Modules),
         "recommend" | "rec" => Some(ShellCommand::Recommend),
+        "recommendations" => Some(ShellCommand::RecommendationReport),
         "tune" | "t" => Some(ShellCommand::Tune),
         "prompts" => Some(ShellCommand::Prompts),
         "tasks" => Some(ShellCommand::Tasks),

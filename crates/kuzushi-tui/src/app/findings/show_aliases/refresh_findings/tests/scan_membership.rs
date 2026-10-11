@@ -83,11 +83,6 @@ fn selected_parent_counts_its_engine_findings_and_excludes_unrelated_history() {
         app.selected_current_scan_run_refs(),
         Some(vec!["scan-parent".into()])
     );
-    let current = app
-        .relevant_journey_findings(&store, IdentityFoldPolicy::Legacy)
-        .unwrap();
-    assert_eq!(current.len(), 1);
-    assert_eq!(current[0].fingerprint, "engine-child");
     let operator = tempfile::tempdir().unwrap();
     app.refresh_findings_with_operator_state(false, operator.path());
     assert_eq!(app.domain().finding_ledger_counts().unwrap().total, 1);

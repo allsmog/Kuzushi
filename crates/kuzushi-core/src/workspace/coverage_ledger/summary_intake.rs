@@ -5,11 +5,11 @@ use crate::workspace::ROOT_SCOPE_ID;
 use anyhow::Result;
 use std::path::Path;
 
-/// Record a coverage baseline from a persisted run summary.
+/// Record historical Git metadata from a persisted run summary.
 ///
-/// Receipt-backed and success-only: anything short of a `completed` summary
-/// carrying git provenance and a phase-bearing tool writes nothing, so the
-/// ledger can never claim more coverage than the run artifacts prove.
+/// Only completed phase-bearing summaries with Git provenance are recorded.
+/// Legacy rows do not validate selected scope, exact content or accepted
+/// context; callers must not interpret them as complete coverage receipts.
 pub fn record_baseline_from_summary(
     target: &Path,
     summary: &RunSummary,
@@ -46,7 +46,5 @@ fn summary_phase(summary: &RunSummary) -> Option<WorkflowPhase> {
 }
 
 fn baseline_timestamp(summary: &RunSummary) -> i64 {
-    summary
-        .completed_at_unix
-        .unwrap_or(summary.started_at_unix) as i64
+    summary.completed_at_unix.unwrap_or(summary.started_at_unix) as i64
 }

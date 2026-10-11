@@ -18,7 +18,7 @@ impl OauthCredentialStatus {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Ready => "stored; value hidden",
-            Self::Refreshable => "refreshable; refresh on next call",
+            Self::Refreshable => "access expired; refresh attempted on use",
             Self::Environment => "environment token; value hidden",
             Self::Missing => "missing",
             Self::Invalid => "invalid",

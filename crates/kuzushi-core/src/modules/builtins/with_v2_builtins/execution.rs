@@ -325,7 +325,7 @@ impl ModuleRegistry {
             return Ok(input);
         };
         let input = validate_tool_input_options(tool, input)?;
-        crate::modules::allowance_dispatch::validate_reference(&input)?;
+        crate::modules::allowance_dispatch::validate_tool_reference(tool, &input)?;
         validate_tool_prompt_inputs(tool, &input)?;
         Ok(input)
     }
@@ -570,6 +570,7 @@ impl ModuleRegistry {
         let executor_input = crate::modules::allowance_dispatch::executor_input(input);
         let mut output = executor(self, name, &executor_input, ctx, runtime)
             .map(|output| normalize_tool_output_contract(name, output))?;
+        bind_cost_data_scope(self.resolve_tool(name), &mut output)?;
         crate::modules::allowance_dispatch::attach_result_reference(input, &mut output)?;
         if let Some(traced) = traced_runtime.as_ref() {
             crate::module_result::backfill_estimated_cost(&mut output, traced.observed_spend());
@@ -621,6 +622,46 @@ impl ModuleRegistry {
         anyhow::bail!(
             "{name} requires an agent runtime; configure a model/runtime before running it"
         )
+    }
+}
+
+fn bind_cost_data_scope(descriptor: Option<&ToolDescriptor>, output: &mut Value) -> Result<()> {
+    let Some(object) = output.as_object_mut() else {
+        return Ok(());
+    };
+    object.remove("dataCostScope");
+    let Some(descriptor) = descriptor.filter(|tool| tool.cost_data_projection) else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        descriptor.runtime_requirement == crate::modules::RuntimeRequirement::Never,
+        "Historical cost projections require a runtime-free tool"
+    );
+    object.insert("dataCostScope".into(), Value::String("projection".into()));
+    Ok(())
+}
+
+#[cfg(test)]
+mod cost_projection_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn projection_scope_is_owned_by_the_resolved_descriptor() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut output =
+            json!({"dataCostScope":"projection","data":{"providerSpendUnresolved":true}});
+        bind_cost_data_scope(registry.resolve_tool("sast:scan"), &mut output).unwrap();
+        assert!(output.get("dataCostScope").is_none());
+        assert!(crate::run_artifacts::tool_run_output_cost_report(&output).is_err());
+        bind_cost_data_scope(registry.resolve_tool("campaign:status"), &mut output).unwrap();
+        assert_eq!(output["dataCostScope"], "projection");
+        assert!(crate::run_artifacts::tool_run_output_cost_report(&output)
+            .unwrap()
+            .is_unavailable());
+        let mut invalid = registry.resolve_tool("campaign:status").unwrap().clone();
+        invalid.runtime_requirement = crate::modules::RuntimeRequirement::Always;
+        assert!(bind_cost_data_scope(Some(&invalid), &mut output).is_err());
     }
 }
 

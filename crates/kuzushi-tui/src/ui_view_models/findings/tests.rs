@@ -9,6 +9,29 @@ use kuzushi_core::{
 use std::collections::BTreeMap;
 
 #[test]
+fn rule_suppression_label_does_not_invent_a_human_false_positive_decision() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut finding = Finding::new_semgrep(
+        "owned/note",
+        "reader.rs",
+        1,
+        None,
+        Severity::Info,
+        "Owned rule observation",
+    );
+    finding.suppressed = true;
+    app.set_findings(vec![finding]);
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].proof_confidence_label, "suppressed");
+    assert_eq!(model.rows[0].decision, "needs_review");
+    assert_ne!(model.rows[0].decision_author, "human");
+}
+
+#[test]
 fn visible_projection_cache_reuses_shared_storage_until_findings_change() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_findings(vec![Finding::new_semgrep(

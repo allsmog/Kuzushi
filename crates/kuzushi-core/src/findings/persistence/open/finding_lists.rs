@@ -109,6 +109,29 @@ impl FindingStore {
         projected.sort_by(super::v3_finding_reads::finding_list_order);
         self.hydrate_v3_findings(projected)
     }
+
+    pub(in crate::findings) fn matching_findings_for_page(
+        &self,
+        filter: &FindingListFilter,
+        policy: IdentityFoldPolicy,
+    ) -> Result<FindingListReport> {
+        let mut complete_filter = filter.clone();
+        complete_filter.limit = usize::MAX;
+        collect_filtered_findings(
+            self,
+            self.policy_projected_findings(policy)?,
+            &complete_filter,
+        )
+    }
+
+    pub fn finding_for_alias_with_identity_policy(
+        &self,
+        alias: &str,
+        policy: IdentityFoldPolicy,
+    ) -> Result<Option<Finding>> {
+        let findings = self.policy_projected_findings(policy)?;
+        Ok(crate::findings::resolve_finding_alias(&findings, alias))
+    }
 }
 
 fn collect_filtered_findings(

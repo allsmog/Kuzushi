@@ -14,6 +14,9 @@ impl ShellApp {
         changed |= self.advance_scene(now);
         changed |= self.reload_operator_keymap(now);
         changed |= self.drain_core_runtime_diagnostics();
+        changed |= self.poll_campaign_completion();
+        changed |= self.poll_relationship_write();
+        changed |= self.poll_lesson_write();
         changed
     }
 
@@ -120,6 +123,8 @@ impl ShellApp {
         let tool_running = self.tool_is_running();
         let agent_running = self.agent_chat().is_some_and(|agent| agent.running);
         self.jobs().has_running_job()
+            || self.runtime_state.relationship_write.is_some()
+            || self.runtime_state.lesson_write.is_some()
             || scan_running
             || tool_running
             || agent_running

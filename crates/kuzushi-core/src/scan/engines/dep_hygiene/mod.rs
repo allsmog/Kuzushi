@@ -24,6 +24,7 @@ pub(crate) use textual_cvss_severity::*;
 mod analyze_package_json;
 mod analyze_pep508;
 mod analyze_pyproject_toml;
+mod cargo_audit_probe;
 mod dep_hygiene_scanners;
 mod id;
 mod output;

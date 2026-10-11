@@ -9,7 +9,9 @@ use serde_json::json;
 
 mod generation;
 mod input;
+mod origin;
 pub use generation::scope_proposal_study_input;
+pub use origin::ScopeStudyOriginV1;
 mod diagnosis;
 mod map_result;
 mod preparation;
@@ -25,6 +27,10 @@ const KIND: &str = "context-study";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextStudyReceipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief_guidance: Option<super::BriefGuidanceV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_study_origin: Option<ScopeStudyOriginV1>,
     #[serde(default = "generation::default_tool")]
     pub generation_tool: String,
     pub campaign_id: String,
@@ -45,23 +51,19 @@ pub fn execute_context_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         .root();
     let registry = ModuleRegistry::with_v2_builtins();
     let tool = generation::selected(input["generationTool"].as_str())?;
-    let prepared = generation::prepare(
-        tool,
-        input
-            .get("contextInput")
-            .context("contextInput is required")?,
-        ctx,
-        &registry,
-    )?;
+    let guided = super::brief::prepare_guided_input(root, input, tool)?;
+    let prepared = generation::prepare(tool, &guided, ctx, &registry)?;
     let preparation = preparation::prepare_jobs(input.get("preparationJobs"), ctx, &registry)?;
-    generation::validate_preparation(tool, &preparation)?;
+    generation::validate_preparation(tool, &prepared, &preparation)?;
     let id =
         string_input(input, &["campaignId"]).unwrap_or_else(|| crate::new_run_id("context-study"));
     validate_scan_batch_id(&id)?;
     let investigation = input["investigationId"]
         .as_str()
         .context("investigationId is required")?;
-    let document = plan_document(&id, investigation, tool, prepared, &preparation, ctx)?;
+    let mut document = plan_document(&id, investigation, tool, prepared, &preparation, ctx)?;
+    origin::attach(&mut document, input, ctx)?;
+    super::brief::attach(root, &mut document, input)?;
     let receipt = receipt_from_plan(&id, &document)?;
     let directory = campaign_dir(root, &id);
     std::fs::create_dir_all(campaigns_dir(root))?;
@@ -124,9 +126,11 @@ fn receipt_from_plan(id: &str, plan: &Value) -> Result<ContextStudyReceipt> {
     let context_job = jobs.last().unwrap();
     let preparation_jobs = preparation::read_jobs(&jobs[..jobs.len() - 1])?;
     validate_generation_job(plan, context_job, tool)?;
-    generation::validate_preparation(tool, &preparation_jobs)?;
+    generation::validate_preparation(tool, &context_job["input"], &preparation_jobs)?;
     generation::validate(tool, &context_job["input"])?;
     Ok(ContextStudyReceipt {
+        brief_guidance: super::brief::guidance_receipt(plan)?,
+        scope_study_origin: origin::read(plan, &context_job["input"])?,
         generation_tool: tool.into(),
         campaign_id: id.into(),
         investigation_id: required_text(plan, "investigationId")?,

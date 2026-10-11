@@ -1,11 +1,29 @@
 use super::*;
 use crate::ui_view_models::{setup_readiness_model, SetupReadinessRow, SetupReadinessTone};
 
+mod details;
+mod overview;
+pub(crate) use details::setup_detail_scroll;
+
 pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if app.budget_editor_open() {
         return super::budget_editor::budget_editor_lines(app, area);
     }
     let model = setup_readiness_model(app);
+    if app.router.setup().editor() == Some(crate::app::SetupEditor::Details) {
+        return details::detail_lines(app, &model, area);
+    }
+    if overview::needs_dense_overview(app, &model, area) {
+        return overview::dense_lines(app, &model, area);
+    }
+    expanded_setup_lines(app, &model, area)
+}
+
+fn expanded_setup_lines(
+    app: &ShellApp,
+    model: &crate::ui_view_models::SetupReadinessModel,
+    area: Rect,
+) -> Vec<Line<'static>> {
     let width = area.width as usize;
     let compact = area.width < 72;
     let mut lines = vec![divider("SETUP · READY THE MAP RUN", area.width)];
@@ -18,7 +36,7 @@ pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
     lines.extend(setup_readiness_lines(app, &model.rows, width, compact));
     lines.push(blank());
-    lines.extend(setup_summary_lines(&model, width));
+    lines.extend(setup_summary_lines(model, width));
     lines
 }
 
@@ -73,11 +91,9 @@ fn setup_selected_row_detail(
     compact: bool,
 ) -> Vec<Line<'static>> {
     let prefix = if compact { "    why · " } else { "    " };
-    let limit = if compact { 2 } else { usize::MAX };
     let detail = compact_setup_detail(row, compact);
     wrap_text(&format!("{prefix}{detail}"), width)
         .into_iter()
-        .take(limit)
         .map(|line| muted(&line))
         .collect()
 }
@@ -214,6 +230,7 @@ fn setup_row_line(
 ) -> Line<'static> {
     let glyph = match row.tone {
         SetupReadinessTone::Ready => "✓",
+        SetupReadinessTone::Attention => "!",
         SetupReadinessTone::Optional => "·",
         SetupReadinessTone::Blocked => "!",
         SetupReadinessTone::Action => " ",
@@ -230,6 +247,74 @@ fn setup_row_line(
 mod tests {
     use super::*;
     use kuzushi_core::{V2Config, WorkspaceTarget};
+    mod reading;
+
+    #[test]
+    fn short_setup_keeps_start_visible_when_context_import_is_selected() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(root.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        app.engagement
+            .planning_picker_mut()
+            .selected_mut()
+            .insert(crate::app::PlanningTaskId::ImportThreatModel);
+        app.engagement.set_option_override(
+            crate::app::PlanningTaskId::ImportThreatModel,
+            "path".into(),
+            serde_json::json!(".kuzushi/manual-context.json"),
+        );
+        app.router.setup_mut().set_cursor(2);
+        app.set_viewport(crate::TerminalViewport::new(40, 12));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 12)).unwrap();
+        terminal
+            .draw(|frame| crate::renderer::render_app(frame, &app))
+            .unwrap();
+        let text = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(text.contains("Context import"), "{text}");
+        assert!(
+            text.contains("Start Map"),
+            "the main action is hidden: {text}"
+        );
+    }
+
+    #[test]
+    fn compact_credentials_keep_the_complete_reason_and_attention_marker() {
+        let row = SetupReadinessRow {
+            id: crate::app::SetupRowId::Credentials,
+            label: "Credentials",
+            status: "OAuth refresh required".into(),
+            detail: "Stored access token expired. Runtime must refresh it before a model request; refresh success is unverified.".into(),
+            tone: SetupReadinessTone::Attention,
+            blocker: None,
+        };
+        let lines = setup_selected_row_detail(&row, 40, true);
+        let text = lines
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("refresh success is unverified"));
+        let marker = setup_row_line(&row, true, 40, true);
+        let text = marker
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(text.contains('!') && !text.contains('✓'));
+    }
 
     #[test]
     fn setup_projection_stays_readable_at_compact_and_wide_sizes() {
@@ -418,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_setup_wraps_the_selected_reason_instead_of_ellipsizing_it() {
+    fn compact_setup_retains_the_action_and_offers_the_complete_selected_reason() {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -431,9 +516,17 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
 
-        assert!(text.contains("why · the selected Map plan is"), "{text}");
-        assert!(text.contains("deterministic/runtime-free"), "{text}");
         assert!(text.contains("Start Map"), "{text}");
+        app.router
+            .setup_mut()
+            .begin_editor(crate::app::SetupEditor::Details);
+        let detail = setup_lines(&app, Rect::new(0, 0, 40, u16::MAX))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(detail.contains("the selected Map plan is"), "{detail}");
+        assert!(detail.contains("deterministic/runtime-free"), "{detail}");
     }
 
     #[test]
@@ -602,13 +695,12 @@ mod tests {
         .unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        app.set_shell_view(crate::ShellView::Config);
+        app.open_setup();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while app.active_target_facts().is_none() && std::time::Instant::now() < deadline {
             app.apply_target_candidate_discovery_results();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        app.open_setup();
         (target, app)
     }
 }

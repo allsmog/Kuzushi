@@ -2,7 +2,10 @@
 use super::*;
 use crate::{allowance::ProviderRunUsage, run_artifacts::RunSummary};
 use serde::{Deserialize, Serialize};
+pub(super) mod campaign_baseline;
+pub(super) mod campaign_preview;
 pub(super) mod catalogue;
+pub(super) mod study_catalogue;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,6 +1,7 @@
 use super::*;
 
 mod allowance;
+mod brief;
 
 pub(crate) fn campaign_module() -> BuiltinModule {
     builtin_module(
@@ -9,6 +10,7 @@ pub(crate) fn campaign_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Plan and track multi-job scan campaigns over threat-model, shard, and model axes.",
         vec![
+            brief::tool(),
             allowance::study_tool(),
             allowance::context_study_tool(),
             allowance::context_map_tool(),
@@ -25,13 +27,15 @@ pub(crate) fn campaign_module() -> BuiltinModule {
             // decisions) folds identically headless and in the shell — same
             // requirement `campaign:coverage` carries.
             campaign_status_tool().with_policy(workspace_policy(
-                ToolPhase::Map,
+                ToolPhase::Operate,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             )),
-            campaign_coverage_tool().with_policy(workspace_policy(
-                ToolPhase::Map,
+            campaign_coverage_tool().with_policy(tool_policy(
+                ToolPhase::Operate,
                 RuntimeRequirement::Never,
+                ToolEffect::Read,
+                WorkspaceRequirement::Required,
                 FindingStoreRequirement::Required,
             )),
         ],
@@ -42,20 +46,19 @@ pub(crate) fn campaign_module() -> BuiltinModule {
 fn campaign_plan_tool() -> ToolDescriptor {
     tool_with_options(
         "campaign:plan",
-        "Deterministically cross the threat model (or a modelsDir of subsystem \
+        "Compatibility shard planner. Prefer campaign:study for accepted scope and finite investigation approval. Deterministically cross the threat model (or a modelsDir of subsystem \
          models) with the shard manifest and optional model list into a ranked \
          job matrix at .kuzushi/v3/campaigns/<id>/plan.json, with one seasoned \
          prompt file per threat-scoped job. No model calls.",
         campaign_plan_options(),
-    )
+    ).with_discovery_maturity(ModuleMaturity::Compatibility)
 }
 
 fn campaign_plan_options() -> Vec<OptionSpec> {
     let mut options = vec![
         opt("campaignId", OptionType::String, "Campaign identifier.")
             .aliases(&["campaign_id", "id"]),
-        opt("tool", OptionType::String, "Tool each planned job runs.")
-            .default(json!("sast:scan")),
+        opt("tool", OptionType::String, "Tool each planned job runs.").default(json!("sast:scan")),
         opt(
             "shards",
             OptionType::StringList,
@@ -130,10 +133,9 @@ fn campaign_plan_shape_options() -> Vec<OptionSpec> {
 fn campaign_coverage_tool() -> ToolDescriptor {
     tool_with_options(
         "campaign:coverage",
-        "Coverage matrix: shards × threat sources with per-cell campaign \
-         progress and per-shard finding counts. Read-only; no model calls.",
+        "Compatibility shard-progress matrix. Accepted scope studies use their investigation report. Counts historical job progress, not repository coverage. Read-only; no model calls.",
         vec![],
-    )
+    ).with_discovery_maturity(ModuleMaturity::Compatibility)
 }
 
 fn campaign_status_tool() -> ToolDescriptor {
@@ -148,4 +150,5 @@ fn campaign_status_tool() -> ToolDescriptor {
         )
         .aliases(&["campaign_id", "id"])],
     )
+    .with_cost_data_projection()
 }

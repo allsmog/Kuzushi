@@ -134,7 +134,7 @@ fn resource_detail(state: &ScopeReviewState) -> Vec<String> {
     let draft = &review.record.draft;
     vec![format!("Boundaries: {} primary scopes. Shared discovery: {}.", draft.scopes.len(), draft.shared_discovery),
         "Study context, local overrides, passes and model are reviewed in each study.".into(),
-        "Scope acceptance does not approve jobs or spending. p plans the selected accepted boundary. Other studies remain separate; each has its own resource estimate.".into(),
+        "Scope acceptance does not approve jobs or spending. Space marks discovery boundaries; p reviews one finite study for the marked set, or the focused boundary when none are marked. Other boundaries stay unplanned.".into(),
         "Shared context adds no discovery unless explicitly selected.".into()]
 }
 
@@ -162,6 +162,8 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
         7 => "Replace division with a whole-repository boundary. Existing explicit exclusions stay recorded. No scan starts.",
         8 => "Review coverage limitations, duplicate discovery and exclusions before accepting the exact scope revision.",
         10 => "Plan discovery for the selected accepted boundary. The study keeps your engine choices and defaults to three passes and one worker. Other scopes remain unplanned. Draft preparation rechecks source and engine support; allowance approval and starting jobs are separate actions.",
+        11 => "Remove one exact recorded exclusion rule. The form starts with its path. Other exclusions stay in force, coverage is recomputed, and the new revision needs acceptance before scanning. No work starts.",
+        12 => "Request one bounded scope proposal after reviewing its model and shared allowance. No recursive subdivision or automatic follow-up requests are approved here.",
         _ => "Create a separate inventory draft for the current source. Earlier immutable revisions remain available. No model requests are made.",
     };
     let mut lines = vec![description.into()];

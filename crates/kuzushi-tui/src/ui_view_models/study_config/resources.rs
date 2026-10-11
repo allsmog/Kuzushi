@@ -1,8 +1,12 @@
 use crate::app::BatchScanConfig;
 use crate::app::ViewDataState;
 use kuzushi_core::capabilities::campaign::{ScanResourceEvidence, StudyResourceProjection};
+mod campaign_resources;
 
 pub(super) fn row_value(config: &BatchScanConfig) -> String {
+    if let Some(campaign) = &config.prior_campaign_id {
+        return format!("study {campaign}");
+    }
     let Some(prior) = config.selected_prior() else {
         return missing_selection_label(config).into();
     };
@@ -49,6 +53,44 @@ fn history_lines(config: &BatchScanConfig) -> Vec<String> {
 }
 
 fn selected_resource_lines(config: &BatchScanConfig) -> Vec<String> {
+    if let Some(lines) = campaign_resources::lines(config) {
+        return lines;
+    }
+    if config.study.scope_draft.is_some() {
+        return scope_resource_lines(config);
+    }
+    if !config.study.matrix.cases.is_empty() {
+        return matrix_resource_lines(config);
+    }
+    selected_single_resource_lines(config)
+}
+
+fn scope_resource_lines(config: &BatchScanConfig) -> Vec<String> {
+    let draft = config.study.scope_draft.as_ref().unwrap();
+    let jobs = draft.job_count();
+    let mut lines = vec![format!(
+        "{} selected boundaries · {jobs} fixed discovery jobs · {} maximum starts per job ({} starts).",
+        draft.cases.len(), config.study.max_job_attempts,
+        jobs.saturating_mul(config.study.max_job_attempts)
+    )];
+    lines.extend([
+        "Each boundary needs matching historical source, context, engine, model and runtime evidence. One boundary's usage cannot estimate its siblings.".into(),
+        "Provider requests: not estimated for this scope set. Internal turns and retries consume the shared allowance.".into(),
+        "Dollar estimate: unavailable. No dollar ceiling enforced.".into(),
+    ]);
+    lines.extend(uncalibrated_capacity_lines(config));
+    lines
+}
+
+fn uncalibrated_capacity_lines(config: &BatchScanConfig) -> Vec<String> {
+    proposed_scan_calls(config).map_or_else(
+        || vec!["Set Total calls and Protected review to compare available capacity.".into()],
+        |available| vec![format!("Under the proposed limits: {available} context/scan calls available after commitments and protected review."),
+            "This is spending capacity, not an estimate that all jobs will finish. Approve any new allowance separately.".into()],
+    )
+}
+
+fn selected_single_resource_lines(config: &BatchScanConfig) -> Vec<String> {
     let Some(prior) = config.selected_prior() else {
         if let Some(run) = &config.prior_run_id {
             return vec![format!("Recorded usage evidence {run} is unavailable. Refresh or select another completed scan; no projection.")];
@@ -85,6 +127,24 @@ fn selected_resource_lines(config: &BatchScanConfig) -> Vec<String> {
     }
     lines.push(format!("Usage evidence: {}", prior.run_id));
     lines.extend(identity_lines(evidence));
+    lines
+}
+
+fn matrix_resource_lines(config: &BatchScanConfig) -> Vec<String> {
+    let mut lines = vec![format!("{} fixed discovery jobs across {} explicit contexts.",config.study.matrix.planned_jobs(),config.study.matrix.cases.len()),
+        "Cases can consume different amounts. Each fresh pass can make multiple requests; internal turns and retries share the investigation allowance.".into(),
+        "No calibrated whole-matrix estimate. A historical pass is usage evidence for its own conditions only.".into(),
+        "Dollar consumption: unknown without complete price receipts. A dollar ceiling is not enforced; approve call limits and protected review explicitly.".into()];
+    if let Some(evidence) = config
+        .selected_prior()
+        .and_then(|prior| match &prior.evidence {
+            ViewDataState::Ready(Ok(evidence)) => Some(evidence),
+            _ => None,
+        })
+    {
+        lines.extend(historical_lines(evidence));
+    }
+    lines.extend(uncalibrated_capacity_lines(config));
     lines
 }
 

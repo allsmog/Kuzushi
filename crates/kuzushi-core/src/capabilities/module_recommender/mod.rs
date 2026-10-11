@@ -1,7 +1,7 @@
 use crate::attack_surface::{build_attack_surface_map_from_inventory, AttackSurfaceMap};
 use crate::findings::{Finding, FindingStore, Severity};
 use crate::modules::ToolExecutionContext;
-use crate::repository_inventory::{build_repository_inventory, RepositoryInventory};
+use crate::repository_inventory::RepositoryInventory;
 use crate::runtime::AgentRuntime;
 use crate::threat_model::{persistent_threat_model_path, try_load_persistent_threat_model};
 use crate::workspace::WorkspaceTarget;
@@ -15,8 +15,10 @@ mod adapters;
 mod application;
 mod component_classify;
 mod domain;
+mod inventory_coverage;
 mod model_ranking;
 mod rule_catalog;
+mod proposal_history;
 mod threat_model_signals;
 #[cfg(test)]
 mod tests;
@@ -26,4 +28,4 @@ pub(crate) use application::build_recommendation_report_ranked;
 #[cfg(test)]
 pub(crate) use application::build_recommendation_report;
 pub(crate) use domain::*;
-pub(crate) use model_ranking::ModelRanking;
+pub(crate) use model_ranking::{model_ranking_enabled, ModelRanking};

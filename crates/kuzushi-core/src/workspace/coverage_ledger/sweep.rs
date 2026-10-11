@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
+mod git;
 
 /// Run identity recorded on `sweep-skip` baseline rows. There is no run
 /// receipt behind such a row; its evidence is the deterministic whole-repo
@@ -21,9 +21,18 @@ pub enum SweepVerdict {
     Changed { files: usize },
     /// Whole-repo diff shows no change under the scope since the baseline.
     Current,
-    /// The baseline SHA is not reachable in the target's history (rebase,
-    /// force-push, shallow clone): the only honest answer is a fresh scan.
+    /// Git cannot compare the baseline revision with the current commit.
     BaselineUnreachable,
+    /// Commit metadata cannot identify the exact source represented by this row.
+    SourceUnverified { reason: SourceCheckIssue },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceCheckIssue {
+    DirtyWorkingTree,
+    DirtyBaseline,
+    ScopeUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -41,8 +50,8 @@ pub struct ScopeSweepEntry {
 pub struct SweepReport {
     pub head: RunTargetGitMetadata,
     pub entries: Vec<ScopeSweepEntry>,
-    /// Scopes present in the nested-scope tree with no ledger baseline at
-    /// all — never scanned, so `no-baseline` means "full scan seeds it".
+    /// Root or nested scopes with no ledger baseline. Absence is not proof
+    /// that no scan has ever been attempted.
     pub unbaselined_scopes: Vec<String>,
 }
 
@@ -51,16 +60,21 @@ pub struct SweepReport {
 /// whole-repo and filtered per scope afterwards — a pathspec-limited diff
 /// can silently advance baselines past unscanned changes.
 pub fn sweep_target(target: &Path) -> Result<SweepReport> {
-    let head = crate::workspace::target_git_metadata(target)
-        .context("sweep requires a git repository target")?;
-    let ledger = CoverageLedger::open(target)?;
-    let baselines = ledger.latest_baselines()?;
+    let head = git::metadata(target)?;
+    let baselines = match CoverageLedger::open_if_exists(target)? {
+        Some(ledger) => ledger.latest_baselines()?,
+        None => Vec::new(),
+    };
     let scope_paths = scope_path_index(target)?;
     let mut diffs = DiffCache::new(target, &head.sha);
     let entries = baselines
         .iter()
         .map(|row| sweep_entry(row, &head, &scope_paths, &mut diffs))
         .collect::<Result<Vec<_>>>()?;
+    anyhow::ensure!(
+        git::metadata(target)? == head,
+        "source changed during baseline inspection; run coverage:sweep again"
+    );
     Ok(SweepReport {
         unbaselined_scopes: unbaselined_scopes(&scope_paths, &baselines),
         head,
@@ -76,12 +90,22 @@ pub fn write_sweep_skips(target: &Path, report: &SweepReport) -> Result<usize> {
         !report.head.dirty,
         "refusing --write-skips on a dirty tree; commit or stash first"
     );
+    anyhow::ensure!(
+        sweep_target(target)? == *report,
+        "source or baseline state changed; run coverage:sweep again before writing skips"
+    );
     let ledger = CoverageLedger::open(target)?;
+    let transaction = ledger.connection().unchecked_transaction()?;
     let mut written = 0;
     for entry in current_entries_behind_head(report) {
         ledger.record_baseline(&sweep_skip_row(entry, &report.head)?)?;
         written += 1;
     }
+    anyhow::ensure!(
+        git::metadata(target)? == report.head,
+        "source changed while writing sweep skips; no skip rows were committed"
+    );
+    transaction.commit()?;
     Ok(written)
 }
 
@@ -126,6 +150,9 @@ fn sweep_verdict(
     scope_paths: &BTreeMap<String, String>,
     diffs: &mut DiffCache<'_>,
 ) -> Result<SweepVerdict> {
+    if let Some(reason) = source_check_issue(row, head, scope_paths) {
+        return Ok(SweepVerdict::SourceUnverified { reason });
+    }
     if row.revision.sha == head.sha {
         return Ok(SweepVerdict::Current);
     }
@@ -137,6 +164,21 @@ fn sweep_verdict(
         0 => SweepVerdict::Current,
         files => SweepVerdict::Changed { files },
     })
+}
+
+fn source_check_issue(
+    row: &BaselineRow,
+    head: &RunTargetGitMetadata,
+    scope_paths: &BTreeMap<String, String>,
+) -> Option<SourceCheckIssue> {
+    if head.dirty {
+        return Some(SourceCheckIssue::DirtyWorkingTree);
+    }
+    if row.revision.dirty {
+        return Some(SourceCheckIssue::DirtyBaseline);
+    }
+    (row.scope_id != ROOT_SCOPE_ID && !scope_paths.contains_key(&row.scope_id))
+        .then_some(SourceCheckIssue::ScopeUnavailable)
 }
 
 fn scope_prefix<'index>(
@@ -164,14 +206,16 @@ fn file_under_prefix(file: &str, prefix: &str) -> bool {
 }
 
 fn scope_path_index(target: &Path) -> Result<BTreeMap<String, String>> {
+    let mut paths = BTreeMap::from([(ROOT_SCOPE_ID.to_string(), ".".to_string())]);
     let Some(tree) = load_nested_project_scopes(target)? else {
-        return Ok(BTreeMap::new());
+        return Ok(paths);
     };
-    Ok(tree
-        .scopes
-        .into_iter()
-        .map(|scope| (scope.id, scope.rel_path))
-        .collect())
+    paths.extend(
+        tree.scopes
+            .into_iter()
+            .map(|scope| (scope.id, scope.rel_path)),
+    );
+    Ok(paths)
 }
 
 fn unbaselined_scopes(
@@ -181,7 +225,6 @@ fn unbaselined_scopes(
     scope_paths
         .keys()
         .filter(|scope_id| !baselines.iter().any(|row| row.scope_id == **scope_id))
-        .filter(|scope_id| scope_id.as_str() != ROOT_SCOPE_ID)
         .cloned()
         .collect()
 }
@@ -216,23 +259,7 @@ impl<'target> DiffCache<'target> {
     }
 }
 
-fn whole_repo_diff(target: &Path, from: &str, to: &str) -> Result<Option<Vec<String>>> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(target)
-        .args(["diff", "--name-only", &format!("{from}..{to}")])
-        .output()
-        .context("failed to run git diff for sweep")?;
-    if !output.status.success() {
-        return Ok(None);
-    }
-    let files = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(str::to_string)
-        .collect();
-    Ok(Some(files))
-}
+use git::whole_repo_diff;
 
 fn now_unix() -> Result<i64> {
     let now = std::time::SystemTime::now()

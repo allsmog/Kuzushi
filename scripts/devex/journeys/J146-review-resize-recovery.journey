@@ -1,0 +1,103 @@
+name: Focused Review survives resize and offers exact current-observation recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finding_continuity.py @TMP_TARGET @ART prepare
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 25 rows 1-500 of 800 | first-page
+nav-mode:
+keys: C-n
+require-live-snap: 25 501-800/800 | later-page
+paste-file: @ART/open.txt
+require-live-snap: 15 open F- | open-draft
+keys: Enter
+require-live-snap: 25 recorded: confirmed | opened-source
+expect: DECISION SOURCE
+expect-echo-within: 300 retained-resize-draft
+live-snap: retained-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finding_continuity.py @TMP_TARGET @ART replace
+require-live-snap: 25 earlier observation | historical-source
+expect: open F-0601 inspect current
+expect: retained-resize-draft
+resize: 60x20
+require-live-snap: 20 SELECTED FINDING | historical-detail-60x20
+expect: earlier observation
+expect: retained-resize-draft
+resize: 40x12
+require-live-snap: 20 SELECTED FINDING | historical-detail-40x12
+expect: earlier observation
+expect: retained-resize-draft
+ask: Does narrowing preserve the historical detail and draft, with the warning distinguishing an earlier observation from a filter issue?
+keys: C-u
+nav-mode:
+keys: g
+keys: NPage
+live-snap: historical-recovery-control
+keys: q
+require-live-snap: 20 501-800/800 | narrow-list-return
+expect: Synthetic continuity candidate 0727
+expect: earlier F-0601
+resize: 120x36
+paste-file: @ART/open.txt
+require-live-snap: 15 open F- | current-inspection-draft
+keys: Enter
+require-live-snap: 25 Owned later source; never executed. | current-observation
+expect-not: shows an earlier observation
+submit: decision deferred J145 current observation deliberately deferred
+nav-mode:
+keys: g
+require-live-snap: 25 J145 current observation deliberately deferred | current-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finding_continuity.py @TMP_TARGET @ART decided
+ask: Does the displayed inspect-current command explicitly select the new observation before a decision, preserving the earlier decision?
+resize: 160x48
+require-live-snap: 20 SELECTED FINDING | current-detail-160x48
+resize: 96x89
+require-live-snap: 20 SELECTED FINDING | current-detail-96x89
+resize: 80x24
+require-live-snap: 20 SELECTED FINDING | current-detail-80x24
+resize: 60x20
+require-live-snap: 20 SELECTED FINDING | current-detail-60x20
+resize: 40x12
+require-live-snap: 20 SELECTED FINDING | current-detail-40x12
+expect: F-0601
+keys: NPage
+live-snap: current-decision-page-1
+keys: NPage
+live-snap: current-decision-page-2
+expect: recorded: deferred
+resize: 120x36
+live-snap: expanded-reading-position
+keys: g
+require-live-snap: 20 J145 current observation deliberately deferred | expanded-two-pane
+expect: 501-800/800
+keys: q
+require-live-snap: 20 501-800/800 | expanded-list-return
+ask: Does detail remain focused without an extra Enter at narrow sizes, and does expanding restore the list/detail layout with normal reading and return controls?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: findings
+require-live-snap: 25 rows 1-500 of 800 | recovered-first
+nav-mode:
+keys: C-n
+require-live-snap: 25 501-800/800 | recovered-later
+resize: 40x12
+paste-file: @ART/open.txt
+require-live-snap: 15 open F- | recovered-open-draft
+keys: Enter
+require-live-snap: 20 SELECTED FINDING | recovered-narrow-detail
+nav-mode:
+keys: NPage
+keys: NPage
+require-live-snap: 20 recorded: deferred | recovered-narrow-decision
+keys: q
+require-live-snap: 20 501-800/800 | recovered-narrow-list
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finding_continuity.py @TMP_TARGET @ART recovered
+ask: Does no-color restart retain both observations and decisions, with narrow detail and list access and no new provider or scanner work?
+keys: C-c
+require-exit: 10

@@ -63,6 +63,7 @@ pub fn execute_allowance_status(input: &Value, ctx: &ToolExecutionContext<'_>) -
         .context("allowance requires an active workspace")?;
     let snapshot = crate::SpendLimiter::read_allowance_snapshot(&workspace.findings_db_path(), id)?;
     let mut output = result(snapshot, "Investigation allowance");
+    output["data"]["target"] = serde_json::to_value(workspace.root())?;
     append_run_usage(input, id, &workspace.findings_db_path(), &mut output)?;
     Ok(output)
 }
@@ -106,10 +107,10 @@ fn open_ledger(ctx: &ToolExecutionContext<'_>) -> Result<crate::SpendLimiter> {
 
 fn result(snapshot: AllowanceSnapshot, title: &str) -> Value {
     let mut summary = format!(
-        "{title}: {} revision {} · {}\nCalls committed: {}/{} · remaining: {} · protected review remaining: {}\nUnresolved calls: {} · dollar ceiling: not enforced\nDollar charges may be unavailable. Calls include internal turns and retries. Approve any additional work separately.",
+        "{title}: {} revision {} · {}\nCalls committed: {}/{} · remaining: {} · protected review remaining: {}\nCalls available for context, scopes, scans and lessons: {}\nUnresolved calls: {} · dollar ceiling: not enforced\nDollar charges may be unavailable. Calls include internal turns and retries. Approve any additional work separately.",
         snapshot.investigation_id, snapshot.revision, snapshot.model,
         snapshot.committed_calls, snapshot.limits.max_provider_calls, snapshot.remaining_calls(),
-        snapshot.protected_review_remaining(), snapshot.unresolved_calls,
+        snapshot.protected_review_remaining(), snapshot.non_review_remaining(), snapshot.unresolved_calls,
     );
     if let Some(plan) = &snapshot.work_plan {
         summary.push_str(&format!("\nApproved campaign: {} · {} fixed jobs\nPlan digest: {}\nSource identity: {}\nStarted attempts stay consumed after failure, cancellation and restart.", plan.campaign_id, plan.jobs.len(), plan.plan_sha256, plan.source_identity));

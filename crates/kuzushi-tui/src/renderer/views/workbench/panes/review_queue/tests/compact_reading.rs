@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn suppression_label_survives_compact_and_wide_queue_rendering() {
+    let mut row = review_row();
+    row.proof_confidence = ProofConfidence::Dismissed;
+    row.proof_confidence_label = "suppressed".into();
+    row.decision = "needs_review".into();
+    row.decision_author = "-".into();
+    for width in [28, 40, 60, 80, 120, 160] {
+        let text = lines_text(populated_review_queue_pane_lines(
+            &review_model(vec![row.clone()]),
+            Rect::new(0, 0, width, 16),
+        ));
+        assert!(text.contains("suppressed"), "{width}: {text}");
+        let finding_row = text.lines().find(|line| line.contains("F-0001")).unwrap();
+        assert!(!finding_row.contains("dismissed"), "{width}: {text}");
+        assert!(!finding_row.contains("false-pos"), "{width}: {text}");
+    }
+}
+
+#[test]
 fn compact_reading_shows_both_claims_before_secondary_facets() {
     let mut first = review_row();
     first.title = "Descriptor policy allows inconsistent approval settings".into();
@@ -191,5 +210,124 @@ fn compact_reading_detail_page_keys_scroll_without_retargeting() {
         );
         assert_eq!(app.router.findings().cursor(), 0);
         assert!(!app.has_running_work());
+    }
+}
+
+fn compact_review_fixture() -> (tempfile::TempDir, crate::ShellApp) {
+    use crate::ui_view_models::PhaseSurfaceId;
+    use kuzushi_core::{Finding, Severity, V2Config};
+    let root = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(root.path()).unwrap();
+    let mut app = crate::ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
+    app.set_shell_view(crate::ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.set_findings(vec![Finding::new_semgrep(
+        "owned",
+        "source.rs",
+        1,
+        None,
+        Severity::Info,
+        "Owned reading fixture",
+    )]);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
+    (root, app)
+}
+
+fn review_screen(app: &mut crate::ShellApp, width: u16, height: u16) -> String {
+    app.set_viewport(crate::TerminalViewport::new(width, height));
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+    terminal
+        .draw(|frame| crate::renderer::render_app(frame, app))
+        .unwrap();
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn review_detail_offset(app: &crate::ShellApp) -> u16 {
+    app.router
+        .workbench()
+        .scroll()
+        .get(crate::ui_view_models::PhaseSurfaceId::ReviewDetail)
+}
+
+#[test]
+fn compact_review_reader_reserves_six_body_rows_and_pages_by_them() {
+    use crate::ui_view_models::PhaseSurfaceId;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (_root, mut app) = compact_review_fixture();
+    let plan =
+        crate::renderer::workbench_phase_plan_for_app(&app, Rect::new(0, 0, 40, 12)).unwrap();
+    let inner = crate::renderer::shared::cockpit_pane_block("detail", true)
+        .inner(plan.surface(PhaseSurfaceId::ReviewDetail).unwrap().rect);
+    assert!(
+        inner.height >= 6,
+        "only {} detail rows remain",
+        inner.height
+    );
+    assert!(
+        app.reduce_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+            .handled
+    );
+    assert_eq!(review_detail_offset(&app), inner.height);
+    assert_eq!(app.router.findings().cursor(), 0);
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn compact_review_resize_keeps_scroll_selection_and_visible_reading_keys() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (_root, mut app) = compact_review_fixture();
+    app.reduce_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    let offset = review_detail_offset(&app);
+    for (width, height) in [(60, 20), (80, 24), (96, 89), (120, 36), (160, 48), (40, 12)] {
+        review_screen(&mut app, width, height);
+        assert_eq!(review_detail_offset(&app), offset);
+        assert_eq!(app.router.findings().cursor(), 0);
+        assert_eq!(app.input_mode(), crate::InputMode::Navigate);
+    }
+    let text = review_screen(&mut app, 40, 12);
+    assert!(text.contains("PgUp/PgDn"), "{text}");
+    assert!(text.contains("q review list"), "{text}");
+}
+
+#[test]
+fn compact_review_keeps_source_errors_and_dismissal_visible() {
+    let (_root, mut app) = compact_review_fixture();
+    app.set_error_notice(
+        "source",
+        "Source evidence is unavailable; read the recorded receipt.",
+    );
+    let warning = review_screen(&mut app, 40, 12);
+    assert!(warning.contains("Esc dismiss"), "{warning}");
+    assert!(warning.contains("Source evidence"), "{warning}");
+}
+
+#[test]
+fn compact_review_resize_preserves_unsent_draft_cursor_and_reading_position() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (_root, mut app) = compact_review_fixture();
+    app.reduce_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    let offset = review_detail_offset(&app);
+    app.set_input("held review draft");
+    app.set_cursor(5);
+    app.set_input_mode(crate::InputMode::Prompt);
+    for (width, height) in [(120, 36), (40, 12)] {
+        review_screen(&mut app, width, height);
+        assert_eq!(app.input(), "held review draft");
+        assert_eq!(app.cursor(), 5);
+        assert_eq!(review_detail_offset(&app), offset);
     }
 }

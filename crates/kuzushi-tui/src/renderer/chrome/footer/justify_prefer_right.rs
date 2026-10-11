@@ -64,7 +64,8 @@ fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(St
 
 fn wrapped_binding_priority(binding: (&str, &str)) -> u8 {
     match binding {
-        ("j/k", "select") => 0,
+        ("j/k", "select") | ("↑/↓", "action") | ("Ctrl+F", "filter ledger") => 0,
+        ("Ctrl+N" | "Ctrl+P" | "Ctrl+N/P", _) => 0,
         ("Ctrl+C" | "Ctrl+G" | "Esc" | "Esc/q" | "q" | "PgUp/PgDn", _) => 0,
         ("Enter" | "Tab" | "Shift+Tab", _) => 1,
         (key, _) if looks_like_typed_command(key) => 3,
@@ -395,6 +396,26 @@ mod tests {
             keybindings_line_for_wrapped_row(bottom, 40, OverflowHint::ShowIf(overflow));
         let text = [line_text(&top), line_text(&bottom)].join("\n");
         assert!(text.contains("PgUp/PgDn scroll"), "{text}");
+        assert!(text.contains("Esc prompt"), "{text}");
+    }
+
+    #[test]
+    fn wrapped_footer_keeps_global_ledger_filter_at_40_columns() {
+        let mut bindings = vec![
+            ("Esc", "prompt"),
+            ("Ctrl+F", "filter ledger"),
+            ("Ctrl+C", "exit"),
+            ("r", "Report"),
+            ("Ctrl+G", "palette"),
+            ("Tab", "pane"),
+        ];
+        bindings.sort_by_key(|binding| wrapped_binding_priority(*binding));
+        let (top, bottom) = distribute_wrapped_bindings(bindings);
+        let (top, overflow) = keybindings_line_for_wrapped_row(top, 40, OverflowHint::Defer);
+        let (bottom, _) =
+            keybindings_line_for_wrapped_row(bottom, 40, OverflowHint::ShowIf(overflow));
+        let text = [line_text(&top), line_text(&bottom)].join("\n");
+        assert!(text.contains("Ctrl+F filter ledger"), "{text}");
         assert!(text.contains("Esc prompt"), "{text}");
     }
 

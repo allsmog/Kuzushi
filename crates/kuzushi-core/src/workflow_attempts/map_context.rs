@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::Path;
 
+mod accounting;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapRunContext {
     pub run_id: String,
@@ -18,7 +20,8 @@ pub struct MapRunContext {
 /// Never substitute target-global context for missing or damaged run evidence.
 pub fn load_map_run_context(target: &Path, run_refs: &[String]) -> Result<Option<MapRunContext>> {
     for run_id in run_refs.iter().rev() {
-        if let Some(context) = context_from_run(target, run_id)? {
+        if let Some(mut context) = context_from_run(target, run_id)? {
+            context.allowance_ref = accounting::resolve(target, &context)?;
             return Ok(Some(context));
         }
     }

@@ -120,6 +120,9 @@ impl ShellApp {
                 self.open_coverage_view();
                 Some(Vec::new())
             }
+            ShellCommand::ShowRelationships
+            | ShellCommand::ShowLessons
+            | ShellCommand::ShowFindingGroups => self.reduce_review_reader_command(command),
             ShellCommand::QueueCommand(raw) => Some(self.reduce_queue_command(raw)),
             ShellCommand::Background => {
                 self.background_handoff();
@@ -133,6 +136,16 @@ impl ShellApp {
         self.reduce_status_view_command_effect(command)
             .or_else(|| self.reduce_status_config_command_effect(command))
             .or_else(|| self.reduce_status_session_command_effect(command))
+    }
+
+    fn reduce_review_reader_command(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
+        match command {
+            ShellCommand::ShowRelationships => self.open_relationships(),
+            ShellCommand::ShowLessons => self.open_lessons(),
+            ShellCommand::ShowFindingGroups => self.open_finding_groups(),
+            _ => return None,
+        }
+        Some(Vec::new())
     }
 
     fn reduce_status_view_command_effect(
@@ -666,6 +679,14 @@ impl ShellApp {
     ) -> Option<Vec<ShellEffect>> {
         match command {
             ShellCommand::Recommend => Some(self.reduce_recommend()),
+            ShellCommand::RecommendationReport => {
+                self.workbench_cache()
+                    .borrow_mut()
+                    .invalidate_run_summaries();
+                self.invalidate_view_hydration();
+                self.set_shell_view(ShellView::Recommend);
+                Some(Vec::new())
+            }
             ShellCommand::Aim(focus) => Some(self.reduce_aim(focus)),
             ShellCommand::RunTool { tool, input } => {
                 Some(self.reduce_run_tool(tool.clone(), input.clone()))
@@ -1313,6 +1334,7 @@ impl ShellApp {
     }
 
     fn open_threat_view(&mut self, view: crate::app::ThreatView) {
+        self.prepare_context_history_view(view);
         self.router.threat_mut().open(view);
         self.set_shell_view(ShellView::Threat);
         self.log("view", format!("threats {}", threat_view_label(view)));

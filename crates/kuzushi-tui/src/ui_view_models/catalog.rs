@@ -21,6 +21,7 @@ pub(crate) struct CatalogModel {
     pub(crate) expanded: bool,
     pub(crate) phase_label: &'static str,
     pub(crate) selected_action: Option<CatalogActionModule>,
+    pub(crate) input_hint: &'static str,
     pub(crate) collapsed: CatalogCollapsedModel,
     pub(crate) groups: Vec<CatalogModuleGroup>,
 }
@@ -118,9 +119,20 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
         expanded: app.router.catalog().is_expanded(),
         phase_label: phase_label(phase),
         selected_action,
+        input_hint: catalog_input_hint(app),
         collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&actions, focused_id, cursor_id.as_deref()),
     }
+}
+
+fn catalog_input_hint(app: &ShellApp) -> &'static str {
+    if !app.catalog_picker_owns_input() {
+        return "Editing a command · Esc clears the draft";
+    }
+    if app.target().is_none() {
+        return "Enter opens the target picker · e expert · browse capabilities";
+    }
+    "Enter loads a draft · e expert · review inputs before execution"
 }
 
 pub(crate) fn catalog_uses_collapsed_layout(_model: &CatalogModel, _width: u16) -> bool {
@@ -192,7 +204,7 @@ fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {
 
 fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
     if app.target().is_none() {
-        return Some("[!] target required; Enter opens picker · `target <path>` · `demo` offline");
+        return Some("[!] target required · `target <path>` · `demo` offline");
     }
     app.findings()
         .is_empty()

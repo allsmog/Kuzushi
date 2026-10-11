@@ -13,6 +13,8 @@ const TREE_HASH_POINTERS: &[&str] = &[
     "/data/treeHash",
     "/data/provenance/snapshot/treeHash",
 ];
+#[path = "snapshot_evidence/start_receipt.rs"]
+mod start_receipt;
 
 pub(super) enum SnapshotEvidence {
     Absent,
@@ -54,7 +56,12 @@ fn typed_snapshot_evidence(
         Ok(value) => value,
         Err(_) => return SnapshotEvidence::Invalid,
     };
-    verified_snapshot_claim(target, snapshot_claim(&value))
+    match verified_snapshot_claim(target, snapshot_claim(&value)) {
+        SnapshotEvidence::Absent => {
+            start_receipt::read(target, run_id, projection, reference.producing_item_id)
+        }
+        evidence => evidence,
+    }
 }
 
 fn exact_result_reference(

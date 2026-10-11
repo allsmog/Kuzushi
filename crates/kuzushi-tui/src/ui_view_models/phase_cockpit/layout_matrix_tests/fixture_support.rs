@@ -53,6 +53,10 @@ pub(super) fn fixture_review_queue(populated: bool) -> ReviewQueueModel {
     let count = usize::from(populated);
     ReviewQueueModel {
         navigation_active: false,
+        refresh_status: None,
+        decision_save_label: None,
+        page: None,
+        partial_load: None,
         total_count: count,
         visible_count: count,
         open_count: count,

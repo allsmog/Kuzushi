@@ -7,9 +7,12 @@ pub(super) fn owned_picker_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybi
     }
     let mut bindings = super::active::active_keybindings(app)
         .unwrap_or_else(|| vec![super::interrupt_binding(app)]);
-    bindings.insert(1, bind("↑/↓", "action"));
-    bindings.insert(2, bind("PgUp/PgDn", "page"));
+    let activation = catalog_activation_label(app);
+    bindings.insert(1, bind("Enter", activation));
+    bindings.insert(2, bind("↑/↓", "action"));
+    bindings.insert(3, bind("PgUp/PgDn", "page"));
     super::push_view_keybindings(&mut bindings, app);
+    bindings.retain(|binding| binding.key != "Enter" || binding.label == activation);
     bindings.push(bind("Tab", "complete"));
     bindings.push(bind("type", "command"));
     bindings.push(bind("Ctrl+G", "palette"));
@@ -18,6 +21,14 @@ pub(super) fn owned_picker_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybi
         bindings.push(root_catalog_escape_binding(app));
     }
     Some(bindings)
+}
+
+fn catalog_activation_label(app: &ShellApp) -> &'static str {
+    if app.target().is_some() {
+        "load"
+    } else {
+        "target picker"
+    }
 }
 
 fn root_catalog_escape_binding(app: &ShellApp) -> FooterKeybinding {
@@ -34,7 +45,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
             Some(collapsed_catalog_keybindings())
         }
         ShellView::Catalog => Some(expanded_catalog_keybindings()),
-        ShellView::Recommend => Some(recommend_keybindings()),
+        ShellView::Recommend => Some(recommend_keybindings(app)),
         _ => None,
     }
 }
@@ -73,14 +84,8 @@ fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
     ]
 }
 
-fn recommend_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("Ctrl+G", "palette"),
-        bind("j/k", "component"),
-        bind("Enter", "scan focused"),
-        bind("p", "promote target"),
-        bind("runs", "ledger"),
-        bind("Esc", "back"),
-        bind("?", "help"),
-    ]
+fn recommend_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = vec![bind("Ctrl+G", "palette")];
+    super::push_view_keybindings(&mut bindings, app);
+    bindings
 }

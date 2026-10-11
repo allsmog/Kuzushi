@@ -8,9 +8,11 @@ pub(in crate::renderer) use recommend_lines::*;
 mod catalog_lines;
 mod home_lines;
 mod recommend_lines;
+mod recommend_reader;
 pub(crate) use catalog_lines::catalog_lines;
 pub(crate) use home_lines::home_lines;
 pub(crate) use recommend_lines::recommend_lines;
+pub(crate) use recommend_reader::{recommendation_max_scroll, recommendation_page_rows};
 
 fn attack_surface_risk_line(surface: &AttackSurfaceRiskModel, width: u16) -> Line<'static> {
     detail(

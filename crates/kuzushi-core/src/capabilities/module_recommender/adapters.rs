@@ -23,22 +23,10 @@ pub(crate) fn execute_module_recommender_tool(
         "module-recommender:recommend",
         workspace.root(),
     )?;
-    let inventory = build_repository_inventory(workspace.root())?;
-    let attack_surface = build_attack_surface_map_from_inventory(workspace.root(), &inventory)?;
-    let (findings_available, findings) = list_findings(ctx, &workspace)?;
-    let request = recommender_request(
-        &input,
-        &workspace,
-        available_tools,
-        &inventory,
-        &attack_surface,
-        findings_available,
-        &findings,
-    )?;
-    // Rank with the session model when one is configured and a runtime is
-    // available; otherwise fall back to the deterministic rule catalog.
-    let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root());
-    let report = build_recommendation_report_ranked(request, ranking);
+    let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root())?;
+    let (request, coverage) =
+        inspect_recommendation_facts(&input, &workspace, available_tools, ctx)?;
+    let report = build_recommendation_report_ranked(request, ranking)?;
     snapshot.ensure_current(ctx, "module-recommender:recommend", workspace.root())?;
     let strategy_proposals = persist_strategy_proposals(&workspace, &report, ctx.run_id())?;
     write_strategy_run_artifact(ctx, &strategy_proposals)?;
@@ -46,11 +34,35 @@ pub(crate) fn execute_module_recommender_tool(
     let output = recommendation_report_output(&report);
     let data =
         serde_json::to_value(report).context("Could not serialize module recommendations")?;
-    Ok(
-        snapshot.attach(crate::module_result::completed_output_result(
-            summary, output, data,
-        )),
-    )
+    Ok(snapshot.attach(super::inventory_coverage::output(
+        summary, output, data, coverage,
+    )))
+}
+
+fn inspect_recommendation_facts(
+    input: &Value,
+    workspace: &WorkspaceTarget,
+    available_tools: Vec<String>,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<(RecommenderRequest, Value)> {
+    let inventory = crate::repository_inventory::build_repository_inventory_with_observer(
+        workspace.root(),
+        &mut |_| {},
+        &|| ctx.ensure_active().is_err(),
+    )?;
+    ctx.ensure_active()?;
+    let attack_surface = build_attack_surface_map_from_inventory(workspace.root(), &inventory)?;
+    let (findings_available, findings) = list_findings(ctx, &workspace)?;
+    let request = recommender_request(
+        input,
+        workspace,
+        available_tools,
+        &inventory,
+        &attack_surface,
+        findings_available,
+        &findings,
+    )?;
+    Ok((request, super::inventory_coverage::receipt(&inventory)))
 }
 
 fn recommender_request(
@@ -65,7 +77,7 @@ fn recommender_request(
     let threat_model = try_load_persistent_threat_model(workspace.root())?;
     Ok(RecommenderRequest {
         target: workspace.root().display().to_string(),
-        max_recommendations: max_recommendations(input),
+        max_recommendations: max_recommendations(input)?,
         available_tools: available_tools.into_iter().collect(),
         tools_missing_binaries: tools_missing_binaries(),
         signals: repository_signals(
@@ -105,12 +117,14 @@ fn persist_strategy_proposals(
     let mut generated = Vec::new();
     for recommendation in &report.recommendations {
         let proposal = strategy_proposal_from_recommendation(recommendation, run_id.clone(), now);
-        generated_ids.push(proposal.id.clone());
         generated.push(proposal);
     }
     apply_strategy_corrections_unlocked(workspace, run_id.as_deref(), &mut generated)?;
     for proposal in generated {
-        merge_strategy_proposal(&mut existing, proposal);
+        generated_ids.push(super::proposal_history::retain_draft(
+            &mut existing,
+            proposal,
+        )?);
     }
     save_strategy_queue_unlocked(workspace, &existing)?;
     Ok(existing
@@ -138,16 +152,6 @@ fn write_strategy_run_artifact(
         &value,
     )?;
     Ok(())
-}
-
-fn merge_strategy_proposal(proposals: &mut Vec<StrategyProposal>, mut next: StrategyProposal) {
-    if let Some(existing) = proposals.iter_mut().find(|proposal| proposal.id == next.id) {
-        next.status = existing.status;
-        next.created_at_ms = existing.created_at_ms;
-        *existing = next;
-    } else {
-        proposals.push(next);
-    }
 }
 
 fn strategy_proposal_from_recommendation(
@@ -296,16 +300,25 @@ fn recent_findings(store: &FindingStore) -> Result<Vec<Finding>> {
     store.list_findings(50)
 }
 
-fn max_recommendations(input: &Value) -> usize {
-    input
+fn max_recommendations(input: &Value) -> Result<usize> {
+    let count = input
         .get("maxRecommendations")
-        .and_then(Value::as_u64)
-        .map(|value| value.clamp(1, 50) as usize)
-        .unwrap_or(8)
+        .map(|value| {
+            value
+                .as_u64()
+                .context("maxRecommendations must be a positive integer")
+        })
+        .transpose()?
+        .unwrap_or(8);
+    anyhow::ensure!(
+        (1..=50).contains(&count),
+        "maxRecommendations must be between 1 and 50"
+    );
+    Ok(count as usize)
 }
 
 fn recommendation_report_output(report: &RecommendationReport) -> String {
-    let mut lines = vec![report.summary.clone()];
+    let mut lines = vec![report.summary.clone(), format!("Ranking: {}. Suggestions require a separately approved plan; no discovery jobs were started.", report.ranking_mode)];
     if !report.components.is_empty() {
         lines.extend(report.components.iter().take(3).map(component_line));
     }

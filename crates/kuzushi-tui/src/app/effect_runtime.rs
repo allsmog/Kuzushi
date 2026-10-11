@@ -7,7 +7,15 @@ impl EffectRuntime {
     pub(crate) fn execute(app: &mut ShellApp, effects: Vec<ShellEffect>) {
         let mut pending = VecDeque::from(effects);
         while let Some(effect) = pending.pop_front() {
-            pending.extend(Self::execute_effect(app, effect));
+            match effect {
+                ShellEffect::RefreshFindings(refresh)
+                    if app.can_defer_findings_refresh(&pending) =>
+                {
+                    app.defer_findings_refresh(refresh, pending.into_iter().collect());
+                    return;
+                }
+                effect => pending.extend(Self::execute_effect(app, effect)),
+            }
         }
     }
 
@@ -275,6 +283,7 @@ impl EffectRuntime {
             }
             effect @ (ShellEffect::WorkspaceExportFindings(_)
             | ShellEffect::ExportReport(_)
+            | ShellEffect::PersistReportChoices
             | ShellEffect::RevealReportDestination) => Self::execute_workspace_effect(app, effect),
             effect @ ShellEffect::WorkspaceReindex(_) => {
                 Self::execute_workspace_effect(app, effect)
@@ -290,6 +299,7 @@ impl EffectRuntime {
             }
             ShellEffect::ExportReport(export) => app.export_report_effect(export),
             ShellEffect::RevealReportDestination => app.reveal_report_destination_effect(),
+            ShellEffect::PersistReportChoices => app.persist_report_choices(),
             ShellEffect::WorkspaceReindex(reindex) => app.reindex_workspace_effect(reindex),
             _ => unreachable!("workspace effect dispatch"),
         }

@@ -1,0 +1,65 @@
+name: Immutable context comparison, activation, restore and explicit mirror adoption
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: threats models
+require-live-snap: 20 THREAT MODEL LINEAGES | lineages
+ask: Can the operator distinguish the active Beta context from the original Alpha and inactive reviewed copy, with explicit activation and history actions?
+paste-file: @ART/diff-command.txt
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART compared
+submit: logs
+keys: End
+require-live-snap: 20 Application owner | compared-text
+expect: context text: 3 change(s)
+expect: Reviewed overview α
+ask: Does comparison show actual before/after overview, component purpose and question answer, disclose preview limits, and leave active context and immutable objects unchanged?
+resize: 160x48
+live-snap: diff-160x48
+resize: 96x89
+live-snap: diff-96x89
+resize: 80x24
+live-snap: diff-80x24
+resize: 60x20
+live-snap: diff-60x20
+resize: 40x12
+live-snap: diff-40x12
+keys: PPage PPage
+live-snap: diff-paged-40x12
+ask: Are the comparison, full-message route and paging usable across the viewport matrix without claiming context equivalence or finding validity?
+resize: 120x36
+paste-file: @ART/activate-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 result activated | activated
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART activated
+paste-file: @ART/restore-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 result restored | restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART edit-mirror
+paste-file: @ART/adopt-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 result adopted mirror edits | adopted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART adopted
+ask: Do explicit activation, restore and adopt preserve the original objects, append honest history, complete without replacing Map and keep exact context reads independent of the active pointer?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-ready
+submit: threats models
+require-live-snap: 20 THREAT MODEL LINEAGES | no-color-lineages
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_lifecycle.py @TMP_TARGET @ART recovered
+ask: Does restart retain the adopted active revision and exact inactive copy, with unchanged source and no provider, scanner or repeated work?
+keys: C-c
+require-exit: 10

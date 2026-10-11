@@ -59,11 +59,16 @@ fn scope_boundary_rows(state: &ScopeReviewState) -> (Vec<String>, usize) {
     let mut rows = draft
         .scopes
         .iter()
-        .map(|scope| scope_boundary_row(review, scope))
+        .map(|scope| marked_boundary_row(state, review, scope))
         .collect::<Vec<_>>();
     if let Some(shared) = &draft.shared_scope {
         rows.push(format!(
-            "Shared: {} · {}",
+            "[{}] Shared: {} · {}",
+            if state.study_scope_ids.contains(&shared.id) {
+                "x"
+            } else {
+                " "
+            },
             shared.name,
             if draft.shared_discovery {
                 "discovery"
@@ -78,6 +83,19 @@ fn scope_boundary_rows(state: &ScopeReviewState) -> (Vec<String>, usize) {
         format!("Overlap · {}", review.coverage.overlaps.total),
     ]);
     (rows, state.cursor)
+}
+
+fn marked_boundary_row(
+    state: &ScopeReviewState,
+    review: &kuzushi_core::workspace::ScanScopeReview,
+    scope: &kuzushi_core::workspace::ProposedScanScope,
+) -> String {
+    let marker = if state.study_scope_ids.contains(&scope.id) {
+        "x"
+    } else {
+        " "
+    };
+    format!("[{marker}] {}", scope_boundary_row(review, scope))
 }
 
 fn scope_boundary_row(
@@ -157,7 +175,7 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
         ];
     }
     [
-        "↑↓ choose · Enter actions · p study",
+        "↑↓ Space mark · p plan · Enter menu",
         "f files · PgUp/Dn read · Esc back",
     ]
 }

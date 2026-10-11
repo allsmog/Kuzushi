@@ -1,7 +1,10 @@
 use super::*;
 
 pub(crate) fn build_dread_scores(threats: &[Value]) -> Value {
-    let scores = threats.iter().map(dread_score_for_threat).collect::<Vec<_>>();
+    let scores = threats
+        .iter()
+        .map(dread_score_for_threat)
+        .collect::<Vec<_>>();
     json!({
         "methodology": "dread",
         "scale": "0-10",

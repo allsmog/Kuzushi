@@ -1,0 +1,77 @@
+name: Complete Review ledger navigation and stable finding details
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py prepare @TARGET @ART/fixture
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 30 rows 1-500 of 1000 | first-page
+nav-mode:
+require-live-snap: 20 Ctrl+N | first-controls
+ask: Does the first page distinguish its 500 loaded rows from the complete 1000-finding ledger and visibly offer the next page?
+keys: C-n
+require-live-snap: 20 501-1000/1000 | second-page
+expect: Ctrl+P
+submit: open F-0952
+require-live-snap: 20 Synthetic Review candidate 0000 | omitted-finding-details
+wait: 1
+require-live-snap: 20 large-b | settled-details
+expect: 501-1000/1000
+ask: Does paging reach the previously omitted finding with its stable alias, source and decision evidence, without a separate global filter?
+nav-mode:
+keys: C-p
+require-live-snap: 20 rows 1-500 of 1000 | back-to-first
+expect: Ctrl+N
+keys: C-n
+require-live-snap: 20 501-1000/1000 | second-again
+resize: 160x48
+wait: 1
+require-live-snap: 20 501-1000/1000 | paging-160x48
+expect: scope: F-0952 · Review
+resize: 96x89
+wait: 1
+require-live-snap: 20 501-1000/1000 | paging-96x89
+resize: 80x24
+wait: 1
+require-live-snap: 20 501-1000/1000 | paging-80x24
+resize: 60x20
+wait: 1
+require-live-snap: 20 501-1000/1000 | paging-60x20
+resize: 40x12
+wait: 1
+require-live-snap: 20 501-1000/1000 | paging-40x12
+expect: Ctrl+P
+ask: At 40x12, can the operator identify the current page and return to the previous page while retaining usable finding navigation?
+keys: C-p
+require-live-snap: 20 500/1000 loaded | tiny-first
+expect: Ctrl+N
+keys: C-n
+require-live-snap: 20 501-1000/1000 | tiny-second
+keys: Escape
+expect-echo-within: 300 retained-paging-draft
+live-snap: paging-draft
+expect: retained-paging-draft
+ask: Does the composer retain typing ownership and the paging draft without moving to another page?
+keys: C-u
+resize: 120x36
+submit: findings filter name:0000
+wait: 1
+require-live-snap: 20 Synthetic Review candidate 0000 | filtered-first-page
+expect: FINDINGS · 1
+ask: Does changing the global query reset page position while preserving full-ledger review progress?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: findings
+require-live-snap: 30 rows 1-500 of 1000 | no-color-first
+nav-mode:
+keys: C-n
+require-live-snap: 20 501-1000/1000 | no-color-second
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py verify-read-only @TARGET @ART/fixture
+ask: Does no-color restart retain complete navigation without changing observations, decisions, source bytes or spending?
+keys: C-c
+require-exit: 10

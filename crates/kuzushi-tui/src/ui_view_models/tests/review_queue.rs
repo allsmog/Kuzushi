@@ -21,6 +21,62 @@ fn finding(rule: &str, severity: Severity, line: u32) -> Finding {
     Finding::new_tool("semgrep", rule, "src/lib.rs", line, None, severity, rule)
 }
 
+#[test]
+fn partial_review_queue_names_loaded_and_matching_populations() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut()
+        .set_findings(vec![finding("loaded", Severity::High, 1)]);
+    app.domain_mut().set_findings_total_count(1000);
+    let queue = review_queue_model(&app, ReviewQueueMode::All);
+    assert!(
+        queue.header.contains("1 of 1000 matching findings loaded"),
+        "{}",
+        queue.header
+    );
+}
+
+#[test]
+fn empty_open_subset_never_claims_unloaded_findings_are_reviewed() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut().set_findings(vec![human_confirmed(
+        finding("loaded", Severity::High, 1),
+        0.9,
+    )]);
+    app.domain_mut().set_findings_total_count(1000);
+    let queue = review_queue_model(&app, ReviewQueueMode::Open);
+    assert!(queue
+        .empty_reason
+        .as_deref()
+        .unwrap()
+        .contains("loaded portion"));
+}
+
+#[test]
+fn review_ledger_filter_shortcut_loads_a_draft_in_navigation() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_workbench_page(WorkbenchPage::Review);
+    app.set_input_mode(InputMode::Navigate);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
+    app.reduce_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    assert_eq!(app.input(), "findings filter ");
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+}
+
+#[test]
+fn review_ledger_filter_shortcut_preserves_composer_editing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_workbench_page(WorkbenchPage::Review);
+    app.set_input_mode(InputMode::Prompt);
+    app.set_input("preserved draft");
+    app.set_cursor(0);
+    app.reduce_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    assert_eq!(app.input(), "preserved draft");
+    assert_eq!(app.cursor(), 1);
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+}
+
 fn confirmed(mut finding: Finding) -> Finding {
     finding.triage = Some(TriageOutcome {
         first_link: None,
@@ -169,6 +225,66 @@ fn active_batch_scopes_review_and_exposes_occurrence_and_run_facets() {
         .unwrap();
     assert_eq!(runs.values[0].value, "run-1");
     assert_eq!(runs.values[0].count, 1);
+}
+
+#[test]
+fn incomplete_batch_observations_stay_visible_without_a_completed_occurrence() {
+    let mut retained = finding("owned-incomplete", Severity::Info, 20);
+    retained.fingerprint = "retained-fingerprint".into();
+    let mut outside = finding("owned-outside", Severity::Info, 20);
+    outside.fingerprint = "outside-fingerprint".into();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![retained, outside];
+    let mut report = batch_report_for("unused");
+    report.rows.clear();
+    report.completed = 0;
+    report.failed = report.planned;
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some(report.batch_id.clone());
+    deck.active_batch_report = Some(report);
+    assert!(review_queue_model(&app, ReviewQueueMode::All)
+        .rows
+        .is_empty());
+    app.router
+        .campaign_mut()
+        .active_batch_observation_fingerprints
+        .insert("retained-fingerprint".into());
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].rule, "owned-incomplete");
+    assert!(model.rows[0].occurrence.is_none());
+    assert_eq!(
+        app.router
+            .campaign()
+            .active_batch_report()
+            .unwrap()
+            .completed,
+        0
+    );
+    app.router.campaign_mut().clear_active_batch();
+    assert!(app
+        .router
+        .campaign()
+        .active_batch_observation_fingerprints
+        .is_empty());
+    assert_eq!(review_queue_model(&app, ReviewQueueMode::All).rows.len(), 2);
+}
+
+#[test]
+fn unavailable_batch_report_hides_stale_retained_membership() {
+    let mut retained = finding("owned-incomplete", Severity::Info, 20);
+    retained.fingerprint = "retained-fingerprint".into();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![retained];
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some("unavailable-batch".into());
+    deck.active_batch_report = None;
+    deck.active_batch_observation_fingerprints
+        .insert("retained-fingerprint".into());
+
+    assert!(review_queue_model(&app, ReviewQueueMode::All)
+        .rows
+        .is_empty());
 }
 
 #[test]
@@ -403,7 +519,7 @@ fn zero_result_search_clamps_cursor_without_retargeting_pin() {
     let disclosure = review
         .selection_disclosure
         .expect("pinned finding disclosure");
-    assert_eq!(disclosure.filter, "search:no-such-result");
+    assert_eq!(disclosure.filter.as_deref(), Some("search:no-such-result"));
     assert!(disclosure.message.contains("outside"));
 }
 

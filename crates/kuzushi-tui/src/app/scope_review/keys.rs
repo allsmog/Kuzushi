@@ -196,6 +196,7 @@ impl ShellApp {
             }
             KeyCode::Char('a') => self.open_scope_acceptance(),
             KeyCode::Char('p') => return self.plan_selected_scope(),
+            KeyCode::Char(' ') => return self.toggle_study_scope_selection(),
             KeyCode::Char('f') => return self.request_scope_files(0),
             KeyCode::Char('r') => return self.refresh_scope_head(),
             KeyCode::Char(']') => return self.turn_scope_file_page(false),

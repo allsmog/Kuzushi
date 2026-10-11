@@ -42,9 +42,9 @@ impl<'a> TracedRuntime<'a> {
         Self {
             inner: InnerRuntime::Borrowed(inner),
             trace,
-            spend: std::sync::Arc::new(std::sync::Mutex::new(crate::runtime::RuntimeCostReport::known(
-                crate::runtime::RuntimeCost::ZERO,
-            ))),
+            spend: std::sync::Arc::new(std::sync::Mutex::new(
+                crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+            )),
         }
     }
 
@@ -407,6 +407,15 @@ fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelU
 
 #[async_trait]
 impl AgentRuntime for TracedRuntime<'_> {
+    fn authorize_tool_policy_blocking(
+        &self,
+        authorization: &crate::runtime::AgentToolPolicyAuthorization,
+    ) -> Result<crate::runtime::AgentToolPolicyReceipt> {
+        self.inner
+            .get()
+            .authorize_tool_policy_blocking(authorization)
+    }
+
     fn with_allowance_binding(
         &self,
         allowance: crate::allowance::AllowanceBinding,

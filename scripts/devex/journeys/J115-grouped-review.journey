@@ -1,0 +1,58 @@
+name: Browse complete accepted groups and individual observations
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/groups.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: groups
+require-live-snap: 30 2 groups / 65 findings | complete-groups
+ask: Does Review distinguish two presentation groups from sixty-five independent findings without claiming decisions or full coverage?
+require-live-snap: 20 GROUPS · Enter members | group-navigation
+keys: Enter
+require-live-snap: 25 GROUP MEMBERS | first-members
+keys: n
+require-live-snap: 25 Rows 51-64 / 64 | last-members
+keys: j j j j j j j j j j j j j
+require-live-snap: 20 GROUP MEMBERS · F-0065 | final-observation
+keys: k k k k k k k k k k k k k
+require-live-snap: 20 GROUP MEMBERS · F-0052 | selected-observation
+ask: Are all sixty-four members reachable through explicit paging with their own aliases and no lost or rewritten observations?
+resize: 40x12
+live-snap: narrow-members
+keys: PageDown
+live-snap: narrow-member-detail
+expect: Recorded decision: needs_review
+ask: At 40x12 does the selected alias remain visible while paging its independent verdict and recorded source, with open/back controls usable?
+resize: 120x36
+keys: Home
+keys: Enter
+require-live-snap: 25 SELECTED FINDING | opened-observation
+keys: G
+require-live-snap: 25 Rows 51-64 / 64 | returned-members
+ask: Does opening an observation and returning with G preserve the group, member page, selection and source binding?
+keys: L
+require-live-snap: 25 Duplicate · Accepted | member-relationship
+keys: u
+require-live-snap: 20 Reason (required) | unlink-note
+paste-file: @ART/unlink-note.txt
+keys: Enter
+require-live-snap: 25 Duplicate · Removed | unlinked
+keys: Tab
+require-live-snap: 25 Groups unavailable | stale-group
+keys: R
+require-live-snap: 25 3 groups / 65 findings | split-groups
+require-shell: python3 -B @REPO/scripts/devex/fixtures/groups.py @TMP_TARGET @ART removed
+ask: Does explicit unlink split only the grouping while retaining all observations and verdicts, and does stale grouping require an honest refresh?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: groups
+require-live-snap: 25 3 groups / 65 findings | recovered-groups
+require-shell: python3 -B @REPO/scripts/devex/fixtures/groups.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the split groups and original findings without another inference or finding verdict?
+keys: C-c
+require-exit: 10

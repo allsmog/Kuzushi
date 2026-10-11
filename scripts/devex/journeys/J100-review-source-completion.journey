@@ -1,0 +1,66 @@
+# Source, findings, commit metadata and the shifted display clock are labeled synthetic.
+name: Source reassessment, causal decision order and durable Review completion
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_clock.py prepare @TMP_TARGET @ART/fixture
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/fixture/open.txt
+keys: Enter
+require-live-snap: 30 DECISION SOURCE | older-source-decision
+expect: 2099-01-01
+expect: Reassess this verdict
+expect: reassess
+expect-not: NEXT open Report
+ask: Does the older verdict remain readable while newer source requires Review rather than claiming Report readiness?
+resize: 160x48
+require-live-snap: 20 DECISION SOURCE | reassessment-160x48
+resize: 96x89
+require-live-snap: 20 DECISION SOURCE | reassessment-96x89
+resize: 80x24
+require-live-snap: 20 KUZUSHI | reassessment-80x24
+resize: 60x20
+require-live-snap: 20 KUZUSHI | reassessment-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 20 ZOOM SELECTED FINDING | detail-focus
+resize: 40x12
+require-live-snap: 20 KUZUSHI | reassessment-40x12
+keys: NPage
+live-snap: reassessment-page-1
+keys: NPage
+live-snap: reassessment-page-2
+keys: NPage
+live-snap: reassessment-page-3
+keys: NPage
+live-snap: reassessment-page-4
+keys: NPage
+live-snap: reassessment-page-5
+ask: Can the operator read the older verdict and source warning at 40x12 while the journey remains in Review?
+resize: 120x36
+keys: PPage
+require-live-snap: 20 recorded: confirmed | older-clock-verdict
+submit: decision deferred Synthetic source B deliberately deferred
+require-live-snap: 30 No later observation | newer-causal-decision
+expect: recorded: deferred
+expect: Synthetic source B deliberately deferred
+expect: fixture-b
+expect: NEXT open Report
+ask: Does the explicit new decision govern source B despite the old future display date, with the earlier decision retained and no fix claim?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/fixture/open.txt
+keys: Enter
+require-live-snap: 30 Synthetic source B deliberately deferred | source-restarted
+expect: fixture-b
+expect: No later observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_clock.py verify @TMP_TARGET @ART/fixture
+ask: Does no-color restart agree with export about the new source-qualified decision while preserving all earlier provenance and source bytes?
+keys: C-c
+require-exit: 10

@@ -4,6 +4,8 @@ use crate::capabilities::campaign::{
 };
 use crate::modules::ModuleRegistry;
 
+mod context_guidance;
+mod matrix;
 mod scope;
 
 pub(in crate::workspace::application) fn planned_report(root: &Path) -> InvestigationReportReceipt {

@@ -48,18 +48,26 @@ pub(crate) fn load_selected_threat_model(
     root: &Path,
     selection: &ThreatModelSelection,
 ) -> Result<Option<Value>> {
-    match selection {
+    let document = match selection {
         ThreatModelSelection::Active => try_load_persistent_threat_model(root),
         ThreatModelSelection::None => Ok(None),
         ThreatModelSelection::Revision(reference) => {
             load_exact_threat_model(root, reference).map(Some)
         }
+    }?;
+    if let Some(document) = document.as_ref() {
+        super::lesson_selection::validate_reviewed_lessons(root, document)?;
     }
+    Ok(document)
 }
 
 pub(crate) fn load_exact_threat_model(root: &Path, reference: &ThreatModelRef) -> Result<Value> {
-    let loaded = load_threat_model_revision(root, &reference.model_id, Some(&reference.revision_id))?;
-    anyhow::ensure!(loaded.model_ref == *reference, "bound threatModelRef failed immutable object verification");
+    let loaded =
+        load_threat_model_revision(root, &reference.model_id, Some(&reference.revision_id))?;
+    anyhow::ensure!(
+        loaded.model_ref == *reference,
+        "bound threatModelRef failed immutable object verification"
+    );
     Ok(loaded.document)
 }
 

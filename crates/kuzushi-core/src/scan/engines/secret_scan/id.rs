@@ -6,7 +6,9 @@ impl ScanEngine for SecretScanScanner {
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        Ok(secret_scan_engine_output(target, cancellation)?.findings)
+        let output = secret_scan_engine_output(target, cancellation)?;
+        output.ensure_empty_result_is_complete()?;
+        Ok(output.findings)
     }
 
     fn supports_exact_files(&self) -> bool {
@@ -48,7 +50,7 @@ fn secret_scan_engine_output(
     Ok(secret_report_output(report))
 }
 
-fn secret_report_output(report: SecretScanReport) -> ScanEngineOutput {
+pub(super) fn secret_report_output(report: SecretScanReport) -> ScanEngineOutput {
     ScanEngineOutput {
         findings: report
             .findings

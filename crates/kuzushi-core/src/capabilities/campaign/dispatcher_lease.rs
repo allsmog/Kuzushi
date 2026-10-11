@@ -3,6 +3,13 @@ use std::path::Path;
 
 pub struct CampaignDispatcherLease {
     _lock: crate::file_lock::ExclusiveFileLock,
+    control: super::CampaignDispatcherControl,
+}
+
+impl CampaignDispatcherLease {
+    pub fn control(&self) -> super::CampaignDispatcherControl {
+        self.control.clone()
+    }
 }
 
 pub struct BatchControllerLease {
@@ -13,7 +20,11 @@ pub fn acquire_dispatcher_lease(root: &Path, campaign_id: &str) -> Result<Campai
     let path = super::campaign_dir(root, campaign_id).join(".dispatcher.lock");
     let lock = crate::file_lock::ExclusiveFileLock::try_acquire(&path)?
         .with_context(|| format!("campaign {campaign_id:?} already has an active dispatcher"))?;
-    Ok(CampaignDispatcherLease { _lock: lock })
+    let control = super::CampaignDispatcherControl::publish(root, campaign_id)?;
+    Ok(CampaignDispatcherLease {
+        _lock: lock,
+        control,
+    })
 }
 
 pub fn acquire_batch_controller_lease(root: &Path, batch_id: &str) -> Result<BatchControllerLease> {

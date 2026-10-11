@@ -28,12 +28,10 @@ impl ShellApp {
     /// generation just loaded. The reload is the only place the queue changes,
     /// so it is the one place scoring has to be re-requested.
     pub(crate) fn refresh_findings_effect(&mut self, refresh: FindingsRefresh) -> Vec<ShellEffect> {
-        match refresh.filter {
-            Some(expression) => self.refresh_findings_filtered(&expression),
-            // `None` means reload the current projection. The explicit
-            // `findings` command clears route state before issuing it.
-            None => self.refresh_findings_preserving_active_filter(refresh.announce),
-        }
+        let filter = refresh
+            .filter
+            .or_else(|| self.active_findings_filter().clone());
+        self.refresh_findings_query(refresh.announce, filter);
         self.review_yield_queue_scoring_effects()
     }
 
@@ -41,228 +39,218 @@ impl ShellApp {
     /// Call `refresh_findings` only when the caller explicitly wants the
     /// unfiltered ledger and has intentionally cleared the filter.
     pub(crate) fn refresh_findings_preserving_active_filter(&mut self, announce: bool) {
-        let Some(expression) = self.active_findings_filter().clone() else {
-            self.refresh_findings(announce);
-            return;
-        };
-        self.refresh_findings_filtered(&expression);
+        self.refresh_findings_query(announce, self.active_findings_filter().clone());
     }
 
     pub(crate) fn refresh_findings(&mut self, announce: bool) {
-        let operator_state = match self.identity_policy_operator_state_dir() {
+        self.refresh_findings_query(announce, None);
+    }
+
+    fn refresh_findings_query(&mut self, announce: bool, filter: Option<String>) {
+        let operator = match self.identity_policy_operator_state_dir() {
             Ok(path) => path,
             Err(error) => {
                 self.log_refresh_findings_error(error, announce);
                 return;
             }
         };
-        self.refresh_findings_with_operator_state(announce, &operator_state);
+        self.read_and_apply_findings_projection(&operator, filter, announce);
     }
 
+    #[cfg(test)]
     fn refresh_findings_with_operator_state(&mut self, announce: bool, operator_state: &Path) {
-        let (store, policy) = match self.open_store_and_identity_policy(operator_state) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                self.log_refresh_findings_error(error, announce);
-                return;
-            }
-        };
-        let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
-        let read_watermark = self.current_findings_projection_watermark(&store);
-        match store.list_findings_filtered_with_identity_policy(&filter, policy) {
-            Ok(report) => {
-                self.replace_findings_from_store(&store, report, policy, announce, read_watermark)
-            }
-            Err(error) => self.log_refresh_findings_error(error.into(), announce),
-        }
+        self.read_and_apply_findings_projection(operator_state, None, announce);
     }
 
+    #[cfg(test)]
     pub(crate) fn refresh_findings_filtered(&mut self, expression: &str) {
-        let operator_state = match self.identity_policy_operator_state_dir() {
-            Ok(path) => path,
-            Err(error) => {
-                self.log_refresh_findings_error(error, true);
-                return;
-            }
-        };
-        self.refresh_findings_filtered_with_operator_state(expression, &operator_state);
+        self.refresh_findings_query(true, Some(expression.to_owned()));
     }
 
+    #[cfg(test)]
     fn refresh_findings_filtered_with_operator_state(
         &mut self,
         expression: &str,
         operator_state: &Path,
     ) {
-        let Some((filter, requested_limit)) = self.parsed_refresh_filter(expression) else {
-            return;
-        };
-        let (store, policy) = match self.open_store_and_identity_policy(operator_state) {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                self.log_refresh_findings_error(error, true);
-                return;
-            }
-        };
-        let read_watermark = self.current_findings_projection_watermark(&store);
-        match store.list_findings_filtered_with_identity_policy(&filter, policy) {
-            Ok(report) => match self.filter_findings_by_provenance(report, &filter) {
-                Ok(report) => {
-                    let report = truncate_findings_report(report, requested_limit);
-                    self.refresh_journey_ledger_counts_with_policy(&store, policy);
-                    self.replace_filtered_findings(
-                        &store,
-                        report,
-                        policy,
-                        expression,
-                        read_watermark,
-                    );
-                }
-                Err(error) => self.log("error", format!("invalid findings filter: {error}")),
-            },
-            Err(error) => self.log_refresh_findings_error(error.into(), true),
-        }
+        self.read_and_apply_findings_projection(operator_state, Some(expression.to_owned()), true);
     }
 
-    fn parsed_refresh_filter(&mut self, expression: &str) -> Option<(FindingListFilter, usize)> {
-        let mut filter = match FindingListFilter::from_filter_expression(expression) {
-            Ok(filter) => filter,
-            Err(error) => {
-                self.log("error", format!("invalid findings filter: {error}"));
-                return None;
-            }
-        };
-        let requested_limit = filter.limit;
-        if filter.has_provenance_filter() {
-            filter.limit = FindingListFilter::MAX_LIMIT;
-        }
-        Some((filter, requested_limit))
-    }
-
-    fn filter_findings_by_provenance(
-        &self,
-        report: FindingListReport,
-        filter: &FindingListFilter,
-    ) -> anyhow::Result<FindingListReport> {
-        if !filter.has_provenance_filter() {
-            return Ok(report);
-        }
-        let Some(target) = self.target_path_buf() else {
-            anyhow::bail!("revision filters require an active target");
-        };
-        let runs = kuzushi_core::list_run_summaries(target)?
-            .into_iter()
-            .map(|summary| (summary.run_id.clone(), summary))
-            .collect::<BTreeMap<_, _>>();
-        let (findings, aliases): (Vec<_>, Vec<_>) = report
-            .findings
-            .into_iter()
-            .zip(report.aliases)
-            .filter(|(finding, _)| filter.matches_run_provenance(finding, &runs))
-            .unzip();
-        let count = findings.len();
-        Ok(FindingListReport {
-            review_decisions: report.review_decisions,
-            count,
-            findings,
-            aliases,
-        })
-    }
-
-    fn replace_findings_from_store(
+    fn read_and_apply_findings_projection(
         &mut self,
-        store: &FindingStore,
-        report: FindingListReport,
-        policy: IdentityFoldPolicy,
+        operator_state: &Path,
+        filter: Option<String>,
         announce: bool,
-        read_watermark: Option<u64>,
     ) {
+        if announce {
+            self.reset_findings_page_request();
+        }
+        let request = self.findings_read_request(0, operator_state.to_path_buf(), filter);
+        self.runtime_state.requested_findings_page = None;
+        let result = self
+            .target()
+            .context("Findings require an explicit target")
+            .and_then(|target| read_findings_projection(target, &request));
+        match result {
+            Ok(snapshot) => self.apply_findings_read_snapshot(snapshot, &request, announce),
+            Err(error) => {
+                self.log_refresh_findings_error(error, announce || !request.recover_missing_anchor)
+            }
+        }
+    }
+
+    pub(crate) fn findings_read_request(
+        &self,
+        id: u64,
+        operator_state: std::path::PathBuf,
+        filter: Option<String>,
+    ) -> FindingsReadRequest {
+        FindingsReadRequest {
+            id,
+            expected_watermark: self.findings_read_watermark(),
+            operator_state,
+            filter: filter.clone(),
+            identity_fold: self
+                .option_store()
+                .effective_stored_values("sast:scan")
+                .get("identityFold")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned),
+            scan_run_refs: self.selected_current_scan_run_refs(),
+            page: self.findings_page_request(filter.as_deref()),
+            prior_page_policy: format!("{:?}", self.identity_fold_policy()),
+            recover_missing_anchor: self.runtime_state.requested_findings_page.is_none(),
+        }
+    }
+
+    pub(crate) fn apply_findings_read_snapshot(
+        &mut self,
+        snapshot: FindingsReadSnapshot,
+        request: &FindingsReadRequest,
+        announce: bool,
+    ) {
+        self.runtime_state.findings_refresh.accept_projection();
+        self.clear_failed_findings_refresh_notice();
+        if let Some(notice) = &snapshot.page_recovery_notice {
+            self.set_warn_notice("findings", notice.clone());
+        }
+        if self.target() != Some(snapshot.target.as_path()) {
+            self.set_target(Some(snapshot.target.clone()));
+        }
+        self.apply_snapshot_counts(&snapshot);
+        self.router
+            .findings_mut()
+            .refresh_selected_finding(&snapshot.corpus);
+        for warning in &snapshot.warnings {
+            self.log("error", warning.clone());
+        }
         let FindingListReport {
             count,
             findings,
             aliases,
             ..
-        } = report;
-        let decisions = self.load_review_decisions_for_findings(store, &findings);
-        let counts = self.journey_ledger_counts(store, policy, &findings, &decisions, count);
-        self.domain_mut().set_finding_ledger_counts(counts);
+        } = snapshot.report;
         self.replace_findings(
             findings,
             aliases,
-            policy,
-            decisions,
+            snapshot.policy,
+            snapshot.review_decisions,
             announce,
             count,
-            read_watermark,
+            snapshot.watermark,
+        );
+        self.domain_mut().set_findings_page(snapshot.page);
+        self.restore_snapshot_filter(request.filter.as_deref(), count);
+    }
+
+    fn restore_snapshot_filter(&mut self, expression: Option<&str>, count: usize) {
+        let Some(expression) = expression else {
+            return;
+        };
+        self.set_active_findings_filter(Some(expression.to_owned()));
+        self.log(
+            "findings",
+            format!(
+                "filter {expression:?}: loaded {} of {count} matching",
+                self.findings().len()
+            ),
         );
     }
 
-    pub(crate) fn refresh_journey_ledger_projection(&mut self) {
-        let Ok(store) = self.open_store() else {
-            return;
-        };
-        let policy = self.identity_fold_policy();
-        self.refresh_journey_ledger_counts_with_policy(&store, policy);
-    }
-
-    fn refresh_journey_ledger_counts_with_policy(
-        &mut self,
-        store: &FindingStore,
-        policy: IdentityFoldPolicy,
-    ) {
-        let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
-        let Ok(report) = store.list_findings_filtered_with_identity_policy(&filter, policy) else {
-            return;
-        };
-        let decisions = self.load_review_decisions_for_findings(store, &report.findings);
-        let counts =
-            self.journey_ledger_counts(store, policy, &report.findings, &decisions, report.count);
+    fn apply_snapshot_counts(&mut self, snapshot: &FindingsReadSnapshot) {
+        let mut counts = crate::ui_view_models::finding_ledger_counts(
+            &snapshot.corpus,
+            &snapshot.review_decisions,
+            snapshot.corpus.len(),
+        );
+        self.apply_snapshot_source_completion(snapshot, &mut counts);
+        crate::ui_view_models::attach_proof_deferral_counts(
+            &mut counts,
+            &snapshot.corpus,
+            &snapshot.review_decisions,
+            &self.engagement,
+        );
+        crate::ui_view_models::attach_remediation_counts(
+            &mut counts,
+            &snapshot.corpus,
+            &snapshot.review_decisions,
+            &snapshot.legacy_lifecycles,
+        );
+        self.domain_mut()
+            .set_patch_lifecycle_records(&snapshot.legacy_lifecycles);
         self.domain_mut().set_finding_ledger_counts(counts);
     }
 
-    fn journey_ledger_counts(
+    fn apply_snapshot_source_completion(
         &mut self,
-        store: &FindingStore,
-        policy: IdentityFoldPolicy,
-        fallback_findings: &[Finding],
-        fallback_decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
-        fallback_total: usize,
-    ) -> FindingLedgerCounts {
-        match self.relevant_journey_findings(store, policy) {
-            Ok(findings) => self.count_journey_findings(store, &findings, findings.len()),
+        snapshot: &FindingsReadSnapshot,
+        counts: &mut FindingLedgerCounts,
+    ) {
+        match &snapshot.completion {
+            Ok(completion) => {
+                counts.reviewed = completion.reviewed;
+                counts.confirmed = completion.confirmed;
+                self.domain_mut()
+                    .set_review_source_applicabilities(completion.source_applicabilities.clone());
+            }
             Err(error) => {
+                counts.reviewed = 0;
+                counts.confirmed = 0;
+                self.domain_mut().set_review_source_applicabilities(
+                    unverified_terminal_review_sources(
+                        &snapshot.corpus,
+                        &snapshot.review_decisions,
+                    ),
+                );
                 self.log(
                     "error",
-                    format!("could not load the relevant findings corpus: {error}"),
+                    format!("Decision source comparison is unavailable: {error}"),
                 );
-                self.count_journey_findings_with_decisions(
-                    store,
-                    fallback_findings,
-                    fallback_decisions,
-                    fallback_total,
-                )
             }
         }
     }
 
-    fn relevant_journey_findings(
-        &self,
-        store: &FindingStore,
-        policy: IdentityFoldPolicy,
-    ) -> anyhow::Result<Vec<Finding>> {
-        let mut findings = store.list_relevant_findings_with_identity_policy(policy)?;
-        let Some(run_refs) = self.selected_current_scan_run_refs() else {
-            return Ok(findings);
-        };
-        let run_refs = match self.target() {
-            Some(target) => kuzushi_core::run_artifacts::scan_finding_run_refs(target, &run_refs)?,
-            None => run_refs,
-        };
-        let run_refs = run_refs.into_iter().collect::<BTreeSet<_>>();
-        findings.retain(|finding| finding_observed_in_runs(finding, &run_refs));
-        Ok(findings)
+    pub(crate) fn invalidate_findings_review_completion(&mut self) {
+        if let Some(mut counts) = self.domain().finding_ledger_counts() {
+            counts.reviewed = 0;
+            counts.confirmed = 0;
+            self.domain_mut().set_finding_ledger_counts(counts);
+        }
+        let sources = unverified_terminal_review_sources(self.findings(), self.review_decisions());
+        self.domain_mut().set_review_source_applicabilities(sources);
     }
 
-    fn selected_current_scan_run_refs(&self) -> Option<Vec<String>> {
+    pub(crate) fn refresh_journey_ledger_projection(&mut self) {
+        EffectRuntime::execute(
+            self,
+            vec![ShellEffect::RefreshFindings(FindingsRefresh {
+                announce: false,
+                filter: self.active_findings_filter().clone(),
+            })],
+        );
+    }
+
+    pub(crate) fn selected_current_scan_run_refs(&self) -> Option<Vec<String>> {
         if !self
             .engagement
             .selected_attempt_completed_after(WorkflowPhase::Map, WorkflowPhase::Scan)
@@ -273,56 +261,6 @@ impl ShellApp {
             .engagement
             .selected_phase_attempt(WorkflowPhase::Scan)?;
         Some(attempt.completed.run_refs.clone())
-    }
-
-    fn count_journey_findings(
-        &mut self,
-        store: &FindingStore,
-        findings: &[Finding],
-        total: usize,
-    ) -> FindingLedgerCounts {
-        let decisions = self.load_review_decisions_for_findings(store, findings);
-        self.count_journey_findings_with_decisions(store, findings, &decisions, total)
-    }
-
-    fn count_journey_findings_with_decisions(
-        &mut self,
-        store: &FindingStore,
-        findings: &[Finding],
-        decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
-        total: usize,
-    ) -> FindingLedgerCounts {
-        let mut counts = crate::ui_view_models::finding_ledger_counts(findings, decisions, total);
-        crate::ui_view_models::attach_proof_deferral_counts(
-            &mut counts,
-            findings,
-            decisions,
-            &self.engagement,
-        );
-        self.refresh_remediation_projection(store, findings, decisions, &mut counts);
-        counts
-    }
-
-    fn refresh_remediation_projection(
-        &mut self,
-        store: &FindingStore,
-        findings: &[Finding],
-        decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
-        counts: &mut FindingLedgerCounts,
-    ) {
-        let lifecycles = match store.list_patch_lifecycle_current() {
-            Ok(lifecycles) => lifecycles,
-            Err(error) => {
-                self.domain_mut().set_patch_lifecycle_records(&[]);
-                self.log(
-                    "error",
-                    format!("could not load remediation projection: {error}"),
-                );
-                return;
-            }
-        };
-        crate::ui_view_models::attach_remediation_counts(counts, findings, decisions, &lifecycles);
-        self.domain_mut().set_patch_lifecycle_records(&lifecycles);
     }
 
     fn replace_findings(
@@ -336,7 +274,7 @@ impl ShellApp {
         read_watermark: Option<u64>,
     ) {
         let cursored_identity = crate::ui_view_models::visible_finding_at_cursor(self)
-            .map(|(_, finding)| finding_generation_key(&finding));
+            .map(|(_, finding)| kuzushi_core::findings::finding_page_continuity_anchor(&finding));
         self.set_findings_projection(findings, aliases, policy);
         self.set_findings_total_count(total_count);
         self.set_findings_read_watermark(read_watermark);
@@ -369,127 +307,44 @@ impl ShellApp {
         let Some(identity) = identity else {
             return;
         };
+        let Some(raw_index) =
+            kuzushi_core::findings::finding_page_anchor_index(self.findings(), &identity)
+        else {
+            return;
+        };
+        let exact = finding_generation_key(&self.findings()[raw_index]);
         let position = (0..crate::ui_view_models::visible_findings_len(self)).find(|index| {
             crate::ui_view_models::visible_finding_at_index(self, *index)
-                .is_some_and(|(_, finding)| finding_generation_key(&finding) == identity)
+                .is_some_and(|(_, finding)| finding_generation_key(&finding) == exact)
         });
         if let Some(index) = position {
             self.router.findings_mut().set_cursor(index);
         }
     }
 
-    fn replace_filtered_findings(
-        &mut self,
-        store: &FindingStore,
-        report: FindingListReport,
-        policy: IdentityFoldPolicy,
-        expression: &str,
-        read_watermark: Option<u64>,
-    ) {
-        let FindingListReport {
-            count,
-            findings,
-            aliases,
-            ..
-        } = report;
-        let decisions = self.load_review_decisions_for_findings(store, &findings);
-        self.replace_findings(
-            findings,
-            aliases,
-            policy,
-            decisions,
-            false,
-            count,
-            read_watermark,
-        );
-        self.set_active_findings_filter(Some(expression.to_string()));
-        self.log(
-            "findings",
-            format!(
-                "filter {expression:?}: loaded {} of {count} matching",
-                self.findings().len()
-            ),
-        );
-    }
-
-    fn identity_policy_operator_state_dir(&self) -> anyhow::Result<std::path::PathBuf> {
+    pub(crate) fn identity_policy_operator_state_dir(&self) -> anyhow::Result<std::path::PathBuf> {
         Ok(kuzushi_core::ConfigPaths::from_target(self.target())?.global_state_dir())
     }
 
-    fn open_store_and_identity_policy(
-        &mut self,
-        operator_state: &Path,
-    ) -> anyhow::Result<(FindingStore, IdentityFoldPolicy)> {
-        let store = self.open_store()?;
-        let target = self
-            .target()
-            .context("finding identity policy requires an active target")?;
-        let values = self.option_store().effective_stored_values("sast:scan");
-        let requested = values.get("identityFold").and_then(|value| value.as_str());
-        let defaults = kuzushi_core::findings::resolve_identity_policy_defaults(
-            operator_state,
-            target,
-            requested,
-            None,
-        )?;
-        let policy = IdentityFoldPolicy::parse(Some(&defaults.identity_fold))?;
-        Ok((store, policy))
-    }
-
-    fn current_findings_projection_watermark(&mut self, store: &FindingStore) -> Option<u64> {
-        match store.projection_meta() {
-            Ok(meta) => Some(meta.applied_seq),
-            Err(error) => {
-                self.log(
-                    "error",
-                    with_next_step(
-                        format!("could not read findings projection watermark: {error}"),
-                        "workspace status",
-                    ),
-                );
-                None
-            }
-        }
-    }
-
-    fn load_review_decisions_for_findings(
-        &mut self,
-        store: &FindingStore,
-        findings: &[Finding],
-    ) -> Vec<kuzushi_core::findings::ReviewDecisionRecord> {
-        match review_decisions_for_findings(store, findings) {
-            Ok(decisions) => decisions,
-            Err(error) => {
-                self.log(
-                    "error",
-                    with_next_step(
-                        format!("could not load review decisions: {error}"),
-                        "workspace status",
-                    ),
-                );
-                Vec::new()
-            }
-        }
-    }
-
     fn reselect_current_finding(&mut self) {
-        let Some(selected_fingerprint) = self
-            .selected_finding()
-            .as_ref()
-            .map(|finding| finding.fingerprint.clone())
-        else {
+        let Some(selected) = self.selected_finding().clone() else {
             return;
         };
-        let selected = self
-            .findings()
-            .iter()
-            .find(|finding| finding.fingerprint == selected_fingerprint)
-            .cloned();
-        self.set_selected_finding(selected);
+        let explicit = self.router.findings().selection_is_explicit();
+        let anchor = if explicit {
+            kuzushi_core::findings::finding_page_anchor(&selected)
+        } else {
+            kuzushi_core::findings::finding_page_continuity_anchor(&selected)
+        };
+        let replacement =
+            kuzushi_core::findings::finding_page_anchor_index(self.findings(), &anchor)
+                .map(|index| self.findings()[index].clone())
+                .or_else(|| explicit.then_some(selected));
+        self.set_selected_finding(replacement);
         self.sync_findings_cursor_to_selected();
     }
 
-    fn log_refresh_findings_error(&mut self, error: anyhow::Error, announce: bool) {
+    pub(crate) fn log_refresh_findings_error(&mut self, error: anyhow::Error, announce: bool) {
         if announce {
             self.log(
                 "error",
@@ -506,15 +361,6 @@ fn finding_generation_key(finding: &Finding) -> String {
         .unwrap_or_else(|| format!("fingerprint:{}", finding.fingerprint))
 }
 
-fn truncate_findings_report(
-    mut report: FindingListReport,
-    requested_limit: usize,
-) -> FindingListReport {
-    report.findings.truncate(requested_limit);
-    report.aliases.truncate(requested_limit);
-    report
-}
-
 fn findings_loaded_message(loaded: usize, total: usize) -> String {
     let noun = if total == 1 { "finding" } else { "findings" };
     if loaded == total {
@@ -524,11 +370,27 @@ fn findings_loaded_message(loaded: usize, total: usize) -> String {
     }
 }
 
-fn review_decisions_for_findings(
-    store: &FindingStore,
+fn unverified_terminal_review_sources(
     findings: &[Finding],
-) -> Result<Vec<kuzushi_core::findings::ReviewDecisionRecord>> {
-    store.list_review_decisions_for_findings(findings)
+    decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+) -> BTreeMap<String, kuzushi_core::workspace::WorkspaceReviewSourceApplicability> {
+    let index = kuzushi_core::findings::EffectiveReviewStateIndex::from_findings_and_decisions(
+        findings, decisions,
+    );
+    findings
+        .iter()
+        .filter(|finding| {
+            index
+                .effective_decision_for(finding)
+                .is_some_and(|decision| decision.complete())
+        })
+        .map(|finding| {
+            (
+                kuzushi_core::findings::finding_observation_identity(finding).to_owned(),
+                kuzushi_core::workspace::WorkspaceReviewSourceApplicability::LaterSourceUnverified,
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -540,6 +402,8 @@ mod tests {
     };
     use kuzushi_core::{OptionScope, OptionTarget, Severity, V2Config};
 
+    mod large_ledger;
+    mod review_source_failure;
     mod scan_membership;
 
     #[test]

@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-const BINARY_SNIFF_BYTES: usize = 4 * 1024;
+pub(crate) const BINARY_SNIFF_BYTES: usize = 4 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundedText {
@@ -67,7 +67,11 @@ pub(crate) fn read_regular_bytes(path: &Path, max_bytes: usize) -> io::Result<Ve
     read_open_regular_bytes(path, open_regular_file(path)?, max_bytes)
 }
 
-fn read_open_regular_bytes(path: &Path, file: fs::File, max_bytes: usize) -> io::Result<Vec<u8>> {
+pub(crate) fn read_open_regular_bytes(
+    path: &Path,
+    file: fs::File,
+    max_bytes: usize,
+) -> io::Result<Vec<u8>> {
     reject_truncated(path, max_bytes, file.metadata()?.len() > max_bytes as u64)?;
     let prefix = read_open_file_prefix(file, max_bytes)?;
     reject_truncated(path, max_bytes, prefix.truncated)?;

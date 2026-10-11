@@ -1,4 +1,6 @@
 mod application;
+pub(crate) use application::read_workspace_finding_export_records;
+pub use application::{execute_lesson_action, load_finding_lessons};
 pub mod artifact_kb;
 pub mod artifacts;
 pub mod attack_surface;
@@ -15,6 +17,7 @@ pub(crate) mod rust_test_source;
 pub(crate) mod source_snapshot;
 pub mod source_span;
 pub mod tool_shelf;
+pub mod report_preferences;
 
 #[cfg(test)]
 mod tests;
@@ -25,22 +28,29 @@ pub use application::{
     discover_nested_project_scopes, edit_scan_scope_proposal, export_scan_findings_sarif,
     export_scan_findings_sarif_with_run_summary, export_workspace_findings,
     export_workspace_findings_with_options, findings_since_filter_expression,
-    load_accepted_scan_scope_proposal, load_investigation_report,
+    load_accepted_scan_scope_proposal, load_finding_relationships, load_investigation_report,
+    load_investigation_report_document, load_investigation_report_document_for_runs,
     load_investigation_report_for_runs, load_nested_project_scopes, load_program_scope,
     load_project_model_document, load_scan_scope_proposal, preview_workspace_findings_export,
-    project_model_scope_path, record_review_session_started,
+    project_model_scope_path, read_finding_review_source, record_finding_relationship_batch_review,
+    record_finding_relationship_review, record_review_session_started,
     record_user_review_decision_for_finding, record_user_review_decision_for_finding_at_watermark,
     record_user_review_decision_for_finding_with_session, refresh_project_model_staleness,
-    save_nested_project_scopes, save_project_model_document, scan_scope_proposal_files,
-    workspace_export_omitted_fields, workspace_finding_export_records_with_context,
-    workspace_finding_export_records_with_reviews, workspace_status_for_target,
-    write_program_scope_scaffold, ChangedScanScope, InvestigationReportReceipt,
-    ProjectModelDocument, ProjectModelSection, ProjectModelSectionOrigin,
-    WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary, WorkspaceFindingExportLocation,
-    WorkspaceFindingExportRecord, WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
-    WorkspaceFindingsExportPreview, WorkspaceObservedSource, WorkspaceRemediationExportSummary,
-    WorkspaceReviewDecisionBasis, WorkspaceRunExportContext, WorkspaceStatus,
-    WorkspaceVerificationExportSummary, PROJECT_MODEL_SCHEMA_VERSION,
+    review_completion_for_findings, save_nested_project_scopes, save_project_model_document,
+    scan_scope_proposal_files, workspace_export_omitted_fields,
+    workspace_finding_export_records_with_context, workspace_finding_export_records_with_reviews,
+    workspace_status_for_target, write_program_scope_scaffold, ChangedScanScope,
+    ContextMatrixInvestigationReceipt, FindingRelationshipBatchReviewRequest,
+    FindingRelationshipReviewRequest, InvestigationContextCase, InvestigationReportDocument,
+    InvestigationReportEvidence, InvestigationReportReceipt, InvestigationReportSummary,
+    InvestigationWorkCounts, ProjectModelDocument, ProjectModelSection, ProjectModelSectionOrigin,
+    ScopeStudyInvestigationReceipt, WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary,
+    WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
+    WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
+    WorkspaceFindingsExportPreview, WorkspaceLessonExportRecord, WorkspaceObservedSource,
+    WorkspaceRemediationExportSummary, WorkspaceReviewCompletion, WorkspaceReviewDecisionBasis,
+    WorkspaceReviewSourceApplicability, WorkspaceReviewSourceComparison, WorkspaceRunExportContext,
+    WorkspaceStatus, WorkspaceVerificationExportSummary, PROJECT_MODEL_SCHEMA_VERSION,
 };
 pub use artifact_kb::*;
 pub use artifacts::{

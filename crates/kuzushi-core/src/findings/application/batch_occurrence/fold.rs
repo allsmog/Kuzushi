@@ -82,7 +82,7 @@ impl LogicalTrialCounts {
 }
 
 fn trial_is_failed(trial: &BatchTrialReport) -> bool {
-    matches!(trial.state.as_str(), "failed" | "parked")
+    trial.state == "failed" || (trial.state == "parked" && trial.attempts > 0)
 }
 
 pub(super) fn occurrence_rows(

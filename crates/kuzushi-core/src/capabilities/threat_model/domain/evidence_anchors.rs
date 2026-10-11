@@ -115,10 +115,17 @@ fn narrative_criticality_buckets(record: &Map<String, Value>) -> Value {
     })
 }
 
-fn object_field<'a>(record: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Map<String, Value>> {
-    keys.iter().find_map(|key| record.get(*key)).and_then(Value::as_object)
+fn object_field<'a>(
+    record: &'a Map<String, Value>,
+    keys: &[&str],
+) -> Option<&'a Map<String, Value>> {
+    keys.iter()
+        .find_map(|key| record.get(*key))
+        .and_then(Value::as_object)
 }
 
 fn category_array(record: Option<&Map<String, Value>>, keys: &[&str]) -> Vec<String> {
-    record.map(|value| string_array_field(value, keys)).unwrap_or_default()
+    record
+        .map(|value| string_array_field(value, keys))
+        .unwrap_or_default()
 }

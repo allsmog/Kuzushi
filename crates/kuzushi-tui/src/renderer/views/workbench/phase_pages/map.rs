@@ -184,9 +184,9 @@ fn map_artifact_status_line(model: &MapPhaseModel, width: usize) -> Line<'static
         .details
         .as_ref()
         .map(|details| details.files.as_str())
-        .unwrap_or("context inventory unavailable");
+        .unwrap_or("file inventory unavailable");
     let status = format!(
-        "{} · {} · {} · context:{} · {} · {} nodes · {} flows",
+        "{} · {} · {} · repo index:{} · {} · {} nodes · {} flows",
         model.threat_model_freshness.verdict,
         model.project.scope_label,
         model.project.revision_label,
@@ -510,8 +510,7 @@ fn context_heading_line(scope: &str, revision: &str, width: usize) -> Line<'stat
     ])
 }
 
-/// "context:missing · missing. Next: …" repeats the state; strip a status
-/// prefix that restates it so the line reads "context:missing · Next: …".
+/// Keep the repository-index status distinct from the accepted Map context.
 fn context_status_line(model: &MapPhaseModel) -> String {
     let state = model.context.state.to_string();
     let status = model
@@ -519,7 +518,7 @@ fn context_status_line(model: &MapPhaseModel) -> String {
         .status
         .strip_prefix(&format!("{state}. "))
         .unwrap_or(&model.context.status);
-    format!("context:{state} · {status}")
+    format!("repo index:{state} · {status}")
 }
 
 fn render_attack_surface(

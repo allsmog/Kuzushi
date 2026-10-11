@@ -30,6 +30,9 @@ pub enum ScanScopeEdit {
         path: String,
         reason: String,
     },
+    IncludePath {
+        path: String,
+    },
     EditBoundary {
         scope_id: String,
         rationale: String,
@@ -95,6 +98,7 @@ impl ScanScopeDraft {
                 self.set_exclusion(path, &reason);
                 Ok(())
             }
+            ScanScopeEdit::IncludePath { path } => self.remove_exclusion(&path),
             ScanScopeEdit::SetSharedDiscovery { enabled } => {
                 self.shared_discovery = enabled;
                 Ok(())
@@ -138,6 +142,16 @@ impl ScanScopeDraft {
         }
     }
 
+    fn remove_exclusion(&mut self, path: &str) -> Result<()> {
+        let index = self
+            .exclusions
+            .iter()
+            .position(|exclusion| exclusion.path == path)
+            .context("Choose an exact recorded exclusion path. No scope changed.")?;
+        self.exclusions.remove(index);
+        Ok(())
+    }
+
     fn select_whole_repository(&mut self) {
         self.scopes = vec![ProposedScanScope {
             id: "repository".into(),
@@ -149,7 +163,6 @@ impl ScanScopeDraft {
         }];
         self.shared_scope = None;
         self.shared_discovery = false;
-        self.exclusions.clear();
     }
 }
 

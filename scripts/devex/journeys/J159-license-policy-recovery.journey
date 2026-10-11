@@ -1,0 +1,112 @@
+name: Actual license signals retain repetitions, deferred review, partial history and readable recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run license-scan:scan {"requireSpdxHeaders":false}
+require-live-snap: 35 license-scan: 1 finding | first-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART first
+submit: run license-scan:scan {"requireSourceSpdxHeaders":false}
+require-live-snap: 35 run receipt | second-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART second
+submit: run license-scan:scan {"require_source_spdx_headers":false}
+require-live-snap: 35 run receipt | third-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART third
+submit: open F-0001
+require-live-snap: 25 Package manifest does not declare a license | actual-finding
+expect: signal-only
+ask: Do three explicit scanner repetitions produce one retained finding with real source evidence and distinct observations, while keeping generated analysis artifacts outside source policy?
+submit: decision deferred Owned license policy needs owner review
+require-live-snap: 25 Owned license policy needs owner review | deferred-finding
+expect: recorded: deferred
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART deferred
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 25 SELECTED FINDING | finding-reader
+resize: 40x12
+live-snap: review-40x12
+expect: F-0001
+expect: PgUp/PgDn scroll
+keys: NPage
+live-snap: finding-page-1-40x12
+keys: NPage
+live-snap: finding-page-2-40x12
+keys: NPage
+live-snap: finding-page-3-40x12
+keys: NPage
+live-snap: finding-page-4-40x12
+keys: NPage
+live-snap: finding-page-5-40x12
+keys: NPage
+live-snap: finding-page-6-40x12
+expect: F-0001
+expect: PgUp/PgDn scroll
+ask: Are the real policy observation, signal-only evidence and scripted deferral readable through normal Review controls across six terminal sizes without claiming a verified vulnerability?
+resize: 120x36
+keys: q
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART license
+submit: logs
+submit: run sast:scan {"taskMode":"manual","tasks":["license-scan"],"triage":false,"verify":false,"autoPatch":false}
+require-live-snap: 25 PREREQUISITE PLAN | deterministic-prerequisite
+expect: no model cost expected
+keys: a
+require-live-snap: 35 0 finding(s) | clean-rerun
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART clean
+submit: open F-0001
+require-live-snap: 25 not observed | retained-observation
+expect: recorded: deferred
+expect: Absence does not establish a fix.
+ask: Does a clean rerun after an explicit source edit retain earlier observations and deferral without silently marking the finding fixed or making an old decision current?
+submit: report
+require-live-snap: 25 Enter export | report
+keys: j j j
+require-live-snap: 20 format json | json-report
+keys: Enter
+require-live-snap: 25 EXPORTED | report-exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART exported
+ask: Does the exported report retain the source-bound deferral and absence limitation from actual scanner observations?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART oversize
+submit: logs
+submit: run license-scan:scan {"requireSourceSpdxHeaders":false}
+require-live-snap: 35 2097152 | failed-license-read
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART failed
+submit: open F-0001
+require-live-snap: 25 Owned license policy needs owner review | retained-after-failure
+expect: recorded: deferred
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART repair
+submit: logs
+submit: run sast:scan {"taskMode":"manual","tasks":["license-scan"],"triage":false,"verify":false,"autoPatch":false}
+require-live-snap: 25 PREREQUISITE PLAN | cached-prerequisite
+expect: cached via context:build
+keys: r
+require-live-snap: 35 0 finding(s) | recovered-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART recovered
+ask: Does an oversized license file produce an honest failed result, retain earlier evidence and recover only after explicit repair and rerun?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0001
+require-live-snap: 25 Owned license policy needs owner review | recovered-review
+expect: not observed
+expect: recorded: deferred
+require-shell: python3 -B @REPO/scripts/devex/fixtures/license_audit.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain all six real scanner outcomes, three observations, one scripted review decision and the report without executing source, calling a model or inventing fix evidence?
+keys: C-c
+require-exit: 10

@@ -61,6 +61,9 @@ Notable changes to Kuzushi. Release procedure lives in
   row taller than its canvas is clipped with the clip disclosed rather than
   skipped. Scrolling past the end still lands on the last rows, now by
   measuring rows from the end instead of clamping a `Paragraph` offset.
+  The worklist, whose values also wrap, groups its rows the same way, and
+  PgUp/PgDn on a line page (full-frame or embedded in Map) move to the
+  adjacent window of whole rows, so paging neither skips nor repeats a row.
   Reported against a real target in #172 (2026-10-09).
 - Map's embedded gallery owns the keys it advertises. The renderer draws the
   Summary/DFD/Entry/Components gallery as Map's page body for every

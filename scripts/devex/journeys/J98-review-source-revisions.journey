@@ -1,0 +1,67 @@
+# Synthetic findings and commit metadata; real store, source captures and TUI.
+name: Review distinguishes the source of an older verdict from later observations
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_source.py prepare @TMP_TARGET @ART/fixture
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/fixture/open.txt
+keys: Enter
+require-live-snap: 30 DECISION SOURCE | older-decision
+expect: fixture-a
+expect: 111111111111
+expect: fixture-b
+expect: 222222222222
+expect: Reassess this verdict
+ask: Does Review retain the older human verdict while naming both recorded revisions and the need for reassessment, with no fix claim or new scan?
+resize: 160x48
+require-live-snap: 20 DECISION SOURCE | source-160x48
+resize: 96x89
+require-live-snap: 20 DECISION SOURCE | source-96x89
+resize: 80x24
+require-live-snap: 20 KUZUSHI | source-80x24
+resize: 60x20
+require-live-snap: 20 KUZUSHI | source-60x20
+nav-mode:
+keys: Enter
+require-live-snap: 20 ZOOM SELECTED FINDING | source-focus
+resize: 40x12
+require-live-snap: 20 KUZUSHI | source-40x12
+keys: NPage
+live-snap: source-40x12-page-1
+keys: NPage
+live-snap: source-40x12-page-2
+keys: NPage
+live-snap: source-40x12-page-3
+keys: NPage
+live-snap: source-40x12-page-4
+keys: NPage
+live-snap: source-40x12-page-5
+ask: At 40x12, can the operator page from the verdict into its source warning without losing the selected finding?
+resize: 120x36
+require-live-snap: 20 KUZUSHI | restored-source
+keys: PPage
+require-live-snap: 20 recorded: confirmed | source-before-new-decision
+submit: decision deferred Synthetic source B deliberately deferred
+require-live-snap: 30 No later observation | reassessed-source
+expect: recorded: deferred
+expect: Synthetic source B deliberately deferred
+expect: fixture-b
+expect: No later observation
+ask: Does the explicit new verdict use source B, retain the earlier decisions and avoid treating absence as a fix?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/fixture/open.txt
+keys: Enter
+require-live-snap: 30 Synthetic source B deliberately deferred | source-restarted
+expect: fixture-b
+expect: No later observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_source.py verify @TMP_TARGET @ART/fixture
+ask: Does no-color restart retain the new source-qualified verdict and all prior decisions with unchanged source and zero provider work?
+keys: C-c
+require-exit: 10

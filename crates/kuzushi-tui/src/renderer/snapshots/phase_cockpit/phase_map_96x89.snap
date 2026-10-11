@@ -18,6 +18,10 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │flows cross a declared boundary. Rebuild  │ │                                                 │
 │to add a source-grounded product summary. │ │                                                 │
 │                                          │ │                                                 │
+│shape · 1 entities · 1 processes · 1      │ │                                                 │
+│stores                                    │ │                                                 │
+│context · 0 entries, 0 gates, 0 assets, 0 │ │                                                 │
+│threats                                   │ │                                                 │
 └──────────────────────────────────────────┘ └─────────────────────────────────────────────────┘
 ┌COMPONENT TREE · external · 1/3 · ↑/↓ select · Enter DFD · PgUp/PgDn scroll ──────────────────┐
 │◇ phase-target · 3 components                                                                   │
@@ -83,12 +87,8 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │                                                                                              │
 │                                                                                              │
 │                                                                                              │
-│                                                                                              │
-│                                                                                              │
-│                                                                                              │
-│                                                                                              │
 └──────────────────────────────────────────────────────────────────────────────────────────────┘
-unverified · ./phase-target · rev:unknown · context:current · indexed=3 total=3 · 3 nodes · 2...
+unverified · ./phase-target · rev:unknown · repo index:current · indexed=3 total=3 · 3 nodes ·...
 ⛭ autonomy:fix · run route · ⠋ context:build · 42s ·...     6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

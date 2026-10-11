@@ -1,0 +1,100 @@
+name: Bounded pack inspection, legacy draft consumption and deliberate scope review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART seed
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/limited-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 pack walk-entry limit reached | limited
+expect: Incomplete inspection
+expect: entries 1/1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART limited
+ask: Does the result expose the finite walk allowance and omitted checks without claiming a clean pack or completed Map?
+submit: run pack:suggest-shards {}
+submit: logs
+keys: End
+require-live-snap: 25 never auto-installed | draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART consume-draft
+paste-file: @ART/complete-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 Inspection: complete=true | complete
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART complete
+ask: Does exact compatibility dispatch produce a draft that the linter can consume while modern scope acceptance and scan work remain separate?
+paste-file: @ART/oversized-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 reserved bytes 16/16 | oversized
+expect: size of 16 bytes
+expect: 1 error(s)
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART oversized
+resize: 40x12
+keys: Escape
+wait: 0.2
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | failed-reader-40x12
+expect: Ctrl+G palette
+expect-not: z expand
+keys: PPage
+live-snap: failed-reader-page-40x12
+keys: PPage
+live-snap: failed-reader-second-page-40x12
+keys: PPage
+live-snap: failed-reader-third-page-40x12
+keys: PPage
+live-snap: failed-reader-allowance-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART reader
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | reader-palette-40x12
+keys: Escape
+require-live-snap: 20 READ TRANSCRIPT | reader-return-40x12
+ask: Can the operator read the failed inspection and its retained allowance without hidden model work or unreadable narrow chrome?
+resize: 120x36
+keys: Escape
+submit: scopes
+require-live-snap: 20 Enter / c build inventory | empty-scopes
+keys: c
+require-live-snap: 30 DRAFT SCOPES | whole-scope
+keys: z
+require-live-snap: 20 DRAFT SCOPES | scope-keeps-input
+keys: f
+require-live-snap: 20 README.md | loose-root-file
+ask: Does the modern whole-repository draft retain loose root files and show concrete membership before acceptance?
+keys: Escape
+resize: 160x48
+live-snap: scope-160x48
+resize: 96x89
+live-snap: scope-96x89
+resize: 80x24
+live-snap: scope-80x24
+resize: 60x20
+live-snap: scope-60x20
+resize: 40x12
+require-live-snap: 15 Enter menu | scope-40x12
+expect: p plan
+keys: NPage NPage
+live-snap: scope-page-40x12
+ask: Are scope, evidence and actions readable across all six sizes without allowing drafts or lint results to imply a scan plan?
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+resize: 80x24
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES | no-color-scopes
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/pack_inspection.py @TMP_TARGET @ART restarted
+ask: Does restart retain the draft and inspection history without forging Map completion, spending or discovery work?
+keys: Escape
+wait: 0.2
+keys: C-c
+require-exit: 10

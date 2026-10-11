@@ -1,0 +1,172 @@
+//! Actual shared context dispatch and downstream artifacts; never execute source.
+use kuzushi_core::{ModuleRegistry, ToolExecutionContext, V2Config, WorkspaceTarget};
+use serde_json::{json, Value};
+use std::path::Path;
+
+fn fixture() -> tempfile::TempDir {
+    let root = tempfile::tempdir().unwrap();
+    for path in ["root.rs", "alpha/deep/file.py", "zeta/file.rs"] {
+        let file = root.path().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "// Owned context fixture; never executed.\n").unwrap();
+    }
+    root
+}
+
+fn dispatch(root: &Path, tool: &str, input: Value) -> anyhow::Result<Value> {
+    let workspace = WorkspaceTarget::new(root)?;
+    let config = V2Config::default();
+    let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let prepared = registry
+        .prepare_dispatch_input(tool, input, &ctx, None)?
+        .authorize_explicit_headless();
+    registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+}
+
+fn snapshot(root: &Path) -> Value {
+    serde_json::from_slice(
+        &std::fs::read(kuzushi_core::context::context_snapshot_path(root)).unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn real_context_reuses_inventory_membership_and_discloses_the_exact_sample() {
+    let root = fixture();
+    let result = dispatch(
+        root.path(),
+        "context:build",
+        json!({"sampleLimit":2,"enrichment":false}),
+    )
+    .unwrap();
+    let value = snapshot(root.path());
+    let inspection = &value["repositoryInventory"]["inspection"];
+    assert_eq!(
+        value["filesIndexed"],
+        inspection["files"].as_array().unwrap().len()
+    );
+    assert_eq!(value["filesSample"], json!(["root.rs", "zeta/file.rs"]));
+    assert_eq!(value["fileIndex"]["enumeration"], "filesystem");
+    assert_eq!(value["fileIndex"]["sampleOrder"], "depth_then_path");
+    assert_eq!(value["fileIndex"]["truncated"], true);
+    assert_eq!(result["data"]["snapshot"]["fileIndex"], value["fileIndex"]);
+    let receipt = kuzushi_core::context::context_snapshot_inspection(&value).unwrap();
+    assert_eq!((receipt.sampled_files, receipt.enumerated_files), (2, 3));
+    assert!(kuzushi_core::context::context_snapshot_freshness(root.path(), &value).is_current());
+}
+
+#[test]
+fn invalid_limits_and_aliases_are_rejected_before_replacing_prior_bytes() {
+    let root = fixture();
+    dispatch(root.path(), "context:build", json!({"sampleLimit":1})).unwrap();
+    let path = kuzushi_core::context::context_snapshot_path(root.path());
+    let before = std::fs::read(&path).unwrap();
+    for tool in ["context:build", "context-lite:index"] {
+        for key in ["sampleLimit", "limit", "sample_limit"] {
+            for value in [
+                json!(-1),
+                json!(0),
+                json!(2001),
+                json!(1.5),
+                json!("invalid"),
+            ] {
+                let input = json!({key:value});
+                assert!(dispatch(root.path(), tool, input).is_err());
+                assert_eq!(std::fs::read(&path).unwrap(), before);
+            }
+        }
+    }
+    dispatch(root.path(), "context:build", json!({"limit":2})).unwrap();
+    assert_eq!(
+        snapshot(root.path())["filesSample"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn repo_and_app_model_scopes_preserve_slice_contracts_without_model_work() {
+    let root = fixture();
+    dispatch(
+        root.path(),
+        "context:build",
+        json!({"scope":"repo","sampleLimit":2}),
+    )
+    .unwrap();
+    let repo = snapshot(root.path());
+    assert!(repo.get("appModel").is_none());
+    assert!(repo.get("enrichedContext").is_none());
+    dispatch(root.path(), "context:build", json!({"scope":"app-model"})).unwrap();
+    let app = snapshot(root.path());
+    assert!(app.get("appModel").is_some());
+    assert_eq!(repo["repositoryInventory"], app["repositoryInventory"]);
+    assert_eq!(repo["fileIndex"], app["fileIndex"]);
+    assert!(kuzushi_core::context::context_snapshot_freshness(root.path(), &app).is_current());
+}
+
+#[test]
+fn pre_cancellation_preserves_the_existing_snapshot_and_never_starts_sampling() {
+    let root = fixture();
+    dispatch(root.path(), "context:build", json!({})).unwrap();
+    let path = kuzushi_core::context::context_snapshot_path(root.path());
+    let before = std::fs::read(&path).unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = V2Config::default();
+    let cancellation = kuzushi_core::scan::ScanCancellation::default();
+    cancellation.cancel();
+    let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: Some(&cancellation),
+        authorization: Default::default(),
+    };
+    let prepared = registry
+        .prepare_dispatch_input("context:build", json!({}), &ctx, None)
+        .unwrap()
+        .authorize_explicit_headless();
+    let error = registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("cancel"), "{error:#}");
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn git_inventory_does_not_silently_expand_to_untracked_source() {
+    let root = fixture();
+    for args in [
+        vec!["init", "--quiet"],
+        vec!["add", "root.rs", "zeta/file.rs"],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(root.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    dispatch(root.path(), "context:build", json!({"sampleLimit":200})).unwrap();
+    let value = snapshot(root.path());
+    assert_eq!(value["fileIndex"]["enumeration"], "git-index");
+    assert_eq!(value["filesSample"], json!(["root.rs", "zeta/file.rs"]));
+    let receipt = kuzushi_core::context::context_snapshot_inspection(&value).unwrap();
+    assert_eq!(
+        receipt.enumeration,
+        kuzushi_core::context::ContextEnumeration::GitIndex
+    );
+    assert_eq!(receipt.enumerated_files, 2);
+    assert!(root.path().join("alpha/deep/file.py").exists());
+}

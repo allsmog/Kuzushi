@@ -82,6 +82,7 @@
     "scripts/langgraph-bridge/diagnostics.mjs",
     "scripts/langgraph-bridge/errors.mjs",
     "scripts/langgraph-bridge/file-tools.mjs",
+    "scripts/langgraph-bridge/read-scope.mjs",
     "scripts/langgraph-bridge/grep-regex-runner.mjs",
     "scripts/langgraph-bridge/grep-regex-worker.mjs",
     "scripts/langgraph-bridge/mcp.mjs",

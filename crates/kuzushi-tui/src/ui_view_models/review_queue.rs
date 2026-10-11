@@ -1,7 +1,7 @@
 use super::findings::{
-    finding_identity_label, finding_proof_meter, finding_unique_source_count,
-    projected_findings_before_search, projected_visible_findings, relativize_location, target_base,
-    visible_findings_cache_key,
+    finding_confidence_label, finding_identity_label, finding_proof_meter,
+    finding_unique_source_count, projected_findings_before_search, projected_visible_findings,
+    relativize_location, target_base, visible_findings_cache_key,
 };
 use super::review_conflicts::effective_review_decision_conflict_label;
 use super::review_state::{
@@ -53,6 +53,10 @@ impl ReviewQueueMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewQueueModel {
     pub(crate) navigation_active: bool,
+    pub(crate) refresh_status: Option<String>,
+    pub(crate) decision_save_label: Option<String>,
+    pub(crate) page: Option<ReviewQueuePage>,
+    pub(crate) partial_load: Option<ReviewQueuePartialLoad>,
     pub(crate) total_count: usize,
     pub(crate) visible_count: usize,
     pub(crate) open_count: usize,
@@ -72,6 +76,41 @@ pub(crate) struct ReviewQueueModel {
     pub(crate) empty_reason: Option<String>,
     pub(crate) rows: Arc<[ReviewQueueRow]>,
     pub(crate) selected_row: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReviewQueuePartialLoad {
+    pub(crate) loaded: usize,
+    pub(crate) matching: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReviewQueuePage {
+    pub(crate) offset: usize,
+    pub(crate) loaded: usize,
+    pub(crate) total: usize,
+    pub(crate) has_next: bool,
+    pub(crate) has_previous: bool,
+}
+
+impl ReviewQueuePage {
+    pub(crate) fn label(self) -> String {
+        format!(
+            "rows {}-{} of {}",
+            self.offset + usize::from(self.loaded > 0),
+            self.offset + self.loaded,
+            self.total
+        )
+    }
+}
+
+impl ReviewQueuePartialLoad {
+    pub(crate) fn label(self) -> String {
+        format!(
+            "{} of {} matching findings loaded",
+            self.loaded, self.matching
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -123,6 +162,30 @@ pub(crate) struct ReviewFacetCount {
 }
 
 impl ReviewQueueModel {
+    pub(crate) fn population_title(&self) -> String {
+        self.decision_save_label
+            .as_ref()
+            .map(|label| format!("FINDINGS · saving {label}"))
+            .unwrap_or_else(|| self.population_title_without_save())
+    }
+
+    fn population_title_without_save(&self) -> String {
+        if self.refresh_status.is_some() {
+            return "FINDINGS · previous results".into();
+        }
+        if let Some(page) = self.page.filter(|page| page.offset > 0) {
+            return format!(
+                "FINDINGS · {}-{}/{}",
+                page.offset + 1,
+                page.offset + page.loaded,
+                page.total
+            );
+        }
+        match self.partial_load {
+            Some(partial) => format!("FINDINGS · {}/{} loaded", partial.loaded, partial.matching),
+            None => format!("FINDINGS · {}", self.visible_count),
+        }
+    }
     #[cfg(test)]
     pub(crate) fn row_is_selected(&self, index: usize) -> bool {
         self.selected_row == Some(index)
@@ -183,6 +246,13 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
     let review = app.router.workbench().review();
     let search_active = review_search_active(review);
     let backlog = super::review_backlog_active(app);
+    let partial_load = app
+        .domain()
+        .findings_are_partial()
+        .then(|| ReviewQueuePartialLoad {
+            loaded: app.findings().len(),
+            matching: app.findings_total_count(),
+        });
     let header = if backlog {
         backlog_header(visible_count, review)
     } else {
@@ -190,6 +260,20 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
     };
     ReviewQueueModel {
         navigation_active: app.input_mode() == crate::InputMode::Navigate,
+        refresh_status: app.findings_refresh_status(),
+        decision_save_label: app.review_decision_save_label(),
+        page: app
+            .domain()
+            .findings_page()
+            .filter(|page| page.total > page.loaded)
+            .map(|page| ReviewQueuePage {
+                offset: page.offset,
+                loaded: page.loaded,
+                total: page.total,
+                has_next: page.next_cursor.is_some(),
+                has_previous: page.previous_cursor.is_some(),
+            }),
+        partial_load,
         total_count,
         visible_count,
         open_count,
@@ -202,17 +286,41 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         completeness_mode: if backlog { "backlog" } else { mode.label() },
         ordering_indicator: review_ordering_indicator(app, backlog),
         operator_calibration: operator_calibration_model(app.findings(), app.review_decisions()),
-        header,
-        empty_reason: review_queue_empty_reason(
-            total_count,
-            visible_count,
-            app.findings().len(),
-            search_active,
-            mode,
-        ),
+        header: qualify_partial_review_header(header, partial_load),
+        empty_reason: app
+            .findings_refresh_status()
+            .or_else(|| partial_review_empty_reason(partial_load, visible_count))
+            .or_else(|| {
+                review_queue_empty_reason(
+                    total_count,
+                    visible_count,
+                    app.findings().len(),
+                    search_active,
+                    mode,
+                )
+            }),
         rows,
         selected_row,
     }
+}
+
+fn qualify_partial_review_header(
+    header: String,
+    partial: Option<ReviewQueuePartialLoad>,
+) -> String {
+    match partial {
+        Some(partial) => format!("{header} · {}", partial.label()),
+        None => header,
+    }
+}
+
+fn partial_review_empty_reason(
+    partial: Option<ReviewQueuePartialLoad>,
+    visible: usize,
+) -> Option<String> {
+    (partial.is_some() && visible == 0).then(|| {
+        "No matches in the loaded portion. Filter the ledger to inspect omitted findings.".into()
+    })
 }
 
 fn operator_calibration_model(
@@ -334,7 +442,7 @@ fn cached_review_queue_rows(
     );
     let candidates = projected_findings_before_search(app);
     let facet_groups = Arc::from(review_facet_groups(app, &candidates, &review_index));
-    let (open_count, complete_count) = candidate_review_counts(&candidates, &review_index);
+    let (open_count, complete_count) = candidate_review_counts(app, &candidates, &review_index);
     let all_rows = projected_review_queue_rows(app, &review_index, base.as_deref());
     let rows = Arc::from(filter_review_rows(all_rows, mode));
     app.workbench_cache().borrow_mut().cache_review_queue(
@@ -348,6 +456,7 @@ fn cached_review_queue_rows(
 }
 
 fn candidate_review_counts(
+    app: &ShellApp,
     candidates: &[crate::VisibleFindingProjection],
     review_index: &EffectiveReviewStateIndex,
 ) -> (usize, usize) {
@@ -355,7 +464,11 @@ fn candidate_review_counts(
         .iter()
         .filter(|candidate| {
             let decision = review_index.effective_decision_for(&candidate.finding);
-            effective_review_decision_complete(&candidate.finding, decision.as_ref())
+            super::review_state::source_qualified_review_complete(
+                app,
+                &candidate.finding,
+                decision.as_ref(),
+            )
         })
         .count();
     (candidates.len().saturating_sub(complete), complete)
@@ -478,14 +591,24 @@ fn projected_review_queue_rows(
         .enumerate()
         .map(|(index, projected)| {
             let decision = review_index.effective_decision_for(&projected.finding);
-            ReviewQueueRow::from_finding(
+            let mut row = ReviewQueueRow::from_finding(
                 index,
                 projected.alias.clone(),
                 &projected.finding,
                 decision.as_ref(),
                 base,
                 batch_occurrence(app, &projected.finding.fingerprint),
-            )
+            );
+            if app
+                .domain()
+                .review_source_needs_reassessment(&projected.finding)
+            {
+                row.decision_complete = false;
+                row.workflow_group = workflow_group("needs_review", None);
+                row.decision.push_str(" · reassess");
+                row.next_action = "reassess recorded source".into();
+            }
+            row
         })
         .collect()
 }
@@ -579,7 +702,7 @@ impl ReviewQueueRow {
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: projection.severity_label,
             proof_confidence: ProofConfidence::classify(finding),
-            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
+            proof_confidence_label: finding_confidence_label(finding).to_string(),
             confidence_label: effective_review_confidence_label(finding, decision),
             occurrence,
             priority_label: format!("review-order:{}", index + 1),

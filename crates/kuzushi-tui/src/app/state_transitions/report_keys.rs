@@ -13,6 +13,9 @@ impl ShellApp {
     }
 
     fn handle_report_navigation_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if self.input_mode() == InputMode::Navigate && report_choices_save_key(key) {
+            return InputUpdate::handled_with_effects(vec![ShellEffect::PersistReportChoices]);
+        }
         if self.input_mode() != InputMode::Navigate || !key.modifiers.is_empty() {
             return InputUpdate::ignored();
         }
@@ -111,6 +114,11 @@ impl ShellApp {
 fn report_path_save_key(key: KeyEvent) -> bool {
     (key.code == KeyCode::Enter && key.modifiers.is_empty())
         || (key.code == KeyCode::Char('s') && key.modifiers == KeyModifiers::CONTROL)
+}
+
+fn report_choices_save_key(key: KeyEvent) -> bool {
+    key.code == KeyCode::Char('S')
+        && matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
 }
 
 #[cfg(test)]

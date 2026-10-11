@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 pub(super) fn empty_dedupe_result(candidate_count: usize) -> Value {
     let summary = format!(
-        "triage:dedupe — {candidate_count} candidate(s); need at least 2 co-located findings from different runs or tools"
+        "triage:dedupe: {candidate_count} candidate(s); need at least 2 co-located findings from different runs or tools"
     );
     crate::module_result::skipped_output_result(
         summary.clone(),
@@ -35,6 +35,8 @@ pub(super) fn dedupe_result(
         "skippedConflict": report.skipped_conflict,
         "skippedHuman": report.skipped_human,
         "verdictsRecorded": report.verdicts_recorded,
+        "relationshipsProposed": report.proposed,
+        "relationshipIds": report.relationship_ids,
     });
     crate::module_result::apply_runtime_cost_report(&mut data, cost);
     let output = dedupe_output(&summary, &confirmed.groups);
@@ -48,13 +50,16 @@ fn dedupe_summary(
     report: &LinkReport,
     candidate_count: usize,
 ) -> String {
+    if report.proposed > 0 {
+        return format!("triage:dedupe: {} duplicate relationship candidate(s); review before acceptance. Finding identities and verdicts are unchanged.",report.proposed);
+    }
     let action = if report.dry_run {
         "proposed (dry run)"
     } else {
         "linked"
     };
     format!(
-        "triage:dedupe — {} duplicate group(s) over {} candidate(s); {} duplicate(s) {}, {} already linked, {} conflict(s) skipped, {} human-decided skipped",
+        "triage:dedupe: {} duplicate group(s) over {} candidate(s); {} duplicate(s) {}, {} already linked, {} conflict(s) skipped, {} human-decided skipped",
         confirmed.groups.len(),
         candidate_count,
         report.linked,

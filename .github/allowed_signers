@@ -1,27 +1,5 @@
-# OpenSSH allowed_signers for the Kuzushi local merge-gate receipt.
-#
-# `scripts/verify-receipt.mjs verify` accepts a receipt signature only from a
-# key listed here, under the `kuzushi-verify` signature namespace. Format is one
-# entry per line:
-#
-#   <principal> <keytype> <base64-key>
-#
-# where <principal> is the signer's git `user.email`. Public keys only — never
-# put a private key in this file.
-#
-# This file is intentionally empty of trusted keys. No signing key is configured
-# in this repository yet (`git config gpg.format` and `user.signingkey` are
-# unset, and commits on `main` are unsigned), so trusting a key here would be a
-# guess, not a fact. Until the owner adds their own key, `verify` refuses every
-# receipt and says why.
-#
-# To trust your key:
-#
-#   git config gpg.format ssh
-#   git config user.signingkey ~/.ssh/<your-key>
-#   pnpm verify:receipt:sign            # prints the exact line to paste below
-#
-# or derive it directly:
-#
-#   echo "$(git config user.email) $(ssh-keygen -y -f ~/.ssh/<your-key>)" \
-#     >> .github/allowed_signers
+# OpenSSH allowed_signers for the local verification receipt.
+# Owner-approved dedicated key, enrolled 2026-10-10.
+# Trust is limited to the kuzushi-verify signature namespace.
+# Public keys only. Keep private keys outside the repository.
+snejad123@gmail.com namespaces="kuzushi-verify" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKCEqLtdImhLZaKOuHB6jB8fXhW0I2VnF9gybdPTLIUD

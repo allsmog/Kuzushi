@@ -1,0 +1,142 @@
+name: Historical context guidance, missing-reference recovery and exact report export
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_goal_reading.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: threats models
+require-live-snap: 25 b baseline | history
+keys: Home Enter
+require-live-snap: 25 RECORDED GOAL GUIDANCE | historical-context
+expect: Original architecture priorities
+expect: exact revision 1
+expect: Model use is not independently verified
+expect-not: Later replacement goal
+ask: Does the historical reader distinguish the saved goal from source evidence and unverified model use while keeping the other context active?
+resize: 160x48
+live-snap: goal-160x48
+resize: 96x89
+live-snap: goal-96x89
+resize: 80x24
+live-snap: goal-80x24
+resize: 60x20
+live-snap: goal-60x20
+resize: 40x12
+live-snap: goal-40x12
+keys: NPage
+live-snap: goal-page-1-40x12
+keys: NPage
+live-snap: goal-page-2-40x12
+keys: NPage
+live-snap: goal-page-3-40x12
+keys: NPage
+live-snap: goal-page-4-40x12
+keys: NPage
+live-snap: goal-page-5-40x12
+ask: Can the exact goal and its qualification be read through ordinary paging at all six sizes with visible return controls?
+resize: 120x36
+keys: Home Tab
+require-live-snap: 20 COMPLETE DOCUMENT | complete-document
+expect: Original architecture priorities
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_goal_reading.py @TMP_TARGET @ART hide
+keys: Enter
+require-live-snap: 25 RECORDED GOAL GUIDANCE · unavailable | missing-goal
+expect: No current goal was substituted
+expect-not: Original architecture priorities
+expect-not: Later replacement goal
+ask: Does a missing goal retain the exact context document and readable cause without selecting the current goal or hiding the context?
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_goal_reading.py @TMP_TARGET @ART restore
+keys: Enter
+require-live-snap: 25 Original architecture priorities | recovered-goal
+keys: Escape
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | draft-study
+keys: Down Down Down Enter
+require-live-snap: 25 CHOOSE STUDY CONTEXT | study-contexts
+keys: Up Enter
+require-live-snap: 25 Original architecture priorities | inspected-study-context
+expect: Model use is not independently
+expect: verified by this read
+keys: Tab
+require-live-snap: 25 Complete selected context document | raw-study-context
+expect: Original architecture priorities
+keys: Escape Escape
+submit: campaign goal-reader
+require-live-snap: 25 CAMPAIGN goal-reader | selected-study
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | frozen-study
+keys: Down Down Down Down Down Down Down Down Down Down Enter v R
+require-live-snap: 25 Context cases: 2 | report
+keys: End
+require-live-snap: 25 Original architecture priorities | report-guidance
+expect: Model use is not independently verified
+expect-not: Later replacement goal
+resize: 160x48
+keys: End
+live-snap: report-guidance-160x48
+resize: 96x89
+keys: End
+live-snap: report-guidance-96x89
+resize: 80x24
+keys: End
+live-snap: report-guidance-80x24
+keys: PPage
+live-snap: report-guidance-page-80x24
+resize: 60x20
+keys: End
+live-snap: report-guidance-60x20
+keys: PPage
+live-snap: report-guidance-page-1-60x20
+keys: PPage
+live-snap: report-guidance-page-2-60x20
+resize: 40x12
+keys: Home
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-1-40x12
+keys: NPage
+live-snap: report-page-2-40x12
+keys: NPage
+live-snap: report-page-3-40x12
+keys: NPage
+live-snap: report-page-4-40x12
+keys: NPage
+live-snap: report-page-5-40x12
+keys: NPage
+live-snap: report-page-6-40x12
+keys: NPage
+live-snap: report-page-7-40x12
+keys: NPage
+live-snap: report-page-8-40x12
+keys: NPage
+live-snap: report-page-9-40x12
+keys: NPage
+live-snap: report-page-10-40x12
+keys: NPage
+live-snap: report-page-11-40x12
+keys: NPage
+live-snap: report-page-12-40x12
+ask: Does the matrix report keep each case's goal or explicit omission readable at all six sizes, with complete compact paging and six jobs still unstarted?
+resize: 120x36
+keys: j j j Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_goal_reading.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: threats models
+require-live-snap: 25 b baseline | restarted-history
+keys: Home Enter
+require-live-snap: 25 Original architecture priorities | restarted-guidance
+expect: exact revision 1
+expect-not: Later replacement goal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_goal_reading.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain exact context, goal and report history with six unstarted jobs, unchanged source and no provider reservations?
+keys: C-c
+require-exit: 10

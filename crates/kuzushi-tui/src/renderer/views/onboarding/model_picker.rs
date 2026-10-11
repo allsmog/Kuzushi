@@ -229,14 +229,5 @@ fn offline_demo_action_line(width: u16) -> Line<'static> {
 }
 
 fn auth_hint_for(app: &ShellApp, choice: &ModelChoice) -> String {
-    let ready = app.provider_auth_ready_for(choice.provider);
-    match (choice.provider, ready) {
-        ("anthropic", true) => "auth ready".to_string(),
-        ("anthropic", false) => "auth required".to_string(),
-        ("openai", true) => "API key ready".to_string(),
-        ("openai", false) => "needs OPENAI_API_KEY".to_string(),
-        ("openai-codex", true) => "OAuth stored".to_string(),
-        ("openai-codex", false) => "needs OpenAI OAuth login".to_string(),
-        (other, _) => format!("provider {other}"),
-    }
+    crate::ui_view_models::model_auth_status(app, choice)
 }

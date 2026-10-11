@@ -146,6 +146,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) lifecycle_status: String,
     pub(crate) decision: String,
     pub(crate) decision_source: String,
+    pub(crate) decision_basis: Option<super::finding_review_source::FindingReviewSourceModel>,
     pub(crate) decision_history: String,
     pub(crate) decision_history_rows: Vec<DecisionHistoryRow>,
     pub(crate) current_decision: Option<DecisionHistoryRow>,
@@ -234,7 +235,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
     let rows = finding_rows(app, &visible, &review_index);
     let selected_out_of_window = selected_finding_out_of_window_notice(app);
     let total = visible.len();
-    let triaged = visible_triaged_count(&visible, &review_index);
+    let triaged = visible_triaged_count(app, &visible, &review_index);
     let pending = total.saturating_sub(triaged);
     let counts = visible_severity_counts(&visible);
     FindingsModel {
@@ -465,6 +466,9 @@ pub(crate) fn finding_detail_model_for_projection(
         app.review_decisions(),
         decision.as_ref(),
     );
+    if decision.is_some() {
+        detail.decision_basis = Some(super::finding_review_source::source_model(app, finding));
+    }
     detail
 }
 
@@ -475,12 +479,9 @@ fn apply_decision_history(
     effective: Option<&EffectiveReviewDecision>,
 ) {
     let history = review_decision_history_for(finding, decisions);
-    detail.current_decision = history
-        .iter()
-        .find(|record| {
-            Some(&record.decision) == effective.map(EffectiveReviewDecision::review_decision)
-        })
-        .map(|record| decision_history_row(record));
+    detail.current_decision =
+        super::finding_review_source::selected_decision_record(finding, decisions, effective)
+            .map(decision_history_row);
     detail.decision_history_overflow = 0;
     detail.decision_history_rows = history.into_iter().map(decision_history_row).collect();
 }
@@ -716,7 +717,8 @@ fn snippet_note(focus_line: usize, note: String) -> SourceSnippetModel {
 pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<String>, Finding)> {
     let visible = projected_visible_findings(app);
     if let Some(finding) = selected_outside_loaded_findings(app, &visible) {
-        let alias = cached_alias_for_fingerprint(app, &finding.fingerprint);
+        let alias = cached_alias_for_fingerprint(app, &finding.fingerprint)
+            .or_else(|| selected_alias_reference(app, &finding));
         return Some((alias, finding));
     }
     if let Some(projected) = visible.get(app.router.findings().cursor()) {
@@ -758,32 +760,60 @@ fn selected_outside_loaded_findings(
     app: &ShellApp,
     visible: &[ProjectedFinding],
 ) -> Option<Finding> {
-    if active_component_rel_path(app).is_some() {
+    if active_component_rel_path(app).is_some() && !app.router.findings().selection_is_explicit() {
         return None;
     }
     let selected = app.selected_finding().as_ref()?;
-    let policy = active_identity_fold_policy(app);
-    let selected_key = engagement_projection_key(selected, policy);
     let selected_is_loaded = visible
         .iter()
-        .any(|projected| engagement_projection_key(&projected.finding, policy) == selected_key);
+        .any(|projected| selection_matches_projection(app, selected, &projected.finding));
     (!selected_is_loaded).then_some(selected.clone())
+}
+
+fn selection_matches_projection(app: &ShellApp, selected: &Finding, current: &Finding) -> bool {
+    if app.router.findings().selection_is_explicit() {
+        return kuzushi_core::findings::finding_page_anchor(selected)
+            == kuzushi_core::findings::finding_page_anchor(current);
+    }
+    let policy = active_identity_fold_policy(app);
+    engagement_projection_key(selected, policy) == engagement_projection_key(current, policy)
+}
+
+fn selected_alias_reference(app: &ShellApp, finding: &Finding) -> Option<String> {
+    app.selected_finding_reference(finding)
+        .filter(|reference| kuzushi_core::parse_finding_alias(reference).is_some())
 }
 
 pub(crate) fn selected_finding_out_of_window_notice(app: &ShellApp) -> Option<String> {
     let selected = app.selected_finding().as_ref()?;
-    let policy = active_identity_fold_policy(app);
-    let selected_key = engagement_projection_key(selected, policy);
     if projected_visible_findings(app)
         .iter()
-        .any(|projected| engagement_projection_key(&projected.finding, policy) == selected_key)
+        .any(|projected| selection_matches_projection(app, selected, &projected.finding))
     {
         return None;
     }
-    Some(format!(
-        "opened finding is outside the loaded list · {}",
-        selected.fingerprint
-    ))
+    let reference = cached_alias_for_fingerprint(app, &selected.fingerprint)
+        .or_else(|| selected_alias_reference(app, selected))
+        .unwrap_or_else(|| finding_identity_label(selected));
+    Some(format!("{reference} is pinned outside this list"))
+}
+
+pub(super) fn current_observation_alias(app: &ShellApp, pinned: &Finding) -> Option<String> {
+    use kuzushi_core::findings::{
+        finding_page_anchor, finding_page_anchor_index, finding_page_continuity_anchor,
+    };
+    let anchor = finding_page_continuity_anchor(pinned);
+    let current = app
+        .findings()
+        .get(finding_page_anchor_index(app.findings(), &anchor)?)?;
+    let current_anchor = finding_page_anchor(current);
+    if current_anchor == finding_page_anchor(pinned) {
+        return None;
+    }
+    projected_visible_findings(app)
+        .iter()
+        .find(|row| finding_page_anchor(&row.finding) == current_anchor)
+        .map(|row| row.alias.clone())
 }
 
 fn finding_rows(
@@ -901,6 +931,7 @@ fn batch_scoped_finding_alias_indices(
         .rows
         .iter()
         .flat_map(|row| row.fingerprints.iter())
+        .chain(deck.active_batch_observation_fingerprints.iter())
         .collect::<std::collections::HashSet<_>>();
     candidates
         .into_iter()
@@ -1047,8 +1078,11 @@ fn backlog_open_only_finding_alias_indices(
         .filter(|(_, index)| {
             app.findings().get(*index).is_some_and(|finding| {
                 let decision = review_index.effective_decision_for(finding);
-                !super::review_state::effective_review_decision_complete(finding, decision.as_ref())
-                    && backlog_filters_match(finding, severity_filter, tool_filter.as_deref())
+                !super::review_state::source_qualified_review_complete(
+                    app,
+                    finding,
+                    decision.as_ref(),
+                ) && backlog_filters_match(finding, severity_filter, tool_filter.as_deref())
             })
         })
         .collect()
@@ -1302,8 +1336,12 @@ fn active_batch_cache_value(app: &ShellApp) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        " batch:{}:{}/{}/{}:{fingerprints}",
-        report.batch_id, report.completed, report.planned, report.failed
+        " batch:{}:{}/{}/{}:{fingerprints}:retained:{:?}",
+        report.batch_id,
+        report.completed,
+        report.planned,
+        report.failed,
+        app.router.campaign().active_batch_observation_fingerprints
     )
 }
 
@@ -1433,6 +1471,7 @@ fn merged_corroboration_count(left: u32, right: u32, merged_source_count: usize)
 }
 
 fn visible_triaged_count(
+    app: &ShellApp,
     visible: &[ProjectedFinding],
     review_index: &EffectiveReviewStateIndex,
 ) -> usize {
@@ -1441,7 +1480,7 @@ fn visible_triaged_count(
         .map(|projected| &projected.finding)
         .filter(|finding| {
             let decision = review_index.effective_decision_for(finding);
-            effective_review_decision_complete(finding, decision.as_ref())
+            super::review_state::source_qualified_review_complete(app, finding, decision.as_ref())
         })
         .count()
 }
@@ -1597,6 +1636,13 @@ fn findings_preview_overflow(total: usize) -> Option<FindingsPreviewOverflow> {
     })
 }
 
+pub(super) fn finding_confidence_label(finding: &Finding) -> &'static str {
+    if finding.suppressed {
+        return "suppressed";
+    }
+    ProofConfidence::classify(finding).label()
+}
+
 impl FindingListRow {
     fn from_finding(
         index: usize,
@@ -1631,7 +1677,7 @@ impl FindingListRow {
             proof_marker: proof.marker,
             proof_tier: proof.tier,
             proof_confidence: ProofConfidence::classify(finding),
-            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
+            proof_confidence_label: finding_confidence_label(finding).to_string(),
             cwe: projection.cwe_label,
             source: finding_source_summary_label(finding),
             evidence: projection.evidence_preview,
@@ -1928,7 +1974,7 @@ impl FindingDetailModel {
             source_count: finding_unique_source_count(finding),
             fingerprint: projection.fingerprint,
             proof_confidence: confidence,
-            proof_confidence_label: confidence.label().to_string(),
+            proof_confidence_label: finding_confidence_label(finding).to_string(),
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
             ..Self::default()

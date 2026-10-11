@@ -28,6 +28,7 @@ mod tests;
 pub struct EffectiveReviewDecision {
     decision: ReviewDecision,
     source: EffectiveReviewDecisionSource,
+    record_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,7 @@ impl EffectiveReviewDecision {
         finding.triage.as_ref().map(|triage| Self {
             decision: ReviewDecision::from_triage(triage, finding.triaged_by),
             source: EffectiveReviewDecisionSource::SelectedFinding,
+            record_id: None,
         })
     }
 
@@ -48,6 +50,7 @@ impl EffectiveReviewDecision {
         Self {
             decision: indexed.decision.clone(),
             source: indexed_decision_source(finding, indexed.finding_id),
+            record_id: indexed.record_id,
         }
     }
 
@@ -58,6 +61,7 @@ impl EffectiveReviewDecision {
         Self {
             decision,
             source: EffectiveReviewDecisionSource::DurableIdentity,
+            record_id: None,
         }
     }
 
@@ -67,6 +71,12 @@ impl EffectiveReviewDecision {
 
     pub fn review_decision(&self) -> &ReviewDecision {
         &self.decision
+    }
+
+    /// Exact immutable record chosen by the shared resolver. Embedded legacy
+    /// triage has no record and must not manufacture event provenance.
+    pub fn record_id(&self) -> Option<i64> {
+        self.record_id
     }
 
     pub fn carried_from_durable_identity(&self) -> bool {
@@ -130,6 +140,7 @@ struct IndexedReviewDecision {
     sort_key: ReviewSortKey,
     finding_id: Option<i64>,
     decision: ReviewDecision,
+    record_id: Option<i64>,
 }
 
 impl EffectiveReviewStateIndex {
@@ -161,6 +172,7 @@ impl EffectiveReviewStateIndex {
             sort_key: ReviewSortKey::from_finding(finding),
             finding_id: finding.id,
             decision: decision.decision,
+            record_id: None,
         };
         self.insert_embedded_decision_scope(finding, &indexed, local);
         if let Some(finding_id) = finding.id {
@@ -192,6 +204,7 @@ impl EffectiveReviewStateIndex {
             sort_key: ReviewSortKey::from_record(record),
             finding_id: Some(record.finding_id),
             decision: record.decision.clone(),
+            record_id: Some(record.id),
         };
         if let Some(identity_id) = normalized_record_identity_id(record) {
             insert_latest_decision(&mut self.by_identity, identity_id, indexed.clone());
@@ -314,23 +327,30 @@ pub fn finding_is_review_actionable(finding: &Finding, decisions: &[ReviewDecisi
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct ReviewSortKey {
-    created_at: String,
-    id: i64,
+enum ReviewSortKey {
+    Embedded { created_at: String, id: i64 },
+    LegacyRecord { id: i64, created_at: String },
+    Recorded { event_seq: u64, id: i64 },
 }
 
 impl ReviewSortKey {
     fn from_finding(finding: &Finding) -> Self {
-        Self {
+        Self::Embedded {
             created_at: finding.created_at.clone(),
             id: finding.id.unwrap_or_default(),
         }
     }
 
     fn from_record(record: &ReviewDecisionRecord) -> Self {
-        Self {
-            created_at: record.created_at.clone(),
-            id: record.id,
+        match &record.provenance {
+            Some(provenance) => Self::Recorded {
+                event_seq: provenance.event_seq,
+                id: record.id,
+            },
+            None => Self::LegacyRecord {
+                id: record.id,
+                created_at: record.created_at.clone(),
+            },
         }
     }
 }

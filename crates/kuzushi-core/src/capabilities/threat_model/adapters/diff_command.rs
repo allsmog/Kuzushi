@@ -4,6 +4,25 @@ use super::model_commands::workspace_root;
 use super::*;
 
 const MAX_THREAT_DETAIL_LINES: usize = 10;
+mod context_text;
+
+struct RevisionComparison {
+    structural: ThreatModelDocumentDiff,
+    text: Vec<ContextTextDifference>,
+    sections: Vec<String>,
+    document_changed: bool,
+}
+
+impl RevisionComparison {
+    fn new(before: &Value, after: &Value) -> Self {
+        Self {
+            structural: diff_threat_model_documents(before, after),
+            text: context_text_differences(before, after),
+            sections: context_text::changed_document_sections(before, after),
+            document_changed: before != after,
+        }
+    }
+}
 
 pub(crate) fn diff_threat_model_revisions_adapter(
     input: Value,
@@ -12,11 +31,16 @@ pub(crate) fn diff_threat_model_revisions_adapter(
     let root = workspace_root(ctx, "threat-model:diff")?;
     let from = load_diff_side(root, &input, "from")?;
     let to = load_diff_side(root, &input, "to")?;
-    let diff = diff_threat_model_documents(&from.document, &to.document);
-    let data = threat_model_diff_data(&from, &to, &diff)?;
+    let comparison = RevisionComparison::new(&from.document, &to.document);
+    let mut data = threat_model_diff_data(&from, &to, &comparison)?;
+    data["target"] = json!(root);
     Ok(crate::module_result::completed_output_result(
-        diff_headline(&diff),
-        render_threat_model_diff(&from, &to, &diff),
+        diff_headline(
+            &comparison.structural,
+            comparison.text.len(),
+            comparison.document_changed,
+        ),
+        render_threat_model_diff(&from, &to, &comparison),
         data,
     ))
 }
@@ -36,11 +60,19 @@ fn load_diff_side(root: &Path, input: &Value, field: &str) -> Result<ActiveThrea
 fn threat_model_diff_data(
     from: &ActiveThreatModel,
     to: &ActiveThreatModel,
-    diff: &ThreatModelDocumentDiff,
+    comparison: &RevisionComparison,
 ) -> Result<Value> {
-    let mut data = serde_json::to_value(diff)?;
+    let mut data = serde_json::to_value(&comparison.structural)?;
     data["from"] = diff_side_data(from);
     data["to"] = diff_side_data(to);
+    data["contextText"] = json!(comparison.text);
+    data["changedDocumentSections"] = json!(comparison.sections);
+    data["documentChanged"] = json!(comparison.document_changed);
+    data["comparisonCoverage"] = json!({
+        "contextText":"System overview, component descriptions/purposes and question answers. Unique component/question ids and exact question text match across ordering; unkeyed or ambiguous rows compare by position.",
+        "structural":"Selected threat fields, DFD membership, entry-point coverage counts and methodology.",
+        "documentSections":"All changed top-level stored sections, including metadata. Section changes do not establish semantic equivalence or finding validity.",
+    });
     Ok(data)
 }
 
@@ -48,14 +80,26 @@ fn diff_side_data(side: &ActiveThreatModel) -> Value {
     json!({
         "modelId": side.model_ref.model_id,
         "revisionId": side.model_ref.revision_id,
+        "sha256": side.model_ref.sha256,
         "methodology": document_methodology(&side.document),
         "threatCount": document_threat_count(&side.document),
     })
 }
 
-fn diff_headline(diff: &ThreatModelDocumentDiff) -> String {
+fn diff_headline(
+    diff: &ThreatModelDocumentDiff,
+    context_changes: usize,
+    document_changed: bool,
+) -> String {
+    if context_changes > 0 {
+        return format!("threat-model diff: {context_changes} context text change(s)");
+    }
     if diff.is_empty() {
-        return "threat-model diff: no differences".to_string();
+        return if document_changed {
+            "threat-model diff: document changed outside compared fields".to_string()
+        } else {
+            "threat-model diff: no differences".to_string()
+        };
     }
     let threats = &diff.threats;
     format!(
@@ -69,15 +113,25 @@ fn diff_headline(diff: &ThreatModelDocumentDiff) -> String {
 fn render_threat_model_diff(
     from: &ActiveThreatModel,
     to: &ActiveThreatModel,
-    diff: &ThreatModelDocumentDiff,
+    comparison: &RevisionComparison,
 ) -> String {
+    let diff = &comparison.structural;
     let mut lines = vec![
-        format!("threat-model diff {} -> {}", side_label(from), side_label(to)),
+        format!(
+            "threat-model diff {} -> {}",
+            side_label(from),
+            side_label(to)
+        ),
+        format!(
+            "stored sections changed: {}",
+            context_text::section_labels(&comparison.sections)
+        ),
         threat_count_line(from, to, &diff.threats),
         dfd_line(&diff.dfd),
         coverage_line(&diff.coverage),
         methodology_line(from, to, diff.methodology_changed),
     ];
+    lines.extend(context_text::render_context_changes(&comparison.text));
     lines.extend(threat_detail_lines(&diff.threats));
     lines.join("\n")
 }
@@ -147,11 +201,19 @@ fn threat_detail_lines(threats: &ThreatSetDiff) -> Vec<String> {
         .added
         .iter()
         .map(|threat| summary_line('+', threat))
-        .chain(threats.removed.iter().map(|threat| summary_line('-', threat)))
+        .chain(
+            threats
+                .removed
+                .iter()
+                .map(|threat| summary_line('-', threat)),
+        )
         .chain(threats.changed.iter().map(change_line))
         .collect::<Vec<_>>();
     let hidden = all.len().saturating_sub(MAX_THREAT_DETAIL_LINES);
-    let mut lines = all.into_iter().take(MAX_THREAT_DETAIL_LINES).collect::<Vec<_>>();
+    let mut lines = all
+        .into_iter()
+        .take(MAX_THREAT_DETAIL_LINES)
+        .collect::<Vec<_>>();
     if hidden > 0 {
         lines.push(format!("… {hidden} more threat change(s) in data.threats"));
     }
@@ -160,7 +222,10 @@ fn threat_detail_lines(threats: &ThreatSetDiff) -> Vec<String> {
 
 fn summary_line(marker: char, threat: &ThreatSummary) -> String {
     let impact = threat.impact.as_deref().unwrap_or("unrated");
-    format!("{marker} [{impact}] {}", threat_title(&threat.key, &threat.title))
+    format!(
+        "{marker} [{impact}] {}",
+        threat_title(&threat.key, &threat.title)
+    )
 }
 
 fn change_line(change: &ThreatFieldChange) -> String {
@@ -202,9 +267,9 @@ mod tests {
     #[test]
     fn data_carries_both_sides_and_the_structural_diff() {
         let (from, to) = (side(threats(1)), side(threats(2)));
-        let diff = diff_threat_model_documents(&from.document, &to.document);
+        let comparison = RevisionComparison::new(&from.document, &to.document);
 
-        let data = threat_model_diff_data(&from, &to, &diff).unwrap();
+        let data = threat_model_diff_data(&from, &to, &comparison).unwrap();
 
         assert_eq!(data["from"]["threatCount"], json!(1));
         assert_eq!(data["to"]["methodology"], json!("stride"));
@@ -218,14 +283,18 @@ mod tests {
     fn rendered_summary_caps_threat_detail_lines() {
         let (from, to) = (side(threats(0)), side(threats(13)));
         let diff = diff_threat_model_documents(&from.document, &to.document);
+        let comparison = RevisionComparison::new(&from.document, &to.document);
 
-        let text = render_threat_model_diff(&from, &to, &diff);
+        let text = render_threat_model_diff(&from, &to, &comparison);
 
         assert!(text.contains("threats: 0 -> 13 (+13 added"), "{text}");
         assert!(text.contains("+ [unrated] T0 (tm-0)"), "{text}");
         assert!(text.contains("… 3 more threat change(s)"), "{text}");
         assert!(text.contains("covered unrecorded -> unrecorded"), "{text}");
-        assert_eq!(diff_headline(&diff), "threat-model diff: +13 -0 ~0 threat(s)");
+        assert_eq!(
+            diff_headline(&diff, 0, true),
+            "threat-model diff: +13 -0 ~0 threat(s)"
+        );
     }
 
     #[test]
@@ -236,7 +305,10 @@ mod tests {
         let error = load_diff_side(root.path(), &input, "from").unwrap_err();
 
         let message = error.to_string();
-        assert!(message.contains("from=\"tm_missing\" did not resolve"), "{message}");
+        assert!(
+            message.contains("from=\"tm_missing\" did not resolve"),
+            "{message}"
+        );
         assert!(message.contains("manifest is missing"), "{message}");
         assert!(load_diff_side(root.path(), &input, "to").is_err());
     }
@@ -246,6 +318,31 @@ mod tests {
         let from = side(threats(2));
         let diff = diff_threat_model_documents(&from.document, &from.document);
 
-        assert_eq!(diff_headline(&diff), "threat-model diff: no differences");
+        assert_eq!(
+            diff_headline(&diff, 0, false),
+            "threat-model diff: no differences"
+        );
+    }
+
+    #[test]
+    fn metadata_or_other_uncompared_changes_never_claim_identical_documents() {
+        let from = side(threats(0));
+        let mut to = from.clone();
+        to.document["metadata"] = json!({"note":"Owned changed metadata"});
+        let diff = diff_threat_model_documents(&from.document, &to.document);
+        assert!(diff.is_empty());
+        let data = threat_model_diff_data(
+            &from,
+            &to,
+            &RevisionComparison::new(&from.document, &to.document),
+        )
+        .unwrap();
+        assert_eq!(data["changedDocumentSections"], json!(["metadata"]));
+        assert_eq!(data["documentChanged"], true);
+        assert!(diff_headline(&diff, 0, true).contains("outside compared fields"));
     }
 }
+
+#[cfg(test)]
+#[path = "diff_command/tests/dispatch.rs"]
+mod dispatch_tests;

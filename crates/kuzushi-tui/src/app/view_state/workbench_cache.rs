@@ -39,19 +39,23 @@ const MAX_STATUS_CACHE_ENTRIES: usize = 32;
 
 type MapRunContextRead = Result<Option<kuzushi_core::workflow_attempts::MapRunContext>, String>;
 type InvestigationReportRead =
-    Result<Option<kuzushi_core::workspace::InvestigationReportReceipt>, String>;
+    Result<Option<kuzushi_core::workspace::InvestigationReportDocument>, String>;
 
 mod audit_dataflow;
 mod cache_entries;
 mod completion_values;
 mod cpg_artifacts_cache;
 mod finding_alias_cache;
+mod groups;
 mod hydrated_reads;
 mod hydration_state;
 mod map_artifacts_cache;
 mod prompt_override_cache;
+mod relationships;
 mod remediation_projection;
+mod review_source;
 mod scanned_snippet;
+mod study_history;
 mod study_usage;
 #[cfg(test)]
 mod tests;
@@ -67,6 +71,16 @@ pub(crate) use view_model_fragments::{
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkbenchCache {
+    pub(crate) lesson_pages:
+        BTreeMap<(PathBuf, usize), Result<kuzushi_core::findings::FindingLessonPage, String>>,
+    pub(crate) group_pages: BTreeMap<
+        (PathBuf, ViewHydrationKey),
+        Result<kuzushi_core::findings::FindingGroupsPage, String>,
+    >,
+    pub(crate) relationship_pages: BTreeMap<
+        (PathBuf, Option<i64>, usize),
+        Result<kuzushi_core::findings::FindingRelationshipPage, String>,
+    >,
     pub(crate) answer_document: Option<crate::ui_view_models::AnswerDocumentCache>,
     target_base: Option<TargetBaseCache>,
     target_profile: Option<TargetProfileCache>,
@@ -88,7 +102,7 @@ pub(crate) struct WorkbenchCache {
     scope_tree: Option<ScopeTreeCache>,
     threat_model_store: Option<(PathBuf, ThreatModelStoreState)>,
     map_run_context: BTreeMap<(PathBuf, Vec<String>), MapRunContextRead>,
-    investigation_report: Option<(PathBuf, Vec<String>, InvestigationReportRead)>,
+    investigation_report: Option<(PathBuf, ViewHydrationKey, InvestigationReportRead)>,
     project_model_document: Option<ProjectModelDocumentCache>,
     strategy_queue: Option<StrategyQueueCache>,
     prompt_mutations: Option<PromptMutationsCache>,
@@ -105,7 +119,12 @@ pub(crate) struct WorkbenchCache {
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     study_usage_catalogue: Option<(PathBuf, StudyUsageCatalogueRead)>,
+    study_history: Option<(PathBuf, StudyHistoryRead)>,
     study_usage_runs: BTreeMap<(PathBuf, String), StudyUsageRunRead>,
+    matrix_reports: BTreeMap<
+        (PathBuf, ViewHydrationKey),
+        Result<kuzushi_core::findings::ContextMatrixOccurrenceReport, String>,
+    >,
     map_artifacts: MapArtifactsCache,
     cpg_artifacts: CpgArtifactsCache,
     scan_recommendations: Option<ScanRecommendationsCache>,
@@ -114,6 +133,8 @@ pub(crate) struct WorkbenchCache {
     finding_aliases: FindingAliasCache,
     finding_patch_truth: FindingPatchTruthCache,
     finding_audit_dataflow: FindingAuditDataflowCache,
+    finding_review_sources:
+        BTreeMap<(PathBuf, ViewHydrationKey), crate::app::view_hydration::FindingReviewSourceRead>,
     scanned_snippets: ScannedSnippetCache,
     view_models: ViewModelFragmentCache,
     hydrating_view_data: BTreeSet<(PathBuf, ViewHydrationKey)>,
@@ -442,6 +463,7 @@ impl WorkbenchCache {
     }
 
     pub(crate) fn invalidate_workspace_files(&mut self) {
+        self.lesson_pages.clear();
         self.investigation_report = None;
         self.source_file = None;
         self.mark_git_metadata_stale();
@@ -464,6 +486,7 @@ impl WorkbenchCache {
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.finding_patch_truth.invalidate(None);
         self.finding_audit_dataflow.invalidate(None);
+        self.finding_review_sources.clear();
         self.scanned_snippets.invalidate();
         self.map_artifacts.invalidate();
         self.cpg_artifacts.invalidate();
@@ -560,6 +583,7 @@ impl WorkbenchCache {
             self.finding_completion_values = None;
             self.finding_patch_truth.invalidate(None);
             self.finding_audit_dataflow.invalidate(None);
+            self.finding_review_sources.clear();
             self.scanned_snippets.invalidate();
         }
         self.bump_completion_generation_when(findings_changed | run_summaries_changed);
@@ -580,6 +604,7 @@ impl WorkbenchCache {
 
     fn invalidate_run_summary_dependents(&mut self) {
         self.study_usage_catalogue = None;
+        self.study_history = None;
         self.study_usage_runs.clear();
         self.investigation_report = None;
         self.invalidate_legacy_run_summary_index();
@@ -698,6 +723,7 @@ impl WorkbenchCache {
         self.cpg_artifacts.invalidate();
         self.finding_patch_truth.invalidate(None);
         self.finding_audit_dataflow.invalidate(None);
+        self.finding_review_sources.clear();
         self.scanned_snippets.invalidate();
     }
 

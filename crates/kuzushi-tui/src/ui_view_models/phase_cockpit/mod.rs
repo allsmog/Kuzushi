@@ -355,8 +355,9 @@ pub(crate) struct InvestigationPlanModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SelectionDisclosureModel {
     pub(crate) message: String,
-    pub(crate) filter: String,
-    pub(crate) reveal_command: &'static str,
+    pub(crate) filter: Option<String>,
+    pub(crate) reveal_command: String,
+    pub(crate) reveal_label: &'static str,
 }
 
 /// Verification evidence for the selected projected finding. `replay_run_id`
@@ -720,7 +721,7 @@ fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String 
     }
     parts.extend([
         format!("{} run(s)", summary.run_count),
-        format!("{} artifact(s)", summary.artifact_count),
+        format!("receipt links {}", summary.artifact_count),
     ]);
     parts.extend(summary.findings_segment());
     parts.join(" · ")

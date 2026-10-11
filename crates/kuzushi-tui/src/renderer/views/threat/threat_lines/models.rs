@@ -56,7 +56,7 @@ fn model_style(row: &ThreatModelHeadRow) -> Style {
 fn append_actions(lines: &mut Vec<Line<'static>>, width: u16) {
     lines.push(blank());
     lines.push(section_header_line("ACTIONS", width));
-    lines.push(detail("cycle", "m next · M previous"));
+    lines.push(detail("activate", "m next model · M previous model"));
     lines.push(detail(
         "activate",
         "threats activate <model-id>[@<revision-id>]",

@@ -1,0 +1,64 @@
+name: Stop a finite campaign while transport is waiting and recover honest partial work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_stop.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/stop-command.txt
+keys: Enter
+require-live-snap: 20 9 job(s) | fixed-plan
+nav-mode:
+keys: L
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_stop.py @TMP_TARGET @ART waiting
+keys: r
+require-live-snap: 20 1 completed | active-work
+expect: K stop
+ask: Does the fixed plan show completed and active work, the frozen job list and a visible Stop control before the intercepted request is interrupted?
+keys: K
+keys: Escape
+expect-echo-within: 250 operator draft
+live-snap: stop-responsive
+ask: Does Stop keep the shell responsive and preserve the operator draft while saving partial work, without claiming cancellation has already completed?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_stop.py @TMP_TARGET @ART stopped
+require-live-snap: 20 no deck-launched dispatcher | settled-draft
+expect: operator draft
+keys: C-u
+nav-mode:
+keys: r
+require-live-snap: 20 8 parked | partial-jobs
+expect: work paused
+ask: Does the stopped deck distinguish one completed job, one attempted interrupted job and seven unstarted jobs, with explicit next actions?
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT partial | partial-result
+nav-mode:
+keys: u
+require-live-snap: 25 partial acknowledged | partial-accepted
+keys: Escape
+submit: report
+require-live-snap: 25 1 unresolved | partial-report
+expect: 1 / 2 attempted jobs recorded; 1 unavailable
+ask: Does the report preserve the completed observation and unresolved provider reservation, disclose missing evidence for the interrupted job and avoid complete coverage claims?
+resize: 40x12
+keys: Home
+live-snap: narrow-report-start
+keys: PgDn
+live-snap: narrow-report-details
+keys: End
+live-snap: narrow-report
+ask: Are the partial result and report actions usable in the narrow terminal with no misleading cost or completion state?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/stop-command.txt
+keys: Enter
+require-live-snap: 25 8 parked | recovered-stop
+require-shell: python3 -B @REPO/scripts/devex/fixtures/campaign_stop.py @TMP_TARGET @ART restarted
+ask: Does restart retain the stopped work, original allowance and unresolved reservation without launching more jobs or silently refunding the request?
+keys: C-c
+require-exit: 10

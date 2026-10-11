@@ -14,23 +14,30 @@ pub(crate) enum BatchScanConfigRow {
     Workers,
     Engines,
     Context,
+    Brief,
     ProviderCalls,
     ReviewCalls,
     Attempts,
     PriorRun,
+    ContextComparison,
+    ContextCases,
+    CasePasses,
     Launch,
 }
 
 impl BatchScanConfigRow {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 12] = [
         Self::Trials,
         Self::Workers,
         Self::Engines,
         Self::Context,
+        Self::Brief,
         Self::ProviderCalls,
         Self::ReviewCalls,
         Self::Attempts,
         Self::PriorRun,
+        Self::ContextComparison,
+        Self::ContextCases,
         Self::Launch,
     ];
 
@@ -40,10 +47,14 @@ impl BatchScanConfigRow {
             Self::Workers => "Workers",
             Self::Engines => "Discovery engines",
             Self::Context => "Source and context",
+            Self::Brief => "Goal and priorities",
             Self::ProviderCalls => "Total calls",
             Self::ReviewCalls => "Protected review",
             Self::Attempts => "Attempts per job",
             Self::PriorRun => "Usage evidence",
+            Self::ContextComparison => "Context comparison",
+            Self::ContextCases => "Context cases",
+            Self::CasePasses => "Case repetitions",
             Self::Launch => "Next action",
         }
     }
@@ -57,6 +68,7 @@ pub(crate) struct BatchPriorRun {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BatchScanConfig {
+    pub(crate) brief_open: bool,
     pub(crate) origin: Option<StudyNavigationOrigin>,
     pub(crate) target: std::path::PathBuf,
     pub(crate) trials: usize,
@@ -64,21 +76,36 @@ pub(crate) struct BatchScanConfig {
     pub(crate) effective_workers: usize,
     pub(crate) worker_clamp_reason: Option<String>,
     pub(crate) prior_run_id: Option<String>,
+    pub(crate) prior_campaign_id: Option<String>,
     pub(crate) prior_runs: Vec<BatchPriorRun>,
     pub(crate) prior_catalogue: ViewDataState<StudyUsageCatalogueRead>,
     pub(crate) cursor: usize,
     pub(crate) study: super::study_state::StudyDraftState,
     pub(crate) detail_scroll: usize,
+    pub(crate) detail_reader_scroll: Option<usize>,
+    pub(crate) source_view: super::study_source::StudySourceState,
+    pub(crate) source_option_specs: Vec<kuzushi_core::modules::OptionSpec>,
     pub(crate) notice: Option<String>,
     pub(crate) number_edit: Option<BatchNumberEdit>,
     pub(crate) context_picker: Option<super::StudyContextPicker>,
+    pub(crate) scope_context: super::scope_context::ScopeContextState,
     pub(crate) engine_picker: Option<super::StudyEnginePicker>,
+    pub(crate) resource_picker: Option<super::resource_picker::StudyResourcePicker>,
     pub(crate) context_generation: Option<super::context_generation::StudyContextGeneration>,
+    pub(crate) context_result_cursor: Option<usize>,
 }
 
 impl BatchScanConfig {
+    pub(crate) fn brief_is_frozen(&self) -> bool {
+        self.study.plan_identity().is_some()
+            || self
+                .context_generation
+                .as_ref()
+                .is_some_and(|generation| generation.receipt.is_some())
+    }
     pub(crate) fn load(target: &Path, requested_prior_run: Option<&str>) -> Self {
         Self {
+            brief_open: false,
             origin: None,
             target: target.to_path_buf(),
             trials: DEFAULT_BATCH_TRIALS,
@@ -86,6 +113,7 @@ impl BatchScanConfig {
             effective_workers: 1,
             worker_clamp_reason: None,
             prior_run_id: requested_prior_run.map(str::to_owned),
+            prior_campaign_id: None,
             prior_runs: requested_prior_run
                 .map(BatchPriorRun::pending)
                 .into_iter()
@@ -94,11 +122,17 @@ impl BatchScanConfig {
             cursor: 0,
             study: super::study_state::StudyDraftState::default(),
             detail_scroll: 0,
+            detail_reader_scroll: None,
+            source_view: Default::default(),
+            source_option_specs: Vec::new(),
             notice: None,
             number_edit: None,
             context_picker: None,
+            scope_context: Default::default(),
             engine_picker: None,
+            resource_picker: None,
             context_generation: None,
+            context_result_cursor: None,
         }
     }
 
@@ -122,11 +156,15 @@ impl BatchScanConfig {
         let last = BatchScanConfigRow::ALL.len() as i64 - 1;
         self.cursor = (self.cursor as i64 + delta).clamp(0, last) as usize;
         self.detail_scroll = 0;
+        self.detail_reader_scroll = self.detail_reader_scroll.map(|_| 0);
     }
 
     pub(crate) fn activate_selected(&mut self) -> bool {
         match self.selected_row() {
             BatchScanConfigRow::PriorRun => self.cycle_prior_run(),
+            BatchScanConfigRow::ContextComparison | BatchScanConfigRow::ContextCases => {
+                return false
+            }
             BatchScanConfigRow::Launch => return true,
             row => self.begin_number_edit(row),
         }
@@ -138,7 +176,7 @@ impl BatchScanConfig {
         let next = next_prior_run(&self.prior_runs, self.prior_run_id.as_deref());
         self.prior_run_id = next.map(|prior| prior.run_id.clone());
         self.notice = None;
-        if previous != self.prior_run_id && self.study.receipt.is_some() {
+        if previous != self.prior_run_id && self.study.plan_identity().is_some() {
             self.study.invalidate_plan();
             self.notice = Some("Usage evidence changed. Prepare a new plan for separate approval; limits, options and existing spending remain.".into());
         }

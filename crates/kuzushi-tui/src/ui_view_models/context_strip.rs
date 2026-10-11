@@ -10,8 +10,7 @@ pub(crate) struct ContextStripModel {
     pub(crate) target: String,
     pub(crate) context_present: bool,
     pub(crate) context_state: &'static str,
-    /// A context snapshot build is live right now: the strip must say so
-    /// instead of asserting "context not built" mid-build.
+    /// A repository index build is live; its status is separate from Map context.
     pub(crate) context_building: bool,
     pub(crate) model: String,
     pub(crate) findings: String,
@@ -75,18 +74,29 @@ impl ContextStripModel {
     }
 
     pub(super) fn context_state_segment(&self) -> String {
-        // The context snapshot is an optional repo index. Word the empty state
-        // as an action ("not built") rather than an alarm ("missing") — scans
-        // run fine without it; `context build` creates it.
+        // This optional file index is distinct from an accepted threat model.
         if self.context_building && !self.context_present {
-            "context building…".to_string()
-        } else if self.context_state == "malformed" {
-            "context malformed".to_string()
-        } else if self.context_present {
-            "context ready".to_string()
-        } else {
-            "context not built".to_string()
+            return "repo index building…".to_string();
         }
+        format!("repo index {}", self.stored_index_state())
+    }
+
+    fn stored_index_state(&self) -> &'static str {
+        if self.context_state == "malformed" {
+            return "malformed";
+        }
+        if !self.context_present {
+            return "not built";
+        }
+        index_freshness_label(self.context_state)
+    }
+}
+
+fn index_freshness_label(state: &str) -> &'static str {
+    match state {
+        "current" => "ready",
+        "stale" => "stale",
+        _ => "unverified",
     }
 }
 

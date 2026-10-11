@@ -1,0 +1,87 @@
+name: Explicit goal guidance, frozen context input and budget-reader recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_guidance.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | context-choice
+keys: g
+require-live-snap: 20 GENERATE STUDY CONTEXT | generation
+expect: Goal guidance: off
+keys: g
+require-live-snap: 20 Choose and save an exact goal revision | missing-goal-choice
+keys: b
+require-live-snap: 25 Shown revision: 1 | goal-editor
+expect: Original goal
+keys: a
+require-live-snap: 20 GENERATE STUDY CONTEXT | goal-selected
+keys: g
+require-live-snap: 20 Goal guidance: on | guidance-enabled
+ask: Is guidance explicitly enabled for the selected goal, with a clear distinction between operator priorities and source evidence before any model request?
+keys: t
+require-live-snap: 20 Total calls | calls-editor
+type: 3
+keys: Enter
+keys: r
+require-live-snap: 20 Protected review | review-editor
+type: 2
+keys: Enter
+require-live-snap: 20 Protected review: 2 | explicit-limits
+keys: Enter
+require-live-snap: 30 Goal guidance: frozen revision 1 | frozen-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_guidance.py @TMP_TARGET @ART planned
+keys: g
+require-live-snap: 20 Goal guidance is frozen | frozen-choice-refusal
+keys: b
+require-live-snap: 20 GOAL IN THIS CONTEXT PLAN | bound-goal
+expect: Original goal
+expect-not: Later replacement goal
+resize: 160x48
+live-snap: goal-160x48
+resize: 96x89
+live-snap: goal-96x89
+resize: 80x24
+live-snap: goal-80x24
+resize: 60x20
+live-snap: goal-60x20
+resize: 40x12
+live-snap: goal-40x12
+keys: NPage
+live-snap: goal-page-1-40x12
+keys: NPage
+live-snap: goal-page-2-40x12
+keys: NPage
+live-snap: goal-page-3-40x12
+keys: NPage
+live-snap: goal-page-4-40x12
+keys: NPage
+live-snap: goal-page-5-40x12
+ask: Can the operator read the exact frozen goal at six sizes and return to the same allowance draft, even after the current goal head changes?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 Goal guidance: frozen revision 1 | allowance-restored
+expect: Protected review: 2
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_guidance.py @TMP_TARGET @ART verify
+keys: Escape
+submit: setup
+require-live-snap: 25 SETUP | setup
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | explicit-exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+paste-file: @ART/exact-command.txt
+keys: Enter
+submit: logs
+keys: End
+require-live-snap: 25 Original goal | frozen-goal-after-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_guidance.py @TMP_TARGET @ART verify
+ask: Does no-color restart preserve the original goal and frozen context plan, with no generation, provider reservations or source changes?
+keys: C-c
+require-exit: 10

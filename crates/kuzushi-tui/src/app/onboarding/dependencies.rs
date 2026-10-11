@@ -13,6 +13,7 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         MapEntryPoints => &[GatherRepoContext],
         DecomposeModules => &[GatherRepoContext],
         BuildXRay => &[GatherRepoContext],
+        ImportThreatModel => &[GatherRepoContext],
         BuildThreatModel => &[MapEntryPoints],
         BuildStrideThreatModel => &[MapEntryPoints],
         BuildPastaThreatModel => &[MapEntryPoints],

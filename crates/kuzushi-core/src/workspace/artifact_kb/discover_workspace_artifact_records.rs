@@ -70,6 +70,9 @@ pub(crate) fn workspace_artifact_record(
     workspace: &WorkspaceTarget,
     source_path: String,
 ) -> Result<Option<ArtifactKnowledgeRecord>> {
+    if explicit_context_run_source(workspace.root(), &source_path)? {
+        return Ok(None);
+    }
     let absolute = crate::workspace::validated_workspace_descendant(
         workspace.root(),
         Path::new(&source_path),
@@ -83,6 +86,10 @@ pub(crate) fn workspace_artifact_record(
         MAX_REFRESH_SOURCE_BYTES as usize,
     )
     .with_context(|| format!("Could not read artifact {}", absolute.display()))?;
+    let body = artifact_body_without_lessons(workspace.root(), &absolute, body)?;
+    if unselected_lesson_artifact(&body) {
+        return Ok(None);
+    }
     Ok(Some(artifact_record_from_body(
         workspace,
         source_path,
@@ -91,12 +98,31 @@ pub(crate) fn workspace_artifact_record(
     )))
 }
 
+fn unselected_lesson_artifact(body: &str) -> bool {
+    [
+        "reviewedLessons",
+        "Operator-reviewed lessons for this context",
+        "\"lessonRef\"",
+        "\"kuzushiLessons\"",
+    ]
+    .iter()
+    .any(|marker| body.contains(marker))
+}
+
+fn artifact_body_without_lessons(root: &Path, absolute: &Path, body: String) -> Result<String> {
+    if absolute == crate::capabilities::persistent_threat_model_path(root) {
+        return without_reviewed_lessons(body);
+    }
+    Ok(body)
+}
+
 fn is_indexable_artifact(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => Ok(metadata.is_file() && is_indexable_text_path(path)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error)
-            .with_context(|| format!("Could not inspect artifact {}", path.display())),
+        Err(error) => {
+            Err(error).with_context(|| format!("Could not inspect artifact {}", path.display()))
+        }
     }
 }
 
@@ -226,6 +252,9 @@ fn collect_refresh_run_dir(
     depth: usize,
     collector: &mut RefreshCandidateCollector,
 ) -> Result<bool> {
+    if explicit_context_run(root, dir)? {
+        return Ok(true);
+    }
     if !refresh_directory_is_traversable(dir, depth, collector)? {
         return Ok(true);
     }
@@ -293,6 +322,9 @@ pub(crate) fn collect_run_artifact_paths(
     dir: &Path,
     out: &mut Vec<String>,
 ) -> Result<()> {
+    if explicit_context_run(root, dir)? {
+        return Ok(());
+    }
     match fs::symlink_metadata(dir) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
             anyhow::bail!(
@@ -311,6 +343,49 @@ pub(crate) fn collect_run_artifact_paths(
         collect_run_artifact_entry(root, entry?, out)?;
     }
     Ok(())
+}
+
+fn explicit_context_run_source(root: &Path, source_path: &str) -> Result<bool> {
+    let runs = crate::run_artifacts::runs_root(root);
+    let relative = runs
+        .strip_prefix(root)
+        .context("Runs are outside workspace")?;
+    let Ok(path) = Path::new(source_path).strip_prefix(relative) else {
+        return Ok(false);
+    };
+    let mut components = path.components();
+    let Some(run) = components.next() else {
+        return Ok(false);
+    };
+    explicit_context_run(root, &runs.join(run.as_os_str()))
+}
+
+fn without_reviewed_lessons(body: String) -> Result<String> {
+    let Ok(mut document) = serde_json::from_str::<Value>(&body) else {
+        return Ok(body);
+    };
+    let Some(object) = document.as_object_mut() else {
+        return Ok(body);
+    };
+    if object.remove("reviewedLessons").is_none() {
+        return Ok(body);
+    }
+    object.remove("lessonSelection");
+    Ok(serde_json::to_string(&document)?)
+}
+
+fn explicit_context_run(root: &Path, dir: &Path) -> Result<bool> {
+    let metadata = dir.join("run.json");
+    if !metadata.exists() {
+        return Ok(false);
+    }
+    let raw = crate::bounded_file::read_utf8_text_within(root, &metadata, 262144)?;
+    let value: Value = serde_json::from_str(&raw).context("Artifact run metadata is malformed")?;
+    let tool = value
+        .get("tool")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    Ok(tool.starts_with("findings:lesson") || tool == "threat-model:reuse-lessons")
 }
 
 fn collect_run_artifact_entry(

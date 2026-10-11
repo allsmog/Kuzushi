@@ -143,6 +143,15 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
     format!("fi_{}", hash.as_str())
 }
 
+/// Immutable ledger key carried by a loaded finding. Legacy findings use
+/// their fingerprint; observation readers must not resolve a newer row first.
+pub fn finding_observation_identity(finding: &Finding) -> &str {
+    finding
+        .identity_id
+        .as_deref()
+        .unwrap_or(&finding.fingerprint)
+}
+
 /// Durable identity is intentionally independent of producer-supplied prose,
 /// evidence, and display locations. Evidence is verified at the persistence
 /// boundary, while line numbers are mutable presentation metadata; neither can

@@ -37,6 +37,7 @@ pub struct ContextSnapshotView {
     pub stale_slices: Vec<String>,
     pub enrichment_claims: usize,
     pub enrichment_model: Option<String>,
+    pub inspection: Option<kuzushi_core::context::ContextSnapshotInspection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +139,8 @@ pub enum ShellView {
     /// from every campaign plan/queue plus per-shard finding counts. Answers
     /// "where have we looked, what did we find, where is risk uncovered".
     Coverage,
+    Relationships,
+    Lessons,
     Help,
     Quickstart,
     /// Full-screen scrollable transcript. M1 §1.1 — the embedded

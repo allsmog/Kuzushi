@@ -23,14 +23,18 @@ pub(crate) use domain::*;
 pub(crate) use persistence::*;
 
 pub use adapters::execute_threat_model_tool;
-pub(crate) use persistence::{load_exact_threat_model, load_selected_threat_model, ThreatModelSelection};
-#[cfg(test)]
-pub(crate) use persistence::commit_test_model;
 pub use application::{
     apply_threat_model_patch_revision, classify_scope_binding, current_scope_ref_for_path,
     ScopeBindingStatus, ThreatModelPatchCommit,
 };
+pub use domain::validate_threat_model_import_source;
+pub use domain::{
+    apply_context_text_edits, context_text_differences, context_text_fields, ContextTextDifference,
+    ContextTextEdit, ContextTextField, MAX_CONTEXT_EDITS, MAX_CONTEXT_EDIT_BYTES,
+};
 pub use domain::{security_context_link_report, SecurityContextLinkReport, ThreatModelBuildRoots};
+#[cfg(test)]
+pub(crate) use persistence::commit_test_model;
 pub use persistence::{
     activate_threat_model, adopt_threat_model_mirror_edits, commit_threat_model_revision,
     inspect_threat_model_mirror_diff, list_model_revisions, list_threat_model_heads,
@@ -47,4 +51,7 @@ pub use persistence::{
     ThreatModelJsonChange, ThreatModelManifest, ThreatModelMetadata, ThreatModelMirrorDiff,
     ThreatModelRef, ThreatModelResolvedVia, ThreatModelRevisionId, ThreatModelRevisionMetadata,
     ThreatModelRevisionSource, ThreatModelStoreError, ThreatModelVerificationCache,
+};
+pub(crate) use persistence::{
+    load_exact_threat_model, load_selected_threat_model, ThreatModelSelection,
 };

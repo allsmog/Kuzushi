@@ -1,0 +1,58 @@
+name: Distinguish selected scan history from the displayed observation
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/group_runs.py prepare @TMP_TARGET @ART
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: groups
+require-live-snap: 25 1 group / 1 finding | selected-history
+expect: latest observations
+ask: Does grouped Review make clear that the selected scan filters observation history while the displayed finding uses the current ledger?
+keys: Enter
+require-live-snap: 25 Observation run: latest-observation | current-observation
+expect: Observed in selected runs: middle-observation
+expect: Compare source revisions
+ask: Can the operator distinguish the middle run that observed this finding from its displayed latest observation without an implied fixed verdict?
+resize: 40x12
+live-snap: narrow-history
+keys: PageDown
+live-snap: narrow-detail
+keys: PageDown
+live-snap: narrow-membership
+keys: PageDown
+live-snap: narrow-observation-run
+expect: latest-observation
+keys: PageDown
+live-snap: narrow-selected-run
+expect: middle-observation
+keys: PageDown
+live-snap: narrow-history-guidance
+expect: Compare source revisions
+keys: PageDown
+live-snap: narrow-source-guidance
+keys: PageDown
+live-snap: narrow-verdict-guidance
+ask: At 40x12 can the operator read the history and observation details through paging while retaining selection and usable back/open controls?
+resize: 120x36
+keys: Home
+keys: Enter
+require-live-snap: 25 SELECTED FINDING | opened-current
+keys: G
+require-live-snap: 25 GROUP MEMBERS | returned-member
+require-shell: python3 -B @REPO/scripts/devex/fixtures/group_runs.py verify @TMP_TARGET @ART
+ask: Does opening and returning preserve the selected run context and exact displayed observation, without another scan or finding decision?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: groups
+require-live-snap: 25 1 group / 1 finding | recovered-history
+keys: Enter
+require-live-snap: 25 Observed in selected runs: middle-observation | recovered-member
+require-shell: python3 -B @REPO/scripts/devex/fixtures/group_runs.py verify @TMP_TARGET @ART
+ask: Does restart preserve selected history and the latest observation in no-color output, with no provider request or inferred fix?
+keys: C-c
+require-exit: 10

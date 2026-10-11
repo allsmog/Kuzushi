@@ -2,6 +2,8 @@ use super::workspace_artifact_path_label;
 use crate::ShellApp;
 use std::sync::OnceLock;
 
+mod inspection;
+
 static CONTEXT_SNAPSHOT_RELATIVE_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +33,7 @@ pub(crate) struct ContextSnapshotDetails {
     pub(crate) generated: String,
     pub(crate) stale: String,
     pub(crate) enrichment: String,
+    pub(crate) inspection: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,7 +135,7 @@ pub(crate) fn context_snapshot_relative_path() -> &'static str {
 }
 
 fn plain_context_detail_rows(details: ContextSnapshotDetails) -> Vec<String> {
-    vec![
+    let mut rows = vec![
         format!("target: {}", details.target),
         format!("discovery: {}", details.discovery),
         format!("files: {}", details.files),
@@ -141,7 +144,9 @@ fn plain_context_detail_rows(details: ContextSnapshotDetails) -> Vec<String> {
         format!("generated: {}", details.generated),
         format!("stale: {}", details.stale),
         format!("enrichment: {}", details.enrichment),
-    ]
+    ];
+    rows.extend(details.inspection);
+    rows
 }
 
 fn context_running(app: &ShellApp) -> Option<ContextSnapshotRunning> {
@@ -197,6 +202,7 @@ impl ContextSnapshotDetails {
             generated: join_or_dash(&view.generated_slices),
             stale: join_or_dash(&view.stale_slices),
             enrichment: enrichment_label(view.enrichment_claims, view.enrichment_model.as_deref()),
+            inspection: inspection::inspection_lines(view.inspection.as_ref()),
         }
     }
 }

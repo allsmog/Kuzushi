@@ -59,15 +59,15 @@ fn a_gap_reaches_both_the_output_and_the_tool_json() {
     let report = report_with_unreadable_directory();
 
     let output = report.output();
-    assert!(output.contains("Unread paths: 1 (coverage is incomplete)"), "{output}");
+    assert!(
+        output.contains("Unread paths: 1 (coverage is incomplete)"),
+        "{output}"
+    );
     assert!(output.contains("- directory config: "), "{output}");
 
     let json = report.to_tool_json();
     assert_eq!(json["data"]["coverageGaps"]["gaps"][0]["path"], "config");
-    assert_eq!(
-        json["data"]["coverageGaps"]["gaps"][0]["kind"],
-        "directory"
-    );
+    assert_eq!(json["data"]["coverageGaps"]["gaps"][0]["kind"], "directory");
     assert_eq!(json["data"]["coverageGaps"]["unnamed"], 0);
 }
 
@@ -101,6 +101,7 @@ fn report_with_unreadable_directory() -> SecretScanReport {
         files_scanned: 0,
         files_skipped: 0,
         coverage_gaps,
+        inspection: None,
     }
 }
 

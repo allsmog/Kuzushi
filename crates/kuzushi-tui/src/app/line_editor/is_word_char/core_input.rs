@@ -31,7 +31,10 @@ impl ShellApp {
     }
 
     pub fn restore_last_cleared_input(&mut self) {
-        self.editor_mut().restore_last_cleared_input();
+        let restored = self.editor_mut().restore_last_cleared_input();
+        if restored && self.input_mode() == InputMode::Navigate {
+            self.log("input", "draft restored; Esc opens the command line");
+        }
     }
 
     pub fn take_input(&mut self) -> String {

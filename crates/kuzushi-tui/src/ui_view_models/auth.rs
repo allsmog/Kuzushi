@@ -3,7 +3,7 @@ use crate::ShellApp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthProviderTone {
-    Connected,
+    Present,
     Missing,
     Refreshable,
     Incomplete,
@@ -12,7 +12,7 @@ pub(crate) enum AuthProviderTone {
 impl AuthProviderTone {
     fn label(self) -> &'static str {
         match self {
-            AuthProviderTone::Connected => "connected",
+            AuthProviderTone::Present => "present",
             AuthProviderTone::Missing => "missing",
             AuthProviderTone::Refreshable => "refreshable",
             AuthProviderTone::Incomplete => "incomplete",
@@ -100,7 +100,7 @@ fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
     let env_set = env_credential_is_ready(api_key_env);
     auth_provider_row(
         "LangGraph",
-        connected_or_missing(env_set),
+        present_or_missing(env_set),
         runtime_env_detail(api_key_env, env_set),
     )
 }
@@ -119,7 +119,7 @@ fn anthropic_auth_row(app: &ShellApp) -> AuthProviderRow {
     auth_provider_row(
         "anthropic",
         if env_set {
-            AuthProviderTone::Connected
+            AuthProviderTone::Present
         } else {
             oauth_tone(oauth)
         },
@@ -156,9 +156,9 @@ fn auth_provider_row(name: &str, tone: AuthProviderTone, detail: String) -> Auth
     }
 }
 
-fn connected_or_missing(connected: bool) -> AuthProviderTone {
-    if connected {
-        AuthProviderTone::Connected
+fn present_or_missing(present: bool) -> AuthProviderTone {
+    if present {
+        AuthProviderTone::Present
     } else {
         AuthProviderTone::Missing
     }
@@ -166,9 +166,9 @@ fn connected_or_missing(connected: bool) -> AuthProviderTone {
 
 fn oauth_tone(status: OauthCredentialStatus) -> AuthProviderTone {
     match status {
-        OauthCredentialStatus::Ready => AuthProviderTone::Connected,
+        OauthCredentialStatus::Ready => AuthProviderTone::Present,
         OauthCredentialStatus::Refreshable => AuthProviderTone::Refreshable,
-        OauthCredentialStatus::Environment => AuthProviderTone::Connected,
+        OauthCredentialStatus::Environment => AuthProviderTone::Present,
         OauthCredentialStatus::Missing => AuthProviderTone::Missing,
         OauthCredentialStatus::Invalid => AuthProviderTone::Incomplete,
     }
@@ -201,19 +201,17 @@ fn anthropic_auth_status(app: &ShellApp) -> String {
 }
 
 fn anthropic_model_auth_status(env_ready: bool, oauth: OauthCredentialStatus) -> &'static str {
-    match (env_ready, oauth_model_status(oauth)) {
-        (true, "OAuth ready") => "ANTHROPIC_API_KEY/OAuth ready",
-        (true, _) => "ANTHROPIC_API_KEY set",
-        (false, "OAuth missing") => "ANTHROPIC auth missing",
-        (false, status) => status,
+    if env_ready {
+        return "ANTHROPIC_API_KEY present";
     }
+    oauth_model_status(oauth)
 }
 
-fn oauth_model_status(status: OauthCredentialStatus) -> &'static str {
+pub(crate) fn oauth_model_status(status: OauthCredentialStatus) -> &'static str {
     match status {
-        OauthCredentialStatus::Ready => "OAuth ready",
-        OauthCredentialStatus::Refreshable => "OAuth ready (refreshes on use)",
-        OauthCredentialStatus::Environment => "OAuth ready (environment token)",
+        OauthCredentialStatus::Ready => "OAuth stored",
+        OauthCredentialStatus::Refreshable => "OAuth refresh required",
+        OauthCredentialStatus::Environment => "OAuth token present (environment)",
         OauthCredentialStatus::Invalid => "OAuth invalid",
         OauthCredentialStatus::Missing => "OAuth missing",
     }

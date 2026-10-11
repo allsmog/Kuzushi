@@ -18,6 +18,7 @@ pub(crate) fn default_context_snapshot_view(snapshot_path: Option<PathBuf>) -> C
         stale_slices: Vec::new(),
         enrichment_claims: 0,
         enrichment_model: None,
+        inspection: None,
     }
 }
 
@@ -113,6 +114,7 @@ fn present_context_snapshot_view(
         stale_slices,
         enrichment_claims,
         enrichment_model,
+        inspection: kuzushi_core::context::context_snapshot_inspection(snapshot),
     }
 }
 
@@ -174,6 +176,7 @@ fn malformed_context_snapshot_view(snapshot_path: PathBuf) -> ContextSnapshotVie
         stale_slices: Vec::new(),
         enrichment_claims: 0,
         enrichment_model: None,
+        inspection: None,
     }
 }
 
@@ -193,6 +196,7 @@ fn invalid_context_snapshot_view(snapshot_path: PathBuf, reason: &str) -> Contex
         stale_slices: Vec::new(),
         enrichment_claims: 0,
         enrichment_model: None,
+        inspection: None,
     }
 }
 

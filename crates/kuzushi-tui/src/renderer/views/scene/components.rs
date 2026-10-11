@@ -10,11 +10,14 @@ use ratatui::prelude::{Line, Span, Style};
 /// same at every canvas width.
 pub(super) fn component_tree_rows(width: usize, model: &ComponentStack) -> LinePageRows {
     if let Some(hint) = &model.empty_hint {
-        return LinePageRows::from_lines(crate::renderer::empty_state_panel(
-            "no component stack",
-            &[hint],
-            &[("sbom-scan:scan", "inventory manifests and lockfiles")],
-        ));
+        return LinePageRows::from_document_lines(
+            crate::renderer::empty_state_panel(
+                "no component stack",
+                &[hint],
+                &[("run sbom-scan:scan", "inventory manifests and lockfiles")],
+            ),
+            width,
+        );
     }
     let mut rows = LinePageRows::default();
     append_summary(&mut rows, width, model);
@@ -47,6 +50,13 @@ fn append_summary(rows: &mut LinePageRows, width: usize, model: &ComponentStack)
         width,
         theme::muted(),
     ));
+    if model.from_tool {
+        rows.push_wrapped(styled_wrapped_lines(
+            "From the latest completed SBOM result. Source freshness is unverified.",
+            width,
+            theme::muted(),
+        ));
+    }
 }
 
 fn append_metadata(rows: &mut LinePageRows, width: usize, model: &ComponentStack) {
@@ -220,6 +230,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn narrow_failure_retains_the_full_cause_and_rerun_action() {
+        let cause =
+            "Component inventory failed: /owned/long/path/package.json exceeds its read limit.";
+        let model = ComponentStack {
+            empty_hint: Some(cause.into()),
+            ..Default::default()
+        };
+        let rows = component_tree_rows(40, &model);
+        let wrapped_total = component_tree_rows(120, &model).len();
+        assert_eq!(
+            rows.len(),
+            wrapped_total,
+            "a wrapped cause is still one row"
+        );
+        let lines = rows.into_lines();
+        assert!(lines.iter().all(|line| line.width() <= 40));
+        let text = lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<String>();
+        let compact = text.split_whitespace().collect::<String>();
+        assert!(compact.contains(&cause.split_whitespace().collect::<String>()));
+        assert!(compact.contains("runsbom-scan:scan"));
+    }
+
+    #[test]
     fn tree_preserves_version_semantics_at_narrow_width() {
         let model = ComponentStack {
             target: "demo".into(),
@@ -244,6 +280,7 @@ mod tests {
             resolved_count: 1,
             ecosystems: vec!["npm".into()],
             empty_hint: None,
+            from_tool: false,
         };
 
         let lines = component_tree_rows(28, &model).into_lines();
@@ -317,6 +354,8 @@ mod tests {
             resolved_count: 24,
             ecosystems: vec!["npm".into()],
             empty_hint: None,
+            // The freshness disclaimer wraps at 40 columns and is one row too.
+            from_tool: true,
         }
     }
 

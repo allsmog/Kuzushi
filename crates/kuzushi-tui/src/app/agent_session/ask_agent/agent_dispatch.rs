@@ -1310,6 +1310,7 @@ mod tests {
             read_roots: authorization.policy.mcp_read_roots.clone(),
             write_shell_tools_mounted: false,
             mcp_tools_mounted: false,
+            read_scope_sha256: None,
         };
         dispatch.tool_policy_receipt = Some(expected.clone());
 

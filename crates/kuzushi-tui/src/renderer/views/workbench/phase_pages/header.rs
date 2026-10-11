@@ -3,6 +3,15 @@ use crate::ui_view_models::{EngagementHeaderModel, JourneyPhaseStatus, Workbench
 use ratatui::style::Modifier;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(in crate::renderer::views) fn compact_review_header_lines(
+    header: &EngagementHeaderModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![identity_line(header, width)];
+    lines.extend(checkpoint_drift_line(header, width));
+    lines
+}
+
 pub(in crate::renderer::views) fn phase_header_lines(
     header: &EngagementHeaderModel,
     hints: &[WorkbenchHint],

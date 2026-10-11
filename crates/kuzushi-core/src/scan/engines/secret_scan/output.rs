@@ -8,7 +8,7 @@ impl SecretScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        crate::scan::completed_scan_tool_json(
+        crate::scan::scan_tool_json_with_coverage(
             self.output(),
             serde_json::json!({
                 "findings": self.findings,
@@ -16,7 +16,9 @@ impl SecretScanReport {
                 "filesSkipped": self.files_skipped,
                 "coverageGaps": self.coverage_gaps,
                 "target": self.target,
+                "inspection": self.inspection,
             }),
+            &self.coverage_gaps.scan_error_lines(),
         )
     }
 }
@@ -33,8 +35,34 @@ fn secret_scan_header_lines(report: &SecretScanReport) -> Vec<String> {
         format!("  Files skipped: {}", report.files_skipped),
         format!("  Target:        {}", report.target),
     ];
+    lines.extend(inspection_lines(report.inspection.as_ref()));
     lines.extend(report.coverage_gaps.disclosure_lines());
     lines
+}
+
+fn inspection_lines(inspection: Option<&SecretScanInspection>) -> Vec<String> {
+    let Some(inspection) = inspection else {
+        return Vec::new();
+    };
+    let entries = inspection
+        .traversal_entries
+        .map_or("exact file membership".into(), |count| {
+            format!("{count} / {} entries", inspection.max_entries)
+        });
+    vec![
+        format!("  Inspection: {entries}"),
+        format!(
+            "  Content read reservations: {} / {} bytes",
+            inspection.content_bytes_reserved, inspection.max_total_bytes
+        ),
+        format!(
+            "  Limits: {} bytes/file · {} findings; reaching a limit leaves coverage incomplete",
+            inspection.max_file_bytes, inspection.max_findings
+        ),
+        format!("  Excluded directory names: {}", inspection.excluded_directories.join(", ")),
+        format!("  Excluded file extensions: {}", inspection.excluded_extensions.join(", ")),
+        "  Symlinks and binary content are excluded. Matching strings are signals; credential validity is not checked.".into(),
+    ]
 }
 
 fn severity_summary(findings: &[SecretScanFinding]) -> String {

@@ -27,11 +27,11 @@ const STRATEGY_QUEUE_COMMANDS: [&str; 7] = [
     "strategy skip <id>",
     "strategy fire",
     "strategy correct <id> <strategy>",
-    "recommend",
-    "prompts",
+    "recommendations",
+    "strategy inspect <id>",
     "back",
 ];
-const STRATEGY_QUEUE_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
+const STRATEGY_QUEUE_EMPTY_COMMANDS: [&str; 3] = ["recommendations", "runs", "back"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StrategyQueueModel {
@@ -64,6 +64,9 @@ pub(crate) struct StrategyQueueRow {
     pub(crate) rationale: String,
     pub(crate) lineage: String,
     pub(crate) source_run: String,
+    pub(crate) approved_cost: String,
+    pub(crate) result_run: String,
+    pub(crate) tool: String,
 }
 
 pub(crate) fn strategy_queue_model(app: &ShellApp) -> StrategyQueueModel {
@@ -71,14 +74,76 @@ pub(crate) fn strategy_queue_model(app: &ShellApp) -> StrategyQueueModel {
     let snapshot = strategy_queue_snapshot(app, &source);
     let detail_rows = strategy_queue_detail_rows(&source);
     StrategyQueueModel {
-        title: "STRATEGY QUEUE",
+        title: if app.inspected_strategy_id().is_some() {
+            "STRATEGY PROPOSAL"
+        } else {
+            "STRATEGY QUEUE"
+        },
         detail_rows,
         summary: snapshot.summary,
         headers: STRATEGY_QUEUE_HEADERS,
         commands: STRATEGY_QUEUE_COMMANDS,
-        empty_state: strategy_queue_empty_state(source.target.is_some()),
-        rows: snapshot.rows,
+        empty_state: reader_empty_state(app, source.target.is_some()),
+        rows: inspected_rows(
+            snapshot.rows,
+            app.inspected_strategy_id(),
+            queue_loaded(app),
+        ),
     }
+}
+
+fn inspected_rows(
+    rows: Vec<StrategyQueueRow>,
+    id: Option<&str>,
+    loaded: bool,
+) -> Vec<StrategyQueueRow> {
+    let Some(id) = id else {
+        return rows;
+    };
+    if !loaded {
+        return rows;
+    }
+    let selected = rows
+        .into_iter()
+        .filter(|row| row.id == id)
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        return vec![strategy_queue_error_row(format!(
+            "No proposal named {id}; enter strategy to show the complete queue."
+        ))];
+    }
+    selected
+}
+
+fn queue_loaded(app: &ShellApp) -> bool {
+    matches!(
+        app.workbench_cache()
+            .borrow()
+            .cached_strategy_queue(app.target()),
+        ViewDataState::Ready(StrategyQueueState::Ready(_))
+    )
+}
+
+fn reader_empty_state(app: &ShellApp, target_selected: bool) -> StrategyQueueEmptyState {
+    if target_selected
+        && !matches!(
+            app.workbench_cache()
+                .borrow()
+                .cached_strategy_queue(app.target()),
+            ViewDataState::Ready(_)
+        )
+    {
+        return StrategyQueueEmptyState {
+            title: "reading saved proposal history",
+            explanations: [
+                "Loading the target's recorded proposals.",
+                "No proposal is approved or executed by opening this reader.",
+            ],
+            actions: [("back", "return"), ("runs", "inspect recorded runs")],
+            commands: ["back", "runs", ""],
+        };
+    }
+    strategy_queue_empty_state(target_selected)
 }
 
 struct StrategyQueueSnapshot {
@@ -111,7 +176,9 @@ fn strategy_queue_snapshot(app: &ShellApp, source: &StrategyQueueSource) -> Stra
         },
         ViewDataState::NotRequested => StrategyQueueSnapshot {
             rows: Vec::new(),
-            summary: "strategy queue not generated — run `recommend`".to_string(),
+            summary:
+                "strategy queue has not been loaded; open `recommendations` to inspect suggestions"
+                    .to_string(),
         },
         ViewDataState::Loading => StrategyQueueSnapshot {
             rows: Vec::new(),
@@ -140,6 +207,9 @@ fn strategy_queue_error_row(error: String) -> StrategyQueueRow {
         rationale: error,
         lineage: "base -> recommended".to_string(),
         source_run: "-".to_string(),
+        approved_cost: "unknown".into(),
+        result_run: "-".into(),
+        tool: "-".into(),
     }
 }
 
@@ -151,9 +221,12 @@ fn strategy_rows_from_proposals(mut proposals: Vec<StrategyProposal>) -> Vec<Str
         .collect()
 }
 
-fn strategy_proposal_sort_key(proposal: &StrategyProposal) -> (u8, &'static str, String, String) {
+fn strategy_proposal_sort_key(
+    proposal: &StrategyProposal,
+) -> (u8, std::cmp::Reverse<u64>, &'static str, String, String) {
     (
         strategy_status_order(proposal.status),
+        std::cmp::Reverse(proposal.created_at_ms),
         proposal.phase.label(),
         proposal.effective_strategy().to_string(),
         proposal.id.clone(),
@@ -174,6 +247,9 @@ fn strategy_status_order(status: StrategyProposalStatus) -> u8 {
 fn strategy_row_from_proposal(proposal: StrategyProposal) -> StrategyQueueRow {
     let strategy = proposal.effective_strategy().to_string();
     let lineage = strategy_lineage(&proposal);
+    let approved_cost = cost_label(proposal.approved_cost_usd);
+    let result_run = proposal.result_run_id.clone().unwrap_or_else(|| "-".into());
+    let tool = proposal.tool.clone().unwrap_or_else(|| "-".into());
     StrategyQueueRow {
         id: proposal.id.clone(),
         cells: [
@@ -199,6 +275,9 @@ fn strategy_row_from_proposal(proposal: StrategyProposal) -> StrategyQueueRow {
         ),
         lineage,
         source_run: proposal.source_run_id.unwrap_or_else(|| "-".to_string()),
+        approved_cost,
+        result_run,
+        tool,
     }
 }
 
@@ -241,7 +320,8 @@ fn strategy_lineage(proposal: &StrategyProposal) -> String {
 }
 
 fn cost_label(cost: Option<f64>) -> String {
-    cost.map(|value| format!("${value:.4}"))
+    cost.filter(|value| value.is_finite() && *value >= 0.0)
+        .map(|value| format!("${value:.4}"))
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -376,7 +456,10 @@ fn strategy_queue_empty_state(target_selected: bool) -> StrategyQueueEmptyState 
             "run the recommender to materialize review proposals before execution.",
         ],
         actions: [
-            ("recommend", "rank modules and write strategy proposals"),
+            (
+                "recommendations",
+                "inspect suggestions; r generates a free deterministic draft",
+            ),
             ("runs", "inspect persisted runs"),
         ],
         commands: STRATEGY_QUEUE_EMPTY_COMMANDS,

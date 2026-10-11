@@ -5,6 +5,7 @@ impl StudyContextGeneration {
     pub(super) fn refresh_result(&mut self, target: &std::path::Path) {
         self.generated = None;
         self.generated_scopes = None;
+        self.generated_lesson = None;
         self.result_error = None;
         self.rejected_available = false;
         self.rejected_output = None;
@@ -13,16 +14,17 @@ impl StudyContextGeneration {
         let Some(receipt) = &self.receipt else {
             return;
         };
-        if self.is_scope_proposal() {
-            match receipt.generated_scopes(target) {
-                Ok(review) => self.generated_scopes = review,
-                Err(error) => self.result_error = Some(format!("{error:#}")),
-            }
-        } else {
-            match receipt.generated_context(target) {
-                Ok(reference) => self.generated = reference,
-                Err(error) => self.result_error = Some(format!("{error:#}")),
-            }
+        match load_generated_result(receipt, target) {
+            Ok(result) => self.apply_generated_result(result),
+            Err(error) => self.result_error = Some(format!("{error:#}")),
+        }
+    }
+
+    fn apply_generated_result(&mut self, result: GeneratedResult) {
+        match result {
+            GeneratedResult::Context(reference) => self.generated = reference,
+            GeneratedResult::Scopes(review) => self.generated_scopes = review,
+            GeneratedResult::Lesson(reference) => self.generated_lesson = reference,
         }
     }
 
@@ -70,10 +72,9 @@ impl ShellApp {
         match restore_context_form(target, id) {
             Ok(config) => {
                 self.show_study_form(config);
-                if self
-                    .context_generation()
-                    .is_none_or(|generation| !generation.is_scope_proposal())
-                {
+                if self.context_generation().is_none_or(|generation| {
+                    !generation.is_scope_proposal() && !generation.is_lesson()
+                }) {
                     self.open_study_context_picker();
                 }
             }
@@ -129,6 +130,7 @@ fn restore_context_form(target: &std::path::Path, id: &str) -> Result<BatchScanC
     let allowance = receipt.load_allowance(target)?;
     let mut config = BatchScanConfig::load(target, None);
     config.study.investigation_id = receipt.investigation_id.clone();
+    super::scoped_context::restore_origin(&mut config, &receipt);
     if let Some(allowance) = allowance {
         config.study.restore_allowance(allowance);
     }
@@ -142,4 +144,27 @@ fn restore_context_form(target: &std::path::Path, id: &str) -> Result<BatchScanC
     generation.refresh_result(target);
     config.context_generation = Some(generation);
     Ok(config)
+}
+
+enum GeneratedResult {
+    Context(Option<kuzushi_core::ThreatModelRef>),
+    Scopes(Option<kuzushi_core::workspace::ScanScopeReview>),
+    Lesson(Option<kuzushi_core::findings::LessonRef>),
+}
+
+fn load_generated_result(
+    receipt: &ContextStudyReceipt,
+    target: &std::path::Path,
+) -> Result<GeneratedResult> {
+    match receipt.generation_tool.as_str() {
+        "findings:lesson-generate" => receipt
+            .generated_lesson(target)
+            .map(GeneratedResult::Lesson),
+        "pack:suggest-scopes" => receipt
+            .generated_scopes(target)
+            .map(GeneratedResult::Scopes),
+        _ => receipt
+            .generated_context(target)
+            .map(GeneratedResult::Context),
+    }
 }

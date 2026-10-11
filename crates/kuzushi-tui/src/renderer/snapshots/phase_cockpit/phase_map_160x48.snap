@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: map
 size: 160x48
 ---
-KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context   │ ENGAGEMENT
+KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready · module context│ ENGAGEMENT
  Map ✓ · Scan ✓ · Review ● · Report                                                                                         │ phase-target
  ▸ NEXT review 6 remaining findings (6 total)                                                                               │ scope: F-0001 · Review
  Tab cycle map views · z zoom selected view · next → Review · jobs inspect Map runs · report open Report                    │
@@ -18,10 +18,11 @@ views  [summary] · dfd  ·  Tab cycles · z zoom                               
 │source-grounded product summary.                       │ │                                                                ││ FINDINGS
 │                                                       │ │                                                                ││ 6 findings · 1 C · 2 H · 2 M
 │shape · 1 entities · 1 processes · 1 stores            │ │                                                                ││ 0/6 reviewed · 0 confirmed
-└───────────────────────────────────────────────────────┘ └────────────────────────────────────────────────────────────────┘│
-┌COMPONENT TREE · external · 1/3 · ↑/↓ select · Enter DFD · PgUp/PgDn scroll ──────────────────────────────────────────────┐│ SESSION COST
-│◇ phase-target · 3 components                                                                                               ││ $0.37 of $2.00
-│├─ external · 1 component                                                                                                 ││ 19% of budget
+│context · 0 entries, 0 gates, 0 assets, 0 threats      │ │                                                                ││
+└───────────────────────────────────────────────────────┘ └────────────────────────────────────────────────────────────────┘│ SESSION COST
+┌COMPONENT TREE · external · 1/3 · ↑/↓ select · Enter DFD · PgUp/PgDn scroll ──────────────────────────────────────────────┐│ $0.37 of $2.00
+│◇ phase-target · 3 components                                                                                               ││ 19% of budget
+│├─ external · 1 component                                                                                                 ││ report · prior usage
 ││  └─ › ◇ Client · entity · in 0 · out 1                                                                                  ││
 ││     ├─ does · not recorded in the threat model                                                                          ││
 ││     ├─ purpose · not recorded; rebuild the threat model                                                                 ││
@@ -45,9 +46,8 @@ views  [summary] · dfd  ·  Tab cycles · z zoom                               
 │                                                                                                                          ││
 │                                                                                                                          ││
 │                                                                                                                          ││
-│                                                                                                                          ││
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
-unverified · ./phase-target · rev:unknown · context:current · indexed=3 total=3 · 3 nodes · 2 flows                           │
+unverified · ./phase-target · rev:unknown · repo index:current · indexed=3 total=3 · 3 nodes · 2 flows                        │
 ⛭ autonomy:fix · run route · ⠋ context:build · 42s · 1/2 · notify:unavailable ·...      6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │

@@ -17,4 +17,6 @@ pub(crate) use gallery::{
     map_summary_plain_lines, scene_line_page_viewport_lines, scene_page_lines,
 };
 pub(in crate::renderer::views) use gallery_layout::map_canvas_sections;
+pub(crate) use gallery_layout::{map_gallery_page_rows, scene_page_rows, summary_page_rows};
+pub(crate) use line_page::PageDirection;
 pub(crate) use render_scene_view::{render_embedded_map_gallery, render_scene_view};

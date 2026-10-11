@@ -15,6 +15,12 @@ pub struct AgenticSastReport {
     pub cost_usd: f64,
     #[serde(default = "default_cost_usd_exact", skip_serializing_if = "is_true")]
     pub cost_usd_exact: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_coverage: Option<AgenticInventoryCoverage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AgenticScopeReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub out_of_scope_observations: Vec<Finding>,
 }
 
 const fn default_cost_usd_exact() -> bool {
@@ -28,9 +34,20 @@ const fn is_true(value: &bool) -> bool {
 impl AgenticSastReport {
     pub(crate) fn output(&self) -> String {
         let mut lines = vec![self.summary()];
+        if let Some(scope) = self.scope_summary() {
+            lines.push(scope);
+        }
+        if let Some(coverage) = &self.inventory_coverage {
+            lines.extend(coverage.reading_lines());
+        }
         append_persisted_run(&mut lines, self.persisted.as_ref());
         append_top_findings(&mut lines, &self.findings);
         lines.join("\n")
+    }
+
+    pub(crate) fn scope_summary(&self) -> Option<String> {
+        let scope = self.scope.as_ref()?;
+        Some(format!("Accepted scope: {} · {} discovery files · {} inherited context files · {} observations outside discovery retained in the run receipt", scope.name, scope.discovery_files, scope.inherited_context_files, self.out_of_scope_observations.len()))
     }
 
     pub(crate) fn to_tool_json(&self) -> Value {

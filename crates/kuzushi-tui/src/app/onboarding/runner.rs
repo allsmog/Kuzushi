@@ -607,7 +607,9 @@ impl ShellApp {
             }
             self.log(
                 "phase",
-                format!("session model recommended {count} tool(s) — preselection refined"),
+                format!(
+                    "generated suggestions retained {count} tool(s); draft preselection refined"
+                ),
             );
         }
         // If the operator committed a plan while ranking was still in flight,
@@ -819,7 +821,7 @@ impl ShellApp {
         self.start_deterministic_recommender(workspace);
     }
 
-    fn start_deterministic_recommender(&mut self, workspace: WorkspaceTarget) {
+    pub(crate) fn start_deterministic_recommender(&mut self, workspace: WorkspaceTarget) {
         let input = json!({ "useModelRanking": false });
         let prepared = match self.prepare_background_tool_input(
             "module-recommender:recommend",

@@ -17,7 +17,10 @@ pub(super) fn optional_dfd_nodes() -> Vec<(AttackSurfaceKind, Value)> {
             external_service_node(),
         ),
         (AttackSurfaceKind::AuthBoundary, auth_control_node()),
-        (AttackSurfaceKind::SessionStateBoundary, session_state_node()),
+        (
+            AttackSurfaceKind::SessionStateBoundary,
+            session_state_node(),
+        ),
         (
             AttackSurfaceKind::RequestTrustBoundary,
             request_trust_node(),
@@ -43,7 +46,10 @@ pub(super) fn optional_dfd_flows() -> Vec<(AttackSurfaceKind, Value)> {
             external_service_flow(),
         ),
         (AttackSurfaceKind::AuthBoundary, auth_control_flow()),
-        (AttackSurfaceKind::SessionStateBoundary, session_state_flow()),
+        (
+            AttackSurfaceKind::SessionStateBoundary,
+            session_state_flow(),
+        ),
         (
             AttackSurfaceKind::RequestTrustBoundary,
             request_trust_flow(),

@@ -32,10 +32,7 @@ pub(crate) fn validate_legacy_threat_model(document: &Value) -> Result<()> {
     Ok(())
 }
 
-fn require_nonempty_string<'a>(
-    object: &'a Map<String, Value>,
-    field: &str,
-) -> Result<&'a str> {
+fn require_nonempty_string<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a str> {
     object
         .get(field)
         .and_then(Value::as_str)
@@ -44,7 +41,10 @@ fn require_nonempty_string<'a>(
         .with_context(|| format!("ThreatModelDocument.{field} must be a non-empty string"))
 }
 
-fn require_object<'a>(object: &'a Map<String, Value>, field: &str) -> Result<&'a Map<String, Value>> {
+fn require_object<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> Result<&'a Map<String, Value>> {
     object
         .get(field)
         .and_then(Value::as_object)
@@ -79,10 +79,12 @@ mod tests {
     #[test]
     fn persistence_validation_rejects_incomplete_or_mismatched_documents() {
         assert!(validate_persisted_threat_model(&document(), "stride").is_ok());
-        assert!(validate_persisted_threat_model(&json!({"title": "not a model"}), "stride")
-            .unwrap_err()
-            .to_string()
-            .contains("version"));
+        assert!(
+            validate_persisted_threat_model(&json!({"title": "not a model"}), "stride")
+                .unwrap_err()
+                .to_string()
+                .contains("version")
+        );
         assert!(validate_persisted_threat_model(&document(), "pasta")
             .unwrap_err()
             .to_string()

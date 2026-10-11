@@ -5,10 +5,10 @@ assertion_line: 33
  KUZUSHI › capabilities · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 CAPABILITIES · MAP · 3 actions
-[!] target required; Enter opens picker · `target <path>` · `demo` offline
+[!] target required · `target <path>` · `demo` offline
 
 > NEXT Load Quick map: TARGET REQUIRED · Build context and entry points
-
+TARGET REQUIRED · target <path> selects a repository
 -- PRIMARY recommended actions for the workspace's current phase -------------------------------------------------------
 > Quick map               Build context and entry points
   Deep threat map         Build the DFD and threat model

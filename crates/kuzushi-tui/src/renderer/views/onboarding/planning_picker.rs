@@ -879,7 +879,14 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
 /// A task whose input cannot be prepared has no model to check yet; naming
 /// the input problem keeps it from reading as "needs model" when one is set.
 fn unresolved_input_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
-    let error = app.resolved_input_for_planning_task(row.id).err()?;
+    if row.id.is_inline_action() {
+        return None;
+    }
+    let input = match row.id {
+        crate::app::PlanningTaskId::ImportThreatModel => app.validated_context_import_input(),
+        _ => app.resolved_input_for_planning_task(row.id),
+    };
+    let error = input.err()?;
     Some(unresolved_input_message(row.tool_name, &error.to_string()))
 }
 
@@ -888,7 +895,7 @@ fn unresolved_input_message(tool: &str, error: &str) -> String {
     let first_line = error.lines().next().unwrap_or_default();
     let reason = first_line.split("; ").next().unwrap_or(first_line).trim();
     let reason = reason.strip_prefix(tool).map_or(reason, str::trim_start);
-    format!("needs input — {reason}")
+    format!("needs input: {reason}")
 }
 
 fn model_readiness_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
@@ -969,7 +976,7 @@ fn artifact_reason(row: &PlanningTaskRow) -> &'static str {
         PlanningArtifactState::Cached => "cached",
         PlanningArtifactState::Missing => "not built yet",
         PlanningArtifactState::Invalid => "cached but invalid",
-        PlanningArtifactState::Action => "inline action — Space selects",
+        PlanningArtifactState::Action => "fresh action · Space selects",
     }
 }
 
@@ -1790,6 +1797,27 @@ mod tests {
     }
 
     #[test]
+    fn imported_context_requires_its_document_and_never_claims_to_be_an_inline_action() {
+        let task = PlanningTaskId::ImportThreatModel;
+        let mut app = planning_app(&[task]);
+        let row = app.engagement.planning_picker().tasks()[0].clone();
+        assert!(unresolved_input_note(&app, &row)
+            .unwrap()
+            .contains("Choose a context JSON path"));
+        app.engagement.set_option_override(
+            task,
+            "path".into(),
+            serde_json::json!("owned-context.json"),
+        );
+        assert!(unresolved_input_note(&app, &row).is_none());
+        assert!(!artifact_reason(&row).contains("inline"));
+        assert!(!outcome_row_note(&app, &row, RowOutcome::Run).contains("no module runs"));
+        let attached = planning_app(&[PlanningTaskId::AttachFiles]);
+        let inline = attached.engagement.planning_picker().tasks()[0].clone();
+        assert!(unresolved_input_note(&attached, &inline).is_none());
+    }
+
+    #[test]
     fn column_header_collapses_on_narrow_terminals() {
         assert!(line_text(&column_header(120).unwrap()).contains("TOOL"));
         assert!(!line_text(&column_header(70).unwrap()).contains("TOOL"));
@@ -1962,7 +1990,7 @@ mod tests {
                 "patch:finding",
                 "patch:finding requires a fingerprint; open a finding first\ndetail"
             ),
-            "needs input — requires a fingerprint"
+            "needs input: requires a fingerprint"
         );
     }
 

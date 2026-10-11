@@ -338,6 +338,8 @@ impl ShellApp {
     }
 
     fn handle_embedded_component_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let page_down = self.map_gallery_page_step(crate::renderer::PageDirection::Down);
+        let page_up = self.map_gallery_page_step(crate::renderer::PageDirection::Up);
         let scroll = self.router.workbench_mut().scroll_mut();
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
@@ -352,15 +354,23 @@ impl ShellApp {
             }
             KeyCode::PageDown => scroll.shift(
                 crate::ui_view_models::PhaseSurfaceId::MapDfd,
-                VIEWPORT_PAGE_LINES as i32,
+                page_down as i32,
             ),
             KeyCode::PageUp => scroll.shift(
                 crate::ui_view_models::PhaseSurfaceId::MapDfd,
-                -(VIEWPORT_PAGE_LINES as i32),
+                -(page_up as i32),
             ),
             _ => return InputUpdate::ignored(),
         }
         InputUpdate::handled()
+    }
+
+    /// PgUp/PgDn on Map's embedded line page move to the adjacent window of
+    /// whole rows, clamped to the `u16` surface offset.
+    fn map_gallery_page_step(&self, direction: crate::renderer::PageDirection) -> u16 {
+        crate::renderer::map_gallery_page_rows(self, direction)
+            .unwrap_or(VIEWPORT_PAGE_LINES)
+            .min(u16::MAX as usize) as u16
     }
 
     fn handle_line_scene_scroll_key(&mut self, key: KeyEvent) -> bool {
@@ -612,9 +622,10 @@ impl ShellApp {
     }
 
     fn scroll_summary(&mut self, direction: i32) {
-        self.router
-            .scene_mut()
-            .scroll_summary(direction, VIEWPORT_PAGE_LINES);
+        let rows = crate::renderer::summary_page_rows(self)
+            .unwrap_or(VIEWPORT_PAGE_LINES)
+            .min(VIEWPORT_PAGE_LINES);
+        self.router.scene_mut().scroll_summary(direction, rows);
     }
 
     fn cycle_scene(&mut self, direction: i32) {

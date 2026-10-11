@@ -73,12 +73,24 @@ pub fn ground_finding_location(
     let Some(path) = safe_target_path(root, file_path) else {
         return GroundingStatus::FileMissing { revision };
     };
-    let Ok(source) =
-        crate::bounded_file::read_utf8_text_within(root, &path, GROUNDING_MAX_FILE_BYTES)
-    else {
-        return GroundingStatus::FileMissing { revision };
-    };
+    let source =
+        match crate::bounded_file::read_utf8_text_within(root, &path, GROUNDING_MAX_FILE_BYTES) {
+            Ok(source) => source,
+            Err(error) => return grounding_read_error(error, revision),
+        };
     ground_against_source(&source, line, snippet, revision)
+}
+
+pub(crate) fn grounding_read_error(
+    error: std::io::Error,
+    revision: Option<String>,
+) -> GroundingStatus {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return GroundingStatus::FileMissing { revision };
+    }
+    GroundingStatus::Unavailable {
+        reason: format!("Citation source could not be inspected: {error}"),
+    }
 }
 
 /// Resolve a cited (possibly hostile) relative path strictly inside the
@@ -96,7 +108,7 @@ pub(crate) fn safe_target_path(target_root: &Path, raw_path: &str) -> Option<Pat
     Some(target_root.join(relative))
 }
 
-fn ground_against_source(
+pub(crate) fn ground_against_source(
     source: &str,
     line: u32,
     snippet: &str,
@@ -194,6 +206,34 @@ mod tests {
         )
         .unwrap();
         temp
+    }
+
+    #[test]
+    fn oversized_existing_citation_is_unavailable_and_remains_on_disk() {
+        let root = fixture_root();
+        let path = root.path().join("src/app.py");
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.set_len((GROUNDING_MAX_FILE_BYTES + 1) as u64).unwrap();
+        let status = ground_finding_location(root.path(), "src/app.py", 1, "", None);
+        assert!(matches!(status, GroundingStatus::Unavailable { .. }));
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn citation_read_errors_distinguish_absence_from_uninspectable_source() {
+        assert!(matches!(
+            grounding_read_error(std::io::Error::from(std::io::ErrorKind::NotFound), None),
+            GroundingStatus::FileMissing { .. }
+        ));
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::InvalidData,
+        ] {
+            assert!(matches!(
+                grounding_read_error(std::io::Error::from(kind), None),
+                GroundingStatus::Unavailable { .. }
+            ));
+        }
     }
 
     #[test]

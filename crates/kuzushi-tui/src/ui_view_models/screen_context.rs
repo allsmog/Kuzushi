@@ -2,8 +2,8 @@ use super::findings::projected_visible_findings;
 use crate::app::{PaneFocus, ShellView};
 use crate::ShellApp;
 use kuzushi_core::{
-    finding_next_action, runtime_validation_summary, stable_finding_alias, static_proof_summary,
-    Finding, FindingEvidence, FindingNextAction, PersistedVerification,
+    finding_next_action, runtime_validation_summary, static_proof_summary, Finding,
+    FindingEvidence, FindingNextAction, PersistedVerification,
 };
 use std::collections::BTreeMap;
 
@@ -74,6 +74,8 @@ fn core_shell_view_label(app: &ShellApp, view: &ShellView) -> Option<&'static st
         ShellView::Jobs => Some("Jobs"),
         ShellView::Campaign => Some("Campaign"),
         ShellView::Coverage => Some("Coverage"),
+        ShellView::Relationships => Some("Relationships"),
+        ShellView::Lessons => Some("Lessons"),
         ShellView::RunDiff => Some("RunDiff"),
         ShellView::Replay => Some("Replay"),
         ShellView::Trace => Some("Trace"),
@@ -128,6 +130,7 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
 
 fn setup_screen_label(app: &ShellApp) -> &'static str {
     match app.router.setup().editor() {
+        Some(crate::app::SetupEditor::Details) => "SetupDetails",
         Some(crate::app::SetupEditor::Model) => "SetupModel",
         Some(crate::app::SetupEditor::Credentials) => "SetupCredentials",
         Some(crate::app::SetupEditor::Plan) => "SetupMapPlan",
@@ -167,12 +170,11 @@ fn pane_focus_label(pane: PaneFocus) -> &'static str {
 }
 
 fn selected_item(app: &ShellApp) -> Option<ScreenSelectedItem> {
-    let (_, finding) = super::current_finding_for_detail(app)?;
-    Some(selected_item_from_finding(app, &finding))
+    let (alias, finding) = super::current_finding_for_detail(app)?;
+    Some(selected_item_from_finding(&finding, alias))
 }
 
-fn selected_item_from_finding(app: &ShellApp, finding: &Finding) -> ScreenSelectedItem {
-    let alias = stable_finding_alias(app.findings(), &finding.fingerprint);
+fn selected_item_from_finding(finding: &Finding, alias: Option<String>) -> ScreenSelectedItem {
     ScreenSelectedItem {
         alias: alias.clone(),
         fingerprint: finding.fingerprint.clone(),
@@ -320,6 +322,9 @@ fn selected_revision(app: &ShellApp) -> Option<ScreenRevision> {
 }
 
 fn active_phase(app: &ShellApp) -> Option<String> {
+    if !super::journey::investigation_chrome_is_visible(app) {
+        return None;
+    }
     super::journey_model(app).map(|journey| {
         crate::app::WorkbenchPage::from_phase(journey.current)
             .title()

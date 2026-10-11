@@ -34,6 +34,7 @@ pub enum WorkspaceCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrategyCommand {
     Show,
+    Inspect(String),
     Approve(String),
     Reject(String),
     Fire,

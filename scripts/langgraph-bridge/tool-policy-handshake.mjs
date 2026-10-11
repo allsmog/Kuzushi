@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { fileToolsForRequest } from "./file-tools.mjs";
+import { READ_ONLY_SCOPE_POLICY_ID, readScopeForPolicy } from "./read-scope.mjs";
 
 export const READ_ONLY_ASK_POLICY_PROTOCOL_VERSION = 1;
 export const READ_ONLY_ASK_POLICY_ID = "ask.concurrent-read-only.v1";
@@ -12,6 +13,7 @@ export function acknowledgeToolPolicy(request) {
   const policy = authorization.policy;
   const readRoots = canonicalReadRoots(policy);
   const effectiveTools = fileToolsForRequest({ toolPolicy: policy }).map((tool) => tool.name);
+  const scope = readScopeForPolicy(policy, readRoots);
   requireExact(effectiveTools, READ_ONLY_ASK_TOOLS, "effective read-only tools");
   return {
     ok: true,
@@ -22,6 +24,7 @@ export function acknowledgeToolPolicy(request) {
       readRoots,
       writeShellToolsMounted: false,
       mcpToolsMounted: false,
+      ...(scope ? { readScopeSha256: scope.sha256 } : {}),
     },
   };
 }
@@ -42,19 +45,27 @@ function validateAuthorization(authorization) {
   if (authorization.protocolVersion !== READ_ONLY_ASK_POLICY_PROTOCOL_VERSION) {
     throw new Error("unsupported Ask tool-policy protocol version");
   }
-  if (authorization.policyId !== READ_ONLY_ASK_POLICY_ID) {
+  if (![READ_ONLY_ASK_POLICY_ID, READ_ONLY_SCOPE_POLICY_ID].includes(authorization.policyId)) {
     throw new Error("unknown Ask tool-policy id");
   }
-  validatePolicy(authorization.policy);
+  validatePolicy(authorization.policy, authorization.policyId);
 }
 
-function validatePolicy(policy) {
-  if (!policy || policy.profile !== READ_ONLY_ASK_POLICY_ID) {
+function validatePolicy(policy, id) {
+  if (!policy || policy.profile !== id) {
     throw new Error("Ask tool policy profile does not match its authorization");
   }
   requireExact(policy.tools, READ_ONLY_ASK_TOOLS, "authorized tools");
   if (policy.mcps === true || (policy.mcpsAttached ?? []).length > 0) {
     throw new Error("concurrent Ask cannot mount MCP tools");
+  }
+  requireMembershipKind(policy, id);
+}
+
+function requireMembershipKind(policy, id) {
+  const hasScope = policy.readScope !== undefined;
+  if (hasScope !== (id === READ_ONLY_SCOPE_POLICY_ID)) {
+    throw new Error("tool authorization and read membership kind differ");
   }
 }
 

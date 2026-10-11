@@ -25,7 +25,7 @@ fn context_strip_model_reports_idle_shell_state() {
             "view:capabilities",
             "target:none",
             "model:unconfigured",
-            "context not built",
+            "repo index not built",
             "cost:$0.00"
         ]
     );
@@ -52,7 +52,7 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     assert_eq!(model.cost, Some("$0.42".to_string()));
     assert!(model
         .compact_segments()
-        .contains(&"context ready".to_string()));
+        .contains(&"repo index ready".to_string()));
 }
 
 #[test]
@@ -79,7 +79,33 @@ fn context_strip_model_reports_malformed_context_snapshot() {
     assert_eq!(model.context_state, "malformed");
     assert!(model
         .compact_segments()
-        .contains(&"context malformed".to_string()));
+        .contains(&"repo index malformed".to_string()));
+}
+
+#[test]
+fn context_strip_preserves_stale_and_unverified_file_context_states() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut().context_view_mut().exists = true;
+    for (freshness, expected) in [
+        (
+            kuzushi_core::context::ContextSnapshotFreshness::Stale("source changed".into()),
+            "repo index stale",
+        ),
+        (
+            kuzushi_core::context::ContextSnapshotFreshness::Unverifiable(
+                "no authenticated source".into(),
+            ),
+            "repo index unverified",
+        ),
+    ] {
+        app.domain_mut().context_view_mut().freshness = Some(freshness);
+        let model = context_strip_model(&app);
+        assert!(model.compact_segments().contains(&expected.to_string()));
+        assert!(!model
+            .compact_segments()
+            .iter()
+            .any(|segment| segment.ends_with("ready")));
+    }
 }
 
 #[test]

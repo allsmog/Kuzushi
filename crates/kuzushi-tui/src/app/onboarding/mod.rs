@@ -7,6 +7,7 @@
 //! (rendering), and `app/onboarding/` (state + dependency graph).
 
 mod auth_rows;
+mod context_import;
 mod controls;
 mod dependencies;
 mod failure;

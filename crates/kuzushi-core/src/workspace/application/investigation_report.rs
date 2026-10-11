@@ -9,11 +9,23 @@ use crate::run_artifacts::{load_scan_stage_data, scan_finding_run_refs, PhaseSta
 use crate::workflow_attempts::{referenced_run_content_identity, TargetContentIdentity};
 use serde::Serialize;
 
+mod document;
+mod evidence;
+mod matrix;
 mod scope;
+mod scopes;
+pub use document::{
+    ContextMatrixInvestigationReceipt, InvestigationContextCase, InvestigationReportDocument,
+    InvestigationReportEvidence, InvestigationReportSummary, InvestigationWorkCounts,
+    ScopeStudyInvestigationReceipt,
+};
+use evidence::collect_evidence;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InvestigationReportReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub investigation_brief: Option<crate::capabilities::campaign::BriefRevision>,
     pub schema_version: u32,
     pub campaign_id: String,
     pub plan_sha256: String,
@@ -45,6 +57,47 @@ pub fn load_investigation_report_for_runs(
     workspace: &WorkspaceTarget,
     runs: &[String],
 ) -> Result<Option<InvestigationReportReceipt>> {
+    match load_investigation_report_document_for_runs(workspace, runs)? {
+        Some(InvestigationReportDocument::Study(receipt)) => Ok(Some(receipt)),
+        Some(
+            InvestigationReportDocument::ContextMatrix(_)
+            | InvestigationReportDocument::ScopeStudy(_),
+        ) => {
+            anyhow::bail!("Use the matrix-aware investigation document reader for context cases")
+        }
+        None => Ok(None),
+    }
+}
+
+pub fn load_investigation_report_document_for_runs(
+    workspace: &WorkspaceTarget,
+    runs: &[String],
+) -> Result<Option<InvestigationReportDocument>> {
+    let Some(campaign) = selected_report_campaign(workspace, runs)? else {
+        return Ok(None);
+    };
+    let receipt = load_investigation_report_document(workspace, &campaign)?;
+    let expected = runs
+        .iter()
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    let actual = receipt
+        .summary()
+        .attempts
+        .iter()
+        .map(|attempt| attempt.run_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    anyhow::ensure!(
+        expected == actual,
+        "selected Scan runs do not match the study's authenticated attempts"
+    );
+    Ok(Some(receipt))
+}
+
+fn selected_report_campaign(
+    workspace: &WorkspaceTarget,
+    runs: &[String],
+) -> Result<Option<String>> {
     let mut campaigns = std::collections::BTreeSet::new();
     for run in runs {
         if let Some(campaign) = report_run_campaign(workspace, run)? {
@@ -58,21 +111,24 @@ pub fn load_investigation_report_for_runs(
         campaigns.len() == 1,
         "selected Scan references multiple studies"
     );
-    let receipt = load_investigation_report(workspace, campaigns.first().unwrap())?;
-    let expected = runs
-        .iter()
-        .cloned()
-        .collect::<std::collections::BTreeSet<_>>();
-    let actual = receipt
-        .occurrence
-        .all_attempt_run_ids()
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
-    anyhow::ensure!(
-        expected == actual,
-        "selected Scan runs do not match the study's authenticated attempts"
-    );
-    Ok(Some(receipt))
+    Ok(campaigns.into_iter().next())
+}
+
+pub fn load_investigation_report_document(
+    workspace: &WorkspaceTarget,
+    campaign: &str,
+) -> Result<InvestigationReportDocument> {
+    let plan =
+        crate::capabilities::campaign::read_campaign_plan_document(workspace.root(), campaign)?;
+    if plan["kind"] == crate::capabilities::campaign::CONTEXT_MATRIX_KIND {
+        return matrix::load_matrix_report(workspace, campaign)
+            .map(InvestigationReportDocument::ContextMatrix);
+    }
+    if plan["kind"] == crate::capabilities::campaign::SCOPE_STUDY_KIND {
+        return scopes::load_scope_report(workspace, campaign)
+            .map(InvestigationReportDocument::ScopeStudy);
+    }
+    load_investigation_report(workspace, campaign).map(InvestigationReportDocument::Study)
 }
 
 fn report_run_campaign(workspace: &WorkspaceTarget, run: &str) -> Result<Option<String>> {
@@ -107,16 +163,12 @@ pub fn load_investigation_report(
         derive_batch_occurrence_report_for_controller(workspace.root(), campaign, &store)?;
     let allowance = load_report_allowance(workspace, &plan)?;
     let parents = occurrence.all_attempt_run_ids();
-    let observation_run_refs = scan_finding_run_refs(workspace.root(), &parents)?;
-    let observation_count = store.count_finding_observations_for_scan_ids(&observation_run_refs)?;
-    let findings = store.list_distinct_findings_for_scan_ids(&observation_run_refs)?;
-    let (reviewed_count, confirmed_count) =
-        super::export_workspace_findings::investigation_review_counts(&store, &findings)?;
-    let attempts = parents
-        .iter()
-        .map(|run| attempt_receipt(workspace.root(), run))
-        .collect::<Result<Vec<_>>>()?;
+    let evidence = collect_evidence(workspace, &store, &parents)?;
     Ok(InvestigationReportReceipt {
+        investigation_brief: crate::capabilities::campaign::load_plan_brief(
+            workspace.root(),
+            campaign,
+        )?,
         schema_version: 1,
         campaign_id: campaign.into(),
         plan_sha256: plan.plan_sha256,
@@ -124,12 +176,12 @@ pub fn load_investigation_report(
         equivalence: plan.equivalence,
         scope: scope::report_scope(workspace, &plan.scan_input)?,
         occurrence,
-        observation_run_refs,
-        observation_count,
-        finding_count: findings.len(),
-        reviewed_count,
-        confirmed_count,
-        attempts,
+        observation_run_refs: evidence.observation_run_refs,
+        observation_count: evidence.observation_count,
+        finding_count: evidence.finding_count,
+        reviewed_count: evidence.reviewed_count,
+        confirmed_count: evidence.confirmed_count,
+        attempts: evidence.attempts,
         allowance,
         limitations: report_limitations(),
     })

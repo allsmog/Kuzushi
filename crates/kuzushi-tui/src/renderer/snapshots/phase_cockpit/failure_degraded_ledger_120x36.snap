@@ -4,7 +4,7 @@ contract: failure-path decision cards render honest outcome copy and recovery ac
 scenario: degraded_ledger
 size: 120x36
 ---
-KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not built · model unconfigured · module all
+KUZUSHI · Viewing Map · target ./failure-target · ○ idle · repo index not built · model unconfigured · module all
  Map ● · Scan × · Review × · Report
  ▸ NEXT phase result ledger is degraded; repair it before selecting this result
  z open map viz · next → Map · jobs inspect Map runs

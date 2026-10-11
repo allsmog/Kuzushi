@@ -99,6 +99,15 @@ fn review_campaign(
         input["campaignPlanSha256"].as_str() == Some(&digest),
         "campaign plan changed; review its current digest"
     );
+    if let Some(current) =
+        context_matrix::review_for_approval(root, id, &plan, input, ctx, registry)?
+    {
+        return Ok((plan, digest, current));
+    }
+    if let Some(current) = scope_study::review_for_approval(root, id, &plan, input, ctx, registry)?
+    {
+        return Ok((plan, digest, current));
+    }
     let checked = validate_scan_batch_execution_plan(id, &plan)?;
     validate_discovery_input(&checked.base_input)?;
     anyhow::ensure!(
@@ -110,13 +119,25 @@ fn review_campaign(
         current.sha256 == checked.equivalence_key,
         "campaign source, context, model or configuration changed; compile a new plan"
     );
+    validate_context_and_model(root, &plan, &checked.base_input, &current, input)?;
+    Ok((plan, digest, current))
+}
+
+fn validate_context_and_model(
+    root: &Path,
+    plan: &Value,
+    base_input: &Value,
+    current: &BatchEquivalenceKey,
+    approval: &Value,
+) -> Result<()> {
+    super::context_experiment::verify_baseline_for_approval(root, plan, base_input, current)?;
     if let Some(model) = &current.components.model {
         anyhow::ensure!(
-            input["model"].as_str() == Some(model),
+            approval["model"].as_str() == Some(model),
             "allowance model differs from the frozen campaign model"
         );
     }
-    Ok((plan, digest, current))
+    Ok(())
 }
 
 fn validate_investigation_binding(plan: &Value, input: &Value) -> Result<()> {
@@ -169,7 +190,7 @@ pub fn work_input_digest(input: &Value) -> Result<String> {
     digest_serializable(&input)
 }
 
-pub(super) fn read_bounded_plan(root: &Path, id: &str) -> Result<Value> {
+pub fn read_bounded_plan(root: &Path, id: &str) -> Result<Value> {
     validate_scan_batch_id(id)?;
     let path = campaign_plan_path(root, id);
     let mut bytes = Vec::new();
@@ -180,7 +201,9 @@ pub(super) fn read_bounded_plan(root: &Path, id: &str) -> Result<Value> {
         bytes.len() <= 4 * 1024 * 1024,
         "campaign plan exceeds the 4 MiB approval limit"
     );
-    serde_json::from_slice(&bytes).context("campaign plan is malformed")
+    let plan = serde_json::from_slice(&bytes).context("campaign plan is malformed")?;
+    super::brief::validate_plan(root, &plan)?;
+    Ok(plan)
 }
 
 pub(crate) fn require_study_reference(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {

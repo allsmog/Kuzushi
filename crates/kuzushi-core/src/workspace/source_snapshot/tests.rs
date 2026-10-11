@@ -106,3 +106,20 @@ fn result_source_snapshot_rejects_changed_source_and_preserves_payload() {
     assert_eq!(result["data"]["snapshotHash"].as_str().unwrap().len(), 64);
     assert_eq!(result["data"]["treeHash"].as_str().unwrap().len(), 64);
 }
+
+#[test]
+fn a_library_capture_without_an_observed_call_creates_no_start_receipt() {
+    let target = tempfile::tempdir().unwrap();
+    std::fs::write(target.path().join("hello.txt"), "owned source").unwrap();
+    let config = crate::V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    SourceSnapshot::capture(&ctx, "sast:scan", target.path()).unwrap();
+    assert!(!crate::run_artifacts::run_dir(target.path(), "absent").exists());
+}

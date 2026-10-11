@@ -107,3 +107,64 @@ fn human_priority_and_recency_are_shared_by_local_and_identity_records() {
         );
     }
 }
+
+fn with_event(mut record: ReviewDecisionRecord, event_seq: u64) -> ReviewDecisionRecord {
+    record.provenance = Some(crate::findings::ReviewDecisionProvenance {
+        event_seq,
+        event_hash: format!("event-{event_seq}"),
+        read_watermark: Some(event_seq - 1),
+    });
+    record
+}
+
+#[test]
+fn recorded_event_order_survives_a_reversed_display_clock() {
+    let selected = finding(2);
+    let mut older = with_event(record(1, 1, Some("fi_same"), TriageAuthor::Human), 10);
+    older.created_at = "2099-01-01T00:00:00Z".into();
+    let newer = with_event(record(2, 2, Some("fi_same"), TriageAuthor::Human), 11);
+    let records = [older, newer];
+    let index = EffectiveReviewStateIndex::from_findings_and_decisions(&[], &records);
+
+    assert_eq!(
+        index.effective_decision_for(&selected).unwrap().rationale(),
+        "decision 2"
+    );
+    assert_eq!(review_decision_history_for(&selected, &records)[0].id, 2);
+}
+
+#[test]
+fn event_order_is_authoritative_over_projection_ids() {
+    let selected = finding(2);
+    let records = [
+        with_event(record(99, 1, Some("fi_same"), TriageAuthor::Human), 10),
+        with_event(record(1, 2, Some("fi_same"), TriageAuthor::Human), 11),
+    ];
+    let index = EffectiveReviewStateIndex::from_findings_and_decisions(&[], &records);
+    assert_eq!(
+        index.effective_decision_for(&selected).unwrap().rationale(),
+        "decision 1"
+    );
+}
+
+#[test]
+fn embedded_triage_does_not_manufacture_a_newer_human_review() {
+    let mut selected = finding(2);
+    selected.created_at = "2099-01-01T00:00:00Z".into();
+    selected.triaged_by = Some(TriageAuthor::Human);
+    selected.triage = Some(crate::findings::TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 1.0,
+        rationale: "cached old verdict on a newer observation".into(),
+        ..Default::default()
+    });
+    let records = [with_event(
+        record(1, 1, Some("fi_same"), TriageAuthor::Human),
+        10,
+    )];
+    let index =
+        EffectiveReviewStateIndex::from_findings_and_decisions(&[selected.clone()], &records);
+    let decision = index.effective_decision_for(&selected).unwrap();
+    assert_eq!(decision.rationale(), "decision 1");
+    assert!(decision.carried_from_durable_identity());
+}

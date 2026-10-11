@@ -12,11 +12,86 @@ fn editor() -> ShellApp {
     app
 }
 
+#[test]
+fn report_navigation_retires_review_success_but_preserves_errors_and_other_results() {
+    for (source, severity, retained) in [
+        ("review", NoticeSeverity::Success, false),
+        ("review", NoticeSeverity::Error, true),
+        ("review", NoticeSeverity::Warn, true),
+        ("navigate", NoticeSeverity::Info, false),
+        ("background", NoticeSeverity::Success, true),
+    ] {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.advisory_mut().notice = Some(Notice {
+            source: source.into(),
+            message: "Recorded result".into(),
+            severity,
+            since: std::time::Instant::now(),
+        });
+        app.open_report_from_current_origin();
+        assert_eq!(app.advisory().notice.is_some(), retained);
+        assert_eq!(app.shell_view(), ShellView::Report);
+    }
+}
+
 fn press(app: &mut ShellApp, code: KeyCode, modifiers: KeyModifiers) {
     let update = app.reduce_key(KeyEvent::new(code, modifiers));
     assert!(update.handled && update.effects.is_empty());
     assert_eq!(app.input(), "retained composer");
     assert!(!app.has_running_work());
+}
+
+#[test]
+fn report_hydration_keys_follow_durable_review_watermark() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(root.path()).unwrap();
+    for explicit in [false, true] {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.open_report_from_current_origin();
+        if explicit {
+            app.router.report_mut().set_study(Some(ReportStudyRef {
+                campaign_id: "owned-study".into(),
+                plan_sha256: "a".repeat(64),
+            }));
+        }
+        app.set_findings_read_watermark(Some(1));
+        let old = app.report_hydration_key();
+        app.workbench_cache()
+            .borrow_mut()
+            .apply_view_hydration(ViewHydrationResult {
+                target: root.path().into(),
+                key: old.clone(),
+                value: ViewHydrationValue::InvestigationReport(Err(
+                    "obsolete review projection".into()
+                )),
+            });
+        app.set_findings_read_watermark(Some(2));
+        let current = app.report_hydration_key();
+        assert_ne!(
+            old, current,
+            "A saved decision must invalidate the cached report conditions"
+        );
+        assert!(!matches!(
+            app.workbench_cache()
+                .borrow()
+                .cached_selected_report(Some(root.path()), &current),
+            ViewDataState::Ready(_)
+        ));
+        // A late result for the old watermark cannot be shown as current.
+        app.workbench_cache()
+            .borrow_mut()
+            .apply_view_hydration(ViewHydrationResult {
+                target: root.path().into(),
+                key: old,
+                value: ViewHydrationValue::InvestigationReport(Ok(None)),
+            });
+        assert!(!matches!(
+            app.workbench_cache()
+                .borrow()
+                .cached_selected_report(Some(root.path()), &current),
+            ViewDataState::Ready(_)
+        ));
+    }
 }
 
 #[test]
@@ -71,6 +146,7 @@ fn damaged_scope_evidence_blocks_study_export_until_history_is_chosen() {
             target: app.target().unwrap().to_path_buf(),
             key: ViewHydrationKey::InvestigationReport {
                 run_refs: app.report_scan_run_refs(),
+                findings_watermark: app.findings_read_watermark(),
             },
             value: ViewHydrationValue::InvestigationReport(Err(error.into())),
         });

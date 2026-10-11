@@ -258,6 +258,8 @@ pub struct AgentToolPolicy {
     /// children; it never derives filesystem authority from `cwd`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_read_roots: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_scope: Option<AgentReadScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -28,7 +28,8 @@ pub(crate) fn router_module() -> BuiltinModule {
                 "router:show",
                 "Show effective per-role model routing.",
                 model_specs,
-            )],
+            )
+            .without_phase_result()],
         ),
         vec![],
     )

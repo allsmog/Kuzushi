@@ -31,7 +31,10 @@ pub(crate) fn acquire_exact_threat_model_read_lease(
     if let Some(reference) = expected {
         super::super::selection::load_exact_threat_model(root, reference)?;
     }
-    Ok(ThreatModelReadLease { model_ref: expected.cloned(), _lock: None })
+    Ok(ThreatModelReadLease {
+        model_ref: expected.cloned(),
+        _lock: None,
+    })
 }
 
 /// Whether a revision commit could take the store's exclusive lock right now.
@@ -39,5 +42,4 @@ pub(crate) fn acquire_exact_threat_model_read_lease(
 pub(crate) fn threat_model_store_accepts_commits(root: &Path) -> Result<bool> {
     let path = threat_model_store_path(root).join(STORE_LOCK);
     Ok(crate::file_lock::ExclusiveFileLock::try_acquire(&path)?.is_some())
-
 }

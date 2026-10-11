@@ -320,12 +320,12 @@ fn auth_row_hint(app: &ShellApp, provider: &str, row: &AuthMethodRow) -> String 
     oauth_model_switch_for_provider(provider)
         .map(|selection| {
             format!(
-                "connection ready; Enter switches {} to {}",
+                "credentials stored; Enter switches {} to {}",
                 auth_model_switch_scope(app),
                 crate::app::display_model_selector(&selection.model)
             )
         })
-        .unwrap_or_else(|| "stored connection ready; Enter reuses it".to_string())
+        .unwrap_or_else(|| "stored credentials; acceptance unverified".to_string())
 }
 
 fn oauth_ready_for_scene_provider(app: &ShellApp, provider: &str) -> bool {
@@ -370,7 +370,7 @@ fn stored_oauth_intro(provider: &str, recovery: bool) -> String {
     } else {
         "Choose it to reuse the connection"
     };
-    format!("A {provider} OAuth connection is already stored. {outcome}, or paste a key instead.")
+    format!("{provider} OAuth credentials are stored; provider acceptance is unverified. {outcome}, or paste a key instead.")
 }
 
 fn openai_oauth_auth_intro(app: &ShellApp, recovery: bool) -> String {
@@ -378,7 +378,7 @@ fn openai_oauth_auth_intro(app: &ShellApp, recovery: bool) -> String {
     let connection = if app.pending_oauth_reconnect_required() {
         "The previous OAuth connection was rejected; sign in again."
     } else if oauth_ready_for_scene_provider(app, "openai-codex") {
-        "A reusable OpenAI OAuth connection is ready."
+        openai_oauth_connection_detail(app)
     } else {
         "OpenAI browser sign-in is available."
     };
@@ -395,7 +395,7 @@ fn openai_auth_intro(app: &ShellApp, recovery: bool) -> String {
     let connection = if app.pending_api_key_replacement_required() {
         "The previous API key was rejected; paste a replacement or choose OAuth."
     } else if oauth_ready_for_scene_provider(app, "openai") {
-        "A reusable OpenAI OAuth connection is ready."
+        openai_oauth_connection_detail(app)
     } else {
         "OpenAI browser sign-in is available."
     };
@@ -436,12 +436,24 @@ fn compact_openai_oauth_intro(app: &ShellApp, recovery: bool) -> String {
     let action = if app.pending_oauth_reconnect_required() {
         "OAuth reconnect required"
     } else {
-        "OAuth required"
+        crate::ui_view_models::oauth_model_status(crate::app::oauth_provider_status(
+            app.config(),
+            "openai-codex",
+        ))
     };
     let detail = format!("{model} · {action}");
     recovery
         .then(|| format!("Scan preserved · {detail}"))
         .unwrap_or(detail)
+}
+
+fn openai_oauth_connection_detail(app: &ShellApp) -> &'static str {
+    if crate::app::oauth_provider_status(app.config(), "openai-codex")
+        == crate::app::OauthCredentialStatus::Refreshable
+    {
+        return "Stored access token expired. Refresh is required; success is unverified.";
+    }
+    "OpenAI OAuth credentials are stored; provider acceptance is unverified."
 }
 
 fn compact_other_auth_intro(app: &ShellApp, provider: &str, recovery: bool) -> String {
@@ -586,7 +598,8 @@ mod tests {
 
         let intro = auth_intro_text(&app, "anthropic", false);
         assert!(!intro.contains("needs credentials"), "{intro}");
-        assert!(intro.contains("already stored"), "{intro}");
+        assert!(intro.contains("credentials are stored"), "{intro}");
+        assert!(intro.contains("acceptance is unverified"), "{intro}");
         let compact = compact_auth_intro_text(&app, "anthropic", false);
         assert!(compact.contains("OAuth stored"), "{compact}");
     }

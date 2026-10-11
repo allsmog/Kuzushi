@@ -9,9 +9,7 @@ pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     lines.push(blank());
     lines.push(divider(model.title, area.width));
 
-    for row in &model.detail_rows {
-        lines.push(detail(&row.cells[0], &row.cells[1]));
-    }
+    append_receipt_rows(&mut lines, &model, area.width as usize);
     if let Some(surface) = &model.attack_surface {
         lines.push(attack_surface_risk_line(surface, area.width));
     }
@@ -30,24 +28,94 @@ fn append_report(
     area: Rect,
     recommend_cursor: usize,
 ) -> Vec<Line<'static>> {
+    lines.push(muted("r refresh deterministic · Navigate mode"));
     if let Some(summary) = &model.summary {
         lines.push(muted(&fit(&summary, area.width as usize)));
         lines.push(blank());
     }
     append_components(&mut lines, model, area, recommend_cursor);
-    if !model.rows.is_empty() {
-        let widths = recommendation_widths(area.width as usize);
-        lines.push(aligned_header(&model.report_headers, &widths));
-        let take = (area.height.saturating_sub(10) as usize).max(4);
-        for recommendation in model.rows.iter().take(take) {
-            lines.extend(recommendation_lines(recommendation, &widths));
-        }
-    }
+    append_recommendation_rows(&mut lines, model, area.width as usize);
     lines.push(blank());
     lines.push(command_list_line(
         &model.report_commands,
         area.width as usize,
     ));
+    lines
+}
+
+fn append_receipt_rows(lines: &mut Vec<Line<'static>>, model: &RecommendationModel, width: usize) {
+    let mut rows = model.detail_rows.iter().collect::<Vec<_>>();
+    rows.sort_by_key(|row| receipt_order(&row.cells[0]));
+    for row in rows {
+        let field = format!("{}: {}", row.cells[0], row.cells[1]);
+        lines.extend(
+            wrap_text(&field, width.max(1))
+                .into_iter()
+                .map(|line| muted(&line)),
+        );
+    }
+}
+
+fn receipt_order(label: &str) -> usize {
+    [
+        "ranking",
+        "inventory",
+        "coverage",
+        "history",
+        "recommendations",
+        "run",
+    ]
+    .iter()
+    .position(|candidate| *candidate == label)
+    .unwrap_or(6)
+}
+
+fn append_recommendation_rows(
+    lines: &mut Vec<Line<'static>>,
+    model: &RecommendationModel,
+    width: usize,
+) {
+    if model.rows.is_empty() {
+        return;
+    }
+    if width < 96 {
+        append_recommendation_cards(lines, model, width);
+        return;
+    }
+    let widths = recommendation_widths(width);
+    lines.push(aligned_header(&model.report_headers, &widths));
+    for recommendation in &model.rows {
+        lines.extend(recommendation_lines(recommendation, &widths));
+    }
+}
+
+fn append_recommendation_cards(
+    lines: &mut Vec<Line<'static>>,
+    model: &RecommendationModel,
+    width: usize,
+) {
+    for recommendation in &model.rows {
+        lines.extend(recommendation_card(recommendation, width));
+    }
+}
+
+fn recommendation_card(recommendation: &RecommendationRow, width: usize) -> Vec<Line<'static>> {
+    let [priority, tool, runtime, signal, reason] = &recommendation.cells;
+    let fields = [
+        format!("{priority} · {tool}"),
+        format!("Runtime required: {runtime}"),
+        format!("Signal: {signal}"),
+        format!("Reason: {reason}"),
+    ];
+    let mut lines = Vec::new();
+    for field in fields {
+        lines.extend(
+            wrap_text(&field, width.max(1))
+                .into_iter()
+                .map(|line| row(&[line])),
+        );
+    }
+    lines.push(blank());
     lines
 }
 
@@ -65,9 +133,8 @@ fn append_components(
         return;
     }
     lines.push(divider("COMPONENTS", area.width));
-    let take = (area.height as usize).saturating_sub(8).min(6).max(1);
     let selected = recommend_cursor.min(model.components.len().saturating_sub(1));
-    for (index, component) in model.components.iter().take(take).enumerate() {
+    for (index, component) in model.components.iter().enumerate() {
         lines.extend(component_lines(component, area.width, index == selected));
     }
     lines.push(blank());
@@ -129,6 +196,61 @@ mod tests {
 
             assert_eq!(table_width(&widths), width);
             assert!(lines.iter().all(|line| line_width(line) <= width));
+        }
+    }
+
+    #[test]
+    fn narrow_recommendation_cards_preserve_identity_signal_and_rationale() {
+        let row = RecommendationRow {
+            cells: [
+                "high".into(),
+                "a-long-module-name:metadata-action".into(),
+                "no".into(),
+                "A signal that must remain readable at narrow widths.".into(),
+                "Complete rationale including the final supporting fact.".into(),
+            ],
+        };
+        for width in [40, 60, 80] {
+            let lines = recommendation_card(&row, width);
+            assert!(lines.iter().all(|line| line_width(line) <= width));
+            let text = lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(text.contains(&row.cells[1]));
+            assert!(text.contains(&row.cells[3]));
+            assert!(text.contains(&row.cells[4]));
+        }
+    }
+
+    #[test]
+    fn recommendation_receipts_wrap_full_coverage_and_source_identity() {
+        let mut model =
+            recommendation_model(&ShellApp::new(kuzushi_core::V2Config::default(), None));
+        let mut inventory = model.detail_rows[0].clone();
+        inventory.cells = [
+            "inventory".into(),
+            "partial; 12 entries; 1 clipped files; 123 omitted paths".into(),
+        ];
+        let mut identity = inventory.clone();
+        identity.cells = [
+            "run".into(),
+            "recommendation-history-source-identity".into(),
+        ];
+        model.detail_rows = vec![inventory, identity];
+        for width in [40, 60, 80] {
+            let mut lines = Vec::new();
+            append_receipt_rows(&mut lines, &model, width);
+            assert!(lines.iter().all(|line| line_width(line) <= width));
+            let text = lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(text.contains("123 omitted paths"));
+            assert!(text.contains("recommendation-history-source-identity"));
         }
     }
 }
