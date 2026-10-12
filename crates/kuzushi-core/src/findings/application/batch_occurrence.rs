@@ -111,7 +111,7 @@ impl BatchOccurrenceReport {
     ) -> Result<std::collections::BTreeSet<String>> {
         let runs = crate::run_artifacts::scan_finding_run_refs(root, &self.all_attempt_run_ids())?;
         Ok(store
-            .list_distinct_findings_for_scan_ids(&runs)?
+            .list_distinct_findings_for_scan_ids_with_identity_policy(&runs, self.identity_fold)?
             .into_iter()
             .map(|finding| finding.fingerprint)
             .collect())

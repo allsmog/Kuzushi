@@ -45,6 +45,24 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A scan's own finding count folds the way the ledger beside it does.
+  `sast:scan` declares `identityFold` and the shared dispatch boundary binds
+  the operator's resolved value on every dispatch, but no executor read it:
+  `list_distinct_findings_for_scan_ids` hardcoded the `safe` fold for every
+  run-scoped reader. The approval gate holds the effective policy at `legacy`
+  until an operator approves the identity audit, and Review, the rail, and the
+  footer all project the corpus through that effective policy — so two secrets
+  inside one dedup bucket (distinct source-locator identities, one shared dedup
+  key) counted as two findings in the scan receipt, `data.findingsCount`, and
+  `coreFindings`, and as one in the Review ledger printed in the same frame.
+  The query now requires the policy its caller resolved: `sast:scan` folds by
+  its bound `identityFold`, a study export, `report:sarif` over a study, and the
+  investigation report resolve the target's effective policy, and a
+  repeated-trial occurrence report keeps the policy it already carries.
+  Reported on #172, measured at 31 against 29 on a real target on 2026-10-06
+  and again on 2026-10-10. The workspace-wide export still reads
+  `list_all_findings`, whose own fold is not the operator's either; that
+  remains open and is not addressed here.
 - Map's embedded gallery owns the keys it advertises. The renderer draws the
   Summary/DFD/Entry/Components gallery as Map's page body for every
   composition that gives `MapDfd` the canvas role — a ready Map and an

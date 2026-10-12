@@ -359,7 +359,10 @@ fn prepare_scan_findings_export(
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = store.list_distinct_findings_for_scan_ids(run_ids)?;
+    let all_findings = store.list_distinct_findings_for_scan_ids_with_identity_policy(
+        run_ids,
+        crate::findings::target_identity_fold_policy(workspace.root())?,
+    )?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);

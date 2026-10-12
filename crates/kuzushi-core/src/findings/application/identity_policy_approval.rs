@@ -155,6 +155,28 @@ pub fn approve_finding_identity_audit(
     Ok(receipt)
 }
 
+/// The fold policy a target's operator-owned identity-policy defaults bind.
+///
+/// Every operator-facing ledger view projects the corpus through this policy,
+/// so a run-scoped reader that picks its own instead reports a different
+/// finding total for the same runs on the same screen.
+pub fn resolved_identity_fold_policy(
+    operator_state_dir: &Path,
+    target: &Path,
+) -> Result<crate::findings::IdentityFoldPolicy> {
+    let defaults = resolve_identity_policy_defaults(operator_state_dir, target, None, None)?;
+    crate::findings::IdentityFoldPolicy::parse(Some(&defaults.identity_fold))
+}
+
+/// Same policy for readers that hold only the target root and must resolve the
+/// operator state directory themselves.
+pub fn target_identity_fold_policy(
+    target: &Path,
+) -> Result<crate::findings::IdentityFoldPolicy> {
+    let paths = crate::ConfigPaths::from_target(Some(target))?;
+    resolved_identity_fold_policy(&paths.global_state_dir(), target)
+}
+
 pub fn resolve_identity_policy_defaults(
     operator_state_dir: &Path,
     target: &Path,

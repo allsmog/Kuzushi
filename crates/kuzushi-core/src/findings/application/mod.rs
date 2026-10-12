@@ -71,7 +71,8 @@ pub(crate) use identity_fold_projection::project_finding_generations;
 pub use identity_policy_approval::{
     approve_finding_identity_audit, build_finding_identity_audit_evidence,
     current_finding_identity_audit_evidence, identity_audit_approval_receipt_path,
-    resolve_identity_policy_defaults, FindingIdentityAuditApprovalReceipt,
+    resolve_identity_policy_defaults, resolved_identity_fold_policy,
+    target_identity_fold_policy, FindingIdentityAuditApprovalReceipt,
     FindingIdentityAuditApprovalRequest, FindingIdentityAuditDisposition,
     FindingIdentityAuditEvidence, FindingIdentityAuditGroupDisposition,
     IdentityPolicyApprovalStatus, IdentityPolicyDefaults, IDENTITY_AUDIT_APPROVAL_DIR,

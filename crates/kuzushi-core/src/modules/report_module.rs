@@ -110,9 +110,10 @@ pub(in crate::modules) fn run_report_sarif_tool(
         })
         .transpose()?;
     let findings = match &receipt {
-        Some(receipt) => {
-            store.list_distinct_findings_for_scan_ids(receipt.summary().observation_run_refs)?
-        }
+        Some(receipt) => store.list_distinct_findings_for_scan_ids_with_identity_policy(
+            receipt.summary().observation_run_refs,
+            crate::findings::target_identity_fold_policy(workspace.root())?,
+        )?,
         None => store.list_all_findings()?,
     };
     let records = store.list_review_decisions_for_findings(&findings)?;

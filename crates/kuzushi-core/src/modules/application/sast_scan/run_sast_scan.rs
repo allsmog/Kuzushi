@@ -767,7 +767,8 @@ fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastSc
     let reports = scan_reports_with_failure_receipt(&input, &artifacts, &baseline)?;
     write_native_scan_coverage(&artifacts, &reports)?;
     let run_ids = reports.run_ids(primary_run_id.clone());
-    let core_findings = findings_for_sast_runs(input.store, &run_ids)?;
+    let fold = sast_identity_fold(input.input)?;
+    let core_findings = findings_for_sast_runs(input.store, &run_ids, fold)?;
     artifacts.write_json(
         "findings.json",
         "discovery observations",

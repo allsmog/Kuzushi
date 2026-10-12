@@ -29,7 +29,8 @@ mod tests;
 pub use application::{
     approve_finding_identity_audit, build_finding_identity_audit_evidence,
     current_finding_identity_audit_evidence, identity_audit_approval_receipt_path,
-    resolve_identity_policy_defaults,
+    resolve_identity_policy_defaults, resolved_identity_fold_policy,
+    target_identity_fold_policy,
 };
 pub use application::{
     audit_finding_identities, compare_scan_runs, decision_is_review_actionable,
