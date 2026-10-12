@@ -55,14 +55,18 @@ Notable changes to Kuzushi. Release procedure lives in
   inside one dedup bucket (distinct source-locator identities, one shared dedup
   key) counted as two findings in the scan receipt, `data.findingsCount`, and
   `coreFindings`, and as one in the Review ledger printed in the same frame.
-  The query now requires the policy its caller resolved: `sast:scan` folds by
-  its bound `identityFold`, a study export, `report:sarif` over a study, and the
-  investigation report resolve the target's effective policy, and a
-  repeated-trial occurrence report keeps the policy it already carries.
-  Reported on #172, measured at 31 against 29 on a real target on 2026-10-06
-  and again on 2026-10-10. The workspace-wide export still reads
-  `list_all_findings`, whose own fold is not the operator's either; that
-  remains open and is not addressed here.
+  The query now requires the policy its caller resolved, so no reader picks one
+  silently: `sast:scan` folds by its bound `identityFold`, and a repeated-trial
+  occurrence report by the policy it already carries. A study export,
+  `report:sarif` over a study, and the investigation report hold no resolved
+  policy, so they pass the named `IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE` and
+  keep their existing fold; resolving one from the identity-audit approval gate
+  alone would ignore the explicit operator override that the scan and the
+  ledger both honour. Reported on #172, measured at 31 against 29 on a real
+  target on 2026-10-06 and again on 2026-10-10. Two readings are still not the
+  operator's and remain open: the workspace-wide export reads
+  `list_all_findings`, and the three readers above await the stored
+  `identityFold` option reaching them.
 - Map's embedded gallery owns the keys it advertises. The renderer draws the
   Summary/DFD/Entry/Components gallery as Map's page body for every
   composition that gives `MapDfd` the canvas role — a ready Map and an

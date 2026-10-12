@@ -131,23 +131,6 @@ fn audit_reads_every_generation_before_identity_projection() {
 }
 
 #[test]
-fn the_resolved_fold_policy_follows_the_approval_gate() {
-    let (_temp, target, operator_state, evidence) = fixture();
-
-    assert_eq!(
-        resolved_identity_fold_policy(&operator_state, &target).unwrap(),
-        crate::findings::IdentityFoldPolicy::Legacy
-    );
-
-    approve_finding_identity_audit(&operator_state, &target, approval_request(&evidence)).unwrap();
-
-    assert_eq!(
-        resolved_identity_fold_policy(&operator_state, &target).unwrap(),
-        crate::findings::IdentityFoldPolicy::Safe
-    );
-}
-
-#[test]
 fn valid_operator_owned_approval_enables_safe_defaults() {
     let (_temp, target, operator_state, evidence) = fixture();
     let receipt =

@@ -10,7 +10,7 @@ pub(super) fn collect_evidence(
     let observation_count = store.count_finding_observations_for_scan_ids(&observation_run_refs)?;
     let findings = store.list_distinct_findings_for_scan_ids_with_identity_policy(
         &observation_run_refs,
-        crate::findings::target_identity_fold_policy(workspace.root())?,
+        crate::findings::IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE,
     )?;
     let review = super::super::export_workspace_findings::review_completion_for_findings(
         workspace, store, &findings,

@@ -112,7 +112,7 @@ pub(in crate::modules) fn run_report_sarif_tool(
     let findings = match &receipt {
         Some(receipt) => store.list_distinct_findings_for_scan_ids_with_identity_policy(
             receipt.summary().observation_run_refs,
-            crate::findings::target_identity_fold_policy(workspace.root())?,
+            crate::findings::IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE,
         )?,
         None => store.list_all_findings()?,
     };

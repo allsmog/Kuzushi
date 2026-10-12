@@ -361,7 +361,7 @@ fn prepare_scan_findings_export(
     let store = FindingStore::open(workspace.findings_db_path())?;
     let all_findings = store.list_distinct_findings_for_scan_ids_with_identity_policy(
         run_ids,
-        crate::findings::target_identity_fold_policy(workspace.root())?,
+        crate::findings::IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE,
     )?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();

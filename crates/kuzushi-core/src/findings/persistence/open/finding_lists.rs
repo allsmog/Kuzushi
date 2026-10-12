@@ -18,6 +18,10 @@ impl FindingStore {
     /// views an operator reads beside a scan receipt project the corpus
     /// through the effective policy, so a run-scoped reader that chooses its
     /// own reports a different total for the same runs on the same screen.
+    ///
+    /// Every caller must name a policy. A reader with no resolved policy in
+    /// hand passes [`IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE`], which says
+    /// so, rather than letting this method pick one on its behalf.
     pub fn list_distinct_findings_for_scan_ids_with_identity_policy<S: AsRef<str>>(
         &self,
         run_ids: &[S],

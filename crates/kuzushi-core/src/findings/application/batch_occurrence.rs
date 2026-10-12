@@ -34,6 +34,18 @@ pub enum IdentityFoldPolicy {
 }
 
 impl IdentityFoldPolicy {
+    /// The fold a run-scoped reader uses while it holds no operator-resolved
+    /// policy of its own.
+    ///
+    /// `sast:scan` folds by the `identityFold` the dispatch boundary bound for
+    /// it, and an occurrence report by the policy it already carries. A study
+    /// export, `report:sarif` over a study, and the investigation report have
+    /// no such value in hand, and resolving one from the identity-audit
+    /// approval gate alone would ignore the explicit operator override that
+    /// the scan and the Review ledger both honour. They keep this reading
+    /// until the stored option reaches them.
+    pub const UNRESOLVED_RUN_SCOPE: Self = Self::Safe;
+
     pub fn parse(value: Option<&str>) -> Result<Self> {
         match value.unwrap_or("legacy").trim() {
             "legacy" => Ok(Self::Legacy),
