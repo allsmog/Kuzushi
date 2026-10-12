@@ -144,7 +144,7 @@ pub fn load_scope_study_receipt(root: &Path, id: &str) -> Result<ScopeStudyRecei
         job_count: scan_cases::required_usize(&plan, "jobCount")?,
         scope_study,
         supporting_context,
-        resource_evidence: resource_evidence,
+        resource_evidence,
     })
 }
 
