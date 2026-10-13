@@ -88,10 +88,14 @@ fn guidance_lines(generation: &crate::app::StudyContextGeneration, width: usize)
         .collect()
 }
 
+/// Shared TTY/plain disclosure when the guidance editor state is absent.
+pub(crate) const MISSING_GUIDANCE_EDITOR_NOTICE: &str =
+    "Guidance editor unavailable. Esc returns to the plan.";
+
 fn guidance_editor_lines(generation: &crate::app::StudyContextGeneration) -> Vec<String> {
     match generation.guidance_editor.as_ref() {
         Some(editor) => editor.text().lines().map(str::to_owned).collect(),
-        None => vec!["Guidance editor unavailable. Esc returns to the plan.".into()],
+        None => vec![MISSING_GUIDANCE_EDITOR_NOTICE.into()],
     }
 }
 

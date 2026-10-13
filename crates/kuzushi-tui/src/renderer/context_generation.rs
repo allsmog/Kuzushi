@@ -193,6 +193,7 @@ fn render_regeneration_guidance(
     area: Rect,
 ) {
     let Some(editor) = generation.guidance_editor.as_ref() else {
+        render_missing_guidance_editor(frame, area);
         return;
     };
     let block = Block::default()
@@ -219,6 +220,15 @@ fn render_regeneration_guidance(
             height: 2,
             ..inner
         },
+    );
+}
+
+/// Mirrors the plain path's disclosure rather than painting an empty pane.
+fn render_missing_guidance_editor(frame: &mut Frame<'_>, area: Rect) {
+    let notice = crate::ui_view_models::context_generation::MISSING_GUIDANCE_EDITOR_NOTICE;
+    frame.render_widget(
+        Paragraph::new(fit(notice, area.width as usize)).style(theme::muted()),
+        Rect { height: 1, ..area },
     );
 }
 

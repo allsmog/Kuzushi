@@ -15303,6 +15303,44 @@ fn wide_fix_tab_cycles_only_meaningful_rendered_surfaces() {
 }
 
 #[test]
+fn advertised_last_row_key_still_jumps_on_pages_where_it_is_not_shadowed() {
+    // Review's ledger owns `G`; elsewhere the advertised `G` must still
+    // dispatch `workbench_jump(false)` on the focused scrollable surface.
+    let (_target, mut app) = app_with_findings_and_full_phase_access(25);
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Fix));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::FixRemediation);
+    let last = app
+        .view_keybindings()
+        .into_iter()
+        .find(|binding| binding.action == ViewHotkeyAction::WorkbenchScrollLast)
+        .expect("Fix advertises a last-row binding");
+    assert_eq!(last.hint, "g/G");
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::FixRemediation),
+        0
+    );
+
+    press_key(&mut app, key_event_for_trigger(last.trigger));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::FixRemediation),
+        u16::MAX
+    );
+}
+
+#[test]
 fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
     let mut app = app_with_findings(25);
     let advertised = app.view_keybindings();
@@ -15395,17 +15433,6 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 app.router.findings_mut().set_cursor(7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 0);
-            }
-            ViewHotkeyAction::WorkbenchScrollLast => {
-                app.router
-                    .workbench_mut()
-                    .set_page(Some(WorkbenchPage::Review));
-                app.router
-                    .workbench_mut()
-                    .set_focus(PhaseSurfaceId::ReviewQueue);
-                app.router.findings_mut().set_cursor(7);
-                press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.router.findings().cursor(), 24);
             }
             ViewHotkeyAction::WorkbenchOpenFocusedVisualization => {
                 use crate::scene3d::VizPage;
