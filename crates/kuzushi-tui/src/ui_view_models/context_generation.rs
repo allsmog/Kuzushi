@@ -77,15 +77,7 @@ fn guidance_lines(generation: &crate::app::StudyContextGeneration, width: usize)
         "REGENERATION GUIDANCE".into()
     }];
     lines.extend(generation.guidance_notice.iter().cloned());
-    lines.extend(
-        generation
-            .guidance_editor
-            .as_ref()
-            .unwrap()
-            .text()
-            .lines()
-            .map(str::to_owned),
-    );
+    lines.extend(guidance_editor_lines(generation));
     lines.extend([
         "Enter newline · Ctrl+S use guidance".into(),
         "Esc back · draft kept · max 2048 B".into(),
@@ -96,6 +88,13 @@ fn guidance_lines(generation: &crate::app::StudyContextGeneration, width: usize)
         .collect()
 }
 
+fn guidance_editor_lines(generation: &crate::app::StudyContextGeneration) -> Vec<String> {
+    match generation.guidance_editor.as_ref() {
+        Some(editor) => editor.text().lines().map(str::to_owned).collect(),
+        None => vec!["Guidance editor unavailable. Esc returns to the plan.".into()],
+    }
+}
+
 fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
     let Some(generation) = config.context_generation.as_ref() else {
         return Vec::new();
@@ -104,27 +103,30 @@ fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         return scope_generation_summary(config, width);
     }
     if generation.is_regeneration() {
-        return regeneration_summary(config, width);
+        return regeneration_summary(config, generation, width);
     }
     if generation.is_lesson() {
-        return lesson_generation_summary(config, width);
+        return lesson_generation_summary(config, generation, width);
     }
-    remaining_generation_summary(config, width)
+    remaining_generation_summary(config, generation, width)
 }
 
-fn remaining_generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    if config
-        .context_generation
-        .as_ref()
-        .is_some_and(|generation| generation.is_scope_context())
-    {
-        return file_group_summary(config, width);
+fn remaining_generation_summary(
+    config: &crate::app::BatchScanConfig,
+    generation: &crate::app::StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
+    if generation.is_scope_context() {
+        return file_group_summary(config, generation, width);
     }
     context_generation_summary(config, width)
 }
 
-fn file_group_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn file_group_summary(
+    config: &crate::app::BatchScanConfig,
+    generation: &crate::app::StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
     let mut lines=vec![generation.action(config).into(),
         format!("Boundary: {}",generation.context_input.pointer("/scanScopeRef/scopeId").and_then(serde_json::Value::as_str).unwrap_or("unavailable")),
         "One file-group context job · one worker · one attempt".into(),
@@ -133,7 +135,7 @@ fn file_group_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         format!("Inherited context: {}",generation.context_input.pointer("/inheritedContextRef/revisionId").and_then(serde_json::Value::as_str).unwrap_or("explicitly omitted")),
         format!("Total calls: {}",limit(config.study.max_provider_calls)),format!("Protected review: {}",limit(config.study.protected_review_calls)),
         "Context generation and discovery share spending. A completed draft does not approve scans. Dollar estimate unavailable.".into()];
-    lines.extend(brief_guidance_lines(config));
+    lines.extend(brief_guidance_lines(config, generation));
     lines.extend(config.notice.iter().cloned());
     lines.extend(generation_plan_lines(config));
     lines.extend(allowance_status_lines(config));
@@ -143,8 +145,11 @@ fn file_group_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         .collect()
 }
 
-fn lesson_generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn lesson_generation_summary(
+    config: &crate::app::BatchScanConfig,
+    generation: &crate::app::StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
     let mut lines=vec![generation.action(config).into(),"One lesson job · one worker · one attempt".into(),
         format!("Origin: requested generation #{}. Preparation checks exact human confirmation.",generation.context_input["findingId"]),
         "One bounded synthesis request with tools disabled. Uses recorded observation and captured source only; source omissions remain visible. Output stays a draft for human review. No new findings, scans or Map completion.".into(),
@@ -166,8 +171,11 @@ fn lesson_generation_summary(config: &crate::app::BatchScanConfig, width: usize)
         .collect()
 }
 
-fn regeneration_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn regeneration_summary(
+    config: &crate::app::BatchScanConfig,
+    generation: &crate::app::StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
     let mut lines=vec![generation.action(config).into(),"One selected-text job · one worker · one attempt".into(),
         "One synthesis request, with tools disabled. Original and unselected text are preserved. Output is an inactive draft; compare it before selecting it for work.".into(),
         regeneration_selection_line(generation),
@@ -202,8 +210,10 @@ fn bound_brief_lines(generation: &crate::app::StudyContextGeneration, width: usi
         .into_iter().flat_map(|line| wrap_text(&line, width.max(1))).collect()
 }
 
-fn brief_guidance_lines(config: &crate::app::BatchScanConfig) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn brief_guidance_lines(
+    config: &crate::app::BatchScanConfig,
+    generation: &crate::app::StudyContextGeneration,
+) -> Vec<String> {
     if let Some(guidance) = generation
         .receipt
         .as_ref()
@@ -238,7 +248,7 @@ fn context_generation_summary(config: &crate::app::BatchScanConfig, width: usize
         return Vec::new();
     };
     let mut lines = context_result_lines(config);
-    lines.extend(brief_guidance_lines(config));
+    lines.extend(brief_guidance_lines(config, generation));
     lines.push(
         diagnosis::retention_label(generation.receipt.as_ref(), &generation.context_input).into(),
     );

@@ -192,7 +192,9 @@ fn render_regeneration_guidance(
     generation: &crate::app::StudyContextGeneration,
     area: Rect,
 ) {
-    let editor = generation.guidance_editor.as_ref().unwrap();
+    let Some(editor) = generation.guidance_editor.as_ref() else {
+        return;
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .title(guidance_title(generation));
@@ -203,14 +205,7 @@ fn render_regeneration_guidance(
         height: inner.height.saturating_sub(3),
         ..inner
     };
-    let notice = generation
-        .guidance_notice
-        .as_deref()
-        .unwrap_or("Guidance only · no model request");
-    frame.render_widget(
-        Paragraph::new(fit(notice, inner.width as usize)).style(theme::muted()),
-        Rect { height: 1, ..inner },
-    );
+    render_guidance_notice(frame, generation, Rect { height: 1, ..inner });
     let lines = crate::renderer::shared::field_editor_lines(
         editor,
         body.width as usize,
@@ -224,6 +219,21 @@ fn render_regeneration_guidance(
             height: 2,
             ..inner
         },
+    );
+}
+
+fn render_guidance_notice(
+    frame: &mut Frame<'_>,
+    generation: &crate::app::StudyContextGeneration,
+    area: Rect,
+) {
+    let notice = generation
+        .guidance_notice
+        .as_deref()
+        .unwrap_or("Guidance only · no model request");
+    frame.render_widget(
+        Paragraph::new(fit(notice, area.width as usize)).style(theme::muted()),
+        area,
     );
 }
 

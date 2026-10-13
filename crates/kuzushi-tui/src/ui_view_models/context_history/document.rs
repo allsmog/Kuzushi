@@ -153,10 +153,17 @@ fn append_comparison(lines: &mut Vec<String>, data: Option<&Value>) {
                 .push("No editable text differs. Other document sections may have changed.".into());
         }
     }
-    let mut structural = data.clone();
-    structural.as_object_mut().unwrap().remove("contextText");
     lines.extend([String::new(), "STRUCTURE AND COMPARISON COVERAGE".into()]);
-    lines.extend(pretty_lines(&structural));
+    lines.extend(pretty_lines(&structural_comparison(data)));
+}
+
+/// The comparison minus its editable-text changes, which render above.
+fn structural_comparison(data: &Value) -> Value {
+    let mut structural = data.clone();
+    if let Some(object) = structural.as_object_mut() {
+        object.remove("contextText");
+    }
+    structural
 }
 
 fn append_text_change(lines: &mut Vec<String>, change: &Value) {
