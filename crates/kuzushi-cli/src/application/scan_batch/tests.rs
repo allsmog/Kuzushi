@@ -127,31 +127,41 @@ fn assert_all_parked_gate(target: &std::path::Path) {
     assert_eq!(gate["status"], "incomplete");
     assert_eq!(gate["plannedTrials"], 3);
     assert_eq!(gate["completedTrials"], 0);
-    assert_eq!(gate["failedTrials"], 3);
-    assert_eq!(gate["pendingTrials"], 0);
+    // Parking without an attempt leaves the trial resumable, so it is pending
+    // rather than failed (docs/operator-control-surfaces.md).
+    assert_eq!(gate["failedTrials"], 0);
+    assert_eq!(gate["pendingTrials"], 3);
     assert_eq!(gate["sarifWritten"], true);
 }
 
 fn assert_all_parked_sarif(path: &std::path::Path) {
     let sarif: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    assert_eq!(
-        sarif.pointer("/properties/kuzushiBatch/trialsPlanned"),
-        Some(&serde_json::json!(3))
-    );
-    assert_eq!(
-        sarif.pointer("/properties/kuzushiBatch/trialsCompleted"),
-        Some(&serde_json::json!(0))
-    );
-    assert_eq!(
-        sarif.pointer("/properties/kuzushiBatch/trialsFailed"),
-        Some(&serde_json::json!(3))
-    );
-    assert_eq!(
-        sarif.pointer("/properties/kuzushiBatch/rawAttemptRunIds"),
-        Some(&serde_json::json!([]))
-    );
+    let batch = sarif
+        .pointer("/properties/kuzushiBatch")
+        .expect("batch SARIF must carry its kuzushiBatch properties");
+    assert_eq!(batch["trialsPlanned"], 3);
+    assert_eq!(batch["trialsCompleted"], 0);
+    assert_eq!(batch["trialsFailed"], 0);
+    assert_eq!(batch["trialsPending"], 3);
+    assert_sarif_accounts_for_every_planned_trial(batch);
+    assert_eq!(batch["rawAttemptRunIds"], serde_json::json!([]));
     assert_eq!(
         sarif.pointer("/runs/0/results"),
         Some(&serde_json::json!([]))
+    );
+}
+
+/// A trial the export does not publish is a trial its reader cannot see, so
+/// every planned trial must land in exactly one published bucket.
+fn assert_sarif_accounts_for_every_planned_trial(batch: &serde_json::Value) {
+    let count = |key: &str| {
+        batch[key]
+            .as_u64()
+            .unwrap_or_else(|| panic!("batch SARIF must publish {key}"))
+    };
+    assert_eq!(
+        count("trialsCompleted") + count("trialsFailed") + count("trialsPending"),
+        count("trialsPlanned"),
+        "batch SARIF must account for every planned trial"
     );
 }

@@ -45,6 +45,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The batch SARIF export accounts for every planned trial. `kuzushiBatch`
+  published `trialsPlanned`, `trialsCompleted` and `trialsFailed` but never
+  `trialsPending`, and unstarted parked trials stopped being counted as
+  failures when they became resumable. A batch whose trials were all parked
+  before their first attempt — equivalence drift, an exhausted allowance —
+  therefore exported `planned 3, completed 0, failed 0`, which reads to a
+  SARIF consumer as a batch where nothing went wrong, while the sibling
+  `gate.json` disclosed `pendingTrials: 3`. The export now publishes
+  `trialsPending` alongside the other counts, so the two artifacts agree and
+  every planned trial lands in a bucket its reader can see.
 - Map's embedded gallery owns the keys it advertises. The renderer draws the
   Summary/DFD/Entry/Components gallery as Map's page body for every
   composition that gives `MapDfd` the canvas role — a ready Map and an
