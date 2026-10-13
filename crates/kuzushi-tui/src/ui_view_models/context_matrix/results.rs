@@ -8,7 +8,12 @@ pub(super) fn recorded_matrix_lines(
     width: usize,
     rows: usize,
 ) -> Vec<String> {
-    let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
+    let Some(config) = app.router.campaign().batch_scan_config.as_ref() else {
+        return vec![fit(
+            "Study configuration unavailable. Reopen the study to read results.",
+            width,
+        )];
+    };
     if config.study.matrix.pass_selection.is_some() {
         return pass_lines(config, report, width, rows);
     }

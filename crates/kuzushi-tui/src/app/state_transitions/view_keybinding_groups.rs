@@ -234,8 +234,35 @@ pub(super) fn workbench_keybindings_for_plan(
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
 ) -> Vec<ViewKeybinding> {
     let mut bindings = review_ledger_filter_keybindings(app);
-    bindings.extend(workbench_layout_keybindings(app, plan));
+    let mut layout = workbench_layout_keybindings(app, plan);
+    yield_last_row_key_to_review_ledger(&bindings, &mut layout);
+    bindings.extend(layout);
     bindings
+}
+
+/// Review's ledger owns `G` (finding groups) and is searched first, so a
+/// `G` last-row jump would never dispatch. Stop advertising the shadowed
+/// binding and present the surviving `g` honestly as "first".
+fn yield_last_row_key_to_review_ledger(
+    ledger: &[ViewKeybinding],
+    layout: &mut Vec<ViewKeybinding>,
+) {
+    let claimed: Vec<HotkeyTrigger> = ledger.iter().map(|binding| binding.trigger).collect();
+    let shadows_last = |binding: &ViewKeybinding| {
+        binding.action == ViewHotkeyAction::WorkbenchScrollLast
+            && claimed.contains(&binding.trigger)
+    };
+    if !layout.iter().any(shadows_last) {
+        return;
+    }
+    layout.retain(|binding| !shadows_last(binding));
+    for binding in layout
+        .iter_mut()
+        .filter(|binding| binding.action == ViewHotkeyAction::WorkbenchScrollFirst)
+    {
+        binding.hint = "g".into();
+        binding.label = "first".into();
+    }
 }
 
 fn review_ledger_filter_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
