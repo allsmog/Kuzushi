@@ -6,7 +6,9 @@ use crate::capabilities::variant_ndiff::hunt_whitebox_static_variants;
 use crate::evidence::narrative::build_static_narrative_report;
 use crate::evidence::ranking::{rank_static_findings_with_threats_degraded, StaticRankedFinding};
 use crate::evidence::static_evidence::StaticEvidenceStore;
-use crate::findings::{Finding, FindingListFilter, FindingStore, TriageVerdict};
+use crate::findings::{
+    Finding, FindingListFilter, FindingStore, IdentityFoldPolicy, TriageVerdict,
+};
 use crate::proof::suppressions::{evaluate_whitebox_suppressions, load_whitebox_suppressions};
 use crate::workspace::diff_scope::build_whitebox_diff_scope_report;
 use crate::workspace::WorkspaceTarget;

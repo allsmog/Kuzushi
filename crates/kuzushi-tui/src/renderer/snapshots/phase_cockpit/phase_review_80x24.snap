@@ -8,7 +8,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37
  Map ✓ · Scan ✓ · Review ● · Report
  ▸ NEXT review 6 remaining findings (6 total)
  B review decision backlog · Enter finding details · findings reset list
-│▸ FINDINGS · 6               │SELECTED FINDING
+│▸ FINDINGS · 6               │F-0001 · SELECTED FINDING
 │6 of 6 · [completeness:all]  │F-0001 · needs_review · critical
 │[order: proof > severity]    │Evidence: verified L4 · sources:1
 │▸F-0001 C runtime verified   │claim · runtime-verified

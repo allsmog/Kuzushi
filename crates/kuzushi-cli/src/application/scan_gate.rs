@@ -194,6 +194,7 @@ fn batch_sarif_metadata(report: &BatchOccurrenceReport) -> serde_json::Value {
         "trialsPlanned": report.planned,
         "trialsCompleted": report.completed,
         "trialsFailed": report.failed,
+        "trialsPending": report.pending,
         "rawAttemptRunIds": report.all_attempt_run_ids(),
     })
 }

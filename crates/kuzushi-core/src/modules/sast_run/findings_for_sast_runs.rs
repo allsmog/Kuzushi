@@ -4,8 +4,16 @@ use std::path::Path;
 pub(in crate::modules) fn findings_for_sast_runs(
     store: &FindingStore,
     run_ids: &SastRunIds,
+    fold: IdentityFoldPolicy,
 ) -> Result<Vec<Finding>> {
-    store.list_distinct_findings_for_scan_ids(&run_ids.all())
+    store.list_distinct_findings_for_scan_ids_with_identity_policy(&run_ids.all(), fold)
+}
+
+/// The fold policy `bind_identity_policy_defaults` bound for this dispatch.
+/// `sast:scan` declares `identityFold`, so its own finding set must fold the
+/// way the operator's ledger views do rather than pick a policy of its own.
+pub(in crate::modules) fn sast_identity_fold(input: &Value) -> Result<IdentityFoldPolicy> {
+    IdentityFoldPolicy::parse(input.get("identityFold").and_then(Value::as_str))
 }
 
 /// Distinct findings next to the raw producer observations they fold, so a
@@ -66,7 +74,7 @@ pub(in crate::modules) fn write_static_ranking_json(
     artifacts: &SastRunArtifacts,
     input: &Value,
 ) -> Result<Value> {
-    let findings = findings_for_sast_runs(store, run_ids)?;
+    let findings = findings_for_sast_runs(store, run_ids, sast_identity_fold(input)?)?;
     let mut enrichments = load_static_ranking_enrichments(workspace, input)?;
     let (ranked, evidence_warnings) = rank_static_findings_with_threats_degraded(
         &findings,
@@ -178,6 +186,26 @@ mod tests {
     }
 
     #[test]
+    fn the_scan_fold_policy_comes_from_the_bound_identity_fold_input() {
+        assert_eq!(
+            sast_identity_fold(&json!({"identityFold": "safe"})).unwrap(),
+            IdentityFoldPolicy::Safe
+        );
+        assert_eq!(
+            sast_identity_fold(&json!({"identityFold": "aggressive"})).unwrap(),
+            IdentityFoldPolicy::Aggressive
+        );
+        // `bind_identity_policy_defaults` binds this key for every `sast:scan`
+        // dispatch. An input that reaches the executor without one still folds
+        // the way the approval gate withholds, never by a scan-local choice.
+        assert_eq!(
+            sast_identity_fold(&json!({})).unwrap(),
+            IdentityFoldPolicy::Legacy
+        );
+        assert!(sast_identity_fold(&json!({"identityFold": "none"})).is_err());
+    }
+
+    #[test]
     fn optional_enrichment_records_degraded_state_without_failing() {
         let mut warnings = Vec::new();
         let value = optional_enrichment::<usize>(
@@ -195,10 +223,11 @@ mod tests {
 pub(in crate::modules) fn write_static_narratives_json(
     store: &FindingStore,
     run_ids: &SastRunIds,
+    fold: IdentityFoldPolicy,
     artifacts: &SastRunArtifacts,
     static_ranking: Option<&Value>,
 ) -> Result<Value> {
-    let findings = findings_for_sast_runs(store, run_ids)?;
+    let findings = findings_for_sast_runs(store, run_ids, fold)?;
     let ranked = static_ranking
         .and_then(|ranking| ranking.get("ranked").cloned())
         .map(serde_json::from_value::<Vec<StaticRankedFinding>>)
