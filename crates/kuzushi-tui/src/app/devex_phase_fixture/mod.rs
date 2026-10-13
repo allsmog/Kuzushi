@@ -19,6 +19,7 @@ pub(crate) fn seed_pdf_phase_reference_fixture(
     target: &Path,
     lifecycle: PhaseFixtureLifecycle,
 ) -> Result<(), String> {
+    commit_reference_engagement(app);
     artifacts::seed_files(target)?;
     app.workbench_cache()
         .borrow_mut()
@@ -30,6 +31,15 @@ pub(crate) fn seed_pdf_phase_reference_fixture(
     security::seed(app);
     activity::seed(app, lifecycle);
     Ok(())
+}
+
+/// The reference engagement has already completed Map and Scan, which only a
+/// `Start Map` commit allows; mark the fresh target's Setup plan committed so
+/// journey and autonomy chrome project the engagement truthfully.
+fn commit_reference_engagement(app: &mut ShellApp) {
+    app.engagement
+        .planning_picker_mut()
+        .set_return_to_setup(false);
 }
 
 fn hydrate_reference_security_artifacts(app: &mut ShellApp, target: &Path) {
