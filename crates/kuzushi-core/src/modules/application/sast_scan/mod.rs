@@ -5,6 +5,7 @@ use self::input::{bool_input, parse_sast_severity_filter, parse_sast_tasks, stri
 use crate::capabilities::systems_hunt::SystemsHuntReport;
 use crate::carlini_threat_hunt::CarliniThreatHuntReport;
 use crate::findings::Finding;
+use crate::findings::IdentityFoldPolicy;
 use crate::findings::StaticProofState;
 use crate::proof::whitebox_policy::{apply_whitebox_static_sast_policy, WhiteboxStaticPolicy};
 use crate::scan::{

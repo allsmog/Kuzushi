@@ -45,6 +45,28 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A scan's own finding count folds the way the ledger beside it does.
+  `sast:scan` declares `identityFold` and the shared dispatch boundary binds
+  the operator's resolved value on every dispatch, but no executor read it:
+  `list_distinct_findings_for_scan_ids` hardcoded the `safe` fold for every
+  run-scoped reader. The approval gate holds the effective policy at `legacy`
+  until an operator approves the identity audit, and Review, the rail, and the
+  footer all project the corpus through that effective policy — so two secrets
+  inside one dedup bucket (distinct source-locator identities, one shared dedup
+  key) counted as two findings in the scan receipt, `data.findingsCount`, and
+  `coreFindings`, and as one in the Review ledger printed in the same frame.
+  The query now requires the policy its caller resolved, so no reader picks one
+  silently: `sast:scan` folds by its bound `identityFold`, and a repeated-trial
+  occurrence report by the policy it already carries. A study export,
+  `report:sarif` over a study, and the investigation report hold no resolved
+  policy, so they pass the named `IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE` and
+  keep their existing fold; resolving one from the identity-audit approval gate
+  alone would ignore the explicit operator override that the scan and the
+  ledger both honour. Reported on #172, measured at 31 against 29 on a real
+  target on 2026-10-06 and again on 2026-10-10. Two readings are still not the
+  operator's and remain open: the workspace-wide export reads
+  `list_all_findings`, and the three readers above await the stored
+  `identityFold` option reaching them.
 - The batch SARIF export accounts for every planned trial. `kuzushiBatch`
   published `trialsPlanned`, `trialsCompleted` and `trialsFailed` but never
   `trialsPending`, and unstarted parked trials stopped being counted as
