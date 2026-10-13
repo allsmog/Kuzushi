@@ -25,7 +25,7 @@ pub fn load_context_matrix_receipt(root: &Path, id: &str) -> Result<ContextMatri
             &matrix.baseline()?.base_input,
         )?,
         matrix,
-        resource_evidence: resource_evidence,
+        resource_evidence,
     })
 }
 

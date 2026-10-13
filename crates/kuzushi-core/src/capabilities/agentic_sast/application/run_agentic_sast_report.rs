@@ -431,7 +431,7 @@ impl AgenticSastRun {
 }
 
 pub(crate) fn emit_inventory_preparation(ctx: &ToolExecutionContext<'_>, entries: usize) {
-    if entries % 1000 != 0 {
+    if !entries.is_multiple_of(1000) {
         return;
     }
     if let Some(trace) = ctx.trace {

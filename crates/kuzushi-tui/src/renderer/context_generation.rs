@@ -192,7 +192,10 @@ fn render_regeneration_guidance(
     generation: &crate::app::StudyContextGeneration,
     area: Rect,
 ) {
-    let editor = generation.guidance_editor.as_ref().unwrap();
+    let Some(editor) = generation.guidance_editor.as_ref() else {
+        render_missing_guidance_editor(frame, area);
+        return;
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .title(guidance_title(generation));
@@ -203,14 +206,7 @@ fn render_regeneration_guidance(
         height: inner.height.saturating_sub(3),
         ..inner
     };
-    let notice = generation
-        .guidance_notice
-        .as_deref()
-        .unwrap_or("Guidance only · no model request");
-    frame.render_widget(
-        Paragraph::new(fit(notice, inner.width as usize)).style(theme::muted()),
-        Rect { height: 1, ..inner },
-    );
+    render_guidance_notice(frame, generation, Rect { height: 1, ..inner });
     let lines = crate::renderer::shared::field_editor_lines(
         editor,
         body.width as usize,
@@ -224,6 +220,30 @@ fn render_regeneration_guidance(
             height: 2,
             ..inner
         },
+    );
+}
+
+/// Mirrors the plain path's disclosure rather than painting an empty pane.
+fn render_missing_guidance_editor(frame: &mut Frame<'_>, area: Rect) {
+    let notice = crate::ui_view_models::context_generation::MISSING_GUIDANCE_EDITOR_NOTICE;
+    frame.render_widget(
+        Paragraph::new(fit(notice, area.width as usize)).style(theme::muted()),
+        Rect { height: 1, ..area },
+    );
+}
+
+fn render_guidance_notice(
+    frame: &mut Frame<'_>,
+    generation: &crate::app::StudyContextGeneration,
+    area: Rect,
+) {
+    let notice = generation
+        .guidance_notice
+        .as_deref()
+        .unwrap_or("Guidance only · no model request");
+    frame.render_widget(
+        Paragraph::new(fit(notice, area.width as usize)).style(theme::muted()),
+        area,
     );
 }
 
