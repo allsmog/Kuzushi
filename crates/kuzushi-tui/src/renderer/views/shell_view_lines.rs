@@ -74,10 +74,14 @@ fn primary_shell_view_lines(
 }
 
 fn scene_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let scroll = default_scroll_offset(app);
+    if let Some(lines) = scene_line_page_viewport_lines(app, area, scroll) {
+        return lines;
+    }
     pinned_document_viewport_lines(
         scene_page_lines(app, area, app.router.scene().page()),
         area.height,
-        default_scroll_offset(app),
+        scroll,
         3,
     )
 }

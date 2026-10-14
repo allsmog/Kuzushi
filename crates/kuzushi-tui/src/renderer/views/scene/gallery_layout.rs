@@ -1,4 +1,5 @@
 //! Shared geometry for gallery rendering and keyboard paging.
+use super::line_page::PageDirection;
 use crate::{ShellApp, ShellView};
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 
@@ -64,54 +65,33 @@ pub(crate) fn summary_page_rows(app: &ShellApp) -> Option<usize> {
     ))
 }
 
-pub(crate) fn scene_page_rows(app: &ShellApp) -> Option<usize> {
-    if app.shell_view() != ShellView::Scene || app.router.scene().page().is_frame_rendered() {
+/// The rows PgUp/PgDn move a full-frame line page by: the step to the
+/// adjacent window of whole rows on the canvas the viewport draws, so paging
+/// neither skips nor repeats a row however the rows wrap.
+pub(crate) fn scene_page_rows(app: &ShellApp, direction: PageDirection) -> Option<usize> {
+    if app.shell_view() != ShellView::Scene {
         return None;
     }
     let viewport = app.viewport();
     let full = Rect::new(0, 0, viewport.columns, viewport.rows);
     let area = crate::renderer::workbench_primary_area(app, full);
-    // Three pinned header rows and one position row precede the document body.
-    Some(usize::from(area.height.saturating_sub(4)).max(1))
+    let scroll = usize::from(app.router.default_scroll().offset());
+    super::gallery::scene_line_page_step(app, area, scroll, direction)
 }
 
-/// The scrolled window an embedded line page shows, when the page is taller
-/// than its canvas. `None` means the page fits and states nothing.
-pub(super) struct LinePageWindow {
-    pub(super) start: u16,
-    pub(super) position_label: String,
-}
-
-/// Ratatui clips a `Paragraph` without a word, so an embedded line page that
-/// overflows its canvas would hide the rest of the projection silently — the
-/// full-frame view discloses the same overflow through
-/// `pinned_document_viewport_lines`. Reserve the canvas's last row for that
-/// disclosure and clamp the window so scrolling past the end shows the last
-/// page rather than an empty canvas.
-pub(super) fn line_page_window(
-    visible_rows: u16,
-    total_rows: usize,
-    scroll: u16,
-) -> Option<LinePageWindow> {
-    let visible = visible_rows as usize;
-    if visible == 0 || total_rows <= visible {
+/// The rows PgUp/PgDn move Map's embedded line page by, measured on the same
+/// gallery body the embedded canvas draws.
+pub(crate) fn map_gallery_page_rows(app: &ShellApp, direction: PageDirection) -> Option<usize> {
+    if app.shell_view() != ShellView::Workbench {
         return None;
     }
-    let capacity = visible - 1;
-    // The body scrolls by a `u16`, so the label must name the window the body
-    // can actually reach rather than the one the offset asked for.
-    let start = (scroll as usize)
-        .min(total_rows - capacity.max(1))
-        .min(u16::MAX as usize);
-    let position_label = if capacity == 0 {
-        format!(" row {}/{total_rows}", start + 1)
-    } else {
-        format!(" rows {}-{}/{total_rows}", start + 1, start + capacity)
-    };
-    Some(LinePageWindow {
-        start: start as u16,
-        position_label,
-    })
+    let area = gallery_body_area(app)?;
+    let scroll = app
+        .router
+        .workbench()
+        .scroll()
+        .get(crate::ui_view_models::PhaseSurfaceId::MapDfd);
+    super::gallery::embedded_line_page_step(app, area, usize::from(scroll), direction)
 }
 
 /// Splits an embedded line page's canvas into its body and the one row that
@@ -125,56 +105,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn line_gallery_paging_uses_visible_body_rows_at_every_supported_size() {
+    fn line_gallery_paging_is_only_measured_for_a_line_page_in_its_own_view() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_shell_view(ShellView::Scene);
         app.router
             .scene_mut()
-            .set_page(crate::scene3d::VizPage::Components);
-        for (width, height) in [(120, 36), (160, 48), (96, 89), (80, 24), (60, 20), (40, 12)] {
-            app.set_viewport(crate::TerminalViewport::new(width, height));
-            let area =
-                crate::renderer::workbench_primary_area(&app, Rect::new(0, 0, width, height));
-            assert_eq!(
-                scene_page_rows(&app),
-                Some(usize::from(area.height.saturating_sub(4)).max(1))
-            );
-        }
+            .set_page(crate::scene3d::VizPage::Dfd);
+        assert_eq!(scene_page_rows(&app, PageDirection::Down), None);
         app.router
             .scene_mut()
-            .set_page(crate::scene3d::VizPage::Dfd);
-        assert_eq!(scene_page_rows(&app), None);
+            .set_page(crate::scene3d::VizPage::Components);
+        assert!(scene_page_rows(&app, PageDirection::Down).is_some());
+        assert_eq!(map_gallery_page_rows(&app, PageDirection::Down), None);
         app.set_shell_view(ShellView::Context);
-        assert_eq!(scene_page_rows(&app), None);
-    }
-
-    #[test]
-    fn a_page_that_fits_its_canvas_states_no_position() {
-        assert!(line_page_window(24, 24, 0).is_none());
-        assert!(line_page_window(0, 9, 0).is_none());
-    }
-
-    #[test]
-    fn an_overflowing_page_reserves_its_last_row_for_the_row_count() {
-        let window = line_page_window(20, 2657, 0).expect("overflowing page");
-
-        assert_eq!(window.start, 0);
-        assert_eq!(window.position_label, " rows 1-19/2657");
-    }
-
-    #[test]
-    fn scrolling_past_the_end_lands_on_the_last_page_not_an_empty_canvas() {
-        let window = line_page_window(20, 2657, u16::MAX).expect("overflowing page");
-
-        assert_eq!(window.start, 2638);
-        assert_eq!(window.position_label, " rows 2639-2657/2657");
-    }
-
-    #[test]
-    fn a_single_row_canvas_spends_it_on_the_position() {
-        let window = line_page_window(1, 40, 7).expect("overflowing page");
-
-        assert_eq!(window.start, 7);
-        assert_eq!(window.position_label, " row 8/40");
+        assert_eq!(scene_page_rows(&app, PageDirection::Down), None);
     }
 }

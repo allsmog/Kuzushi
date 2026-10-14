@@ -32,6 +32,7 @@ pub(crate) use views::workbench_phase_plan_for_app;
 pub(in crate::renderer) use views::*;
 pub(crate) use views::{activity_output_scroll, ActivityOutputScroll};
 pub(crate) use views::{campaign_reader_scroll, campaign_selection_scroll, coverage_page_rows};
+pub(crate) use views::{map_gallery_page_rows, PageDirection};
 pub(crate) use views::{recommendation_max_scroll, recommendation_page_rows};
 pub(crate) use views::{run_artifact_max_scroll, run_artifact_page_rows};
 pub(crate) use views::{strategy_queue_max_scroll, strategy_queue_page_rows};

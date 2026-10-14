@@ -45,6 +45,26 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A gallery line page's position label counts the projection's rows, not the
+  display lines a canvas wrapped them into. One real 2731-component tree
+  reported three totals for the same model: `rows 1-10/2731` on Map's
+  embedded canvas, `rows 1-25/2732` in the full-frame `z` zoom at the same
+  terminal size, and `rows 1-4/2737` at 80 columns. The embedded canvas
+  measured `page_body_lines(...).len()` after the component tree wrapped each
+  long dependency under its own continuation glyphs, so a narrower canvas
+  invented rows; the zoom measured the same body through the generic pinned
+  document viewport, whose three pinned rows left the gallery's blank
+  separator counted as the first row of content. A wrapped value is one row
+  however many display lines it occupies, so `component_tree_rows` now groups
+  its display lines per row and `LinePageRows` windows those rows for both
+  projections: the total is the model's, the window names whole rows, and a
+  row taller than its canvas is clipped with the clip disclosed rather than
+  skipped. Scrolling past the end still lands on the last rows, now by
+  measuring rows from the end instead of clamping a `Paragraph` offset.
+  The worklist, whose values also wrap, groups its rows the same way, and
+  PgUp/PgDn on a line page (full-frame or embedded in Map) move to the
+  adjacent window of whole rows, so paging neither skips nor repeats a row.
+  Reported against a real target in #172 (2026-10-09).
 - A scan's own finding count folds the way the ledger beside it does.
   `sast:scan` declares `identityFold` and the shared dispatch boundary binds
   the operator's resolved value on every dispatch, but no executor read it:
