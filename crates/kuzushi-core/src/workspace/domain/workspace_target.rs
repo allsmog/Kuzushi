@@ -256,6 +256,16 @@ pub struct WorkspaceExportOptions {
     /// model ever produced.
     #[serde(skip)]
     pub review_yield: Option<ReviewYieldExportProvenance>,
+    /// The identity fold the exporting session's own ledger reads under.
+    ///
+    /// `#[serde(skip)]` for the same reason as `review_yield`: the effective
+    /// fold is resolved from operator state and the identity-audit approval,
+    /// so tool input must not be able to assert a different definition of "a
+    /// finding" than the session applied. `None` means the caller holds no
+    /// resolved policy and the export falls back to
+    /// `IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE`, which says so.
+    #[serde(skip)]
+    pub identity_fold: Option<crate::findings::IdentityFoldPolicy>,
 }
 
 /// What the exporting session's review-yield signal was doing, recorded so a
@@ -276,6 +286,7 @@ impl Default for WorkspaceExportOptions {
             completeness: WorkspaceExportCompleteness::All,
             allow_empty: default_allow_empty_export(),
             review_yield: None,
+            identity_fold: None,
         }
     }
 }
@@ -305,6 +316,16 @@ impl WorkspaceExportOptions {
 
     pub fn with_review_yield(mut self, review_yield: Option<ReviewYieldExportProvenance>) -> Self {
         self.review_yield = review_yield;
+        self
+    }
+
+    /// Bind the fold the exporting session's ledger resolved, so the export
+    /// presents the same finding set the operator reviewed.
+    pub fn with_identity_fold(
+        mut self,
+        identity_fold: Option<crate::findings::IdentityFoldPolicy>,
+    ) -> Self {
+        self.identity_fold = identity_fold;
         self
     }
 }

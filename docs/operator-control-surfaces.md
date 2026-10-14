@@ -159,6 +159,15 @@ keeps omitted `identityFold` at `legacy` and omitted `identityReconcile` at
 Supplying either descriptor option explicitly is the documented operator
 override. `modelDedupe` remains `off` by default.
 
+The same resolved `identityFold` reaches the exports an interactive session
+writes: the Report route and `workspace export findings` bind the policy their
+own ledger resolved, so an export presents the finding set the Review ledger
+does rather than a reader-local count. `kuzushi findings export` and
+`workspace:export-findings` hold no resolved policy and still read under the
+conservative run-scope fold; binding one there means resolving it with no
+ledger in hand, which the identity-audit evidence reader refuses before a
+findings store exists.
+
 #### Changed-file scope (`--since`, `--paths`, `--shard`)
 
 `kuzushi scan --since <ref>` and the shell's `scan since <ref>` resolve the

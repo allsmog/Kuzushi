@@ -45,6 +45,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A findings export folds by the policy the operator's ledger resolved. The
+  Review ledger resolves its identity fold from operator state and the
+  identity-audit approval, the scan-scoped export hardcoded the conservative
+  run-scope fold, and the workspace-scoped export applied no fold at all, so a
+  session could write `sarif · 31 finding(s)` one line below its own
+  `29 findings` header and assign export aliases from positions the shell's own
+  alias resolution never produced. `WorkspaceExportOptions` now carries the
+  fold the exporting session resolved, both preparations read under it, and the
+  Report route and `workspace export findings` bind their own ledger's policy.
+  `kuzushi findings export` and `workspace:export-findings` hold no resolved
+  policy and still read under the conservative run-scope fold; see
+  [docs/operator-control-surfaces.md](./docs/operator-control-surfaces.md).
 - The entry-point browser's clip disclosure counts catalog entries, not pane
   rows. Its title names the selection in entry terms (`1/1250`) but derived
   `+N above`/`+N below` from a row total that folded the disposition group

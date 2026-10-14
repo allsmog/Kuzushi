@@ -33,6 +33,7 @@ pub(crate) fn export_findings_for_target(
     completeness: Option<&str>,
     allow_empty: bool,
     review_yield: Option<ReviewYieldExportProvenance>,
+    identity_fold: kuzushi_core::findings::IdentityFoldPolicy,
     campaign_id: Option<&str>,
 ) -> Result<WorkspaceFindingsExport> {
     let workspace = explicit_workspace_for_target(target)?;
@@ -46,7 +47,8 @@ pub(crate) fn export_findings_for_target(
         .with_campaign(campaign_id.map(str::to_owned))
         .with_completeness(completeness)
         .with_allow_empty(allow_empty)
-        .with_review_yield(review_yield);
+        .with_review_yield(review_yield)
+        .with_identity_fold(Some(identity_fold));
     export_workspace_findings_with_options(&workspace, &output, &options)
 }
 
