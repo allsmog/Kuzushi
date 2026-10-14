@@ -95,3 +95,58 @@ impl ShellApp {
         }
     }
 }
+
+/// The recorded `added`/`updated` delta an attempt may present as a *finding*
+/// delta. A producer counts its own delta in fingerprints; the ledger folds
+/// same-issue observations into findings, so the moment the two disagree the
+/// delta has stopped counting the findings the breakdown beside it describes.
+///
+/// Dropping it there leaves the projection with the reconciled
+/// `distinct`/`observations` pair, which names both real numbers, instead of
+/// printing `findings +31 added · 0 updated` above a `20 high · 5 medium ·
+/// 4 low` breakdown of 29 (issue #172). A claim with no ledger count behind it
+/// has nothing to contradict and keeps its delta.
+pub(crate) fn finding_delta_in_ledger_unit(
+    ledger_count: Option<u64>,
+    added: u64,
+    updated: u64,
+) -> (Option<u64>, Option<u64>) {
+    match ledger_count {
+        Some(count) if added.saturating_add(updated) != count => (None, None),
+        _ => (Some(added), Some(updated)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finding_delta_in_ledger_unit;
+
+    #[test]
+    fn a_delta_counting_the_ledgers_own_findings_is_presentable() {
+        assert_eq!(
+            finding_delta_in_ledger_unit(Some(6), 4, 2),
+            (Some(4), Some(2))
+        );
+        assert_eq!(
+            finding_delta_in_ledger_unit(Some(0), 0, 0),
+            (Some(0), Some(0))
+        );
+    }
+
+    /// Issue #172: `sast:scan` recorded a 31-fingerprint delta for runs the
+    /// ledger attributes 29 findings to, and the panel printed `+31 added`
+    /// above its own `20 high · 5 medium · 4 low` breakdown of those 29.
+    #[test]
+    fn a_delta_the_ledger_folded_is_no_longer_a_finding_delta() {
+        assert_eq!(finding_delta_in_ledger_unit(Some(29), 31, 0), (None, None));
+        assert_eq!(finding_delta_in_ledger_unit(Some(29), 20, 11), (None, None));
+    }
+
+    #[test]
+    fn a_delta_with_no_ledger_count_behind_it_keeps_its_own_numbers() {
+        assert_eq!(
+            finding_delta_in_ledger_unit(None, 31, 0),
+            (Some(31), Some(0))
+        );
+    }
+}
