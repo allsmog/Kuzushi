@@ -322,12 +322,23 @@ async function dispatchAuthorizedModelRequest(request) {
 }
 
 async function dispatchModelRequest(request) {
+  requireMembershipAuthorization(request);
   if (request.type === "next-step") return handleNextStep(request);
   if (request.type === "next-step-preflight") {
     return { ok: true, step: "final", text: "ok", cost_usd: 0 };
   }
   if (request.type === "ping") return handlePing(request);
   return runQueryGraph(request);
+}
+
+function requireMembershipAuthorization(request) {
+  if (declaresReadMembership(request.toolPolicy) && !request.authorization) {
+    throw new Error("accepted read membership requires explicit tool-policy authorization");
+  }
+}
+
+function declaresReadMembership(policy) {
+  return Object.hasOwn(policy ?? {}, "readScope") || Object.hasOwn(policy ?? {}, "read_scope");
 }
 
 let responseStream;

@@ -6,6 +6,9 @@ const MAX_DIGEST_FIELD_CHARS: usize = 200;
 
 mod map_digest;
 
+#[cfg(test)]
+mod context_binding_tests;
+
 /// Prompt enrichment resolved once per run: the persisted threat-model
 /// digest plus the MCP servers the tool policy actually attached, so the
 /// hunt prompt only advertises tools the agent can really call.
@@ -17,10 +20,14 @@ pub(crate) struct PromptEnrichment {
 }
 
 impl PromptEnrichment {
-    pub(crate) fn for_run(target: &Path, tool_policy: &AgentToolPolicy, input: &Value) -> Result<Self> {
+    pub(crate) fn for_run(
+        target: &Path,
+        tool_policy: &AgentToolPolicy,
+        input: &Value,
+    ) -> Result<Self> {
         Ok(Self {
             threat_context: selected_threat_model_scan_context(target, input)?,
-            context_enrichment: context_enrichment_scan_context(target),
+            context_enrichment: crate::scan::selected_scan_context(target, input)?,
             attached_mcps: tool_policy
                 .mcps_attached
                 .iter()
@@ -30,19 +37,22 @@ impl PromptEnrichment {
     }
 }
 
-fn context_enrichment_scan_context(target: &Path) -> Option<String> {
+pub(crate) fn context_enrichment_scan_context(target: &Path) -> Result<Option<String>> {
     let path = crate::context::context_snapshot_path(target);
+    if !path.try_exists()? {
+        return Ok(None);
+    }
     let raw = crate::bounded_file::read_utf8_text_within(
         target,
         &path,
         crate::context::MAX_CONTEXT_SNAPSHOT_BYTES,
-    )
-    .ok()?;
-    let snapshot: Value = serde_json::from_str(&raw).ok()?;
-    if !crate::context::context_snapshot_freshness(target, &snapshot).is_current() {
-        return None;
-    }
-    render_context_enrichment_digest(snapshot.get("enrichedContext")?)
+    )?;
+    let snapshot: Value = serde_json::from_str(&raw)?;
+    anyhow::ensure!(crate::context::context_snapshot_freshness(target, &snapshot).is_current(),
+        "Supporting context is stale or unverifiable; regenerate it or explicitly omit it with scanContextRef=null");
+    Ok(snapshot
+        .get("enrichedContext")
+        .and_then(render_context_enrichment_digest))
 }
 
 fn render_context_enrichment_digest(enrichment: &Value) -> Option<String> {
@@ -129,26 +139,33 @@ pub(crate) fn threat_model_scan_context(target: &Path) -> Result<Option<String>>
     selected_threat_model_scan_context(target, &Value::Null)
 }
 
-pub(crate) fn selected_threat_model_scan_context(target: &Path, input: &Value) -> Result<Option<String>> {
+pub(crate) fn selected_threat_model_scan_context(
+    target: &Path,
+    input: &Value,
+) -> Result<Option<String>> {
     use crate::capabilities::threat_model::{load_selected_threat_model, ThreatModelSelection};
     let selection = ThreatModelSelection::from_input(input)?;
-    let Some(document) =
-        load_selected_threat_model(target, &selection)?
-    else {
+    let Some(document) = load_selected_threat_model(target, &selection)? else {
         return Ok(None);
     };
     let Some(digest) = render_threat_model_digest(&document) else {
         return Ok(None);
     };
-    Ok(match crate::capabilities::threat_model::verification_warning(&document, target) {
-        Some(warning) => Some(format!("{warning}\n\n{digest}")),
-        None => Some(digest),
-    })
+    Ok(
+        match crate::capabilities::threat_model::verification_warning(&document, target) {
+            Some(warning) => Some(format!("{warning}\n\n{digest}")),
+            None => Some(digest),
+        },
+    )
 }
 
 pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
     let sections: Vec<String> = [
         ("Modeled threats", threat_lines(document)),
+        (
+            "Operator-reviewed lessons for this context",
+            reviewed_lesson_lines(document),
+        ),
         (
             "Attack-surface entry points",
             attack_surface_lines(document, "entryPoints", entry_point_line),
@@ -170,6 +187,14 @@ pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
     (!sections.is_empty()).then(|| sections.join("\n\n"))
 }
 
+fn reviewed_lesson_lines(document: &Value) -> Vec<String> {
+    document.get("reviewedLessons").and_then(Value::as_array).into_iter().flatten().take(8).map(|record| {
+        let content=&record["content"];
+        let text=|key|content[key].as_str().unwrap_or_default().chars().take(2048).collect::<String>();
+        format!("- {}: {}\n  Applies: {}\n  Limits: {}\n  Origin: {} revision {}. Historical guidance; assess current source independently.",text("title"),text("text"),text("applicability"),text("limitations"),record["id"].as_str().unwrap_or_default(),record["revision"])
+    }).collect()
+}
+
 fn variant_pattern_lines(document: &Value) -> Vec<String> {
     crate::capabilities::threat_model::threat_variant_patterns(document)
         .into_iter()
@@ -180,9 +205,16 @@ fn variant_pattern_lines(document: &Value) -> Vec<String> {
 
 fn variant_pattern_line(pattern: &Value) -> String {
     let text = |field: &str| pattern.get(field).and_then(Value::as_str).unwrap_or("");
-    let cwe = pattern.get("cwe").and_then(Value::as_str).unwrap_or("unclassified");
+    let cwe = pattern
+        .get("cwe")
+        .and_then(Value::as_str)
+        .unwrap_or("unclassified");
     let code: String = text("code").chars().take(MAX_DIGEST_FIELD_CHARS).collect();
-    format!("- {cwe} at {} · {} · `{code}`", text("location"), text("title"))
+    format!(
+        "- {cwe} at {} · {} · `{code}`",
+        text("location"),
+        text("title")
+    )
 }
 
 fn threat_lines(document: &Value) -> Vec<String> {
@@ -318,7 +350,10 @@ mod tests {
 
         let digest = render_threat_model_digest(&document).unwrap();
 
-        assert!(digest.contains("Confirmed-finding variant patterns"), "{digest}");
+        assert!(
+            digest.contains("Confirmed-finding variant patterns"),
+            "{digest}"
+        );
         assert!(digest.contains(
             "- CWE-89 at routes/search.ts:23 · SQL Injection via Product Search · `models.sequelize.query(`SELECT ... ${criteria}`)`"
         ), "{digest}");
@@ -386,8 +421,7 @@ mod tests {
             true,
         )
         .unwrap();
-        crate::capabilities::threat_model::open_writable_threat_model_store(target.path())
-            .unwrap();
+        crate::capabilities::threat_model::open_writable_threat_model_store(target.path()).unwrap();
         let active = crate::capabilities::threat_model::load_active_threat_model(target.path())
             .unwrap()
             .unwrap();

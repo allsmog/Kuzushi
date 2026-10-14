@@ -24,6 +24,7 @@ use std::collections::HashMap;
 
 mod focus;
 mod overview;
+pub(crate) use overview::summary_reading_rows;
 mod responsive;
 
 const GAP: u16 = 2;

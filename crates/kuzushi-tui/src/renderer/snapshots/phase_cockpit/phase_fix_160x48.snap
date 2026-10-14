@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: fix
 size: 160x48
 ---
-KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context   │ ENGAGEMENT
+KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE · cost $0.37 · repo index ready · module context│ ENGAGEMENT
  Map ✓ · Scan ✓ · Review ● · Report                                                                                         │ phase-target
  ▸ NEXT review 6 remaining findings (6 total)                                                                               │ scope: F-0001 · Review
  patch apply write reviewed diff · patch reject discard candidate · patch regen replace candidate · report open Report      │
@@ -22,7 +22,7 @@ KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● L
 │             response schema     │                                                     │                                   │ SESSION COST
 │✓ login_rejects_sqli ·...        │                                                     │                                   │ $0.37 of $2.00
 │guardrail: human approval        │                                                     │                                   │ 19% of budget
-│           required              │                                                     │                                   │
+│           required              │                                                     │                                   │ report · prior usage
 │                                 │                                                     │                                   │
 │                                 │                                                     │                                   │
 │                                 │                                                     │                                   │

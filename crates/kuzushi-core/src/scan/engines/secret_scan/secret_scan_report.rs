@@ -46,4 +46,20 @@ pub struct SecretScanReport {
     /// with gaps has not cleared the whole tree.
     #[serde(default)]
     pub coverage_gaps: CoverageGaps,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspection: Option<SecretScanInspection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretScanInspection {
+    pub schema_version: u32,
+    pub traversal_entries: Option<usize>,
+    pub content_bytes_reserved: u64,
+    pub max_entries: usize,
+    pub max_file_bytes: u64,
+    pub max_total_bytes: u64,
+    pub max_findings: usize,
+    pub excluded_directories: Vec<String>,
+    pub excluded_extensions: Vec<String>,
 }

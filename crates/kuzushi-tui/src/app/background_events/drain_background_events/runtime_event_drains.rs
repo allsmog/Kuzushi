@@ -49,6 +49,7 @@ impl ShellApp {
     pub(crate) fn run_background_maintenance(&mut self) -> bool {
         self.reap_worker_handles()
             | self.cancel_timed_out_workers()
+            | self.apply_review_decision_write_result()
             | self.apply_view_hydration_results()
             | self.apply_answer_recovery()
             | self.apply_project_scope_discovery_results()

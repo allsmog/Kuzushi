@@ -227,7 +227,6 @@ fn threat_model_metric_lines(
     ]
 }
 
-
 fn findings_suppressed_suffix(emit_findings: bool) -> &'static str {
     if emit_findings {
         ""

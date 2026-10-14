@@ -1,6 +1,38 @@
 use super::{activity_view_model, ActivityViewModel};
 use crate::{ShellApp, ShellView};
 
+/// Compact idle Review keeps its reading area ahead of passive session chrome.
+pub(crate) fn compact_review_reading(app: &ShellApp, height: u16) -> bool {
+    if height > 12 || app.shell_view() != ShellView::Workbench {
+        return false;
+    }
+    if super::active_workbench_page(app) != crate::WorkbenchPage::Review {
+        return false;
+    }
+    review_navigation_is_idle(app) && !review_decision_owns_chrome(app)
+}
+
+fn review_navigation_is_idle(app: &ShellApp) -> bool {
+    if app.input_mode() != crate::InputMode::Navigate || !app.input().is_empty() {
+        return false;
+    }
+    !app.has_running_work() && !app.review_decision_write_pending()
+}
+
+fn review_decision_owns_chrome(app: &ShellApp) -> bool {
+    let advisory = app.advisory();
+    let gates = [
+        advisory.pending_confirm.is_some(),
+        advisory.budget_halt.is_some(),
+        advisory.pending_retry.is_some(),
+        app.engagement.pending_plan().is_some(),
+        app.engagement.has_pending_prereq_prompt(),
+        app.guided_scan_question_is_open(),
+        super::answers_own_input(app),
+    ];
+    gates.into_iter().any(|owns| owns)
+}
+
 /// The Activity view is a focused full-frame dashboard: it carries its own
 /// header, in-pane keybind hints, and live feed, so the generic transcript,
 /// keybind footer, and status strip would only duplicate it — suppress them.
@@ -47,6 +79,10 @@ fn compact_reading_hides_transcript(app: &ShellApp, height: u16) -> bool {
         || (app.shell_view() == ShellView::Scene && height < 20)
 }
 
+pub(crate) fn compact_gallery_notice(app: &ShellApp, height: u16) -> bool {
+    app.shell_view() == ShellView::Scene && height <= 12
+}
+
 pub(crate) fn keybind_footer_chrome_height(
     app: &ShellApp,
     terminal_height: u16,
@@ -68,6 +104,9 @@ pub(crate) fn keybind_footer_chrome_height(
 }
 
 pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
+    if compact_review_reading(app, terminal_height) {
+        return 0;
+    }
     if activity_supplies_own_chrome(app) || terminal_height < 6 {
         return 0;
     }
@@ -127,6 +166,51 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_shell_view(view);
         app
+    }
+
+    fn review_reader() -> ShellApp {
+        let mut app = app_in_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::WorkbenchPage::Review));
+        app.set_input_mode(crate::InputMode::Navigate);
+        app
+    }
+
+    #[test]
+    fn compact_review_chrome_returns_for_prompt_draft_and_taller_viewports() {
+        let mut app = review_reader();
+        assert!(compact_review_reading(&app, 12));
+        assert_eq!(status_footer_chrome_height(&app, 12), 0);
+        assert!(!compact_review_reading(&app, 20));
+        app.set_input_mode(crate::InputMode::Prompt);
+        assert!(!compact_review_reading(&app, 12));
+        assert_eq!(status_footer_chrome_height(&app, 12), 1);
+        app.set_input_mode(crate::InputMode::Navigate);
+        app.set_input("held operator draft");
+        assert!(!compact_review_reading(&app, 12));
+    }
+
+    #[test]
+    fn compact_review_chrome_preserves_approval_and_budget_context() {
+        let mut app = review_reader();
+        app.advisory_mut().pending_confirm = Some(crate::PendingConfirm {
+            kind: crate::ConfirmKind::DescriptorEffect,
+            tool: "workspace:export-findings".into(),
+            target: "owned export".into(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        });
+        assert!(!compact_review_reading(&app, 12));
+        app.advisory_mut().pending_confirm = None;
+        app.advisory_mut().budget_halt = Some(crate::BudgetHalt {
+            spent_usd: 1.0,
+            limit_usd: 1.0,
+        });
+        assert!(!compact_review_reading(&app, 12));
+        assert_eq!(status_footer_chrome_height(&app, 12), 1);
     }
 
     #[test]

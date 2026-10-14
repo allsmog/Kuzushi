@@ -150,6 +150,7 @@ fn context_view(snapshot: PathBuf, target: &Path) -> ContextSnapshotView {
         stale_slices: Vec::new(),
         enrichment_claims: 0,
         enrichment_model: None,
+        inspection: None,
     }
 }
 

@@ -27,7 +27,7 @@ pub(super) fn classify_absences(
     }
 }
 
-fn findings_snapshot_available(app: &ShellApp, run: &str) -> bool {
+pub(super) fn findings_snapshot_available(app: &ShellApp, run: &str) -> bool {
     let Some(value) = artifact_json(app, run, FINDINGS_FILE) else {
         return false;
     };

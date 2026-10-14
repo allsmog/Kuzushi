@@ -1,0 +1,85 @@
+name: One approved model lesson draft, explicit review, protected allowance and recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_generation.py seed @TMP_TARGET @ART @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/open.txt
+keys: Enter
+require-live-snap: 25 SELECTED FINDING | source-finding
+submit: lessons
+require-live-snap: 25 REUSABLE LESSONS | lessons
+keys: g
+require-live-snap: 20 GENERATE LESSON DRAFT | generation-plan
+expect: One lesson job
+ask: Does planning keep generation separate from human acceptance and context reuse, with one job, recorded source and no model request before approval?
+keys: t
+type: 2
+keys: Enter r
+type: 1
+keys: Enter Enter
+require-live-snap: 30 Draft ready | frozen-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_generation.py draft @TMP_TARGET @ART
+resize: 160x48
+live-snap: plan-160x48
+resize: 96x89
+live-snap: plan-96x89
+resize: 80x24
+live-snap: plan-80x24
+resize: 60x20
+live-snap: plan-60x20
+resize: 40x12
+live-snap: plan-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: plan-40x12-last
+ask: Across six sizes, is the complete plan readable by paging with model, spending, protected Review, options and back controls available?
+resize: 120x36
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+keys: End
+require-live-snap: 20 y approve | approval-last
+expect: 1 fixed jobs
+expect: Total provider calls: 2
+ask: Does approval bind exactly one job and one attempt to the original confirmation, selected model and two total calls, with one protected Review call and uncertain dollar consumption?
+keys: y
+require-live-snap: 30 Open approved lesson job | approved
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | before-launch
+keys: L
+require-live-snap: 25 dispatcher pid | launched
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_generation.py finished @TMP_TARGET @ART
+keys: r
+require-live-snap: 25 1 job(s) · 1 completed | completed
+keys: a
+require-live-snap: 25 GENERATED LESSON DRAFT | generation-result
+expect: Inspect model-proposed lesson
+keys: Enter
+require-live-snap: 25 Labeled model lesson | saved-draft
+expect: Proposed by:
+ask: Does the actual executor expose only a model draft, with model and source omissions disclosed, unchanged finding decisions and explicit later human acceptance?
+keys: a
+paste-file: @ART/reason.txt
+keys: Enter
+require-live-snap: 20 CONFIRM ACCEPTED LESSON | acceptance-confirmation
+keys: Enter
+require-live-snap: 25 Accepted · Labeled model | accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_generation.py accepted @TMP_TARGET @ART
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 1 job(s) · 1 completed | recovered-job
+nav-mode:
+keys: a
+require-live-snap: 25 GENERATED LESSON DRAFT | recovered-result
+keys: Enter
+require-live-snap: 25 Accepted · Labeled model | recovered-lesson
+require-shell: python3 -B @REPO/scripts/devex/fixtures/lesson_generation.py restart @TMP_TARGET @ART
+ask: Does restart authenticate the original generated revision and preserve acceptance and consumed allowance without another model request or job?
+keys: C-c
+require-exit: 10

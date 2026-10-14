@@ -23,12 +23,15 @@ pub(super) fn approve_tool() -> ToolDescriptor {
 }
 
 pub(super) fn context_study_tool() -> ToolDescriptor {
-    tool_with_options("campaign:context-study", "Draft one bounded Map model action for approval: source-grounded context or a scan scope proposal. Keeps current context and scope acceptance unchanged. Makes no model requests.", vec![
+    tool_with_options("campaign:context-study", "Draft one bounded model action for approval: context, scan scopes or a lesson. Keeps context, scope and lesson acceptance unchanged. Makes no model requests.", vec![
         opt("campaignId", OptionType::String, "New campaign identifier; generated when omitted."),
         investigation_option(),
-        opt("generationTool", OptionType::Enum, "Model action for this fixed job. Scope proposals reuse an existing inventory and permit no preparation jobs.").choices(&["threat-model:build","pack:suggest-scopes"]).default(json!("threat-model:build")),
+        opt("generationTool", OptionType::Enum, "Model action for this fixed job. Scope proposals, selective context regeneration and lesson drafts permit no preparation jobs.").choices(&["threat-model:build","pack:suggest-scopes","threat-model:regenerate","findings:lesson-generate"]).default(json!("threat-model:build")),
         opt("preparationJobs", OptionType::Json, "Optional ordered context:build and entry-points:extract jobs. At most one of each; prepared and approved with the context job."),
         opt("contextInput", OptionType::Json, "Options for the selected generation tool, checked through shared dispatch. No activation, scan jobs, recursive delegation or automatic follow-up work.").required(),
+        brief_option(),
+        opt("useBriefGuidance", OptionType::Bool, "Explicitly supply the selected briefRef to a fresh inactive repository or file-group context build. Entire reviewed text is supplied as priorities, not source evidence. Requires separate plan/allowance approval.").default(json!(false)),
+        opt("scopeStudyOrigin", OptionType::Json, "Versioned local scope study draft to resume after file-group context generation. Retains scope and context choices; grants no discovery jobs or approval.").aliases(&["scope_study_origin"]).advanced(),
     ]).with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)).without_phase_result()
 }
 
@@ -67,10 +70,21 @@ fn investigation_option() -> OptionSpec {
 pub(super) fn study_tool() -> ToolDescriptor {
     tool_with_options("campaign:study", "Draft a finite discovery scan batch for review. Defaults to three passes and one worker. Makes no model requests and starts no jobs.", vec![
         opt("campaignId", OptionType::String, "New campaign identifier; generated when omitted."),
+        brief_option(),
         opt("investigationId", OptionType::String, "Investigation whose accounting this draft will retain. Defaults to the accepted Map's recorded investigation when available; an explicit identifier selects that investigation's accounting. Approval is still required for this exact plan."),
         opt("trials", OptionType::Int, "Number of fresh discovery passes in this fixed plan.").integer_range(2, 100).default(json!(3)),
         opt("workers", OptionType::Int, "Requested concurrency; engine safety may reduce it.").integer_range(1, 8).default(json!(1)),
         opt("baselineRunId", OptionType::String, "Explicit completed SAST run for historical usage evidence. Frozen as plan metadata; starts no work and grants no allowance.").aliases(&["baseline_run_id"]),
+        opt("resourceBaselineCampaignId", OptionType::String, "Explicit prior scope study or context matrix for bounded, per-case historical usage evidence. Requires scopeCases or contextCases; cannot combine with baselineRunId. Only matching complete child runs calibrate a case. Missing prices and uncalibrated cases remain unknown.").aliases(&["resource_baseline_campaign_id"]).advanced(),
+        opt("contextBaselineRunId", OptionType::String, "Explicit completed SAST run to compare with this candidate context. Source, scope, scan options, model and runtime must match; only the exact context may differ. Each candidate remains a separately approved fixed study.").aliases(&["context_baseline_run_id"]),
+        opt("contextCases", OptionType::Json, "Optional finite context matrix: two to eight objects with id, label, exact threatModelRef (or explicit null), and optional passes. Missing passes inherit trials. Total work is at most 100 fixed jobs; all cases share one allowance and otherwise identical scan conditions.").aliases(&["context_cases"]),
+        opt("baselineCaseId", OptionType::String, "Explicit baseline case id required with contextCases. Fresh baseline repetitions are included in this matrix's approved workload.").aliases(&["baseline_case_id"]),
+        opt("scopeProposalRef", OptionType::Json, "Exact accepted scope proposal for a finite multi-scope study. Requires scopeCases; cannot combine with context experiments or scanInput.scanScopeRef.").aliases(&["scope_proposal_ref"]),
+        opt("scopeCases", OptionType::Json, "One to nine explicit objects with scopeId, optional passes, and optional exact threatModelRef override or null. Missing passes inherit trials; missing context inherits the common accepted context. At most 100 fixed jobs, one shared allowance, no recursive subdivision.").aliases(&["scope_cases"]),
         opt("scanInput", OptionType::Json, "Options for sast:scan, checked through shared prepared dispatch; discovery only.").required(),
     ]).with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)).without_phase_result()
+}
+
+fn brief_option() -> OptionSpec {
+    opt("briefRef", OptionType::Json, "Exact accepted operator brief revision to retain with this plan. It guides human planning and priorities; it changes no scanner prompt, finding verdict, job count or allowance.")
 }

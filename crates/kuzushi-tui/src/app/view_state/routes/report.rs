@@ -14,6 +14,10 @@ pub struct ReportRouteState {
     origin: Option<ReportOrigin>,
     receipt: Option<ReportReceipt>,
     reveal_error: Option<String>,
+    study: Option<ReportStudyRef>,
+    choices_target: Option<PathBuf>,
+    choices_error: Option<String>,
+    choices_saved: bool,
 }
 
 impl Default for ReportRouteState {
@@ -29,17 +33,102 @@ impl Default for ReportRouteState {
             origin: None,
             receipt: None,
             reveal_error: None,
+            study: None,
+            choices_target: None,
+            choices_error: None,
+            choices_saved: false,
         }
     }
 }
 
 impl ReportRouteState {
+    pub(crate) fn choices_target(&self) -> Option<&std::path::Path> {
+        self.choices_target.as_deref()
+    }
+
+    pub(crate) fn prepare_choices_target(&mut self, target: PathBuf) {
+        let fresh = Self::default();
+        self.format_index = fresh.format_index;
+        self.completeness = fresh.completeness;
+        self.paths = fresh.paths;
+        self.provenance_details = false;
+        self.path_edit = None;
+        self.path_error = None;
+        self.choices_target = Some(target);
+        self.choices_error = None;
+        self.choices_saved = false;
+    }
+
+    pub(crate) fn captured_choices(
+        &self,
+        target: PathBuf,
+    ) -> kuzushi_core::workspace::report_preferences::ReportPreferences {
+        kuzushi_core::workspace::report_preferences::ReportPreferences {
+            schema_version: 1,
+            target,
+            format: self.format(),
+            completeness: self.completeness,
+            destinations: Self::FORMATS
+                .iter()
+                .zip(&self.paths)
+                .map(|(format, path)| (format.as_str().into(), path.clone()))
+                .collect(),
+            provenance_details: self.provenance_details,
+        }
+    }
+
+    pub(crate) fn restore_choices(
+        &mut self,
+        choices: kuzushi_core::workspace::report_preferences::ReportPreferences,
+    ) -> Result<(), String> {
+        choices
+            .validate(&choices.target)
+            .map_err(|error| error.to_string())?;
+        let index = Self::FORMATS
+            .iter()
+            .position(|format| *format == choices.format)
+            .ok_or("Unsupported saved report format")?;
+        self.format_index = index;
+        self.paths = Self::FORMATS.map(|format| choices.destinations[format.as_str()].clone());
+        self.completeness = choices.completeness;
+        self.provenance_details = choices.provenance_details;
+        self.choices_saved = true;
+        self.choices_error = None;
+        Ok(())
+    }
+
+    pub(crate) fn record_choices_save(&mut self, result: Result<(), String>) {
+        self.choices_saved = result.is_ok();
+        self.choices_error = result.err();
+    }
+
+    pub(crate) fn choices_status(&self) -> String {
+        if let Some(error) = &self.choices_error {
+            return format!("Saved choices unavailable: {error}. Current choices are shown.");
+        }
+        if self.choices_saved {
+            return "Saved for this target; S updates choices without exporting.".into();
+        }
+        "Session choices; S saves them for restart. Export also saves choices.".into()
+    }
+
+    pub(crate) fn study(&self) -> Option<&ReportStudyRef> {
+        self.study.as_ref()
+    }
+
+    pub(crate) fn set_study(&mut self, study: Option<ReportStudyRef>) {
+        self.study = study;
+        self.workspace_history = false;
+        self.receipt = None;
+        self.reveal_error = None;
+    }
     pub(crate) fn provenance_details(&self) -> bool {
         self.provenance_details
     }
 
     pub(crate) fn toggle_provenance(&mut self) {
         self.provenance_details = !self.provenance_details;
+        self.choices_saved = false;
     }
 
     pub(crate) fn workspace_history(&self) -> bool {
@@ -70,10 +159,15 @@ impl ReportRouteState {
     }
 
     pub(crate) fn move_format(&mut self, delta: isize) {
-        self.format_index = self
+        let index = self
             .format_index
             .saturating_add_signed(delta)
             .min(Self::FORMATS.len() - 1);
+        if index == self.format_index {
+            return;
+        }
+        self.format_index = index;
+        self.choices_saved = false;
         self.receipt = None;
         self.reveal_error = None;
     }
@@ -83,6 +177,7 @@ impl ReportRouteState {
     }
 
     pub(crate) fn cycle_completeness(&mut self) {
+        self.choices_saved = false;
         self.completeness = match self.completeness {
             kuzushi_core::WorkspaceExportCompleteness::All => {
                 kuzushi_core::WorkspaceExportCompleteness::Open
@@ -143,6 +238,9 @@ impl ReportRouteState {
             self.path_error = Some(error.to_string());
             return;
         }
+        if self.paths[self.format_index] != edit.text() {
+            self.choices_saved = false;
+        }
         self.paths[self.format_index] = edit.text().to_string();
         self.path_edit = None;
         self.path_error = None;
@@ -174,6 +272,12 @@ impl ReportRouteState {
     pub(crate) fn set_reveal_error(&mut self, error: Option<String>) {
         self.reveal_error = error;
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ReportStudyRef {
+    pub(crate) campaign_id: String,
+    pub(crate) plan_sha256: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

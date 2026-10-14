@@ -28,7 +28,8 @@ pub fn verify_scan_batch_child_equivalence(
     let Some((batch_id, trial, expected_key)) = batch_provenance(input)? else {
         return Ok(None);
     };
-    let consumed = capture_batch_equivalence(root, &trial_base_input(input), config, registry)?;
+    let consumed = capture_batch_equivalence(root, &trial_base_input(input), config, registry)
+        .context("scan-batch child refused BatchEquivalenceKey drift: frozen conditions could not be authenticated")?;
     anyhow::ensure!(
         consumed.sha256 == expected_key,
         "scan-batch child refused BatchEquivalenceKey drift (expected {expected_key}, actual {})",

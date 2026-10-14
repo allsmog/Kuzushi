@@ -616,7 +616,11 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     app.router.scene_mut().set_page(VizPage::AttackPath);
     let path_bindings = footer_keybindings(&app);
     assert!(path_bindings.contains(&bind("j/k/↑/↓", "scroll")));
+    assert!(path_bindings.contains(&bind("PgUp/PgDn", "page")));
     assert!(path_bindings.contains(&bind("g/G", "ends")));
+
+    app.router.scene_mut().set_page(VizPage::Components);
+    assert!(footer_keybindings(&app).contains(&bind("PgUp/PgDn", "page")));
 
     app.router.scene_mut().set_page(VizPage::EntryPoints);
     let entry_bindings = footer_keybindings(&app);

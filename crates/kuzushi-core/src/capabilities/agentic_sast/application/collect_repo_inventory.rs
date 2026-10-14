@@ -1,5 +1,4 @@
 use super::*;
-use crate::bounded_file::read_source_text_prefix;
 
 pub(crate) fn collect_agentic_repo_inventory(
     root: &Path,
@@ -16,99 +15,28 @@ pub(crate) fn collect_agentic_repo_inventory_with_filters(
     include_patterns: &[String],
     exclude_patterns: &[String],
 ) -> Result<Vec<(String, String)>> {
-    let mut files = Vec::new();
-    collect_agentic_repo_inventory_inner(
+    let mut options = AgenticSastInput::from_tool_input(&json!({}))?;
+    options.max_inventory_files = max_files;
+    options.max_bytes_per_file = max_bytes_per_file;
+    options.include_patterns = include_patterns.to_vec();
+    options.exclude_patterns = exclude_patterns.to_vec();
+    let prepared = collect_bounded_inventory(
         root,
-        root,
-        max_files,
-        max_bytes_per_file,
-        include_patterns,
-        exclude_patterns,
-        &mut files,
+        &options,
+        MAX_AGENTIC_INVENTORY_ENTRIES,
+        &|| Ok(()),
+        &mut |_| {},
     )?;
-    Ok(files)
+    anyhow::ensure!(!prepared.coverage.entry_limit_reached && !prepared.coverage.read_limit_reached,
+        "source preparation exceeded a walk/read limit; this compatibility consumer cannot preserve a partial-inventory receipt");
+    Ok(prepared.snippets)
 }
 
-pub(crate) fn collect_agentic_repo_inventory_inner(
-    root: &Path,
-    dir: &Path,
-    max_files: usize,
-    max_bytes_per_file: usize,
-    include_patterns: &[String],
-    exclude_patterns: &[String],
-    files: &mut Vec<(String, String)>,
-) -> Result<()> {
-    if files.len() >= max_files {
-        return Ok(());
-    }
-    for entry in sorted_readable_entries(dir) {
-        if files.len() >= max_files {
-            break;
-        }
-        collect_agentic_entry(
-            root,
-            entry,
-            max_files,
-            max_bytes_per_file,
-            include_patterns,
-            exclude_patterns,
-            files,
-        )?;
-    }
-    Ok(())
-}
-
-fn sorted_readable_entries(dir: &Path) -> Vec<fs::DirEntry> {
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.path());
-    entries
-}
-
-fn collect_agentic_entry(
-    root: &Path,
-    entry: fs::DirEntry,
-    max_files: usize,
-    max_bytes_per_file: usize,
-    include_patterns: &[String],
-    exclude_patterns: &[String],
-    files: &mut Vec<(String, String)>,
-) -> Result<()> {
-    let Some((path, file_type)) = visible_agentic_entry(&entry) else {
-        return Ok(());
-    };
-    if file_type.is_dir() {
-        return collect_agentic_repo_inventory_inner(
-            root,
-            &path,
-            max_files,
-            max_bytes_per_file,
-            include_patterns,
-            exclude_patterns,
-            files,
-        );
-    }
-    if let Some(item) = agentic_inventory_file(
-        root,
-        &path,
-        file_type.is_file(),
-        max_bytes_per_file,
-        include_patterns,
-        exclude_patterns,
-    ) {
-        files.push(item);
-    }
-    Ok(())
-}
-
-fn visible_agentic_entry(entry: &fs::DirEntry) -> Option<(PathBuf, fs::FileType)> {
-    if should_skip_path(&entry.file_name().to_string_lossy()) {
-        return None;
-    }
-    Some((entry.path(), entry.file_type().ok()?))
-}
+mod bounded_walk;
+pub(crate) use bounded_walk::AgenticInventory;
+pub(crate) use bounded_walk::{
+    collect_bounded_inventory, collect_literal_inventory, MAX_AGENTIC_INVENTORY_ENTRIES,
+};
 
 fn agentic_inventory_file(
     root: &Path,
@@ -118,6 +46,22 @@ fn agentic_inventory_file(
     include_patterns: &[String],
     exclude_patterns: &[String],
 ) -> Option<(String, String)> {
+    let relative =
+        agentic_inventory_candidate(root, path, is_file, include_patterns, exclude_patterns)?;
+    let snippet =
+        crate::bounded_file::read_source_text_prefix_within(root, path, max_bytes_per_file)
+            .ok()
+            .flatten()?;
+    Some((relative, snippet))
+}
+
+fn agentic_inventory_candidate(
+    root: &Path,
+    path: &Path,
+    is_file: bool,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+) -> Option<String> {
     if !is_file || !is_agentic_context_file(path) {
         return None;
     }
@@ -126,13 +70,7 @@ fn agentic_inventory_file(
         .unwrap_or(path)
         .display()
         .to_string();
-    if !agentic_path_allowed(&relative, include_patterns, exclude_patterns) {
-        return None;
-    }
-    let snippet = read_source_text_prefix(path, max_bytes_per_file)
-        .ok()
-        .flatten()?;
-    Some((relative, snippet))
+    agentic_path_allowed(&relative, include_patterns, exclude_patterns).then_some(relative)
 }
 
 pub(crate) fn agentic_path_allowed(

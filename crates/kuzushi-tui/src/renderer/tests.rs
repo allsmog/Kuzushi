@@ -24,6 +24,7 @@ use crate::ui_view_models::{
 use super::*;
 
 mod activity_reader;
+mod compact_notice;
 mod keymap_reader;
 mod prove_detail_controls;
 
@@ -478,7 +479,7 @@ fn planning_picker_options_focus_marks_the_options_pane() {
 fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
     use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
 
-    for (width, height, expected_window) in [(80, 24, "TASKS 1-8/10"), (60, 20, "TASKS 1-6/10")] {
+    for (width, height, expected_window) in [(80, 24, "TASKS 1-8/11"), (60, 20, "TASKS 1-6/11")] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -513,7 +514,7 @@ fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
             "{width}x{height}: {rendered}"
         );
         assert!(
-            rendered.contains("Enter: run 5 new steps · skip 5 unchecked"),
+            rendered.contains("Enter: run 5 new steps · skip 6 unchecked"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -552,13 +553,13 @@ fn compact_planning_picker_scrolls_to_keep_the_focused_task_legible() {
     app.engagement
         .planning_picker_mut()
         .open(rows, Default::default());
-    app.engagement.planning_picker_mut().set_cursor(8);
+    app.engagement.planning_picker_mut().set_cursor(9);
     app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("TASKS 5-10/10"), "{rendered}");
+    assert!(rendered.contains("TASKS 6-11/11"), "{rendered}");
     assert!(
         rendered.contains("> SKIP     Inventory deps for CVE harvest"),
         "{rendered}"
@@ -1063,6 +1064,28 @@ fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
 }
 
 #[test]
+fn catalog_compact_footer_keeps_move_load_and_back_controls() {
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_viewport(crate::app::TerminalViewport::new(40, 12));
+    app.set_target(Some(std::path::PathBuf::from(".")));
+    app.set_shell_view(ShellView::Workbench);
+    assert!(submit_shell_line(&mut app, "modules"));
+    app.move_catalog_cursor(2);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+    for control in [
+        "↑/↓ action",
+        "Enter load",
+        "Esc back",
+        "options recon:import",
+    ] {
+        assert!(rendered.contains(control), "missing {control}: {rendered}");
+    }
+}
+
+#[test]
 fn contextual_catalog_keeps_every_cursor_visible_across_compact_sizes() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -1417,7 +1440,12 @@ fn threat_model_picker_has_tty_and_plain_content_parity() {
     let tty = format!("{:?}", terminal.backend().buffer());
     let plain = render_plain_app(&app, 132);
 
-    for text in ["Root PASTA", "pasta", "verified", "m next · M previous"] {
+    for text in [
+        "Root PASTA",
+        "pasta",
+        "verified",
+        "m next model · M previous model",
+    ] {
         assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
         assert!(plain.contains(text), "plain missing {text:?}: {plain}");
     }
@@ -2632,6 +2660,7 @@ fn renders_context_status_readably_at_80_columns() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
     app.set_shell_view(ShellView::Context);
 
@@ -2859,6 +2888,7 @@ fn plain_context_status_has_no_ansi_or_box_drawing() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
     app.set_shell_view(ShellView::Context);
 
@@ -3346,7 +3376,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("Enter open detail"), "{rendered}");
-    assert!(rendered.contains("j/k/↑/↓ move"), "{rendered}");
+    assert!(rendered.contains("Ctrl+F filter ledger"), "{rendered}");
     assert!(rendered.contains("Shift+Tab phase→"), "{rendered}");
     assert!(rendered.contains("] pane"), "{rendered}");
     assert!(rendered.contains("Tab/[/] pane"), "{rendered}");
@@ -3583,7 +3613,7 @@ fn recommend_view_renders_latest_recommendations_artifact() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("RECOMMEND"));
+    assert!(rendered.contains("GENERATED SUGGESTIONS"));
     assert!(rendered.contains("semgrep:scan"));
     assert!(rendered.contains("surface risk"));
     assert!(rendered.contains("1 high/critical"));
@@ -3673,7 +3703,7 @@ fn renders_all_ink_parity_shell_surfaces() {
     let cases = vec![
         (ShellView::Home, "HOME", None, None),
         (ShellView::Catalog, "CAPABILITIES", None, None),
-        (ShellView::Recommend, "RECOMMEND", None, None),
+        (ShellView::Recommend, "GENERATED SUGGESTIONS", None, None),
         (ShellView::Module, "MODULE DETAIL", None, None),
         (ShellView::ModuleRun, "TRANSCRIPT", None, None),
         (ShellView::Workbench, "FINDING", None, None),
@@ -3689,6 +3719,12 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::ActorDetail, "ACTOR 0", None, None),
         (ShellView::Runs, "RUN TIMELINE", None, None),
         (ShellView::RunDiff, "RUN DIFF", None, None),
+        (
+            ShellView::Relationships,
+            "FINDING RELATIONSHIPS",
+            None,
+            None,
+        ),
         (ShellView::Replay, "REPLAY", None, None),
         (ShellView::Trace, "TRACE", None, None),
         (ShellView::Help, "HELP", None, None),
@@ -7372,7 +7408,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
         rendered.contains("checking durable map artifacts"),
         "un-hydrated Map shows the neutral placeholder, not an evidence verdict: {rendered}"
     );
-    assert!(rendered.contains("context:missing"), "{rendered}");
+    assert!(rendered.contains("repo index:missing"), "{rendered}");
     assert!(rendered.contains("context build"), "{rendered}");
 }
 

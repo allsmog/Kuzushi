@@ -59,6 +59,20 @@ impl StudyEnginePicker {
         (!paths.is_empty()).then_some(paths.as_slice())
     }
 
+    pub fn needs_scoped_file_tools(&self) -> bool {
+        self.input.get("scanScopeRef").is_some()
+            && self.input.get("mcps") != Some(&Value::Bool(false))
+    }
+
+    fn choose_scoped_file_tools(&mut self) {
+        if !self.needs_scoped_file_tools() {
+            return;
+        }
+        self.input["mcps"] = json!(false);
+        self.scroll = 0;
+        self.notice = Some("Scoped file tools selected for this draft. Shared files provide context only; MCP tools are disabled. Apply and review a new plan before execution. Esc preserves the original choices.".into());
+    }
+
     fn clear_path_conflict(&mut self) {
         if self.conflicting_paths().is_none() {
             return;
@@ -86,6 +100,7 @@ impl ShellApp {
         let result = super::launch::configured_scan_input(self, config);
         match result {
             Ok(input) => {
+                let input = super::scope_study::picker_input(config, input);
                 self.router
                     .campaign_mut()
                     .batch_scan_config
@@ -146,6 +161,7 @@ impl ShellApp {
             KeyCode::Esc => self.close_study_engine_picker(),
             KeyCode::Char('a') => return Some(self.accept_study_engines()),
             KeyCode::Char('x') => self.clear_study_path_conflict(),
+            KeyCode::Char('m') => self.choose_study_scoped_file_tools(),
             KeyCode::PageUp | KeyCode::PageDown => self.scroll_study_engines(code),
             _ => return None,
         }
@@ -164,11 +180,23 @@ impl ShellApp {
         }
     }
 
+    fn choose_study_scoped_file_tools(&mut self) {
+        if let Some(picker) = self
+            .router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .and_then(|config| config.engine_picker.as_mut())
+        {
+            picker.choose_scoped_file_tools();
+        }
+    }
+
     fn accept_study_engines(&mut self) -> InputUpdate {
         let Some(picker) = self.study_engine_picker() else {
             return InputUpdate::handled();
         };
-        let input = picker.prepared_selection();
+        let mut input = picker.prepared_selection();
         if let Err(error) = kuzushi_core::modules::validate_scan_scope_contract(&input) {
             self.router
                 .campaign_mut()
@@ -187,6 +215,7 @@ impl ShellApp {
             .batch_scan_config
             .as_mut()
             .unwrap();
+        super::scope_study::remove_picker_scope(config, &mut input);
         let changed = config.study.scan_input.as_ref() != Some(&input);
         config.study.scan_input = Some(input);
         if changed {

@@ -126,14 +126,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) mod lessons;
 mod onboarding;
 mod prompts;
+mod relationships;
 mod review_session;
 mod review_yield;
 mod run_reference;
 mod runtime;
 mod runtime_keymap;
 mod runtime_state;
+pub(crate) use relationships::{
+    RelationshipBulkReview, RelationshipBulkStage, RelationshipNote, RelationshipWrite,
+    RelationshipsRouteState,
+};
+mod report_preferences;
 mod sast_scan_policy;
 mod sast_tasks;
 mod scan;

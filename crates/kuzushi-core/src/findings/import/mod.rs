@@ -39,6 +39,7 @@ pub fn capture_skip_phrase(out_of_scope: usize, unusable: usize) -> Option<Strin
 pub use burp_xml::import_burp_xml;
 pub use har::import_har;
 pub use ledger_jsonl::import_ledger_jsonl;
+pub use ledger_jsonl::is_ledger_import_run_id;
 
 #[cfg(test)]
 mod tests {

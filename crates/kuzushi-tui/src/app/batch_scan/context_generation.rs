@@ -5,8 +5,11 @@ use crossterm::event::KeyCode;
 use kuzushi_core::{capabilities::campaign::ContextStudyReceipt, ThreatModelRef};
 use serde_json::{json, Value};
 
+mod brief;
 mod diagnosis;
+mod model_selection;
 mod recovery;
+mod scoped_context;
 mod scopes;
 mod setup;
 #[cfg(test)]
@@ -14,12 +17,16 @@ mod tests;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct StudyContextGeneration {
+    pub(crate) use_brief_guidance: bool,
+    pub(crate) show_brief_guidance: bool,
+    pub(crate) brief_origin_scroll: usize,
     pub(crate) generation_tool: Option<String>,
     pub(crate) context_input: Value,
     pub(crate) preparation_jobs: Value,
     pub(crate) campaign_id: Option<String>,
     pub(crate) receipt: Option<ContextStudyReceipt>,
     pub(crate) generated: Option<ThreatModelRef>,
+    pub(crate) generated_lesson: Option<kuzushi_core::findings::LessonRef>,
     pub(crate) generated_scopes: Option<kuzushi_core::workspace::ScanScopeReview>,
     pub(crate) result_error: Option<String>,
     pub(crate) rejected_available: bool,
@@ -30,16 +37,49 @@ pub(crate) struct StudyContextGeneration {
     pub(crate) map_attempt_id: Option<String>,
     pub(crate) scroll: usize,
     pub(crate) show_options: bool,
+    pub(crate) return_context_editor: bool,
+    pub(crate) selected_text_label: Option<String>,
+    pub(crate) guidance_editor: Option<crate::app::FieldEditor>,
+    pub(crate) guidance_editing: bool,
+    pub(crate) guidance_notice: Option<String>,
     pub(crate) options: std::sync::Arc<Vec<String>>,
 }
 
 impl StudyContextGeneration {
+    pub(crate) fn allows_model_choice(&self) -> bool {
+        self.is_scope_proposal()
+            || self.is_regeneration()
+            || self.is_lesson()
+            || self.is_scope_context()
+    }
+    pub(crate) fn is_scope_context(&self) -> bool {
+        self.context_input.get("scanScopeRef").is_some()
+    }
+    fn has_unsaved_guidance(&self) -> bool {
+        self.guidance_editor.as_ref().is_some_and(|editor| {
+            editor.text() != self.context_input["guidance"].as_str().unwrap_or("")
+        })
+    }
+    pub(crate) fn is_regeneration(&self) -> bool {
+        self.generation_tool.as_deref() == Some("threat-model:regenerate")
+    }
     pub(crate) fn is_scope_proposal(&self) -> bool {
         self.generation_tool.as_deref() == Some("pack:suggest-scopes")
     }
+    pub(crate) fn is_lesson(&self) -> bool {
+        self.generation_tool.as_deref() == Some("findings:lesson-generate")
+    }
+    pub(crate) fn supports_rejected_retention(&self) -> bool {
+        matches!(
+            self.generation_tool.as_deref(),
+            None | Some("threat-model:build")
+        )
+    }
 
     pub(crate) fn has_result(&self) -> bool {
-        self.generated.is_some() || self.generated_scopes.is_some()
+        self.generated.is_some()
+            || self.generated_scopes.is_some()
+            || self.generated_lesson.is_some()
     }
     pub(crate) fn preparation_count(&self) -> usize {
         self.receipt
@@ -48,6 +88,7 @@ impl StudyContextGeneration {
             .unwrap_or_else(|| self.preparation_jobs.as_array().map_or(0, Vec::len))
     }
     pub(crate) fn record_receipt(&mut self, receipt: ContextStudyReceipt) {
+        self.use_brief_guidance = receipt.brief_guidance.is_some();
         self.generation_tool = Some(receipt.generation_tool.clone());
         self.options = std::sync::Arc::new(
             crate::ui_view_models::context_generation::format_options(
@@ -81,8 +122,8 @@ impl StudyContextGeneration {
     }
 
     pub(crate) fn action(&self, config: &BatchScanConfig) -> &'static str {
-        if self.is_scope_proposal() {
-            return self.scope_proposal_action(config);
+        if let Some(action) = self.special_action(config) {
+            return action;
         }
         if self.result_error.is_some() {
             return "Inspect context job outcome";
@@ -97,6 +138,16 @@ impl StudyContextGeneration {
             return self.approved_action();
         }
         "Review plan and allowance"
+    }
+
+    fn special_action(&self, config: &BatchScanConfig) -> Option<&'static str> {
+        if self.is_scope_proposal() {
+            return Some(self.scope_proposal_action(config));
+        }
+        if self.is_lesson() {
+            return Some(self.lesson_action(config));
+        }
+        None
     }
 
     fn scope_proposal_action(&self, config: &BatchScanConfig) -> &'static str {
@@ -127,6 +178,9 @@ impl ShellApp {
     }
 
     pub(super) fn open_context_generation(&mut self) {
+        if self.open_scope_context_generation() {
+            return;
+        }
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
             if config.study.accounting_error.is_some() {
                 super::map_allowance::restore_map_history_allowance(config);
@@ -135,8 +189,11 @@ impl ShellApp {
             previous.bind_completed_scope_reference();
             config.context_generation = Some(StudyContextGeneration {
                 generation_tool: previous.generation_tool,
-                context_input: previous.context_input,
+                context_input: brief::fresh_input(previous.context_input),
                 preparation_jobs: previous.preparation_jobs,
+                return_context_editor: previous.return_context_editor,
+                guidance_editor: previous.guidance_editor,
+                selected_text_label: previous.selected_text_label,
                 ..Default::default()
             });
             config.notice = None;
@@ -144,6 +201,9 @@ impl ShellApp {
     }
 
     pub(super) fn handle_context_generation_key(&mut self, code: KeyCode) -> InputUpdate {
+        if let Some(update) = self.context_brief_key(code) {
+            return update;
+        }
         if self
             .context_generation()
             .is_some_and(|generation| generation.show_rejected)
@@ -161,16 +221,23 @@ impl ShellApp {
                 if !self.has_running_work()
                     && self
                         .context_generation()
-                        .is_some_and(|generation| generation.is_scope_proposal()) =>
+                        .is_some_and(|generation| generation.allows_model_choice()) =>
             {
                 self.open_model_picker()
             }
             KeyCode::Tab => self.toggle_context_options(),
+            KeyCode::Char('G')
+                if self.context_generation().is_some_and(|generation| {
+                    generation.is_regeneration() || generation.is_lesson()
+                }) =>
+            {
+                self.edit_regeneration_guidance()
+            }
             KeyCode::Char('d') => self.inspect_rejected_context(),
             KeyCode::Char('s')
                 if self
                     .context_generation()
-                    .is_some_and(|generation| !generation.is_scope_proposal()) =>
+                    .is_some_and(|generation| generation.supports_rejected_retention()) =>
             {
                 self.toggle_rejected_output_retention()
             }
@@ -199,8 +266,15 @@ impl ShellApp {
         let Some(generation) = self.context_generation() else {
             return InputUpdate::handled();
         };
+        if generation.is_lesson() {
+            return self.inspect_generated_lesson();
+        }
         if generation.is_scope_proposal() {
             return self.inspect_generated_scopes();
+        }
+        if generation.is_regeneration() {
+            self.set_batch_config_notice("Regenerated text is an inactive draft. Enter inspects it; d compares it with its parent. In the context browser, c checks the exact revision before Map review.");
+            return InputUpdate::handled();
         }
         if generation.generated.is_none() {
             self.set_batch_config_notice(
@@ -218,6 +292,17 @@ impl ShellApp {
     }
 
     fn close_context_generation(&mut self) {
+        if self
+            .context_generation()
+            .is_some_and(|generation| generation.is_lesson())
+        {
+            self.retain_lesson_study();
+            self.close_batch_config();
+            return;
+        }
+        if self.restore_regeneration_editor() {
+            return;
+        }
         if self
             .context_generation()
             .is_some_and(|generation| generation.is_scope_proposal())
@@ -251,6 +336,10 @@ impl ShellApp {
         let Some(generation) = config.context_generation.as_ref() else {
             return InputUpdate::handled();
         };
+        if generation.has_unsaved_guidance() {
+            self.set_batch_config_notice("Your guidance draft is kept. G opens it; Ctrl+S includes it before preparing the plan.");
+            return InputUpdate::handled();
+        }
         self.advance_context_draft(&config, generation)
     }
 
@@ -259,6 +348,9 @@ impl ShellApp {
         config: &BatchScanConfig,
         generation: &StudyContextGeneration,
     ) -> InputUpdate {
+        if generation.generated_lesson.is_some() {
+            return self.inspect_generated_lesson();
+        }
         if generation.generated_scopes.is_some() {
             return self.inspect_generated_scopes();
         }
@@ -272,11 +364,7 @@ impl ShellApp {
             return self.prepare_context_generation(&config);
         }
         if generation.approved(&config) {
-            let result = if generation.is_scope_proposal() {
-                "scope"
-            } else {
-                "context"
-            };
+            let result = generation.result_label();
             return self.open_context_jobs(
                 generation,
                 format!("L starts the approved jobs. After completion, a reopens {result} review."),
@@ -306,9 +394,18 @@ impl ShellApp {
         {
             generation.campaign_id = Some(id.clone());
         }
-        let input = json!({"campaignId":id,"investigationId":config.study.investigation_id,"contextInput":object_or_empty(config.context_generation.as_ref().map(|g| &g.context_input)),
+        let mut input = json!({"campaignId":id,"investigationId":config.study.investigation_id,"contextInput":object_or_empty(config.context_generation.as_ref().map(|g| &g.context_input)),
             "generationTool":config.context_generation.as_ref().and_then(|g|g.generation_tool.as_deref()).unwrap_or("threat-model:build"),
             "preparationJobs":config.context_generation.as_ref().map(|g| &g.preparation_jobs).filter(|v| v.is_array()).cloned().unwrap_or_else(|| json!([]))});
+        if let Err(error) = self.bind_scope_context_origin(config, &mut input) {
+            self.set_batch_config_notice(format!("{error:#}"));
+            return InputUpdate::handled();
+        }
+        super::launch::bind_brief_input(&mut input, config);
+        input["useBriefGuidance"] = json!(config
+            .context_generation
+            .as_ref()
+            .is_some_and(|generation| generation.use_brief_guidance));
         self.dispatch_context_action("campaign:context-study", input)
     }
 
@@ -322,6 +419,11 @@ impl ShellApp {
     }
 
     fn inspect_generated_context(&mut self, reference: ThreatModelRef) -> InputUpdate {
+        let scope_id = self
+            .context_generation()
+            .and_then(|generation| generation.context_input.pointer("/scanScopeRef/scopeId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         self.retain_setup_context_study();
         if self.study_context_picker().is_none() {
             self.open_study_context_picker();
@@ -336,6 +438,9 @@ impl ShellApp {
             .as_mut()
             .and_then(|config| config.context_picker.as_mut())
         {
+            if scope_id.is_some() {
+                picker.scope_id = scope_id;
+            }
             picker.selected = Some(reference);
             picker.preview = None;
             picker.detail_scroll = 0;
@@ -344,7 +449,10 @@ impl ShellApp {
             picker.diagram_visible = false;
         }
         if let Some(config) = self.router.campaign_mut().batch_scan_config.as_mut() {
-            config.context_generation = None;
+            let generation = config.context_generation.take();
+            if let Some(picker) = config.context_picker.as_mut() {
+                picker.return_generation = generation.map(Box::new);
+            }
         }
         self.inspect_study_context()
     }
@@ -358,6 +466,7 @@ impl ShellApp {
             return InputUpdate::handled();
         };
         self.retain_setup_context_study();
+        self.retain_lesson_study();
         self.router.campaign_mut().batch_scan_config = None;
         self.open_batch_results(&receipt.campaign_id);
         self.router.campaign_mut().notice = Some(notice);
@@ -380,6 +489,11 @@ impl ShellApp {
         let body = crate::ui_view_models::context_generation::generation_body(
             viewport.columns,
             viewport.rows,
+            self.context_generation().is_some_and(|generation| {
+                generation.is_regeneration()
+                    || generation.is_lesson()
+                    || generation.supports_brief_guidance()
+            }),
         );
         let count =
             crate::ui_view_models::context_generation::generation_lines(self, body.width as usize)

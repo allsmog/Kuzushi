@@ -1,4 +1,5 @@
 use super::*;
+mod compact_map_summary;
 mod prove_result_reading;
 use crate::ui_view_models::PhaseSurfaceId;
 
@@ -855,6 +856,11 @@ fn first_map_run_chip_never_reads_scan_before_its_terminal_event() {
     app.set_active_tool_run_id_for_test("map-run-1");
     app.set_running_tool_for_test("context:build");
     app.set_shell_view(ShellView::Activity);
+    // A fresh target opens Setup; `Start Map` commits the engagement (and
+    // with it the journey chip) before the first Map run launches.
+    app.engagement
+        .planning_picker_mut()
+        .set_return_to_setup(false);
 
     let mut chips = vec![crate::ui_view_models::journey_footer_segment(&app)];
 
@@ -2402,6 +2408,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::ExportReport(_)
+        | ShellEffect::PersistReportChoices
         | ShellEffect::RevealReportDestination
         | ShellEffect::WorkspaceExportFindings(_)
         | ShellEffect::WorkspaceReindex(_)
@@ -2570,6 +2577,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::ExportReport(_)
+        | ShellEffect::PersistReportChoices
         | ShellEffect::RevealReportDestination
         | ShellEffect::WorkspaceExportFindings(_)
         | ShellEffect::WorkspaceReindex(_)
@@ -2687,6 +2695,7 @@ fn threat_regen_and_inline_ask_return_effects_without_spawning_workers() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::ExportReport(_)
+        | ShellEffect::PersistReportChoices
         | ShellEffect::RevealReportDestination
         | ShellEffect::WorkspaceExportFindings(_)
         | ShellEffect::WorkspaceReindex(_)
@@ -2780,6 +2789,7 @@ fn threat_regen_and_inline_ask_return_effects_without_spawning_workers() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::ExportReport(_)
+        | ShellEffect::PersistReportChoices
         | ShellEffect::RevealReportDestination
         | ShellEffect::WorkspaceExportFindings(_)
         | ShellEffect::WorkspaceReindex(_)
@@ -4144,6 +4154,7 @@ enum EffectKind {
     RefreshDeterministicRecommendations,
     EditPromptOverride,
     ExportReport,
+    PersistReportChoices,
     ListPromptOverrides,
     LoadDynamicModule,
     OfflineDemo,
@@ -4249,6 +4260,7 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::DiffPromptOverride(_) => EffectKind::DiffPromptOverride,
         ShellEffect::EditPromptOverride(_) => EffectKind::EditPromptOverride,
         ShellEffect::ExportReport(_) => EffectKind::ExportReport,
+        ShellEffect::PersistReportChoices => EffectKind::PersistReportChoices,
         ShellEffect::ListPromptOverrides(_) => EffectKind::ListPromptOverrides,
         ShellEffect::LoadDynamicModule(_) => EffectKind::LoadDynamicModule,
         ShellEffect::OpenFilePicker => EffectKind::OpenFilePicker,
@@ -8419,7 +8431,7 @@ fn configured_anthropic_oauth_environment_token_is_reported_as_oauth() {
     );
     assert_eq!(
         crate::ui_view_models::configured_model_credential_readiness(&app),
-        crate::ui_view_models::CredentialReadiness::OAuth
+        crate::ui_view_models::CredentialReadiness::OAuthEnvironment
     );
     let choice = model_choices()
         .iter()
@@ -8427,7 +8439,7 @@ fn configured_anthropic_oauth_environment_token_is_reported_as_oauth() {
         .expect("Anthropic model");
     assert_eq!(
         crate::ui_view_models::model_auth_status(&app, choice),
-        "OAuth ready (environment token)"
+        "OAuth token present (environment)"
     );
 }
 
@@ -10387,8 +10399,11 @@ fn journey_counts_every_finding_beyond_the_display_limit() {
         .expect("journey")
         .progress;
     assert_eq!(progress.finding_total, 501);
-    assert_eq!(progress.reviewed_findings, 501);
-    assert_eq!(progress.confirmed_findings, 501);
+    assert_eq!(
+        progress.reviewed_findings, 0,
+        "unattributed verdicts without source evidence remain open"
+    );
+    assert_eq!(progress.confirmed_findings, 0);
 }
 
 fn seed_confirmed_journey_findings(store: &FindingStore, root: &Path, count: usize) {
@@ -13194,6 +13209,9 @@ fn make_projected_duplicate(severity: Severity, fp: &str, title: &str) -> Findin
 }
 
 fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
+    if let HotkeyTrigger::ControlChar(ch) = trigger {
+        return KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL);
+    }
     let code = hotkey_trigger_code(trigger);
     KeyEvent::new(code, KeyModifiers::empty())
 }
@@ -14569,7 +14587,7 @@ fn cleared_multiline_draft_restores_its_full_payload() {
 }
 
 #[test]
-fn vi_cursor_navigates_findings_list() {
+fn vi_cursor_navigates_findings_list_and_groups_owns_uppercase_g() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
     app.router
@@ -14618,7 +14636,9 @@ fn vi_cursor_navigates_findings_list() {
         &mut app,
         KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()),
     );
-    assert_eq!(app.router.findings().cursor(), 2);
+    assert_eq!(app.shell_view(), ShellView::Relationships);
+    assert!(app.router.relationships.show_groups);
+    assert_eq!(app.router.findings().cursor(), 0);
 }
 
 #[test]
@@ -15283,6 +15303,44 @@ fn wide_fix_tab_cycles_only_meaningful_rendered_surfaces() {
 }
 
 #[test]
+fn advertised_last_row_key_still_jumps_on_pages_where_it_is_not_shadowed() {
+    // Review's ledger owns `G`; elsewhere the advertised `G` must still
+    // dispatch `workbench_jump(false)` on the focused scrollable surface.
+    let (_target, mut app) = app_with_findings_and_full_phase_access(25);
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Fix));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::FixRemediation);
+    let last = app
+        .view_keybindings()
+        .into_iter()
+        .find(|binding| binding.action == ViewHotkeyAction::WorkbenchScrollLast)
+        .expect("Fix advertises a last-row binding");
+    assert_eq!(last.hint, "g/G");
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::FixRemediation),
+        0
+    );
+
+    press_key(&mut app, key_event_for_trigger(last.trigger));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::FixRemediation),
+        u16::MAX
+    );
+}
+
+#[test]
 fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
     let mut app = app_with_findings(25);
     let advertised = app.view_keybindings();
@@ -15314,7 +15372,24 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             && binding.label == "defer proof"
     }));
 
-    for binding in advertised {
+    // Drive each binding in the same mode and state that advertises it: the
+    // Navigate-mode Review ledger adds its own keys and owns `G` (groups).
+    let navigate_advertised = {
+        let (_target, mut app) = app_with_findings_and_full_phase_access(25);
+        app.set_input_mode(crate::InputMode::Navigate);
+        app.view_keybindings()
+    };
+    assert!(navigate_advertised.iter().any(|binding| {
+        binding.hint == "G" && binding.action == ViewHotkeyAction::FindingGroupsOpen
+    }));
+    assert!(
+        navigate_advertised
+            .iter()
+            .all(|binding| binding.hint != "g/G"
+                && binding.action != ViewHotkeyAction::WorkbenchScrollLast),
+        "a shadowed `G` last-row jump must not be advertised beside `G` groups"
+    );
+    for binding in navigate_advertised {
         let (_target, mut app) = app_with_findings_and_full_phase_access(25);
         app.set_input_mode(crate::InputMode::Navigate);
         match binding.action {
@@ -15358,17 +15433,6 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 app.router.findings_mut().set_cursor(7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 0);
-            }
-            ViewHotkeyAction::WorkbenchScrollLast => {
-                app.router
-                    .workbench_mut()
-                    .set_page(Some(WorkbenchPage::Review));
-                app.router
-                    .workbench_mut()
-                    .set_focus(PhaseSurfaceId::ReviewQueue);
-                app.router.findings_mut().set_cursor(7);
-                press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.router.findings().cursor(), 24);
             }
             ViewHotkeyAction::WorkbenchOpenFocusedVisualization => {
                 use crate::scene3d::VizPage;
@@ -15525,6 +15589,19 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.shell_view(), ShellView::Workbench);
                 assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+            }
+            ViewHotkeyAction::WorkbenchReviewLedgerFilter => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.input(), "findings filter ");
+                assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+            }
+            ViewHotkeyAction::RelationshipsOpen | ViewHotkeyAction::FindingGroupsOpen => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.shell_view(), ShellView::Relationships);
+            }
+            ViewHotkeyAction::LessonsOpen => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.shell_view(), ShellView::Lessons);
             }
             other => panic!("unexpected workbench hotkey action: {other:?}"),
         }
@@ -18132,21 +18209,25 @@ fn background_tool_failure_logs_failure_handoff_context() {
         .find(|line| line.prefix == "result")
         .map(|line| line.body.clone())
         .unwrap_or_default();
-    assert!(result_log.contains("\"status\": \"failed\""));
-    assert!(result_log.contains("\"fallback_context\""));
-    assert!(result_log.contains("\"failedStage\": \"semgrep:scan\""));
+    assert!(result_log.starts_with("failed"));
+    assert!(result_log.contains("Stage: semgrep:scan"));
     assert!(result_log.contains("semgrep binary missing"));
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "failure-context"
-            && line.body.contains("stage: semgrep:scan")
-            && line.body.contains("cause: semgrep binary missing")
-            && line.body.contains("artifact-review-only")
-            && line.body.contains("missing:")
-            && line.body.contains("recovery:")
-            && line.body.contains("forbidden claims")
-            && line.body.contains("empirical proof claim")
-            && !line.body.contains("validated")
-    }));
+    assert!(result_log.contains("Details: failure"));
+    assert!(!app
+        .log_lines()
+        .iter()
+        .any(|line| line.prefix == "failure-context"));
+    let stored: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            kuzushi_core::run_dir(tmp.path(), "tool-failed").join("result.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored["fallback_context"]["failedStage"], "semgrep:scan");
+    assert!(stored["fallback_context"]["claimsForbidden"]
+        .as_array()
+        .is_some_and(|claims| !claims.is_empty()));
     assert!(app
         .agent_chat()
         .and_then(|agent| agent.failure_context.as_ref())
@@ -18321,7 +18402,7 @@ fn terminal_scan_effects_use_target_captured_at_launch() {
 }
 
 #[test]
-fn background_tool_partial_result_logs_fallback_context_in_result() {
+fn background_tool_partial_result_keeps_a_readable_receipt_and_persisted_context() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
@@ -18369,8 +18450,17 @@ fn background_tool_partial_result_logs_fallback_context_in_result() {
         .find(|line| line.prefix == "result")
         .map(|line| line.body.clone())
         .unwrap_or_default();
-    assert!(result_log.contains("fallback_context"));
-    assert!(result_log.contains("\"failedStage\": \"codeql:scan\""));
+    assert!(result_log.contains("partial"), "{result_log}");
+    assert!(result_log.contains("Stage: codeql:scan"), "{result_log}");
+    assert!(result_log.contains("codeql binary missing"), "{result_log}");
+    assert!(result_log.contains("Details: failure"), "{result_log}");
+    assert!(!result_log.contains("fallback_context"));
+    let recorded =
+        kuzushi_core::run_artifacts::load_run_failure_context(tmp.path(), "tool-partial")
+            .unwrap()
+            .unwrap();
+    assert_eq!(recorded.failed_stage, "codeql:scan");
+    assert!(recorded.cause.contains("codeql binary missing"));
     assert!(app
         .agent_chat()
         .and_then(|agent| agent.pending_failure_context.as_ref())
@@ -20600,6 +20690,12 @@ fn scan_completion_auto_opens_the_findings_heatmap() {
         make_finding(Severity::High, "fp-viz-1", "x"),
         make_finding(Severity::High, "fp-viz-2", "x"),
     ]);
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-viz", workspace.root(), "completed")
+        .unwrap();
+    store.insert_findings("run-viz", app.findings()).unwrap();
     seed_scan_run_artifacts(target.path(), "run-viz");
     let effects = app.apply_scan_finished("run-viz".to_string(), 2);
     EffectRuntime::execute(&mut app, effects);
@@ -24817,3 +24913,24 @@ fn entry_point_rows() -> serde_json::Value {
 mod source_investigation;
 
 mod report_scan_attempt;
+
+#[test]
+fn generated_recommendations_reader_opens_without_starting_work_or_changing_draft() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.path().to_path_buf()));
+    app.open_setup();
+    app.set_input("held operator draft");
+    let effects = app
+        .reduce_command_effects(&ShellCommand::RecommendationReport)
+        .unwrap();
+    assert!(effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Recommend);
+    assert_eq!(app.input(), "held operator draft");
+    assert!(app.engagement.current_phase().is_none());
+    assert!(!app.tool_is_running());
+    assert_eq!(
+        crate::commands::parse_command("recommendations"),
+        ShellCommand::RecommendationReport
+    );
+}

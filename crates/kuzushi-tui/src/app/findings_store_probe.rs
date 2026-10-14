@@ -122,7 +122,7 @@ impl ShellApp {
             .runtime_state
             .findings_store_probe_mut()
             .observe(now, stamp);
-        if !moved || self.findings_projection_is_current(&target) {
+        if !moved || !self.findings_projection_refresh_needed(&target) {
             return Vec::new();
         }
         vec![ShellEffect::RefreshFindings(FindingsRefresh {

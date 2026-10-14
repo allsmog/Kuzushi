@@ -347,6 +347,7 @@ fn filtered_pinned_finding_is_disclosed_and_action_targets_stay_visible() {
         Severity::Low,
         "untrusted value reaches log output",
     );
+    assert_ne!(visible.fingerprint, pinned.fingerprint);
     *app.findings_mut() = vec![pinned.clone(), visible];
     *app.selected_finding_mut() = Some(pinned.clone());
     app.set_active_findings_filter(Some("rank:low".to_string()));
@@ -357,13 +358,15 @@ fn filtered_pinned_finding_is_disclosed_and_action_targets_stay_visible() {
         panic!("expected review body");
     };
     assert_eq!(review.review.rows.len(), 1);
-    assert_ne!(
-        review.finding.expect("visible detail").fingerprint,
+    assert_eq!(
+        review.finding.expect("pinned detail").fingerprint,
         pinned.fingerprint
     );
     let disclosure = review.selection_disclosure.expect("review disclosure");
-    assert!(disclosure.message.contains("highlighted visible row"));
-    assert_eq!(disclosure.filter, "rank:low");
+    assert!(disclosure
+        .message
+        .contains("pinned outside list; decisions use this detail"));
+    assert_eq!(disclosure.filter.as_deref(), Some("rank:low"));
 
     for phase in [WorkflowPhase::Prove, WorkflowPhase::Fix] {
         let disclosure = match phase_cockpit_model_for_phase(&app, phase).body {
@@ -858,7 +861,7 @@ fn a_map_card_makes_no_finding_claim_it_cannot_measure() {
     };
     let rendered = compact_result_summary(&summary);
     assert!(!rendered.contains("findings"), "{rendered}");
-    assert!(rendered.ends_with("16 artifact(s)"), "{rendered}");
+    assert!(rendered.ends_with("receipt links 16"), "{rendered}");
 
     summary.finding_delta_observed = Some(true);
     assert!(compact_result_summary(&summary).ends_with("findings +0"));

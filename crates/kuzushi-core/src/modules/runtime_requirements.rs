@@ -157,6 +157,7 @@ fn threat_model_build_needs_runtime(input: &Value) -> bool {
 
 fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
     match tool_name {
+        "module-recommender:recommend" => Some(crate::capabilities::module_recommender::model_ranking_enabled(input)),
         "verify:finding" => Some(!super::verification_is_empirical(input)),
         "context:build" => Some(context_build_needs_runtime(input)),
         "offense:chain" => Some(
@@ -195,13 +196,9 @@ fn patch_reverify_needs_runtime(input: &Value) -> bool {
     tool_needs_runtime(tool, detector_input)
 }
 
-fn module_recommender_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> bool {
+fn module_recommender_wants_runtime(tool_name: &str, input: &Value, _config: &V2Config) -> bool {
     tool_name == "module-recommender:recommend"
-        && config.model.is_some()
-        && input
-            .get("useModelRanking")
-            .and_then(Value::as_bool)
-            .unwrap_or(true)
+        && crate::capabilities::module_recommender::model_ranking_enabled(input)
 }
 
 fn full_mode_hunt_needs_runtime(input: &Value) -> bool {
@@ -427,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn recommender_wants_runtime_only_when_model_ranking_is_enabled_with_model() {
+    fn recommender_requests_runtime_only_for_explicit_model_ranking() {
         let mut config = V2Config::default();
         assert!(!tool_wants_runtime(
             "module-recommender:recommend",
@@ -435,8 +432,9 @@ mod tests {
             &config
         ));
 
+        assert!(tool_wants_runtime("module-recommender:recommend", &json!({"useModelRanking":true}), &config));
         config.model = Some("openai:gpt-5.4".to_string());
-        assert!(tool_wants_runtime(
+        assert!(!tool_wants_runtime(
             "module-recommender:recommend",
             &json!({}),
             &config

@@ -37,6 +37,8 @@ impl TryFrom<&str> for SecretSeverity {
 
 #[derive(Debug, Clone)]
 pub struct SecretScanOptions {
+    pub max_entries: usize,
+    pub max_total_bytes: u64,
     pub max_file_bytes: u64,
     pub exclude_dirs: BTreeSet<String>,
     pub binary_exts: BTreeSet<String>,
@@ -47,6 +49,8 @@ pub struct SecretScanOptions {
 impl Default for SecretScanOptions {
     fn default() -> Self {
         Self {
+            max_entries: 100_000,
+            max_total_bytes: 512 * 1024 * 1024,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             exclude_dirs: DEFAULT_EXCLUDE_DIRS
                 .iter()
@@ -73,6 +77,7 @@ impl SecretScanOptions {
     }
 
     fn apply_limits(&mut self, input: &Value) -> Result<()> {
+        self.apply_inspection_limits(input)?;
         if let Some(value) = bounded_u64(
             input,
             "maxFileBytes",
@@ -83,6 +88,16 @@ impl SecretScanOptions {
         }
         if let Some(value) = bounded_u64(input, "maxFindings", 1, MAX_SUPPORTED_FINDINGS)? {
             self.max_findings = value as usize;
+        }
+        Ok(())
+    }
+
+    fn apply_inspection_limits(&mut self, input: &Value) -> Result<()> {
+        if let Some(value) = bounded_u64(input, "maxEntries", 1, 100_000)? {
+            self.max_entries = value as usize;
+        }
+        if let Some(value) = bounded_u64(input, "maxTotalBytes", 1024, 536_870_912)? {
+            self.max_total_bytes = value;
         }
         Ok(())
     }

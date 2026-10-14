@@ -50,18 +50,22 @@ pub fn model_recommended_in_phase(
     rows.iter()
         .filter(|row| row.id.phase() == phase && row.cli_available)
         .filter(|row| row.id != PlanningTaskId::DecomposeModules && model_tasks.contains(&row.id))
+        .filter(|row| row.id != PlanningTaskId::ImportThreatModel)
         .map(|row| row.id)
         .collect()
 }
 
 fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
+    if row.id == PlanningTaskId::ImportThreatModel {
+        return false;
+    }
     if let Some(preselect) = ledger_preselect(row) {
         return preselect;
     }
     use PlanningTaskId::*;
     match row.id {
         // 組 KUMI-KATA · map — foundational artifacts when not already cached.
-        AttachFiles => false,
+        AttachFiles | ImportThreatModel => false,
         GatherRepoContext | MapEntryPoints => missing_artifact(row),
         // Only an operator selection requests subdivision, including retries.
         // File count and model suggestions never select it automatically.

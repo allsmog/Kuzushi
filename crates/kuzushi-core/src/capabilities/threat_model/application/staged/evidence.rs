@@ -20,7 +20,11 @@ pub(crate) fn retain_indexed_evidence(
     warnings
 }
 
-fn retain_threat_evidence(threat: &mut Value, index: &BTreeSet<String>, warnings: &mut Vec<String>) {
+fn retain_threat_evidence(
+    threat: &mut Value,
+    index: &BTreeSet<String>,
+    warnings: &mut Vec<String>,
+) {
     let threat_label = threat_label(threat);
     let Some(evidence) = threat.get_mut("evidence").and_then(Value::as_array_mut) else {
         return;
@@ -122,7 +126,11 @@ pub(crate) fn stable_threat_id(key: &str) -> String {
 /// canonicalized first (low->rare, medium->possible, high->likely).
 /// Vocabulary outside the closed band set passes through unchanged — no
 /// fabricated confidence.
-pub(crate) fn adjusted_likelihood(base: &str, evidence_rows: usize, sibling_count: usize) -> String {
+pub(crate) fn adjusted_likelihood(
+    base: &str,
+    evidence_rows: usize,
+    sibling_count: usize,
+) -> String {
     const BANDS: [&str; 5] = ["very_rare", "rare", "possible", "likely", "almost_certain"];
     let Some(canonical) = crate::capabilities::threat_model::normalize_likelihood(base) else {
         return base.to_string();
@@ -181,7 +189,10 @@ fn collect_display_ids(
         by_stable_id
             .entry(stable_id.to_string())
             .or_insert_with(|| display_id.to_string());
-        if let Some(index) = display_id.strip_prefix('T').and_then(|n| n.parse::<usize>().ok()) {
+        if let Some(index) = display_id
+            .strip_prefix('T')
+            .and_then(|n| n.parse::<usize>().ok())
+        {
             *next_index = (*next_index).max(index + 1);
         }
     }
@@ -224,8 +235,7 @@ mod tests {
                 ]
             }]
         });
-        let index: BTreeSet<String> =
-            ["fp3_real".to_string(), "fp3_also_real".to_string()].into();
+        let index: BTreeSet<String> = ["fp3_real".to_string(), "fp3_also_real".to_string()].into();
         let warnings = retain_indexed_evidence(&mut document, &index);
         let evidence = document["threats"][0]["evidence"].as_array().unwrap();
         assert_eq!(evidence.len(), 2);
@@ -242,14 +252,23 @@ mod tests {
             ]
         });
         assign_stable_ids(&mut document);
-        let first = document["threats"][0]["stableId"].as_str().unwrap().to_string();
-        let second = document["threats"][1]["stableId"].as_str().unwrap().to_string();
+        let first = document["threats"][0]["stableId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let second = document["threats"][1]["stableId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert!(first.starts_with("tm-") && first.len() == 15);
         assert!(
             first[3..].chars().all(|c| c.is_ascii_hexdigit()),
             "stableId must be tm-<12 hex>, got {first}"
         );
-        assert_eq!(first, second, "same cluster key must yield the same stableId");
+        assert_eq!(
+            first, second,
+            "same cluster key must yield the same stableId"
+        );
     }
 
     #[test]
@@ -258,7 +277,10 @@ mod tests {
         assert_eq!(adjusted_likelihood("rare", 3, 0), "possible");
         assert_eq!(adjusted_likelihood("possible", 3, 3), "almost_certain");
         assert_eq!(adjusted_likelihood("likely", 9, 9), "almost_certain");
-        assert_eq!(adjusted_likelihood("almost_certain", 9, 9), "almost_certain");
+        assert_eq!(
+            adjusted_likelihood("almost_certain", 9, 9),
+            "almost_certain"
+        );
     }
 
     #[test]
@@ -266,7 +288,10 @@ mod tests {
         assert_eq!(adjusted_likelihood("low", 0, 0), "rare");
         assert_eq!(adjusted_likelihood("medium", 0, 0), "possible");
         assert_eq!(adjusted_likelihood("high", 0, 0), "likely");
-        assert_eq!(adjusted_likelihood("out-of-vocabulary", 9, 9), "out-of-vocabulary");
+        assert_eq!(
+            adjusted_likelihood("out-of-vocabulary", 9, 9),
+            "out-of-vocabulary"
+        );
     }
 
     #[test]

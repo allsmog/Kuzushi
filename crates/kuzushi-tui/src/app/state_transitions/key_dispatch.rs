@@ -10,6 +10,9 @@ use serde_json::Value;
 mod catalog_picker;
 mod pending_result_reader;
 
+#[cfg(test)]
+mod restore_tests;
+
 #[derive(Clone, Copy)]
 enum JourneyPhaseEntry {
     Workbench,
@@ -57,7 +60,10 @@ impl ShellApp {
     }
 
     fn reduce_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        let update = self.handle_modal_key(key);
+        let update = self
+            .handle_lesson_key(key)
+            .or_else(|| self.handle_relationship_key(key))
+            .unwrap_or_else(|| self.handle_modal_key(key));
         if update.handled {
             return Some(update);
         }
@@ -471,6 +477,11 @@ impl ShellApp {
         }
         if continue_after {
             self.open_rederived_journey_destination();
+        } else {
+            // Keep the inferred result page after its pending anchor disappears.
+            self.router
+                .workbench_mut()
+                .set_page(Some(WorkbenchPage::from_phase(phase)));
         }
     }
 
@@ -895,6 +906,9 @@ impl ShellApp {
     }
 
     fn handle_owned_surface_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if let Some(update) = self.handle_owned_reader_key(key) {
+            return Some(update);
+        }
         if let Some(update) = self.handle_scope_review_key(key) {
             return Some(update);
         }
@@ -902,6 +916,11 @@ impl ShellApp {
             return Some(InputUpdate::handled());
         }
         self.handle_modal_editor_key(key)
+    }
+
+    fn handle_owned_reader_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        self.handle_logs_reader_key(key)
+            .or_else(|| self.handle_context_history_key(key))
     }
 
     fn handle_phase_rerun_review_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -1823,6 +1842,20 @@ impl ShellApp {
         if !modifiers.ctrl {
             return InputUpdate::ignored();
         }
+        if let Some(update) = self.handle_control_view_key(key) {
+            return update;
+        }
+        self.handle_default_control_key(key)
+    }
+
+    fn handle_control_view_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let binding = self.view_keybindings().into_iter().find(|binding| {
+            matches!(binding.trigger, HotkeyTrigger::ControlChar(_)) && binding.matches(key)
+        })?;
+        Some(self.apply_view_hotkey(binding.action))
+    }
+
+    fn handle_default_control_key(&mut self, key: KeyEvent) -> InputUpdate {
         if key.code == KeyCode::Char('g')
             && self
                 .ui()
@@ -1972,7 +2005,16 @@ fn review_search_anchor(finding: &kuzushi_core::Finding) -> String {
 /// Fold terminal-specific keystroke encodings into the canonical form every
 /// binding in this crate matches, before any owner sees the key.
 fn normalize_terminal_key_encoding(key: KeyEvent) -> KeyEvent {
-    normalize_line_feed_enter(normalize_back_tab(key))
+    normalize_line_feed_enter(normalize_legacy_restore_key(normalize_back_tab(key)))
+}
+
+// Legacy terminals send Ctrl+_ as byte 0x1f, which Crossterm decodes as Ctrl+7.
+// Route that encoding to the same restore action as enhanced Ctrl+_ reports.
+fn normalize_legacy_restore_key(key: KeyEvent) -> KeyEvent {
+    if key.code == KeyCode::Char('7') && key.modifiers == KeyModifiers::CONTROL {
+        return KeyEvent::new(KeyCode::Char('_'), KeyModifiers::CONTROL);
+    }
+    key
 }
 
 /// Terminals speaking an enhanced keyboard protocol (kitty CSI-u,
@@ -3127,6 +3169,11 @@ mod tests {
             app.router.scene().page(),
             crate::scene3d::VizPage::Summary,
             "accepting a new Map returns its embedded gallery to Summary"
+        );
+        assert_eq!(
+            crate::ui_view_models::active_workbench_page(&app),
+            WorkbenchPage::Map,
+            "Use stays on the inferred result page; Continue owns progression"
         );
     }
 

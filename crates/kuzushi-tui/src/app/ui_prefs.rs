@@ -296,6 +296,10 @@ impl UiPrefs {
         self.last_operator_interaction = Some(now);
     }
 
+    pub(crate) fn operator_interaction_stamp(&self) -> Option<Instant> {
+        self.last_operator_interaction
+    }
+
     /// External writers (other sessions, detached campaigns) changing
     /// workspace state are real activity even though no local worker runs —
     /// the liveness badge must not claim "idle" while they churn.

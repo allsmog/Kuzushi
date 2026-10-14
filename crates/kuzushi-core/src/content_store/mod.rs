@@ -151,6 +151,29 @@ impl ContentStore {
         read_content_object(&path)
     }
 
+    pub(crate) fn get_blob_bounded(
+        &self,
+        hash: &Blake3Hash,
+        limit: usize,
+    ) -> Result<Option<Vec<u8>>> {
+        let path = self.object_path(hash);
+        self.validate_object_parent(&path)?;
+        if !existing_object_is_file(&path)? {
+            return Ok(None);
+        }
+        let file = crate::bounded_file::open_regular_file(&path)?;
+        let mut bytes = Vec::new();
+        file.take(limit as u64 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > limit {
+            return Ok(None);
+        }
+        anyhow::ensure!(
+            object_hash(ObjectKind::Blob, &bytes) == *hash,
+            "Captured source failed its content integrity check"
+        );
+        Ok(Some(bytes))
+    }
+
     pub fn get_object(&self, object_ref: &ObjectRef) -> Result<Vec<u8>> {
         if object_ref.size_bytes > MAX_CONTENT_OBJECT_BYTES {
             anyhow::bail!(

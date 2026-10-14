@@ -55,6 +55,9 @@ fn ordering_influence(mode: crate::config::ReviewYieldMode) -> &'static str {
 }
 
 const VULN_FINDINGS_OMITTED: &[&str] = &[
+    "reviewDecisionBasis",
+    "lessons",
+    "relationships",
     "identityId",
     "priority",
     "lifecycleStatus",
@@ -67,6 +70,8 @@ const VULN_FINDINGS_OMITTED: &[&str] = &[
 ];
 
 const CSV_OMITTED: &[&str] = &[
+    "reviewDecisionBasis",
+    "lessons",
     "cwe",
     "reviewDecisionReason",
     "snoozedUntil",
@@ -84,6 +89,7 @@ const CSV_OMITTED: &[&str] = &[
     "provenance.runtimePlatform",
     "references",
     "message",
+    "relationships",
 ];
 
 const MARKDOWN_BUNDLE_OMITTED: &[&str] = &[
@@ -133,5 +139,28 @@ pub fn workspace_export_omitted_fields(format: WorkspaceExportFormat) -> Vec<&'s
         WorkspaceExportFormat::Csv => CSV_OMITTED.to_vec(),
         WorkspaceExportFormat::Sarif => vec!["references"],
         WorkspaceExportFormat::MarkdownBundle => MARKDOWN_BUNDLE_OMITTED.to_vec(),
+    }
+}
+
+#[cfg(test)]
+mod source_basis_tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_row_formats_disclose_the_omitted_source_basis() {
+        for format in [
+            WorkspaceExportFormat::Csv,
+            WorkspaceExportFormat::VulnFindings,
+        ] {
+            assert!(workspace_export_omitted_fields(format).contains(&"reviewDecisionBasis"));
+        }
+        for format in [
+            WorkspaceExportFormat::Json,
+            WorkspaceExportFormat::Jsonl,
+            WorkspaceExportFormat::Sarif,
+            WorkspaceExportFormat::MarkdownBundle,
+        ] {
+            assert!(!workspace_export_omitted_fields(format).contains(&"reviewDecisionBasis"));
+        }
     }
 }

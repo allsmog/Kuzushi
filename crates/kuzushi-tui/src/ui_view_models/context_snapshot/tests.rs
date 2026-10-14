@@ -34,6 +34,7 @@ fn context_snapshot_model_projects_present_snapshot() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
 
     let model = context_snapshot_model(&app);
@@ -146,6 +147,7 @@ fn plain_context_model_projects_present_snapshot_details() {
             stale_slices: Vec::new(),
             enrichment_claims: 0,
             enrichment_model: None,
+            inspection: None,
         });
 
     let model = plain_context_model(&app);

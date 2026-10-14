@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HotkeyTrigger {
     Char(char),
+    ControlChar(char),
     Enter,
     Tab,
     BackTab,
@@ -16,6 +17,9 @@ pub(crate) enum HotkeyTrigger {
 
 impl HotkeyTrigger {
     pub(crate) fn matches(self, key: KeyEvent) -> bool {
+        if let Self::ControlChar(expected) = self {
+            return key.code == KeyCode::Char(expected) && key.modifiers == KeyModifiers::CONTROL;
+        }
         // Allow SHIFT only when the trigger is an uppercase Char — terminals
         // typically deliver capital letters as `KeyCode::Char('R')` with
         // `KeyModifiers::SHIFT`. Other modifiers (Ctrl/Alt) always disqualify.
@@ -55,6 +59,21 @@ impl HotkeyTrigger {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewHotkeyAction {
+    RelationshipsOpen,
+    LessonsOpen,
+    FindingGroupsOpen,
+    RelationshipNext,
+    RelationshipPrevious,
+    RelationshipAccept,
+    RelationshipToggleSelection,
+    RelationshipSelectPage,
+    RelationshipClearSelection,
+    RelationshipReviewSelection,
+    RelationshipReject,
+    RelationshipRemove,
+    RelationshipsRefresh,
+    RelationshipsNextPage,
+    RelationshipsPreviousPage,
     CatalogActivate,
     CatalogToggleExpert,
     WorkbenchCyclePane,
@@ -84,6 +103,9 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchBacklogToggle,
     /// `/` on Review: open the incremental findings search capture.
     WorkbenchReviewSearch,
+    WorkbenchReviewLedgerFilter,
+    WorkbenchFindingsPageNext,
+    WorkbenchFindingsPagePrevious,
     WorkbenchCompareObservations,
     /// `/` on Logs: open the incremental transcript filter capture.
     LogsFilter,
@@ -99,6 +121,7 @@ pub(crate) enum ViewHotkeyAction {
     RecommendCursorNext,
     RecommendScanComponent,
     RecommendPromoteComponent,
+    RecommendRefresh,
     ThreatView(ThreatView),
     ThreatModelNext,
     ThreatModelPrevious,

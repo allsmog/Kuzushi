@@ -11,9 +11,28 @@
 mod allowance;
 mod approved_work;
 mod batch;
+mod brief;
+pub use approved_work::read_bounded_plan as read_campaign_plan_document;
 pub use approved_work::validate_campaign_report_approval;
+pub use brief::load_plan_brief;
+pub use brief::{
+    execute_brief, load_brief, load_current_brief, BriefDocument, BriefGuidanceV1, BriefReference,
+    BriefRevision, MAX_BRIEF_TEXT_BYTES,
+};
+mod context_experiment;
+mod context_matrix;
+mod scan_cases;
+mod scope_study;
+pub use scope_study::{
+    load_scope_study_receipt, validate_scope_study_plan, ScopeStudyCaseInput, ScopeStudyDraft,
+    ScopeStudyMetadataV1, ScopeStudyReceipt, SCOPE_STUDY_KIND,
+};
 pub mod coverage;
+mod dispatcher_control;
 mod dispatcher_lease;
+pub use dispatcher_control::{
+    read_campaign_dispatcher_error, request_campaign_dispatcher_stop, CampaignDispatcherControl,
+};
 mod map_allowance;
 mod parallel_safety;
 mod plan;
@@ -22,11 +41,24 @@ mod shards;
 pub mod snapshot;
 mod status;
 mod study_plan;
+pub use context_experiment::{load_study_context_experiment, ContextExperimentReceipt};
+pub use context_matrix::{
+    load_context_matrix_receipt, validate_context_matrix_plan, ContextCaseInput,
+    ContextMatrixDraft, ContextMatrixMetadataV1, ContextMatrixReceipt, FrozenContextCase,
+    CONTEXT_MATRIX_KIND, MAX_CONTEXT_CASES,
+};
 mod study_receipt;
 mod study_resources;
 pub use map_allowance::{load_accepted_map_allowance, load_selected_map_history_allowance};
+pub use study_resources::campaign_preview::{
+    CaseResourceEvidenceV1, ResourceScenario, StudyResourceEvidenceV1,
+};
 pub use study_resources::catalogue::{
     load_named_scan_usage, load_scan_usage_catalogue, ScanUsageCatalogue, SCAN_USAGE_HISTORY_LIMIT,
+};
+pub use study_resources::study_catalogue::{
+    load_study_usage_catalogue, StudyUsageCatalogue, StudyUsageChoice, STUDY_HISTORY_CHOICE_LIMIT,
+    STUDY_HISTORY_ENTRY_LIMIT,
 };
 pub use study_resources::{
     load_scan_resource_evidence, ScanResourceEvidence, StudyResourceProjection,
@@ -35,7 +67,7 @@ mod context_study;
 mod scope_allowance;
 pub use context_study::{
     execute_context_map, execute_context_study, load_context_study, scope_proposal_study_input,
-    ContextPreparationJob, ContextStudyReceipt, RejectedContextOutput,
+    ContextPreparationJob, ContextStudyReceipt, RejectedContextOutput, ScopeStudyOriginV1,
 };
 pub use scope_allowance::load_scope_proposal_allowance;
 pub use study_receipt::{

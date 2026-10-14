@@ -1,0 +1,315 @@
+name: Comfortable compact campaign recovery through the approved native investigation
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+keys: Down Enter
+require-live-snap: 25 MAP | map-plan
+keys: Down Down Down
+require-live-snap: 25 threat-model:import | import-choice
+keys: Space Enter
+require-live-snap: 25 Choose a context JSON path | missing-document
+keys: Down Enter
+require-live-snap: 25 Enter edits this path | import-options
+keys: Enter
+require-live-snap: 25 EDITING OPTION · threat-model:import | document-path
+type: .kuzushi/manual-context.json
+keys: Enter
+require-live-snap: 25 From: this run | saved-path
+keys: Escape
+require-live-snap: 25 TASKS FOCUS | return-to-tasks
+keys: Enter
+require-live-snap: 25 saves an inactive revision | configured-import
+resize: 160x48
+live-snap: import-setup-160x48
+resize: 96x89
+live-snap: import-setup-96x89
+resize: 80x24
+live-snap: import-setup-80x24
+resize: 60x20
+live-snap: import-setup-60x20
+resize: 40x12
+live-snap: import-setup-40x12
+expect: Start Map
+expect: Tab details
+keys: Tab
+require-live-snap: 25 SETUP DETAILS · Context import | complete-import-details
+resize: 160x48
+live-snap: setup-details-160x48
+resize: 96x89
+live-snap: setup-details-96x89
+resize: 80x24
+live-snap: setup-details-80x24
+resize: 60x20
+live-snap: setup-details-60x20
+resize: 40x12
+live-snap: setup-details-40x12
+keys: NPage
+live-snap: setup-details-page-1-40x12
+keys: NPage
+live-snap: setup-details-page-2-40x12
+keys: NPage
+live-snap: setup-details-page-3-40x12
+keys: NPage
+live-snap: setup-details-page-4-40x12
+keys: NPage
+live-snap: setup-details-page-5-40x12
+keys: NPage
+live-snap: setup-details-page-6-40x12
+keys: NPage
+live-snap: setup-details-page-7-40x12
+keys: NPage
+live-snap: setup-details-page-8-40x12
+keys: NPage
+live-snap: setup-details-page-9-40x12
+keys: NPage
+live-snap: setup-details-page-10-40x12
+ask: Can full import, source-check and planned-work explanations be read through ordinary paging while inspection starts no work and preserves the Setup selection?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/setup_reading.py @TMP_TARGET @ART unstarted
+keys: Tab
+require-live-snap: 25 SETUP · READINESS | return-from-details
+expect: Start Map
+resize: 120x36
+ask: Can supplied context be chosen and configured through visible Setup controls, with a missing-source blocker, an inactive revision and no model or credential requirement?
+keys: Down Down Down Down Down Enter
+require-live-snap: 45 SYSTEM SUMMARY | imported-map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+ask: Can manually supplied metadata context be inspected and accepted through real Map controls, with no invented runtime flows or provider requests?
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks license-scan
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study-form
+keys: Down Down Enter
+require-live-snap: 25 CHOOSE DISCOVERY ENGINES | engine-choice
+expect: [x] license-scan
+keys: a
+require-live-snap: 25 Discovery engines  license-scan | selected-engine
+keys: Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | review-calls
+type: 1
+keys: Enter L
+require-live-snap: 35 Draft ready | fixed-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART draft
+keys: L End
+require-live-snap: 25 y approve | allowance-review
+expect: Total provider calls: 1
+expect: Protected review calls: 1
+ask: Does approval retain exactly three native policy jobs and protect all call capacity for review without treating source metadata work as billable discovery?
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-study
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART drift
+keys: L
+require-live-snap: 30 different source | stale-source-refused
+ask: Does changed source refuse the approved plan before any discovery attempt, finding observation or provider reservation?
+resize: 160x48
+live-snap: refusal-160x48
+resize: 96x89
+live-snap: refusal-96x89
+resize: 80x24
+live-snap: refusal-80x24
+resize: 60x20
+live-snap: refusal-60x20
+expect-not: Esc compose
+resize: 40x12
+live-snap: refusal-40x12
+expect: Esc compose
+expect: Ctrl+G commands
+keys: Escape
+type: retained campaign draft
+live-snap: refusal-composer-40x12
+expect: retained campaign draft
+keys: Escape
+keys: Escape
+keys: C-7
+require-live-snap: 20 Esc compose | refusal-return-navigation-40x12
+keys: C-g
+require-live-snap: 20 COMMAND PALETTE | refusal-palette-40x12
+keys: Escape
+require-live-snap: 20 Esc compose | refusal-return-palette-40x12
+keys: Escape
+live-snap: refusal-retained-draft-40x12
+expect: retained campaign draft
+keys: Escape
+keys: Escape
+keys: C-7
+require-live-snap: 20 Esc compose | refusal-reader-after-draft-40x12
+ask: Can compact navigation return to the composer and palette without losing the draft or the refusal reading position?
+keys: NPage
+live-snap: refusal-page-1-40x12
+keys: NPage
+live-snap: refusal-page-2-40x12
+keys: NPage
+live-snap: refusal-page-3-40x12
+keys: NPage
+live-snap: refusal-page-4-40x12
+keys: NPage
+live-snap: refusal-page-5-40x12
+keys: NPage
+live-snap: refusal-page-6-40x12
+keys: NPage
+live-snap: refusal-page-7-40x12
+keys: NPage
+live-snap: refusal-page-8-40x12
+keys: NPage
+live-snap: refusal-page-9-40x12
+keys: NPage
+live-snap: refusal-page-10-40x12
+keys: NPage
+live-snap: refusal-page-11-40x12
+keys: NPage
+live-snap: refusal-page-12-40x12
+keys: NPage
+live-snap: refusal-page-13-40x12
+keys: NPage
+live-snap: refusal-page-14-40x12
+keys: NPage
+live-snap: refusal-page-15-40x12
+keys: NPage
+live-snap: refusal-page-16-40x12
+keys: NPage
+live-snap: refusal-page-17-40x12
+keys: NPage
+live-snap: refusal-page-18-40x12
+keys: NPage
+live-snap: refusal-page-19-40x12
+keys: NPage
+live-snap: refusal-page-20-40x12
+ask: Can the refusal's full cause and recovery guidance be read at every supported size while its job counts stay unchanged?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART restore
+keys: Escape C-u
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 BATCH | restored-source-plan
+nav-mode:
+keys: L
+require-live-snap: 30 dispatcher pid | started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 completed 3 / planned 3 | completed-study
+ask: Does the real controller execute exactly three approved policy passes with one worker, retain three observations and preserve the protected call capacity?
+submit: workbench
+require-live-snap: 30 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+submit: open F-0001
+require-live-snap: 25 Package manifest does not declare a license | policy-finding
+expect: signal-only
+submit: decision deferred Owned package policy needs an owner decision
+require-live-snap: 25 Owned package policy needs an owner decision | deferred
+submit: report
+require-live-snap: 25 Enter export | report
+keys: p
+require-live-snap: 25 REPORT | report-preview
+resize: 160x48
+live-snap: report-160x48
+resize: 96x89
+live-snap: report-96x89
+resize: 80x24
+live-snap: report-80x24
+resize: 60x20
+live-snap: report-60x20
+resize: 40x12
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-1-40x12
+keys: NPage
+live-snap: report-page-2-40x12
+keys: NPage
+live-snap: report-page-3-40x12
+keys: NPage
+live-snap: report-page-4-40x12
+keys: NPage
+live-snap: report-page-5-40x12
+keys: NPage
+live-snap: report-page-6-40x12
+keys: NPage
+live-snap: report-page-7-40x12
+keys: NPage
+live-snap: report-page-8-40x12
+keys: NPage
+live-snap: report-page-9-40x12
+keys: NPage
+live-snap: report-page-10-40x12
+keys: NPage
+live-snap: report-page-11-40x12
+keys: NPage
+live-snap: report-page-12-40x12
+keys: NPage
+live-snap: report-page-13-40x12
+keys: NPage
+live-snap: report-page-14-40x12
+keys: NPage
+live-snap: report-page-15-40x12
+keys: NPage
+live-snap: report-page-16-40x12
+keys: NPage
+live-snap: report-page-17-40x12
+keys: NPage
+live-snap: report-page-18-40x12
+keys: NPage
+live-snap: report-page-19-40x12
+keys: NPage
+live-snap: report-page-20-40x12
+keys: NPage
+live-snap: report-page-21-40x12
+keys: NPage
+live-snap: report-page-22-40x12
+keys: NPage
+live-snap: report-page-23-40x12
+keys: NPage
+live-snap: report-page-24-40x12
+keys: NPage
+live-snap: report-page-25-40x12
+keys: NPage
+live-snap: report-page-26-40x12
+keys: NPage
+live-snap: report-page-27-40x12
+keys: NPage
+live-snap: report-page-28-40x12
+keys: NPage
+live-snap: report-page-29-40x12
+keys: NPage
+live-snap: report-page-30-40x12
+ask: Does the report preserve the three-pass denominator, signal-only evidence and scripted deferral without upgrading repetition into confidence or a fix claim?
+resize: 120x36
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART exported
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | session-choices-warning
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 completed 3 / planned 3 | restored-study
+nav-mode:
+resize: 40x12
+live-snap: restored-study-40x12
+expect: Esc compose
+resize: 120x36
+submit: open F-0001
+require-live-snap: 25 Owned package policy needs an owner decision | restored-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_policy.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the approved workload, source/context identity, observations, decision and report without launching another job or consuming provider capacity?
+keys: C-c
+require-exit: 10

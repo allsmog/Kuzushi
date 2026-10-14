@@ -73,12 +73,40 @@ impl FindingListReport {
         rows
     }
 
+    fn ordered_aliased_rows(
+        &self,
+        order: crate::findings::FindingPageOrder,
+    ) -> Vec<(String, Finding)> {
+        let mut rows = self.aliased_rows();
+        if order == crate::findings::FindingPageOrder::Confidence {
+            rows.sort_by(|(_, left), (_, right)| {
+                crate::findings::compare_findings_by_confidence(left, right)
+            });
+        }
+        rows
+    }
+
     fn summary(&self) -> String {
         format!(
             "findings:list: {} matching finding{}",
             self.count,
             plural_suffix(self.count)
         )
+    }
+}
+
+impl crate::findings::FindingListPage {
+    pub fn to_tool_json(&self) -> Value {
+        let rows = self.report.ordered_aliased_rows(self.page.order);
+        let data = FindingListToolData::from_rows(&self.report, &rows);
+        let mut data = json!(data);
+        data["page"] = json!(self.page);
+        let mut lines = finding_list_output_for_rows(&self.report, rows);
+        lines.push(format!(
+            "Page: {} loaded, starting at {} of {} matching",
+            self.page.loaded, self.page.offset, self.page.total
+        ));
+        crate::module_result::completed_output_result(self.report.summary(), lines.join("\n"), data)
     }
 }
 
@@ -91,12 +119,21 @@ struct FindingListToolData {
 
 impl FindingListToolData {
     fn from_report(report: &FindingListReport) -> Self {
+        Self::from_rows(report, &report.aliased_rows())
+    }
+
+    fn from_rows(report: &FindingListReport, rows: &[(String, Finding)]) -> Self {
         Self {
             count: report.count,
-            findings: report
-                .aliased_rows()
+            findings: rows
                 .iter()
-                .map(|(alias, finding)| FindingListToolFinding::from_finding(alias, finding, report.review_decision(finding)))
+                .map(|(alias, finding)| {
+                    FindingListToolFinding::from_finding(
+                        alias,
+                        finding,
+                        report.review_decision(finding),
+                    )
+                })
                 .collect(),
         }
     }
@@ -116,6 +153,7 @@ struct FindingListToolFinding {
     tool: String,
     static_proof_state: Option<String>,
     proof_confidence: String,
+    suppressed: bool,
     review_decision: Option<String>,
     review_decision_author: Option<TriageAuthor>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -148,9 +186,13 @@ impl FindingListToolFinding {
                 .static_proof_state
                 .map(|state| state.as_str().to_string()),
             proof_confidence: ProofConfidence::classify(finding).as_str().to_string(),
-            review_decision: review.map(|decision| decision.verdict.as_str().to_string())
+            suppressed: finding.suppressed,
+            review_decision: review
+                .map(|decision| decision.verdict.as_str().to_string())
                 .or_else(|| review_decision_label(finding)),
-            review_decision_author: review.map(|decision| decision.author).or(finding.triaged_by),
+            review_decision_author: review
+                .map(|decision| decision.author)
+                .or(finding.triaged_by),
             observation_gap: finding.observation_gap.clone(),
             observation_note: crate::findings::observation_gap_note(finding),
             triaged_by: finding.triaged_by,
@@ -227,14 +269,18 @@ struct FindingTableWidths {
 }
 
 fn finding_list_output_lines(report: &FindingListReport) -> Vec<String> {
-    let aliased = report.aliased_rows();
+    finding_list_output_for_rows(report, report.aliased_rows())
+}
+
+fn finding_list_output_for_rows(
+    report: &FindingListReport,
+    aliased: Vec<(String, Finding)>,
+) -> Vec<String> {
     let widths = finding_table_widths(&aliased, report);
     let mut lines = finding_table_header(widths);
-    lines.extend(
-        aliased
-            .iter()
-            .map(|(alias, finding)| finding_table_row(alias, finding, report.verdict(finding), widths)),
-    );
+    lines.extend(aliased.iter().map(|(alias, finding)| {
+        finding_table_row(alias, finding, report.verdict(finding), widths)
+    }));
     lines.push(String::new());
     lines.push(matching_line(report));
     lines.extend(aliased.iter().filter_map(|(alias, finding)| {
@@ -243,7 +289,10 @@ fn finding_list_output_lines(report: &FindingListReport) -> Vec<String> {
     lines
 }
 
-fn finding_table_widths(aliased: &[(String, Finding)], report: &FindingListReport) -> FindingTableWidths {
+fn finding_table_widths(
+    aliased: &[(String, Finding)],
+    report: &FindingListReport,
+) -> FindingTableWidths {
     FindingTableWidths {
         alias: max_alias_width(aliased),
         fingerprint: max_fingerprint_width(aliased),
@@ -282,8 +331,13 @@ fn max_severity_width(findings: &[Finding]) -> usize {
 }
 
 fn max_verdict_width(report: &FindingListReport) -> usize {
-    report.findings.iter().map(|finding| report.verdict(finding).as_export_str().len())
-        .max().unwrap_or(5).max(5)
+    report
+        .findings
+        .iter()
+        .map(|finding| report.verdict(finding).as_export_str().len())
+        .max()
+        .unwrap_or(5)
+        .max(5)
 }
 
 fn max_name_width(findings: &[Finding]) -> usize {
@@ -318,7 +372,12 @@ fn finding_table_header(widths: FindingTableWidths) -> Vec<String> {
     ]
 }
 
-fn finding_table_row(alias: &str, finding: &Finding, verdict: FindingVerdictFilter, widths: FindingTableWidths) -> String {
+fn finding_table_row(
+    alias: &str,
+    finding: &Finding,
+    verdict: FindingVerdictFilter,
+    widths: FindingTableWidths,
+) -> String {
     format!(
         "  {}  {}  {}  {}  {}  {}",
         pad(alias, widths.alias),
@@ -328,10 +387,7 @@ fn finding_table_row(alias: &str, finding: &Finding, verdict: FindingVerdictFilt
             ProofConfidence::classify(finding).as_str(),
             widths.confidence
         ),
-        pad(
-            verdict.as_export_str(),
-            widths.verdict
-        ),
+        pad(verdict.as_export_str(), widths.verdict),
         finding.title
     )
 }

@@ -371,21 +371,31 @@ fn detail_title_lines(detail: &FindingDetailModel, width: usize) -> Vec<Line<'st
     // The description is the scanner's CLAIM — every asserting row states
     // whether it is a claim or a recorded observation, so the epistemic
     // status never depends on reading the adjacent ladder.
-    lines.push(Line::styled(
-        format!("claim · {}", claim_marker(detail.proof_tier)),
+    push_wrapped(
+        &mut lines,
+        &format!("claim · {}", claim_marker(detail)),
+        width,
+        "",
         theme::muted(),
-    ));
+    );
     push_wrapped(&mut lines, &detail.title, width, "", theme::heading());
     lines
 }
 
-fn claim_marker(tier: crate::ui_view_models::ProofTier) -> &'static str {
+fn claim_marker(detail: &FindingDetailModel) -> &'static str {
+    if detail.proof_confidence_label == "suppressed" {
+        return "suppressed; evidence remains recorded";
+    }
+    proof_claim_marker(detail.proof_tier)
+}
+
+fn proof_claim_marker(tier: crate::ui_view_models::ProofTier) -> &'static str {
     use crate::ui_view_models::ProofTier;
     match tier {
         ProofTier::RuntimeVerified => "runtime-verified",
         ProofTier::StaticLinked => "statically corroborated, not reproduced",
         ProofTier::Suspected => "unverified scanner assertion",
-        ProofTier::Rejected => "refuted — kept for the record",
+        ProofTier::Rejected => "refuted; kept for the record",
     }
 }
 
@@ -603,6 +613,32 @@ mod tests {
             text.contains("SOURCE · observation (on-disk excerpt)"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn suppressed_claim_retains_evidence_without_implying_refutation() {
+        let mut finding = detail();
+        finding.proof_tier = ProofTier::Rejected;
+        finding.proof_confidence_label = "suppressed".into();
+        for width in [36, 56, 76, 92, 116, 156] {
+            let lines = review_detail_lines(&finding, width);
+            let text = lines
+                .iter()
+                .map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("claim · suppressed"), "{width}: {text}");
+            assert!(!text.contains("refuted"), "{width}: {text}");
+            assert!(text.contains("needs_review"), "{width}: {text}");
+            for line in detail_title_lines(&finding, width) {
+                assert!(line.width() <= width, "{line:?}");
+            }
+        }
     }
 
     #[test]

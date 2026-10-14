@@ -57,14 +57,8 @@ pub(in crate::capabilities::threat_model) fn normalize_actor(value: &str) -> Opt
         | "authenticated"
         | "remote_user"
         | "logged_in_user" => Some("remote_auth"),
-        "adjacent_network"
-        | "adjacent"
-        | "lan"
-        | "local_network"
-        | "network_adjacent"
-        | "on_path"
-        | "mitm"
-        | "man_in_the_middle" => Some("adjacent_network"),
+        "adjacent_network" | "adjacent" | "lan" | "local_network" | "network_adjacent"
+        | "on_path" | "mitm" | "man_in_the_middle" => Some("adjacent_network"),
         "local_user" | "local" | "unprivileged_local" | "local_unprivileged" => Some("local_user"),
         "local_admin" | "admin" | "administrator" | "root" | "privileged_local" => {
             Some("local_admin")

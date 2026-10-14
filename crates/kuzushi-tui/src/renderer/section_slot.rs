@@ -88,20 +88,26 @@ pub(crate) fn throttle_banner_height(app: &ShellApp, area: Rect) -> u16 {
 }
 
 pub(crate) fn notice_banner_height(app: &ShellApp, area: Rect) -> u16 {
-    if compact_guided_question_owns_footer(app, area)
-        || notice_banner_model(app).is_none()
-        || area.height < 5
-    {
+    let Some(notice) = notice_banner_model(app) else {
+        return 0;
+    };
+    if compact_guided_question_owns_footer(app, area) || area.height < 5 {
         return 0;
     }
-    // Tall terminals get the full wrapped banner; cramped ones one line, so
-    // the reserved rows always match what render_notice_banner draws.
-    let max_lines = if area.height >= 10 {
-        NOTICE_BANNER_MAX_LINES
-    } else {
-        1
-    };
+    let max_lines = notice_line_limit(
+        area.height,
+        notice.dismiss_on_escape,
+        crate::ui_view_models::compact_gallery_notice(app, area.height),
+    );
     notice_banner_line_count(app, area.width, max_lines) as u16
+}
+
+/// Compact galleries keep their document readable alongside the error badge.
+fn notice_line_limit(height: u16, captures_escape: bool, scene: bool) -> usize {
+    match (height, captures_escape, scene) {
+        (0..=9, _, _) | (10..=12, false, _) | (10..=12, _, true) => 1,
+        _ => NOTICE_BANNER_MAX_LINES,
+    }
 }
 
 fn compact_guided_question_owns_footer(app: &ShellApp, area: Rect) -> bool {
@@ -122,6 +128,22 @@ pub(crate) fn cost_cap_halt_height(app: &ShellApp, area: Rect) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_gallery_errors_leave_room_for_the_failure_document() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Scene);
+        app.set_viewport(crate::TerminalViewport::new(40, 12));
+        app.set_error_notice(
+            "tool",
+            "Owned dependency inventory failure with a long path and a complete recorded cause",
+        );
+        let full = Rect::new(0, 0, 40, 12);
+        assert_eq!(notice_banner_height(&app, full), 1);
+        assert!(crate::renderer::primary_body_area(&app, full).height >= 6);
+        app.set_shell_view(crate::ShellView::Logs);
+        assert_eq!(notice_banner_height(&app, full), 3);
+    }
 
     fn slot(kind: RenderSection, height: u16) -> RenderSectionSlot {
         RenderSectionSlot { kind, height }

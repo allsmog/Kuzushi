@@ -4,7 +4,7 @@ contract: failure-path decision cards render honest outcome copy and recovery ac
 scenario: result_blocked
 size: 120x36
 ---
-KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
+KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · repo index not built · model unconfigured
  Map ● · Scan ! · Review × · Report
  ▸ NEXT inspect, rerun, or discard the blocked Scan result
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts
@@ -16,7 +16,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN was blocked before it could run. Open the run, adjust the autonomy posture or input, then... │
-          │receipt · blocked · 1 run(s) · cost not recorded · findings unmeasured · 0 artifact(s) · 0...     │
+          │receipt · blocked · 1 run(s) · cost not recorded · findings unmeasured · 0 artifact links · 0...  │
           │Outcome · blocked · scenario blocked                                                              │
           │3 run ledger cell(s) omitted from the result card · inspect replay                                │
           │8 timeline cell(s) omitted from the result card · inspect replay                                  │
@@ -38,5 +38,5 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
 ⛭ autonomy:fix · shell route · 1 result ready · workbench · notify:unavailable · focus unknown · Map 1/3...   0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
+ Esc prompt   PgUp/PgDn scroll   o Open   r Run again   d Discard   Ctrl+C exit
 ▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

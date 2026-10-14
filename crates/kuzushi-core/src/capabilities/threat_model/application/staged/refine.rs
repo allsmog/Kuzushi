@@ -356,7 +356,9 @@ fn finding_variant_pattern(
 }
 
 fn threat_single_cwe(threat: &Value) -> Option<String> {
-    let cwes = threat.get("relatedCWEs").or_else(|| threat.get("relatedCwe"))?;
+    let cwes = threat
+        .get("relatedCWEs")
+        .or_else(|| threat.get("relatedCwe"))?;
     match cwes {
         Value::String(cwe) => Some(cwe.clone()),
         Value::Array(values) if values.len() == 1 => values[0].as_str().map(str::to_string),
@@ -657,7 +659,8 @@ mod tests {
             }]
         });
         let read_line = |_: &ConfirmedFindingRow| Some("  memcpy(dst, src, len);".to_string());
-        let attach = attach_new_evidence(&mut document, &[row("fp3_new", "src/auth.ts")], &read_line);
+        let attach =
+            attach_new_evidence(&mut document, &[row("fp3_new", "src/auth.ts")], &read_line);
         assert_eq!(attach.attached, 1);
         assert_eq!(
             attach.likelihood_raised, 1,
@@ -680,7 +683,8 @@ mod tests {
     #[test]
     fn finding_without_covering_threat_is_unmatched_and_becomes_an_open_question() {
         let mut document = json!({"threats": [{"id": "T-1", "affectedFiles": []}]});
-        let attach = attach_new_evidence(&mut document, &[row("fp3_lost", "src/other.rs")], &|_| None);
+        let attach =
+            attach_new_evidence(&mut document, &[row("fp3_lost", "src/other.rs")], &|_| None);
         assert_eq!(attach.attached, 0);
         assert_eq!(attach.unmatched.len(), 1);
         record_unmatched_findings(&mut document, &attach.unmatched);

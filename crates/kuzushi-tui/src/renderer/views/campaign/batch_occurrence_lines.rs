@@ -29,8 +29,9 @@ pub(super) fn append_batch_occurrence(
         theme::muted(),
     ));
     if report.rows.is_empty() {
-        lines.push(Line::styled(
-            "  no findings observed in completed logical trials",
+        lines.extend(batch_wrapped(
+            "no findings observed in completed logical trials",
+            area.width as usize,
             theme::muted(),
         ));
         return;

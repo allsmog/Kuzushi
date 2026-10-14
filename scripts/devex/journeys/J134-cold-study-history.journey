@@ -1,0 +1,69 @@
+name: Cold bounded prior-study history, failure recovery and retained draft
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_history.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | accepted-scopes
+keys: Space Down Space p
+require-live-snap: 25 PLAN A STUDY | cold-scope-draft
+keys: Down Down Down Down Down Down Down Enter
+require-live-snap: 25 HISTORICAL USAGE | cold-history-picker
+require-live-snap: 25 resource-prior | loaded-history
+keys: Down Down
+require-live-snap: 20 Prior study: resource-prior | selected-prior
+expect: 6/6 completed
+ask: Does cold history load directly from the scope draft, without a Campaign visit, automatic selection, additional jobs or model requests?
+resize: 160x48
+live-snap: history-160x48
+resize: 96x89
+live-snap: history-96x89
+resize: 80x24
+live-snap: history-80x24
+resize: 60x20
+live-snap: history-60x20
+resize: 40x12
+live-snap: history-40x12
+expect: Esc back
+keys: PgDn
+require-live-snap: 10 Partial history | partial-history-40x12
+keys: PgDn PgDn PgDn PgDn
+live-snap: history-limits
+ask: Can the operator read the partial-history limits and selected evidence, retaining selection and controls at all six sizes?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_history.py @TMP_TARGET @ART break-history
+keys: r
+require-live-snap: 25 History unavailable | failed-history
+expect: resource-prior
+ask: Does a history read failure keep the selected prior study and offer refresh without discarding the draft or changing spending?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_history.py @TMP_TARGET @ART restore-history
+keys: r
+require-live-snap: 25 Partial history | refreshed-history
+expect: resource-prior
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | history-cancelled
+keys: Enter
+require-live-snap: 25 HISTORICAL USAGE | reopened-history
+keys: Down Down Enter
+require-live-snap: 20 Usage evidence changed | chosen-history
+expect: study resource-prior
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_history.py @TMP_TARGET @ART selected
+ask: Does explicit selection retain the two-boundary draft and accounting, require separate plan approval and leave new discovery unstarted?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME NO_COLOR=1 KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | no-color-restarted
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | no-color-scopes
+keys: Space Down Space p
+require-live-snap: 25 PLAN A STUDY | no-color-draft
+keys: Down Down Down Down Down Down Down Enter
+require-live-snap: 25 HISTORICAL USAGE | no-color-picker
+require-live-snap: 25 resource-prior | no-color-loaded-history
+require-shell: python3 -B @REPO/scripts/devex/fixtures/resource_history.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

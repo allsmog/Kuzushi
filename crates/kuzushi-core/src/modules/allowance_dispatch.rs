@@ -18,7 +18,7 @@ pub(super) fn declare_allowance_option(mut tool: ToolDescriptor) -> ToolDescript
 
 fn supports_allowance(tool: &ToolDescriptor) -> bool {
     matches!(tool.effect, ToolEffect::Read | ToolEffect::WorkspaceWrite)
-        && phase_work(tool.phase).is_some()
+        && descriptor_work(tool).is_some()
 }
 
 fn phase_work(phase: ToolPhase) -> Option<InvestigationWork> {
@@ -31,8 +31,27 @@ fn phase_work(phase: ToolPhase) -> Option<InvestigationWork> {
     }
 }
 
+fn descriptor_work(tool: &ToolDescriptor) -> Option<InvestigationWork> {
+    let Some(category) = tool.allowance_category else {
+        return phase_work(tool.phase);
+    };
+    Some(match category {
+        AllowanceCategory::Context => InvestigationWork::Context,
+        AllowanceCategory::Scope => InvestigationWork::Scope,
+        AllowanceCategory::Discovery => InvestigationWork::Discovery,
+        AllowanceCategory::Review => InvestigationWork::Review,
+        AllowanceCategory::Report => InvestigationWork::Report,
+        AllowanceCategory::Learning => InvestigationWork::Learning,
+    })
+}
+
 pub(super) fn validate_reference(input: &Value) -> Result<()> {
     reference(input).map(|_| ())
+}
+
+pub(super) fn validate_tool_reference(descriptor: &ToolDescriptor, input: &Value) -> Result<()> {
+    validate_reference(input)?;
+    require_model_ranking_reference(descriptor, input)
 }
 
 fn reference(input: &Value) -> Result<Option<AllowanceReferenceV1>> {
@@ -77,6 +96,8 @@ fn bind_selected_runtime<'a>(
     if descriptor.name == "sast:scan" {
         crate::capabilities::campaign::require_study_reference(input, ctx)?;
     }
+    require_context_plan_reference(descriptor, input)?;
+    require_model_ranking_reference(descriptor, input)?;
     let Some(reference) = reference(input)? else {
         return Ok(None);
     };
@@ -86,6 +107,7 @@ fn bind_selected_runtime<'a>(
     );
     let ledger = open_ledger(ctx)?;
     let snapshot = ledger.allowance_snapshot(&reference.investigation_id)?;
+    require_fixed_context_work(descriptor, input, &snapshot)?;
     anyhow::ensure!(
         snapshot.revision == reference.revision,
         "allowance revision changed; review remaining work"
@@ -100,8 +122,58 @@ fn bind_selected_runtime<'a>(
     let Some(runtime) = runtime else {
         return Ok(None);
     };
+    require_selected_runtime_capacity(descriptor, input, ctx, &snapshot)?;
     let binding = runtime_binding(descriptor, input, ctx, reference, ledger)?;
     runtime.with_allowance_binding(binding).map(Some)
+}
+
+fn require_model_ranking_reference(descriptor: &ToolDescriptor, input: &Value) -> Result<()> {
+    if descriptor.name == "module-recommender:recommend"
+        && crate::capabilities::module_recommender::model_ranking_enabled(input)
+    {
+        anyhow::ensure!(input.get(OPTION).is_some(), "Model ranking requires an explicitly approved allowanceRef; deterministic ranking uses no model request");
+    }
+    Ok(())
+}
+
+fn requires_fixed_context_plan(descriptor: &ToolDescriptor, input: &Value) -> bool {
+    descriptor.name == "threat-model:build"
+        && (input.get("scanScopeRef").is_some() || input.get("operatorBriefRef").is_some())
+}
+
+fn require_context_plan_reference(descriptor: &ToolDescriptor, input: &Value) -> Result<()> {
+    if requires_fixed_context_plan(descriptor, input) {
+        anyhow::ensure!(input.get(OPTION).is_some(), "Context generation with file groups or goal guidance requires an explicit allowanceRef from its approved context study");
+    }
+    Ok(())
+}
+
+fn require_fixed_context_work(
+    descriptor: &ToolDescriptor,
+    input: &Value,
+    snapshot: &crate::allowance::AllowanceSnapshot,
+) -> Result<()> {
+    if requires_fixed_context_plan(descriptor, input) {
+        anyhow::ensure!(
+            snapshot.work_plan.is_some(),
+            "Context generation with file groups or goal guidance requires an approved fixed context plan"
+        );
+    }
+    Ok(())
+}
+
+fn require_selected_runtime_capacity(
+    descriptor: &ToolDescriptor,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    snapshot: &crate::allowance::AllowanceSnapshot,
+) -> Result<()> {
+    if !super::runtime_requirements::tool_wants_runtime(&descriptor.name, input, ctx.config) {
+        return Ok(());
+    }
+    snapshot.require_call_capacity(
+        descriptor_work(descriptor).context("tool has no investigation work category")?,
+    )
 }
 
 fn runtime_binding(
@@ -119,7 +191,7 @@ fn runtime_binding(
             .run_id()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         model: resolve_tool_model(&descriptor.name, input, ctx)?,
-        work: phase_work(descriptor.phase).context("tool has no investigation work category")?,
+        work: descriptor_work(descriptor).context("tool has no investigation work category")?,
     };
     AllowanceBinding::new(ledger, work)
 }

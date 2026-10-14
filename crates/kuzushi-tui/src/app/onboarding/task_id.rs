@@ -20,6 +20,8 @@ pub enum PlanningTaskId {
     /// One threat model per target; methodology and seed mode are options on
     /// the shared `threat-model:build` tool, not separate planner rows.
     BuildThreatModel,
+    /// Import a supplied context document as an inactive revision for Map review.
+    ImportThreatModel,
     /// Retained only to decode older saved plans; superseded by the merged
     /// `BuildThreatModel` row.
     #[allow(dead_code)]
@@ -82,6 +84,7 @@ impl PlanningTaskId {
         PlanningTaskId::DecomposeModules,
         PlanningTaskId::BuildXRay,
         PlanningTaskId::BuildThreatModel,
+        PlanningTaskId::ImportThreatModel,
         PlanningTaskId::BuildCodePropertyGraph,
         PlanningTaskId::BuildCodeQlDatabase,
         PlanningTaskId::ThreatIntelCves,
@@ -121,6 +124,7 @@ impl PlanningTaskId {
             | DecomposeModules
             | BuildXRay
             | BuildThreatModel
+            | ImportThreatModel
             | BuildStrideThreatModel
             | BuildPastaThreatModel
             | BuildCodePropertyGraph
@@ -146,6 +150,7 @@ impl PlanningTaskId {
             DecomposeModules => "Decompose into modules",
             BuildXRay => "Build X-ray",
             BuildThreatModel => "Build threat model",
+            ImportThreatModel => "Import context document",
             BuildStrideThreatModel => "Build STRIDE threat model",
             BuildPastaThreatModel => "Build PASTA threat model",
             BuildCodePropertyGraph => "Build code property graph",
@@ -186,6 +191,7 @@ impl PlanningTaskId {
             BuildThreatModel | BuildStrideThreatModel | BuildPastaThreatModel => {
                 "threat-model:build"
             }
+            ImportThreatModel => "threat-model:import",
             BuildCodePropertyGraph => "cpg:build",
             BuildCodeQlDatabase => "codeql:create-db",
             ThreatIntelCves => "threat-intel:discover",
@@ -303,6 +309,19 @@ impl PlanningTaskId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_plan_offers_runtime_free_context_import_as_an_explicit_action() {
+        let task = PlanningTaskId::in_phase(WorkflowPhase::Map)
+            .into_iter()
+            .find(|task| task.tool_name() == "threat-model:import")
+            .expect("Map needs a visible context import choice");
+        assert!(!task.is_model_backed());
+        assert!(
+            task.artifact_relative_path().is_none(),
+            "inactive imports cannot reuse the active mirror"
+        );
+    }
 
     #[test]
     fn every_task_has_a_phase_and_tool() {

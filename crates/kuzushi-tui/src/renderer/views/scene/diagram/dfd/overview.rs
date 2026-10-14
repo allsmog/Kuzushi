@@ -1,4 +1,5 @@
 use super::{diagram_muted, diagram_primary, diagram_style, DfdKind, DfdModel};
+use crate::renderer::views::scene::gallery_layout::summary_document_area;
 use crate::theme;
 use crate::ui_view_models::{dfd_overview, DfdContextCounts, DfdOverview};
 use ratatui::buffer::Buffer;
@@ -19,8 +20,16 @@ pub(super) fn render(
     scroll: i32,
 ) {
     let overview = dfd_overview(model);
-    if area.width >= WIDE_MIN_WIDTH && area.height >= WIDE_MIN_HEIGHT {
-        render_wide(buf, area, model, &overview, component_selection, scroll);
+    if let Some(top_height) = wide_top_height(area, model, &overview) {
+        render_wide(
+            buf,
+            area,
+            model,
+            &overview,
+            component_selection,
+            scroll,
+            top_height,
+        );
     } else {
         render_compact(buf, area, model, &overview, component_selection, scroll);
     }
@@ -33,19 +42,13 @@ fn render_wide(
     overview: &DfdOverview,
     component_selection: usize,
     scroll: i32,
+    top_height: u16,
 ) {
-    let top_height = (overview.zone_flows.len() as u16 + 3)
-        .clamp(9, 14)
-        .min(area.height.saturating_sub(5));
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(top_height), Constraint::Min(5)])
         .split(area);
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .spacing(1)
-        .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
-        .split(rows[0]);
+    let top = wide_columns(rows[0]);
     render_panel(
         buf,
         top[0],
@@ -56,6 +59,36 @@ fn render_wide(
     render_tree(buf, rows[1], model, overview, component_selection, scroll);
 }
 
+fn wide_columns(area: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .spacing(1)
+        .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
+        .split(area)
+}
+
+fn wide_top_height(area: Rect, model: &DfdModel, overview: &DfdOverview) -> Option<u16> {
+    if area.width < WIDE_MIN_WIDTH || area.height < WIDE_MIN_HEIGHT {
+        return None;
+    }
+    let width = usize::from(wide_columns(area)[0].width.saturating_sub(2).max(1));
+    let summary = wrapped_rows(&executive_summary_lines(model, overview), width).saturating_add(2);
+    let height = summary
+        .max(overview.zone_flows.len().saturating_add(3))
+        .max(9);
+    let height = u16::try_from(height).unwrap_or(u16::MAX);
+    (height <= area.height.saturating_sub(5)).then_some(height)
+}
+
+pub(crate) fn summary_reading_rows(area: Rect, model: &DfdModel) -> usize {
+    let overview = dfd_overview(model);
+    let height = wide_top_height(area, model, &overview)
+        .map(|top| area.height.saturating_sub(top))
+        .unwrap_or(area.height);
+    let body = Rect { height, ..area };
+    usize::from(summary_document_area(body).height).max(1)
+}
+
 fn render_compact(
     buf: &mut Buffer,
     area: Rect,
@@ -64,8 +97,10 @@ fn render_compact(
     component_selection: usize,
     scroll: i32,
 ) {
-    let mut lines = vec![section_line("EXECUTIVE SUMMARY")];
-    lines.extend(executive_summary_lines(model, overview));
+    let mut lines = executive_summary_lines(model, overview);
+    if area.height > 4 {
+        lines.insert(0, section_line("EXECUTIVE SUMMARY"));
+    }
     lines.push(Line::default());
     lines.push(section_line("OVERALL DATA FLOW"));
     lines.extend(zone_flow_lines(overview));
@@ -73,7 +108,7 @@ fn render_compact(
     lines.push(section_line("COMPONENT TREE"));
     let tree = tree::component_tree_document(model, overview, component_selection);
     let tree_offset = lines.len();
-    let anchor = compact_anchor(&tree, tree_offset, scroll);
+    let anchor = compact_anchor(&tree, tree_offset);
     lines.extend(tree.lines.iter().cloned());
     render_scrolled_document(buf, area, compact_title(&tree), lines, scroll, anchor);
 }
@@ -106,14 +141,17 @@ fn render_scrolled_document(
     requested_scroll: i32,
     anchor: Option<ScrollAnchor>,
 ) {
-    let viewport = area.height.saturating_sub(2) as usize;
-    let width = area.width.saturating_sub(2).max(1) as usize;
+    let document = summary_document_area(area);
+    let viewport = usize::from(document.height);
+    let width = usize::from(document.width.max(1));
     let scroll = document_scroll(&lines, width, viewport, anchor, requested_scroll);
-    Paragraph::new(lines)
-        .block(panel_block(&title))
+    let mut paragraph = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
-        .scroll((scroll, 0))
-        .render(area, buf);
+        .scroll((scroll, 0));
+    if document != area {
+        paragraph = paragraph.block(panel_block(&title));
+    }
+    paragraph.render(area, buf);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,12 +160,8 @@ struct ScrollAnchor {
     end_line: usize,
 }
 
-fn compact_anchor(
-    tree: &tree::ComponentTreeDocument,
-    tree_offset: usize,
-    requested_scroll: i32,
-) -> Option<ScrollAnchor> {
-    (tree.selection > 0 || requested_scroll < 0).then(|| component_anchor(tree, tree_offset))
+fn compact_anchor(tree: &tree::ComponentTreeDocument, tree_offset: usize) -> Option<ScrollAnchor> {
+    (tree.selection > 0).then(|| component_anchor(tree, tree_offset))
 }
 
 fn component_anchor(tree: &tree::ComponentTreeDocument, offset: usize) -> ScrollAnchor {
@@ -233,7 +267,7 @@ fn security_shape(model: &DfdModel) -> String {
                 counts
             });
     format!(
-        "context · {} · {} · {} · {}",
+        "context · {}, {}, {}, {}",
         count_label(counts.entry_points, "entry"),
         count_label(counts.role_gates, "gate"),
         count_label(counts.assets, "asset"),
@@ -356,6 +390,52 @@ mod tests {
             assert!(text.contains("component-8"), "{width}x{height}: {text}");
             assert!(text.contains("› ◇"), "{width}x{height}: {text}");
         }
+    }
+
+    #[test]
+    fn tiny_summary_document_keeps_the_description_and_selected_component_readable() {
+        let model = component_model(8);
+        for height in 1..=4 {
+            let area = Rect::new(0, 0, 40, height);
+            let mut first = Buffer::empty(area);
+            render(&mut first, area, &model, 0, 0);
+            let text = buffer_text(&first, 40, height);
+            assert!(text.contains("Operators use Sample"), "{height}: {text}");
+
+            let mut selected = Buffer::empty(area);
+            render(&mut selected, area, &model, 7, 0);
+            let text = buffer_text(&selected, 40, height);
+            assert!(text.contains("component-8"), "{height}: {text}");
+        }
+    }
+
+    #[test]
+    fn wide_summary_keeps_the_end_of_a_long_system_description_visible() {
+        let mut model = component_model(3);
+        model.system_context = Some(format!(
+            "{} COMPLETE_DESCRIPTION",
+            "Operators review local records and preserve their decisions. ".repeat(10)
+        ));
+        let area = Rect::new(0, 0, 120, 28);
+        let mut buf = Buffer::empty(area);
+        render(&mut buf, area, &model, 0, 0);
+        let text = buffer_text(&buf, 120, 28);
+        assert!(text.contains("COMPLETE_DESCRIPTION"), "{text}");
+        assert!(text.contains("COMPONENT TREE"), "{text}");
+    }
+
+    #[test]
+    fn oversized_wide_description_uses_a_document_with_a_reachable_component_tail() {
+        let mut model = component_model(3);
+        model.system_context = Some("Operators review local records. ".repeat(100));
+        let area = Rect::new(0, 0, 120, 28);
+        let mut first = Buffer::empty(area);
+        render(&mut first, area, &model, 0, 0);
+        assert!(buffer_text(&first, 120, 28).contains("SYSTEM SUMMARY"));
+
+        let mut last = Buffer::empty(area);
+        render(&mut last, area, &model, 0, i32::MAX);
+        assert!(buffer_text(&last, 120, 28).contains("component-3"));
     }
 
     fn component_model(count: usize) -> DfdModel {

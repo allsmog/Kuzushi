@@ -3,6 +3,13 @@ use crate::runtime::AgentQueryControl;
 
 #[async_trait]
 impl AgentRuntime for RoutedRuntime<'_> {
+    fn authorize_tool_policy_blocking(
+        &self,
+        authorization: &crate::runtime::AgentToolPolicyAuthorization,
+    ) -> Result<crate::runtime::AgentToolPolicyReceipt> {
+        self.inner.authorize_tool_policy_blocking(authorization)
+    }
+
     fn semantic_cache_identity(
         &self,
         request: &AgentQueryRequest,

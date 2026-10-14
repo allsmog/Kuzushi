@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 pub enum ToolClassification {
     Read,
     Report,
+    Operate,
     Phase(WorkflowPhase),
 }
 
@@ -16,10 +17,20 @@ pub fn classify_descriptor(tool: &ToolDescriptor) -> Option<ToolClassification> 
     if tool.effect == ToolEffect::Read {
         return Some(ToolClassification::Read);
     }
+    if tool.phase == ToolPhase::Operate {
+        return operation_classification(tool.effect);
+    }
     if tool.phase == ToolPhase::Report {
         return report_classification(tool.effect);
     }
     workflow_phase(tool.phase).map(ToolClassification::Phase)
+}
+
+fn operation_classification(effect: ToolEffect) -> Option<ToolClassification> {
+    match effect {
+        ToolEffect::WorkspaceWrite | ToolEffect::TargetWrite => Some(ToolClassification::Operate),
+        _ => None,
+    }
 }
 
 // Report is an exit at any posture, never a way to authorize execution or
@@ -42,7 +53,10 @@ pub fn classify(tool_name: &str) -> Option<ToolClassification> {
 pub fn tool_phase(tool_name: &str) -> Option<WorkflowPhase> {
     match classify(tool_name) {
         Some(ToolClassification::Phase(phase)) => Some(phase),
-        Some(ToolClassification::Read | ToolClassification::Report) | None => None,
+        Some(
+            ToolClassification::Read | ToolClassification::Report | ToolClassification::Operate,
+        )
+        | None => None,
     }
 }
 
@@ -94,6 +108,21 @@ fn workflow_phase(phase: ToolPhase) -> Option<WorkflowPhase> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operational_tracking_does_not_become_a_map_result_or_execution_bypass() {
+        let registry = crate::ModuleRegistry::with_v2_builtins();
+        let mut status = registry.resolve_tool("campaign:status").unwrap().clone();
+        assert_eq!(
+            classify_descriptor(&status),
+            Some(ToolClassification::Operate)
+        );
+        assert_eq!(tool_phase("campaign:status"), None);
+        for effect in [ToolEffect::RepositoryExecute, ToolEffect::ExternalAction] {
+            status.effect = effect;
+            assert_eq!(classify_descriptor(&status), None);
+        }
+    }
 
     #[test]
     fn registered_descriptor_drives_phase_and_effect() {

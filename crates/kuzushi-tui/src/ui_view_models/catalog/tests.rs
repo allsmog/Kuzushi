@@ -10,7 +10,7 @@ fn catalog_collapsed_model_steers_context_then_findings() {
     assert!(model.collapsed.next_hint.contains("context build"));
     assert_eq!(
         model.collapsed.target_warning,
-        Some("[!] target required; Enter opens picker · `target <path>` · `demo` offline")
+        Some("[!] target required · `target <path>` · `demo` offline")
     );
     assert_eq!(model.collapsed.scan_command, "target .; next");
 
@@ -160,11 +160,112 @@ fn catalog_readiness_never_turns_a_selected_model_into_execution_authority() {
 }
 
 #[test]
+fn catalog_reports_incompatible_model_auth_configuration_without_changing_it() {
+    let mut config = V2Config::default();
+    config.model = Some("other:fixture".into());
+    let mut app = ShellApp::new(config, None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.move_catalog_cursor(1);
+
+    let selected = catalog_model(&app).selected_action.unwrap();
+    assert_eq!(selected.readiness.label, "RUNTIME CONFIG");
+    assert!(selected.readiness.next.contains("doctor"));
+    assert_eq!(app.config().model.as_deref(), Some("other:fixture"));
+}
+
+#[test]
+fn catalog_runtime_free_input_skips_invalid_model_auth_configuration() {
+    use kuzushi_core::{OptionScope, OptionTarget};
+    let mut config = V2Config::default();
+    config.model = Some("other:fixture".into());
+    let mut app = ShellApp::new(config, None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.move_catalog_cursor(1);
+    app.option_store_mut().set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("threat-model:build".into()),
+        "pipeline",
+        serde_json::json!("deterministic"),
+    );
+
+    assert_eq!(
+        catalog_model(&app).selected_action.unwrap().readiness.label,
+        "REVIEW INPUTS"
+    );
+    assert_eq!(app.config().model.as_deref(), Some("other:fixture"));
+}
+
+#[test]
+fn catalog_reports_the_same_credential_env_mismatch_as_runtime_policy() {
+    let mut config = V2Config::default();
+    config.model = Some("openai-codex:fixture".into());
+    config.runtime.api_key_env = "ANTHROPIC_API_KEY".into();
+    let mut app = ShellApp::new(config, None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.move_catalog_cursor(1);
+
+    assert_eq!(
+        catalog_model(&app).selected_action.unwrap().readiness.label,
+        "RUNTIME CONFIG"
+    );
+    assert_eq!(app.config().runtime.api_key_env, "ANTHROPIC_API_KEY");
+    assert!(
+        kuzushi_core::runtime::bind_model_auth("openai-codex:fixture", "ANTHROPIC_API_KEY")
+            .is_err()
+    );
+}
+
+#[test]
 fn targetless_catalog_explains_the_actual_enter_action() {
     let app = ShellApp::new(V2Config::default(), None);
     let selected = catalog_model(&app).selected_action.unwrap();
     assert_eq!(selected.readiness.label, "TARGET REQUIRED");
-    assert_eq!(selected.readiness.next, "Enter selects a target");
+    assert_eq!(
+        selected.readiness.next,
+        "target <path> selects a repository"
+    );
+    assert!(catalog_model(&app)
+        .input_hint
+        .contains("Enter opens the target picker"));
+}
+
+#[test]
+fn catalog_picker_load_control_is_visible_only_while_it_owns_input() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(PathBuf::from(".")));
+    app.set_shell_view(crate::ShellView::Catalog);
+    let bindings = crate::ui_view_models::footer_keybindings(&app);
+    assert!(bindings
+        .iter()
+        .any(|binding| binding.key == "Enter" && binding.label == "load"));
+    assert_eq!(
+        bindings
+            .iter()
+            .filter(|binding| binding.key == "Enter")
+            .count(),
+        1
+    );
+
+    app.set_input("unfinished draft".to_string());
+    let bindings = crate::ui_view_models::footer_keybindings(&app);
+    assert!(!bindings
+        .iter()
+        .any(|binding| binding.key == "Enter" && binding.label == "load"));
+    assert_eq!(app.input(), "unfinished draft");
+}
+
+#[test]
+fn catalog_targetless_footer_names_the_target_picker() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(crate::ShellView::Catalog);
+    let bindings = crate::ui_view_models::footer_keybindings(&app);
+    let enter = bindings
+        .iter()
+        .filter(|binding| binding.key == "Enter")
+        .collect::<Vec<_>>();
+    assert_eq!(enter.len(), 1);
+    assert_eq!(enter[0].label, "target picker");
+    assert!(app.target().is_none());
 }
 
 #[test]

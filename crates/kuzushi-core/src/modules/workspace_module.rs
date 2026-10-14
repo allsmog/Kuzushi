@@ -8,17 +8,23 @@ pub(crate) fn workspace_module() -> BuiltinModule {
         "Report target and state paths.",
         vec![
             workspace_status_tool()
-                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
+                .with_policy(read_policy(
+                    ToolPhase::Operate,
+                    WorkspaceRequirement::Optional,
+                ))
+                .without_phase_result(),
             workspace_export_findings_tool().with_policy(target_write_policy(
                 ToolPhase::Report,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             )),
-            workspace_import_findings_tool().with_policy(target_write_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Optional,
-            )),
+            workspace_import_findings_tool()
+                .with_policy(target_write_policy(
+                    ToolPhase::Review,
+                    RuntimeRequirement::Never,
+                    FindingStoreRequirement::Optional,
+                ))
+                .without_phase_result(),
         ],
         vec![],
     )
@@ -149,7 +155,9 @@ fn sast_scan_tool() -> ToolDescriptor {
 fn sast_scan_options() -> Vec<OptionSpec> {
     let mut options = Vec::new();
     options.extend(sast_selection_options());
+    options.extend(agentic_inventory_options());
     options.extend(sast_semgrep_options());
+    options.extend(sast_secret_scan_options());
     options.extend(sast_whitebox_options());
     options.extend(sast_post_processing_options());
     options.extend(sast_patch_options());
@@ -169,6 +177,19 @@ fn sast_semgrep_options() -> Vec<OptionSpec> {
             "Rule files or selectors for the selected Semgrep task. Local files allow offline scans.").advanced(),
         opt("semgrepBinary", OptionType::String,
             "Executable for the selected Semgrep task.").advanced(),
+    ]
+}
+
+fn sast_secret_scan_options() -> Vec<OptionSpec> {
+    vec![
+        opt("secretScanMaxFileBytes", OptionType::Int, "Secret inspection maximum bytes per file. Native default is 2 MiB.")
+            .aliases(&["secret_scan_max_file_bytes"]).integer_range(1024, 67_108_864).advanced(),
+        opt("secretScanMaxFindings", OptionType::Int, "Secret inspection finding limit across this scan job. Default is 1000.")
+            .aliases(&["secret_scan_max_findings"]).integer_range(1, 10_000).advanced(),
+        opt("secretScanMaxEntries", OptionType::Int, "Secret inspection entry allowance across this scan job. Default and ceiling are 100000.")
+            .aliases(&["secret_scan_max_entries"]).integer_range(1, 100_000).advanced(),
+        opt("secretScanMaxTotalBytes", OptionType::Int, "Secret content read allowance across this scan job. Default and ceiling are 512 MiB.")
+            .aliases(&["secret_scan_max_total_bytes"]).integer_range(1024, 536_870_912).advanced(),
     ]
 }
 
@@ -245,6 +266,7 @@ fn sast_batch_provenance_options() -> Vec<OptionSpec> {
         batch_trial_option(),
         batch_equivalence_key_option(),
         bound_threat_model_option(),
+        bound_scan_context_option(),
         identity_fold_option(),
     ]
 }
@@ -496,6 +518,14 @@ fn sast_agent_policy_options() -> Vec<OptionSpec> {
 fn sast_agent_runtime_options() -> Vec<OptionSpec> {
     vec![
         opt(
+            "agenticMaxModelTurns",
+            OptionType::Int,
+            "Agentic scanner turns per query (1-40). Structured-output repairs also consume the shared allowance. Omitted keeps the scanner default.",
+        )
+        .aliases(&["agentic_max_model_turns"])
+        .integer_range(1, crate::runtime::domain::MAX_AGENT_MODEL_TURNS as i64)
+        .advanced(),
+        opt(
             "languages",
             OptionType::StringList,
             "Language filters for agentic SAST tasks.",
@@ -633,7 +663,9 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
     let mut options = vec![
         target_option(),
         bound_threat_model_option(),
+        bound_scan_context_option(),
         max_findings_option(40),
+        opt("scanScopeRef", OptionType::Json, "Exact accepted discovery membership with inherited context-only files. Standard strategy uses an acknowledged read-only file policy; runtimes without it refuse execution. MCP and chunked scoped discovery are unsupported.").aliases(&["scan_scope_ref"]).advanced(),
         opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
         agentic_sast_mode_option(),
         opt(
@@ -653,6 +685,7 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
     ];
     options.extend(sast_whitebox_options());
     options.extend(agentic_sast_filter_options());
+    options.extend(agentic_inventory_options());
     options.extend(agentic_sast_chunk_options());
     options.extend(agentic_sast_auto_triage_options());
     options.push(max_model_turns_option(
@@ -668,6 +701,13 @@ fn agentic_sast_mode_option() -> OptionSpec {
         .choices(&["standard", "whitebox-static"])
         .default(json!("standard"))
         .advanced()
+}
+
+fn agentic_inventory_options() -> Vec<OptionSpec> {
+    vec![
+        opt("maxInventoryFiles", OptionType::Int, "Agentic preparation snippet limit; remaining files are disclosed as uninspected.").aliases(&["max_inventory_files"]).integer_range(1, 500).default(json!(80)).advanced(),
+        opt("maxBytesPerFile", OptionType::Int, "Snippet byte limit before decoding. Binary inspection can read up to max(4096, this limit) + 1 bytes per file, within a 512 MiB total read allowance. Snippets do not establish complete coverage.").aliases(&["max_bytes_per_file"]).integer_range(1, 8192).default(json!(2048)).advanced(),
+    ]
 }
 
 fn agentic_sast_filter_options() -> Vec<OptionSpec> {

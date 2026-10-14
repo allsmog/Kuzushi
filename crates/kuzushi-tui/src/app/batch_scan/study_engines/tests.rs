@@ -54,7 +54,7 @@ fn scoped_engine_choices_explain_unsupported_work_and_cancel_without_changing_th
         .unwrap()
         .study
         .clone();
-    focus(&mut app, "agentic");
+    focus(&mut app, "systems-hunt");
     let update = app.handle_study_engine_key(KeyCode::Char(' '));
     assert!(update.effects.is_empty());
     assert!(app
@@ -70,6 +70,52 @@ fn scoped_engine_choices_explain_unsupported_work_and_cancel_without_changing_th
     assert_eq!(
         app.study_engine_picker().unwrap().selected,
         BTreeSet::from(["secret-scan".into()])
+    );
+    app.handle_study_engine_key(KeyCode::Esc);
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .study,
+        original
+    );
+}
+
+#[test]
+fn scoped_agentic_choice_requires_explicit_file_tools_and_preserves_cancelled_options() {
+    let (_root, mut app) = fixture(true);
+    let original = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .unwrap()
+        .study
+        .clone();
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .engine_picker
+        .as_mut()
+        .unwrap()
+        .input["mcps"] = json!(true);
+    focus(&mut app, "agentic");
+    app.handle_study_engine_key(KeyCode::Char(' '));
+    assert!(app.study_engine_picker().unwrap().automatic);
+    assert!(crate::ui_view_models::study_engines::engine_apply_controls(&app).contains("m files"));
+    app.handle_study_engine_key(KeyCode::Char('m'));
+    assert_eq!(
+        app.study_engine_picker().unwrap().input["mcps"],
+        json!(false)
+    );
+    app.handle_study_engine_key(KeyCode::Char(' '));
+    assert_eq!(
+        app.study_engine_picker().unwrap().selected,
+        BTreeSet::from(["agentic".into()])
     );
     app.handle_study_engine_key(KeyCode::Esc);
     assert_eq!(
@@ -403,15 +449,16 @@ fn path_replacement_is_visible_at_all_sizes_and_unavailable_without_an_accepted_
             .iter()
             .map(|cell| cell.symbol())
             .collect::<String>();
-        assert!(
-            text.contains("a apply · x clear · Esc cancel"),
-            "{width}x{height}"
-        );
+        for control in ["a apply · x clear", "m files", "Esc"] {
+            assert!(text.contains(control), "{width}x{height}: {control}");
+        }
     }
     let plain = crate::renderer::render_plain_app(&app, 40);
     assert!(plain.contains("Earlier filters:"));
     assert!(plain.contains("older/scope"));
-    assert!(plain.contains("a apply · x clear · Esc cancel"));
+    for control in ["a apply · x clear", "m files", "Esc"] {
+        assert!(plain.contains(control));
+    }
     let (_root, mut unscoped) = path_conflict_fixture(false);
     let original = unscoped.study_engine_picker().unwrap().prepared_selection();
     unscoped.handle_study_engine_key(KeyCode::Char('x'));

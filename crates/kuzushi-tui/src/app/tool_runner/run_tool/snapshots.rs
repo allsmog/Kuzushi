@@ -1,5 +1,6 @@
 use super::*;
 
+mod component_inventory;
 mod trace_expansion;
 use trace_expansion::cache_trace_expansion_snapshot;
 
@@ -12,6 +13,7 @@ impl ShellApp {
         tool_name: &str,
         result: &serde_json::Value,
     ) -> Vec<ShellEffect> {
+        self.cache_component_inventory_result(tool_name, result);
         if tool_name.starts_with("pwn:") {
             return self.cache_pwn_snapshot(tool_name, result.get("data").unwrap_or(result));
         }
@@ -24,6 +26,18 @@ impl ShellApp {
             }
         }
         Vec::new()
+    }
+
+    pub(crate) fn cache_component_inventory_result(
+        &mut self,
+        tool_name: &str,
+        result: &serde_json::Value,
+    ) -> bool {
+        if tool_name != "sbom-scan:scan" {
+            return false;
+        }
+        component_inventory::cache_result(self, result);
+        true
     }
 
     /// Reload the per-repo taint-flow + exploit-chain viz snapshots a previous
@@ -83,6 +97,7 @@ impl ShellApp {
 type SnapshotCache = fn(&mut ShellApp, &str, &serde_json::Value) -> bool;
 
 const SNAPSHOT_CACHES: &[SnapshotCache] = &[
+    ShellApp::cache_context_history_result,
     ShellApp::cache_study_result,
     ShellApp::cache_scope_review_result,
     cache_recon_snapshot,
@@ -212,8 +227,8 @@ fn cache_taint_flow_snapshot(
 /// Capture the `worklist:rank` tool output into app state so the auto-opened
 /// deck renders the tool's actual worklist — including the `deep`/systems `S`
 /// rows the Read-safe shell fold intentionally omits — instead of a fold that
-/// contradicts the run receipt. The tool serializes its `Worklist` directly as
-/// the result `data`.
+/// contradicts the run receipt. New results identify their actual target;
+/// legacy results retain the active-target compatibility behavior.
 fn cache_worklist_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
     if tool_name != "worklist:rank" {
         return false;
@@ -224,10 +239,24 @@ fn cache_worklist_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_jso
     let Some(target) = app.target_owned() else {
         return true;
     };
-    let artifact_version = crate::ui_view_models::attack_surface_artifact_version(app);
+    if !worklist_result_matches_target(app, data) {
+        return true;
+    }
+    let artifact_version = crate::ui_view_models::worklist_artifact_version(app);
     app.domain_mut()
         .set_worklist_snapshot(target, artifact_version, Some(data.clone()));
     true
+}
+
+pub(super) fn worklist_result_matches_target(app: &ShellApp, data: &serde_json::Value) -> bool {
+    let Some(value) = data.get("target") else {
+        return true;
+    };
+    let Some(target) = value.as_str() else {
+        return false;
+    };
+    app.target()
+        .is_some_and(|active| active == std::path::Path::new(target))
 }
 
 fn taint_flows_from_data(data: &serde_json::Value) -> Vec<TaintFlowSnapshot> {

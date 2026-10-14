@@ -5,7 +5,7 @@
 
 use super::diagram::{DfdDiagram, DfdSummary, TreeDiagram};
 use super::entry_points::EntryPointBrowser;
-use super::gallery::{gallery_header_lines, map_gallery_header_lines, page_body_lines};
+use super::gallery::{gallery_header_lines, map_gallery_header_lines, page_body_rows};
 use super::scene_color::to_color;
 use super::*;
 use crate::scene3d::{
@@ -124,33 +124,21 @@ fn render_line_page_body(
     page: VizPage,
     line_scroll: u16,
 ) {
-    let lines = page_body_lines(app, area, page);
-    let Some(window) =
-        super::gallery_layout::line_page_window(area.height, lines.len(), line_scroll)
-    else {
-        render_scrolled_lines(frame, area, lines, 0);
+    let rows = page_body_rows(app, area, page);
+    let Some(window) = rows.window(area.height, line_scroll as usize) else {
+        render_lines(frame, area, rows.into_lines());
         return;
     };
     let sections = super::gallery_layout::line_page_position_sections(area);
-    render_scrolled_lines(frame, sections[0], lines, window.start);
+    render_lines(frame, sections[0], window.lines);
     frame.render_widget(
         Paragraph::new(Line::styled(window.position_label, crate::theme::muted())),
         sections[1],
     );
 }
 
-fn render_scrolled_lines(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    lines: Vec<Line<'static>>,
-    scroll: u16,
-) {
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
-        area,
-    );
+fn render_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 // ── 3D terrain body: rasterize via scene3d, then overlay labels ────────────
@@ -266,8 +254,11 @@ fn styled(text: String, fg: Color, bg: Color) -> Span<'static> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::gallery_layout::scene_page_rows;
+    use super::super::line_page::PageDirection;
     use super::*;
     use crate::app::{StampedTargetCandidateFacts, TargetCandidateFacts};
+    use crate::ShellView;
     use kuzushi_core::{SbomComponent, SbomLockfile, SbomScanReport, V2Config, WorkspaceTarget};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -310,6 +301,161 @@ mod tests {
         drop(temp);
     }
 
+    /// The defect this guards: the total came from the display lines a canvas
+    /// wrapped the tree into, so one real 2731-component tree read
+    /// `rows 1-10/2731` embedded in Map, `rows 1-25/2732` in the full-frame
+    /// zoom at the same terminal size, and `rows 1-4/2737` at 80 columns. The
+    /// rows belong to the model, so every width and both projections agree.
+    #[test]
+    fn every_width_and_projection_states_the_same_component_row_total() {
+        let (temp, mut app) = app_with_component_inventory();
+        app.router.scene_mut().set_page(VizPage::Components);
+
+        for width in [24, 40, 60] {
+            let rendered = render_embedded_gallery(&app, width, 10, 0);
+            let position = rendered.last().expect("a rendered canvas").trim_end();
+            assert!(position.ends_with("/16"), "width={width} {position}");
+        }
+
+        let zoom =
+            super::super::gallery::scene_line_page_viewport_lines(&app, Rect::new(0, 0, 24, 10), 0)
+                .expect("a line page has a row-windowed zoom");
+        let position = zoom
+            .iter()
+            .map(|line| line.to_string())
+            .find(|text| text.contains("rows "))
+            .expect("the zoom discloses its window");
+        assert!(position.trim_end().ends_with("/16"), "{position}");
+        drop(temp);
+    }
+
+    /// PgDn on the full-frame line page moves to the window that starts on
+    /// the row after the last one shown, PgUp back to the window that ends on
+    /// the row before the first one shown: over wrapped rows no row is
+    /// skipped and none repeats until the final window lands on the tail.
+    #[test]
+    fn full_frame_pages_are_contiguous_over_wrapped_rows() {
+        let (temp, mut app) = app_with_components(component_report(
+            40,
+            "a-dependency-name-long-enough-to-wrap-at-forty-columns",
+        ));
+        app.set_shell_view(ShellView::Scene);
+        app.router.scene_mut().set_page(VizPage::Components);
+        app.set_viewport(crate::TerminalViewport::new(40, 30));
+        let mut previous = shown_rows(&app);
+        let mut pages = 1;
+        while previous.1 < previous.2 {
+            let step = scene_page_rows(&app, PageDirection::Down).expect("a line page");
+            app.router.default_scroll_mut().scroll_down(step as u16);
+            let shown = shown_rows(&app);
+            if shown.1 < shown.2 {
+                assert_eq!(shown.0, previous.1 + 1, "{previous:?} -> {shown:?}");
+            } else {
+                assert!(
+                    shown.0 <= previous.1 + 1,
+                    "skipped into the tail: {shown:?}"
+                );
+            }
+            previous = shown;
+            pages += 1;
+        }
+        assert!(pages > 2, "fixture must span several pages");
+        while app.router.default_scroll().offset() > 0 {
+            let step = scene_page_rows(&app, PageDirection::Up).expect("a line page");
+            let offset = app.router.default_scroll().offset();
+            app.router.default_scroll_mut().set(offset - step as u16);
+            let shown = shown_rows(&app);
+            assert!(
+                shown.1 + 1 >= previous.0,
+                "skipped going up: {shown:?} -> {previous:?}"
+            );
+            previous = shown;
+        }
+        assert_eq!(previous.0, 1);
+        drop(temp);
+    }
+
+    /// The step is measured on the canvas the full-frame viewport draws: the
+    /// pinned three-line header, its blank separator, and the position label
+    /// leave `height - 5` display lines, so a run of one-line rows pages by
+    /// exactly that many rows at every supported size.
+    #[test]
+    fn line_gallery_paging_uses_visible_body_rows_at_every_supported_size() {
+        let (temp, mut app) = app_with_components(component_report(400, "crate"));
+        app.set_shell_view(ShellView::Scene);
+        app.router.scene_mut().set_page(VizPage::Components);
+        for (width, height) in [(120, 36), (160, 48), (96, 89), (80, 24), (60, 20), (40, 12)] {
+            app.set_viewport(crate::TerminalViewport::new(width, height));
+            app.router.default_scroll_mut().set(200);
+            let area =
+                crate::renderer::workbench_primary_area(&app, Rect::new(0, 0, width, height));
+            let expected = usize::from(area.height.saturating_sub(5)).max(1);
+            assert_eq!(
+                scene_page_rows(&app, PageDirection::Down),
+                Some(expected),
+                "{width}x{height}"
+            );
+            assert_eq!(scene_page_rows(&app, PageDirection::Up), Some(expected));
+        }
+        drop(temp);
+    }
+
+    /// Map's embedded canvas pages the same way, measured on the gallery body
+    /// it draws: PgDn lands on the row after the last one shown and PgUp
+    /// returns to the first window.
+    #[test]
+    fn embedded_pages_move_to_the_adjacent_window_of_rows() {
+        let (temp, mut app) = app_with_components(component_report(
+            12,
+            "a-dependency-name-long-enough-to-wrap",
+        ));
+        app.router.scene_mut().set_page(VizPage::Components);
+        let body = super::super::gallery_layout::gallery_sections(Rect::new(0, 0, 40, 12), true)[1];
+        let embedded_position = |scroll: usize| {
+            let rendered = render_embedded_gallery(&app, 40, 12, scroll as u16);
+            parse_position(rendered.last().expect("a rendered canvas").trim())
+        };
+
+        let first = embedded_position(0);
+        let down =
+            super::super::gallery::embedded_line_page_step(&app, body, 0, PageDirection::Down)
+                .expect("a line page");
+        let second = embedded_position(down);
+        let up =
+            super::super::gallery::embedded_line_page_step(&app, body, down, PageDirection::Up)
+                .expect("a line page");
+
+        assert_eq!(second.0, first.1 + 1, "{first:?} -> {second:?}");
+        assert_eq!(up, down, "PgUp returns to the first window");
+        drop(temp);
+    }
+
+    /// The rows the full-frame viewport names as `(first, last, total)`.
+    fn shown_rows(app: &ShellApp) -> (usize, usize, usize) {
+        let viewport = app.viewport();
+        let full = Rect::new(0, 0, viewport.columns, viewport.rows);
+        let area = crate::renderer::workbench_primary_area(app, full);
+        let scroll = usize::from(app.router.default_scroll().offset());
+        let lines = super::super::gallery::scene_line_page_viewport_lines(app, area, scroll)
+            .expect("a line page");
+        let label = lines
+            .iter()
+            .map(|line| line.to_string())
+            .find(|text| text.trim_start().starts_with("row"))
+            .expect("an overflowing page states its window");
+        parse_position(label.trim())
+    }
+
+    fn parse_position(label: &str) -> (usize, usize, usize) {
+        let (range, total) = label
+            .split_once(' ')
+            .and_then(|(_, rest)| rest.split_once('/'))
+            .expect("row label");
+        let (first, last) = range.split_once('-').unwrap_or((range, range));
+        let number = |text: &str| text.parse::<usize>().expect("row number");
+        (number(first), number(last), number(total))
+    }
+
     /// A projection that fits states nothing — the disclosure is a truncation
     /// signal, not permanent chrome.
     #[test]
@@ -349,6 +495,10 @@ mod tests {
     }
 
     fn app_with_component_inventory() -> (tempfile::TempDir, ShellApp) {
+        app_with_components(component_report(8, "crate"))
+    }
+
+    fn app_with_components(report: SbomScanReport) -> (tempfile::TempDir, ShellApp) {
         let temp = tempfile::tempdir().expect("temp target");
         let workspace = WorkspaceTarget::new(temp.path()).expect("workspace");
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -358,12 +508,12 @@ mod tests {
             .session_mut()
             .apply_active_target_facts(StampedTargetCandidateFacts {
                 generation: 1,
-                facts: component_facts(path),
+                facts: component_facts(path, report),
             }));
         (temp, app)
     }
 
-    fn component_facts(path: PathBuf) -> TargetCandidateFacts {
+    fn component_facts(path: PathBuf, report: SbomScanReport) -> TargetCandidateFacts {
         TargetCandidateFacts {
             path,
             repository_kind: "git repository".into(),
@@ -377,15 +527,16 @@ mod tests {
             file_count_capped: false,
             prior_artifact_count: 0,
             prior_artifacts: Vec::new(),
-            component_inventory: Some(component_report()),
+            component_inventory: Some(report),
             component_inventory_error: None,
+            component_inventory_from_tool: false,
         }
     }
 
-    fn component_report() -> SbomScanReport {
-        let components = (0..8)
+    fn component_report(count: usize, prefix: &str) -> SbomScanReport {
+        let components = (0..count)
             .map(|index| SbomComponent {
-                name: format!("crate-{index}"),
+                name: format!("{prefix}-{index}"),
                 version: Some(format!("1.{index}.0")),
                 package_url: None,
                 ecosystem: "cargo".into(),

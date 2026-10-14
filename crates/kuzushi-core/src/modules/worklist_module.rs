@@ -12,7 +12,8 @@ pub(crate) fn worklist_module() -> BuiltinModule {
          scan-coverage recommendations, and an opt-in systems-hunt walk. No model calls; \
          every row carries each contributing ranker's raw evidence.",
         vec![worklist_rank_tool()
-            .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))],
+            .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required))
+            .without_phase_result()],
         vec![],
     )
 }
@@ -37,8 +38,7 @@ fn worklist_rank_tool() -> ToolDescriptor {
             opt(
                 "includeFanIn",
                 OptionType::Bool,
-                "Reserved for Phase B call-graph fan-in; not implemented yet, so \
-                 it has no effect and defaults off.",
+                "Call-graph fan-in is not implemented. Requesting it is an error; defaults off.",
             )
             .aliases(&["include_fan_in", "fanIn"])
             .default(json!(false)),
@@ -55,13 +55,38 @@ pub(in crate::modules) fn run_worklist_rank(
         .workspace
         .context("worklist:rank requires an active workspace target")?;
     let options = worklist_options(input);
-    let worklist = rank_worklist_for_target(workspace.root(), &options, ctx.findings_store)?;
+    let target = crate::WorkspaceTarget::new(resolve_tool_target(input, ctx)?)?;
+    let child_store = worklist_child_store(&target, workspace)?;
+    let store = if target.root() == workspace.root() {
+        ctx.findings_store
+    } else {
+        child_store.as_ref()
+    };
+    let worklist = rank_worklist_for_target(target.root(), &options, store)?;
     let output = worklist_output_line(&worklist);
+    let mut data = serde_json::to_value(&worklist)?;
+    data["target"] = json!(target.root());
+    data["sourceFreshnessVerified"] = json!(false);
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!(worklist),
+        data,
     ))
+}
+
+fn worklist_child_store(
+    target: &crate::WorkspaceTarget,
+    workspace: &crate::WorkspaceTarget,
+) -> Result<Option<crate::findings::FindingStore>> {
+    if target.root() == workspace.root() {
+        return Ok(None);
+    }
+    let path = target.findings_db_path();
+    match std::fs::symlink_metadata(&path) {
+        Ok(_) => crate::findings::FindingStore::open_read_only(path).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).context("Could not inspect selected target findings store"),
+    }
 }
 
 fn worklist_options(input: &Value) -> WorklistOptions {
@@ -86,15 +111,23 @@ fn worklist_flag(input: &Value, key: &str, default: bool) -> bool {
 }
 
 fn worklist_output_line(worklist: &Worklist) -> String {
-    match worklist.rows.first() {
+    let summary = match worklist.rows.first() {
         Some(top) => format!(
-            "worklist:rank · {} file(s) ranked · top: {} ({})",
+            "worklist:rank · {} of {} ranked file(s) shown · top: {} ({})",
             worklist.rows.len(),
+            worklist.ranked_total,
             top.path,
             top_row_evidence(top),
         ),
-        None => "worklist:rank · no ranked files — run context:build first".to_string(),
+        None => "worklist:rank · no ranked files; run context:build first".to_string(),
+    };
+    if worklist.degraded.is_empty() {
+        return summary;
     }
+    format!(
+        "{summary} · {} contributor issue(s); inspect result details",
+        worklist.degraded.len()
+    )
 }
 
 /// A bare normalized `score {:.2}` launders the evidence. Report the top row's

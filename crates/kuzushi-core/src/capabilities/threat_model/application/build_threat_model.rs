@@ -7,6 +7,14 @@ pub(crate) fn build_threat_model(
     runtime: Option<&dyn AgentRuntime>,
     flavor: BuildFlavor,
 ) -> Result<Value> {
+    validate_operator_brief_execution(&input)?;
+    if input.get("scanScopeRef").is_some() {
+        return super::super::adapters::build_scoped_context(input, ctx, runtime, flavor);
+    }
+    anyhow::ensure!(
+        input.get("inheritedContextRef").is_none(),
+        "inheritedContextRef requires scanScopeRef"
+    );
     super::rejected_output::validate_requested_mode(&input)?;
     if deterministic_pipeline_requested(&input) {
         reject_model_only_options_for_deterministic_pipeline(&input, ctx)?;
@@ -329,6 +337,7 @@ pub(crate) fn complete_threat_model_build(
     reconciliation: BuildReconciliation,
 ) -> Result<Value> {
     seal_build_document(&mut generated.document, &input, &source_bundle)?;
+    stamp_operator_intent(&mut generated.document, &input)?;
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
     let cost = generated_threat_model_cost(&generated)?;

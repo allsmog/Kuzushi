@@ -6,6 +6,36 @@ use kuzushi_core::V2Config;
 use std::path::Path;
 use std::sync::Arc;
 
+#[test]
+fn health_does_not_claim_stored_or_refreshable_oauth_was_accepted() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("owned-oauth.json");
+    let mut config = V2Config::default();
+    config.model = Some("openai-codex:gpt-5.5".into());
+    config.runtime.api_key_env = "OPENAI_API_KEY".into();
+    config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+        credentials_path: Some(path.clone()),
+        allow_env_token: false,
+    });
+    let app = ShellApp::new(config, None);
+    for (expires, expected) in [(1, "expired"), (4102444800000u64, "unverified")] {
+        std::fs::write(&path, serde_json::json!({"openai-codex":{"access":"owned-not-a-token","refresh":"owned-not-a-refresh","expires":expires}}).to_string()).unwrap();
+        let row = configured_credential_row(&app, "OPENAI_API_KEY").unwrap();
+        assert_eq!(row.tone, HealthTone::Warn);
+        assert!(row.detail.contains(expected));
+        assert!(!row.detail.contains("ready") && !row.detail.contains("accepted"));
+        assert!(!row.detail.contains("owned-not-a-token"));
+    }
+    std::fs::write(
+        &path,
+        r#"{"openai-codex":{"access":"owned-not-a-token","expires":1}}"#,
+    )
+    .unwrap();
+    let row = configured_credential_row(&app, "OPENAI_API_KEY").unwrap();
+    assert_eq!(row.tone, HealthTone::Fail);
+    assert!(row.next.contains("repair"));
+}
+
 #[derive(Debug)]
 struct SettledHealthReader;
 

@@ -10,6 +10,7 @@ pub(crate) enum ShellEffect {
     OpenActivity(ActivityOpen),
     ApplyReviewedPatch(ReviewedPatchApply),
     ExportReport(ReportExport),
+    PersistReportChoices,
     RevealReportDestination,
     ApplySastTaskOptions(SastTaskOptionsApply),
     ApplyThreatPatch(ThreatPatchApply),
@@ -174,6 +175,7 @@ pub(crate) struct ThreatPatchApply {
     pub(crate) target: PathBuf,
 }
 
+#[derive(Clone)]
 pub(crate) struct ReviewDecisionApply {
     pub(crate) alias: Option<String>,
     pub(crate) decision: ReviewDecision,
@@ -657,6 +659,9 @@ impl ShellApp {
     }
 
     pub(super) fn export_report_effect(&mut self, export: ReportExport) {
+        if export.target.as_deref() == self.target() {
+            self.persist_report_export_choices();
+        }
         let timestamp = effect_timestamp();
         let result = export_findings_for_target(
             export.target.as_ref(),
@@ -765,44 +770,6 @@ impl ShellApp {
                 Vec::new()
             }
         }
-    }
-
-    pub(super) fn record_review_decision_effect(
-        &mut self,
-        apply: ReviewDecisionApply,
-    ) -> Vec<ShellEffect> {
-        let workspace = match workspace_for_target(apply.target.as_ref()) {
-            Ok(workspace) => workspace,
-            Err(error) => {
-                self.log_review_decision_workspace_error(error);
-                return Vec::new();
-            }
-        };
-        match record_review_decision_in_workspace(&workspace, &apply) {
-            Ok(decision_id) => {
-                // The verdict closes the review session it concluded, so the
-                // next open of this finding is measured as a new one.
-                self.close_review_session(&apply.finding);
-                self.clear_review_decision_conflict();
-                let label = review_decision_finding_label(apply.alias.as_deref(), &apply.finding);
-                self.log_saved_review_decision(decision_id, apply.decision.verdict, &label);
-                self.review_decision_refresh_effects(&apply.finding)
-            }
-            Err(error) => {
-                if self.log_review_decision_write_error(&apply.finding, error) {
-                    self.review_decision_conflict_refresh_effects()
-                } else {
-                    Vec::new()
-                }
-            }
-        }
-    }
-
-    fn log_review_decision_workspace_error(&mut self, error: anyhow::Error) {
-        self.set_error_notice(
-            "review",
-            with_next_step(error.to_string(), "target <path> then findings"),
-        );
     }
 
     /// The commit decides the outcome, so nothing is announced or discarded
@@ -1178,19 +1145,6 @@ fn current_unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-fn record_review_decision_in_workspace(
-    workspace: &WorkspaceTarget,
-    apply: &ReviewDecisionApply,
-) -> anyhow::Result<i64> {
-    kuzushi_core::workspace::record_user_review_decision_for_finding_with_session(
-        workspace,
-        &apply.finding,
-        &apply.decision,
-        apply.read_watermark,
-        apply.review_session_id.clone(),
-    )
 }
 
 fn applied_patch_message(

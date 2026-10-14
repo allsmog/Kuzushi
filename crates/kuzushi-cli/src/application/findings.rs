@@ -45,6 +45,9 @@ pub(crate) fn findings_batch_command(
     let target = require_cli_target("findings batch", target, None)?;
     let workspace = WorkspaceTarget::new(target)?;
     let store = FindingStore::open(workspace.findings_db_path())?;
+    if emit_case_study_occurrence(&workspace, &batch_id, &store, json)? {
+        return Ok(());
+    }
     let report = kuzushi_core::findings::derive_batch_occurrence_report(
         workspace.root(),
         &batch_id,
@@ -54,6 +57,51 @@ pub(crate) fn findings_batch_command(
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("{}", report.output());
+    }
+    Ok(())
+}
+
+fn emit_case_study_occurrence(
+    workspace: &WorkspaceTarget,
+    id: &str,
+    store: &FindingStore,
+    json: bool,
+) -> Result<bool> {
+    let plan =
+        kuzushi_core::capabilities::campaign::read_campaign_plan_document(workspace.root(), id)?;
+    match plan["kind"].as_str() {
+        Some(kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND) => {
+            let report = kuzushi_core::findings::derive_scope_study_occurrence_report(
+                workspace.root(),
+                id,
+                store,
+            )?;
+            print_case_occurrence(&report, &report.cases, json)?;
+        }
+        Some(kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND) => {
+            let report = kuzushi_core::findings::derive_context_matrix_occurrence_report(
+                workspace.root(),
+                id,
+                store,
+            )?;
+            print_case_occurrence(&report, &report.cases, json)?;
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+fn print_case_occurrence(
+    report: &impl serde::Serialize,
+    cases: &[kuzushi_core::findings::ContextCaseOccurrenceReport],
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    for context in cases {
+        println!("{}\n{}", context.label, context.occurrence.output());
     }
     Ok(())
 }

@@ -8,93 +8,44 @@ const SOURCE_EXTENSIONS: &[&str] = &[
 pub(super) fn source_header_findings(
     target: &Path,
     manifests: &[PathBuf],
+    files: &[PathBuf],
     cancellation: &ScanCancellation,
     require_source_spdx_headers: bool,
 ) -> Result<Vec<LicenseScanFinding>> {
-    let declared = declared_license_kind(manifests)?;
+    let declared = declared_license_kind(target, manifests, cancellation)?;
     if declared.is_none() && !require_source_spdx_headers {
         return Ok(Vec::new());
     }
     let mut findings = Vec::new();
-    collect_spdx_header_findings(
-        target,
-        target,
-        declared.as_deref(),
-        require_source_spdx_headers,
-        &mut findings,
-        cancellation,
-    )?;
+    for path in files.iter().filter(|path| is_source_file(path)) {
+        ensure_scan_active(cancellation)?;
+        inspect_source_path(
+            target,
+            path,
+            declared.as_deref(),
+            require_source_spdx_headers,
+            &mut findings,
+        )?;
+    }
     findings.sort_by_key(|finding| finding.file_path.clone());
     Ok(findings)
 }
 
-fn declared_license_kind(manifests: &[PathBuf]) -> Result<Option<String>> {
+fn declared_license_kind(
+    target: &Path,
+    manifests: &[PathBuf],
+    cancellation: &ScanCancellation,
+) -> Result<Option<String>> {
     for path in manifests {
-        let text = crate::bounded_file::read_utf8_text(path, MAX_LICENSE_MANIFEST_BYTES)
-            .with_context(|| format!("license-scan: read {}", path.display()))?;
+        ensure_scan_active(cancellation)?;
+        let text =
+            crate::bounded_file::read_utf8_text_within(target, path, MAX_LICENSE_MANIFEST_BYTES)
+                .with_context(|| format!("license-scan: read {}", path.display()))?;
         if let ManifestLicense::Declared(license) = manifest_license(path, &text)? {
             return Ok(Some(normalize_license_id(&license)));
         }
     }
     Ok(None)
-}
-
-fn collect_spdx_header_findings(
-    target: &Path,
-    dir: &Path,
-    declared: Option<&str>,
-    require_source_spdx_headers: bool,
-    findings: &mut Vec<LicenseScanFinding>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("license-scan scan cancelled");
-    }
-    for entry in
-        fs::read_dir(dir).with_context(|| format!("license-scan: read {}", dir.display()))?
-    {
-        let path = entry?.path();
-        inspect_path(
-            target,
-            &path,
-            declared,
-            require_source_spdx_headers,
-            findings,
-            cancellation,
-        )?;
-    }
-    Ok(())
-}
-
-fn inspect_path(
-    target: &Path,
-    path: &Path,
-    declared: Option<&str>,
-    require_source_spdx_headers: bool,
-    findings: &mut Vec<LicenseScanFinding>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    let file_type = fs::symlink_metadata(path)?.file_type();
-    if file_type.is_dir() && !ignored_dir(path) {
-        return collect_spdx_header_findings(
-            target,
-            path,
-            declared,
-            require_source_spdx_headers,
-            findings,
-            cancellation,
-        );
-    }
-    if !file_type.is_file() || !is_source_file(path) {
-        return Ok(());
-    }
-    inspect_source_path(
-        target,
-        path,
-        declared,
-        require_source_spdx_headers,
-        findings,
-    )
 }
 
 fn inspect_source_path(
@@ -104,7 +55,7 @@ fn inspect_source_path(
     require_source_spdx_headers: bool,
     findings: &mut Vec<LicenseScanFinding>,
 ) -> Result<()> {
-    match source_spdx_license(path)? {
+    match source_spdx_license(target, path)? {
         Some(header)
             if declared.is_some_and(|license| normalize_license_id(&header) != license) =>
         {
@@ -124,10 +75,32 @@ fn inspect_source_path(
     Ok(())
 }
 
-fn source_spdx_license(path: &Path) -> Result<Option<String>> {
-    let text = crate::bounded_file::read_utf8_text_prefix(path, MAX_SOURCE_HEADER_BYTES)
-        .with_context(|| format!("license-scan: read {}", path.display()))?;
-    Ok(text.text.lines().take(20).find_map(spdx_license_from_line))
+fn source_spdx_license(target: &Path, path: &Path) -> Result<Option<String>> {
+    let text =
+        crate::bounded_file::read_utf8_text_prefix_within(target, path, MAX_SOURCE_HEADER_BYTES)
+            .with_context(|| format!("license-scan: read {}", path.display()))?;
+    inspected_header(&text.text, text.truncated)
+}
+
+fn inspected_header(text: &str, truncated: bool) -> Result<Option<String>> {
+    let text = complete_header_text(text, truncated);
+    let lines = text.lines().take(20).collect::<Vec<_>>();
+    let header = lines.iter().find_map(|line| spdx_license_from_line(line));
+    if header.is_some() {
+        return Ok(header);
+    }
+    anyhow::ensure!(!truncated || lines.len() >= 20,
+        "license-scan: source header exceeds the {MAX_SOURCE_HEADER_BYTES}-byte inspection limit before 20 complete lines; header absence is unverified");
+    Ok(None)
+}
+
+fn complete_header_text(text: &str, truncated: bool) -> &str {
+    if !truncated || text.ends_with('\n') {
+        return text;
+    }
+    text.rsplit_once('\n')
+        .map(|(complete, _)| complete)
+        .unwrap_or_default()
 }
 
 fn is_source_file(path: &Path) -> bool {
@@ -178,4 +151,33 @@ fn spdx_header_mismatch_finding(
         format!("manifest license = {declared}; source SPDX = {header}"),
         Some(header.to_string()),
     )
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+
+    #[test]
+    fn truncated_lines_cannot_establish_header_absence_or_an_incomplete_identifier() {
+        assert!(inspected_header("// SPDX-License-Identifier: MI", true).is_err());
+        assert!(
+            inspected_header("// first complete line\n// uninspected remainder", true).is_err()
+        );
+    }
+
+    #[test]
+    fn a_complete_header_remains_usable_before_an_uninspected_remainder() {
+        assert_eq!(
+            inspected_header("// SPDX-License-Identifier: MIT\n// incomplete", true).unwrap(),
+            Some("MIT".into())
+        );
+        assert_eq!(
+            inspected_header("// complete with no header", false).unwrap(),
+            None
+        );
+        assert_eq!(
+            inspected_header(&("// complete\n".repeat(20) + "// incomplete"), true).unwrap(),
+            None
+        );
+    }
 }

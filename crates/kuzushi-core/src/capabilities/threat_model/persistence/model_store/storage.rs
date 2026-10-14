@@ -88,7 +88,9 @@ pub(super) fn validate_ref_in_manifest(
     Ok(())
 }
 
-pub(in crate::capabilities::threat_model::persistence) fn validate_sha256(value: &str) -> Result<()> {
+pub(in crate::capabilities::threat_model::persistence) fn validate_sha256(
+    value: &str,
+) -> Result<()> {
     let digest = value
         .strip_prefix("sha256:")
         .context("threat-model digest must start with sha256:")?;
@@ -108,22 +110,16 @@ pub(super) struct StoredObject {
 
 pub(super) fn write_object(root: &Path, document: &Value) -> Result<StoredObject> {
     let bytes = crate::review_yield::domain::canonical_json_bytes(document)?;
+    anyhow::ensure!(bytes.len() <= MAX_STORE_JSON_BYTES, "Context document exceeds the {MAX_STORE_JSON_BYTES}-byte storage limit; reduce text before saving");
     let sha256 = crate::run_lifecycle::sha256_content_digest(&bytes);
     let path = object_path(root, &sha256)?;
+    store_object_bytes(root, &path, &bytes)?;
+    Ok(StoredObject { sha256 })
+}
+
+fn store_object_bytes(root: &Path, path: &Path, bytes: &[u8]) -> Result<()> {
     match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
-            let existing =
-                crate::bounded_file::read_regular_bytes_within(root, &path, MAX_STORE_JSON_BYTES)?;
-            anyhow::ensure!(
-                existing == bytes,
-                "immutable threat-model object {} is corrupt",
-                path.display()
-            );
-        }
-        Ok(_) => anyhow::bail!(
-            "immutable threat-model object {} is not a regular file",
-            path.display()
-        ),
+        Ok(metadata) => verify_object_bytes(root, path, bytes, &metadata)?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             crate::fs_atomic::write_atomic_bytes(&path, &bytes)?;
         }
@@ -131,7 +127,48 @@ pub(super) fn write_object(root: &Path, document: &Value) -> Result<StoredObject
             return Err(error).with_context(|| format!("Could not inspect {}", path.display()))
         }
     }
-    Ok(StoredObject { sha256 })
+    Ok(())
+}
+
+fn verify_object_bytes(
+    root: &Path,
+    path: &Path,
+    bytes: &[u8],
+    metadata: &fs::Metadata,
+) -> Result<()> {
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "immutable threat-model object {} is not a regular file",
+        path.display()
+    );
+    let existing =
+        crate::bounded_file::read_regular_bytes_within(root, path, MAX_STORE_JSON_BYTES)?;
+    anyhow::ensure!(
+        existing == bytes,
+        "immutable threat-model object {} is corrupt",
+        path.display()
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversized_context_objects_are_refused_before_an_unreadable_object_is_written() {
+        let root = tempfile::tempdir().unwrap();
+        prepare_store_directories(root.path()).unwrap();
+        let document = serde_json::json!({"text":"x".repeat(MAX_STORE_JSON_BYTES)});
+        let error = write_object(root.path(), &document).err().unwrap();
+        assert!(error.to_string().contains("storage limit"));
+        assert_eq!(
+            fs::read_dir(threat_model_store_path(root.path()).join(OBJECTS_DIR))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
 }
 
 pub(super) fn read_object(root: &Path, sha256: &str) -> Result<Value> {

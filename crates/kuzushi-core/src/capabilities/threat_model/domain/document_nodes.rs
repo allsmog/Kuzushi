@@ -132,7 +132,9 @@ fn threat_risk_fields(record: &Map<String, Value>) -> ThreatRiskFields {
     let probability = record.get("probability").and_then(Value::as_f64);
     ThreatRiskFields {
         impact,
-        likelihood: probability.map(probability_to_likelihood).unwrap_or("unknown"),
+        likelihood: probability
+            .map(probability_to_likelihood)
+            .unwrap_or("unknown"),
         probability,
         warnings: threat_risk_warnings(raw_impact.as_deref(), impact, probability),
     }

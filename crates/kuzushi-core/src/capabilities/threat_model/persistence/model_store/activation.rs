@@ -2,11 +2,31 @@ use super::*;
 
 pub(super) fn commit_manifest_update(
     root: &Path,
+    manifest: ThreatModelManifest,
+    active: Option<ThreatModelRef>,
+    actor: &str,
+    source: ActivationSource,
+    discarded_mirror_sha256: Option<String>,
+) -> Result<()> {
+    commit_manifest_update_with_observed(
+        root,
+        manifest,
+        active,
+        actor,
+        source,
+        discarded_mirror_sha256,
+        None,
+    )
+}
+
+pub(super) fn commit_manifest_update_with_observed(
+    root: &Path,
     mut manifest: ThreatModelManifest,
     active: Option<ThreatModelRef>,
     actor: &str,
     source: ActivationSource,
     discarded_mirror_sha256: Option<String>,
+    observed_mirror_sha256: Option<&str>,
 ) -> Result<()> {
     let previous = manifest.active.clone();
     manifest.generation = manifest.generation.saturating_add(1);
@@ -22,15 +42,28 @@ pub(super) fn commit_manifest_update(
             discarded_mirror_sha256,
         ));
     }
-    if updates_active {
-        begin_mirror_commit(root, &manifest)?;
-    }
+    prepare_active_mirror_commit(root, &manifest, updates_active, observed_mirror_sha256)?;
     write_manifest(root, &manifest)?;
     ensure_activation_audit(root, &manifest)?;
     if updates_active {
         recover_pending_mirror_commit(root, &manifest)
     } else {
         Ok(())
+    }
+}
+
+fn prepare_active_mirror_commit(
+    root: &Path,
+    manifest: &ThreatModelManifest,
+    updates_active: bool,
+    observed_mirror_sha256: Option<&str>,
+) -> Result<()> {
+    if !updates_active {
+        return Ok(());
+    }
+    match observed_mirror_sha256 {
+        Some(observed) => begin_mirror_commit_with_observed(root, manifest, Some(observed)),
+        None => begin_mirror_commit(root, manifest),
     }
 }
 

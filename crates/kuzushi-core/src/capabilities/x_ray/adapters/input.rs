@@ -69,11 +69,10 @@ pub(crate) fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         return canonicalize_dir(Path::new(&target));
     }
 
-    if let Some(workspace) = ctx.workspace {
-        return Ok(workspace.root().to_path_buf());
-    }
-
-    canonicalize_dir(Path::new("."))
+    let workspace = ctx
+        .workspace
+        .context("x-ray tool requires an explicit target or active workspace")?;
+    Ok(workspace.root().to_path_buf())
 }
 
 pub(crate) fn canonicalize_dir(path: &Path) -> Result<PathBuf> {

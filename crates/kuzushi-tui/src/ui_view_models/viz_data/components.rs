@@ -15,6 +15,7 @@ pub(crate) struct ComponentStack {
     pub resolved_count: usize,
     pub ecosystems: Vec<String>,
     pub empty_hint: Option<String>,
+    pub from_tool: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,11 +64,11 @@ pub(crate) fn component_stack(app: &ShellApp) -> ComponentStack {
 
 fn component_inventory_waiting_hint(app: &ShellApp) -> String {
     if app.target().is_none() {
-        "no active target — select a repository before inspecting components".to_string()
+        "No active target. Select a repository before inspecting components.".to_string()
     } else if app.active_target_facts_loading() {
         "component inventory is still loading from repository manifests".to_string()
     } else {
-        "no component inventory is available — run `sbom-scan:scan`".to_string()
+        "No component inventory is available. Run `run sbom-scan:scan`.".to_string()
     }
 }
 
@@ -80,7 +81,7 @@ fn component_stack_from_facts(facts: &TargetCandidateFacts) -> ComponentStack {
         return ComponentStack {
             target: target_label(facts),
             empty_hint: Some(format!(
-                "component inventory failed: {detail} — run `sbom-scan:scan` for a full receipt"
+                "Component inventory failed: {detail}. Run `run sbom-scan:scan` for a full receipt."
             )),
             ..Default::default()
         };
@@ -116,6 +117,7 @@ fn component_stack_from_report(
         resolved_count,
         ecosystems: report.by_ecosystem.keys().cloned().collect(),
         empty_hint: None,
+        from_tool: facts.component_inventory_from_tool,
     }
 }
 
@@ -251,6 +253,7 @@ mod tests {
             prior_artifacts: Vec::new(),
             component_inventory: Some(report()),
             component_inventory_error: None,
+            component_inventory_from_tool: false,
         };
 
         let stack = component_stack_from_facts(&facts);

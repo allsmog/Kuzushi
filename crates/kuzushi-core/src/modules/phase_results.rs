@@ -9,7 +9,10 @@ pub fn phase_result_phase(tool: &ToolDescriptor) -> Option<WorkflowPhase> {
     }
     match classify_descriptor(tool) {
         Some(ToolClassification::Phase(phase)) => Some(phase),
-        Some(ToolClassification::Read | ToolClassification::Report) | None => None,
+        Some(
+            ToolClassification::Read | ToolClassification::Report | ToolClassification::Operate,
+        )
+        | None => None,
     }
 }
 

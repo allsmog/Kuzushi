@@ -1,14 +1,18 @@
 use crate::app::{
-    auth_ready_for_provider, build_execution_plan, oauth_provider_status, SetupRowId,
+    build_execution_plan, env_credential_is_ready, oauth_provider_status, SetupRowId,
 };
 use crate::ShellApp;
 
+mod context_import;
 mod readiness_rows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CredentialReadiness {
     ApiKey,
     OAuth,
+    OAuthRefreshable,
+    OAuthEnvironment,
+    OAuthRepair,
     Session,
     Missing,
     NotRequired,
@@ -17,22 +21,36 @@ pub(crate) enum CredentialReadiness {
 impl CredentialReadiness {
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::ApiKey => "API key ready",
-            Self::OAuth => "OAuth ready",
-            Self::Session => "session credential ready",
+            Self::ApiKey => "API key present",
+            Self::OAuth => "OAuth stored",
+            Self::OAuthRefreshable => "OAuth refresh required",
+            Self::OAuthEnvironment => "OAuth token present",
+            Self::OAuthRepair => "OAuth needs repair",
+            Self::Session => "session key present",
             Self::Missing => "credentials required",
             Self::NotRequired => "not required by this plan",
         }
     }
 
     fn is_ready(self) -> bool {
-        !matches!(self, Self::Missing)
+        !matches!(self, Self::Missing | Self::OAuthRepair)
+    }
+
+    pub(crate) fn detail(self) -> &'static str {
+        match self {
+            Self::OAuthRefreshable => "Stored access token expired. Runtime must refresh it before a model request; refresh success is unverified.",
+            Self::OAuthRepair => "Stored OAuth data is invalid or cannot refresh. Open Credentials to repair it; the selected model stays unchanged.",
+            Self::Missing => "Select Credentials to configure the selected provider.",
+            Self::NotRequired => "This plan has no model-backed work.",
+            _ => "Credential present; provider acceptance is checked during execution. No credential value is displayed.",
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SetupReadinessTone {
     Ready,
+    Attention,
     Optional,
     Blocked,
     Action,
@@ -208,10 +226,17 @@ pub(crate) fn credential_readiness_for_provider(
 ) -> CredentialReadiness {
     classify_credential_readiness(
         app.session().session_api_key_ready(provider),
-        oauth_provider_for_model(provider)
-            .is_some_and(|oauth| crate::app::oauth_credential_is_ready(app.config(), oauth)),
-        auth_ready_for_provider(app.config(), provider),
+        provider_api_key_present(provider),
+        oauth_provider_for_model(provider).map(|oauth| oauth_provider_status(app.config(), oauth)),
     )
+}
+
+fn provider_api_key_present(provider: &str) -> bool {
+    match provider {
+        "anthropic" => env_credential_is_ready("ANTHROPIC_API_KEY"),
+        "openai" => env_credential_is_ready("OPENAI_API_KEY"),
+        _ => false,
+    }
 }
 
 fn oauth_provider_for_model(provider: &str) -> Option<&str> {
@@ -224,13 +249,24 @@ fn oauth_provider_for_model(provider: &str) -> Option<&str> {
 
 fn classify_credential_readiness(
     session_ready: bool,
-    stored_oauth: bool,
-    provider_ready: bool,
+    api_key_present: bool,
+    stored_oauth: Option<crate::app::OauthCredentialStatus>,
 ) -> CredentialReadiness {
-    match (session_ready, stored_oauth, provider_ready) {
-        (true, _, _) => CredentialReadiness::Session,
-        (false, true, true) => CredentialReadiness::OAuth,
-        (false, false, true) => CredentialReadiness::ApiKey,
+    if session_ready {
+        return CredentialReadiness::Session;
+    }
+    if api_key_present {
+        return CredentialReadiness::ApiKey;
+    }
+    match stored_oauth {
+        Some(crate::app::OauthCredentialStatus::Ready) => CredentialReadiness::OAuth,
+        Some(crate::app::OauthCredentialStatus::Refreshable) => {
+            CredentialReadiness::OAuthRefreshable
+        }
+        Some(crate::app::OauthCredentialStatus::Environment) => {
+            CredentialReadiness::OAuthEnvironment
+        }
+        Some(crate::app::OauthCredentialStatus::Invalid) => CredentialReadiness::OAuthRepair,
         _ => CredentialReadiness::Missing,
     }
 }
@@ -328,20 +364,105 @@ mod tests {
     #[test]
     fn credential_readiness_distinguishes_api_oauth_and_session_sources() {
         assert_eq!(
-            classify_credential_readiness(false, false, true),
+            classify_credential_readiness(false, true, None),
             CredentialReadiness::ApiKey
         );
         assert_eq!(
-            classify_credential_readiness(false, true, true),
+            classify_credential_readiness(
+                false,
+                false,
+                Some(crate::app::OauthCredentialStatus::Ready)
+            ),
             CredentialReadiness::OAuth
         );
         assert_eq!(
-            classify_credential_readiness(true, false, false),
+            classify_credential_readiness(true, false, None),
             CredentialReadiness::Session
         );
         assert_eq!(
-            classify_credential_readiness(false, true, false),
+            classify_credential_readiness(
+                false,
+                false,
+                Some(crate::app::OauthCredentialStatus::Missing)
+            ),
             CredentialReadiness::Missing
+        );
+    }
+
+    #[test]
+    fn credential_readiness_preserves_oauth_states_and_transport_precedence() {
+        use crate::app::OauthCredentialStatus::*;
+        for (status, expected) in [
+            (Ready, CredentialReadiness::OAuth),
+            (Refreshable, CredentialReadiness::OAuthRefreshable),
+            (Environment, CredentialReadiness::OAuthEnvironment),
+            (Invalid, CredentialReadiness::OAuthRepair),
+            (Missing, CredentialReadiness::Missing),
+        ] {
+            assert_eq!(
+                classify_credential_readiness(false, false, Some(status)),
+                expected
+            );
+            assert_eq!(
+                classify_credential_readiness(false, true, Some(status)),
+                CredentialReadiness::ApiKey
+            );
+            assert_eq!(
+                classify_credential_readiness(true, true, Some(status)),
+                CredentialReadiness::Session
+            );
+        }
+        assert!(!CredentialReadiness::OAuthRepair.is_ready());
+        assert!(CredentialReadiness::OAuthRefreshable.is_ready());
+        assert!(CredentialReadiness::OAuthRefreshable
+            .detail()
+            .contains("unverified"));
+    }
+
+    #[test]
+    fn setup_discloses_expired_tokens_and_blocks_unrefreshable_oauth() {
+        let credentials = tempfile::tempdir().unwrap();
+        let path = credentials.path().join("owned-oauth.json");
+        std::fs::write(&path, r#"{"openai-codex":{"access":"owned-not-a-token","refresh":"owned-not-a-refresh","expires":1}}"#).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("openai-codex:gpt-5.5".into());
+        config.runtime.api_key_env = "OPENAI_API_KEY".into();
+        config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+            credentials_path: Some(path.clone()),
+            allow_env_token: false,
+        });
+        let (_target, mut app) = app_with_target(config);
+        app.engagement
+            .planning_picker_mut()
+            .selected_mut()
+            .insert(PlanningTaskId::BuildThreatModel);
+        let model = setup_readiness_model(&app);
+        assert_eq!(
+            model.credential_readiness,
+            CredentialReadiness::OAuthRefreshable
+        );
+        assert_eq!(model.rows[4].status, "OAuth refresh required");
+        assert_eq!(model.rows[4].tone, SetupReadinessTone::Attention);
+        assert!(model.rows[4]
+            .detail
+            .contains("refresh success is unverified"));
+        std::fs::write(
+            &path,
+            r#"{"openai-codex":{"access":"owned-not-a-token","expires":1}}"#,
+        )
+        .unwrap();
+        let model = setup_readiness_model(&app);
+        assert_eq!(model.credential_readiness, CredentialReadiness::OAuthRepair);
+        assert_eq!(model.rows[4].status, "REPAIR");
+        assert!(model.rows[4].blocker.is_some());
+        assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.5"));
+        app.engagement
+            .planning_picker_mut()
+            .selected_mut()
+            .remove(&PlanningTaskId::BuildThreatModel);
+        assert_eq!(
+            setup_readiness_model(&app).credential_readiness,
+            CredentialReadiness::NotRequired
         );
     }
 

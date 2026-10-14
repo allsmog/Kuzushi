@@ -24,7 +24,9 @@ pub(crate) use schema_markdown::*;
 pub(crate) use scope_binding::{bind_scope_ref, root_scope};
 pub use scope_binding::{classify_scope_binding, current_scope_ref_for_path, ScopeBindingStatus};
 pub(crate) use source_bundle::*;
-pub(crate) use source_code::CodeEvidence;
+pub(crate) use source_code::collect_regeneration_source;
+pub(crate) use source_code::collect_scoped_source;
+pub(crate) use source_code::{CodeEvidence, CodeSource};
 pub(crate) use staged::*;
 pub(crate) use verify::verify_threat_model_document_with_roots;
 pub use verify::{

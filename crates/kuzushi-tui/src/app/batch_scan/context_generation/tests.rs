@@ -4,7 +4,9 @@ use crossterm::event::{KeyEvent, KeyModifiers};
 use kuzushi_core::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use ratatui::{backend::TestBackend, Terminal};
 
+mod brief;
 mod diagnosis;
+mod navigation;
 mod recovery;
 
 fn fixture() -> (tempfile::TempDir, ShellApp) {

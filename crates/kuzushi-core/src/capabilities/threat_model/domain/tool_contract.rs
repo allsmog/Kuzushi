@@ -149,6 +149,7 @@ pub(crate) struct BuildInput {
     pub(crate) emit_findings: bool,
     pub(crate) preserve_user_edits: bool,
     pub(crate) prompt_override: Option<String>,
+    pub(crate) operator_brief: Option<crate::capabilities::campaign::BriefRevision>,
     pub(crate) model: String,
     pub(crate) pipeline: String,
     pub(crate) mode: String,

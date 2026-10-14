@@ -36,6 +36,7 @@ impl ModuleRegistry {
 fn visible_tool_names(registry: &ModuleRegistry) -> Vec<String> {
     registry
         .discoverable_tools()
+        .filter(|tool| !matches!(tool.phase, ToolPhase::Prove | ToolPhase::Fix))
         .map(|tool| tool.name.clone())
         .collect()
 }
@@ -50,6 +51,9 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "context:build" | "context-lite:index" => {
             dispatch_context_snapshot_tool(name, input, ctx, runtime)
         }
+        "findings:lesson-generate" => Some(crate::capabilities::finding_lessons::execute_generate(
+            input, ctx, runtime,
+        )),
         "config:show" => Some(Ok(config_show_json(ctx))),
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
@@ -64,6 +68,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         | "campaign:status"
         | "campaign:coverage"
         | "campaign:approve-allowance"
+        | "campaign:brief"
         | "campaign:allowance"
         | "campaign:study"
         | "campaign:context-study"
@@ -135,6 +140,7 @@ fn dispatch_campaign_tool(
         "campaign:status" => Some(campaign::execute_campaign_status(input, ctx)),
         "campaign:coverage" => Some(campaign::execute_campaign_coverage(input, ctx)),
         "campaign:approve-allowance" => Some(campaign::execute_approve_allowance(input, ctx)),
+        "campaign:brief" => Some(campaign::execute_brief(input, ctx)),
         "campaign:study" => Some(campaign::execute_study_plan(input, ctx)),
         "campaign:context-study" => Some(campaign::execute_context_study(input, ctx)),
         "campaign:context-map" => Some(campaign::execute_context_map(input, ctx)),
@@ -150,7 +156,16 @@ fn dispatch_finding_ledger_tool(
 ) -> ToolDispatchResult {
     match name {
         "findings:list" => Some(list_findings_tool(input, ctx)),
+        "findings:lessons" | "findings:lesson-save" | "findings:lesson-review" => {
+            Some(super::super::findings_lessons::execute(name, input, ctx))
+        }
+        "findings:groups" => Some(super::super::findings_groups::execute(input, ctx)),
         "findings:dismiss" => Some(dismiss_finding_tool(input, ctx)),
+        "findings:relationships" | "findings:relationship" | "findings:relationship-batch" => Some(
+            super::super::findings_relationships::execute_finding_relationship_tool(
+                name, input, ctx,
+            ),
+        ),
         "findings:chains" => Some(crate::capabilities::chains::execute_findings_chains(
             input, ctx,
         )),
@@ -174,13 +189,21 @@ fn engagement_aim_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<
         budget_usd: optional_f64_input(input, &["budget", "budgetUsd", "budget_usd"])?,
     };
     let report = crate::engagement::write_engagement_harness(workspace, request)?;
-    let output = format!("engagement:aim wrote {}", report.path.display());
+    let output = format!(
+        "engagement:aim wrote {}\nLegacy metadata only. Recorded budget is not enforced; no scan work is approved. Use campaign:study to review finite work and approve an allowance.",
+        report.path.display()
+    );
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({
             "path": report.path.display().to_string(),
             "harness": report.harness,
+            "compatibility": {
+                "budgetEnforced": false,
+                "workApproved": false,
+                "replacementTool": "campaign:study",
+            },
         }),
     ))
 }
@@ -206,7 +229,13 @@ fn optional_f64_input(input: &Value, keys: &[&str]) -> Result<Option<f64>> {
 }
 
 pub(in crate::modules) fn config_show_json(ctx: &ToolExecutionContext<'_>) -> Value {
-    let output = "config:show loaded effective Kuzushi configuration".to_string();
+    let output = format!(
+        "Effective configuration\nRuntime: {:?}\nModel: {}\nReasoning: {}\nCredential variable: {} (value hidden)\nInvestigation allowance: reviewed separately before model work.",
+        ctx.config.runtime.kind,
+        ctx.config.model.as_deref().unwrap_or("unconfigured"),
+        ctx.config.runtime.thinking_level.as_deref().unwrap_or("unspecified"),
+        ctx.config.runtime.api_key_env,
+    );
     let data = json!({
         "config": ctx.config,
         "runtime": ctx.config.runtime.kind,
@@ -317,39 +346,27 @@ pub(in crate::modules) fn list_findings_tool(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let mut filter = FindingListFilter::from_tool_input(input)?;
-    let requested_limit = filter.limit;
-    if filter.has_provenance_filter() {
-        filter.limit = FindingListFilter::MAX_LIMIT;
-    }
+    let filter = FindingListFilter::from_tool_input(input)?;
+    let request = crate::findings::FindingPageRequest::from_tool_input(input)?;
     let store = ctx
         .findings_store
         .context("findings:list requires a findings store")?;
-    let report = store.list_findings_filtered(&filter)?;
-    if !filter.has_provenance_filter() {
-        return Ok(report.to_tool_json());
-    }
-    let target = findings_provenance_target(input, ctx)?;
-    let runs = crate::list_run_summaries(&target)?
-        .into_iter()
-        .map(|summary| (summary.run_id.clone(), summary))
-        .collect::<BTreeMap<_, _>>();
-    // Keep each kept row paired with its ledger alias through the
-    // provenance filter — re-aliasing the subset would relabel findings.
-    let (aliases, findings): (Vec<_>, Vec<_>) = report
-        .aliases
-        .into_iter()
-        .zip(report.findings)
-        .filter(|(_, finding)| filter.matches_run_provenance(finding, &runs))
-        .unzip();
-    let count = findings.len();
-    Ok(crate::findings::FindingListReport {
-        review_decisions: report.review_decisions,
-        count,
-        findings: findings.into_iter().take(requested_limit).collect(),
-        aliases: aliases.into_iter().take(requested_limit).collect(),
-    }
-    .to_tool_json())
+    let workspace = ctx
+        .workspace
+        .context("findings:list requires an active workspace")?;
+    let requested_workspace = crate::WorkspaceTarget::new(findings_provenance_target(input, ctx)?)?;
+    anyhow::ensure!(
+        requested_workspace.root() == workspace.root(),
+        "findings:list target differs from the active workspace; switch target explicitly"
+    );
+    let page = crate::findings::read_finding_page(
+        store,
+        workspace,
+        &filter,
+        crate::findings::IdentityFoldPolicy::Legacy,
+        &request,
+    )?;
+    Ok(page.to_tool_json())
 }
 
 pub(in crate::modules) fn dismiss_finding_tool(
@@ -534,7 +551,7 @@ pub(in crate::modules) fn run_secret_scan_tool(
     };
     let store_result = store_secret_scan_findings(&report, ctx)?;
     if let Some(trace) = ctx.trace {
-        let _ = trace.step("done", "scan", "secret-scan complete").emit();
+        let _ = trace.step("done", "scan", "secret-scan finished").emit();
     }
     Ok(output_with_core_findings(
         report.to_tool_json(),

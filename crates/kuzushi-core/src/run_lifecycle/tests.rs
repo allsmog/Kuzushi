@@ -374,6 +374,65 @@ fn typed_artifact_without_a_known_terminal_call_degrades() {
 }
 
 #[test]
+fn a_running_scan_can_record_only_its_exact_start_source_before_settlement() {
+    for (tool, path_kind, valid) in [
+        ("sast:scan", 0, true),
+        ("sast:scan", 1, false),
+        ("other:tool", 0, false),
+        ("sast:scan", 2, false),
+    ] {
+        let producer = RunItemId::new();
+        let call_id = RunCallId::new();
+        let requested = envelope(
+            1,
+            producer,
+            RunItemV1::ToolCallRequested {
+                tool_name: SafeText::operator_visible(tool),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"owned start source"),
+                safe_option_names: Vec::new(),
+            },
+            None,
+        )
+        .with_call(call_id)
+        .unwrap();
+        let started = envelope(
+            2,
+            producer,
+            RunItemV1::ToolCallStarted {
+                tool_name: SafeText::operator_visible(tool),
+                runtime: None,
+                model: None,
+            },
+            Some(&requested),
+        )
+        .with_call(call_id)
+        .unwrap();
+        let path = match path_kind {
+            0 => format!("source-start-{producer}.json"),
+            1 => "result.json".into(),
+            _ => format!("source-start-{}.json", RunItemId::new()),
+        };
+        let produced = envelope(
+            3,
+            RunItemId::new(),
+            RunItemV1::ArtifactProduced {
+                artifact: artifact_reference_at(producer, &path, 'a'),
+            },
+            Some(&started),
+        )
+        .with_call(call_id)
+        .unwrap();
+        let projection = reduce_run_items([requested, started, produced]);
+        assert_eq!(
+            matches!(projection.health, ProjectionHealth::Healthy),
+            valid
+        );
+        assert_eq!(projection.artifacts.len(), usize::from(valid));
+        assert!(projection.calls[&call_id].result_artifact.is_none());
+    }
+}
+
+#[test]
 fn artifact_cannot_retroactively_become_a_rejected_calls_result() {
     let item_id = RunItemId::new();
     let call_id = RunCallId::new();

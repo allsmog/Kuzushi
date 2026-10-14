@@ -543,7 +543,7 @@ fn sql_row_u64(value: i64, label: &str) -> rusqlite::Result<u64> {
     u64::try_from(value).map_err(|_| to_sql_error(anyhow::anyhow!("negative {label}: {value}")))
 }
 
-fn review_decision_record_from_row(
+pub(super) fn review_decision_record_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ReviewDecisionRecord> {
     let decision_verdict: String = row.get(3)?;

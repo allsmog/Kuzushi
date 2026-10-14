@@ -4,46 +4,97 @@ use crate::ui_view_models::study_context::{
 };
 use ratatui::widgets::{Block, Borders};
 
+mod actions;
+mod comparison;
 mod diagram;
+mod editor;
 
 pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
     let Some(picker) = app.study_context_picker() else {
         return;
     };
-    if picker.diagram_visible {
-        diagram::render(frame, app, area);
+    if render_context_subview(frame, app, area, picker) {
         return;
     }
     render_context_header(frame, app, area);
     let catalog = context_catalog(app);
     let layout = context_layout(area, catalog.rows.len());
-    let selected = catalog
-        .rows
+    render_context_rows(frame, &catalog.rows, picker.selected.as_ref(), layout.list);
+    render_context_detail(
+        frame,
+        app,
+        layout.detail,
+        layout.controls,
+        picker.detail_scroll,
+        picker.raw,
+    );
+    if let Some(selected) = picker.actions_selected {
+        actions::render(frame, app, area, selected);
+    }
+}
+
+fn render_context_subview(
+    frame: &mut Frame<'_>,
+    app: &ShellApp,
+    area: Rect,
+    picker: &crate::app::StudyContextPicker,
+) -> bool {
+    if let Some(comparison) = picker.comparison.as_ref() {
+        comparison::render(frame, area, comparison);
+        return true;
+    }
+    if picker.editor_visible {
+        editor::render(frame, app, area);
+        return true;
+    }
+    if picker.diagram_visible {
+        diagram::render(frame, app, area);
+        return true;
+    }
+    false
+}
+
+fn render_context_rows(
+    frame: &mut Frame<'_>,
+    rows: &[ContextRow],
+    reference: Option<&kuzushi_core::ThreatModelRef>,
+    area: Rect,
+) {
+    let selected = rows
         .iter()
-        .position(|row| row.reference == picker.selected);
+        .position(|row| row.reference.as_ref() == reference);
     let start = selected
         .unwrap_or(0)
-        .saturating_sub((layout.list.height as usize).saturating_sub(1));
-    let rows = catalog
-        .rows
+        .saturating_sub((area.height as usize).saturating_sub(1));
+    let rows = rows
         .iter()
         .enumerate()
         .skip(start)
-        .take(layout.list.height as usize)
-        .map(|(index, row)| context_row(row, selected == Some(index), layout.list.width as usize))
+        .take(area.height as usize)
+        .map(|(index, row)| context_row(row, selected == Some(index), area.width as usize))
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(rows), layout.list);
-    let lines = context_detail_lines(app, layout.detail.width as usize);
-    let max = lines.len().saturating_sub(layout.detail.height as usize);
-    let offset = picker.detail_scroll.min(max);
+    frame.render_widget(Paragraph::new(rows), area);
+}
+
+fn render_context_detail(
+    frame: &mut Frame<'_>,
+    app: &ShellApp,
+    area: Rect,
+    controls: Rect,
+    scroll: usize,
+    raw: bool,
+) {
+    let lines = context_detail_lines(app, area.width as usize);
+    let max = lines.len().saturating_sub(area.height as usize);
+    let offset = scroll.min(max);
     let lines = lines
         .into_iter()
         .skip(offset)
-        .take(layout.detail.height as usize)
+        .take(area.height as usize)
         .map(|line| Line::styled(line, theme::primary()))
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(lines), layout.detail);
-    render_context_controls(frame, layout.controls, offset, max, picker.raw);
+    frame.render_widget(Paragraph::new(lines), area);
+    render_context_controls(frame, controls, offset, max, raw);
 }
 
 fn render_context_header(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
@@ -90,7 +141,7 @@ fn render_context_controls(
     frame.render_widget(
         Paragraph::new(vec![
             Line::styled(
-                format!("{nav} · PgUp/Dn {}/{}", offset + 1, max + 1),
+                context_navigation_controls(area.width, nav, offset, max),
                 theme::muted(),
             ),
             Line::styled(context_action_controls(area.width, tab), theme::accent()),
@@ -100,9 +151,16 @@ fn render_context_controls(
 }
 
 fn context_action_controls(width: u16, tab: &str) -> String {
-    if width < 50 {
-        "a use m Map g new v DFD Esc back".into()
+    if width < 72 {
+        "a use e edit c check Space actions".into()
     } else {
-        format!("a use · m Map · g new · v diagram · Tab {tab} · Esc back")
+        format!("a use · e edit · c check · Space actions · Tab {tab} · Esc back")
     }
+}
+
+fn context_navigation_controls(width: u16, nav: &str, offset: usize, max: usize) -> String {
+    if width < 72 {
+        return "↑↓ Enter · Tab · PgUp/Dn · Esc back".into();
+    }
+    format!("{nav} · PgUp/Dn {}/{}", offset + 1, max + 1)
 }

@@ -1,15 +1,26 @@
 use super::*;
 use crate::ui_view_models::{context_snapshot_model, ContextSnapshotDetails};
 
+pub(crate) fn context_page_rows(app: &ShellApp) -> Option<usize> {
+    if app.shell_view() != ShellView::Context {
+        return None;
+    }
+    let viewport = app.viewport();
+    let primary =
+        crate::renderer::primary_body_area(app, Rect::new(0, 0, viewport.columns, viewport.rows));
+    let area = crate::ui_view_models::answers_layout(app, primary).workspace;
+    Some(usize::from(area.height).max(1))
+}
+
 pub(crate) fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     let model = context_snapshot_model(app);
 
     lines.push(blank());
     lines.push(divider("CONTEXT", area.width));
-    lines.push(detail("snapshot", &model.snapshot));
+    lines.extend(detail_wrapped("snapshot", &model.snapshot, area.width));
     lines.push(detail("state", model.state));
-    lines.push(detail("status", &fit(&model.status, value_width(area, 10))));
+    lines.extend(detail_wrapped("status", &model.status, area.width));
 
     if let Some(running) = &model.running {
         lines.push(blank());
@@ -21,7 +32,7 @@ pub(crate) fn context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     lines.push(blank());
-    lines.push(command_list_line(
+    lines.extend(command_list_lines(
         &[
             "context build",
             "context status",
@@ -38,22 +49,23 @@ fn append_context_details(
     details: &ContextSnapshotDetails,
     area: Rect,
 ) {
-    lines.push(detail("target", &details.target));
-    lines.push(detail("discovery", &details.discovery));
-    lines.push(detail("files", &details.files));
-    lines.push(detail(
-        "languages",
-        &fit(&details.languages, value_width(area, 10)),
-    ));
-    lines.push(detail(
-        "frameworks",
-        &fit(&details.frameworks, value_width(area, 10)),
-    ));
-    lines.push(detail(
-        "generated",
-        &fit(&details.generated, value_width(area, 10)),
-    ));
-    lines.push(detail("stale", &fit(&details.stale, value_width(area, 10))));
+    for (label, value) in [
+        ("target", &details.target),
+        ("discovery", &details.discovery),
+        ("files", &details.files),
+        ("languages", &details.languages),
+        ("frameworks", &details.frameworks),
+        ("generated", &details.generated),
+        ("stale", &details.stale),
+    ] {
+        lines.extend(detail_wrapped(label, value, area.width));
+    }
+    lines.push(blank());
+    lines.extend(details.inspection.iter().flat_map(|line| {
+        wrap_text(line, area.width as usize)
+            .into_iter()
+            .map(Line::from)
+    }));
 }
 
 fn append_missing_context(lines: &mut Vec<Line<'static>>) {
@@ -73,3 +85,6 @@ fn append_missing_context(lines: &mut Vec<Line<'static>>) {
         ],
     ));
 }
+
+#[cfg(test)]
+mod tests;

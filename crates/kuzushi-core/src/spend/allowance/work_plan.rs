@@ -62,12 +62,14 @@ impl ApprovedWorkItem {
     pub(super) fn work_category(&self) -> Result<super::InvestigationWork> {
         match self.tool.as_str() {
             "sast:scan" => Ok(super::InvestigationWork::Discovery),
+            "findings:lesson-generate"=>Ok(super::InvestigationWork::Learning),
             "threat-model:build"
+                    | "threat-model:regenerate"
             | "context:build"
             | "entry-points:extract"
             | "pack:suggest-scopes" => Ok(super::InvestigationWork::Context),
             _ => anyhow::bail!(
-                "approved campaign work supports discovery scans and bounded Map generation only"
+                "approved campaign work supports discovery scans, bounded Map generation and reviewed lesson drafts only"
             ),
         }
     }

@@ -162,6 +162,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_report_from_current_origin(&mut self) {
+        self.restore_report_choices();
         if self.shell_view() != ShellView::Report {
             let origin = self.current_non_nested_origin();
             if origin.view != ShellView::Report {
@@ -170,6 +171,34 @@ impl ShellApp {
         }
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
+        self.router.report_mut().set_study(None);
+        self.clear_report_navigation_notice();
+    }
+
+    fn clear_report_navigation_notice(&mut self) {
+        if self.advisory().notice.as_ref().is_some_and(|notice| {
+            matches!(notice.source.as_str(), "navigate" | "review")
+                && matches!(
+                    notice.severity,
+                    NoticeSeverity::Info | NoticeSeverity::Success
+                )
+        }) {
+            self.clear_notice();
+        }
+    }
+
+    pub(crate) fn report_hydration_key(&self) -> ViewHydrationKey {
+        if let Some(study) = self.router.report().study() {
+            return ViewHydrationKey::InvestigationStudyReport {
+                campaign_id: study.campaign_id.clone(),
+                plan_sha256: study.plan_sha256.clone(),
+                findings_watermark: self.findings_read_watermark(),
+            };
+        }
+        ViewHydrationKey::InvestigationReport {
+            run_refs: self.report_scan_run_refs(),
+            findings_watermark: self.findings_read_watermark(),
+        }
     }
 
     pub(crate) fn report_scan_run_refs(&self) -> Vec<String> {
@@ -1178,7 +1207,7 @@ impl ShellApp {
                 .invalidate_state_artifact_paths(&target, relative_paths)
         };
         self.reload_external_state(&target, &changes);
-        if !findings_changed || self.findings_projection_is_current(&target) {
+        if !findings_changed || !self.findings_projection_refresh_needed(&target) {
             return Vec::new();
         }
         vec![ShellEffect::RefreshFindings(FindingsRefresh {
@@ -1199,6 +1228,10 @@ impl ShellApp {
         if changes.phase_attempts {
             self.refresh_phase_attempt_projection();
         }
+    }
+
+    pub(crate) fn findings_projection_refresh_needed(&self, target: &std::path::Path) -> bool {
+        self.runtime_state.has_terminal_loop() || !self.findings_projection_is_current(target)
     }
 
     pub(crate) fn findings_projection_is_current(&self, target: &std::path::Path) -> bool {
@@ -1244,6 +1277,22 @@ impl ShellApp {
 
     pub(crate) fn selected_finding_mut(&mut self) -> &mut Option<Finding> {
         self.router.findings_mut().selected_finding_mut()
+    }
+
+    pub(crate) fn bind_selected_finding_reference(&mut self, reference: String) {
+        let watermark = self.findings_read_watermark();
+        let policy = self.identity_fold_policy();
+        self.router
+            .findings_mut()
+            .bind_selected_reference(reference, watermark, policy);
+    }
+
+    pub(crate) fn selected_finding_reference(&self, finding: &Finding) -> Option<String> {
+        self.router.findings().selected_reference(
+            finding,
+            self.findings_read_watermark(),
+            self.identity_fold_policy(),
+        )
     }
 
     pub(crate) fn set_selected_finding(&mut self, finding: Option<Finding>) {
@@ -1475,6 +1524,8 @@ pub(crate) fn contextual_surface_view(view: ShellView) -> bool {
     matches!(
         view,
         ShellView::Catalog
+            | ShellView::Relationships
+            | ShellView::Lessons
             | ShellView::CommandPalette
             | ShellView::ConfirmDialog
             | ShellView::QuitConfirm

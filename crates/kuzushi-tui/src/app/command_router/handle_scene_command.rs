@@ -203,12 +203,7 @@ impl ShellApp {
             VizPage::EntryPoints => !crate::ui_view_models::entry_point_breakdown(self)
                 .entries
                 .is_empty(),
-            VizPage::Components => {
-                let stack = crate::ui_view_models::component_stack(self);
-                !stack.sources.is_empty()
-                    || !stack.languages.is_empty()
-                    || !stack.build_systems.is_empty()
-            }
+            VizPage::Components => self.active_target_facts().is_some(),
             VizPage::Heatmap | VizPage::AttackSurface => !self.findings().is_empty(),
             VizPage::Worklist => !crate::ui_view_models::worklist_model(self).rows.is_empty(),
         }

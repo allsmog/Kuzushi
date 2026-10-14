@@ -114,3 +114,8 @@ pub(crate) fn scan_pipeline_artifact_spec(leaf: &str) -> Option<&'static Canonic
         .iter()
         .find(|spec| spec.leaf == leaf)
 }
+
+/// One immutable source record belongs to one observed tool call.
+pub(crate) fn scan_start_source_artifact_leaf(producer: crate::run_lifecycle::RunItemId) -> String {
+    format!("source-start-{producer}.json")
+}

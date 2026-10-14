@@ -1,13 +1,18 @@
 use super::*;
 
 mod agent_query;
+pub(crate) use agent_query::MAX_AGENT_MODEL_TURNS;
 mod agent_runtime;
 mod failure;
 mod model_usage;
+mod read_scope;
 mod response_and_roles;
 mod runtime_cost;
 mod tool_loop;
 mod tool_policy_authorization;
+pub use read_scope::{
+    AgentReadScope, MAX_READ_SCOPE_BYTES, MAX_READ_SCOPE_FILES, READ_ONLY_SCOPE_POLICY_ID,
+};
 
 pub use agent_query::{
     append_structured_output_contract, AgentQueryRequest, AgentRuntimeOptions,

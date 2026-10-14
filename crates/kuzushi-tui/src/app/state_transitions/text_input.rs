@@ -66,6 +66,9 @@ impl ShellApp {
             return update;
         }
         let normalised = normalise_paste_text(text);
+        self.leave_context_history_for_paste();
+        self.close_logs_reader_for_paste();
+        self.leave_setup_details_for_paste();
         if let Some(update) = self.capture_modal_editor_paste(&normalised) {
             return update;
         }
@@ -106,10 +109,22 @@ impl ShellApp {
     }
 
     fn capture_modal_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.paste_lesson_field(text)
+            || self.paste_relationship_note(text)
+            || self.capture_existing_context_paste(text)
+        {
+            return Some(InputUpdate::handled());
+        }
         if self.capture_scope_review_paste(text) {
             return Some(InputUpdate::handled());
         }
         self.capture_picker_editor_paste(text)
+    }
+    fn capture_existing_context_paste(&mut self, text: &str) -> bool {
+        self.capture_brief_paste(text)
+            || self.capture_bound_brief_paste()
+            || self.capture_regeneration_guidance_paste(text)
+            || self.capture_context_edit_paste(text)
     }
 
     fn capture_picker_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {

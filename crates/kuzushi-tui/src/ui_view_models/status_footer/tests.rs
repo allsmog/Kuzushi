@@ -7,11 +7,96 @@ use kuzushi_core::{
 };
 use std::path::PathBuf;
 
+fn setup_fixture() -> (tempfile::TempDir, ShellApp) {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(root.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.open_setup();
+    (root, app)
+}
+
+fn assert_investigation_chrome(app: &ShellApp, visible: bool) {
+    assert_eq!(journey_footer_segment(app).is_some(), visible);
+    assert_eq!(autonomy_footer_segment(app).is_some(), visible);
+    assert_eq!(
+        crate::ui_view_models::screen_context_model(app)
+            .active_phase
+            .is_some(),
+        visible
+    );
+    assert_eq!(
+        crate::ui_view_models::context_strip_model(app)
+            .phase
+            .is_some(),
+        visible
+    );
+    assert_eq!(
+        crate::ui_view_models::rail_sections(app, 33)
+            .iter()
+            .any(|section| section.title == "JOURNEY"),
+        visible
+    );
+    let model = status_footer_model(app);
+    assert_eq!(
+        model.left_segments.iter().any(|s| s.contains("autonomy:")),
+        visible
+    );
+    assert_eq!(
+        crate::ui_view_models::rail_sections(app, 33)[0].title,
+        if visible { "ENGAGEMENT" } else { "TARGET" }
+    );
+}
+
+#[test]
+fn uncommitted_setup_hides_investigation_chrome_across_other_views() {
+    let (_root, mut app) = setup_fixture();
+    for view in [
+        ShellView::Logs,
+        ShellView::QuitConfirm,
+        ShellView::Config,
+        ShellView::FailureHandoff,
+    ] {
+        app.set_shell_view(view);
+        assert_investigation_chrome(&app, false);
+        assert!(crate::ui_view_models::journey_model(&app).is_some());
+        assert!(app.engagement.current_phase().is_none());
+    }
+}
+
+#[test]
+fn committed_setup_shows_investigation_chrome_and_reopening_hides_it() {
+    let (_root, mut app) = setup_fixture();
+    app.engagement.planning_picker_mut().selected_mut().clear();
+    app.router.setup_mut().set_cursor(7);
+    assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
+    let update = app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::empty(),
+    ));
+    assert!(update.handled);
+    assert!(!app.engagement.planning_picker().returns_to_setup());
+    for view in [
+        ShellView::Logs,
+        ShellView::QuitConfirm,
+        ShellView::Workbench,
+    ] {
+        app.set_shell_view(view);
+        assert_investigation_chrome(&app, true);
+    }
+    app.open_setup();
+    app.set_shell_view(ShellView::Logs);
+    assert_investigation_chrome(&app, false);
+}
+
 #[test]
 fn status_footer_model_reports_idle_shell_segments() {
     let app = ShellApp::new(V2Config::default(), None);
 
     let model = status_footer_model(&app);
+    assert_eq!(
+        crate::ui_view_models::rail_sections(&app, 33)[0].title,
+        "TARGET"
+    );
 
     // Routing + view only: target/ctx/model are the top cockpit strip's job,
     // so each session fact is stated once per screen.
@@ -102,7 +187,7 @@ fn malformed_context_snapshot_surfaces_in_the_cockpit_strip() {
     let strip = crate::ui_view_models::context_strip_model(&app);
     assert!(strip
         .compact_segments()
-        .contains(&"context malformed".to_string()));
+        .contains(&"repo index malformed".to_string()));
 }
 
 #[test]

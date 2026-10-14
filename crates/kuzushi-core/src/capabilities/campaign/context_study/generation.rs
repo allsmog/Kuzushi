@@ -2,6 +2,8 @@
 use super::*;
 
 pub(super) const SCOPE_TOOL: &str = "pack:suggest-scopes";
+pub(super) const REGENERATE_TOOL: &str = "threat-model:regenerate";
+pub(super) const LESSON_TOOL: &str = "findings:lesson-generate";
 
 pub(super) fn default_tool() -> String {
     TOOL.into()
@@ -11,6 +13,8 @@ pub(super) fn selected(value: Option<&str>) -> Result<&'static str> {
     match value {
         None | Some(TOOL) => Ok(TOOL),
         Some(SCOPE_TOOL) => Ok(SCOPE_TOOL),
+        Some(REGENERATE_TOOL) => Ok(REGENERATE_TOOL),
+        Some(LESSON_TOOL) => Ok(LESSON_TOOL),
         _ => anyhow::bail!("unsupported Map generation tool"),
     }
 }
@@ -24,7 +28,10 @@ pub(super) fn prepare(
     if tool == TOOL {
         return super::input::prepare(input, ctx, registry);
     }
-    anyhow::ensure!(tool == SCOPE_TOOL, "unsupported Map generation tool");
+    anyhow::ensure!(
+        matches!(tool, SCOPE_TOOL | REGENERATE_TOOL | LESSON_TOOL),
+        "unsupported Map generation tool"
+    );
     validate(tool, input)?;
     let mut draft = input.clone();
     let object = draft
@@ -39,24 +46,48 @@ pub(super) fn prepare(
     let model = crate::tool_execution_model(tool, &frozen, ctx.config)
         .context("Select a model before planning scope suggestions")?;
     frozen["model"] = json!(model);
-    crate::workspace::validate_scan_scope_suggestion_input(&frozen, ctx)?;
+    if tool == LESSON_TOOL {
+        return crate::capabilities::finding_lessons::prepare_generation_input(&frozen, ctx);
+    }
+    validate_selected_input(tool, &frozen, ctx)?;
     Ok(frozen)
+}
+
+fn validate_selected_input(
+    tool: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
+    if tool == LESSON_TOOL {
+        return crate::capabilities::finding_lessons::validate_generation_input(input, ctx);
+    }
+    if tool == REGENERATE_TOOL {
+        return crate::capabilities::threat_model::validate_context_regeneration_input(input, ctx);
+    }
+    crate::workspace::validate_scan_scope_suggestion_input(input, ctx)
 }
 
 pub(super) fn validate(tool: &str, input: &Value) -> Result<()> {
     if tool == TOOL {
         return super::input::validate(input);
     }
-    anyhow::ensure!(tool == SCOPE_TOOL, "unsupported Map generation tool");
+    anyhow::ensure!(
+        matches!(tool, SCOPE_TOOL | REGENERATE_TOOL | LESSON_TOOL),
+        "unsupported Map generation tool"
+    );
     anyhow::ensure!(input.is_object() && input.get("allowanceRef").is_none(),
-        "scope planning input must be an object without an allowance; approve its frozen job separately");
+        "Map generation input must be an object without an allowance; approve its frozen job separately");
     Ok(())
 }
 
-pub(super) fn validate_preparation(tool: &str, jobs: &[ContextPreparationJob]) -> Result<()> {
+pub(super) fn validate_preparation(
+    tool: &str,
+    input: &Value,
+    jobs: &[ContextPreparationJob],
+) -> Result<()> {
     anyhow::ensure!(
-        tool != SCOPE_TOOL || jobs.is_empty(),
-        "scope suggestions reuse an existing inventory and permit no additional preparation jobs"
+        (tool == TOOL && input.get("scanScopeRef").is_none()) || jobs.is_empty(),
+        "Scope suggestions, file-group context, selected-text regeneration and lesson drafts permit no additional preparation jobs"
     );
     Ok(())
 }

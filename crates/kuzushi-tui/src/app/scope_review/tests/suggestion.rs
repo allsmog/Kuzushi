@@ -7,12 +7,20 @@ fn model_fixture() -> (tempfile::TempDir, ShellApp) {
     (root, app)
 }
 
+fn open_ai_action(app: &mut ShellApp) -> InputUpdate {
+    let index = SCOPE_ACTIONS
+        .iter()
+        .position(|action| *action == "Suggest scan scopes with AI")
+        .unwrap();
+    app.apply_scope_menu(index)
+}
+
 #[test]
 fn visible_ai_action_preserves_multiline_priorities_and_opens_only_budget_review() {
     let (_root, mut app) = model_fixture();
     let original = app.scope_review().unwrap().review.clone();
     let input = (app.input().to_owned(), app.editor().cursor());
-    assert!(app.apply_scope_menu(11).effects.is_empty());
+    assert!(open_ai_action(&mut app).effects.is_empty());
     fill_form(
         &mut app,
         &["Prioritize coherent services\nPreserve loose files"],
@@ -46,7 +54,7 @@ fn visible_ai_action_preserves_multiline_priorities_and_opens_only_budget_review
 #[test]
 fn scope_model_picker_cancel_restores_budget_origin_and_exact_draft() {
     let (_root, mut app) = model_fixture();
-    app.apply_scope_menu(11);
+    open_ai_action(&mut app);
     fill_form(&mut app, &["Operator priority"]);
     press(&mut app, KeyCode::F(2));
     let generation = app.context_generation().unwrap().clone();
@@ -64,7 +72,7 @@ fn scope_model_picker_cancel_restores_budget_origin_and_exact_draft() {
 #[test]
 fn scope_budget_and_priorities_controls_render_at_all_sizes_without_creating_work() {
     let (root, mut app) = model_fixture();
-    app.apply_scope_menu(11);
+    open_ai_action(&mut app);
     for (width, height) in [(160, 48), (120, 36), (96, 89), (80, 24), (60, 20), (40, 12)] {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal

@@ -4,9 +4,10 @@ pub(in crate::modules) fn write_static_variants_json(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
     run_ids: &SastRunIds,
+    fold: IdentityFoldPolicy,
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
-    let findings = findings_for_sast_runs(store, run_ids)?;
+    let findings = findings_for_sast_runs(store, run_ids, fold)?;
     let evidence_store = Some(StaticEvidenceStore::open(workspace)?);
     let variant_report =
         hunt_whitebox_static_variants(workspace.root(), &findings, evidence_store.as_ref(), 50)?;
@@ -27,9 +28,10 @@ pub(in crate::modules) fn write_candidate_semgrep_rules_json(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
     run_ids: &SastRunIds,
+    fold: IdentityFoldPolicy,
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
-    let findings = findings_for_sast_runs(store, run_ids)?;
+    let findings = findings_for_sast_runs(store, run_ids, fold)?;
     let evidence_store = Some(StaticEvidenceStore::open(workspace)?);
     let synthesis_report =
         synthesize_candidate_semgrep_rules(&findings, evidence_store.as_ref(), &[])?;
@@ -54,9 +56,10 @@ pub(in crate::modules) fn write_whitebox_suppressions_json(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
     run_ids: &SastRunIds,
+    fold: IdentityFoldPolicy,
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
-    let findings = findings_for_sast_runs(store, run_ids)?;
+    let findings = findings_for_sast_runs(store, run_ids, fold)?;
     let suppressions = load_whitebox_suppressions(workspace)?;
     let suppression_report =
         evaluate_whitebox_suppressions(workspace.root(), &findings, &suppressions, now_unix());

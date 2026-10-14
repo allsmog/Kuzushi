@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::Path;
 
+const BASELINE_READ_LIMIT: usize = 10_000;
+
 /// One receipt-backed coverage fact: `scope_id` was covered by `phase` in
 /// `mode` at `revision` by run `run_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,12 +35,17 @@ impl CoverageLedger {
         &self.conn
     }
 
-    /// Read path for tools with a `read` effect: never creates the store.
+    /// Read path: never creates, initializes or migrates the store.
     pub fn open_if_exists(target_root: &Path) -> Result<Option<Self>> {
-        if !workspace_coverage_db_path(target_root).exists() {
-            return Ok(None);
+        let path = workspace_coverage_db_path(target_root);
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error).context("Could not inspect coverage ledger"),
         }
-        Self::open(target_root).map(Some)
+        let conn = crate::sqlite_connection::open_read_only_file(&path)?;
+        schema::require_initialized(&conn)?;
+        Ok(Some(Self { conn }))
     }
 
     pub fn record_baseline(&self, row: &BaselineRow) -> Result<()> {
@@ -83,9 +90,15 @@ impl CoverageLedger {
         let mut statement = self.conn.prepare(sql)?;
         let raw_rows = statement
             .query_map([], RawBaseline::from_row)?
+            .take(BASELINE_READ_LIMIT + 1)
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not read scan baselines")?;
-        raw_rows.into_iter().map(RawBaseline::into_baseline).collect()
+        anyhow::ensure!(raw_rows.len() <= BASELINE_READ_LIMIT,
+            "coverage history exceeds the {BASELINE_READ_LIMIT}-row read limit; archive history before requesting recommendations");
+        raw_rows
+            .into_iter()
+            .map(RawBaseline::into_baseline)
+            .collect()
     }
 }
 
@@ -116,7 +129,10 @@ impl RawBaseline {
 
     fn into_baseline(self) -> Result<BaselineRow> {
         let phase = WorkflowPhase::parse(&self.phase_word).with_context(|| {
-            format!("coverage ledger row has unknown phase {:?}", self.phase_word)
+            format!(
+                "coverage ledger row has unknown phase {:?}",
+                self.phase_word
+            )
         })?;
         Ok(BaselineRow {
             scope_id: self.scope_id,

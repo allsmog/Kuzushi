@@ -3,6 +3,25 @@ use crate::modules::{ModuleRegistry, ToolExecutionContext};
 
 /// Compile the existing scan-batch format without dispatching any children.
 pub fn execute_study_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    if let Some(scopes) = ScopeStudyDraft::from_input(input)? {
+        return scope_study::compile_scope_study(input, scopes, ctx);
+    }
+    if let Some(matrix) = ContextMatrixDraft::from_input(input)? {
+        return context_matrix::compile_context_matrix(input, matrix, ctx);
+    }
+    require_resource_case_selection(input)?;
+    execute_scan_study(input, ctx)
+}
+
+fn require_resource_case_selection(input: &Value) -> Result<()> {
+    anyhow::ensure!(
+        input.get("resourceBaselineCampaignId").is_none(),
+        "resourceBaselineCampaignId requires scopeCases or contextCases"
+    );
+    Ok(())
+}
+
+fn execute_scan_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let root = ctx
         .workspace
         .context("study planning requires an active workspace")?
@@ -14,25 +33,25 @@ pub fn execute_study_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> Resu
         .get("baselineRunId")
         .map(|value| value.as_str().context("baselineRunId must be a string"))
         .transpose()?;
-    let handle = batch::compile_study_plan_with_baseline(
-        ScanBatchPlanSpec {
-            root,
-            batch_id: string_input(input, &["campaignId"]),
-            trials: usize_input(input, &["trials"], 3),
-            requested_workers: usize_input(input, &["workers"], 1),
-            gate_policy: ScanBatchGatePolicy::default(),
-            prepared_input,
-            config: ctx.config,
-            registry: &registry,
-        },
-        investigation.as_deref(),
-        baseline,
-    )?;
+    let spec = ScanBatchPlanSpec {
+        root,
+        batch_id: string_input(input, &["campaignId"]),
+        trials: usize_input(input, &["trials"], 3),
+        requested_workers: usize_input(input, &["workers"], 1),
+        gate_policy: ScanBatchGatePolicy::default(),
+        prepared_input,
+        config: ctx.config,
+        registry: &registry,
+    };
+    let handle = compile_selected_study(spec, investigation.as_deref(), baseline, input)?;
     let receipt = load_study_plan_receipt(root, &handle.campaign_id)?;
     let output = format!("Study draft: {} · {} discovery jobs · {} worker(s)\nPlan digest: {}\nSource identity: {}\nReview {} and approve this exact plan with an investigation allowance before execution. No jobs started.",
         handle.campaign_id, handle.trials_planned, handle.effective_workers, receipt.plan_sha256,
         handle.equivalence_key.components.workspace_identity, handle.plan_path.display());
     let mut data = serde_json::to_value(&receipt)?;
+    if let Some(experiment) = load_study_context_experiment(root, &receipt)? {
+        data["contextExperiment"] = serde_json::to_value(experiment)?;
+    }
     if let Some(run) = baseline {
         data["resourceBaselineRunId"] = Value::String(run.into());
     }
@@ -41,6 +60,28 @@ pub fn execute_study_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> Resu
         output,
         data,
     ))
+}
+
+fn compile_selected_study(
+    spec: ScanBatchPlanSpec<'_>,
+    investigation: Option<&str>,
+    baseline: Option<&str>,
+    input: &Value,
+) -> Result<CampaignPlanHandle> {
+    let brief = super::brief::from_input(spec.root, input)?;
+    if let Some(value) = input.get("contextBaselineRunId") {
+        let run = value
+            .as_str()
+            .context("contextBaselineRunId must be a string")?;
+        return batch::compile_context_candidate_plan(
+            spec,
+            investigation,
+            baseline,
+            run,
+            brief.as_ref(),
+        );
+    }
+    batch::compile_study_plan_with_baseline(spec, investigation, baseline, brief.as_ref())
 }
 
 fn prepare_study_scan_input(
@@ -63,7 +104,10 @@ fn prepare_study_scan_input(
     Ok(prepared.value().clone())
 }
 
-fn bind_accepted_map_context(input: &mut Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
+pub(super) fn bind_accepted_map_context(
+    input: &mut Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
     use crate::capabilities::threat_model::ThreatModelSelection;
     if ThreatModelSelection::from_input(input)?.is_bound() {
         return Ok(());

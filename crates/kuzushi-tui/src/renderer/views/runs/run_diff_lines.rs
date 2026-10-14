@@ -88,6 +88,10 @@ fn append_sources(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models:
 }
 
 fn append_findings(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models::RunDiffModel) {
+    if !model.findings_ready {
+        append_pending_comparison(lines, model);
+        return;
+    }
     append_finding_counts(lines, model);
     lines.push(Line::styled(
         "Absence does not establish a fix.",
@@ -105,6 +109,18 @@ fn append_findings(lines: &mut Vec<Line<'static>>, model: &crate::ui_view_models
     append_uncertain_section(lines, &model.uncertain_matches);
     append_absence_sections(lines, &model.not_seen);
     append_section(lines, "SEEN AGAIN", '=', &model.unchanged_findings);
+}
+
+fn append_pending_comparison(
+    lines: &mut Vec<Line<'static>>,
+    model: &crate::ui_view_models::RunDiffModel,
+) {
+    lines.push(Line::styled(
+        "Recorded findings are loading or unavailable. Comparison counts are pending.",
+        theme::muted(),
+    ));
+    append_warnings(lines, &model.warnings);
+    append_run_pair(lines, model);
 }
 
 fn append_finding_counts(

@@ -279,7 +279,8 @@ fn missing_citations(roots: &ThreatModelBuildRoots, refs: &[PathRef]) -> Vec<Str
 }
 
 fn citation_problem(roots: &ThreatModelBuildRoots, path_ref: &PathRef) -> Option<String> {
-    let Some(resolved) = crate::findings::safe_target_path(&roots.workspace_root, &path_ref.path) else {
+    let Some(resolved) = crate::findings::safe_target_path(&roots.workspace_root, &path_ref.path)
+    else {
         return Some(format!("{} (escapes the target root)", path_ref.path));
     };
     if roots.scope.is_some() && !resolved.starts_with(&roots.analysis_root) {
@@ -294,13 +295,12 @@ fn citation_problem(roots: &ThreatModelBuildRoots, path_ref: &PathRef) -> Option
         return None;
     }
     let line = path_ref.line?;
-    let source =
-        crate::bounded_file::read_utf8_text_within(
-            &roots.workspace_root,
-            &resolved,
-            VERIFY_MAX_FILE_BYTES,
-        )
-        .ok()?;
+    let source = crate::bounded_file::read_utf8_text_within(
+        &roots.workspace_root,
+        &resolved,
+        VERIFY_MAX_FILE_BYTES,
+    )
+    .ok()?;
     let count = source.lines().count() as u32;
     (line > count).then(|| format!("{}:{line} (file has {count} lines)", path_ref.path))
 }
@@ -369,7 +369,10 @@ struct CatalogCoverageReceipt {
 
 impl CatalogCoverageReceipt {
     fn is_unavailable(&self) -> bool {
-        matches!(self.status.as_str(), "disabled" | "missing" | "scoped-derived")
+        matches!(
+            self.status.as_str(),
+            "disabled" | "missing" | "scoped-derived"
+        )
     }
 }
 
@@ -380,7 +383,9 @@ fn verification_grounding_surfaces(
     let receipt = catalog_coverage_receipt(document)?;
     if roots.scope.is_some() {
         anyhow::ensure!(
-            receipt.as_ref().is_none_or(CatalogCoverageReceipt::is_unavailable),
+            receipt
+                .as_ref()
+                .is_none_or(CatalogCoverageReceipt::is_unavailable),
             "scoped threat-model verification cannot consume a whole-workspace catalog receipt"
         );
         validate_unbacked_source(document, &roots.workspace_root, receipt.as_ref())?;
@@ -403,11 +408,12 @@ fn verification_grounding_surfaces(
     }
 }
 
-fn scoped_verification_grounding(
-    roots: &ThreatModelBuildRoots,
-) -> Result<VerificationGrounding> {
+fn scoped_verification_grounding(roots: &ThreatModelBuildRoots) -> Result<VerificationGrounding> {
     let mut surfaces = noncatalog_verification_surfaces(&roots.analysis_root)?;
-    let scope = roots.scope.as_ref().context("scoped verification has no scope binding")?;
+    let scope = roots
+        .scope
+        .as_ref()
+        .context("scoped verification has no scope binding")?;
     for surface in &mut surfaces {
         surface.path = scope
             .rel_path
@@ -548,10 +554,7 @@ fn noncatalog_verification_surfaces(
     let mut surfaces = grounding_surfaces(target, VERIFY_COVERAGE_MAX_ELEMENTS)?;
     let map = crate::attack_surface::build_attack_surface_map(target)
         .context("threat-model verification: attack-surface map failed")?;
-    let deterministic = deterministic_threat_surfaces(
-        &map.surfaces,
-        VERIFY_COVERAGE_MAX_ELEMENTS,
-    );
+    let deterministic = deterministic_threat_surfaces(&map.surfaces, VERIFY_COVERAGE_MAX_ELEMENTS);
     append_unique_verification_surfaces(&mut surfaces, deterministic);
     Ok(surfaces)
 }
@@ -582,7 +585,11 @@ fn validate_unbacked_source(
     }
     let tree_hash = receipt
         .and_then(|receipt| receipt.tree_hash.as_deref())
-        .or_else(|| document.pointer("/provenance/treeHash").and_then(Value::as_str))
+        .or_else(|| {
+            document
+                .pointer("/provenance/treeHash")
+                .and_then(Value::as_str)
+        })
         .context(
             "dirty or non-Git threat-model verification requires a bound provenance treeHash",
         )?;
@@ -599,10 +606,18 @@ fn validate_unbacked_git_identity(
 ) -> Result<()> {
     let revision = receipt
         .and_then(|receipt| receipt.revision.as_deref())
-        .or_else(|| document.pointer("/provenance/revision").and_then(Value::as_str));
+        .or_else(|| {
+            document
+                .pointer("/provenance/revision")
+                .and_then(Value::as_str)
+        });
     let dirty = receipt
         .and_then(|receipt| receipt.revision_dirty)
-        .or_else(|| document.pointer("/provenance/revisionDirty").and_then(Value::as_bool));
+        .or_else(|| {
+            document
+                .pointer("/provenance/revisionDirty")
+                .and_then(Value::as_bool)
+        });
     let Some(current) = current else {
         anyhow::ensure!(
             revision.is_none() && dirty.is_none(),

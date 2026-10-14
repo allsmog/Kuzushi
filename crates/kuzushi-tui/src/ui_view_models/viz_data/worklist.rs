@@ -22,8 +22,11 @@ use kuzushi_core::capabilities::worklist::{
 use kuzushi_core::workspace::AttackSurfaceMap;
 use std::collections::BTreeMap;
 
+mod context_artifact;
 mod snapshot;
 
+use context_artifact::worklist_artifact_state;
+pub(crate) use context_artifact::worklist_artifact_version;
 use snapshot::project_snapshot;
 
 /// How many rows the fold retains for the scene deck; the Map section trims
@@ -75,7 +78,7 @@ pub(crate) fn worklist_model(app: &ShellApp) -> WorklistViewModel {
     // once here and reused for both the snapshot staleness check and the memo
     // key, so the always-visible Map page never re-clones or re-parses the full
     // artifact per frame (New-2/New-3).
-    let artifact_version = attack_surface_artifact_version(app);
+    let artifact_version = worklist_artifact_version(app);
     let recommendations = recommendations_input(app);
     // F6: an explicit `worklist:rank` run is the source of truth for the deck,
     // so the deck matches the run receipt (including deep/systems `S` rows the
@@ -95,9 +98,8 @@ pub(crate) fn worklist_model(app: &ShellApp) -> WorklistViewModel {
     }
     // Cache miss only: project the captured snapshot (parse), or — when no
     // snapshot backs this engagement — pay the full artifact parse to fold.
-    let model = worklist_snapshot_model(app, artifact_version).unwrap_or_else(|| {
-        build_worklist_model(attack_surface_artifact_state(app), &recommendations)
-    });
+    let model = worklist_snapshot_model(app, artifact_version)
+        .unwrap_or_else(|| build_worklist_model(worklist_artifact_state(app), &recommendations));
     app.workbench_cache()
         .borrow_mut()
         .cache_worklist(key, model.clone());

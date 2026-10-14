@@ -50,6 +50,52 @@ select created_seq, run_id, snapshot_hash
 "#;
 
 impl FindingStore {
+    pub(crate) fn lesson_captured_source(
+        &self,
+        origin: &LessonOrigin,
+        limit: usize,
+    ) -> Result<serde_json::Value> {
+        let captured =
+            self.observed_file_identity_at(&origin.finding.stable_key, origin.observation_seq)?;
+        let Some((path, hash)) = captured else {
+            return Ok(
+                serde_json::json!({"status":"not_recorded","omission":"No captured source exists for this exact observation."}),
+            );
+        };
+        let objects = self
+            .v3_objects_dir()
+            .context("Captured source store is unavailable")?;
+        let content = ContentStore::open(objects)?
+            .get_blob_bounded(&Blake3Hash::new(hash.clone())?, limit)?;
+        let text = content
+            .map(String::from_utf8)
+            .transpose()
+            .context("Captured source is not UTF-8 text")?;
+        let status = if text.is_some() {
+            "included"
+        } else {
+            "unavailable_or_over_limit"
+        };
+        Ok(
+            serde_json::json!({"status":status,"path":path,"blobHash":hash,"maxBytes":limit,"text":text,"currentSourceRead":false}),
+        )
+    }
+
+    /// Exact captured file identity at one observation event. A run-specific
+    /// snapshot id alone does not establish whether source content changed.
+    pub(crate) fn observed_file_identity_at(
+        &self,
+        stable_fp: &str,
+        created_seq: u64,
+    ) -> Result<Option<(String, String)>> {
+        let seq = i64::try_from(created_seq).unwrap_or(i64::MAX);
+        self.conn.query_row(
+            "select display_path, blob_hash from finding_observations where stable_fp = ?1 and created_seq = ?2 and display_path is not null and blob_hash is not null limit 1",
+            params![stable_fp, seq],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional().context("Could not read the captured observation file identity")
+    }
+
     /// Newest observation of `stable_fp` committed at or before `max_seq`.
     /// Pass `u64::MAX` for the latest observation overall.
     pub fn observed_snapshot_at(

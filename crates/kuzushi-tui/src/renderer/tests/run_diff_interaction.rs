@@ -27,6 +27,26 @@ fn key(app: &mut ShellApp, code: KeyCode) {
 }
 
 #[test]
+fn cold_or_unavailable_comparisons_never_display_zero_as_a_recorded_result() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.path().into()));
+    app.router
+        .run_diff_mut()
+        .open("missing-base", "missing-later");
+    app.set_shell_view(ShellView::RunDiff);
+    for hydrated in [false, true] {
+        if hydrated {
+            app.hydrate_active_view_blocking();
+        }
+        let text = render_plain_app(&app, 80);
+        assert!(text.contains("Comparison counts are pending."), "{text}");
+        assert!(!text.contains("+0 new"), "{text}");
+        assert!(!text.contains("0 not observed"), "{text}");
+    }
+}
+
+#[test]
 fn run_diff_tab_preserves_each_scroll_and_yields_to_the_composer() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = comparison_app(temp.path(), 30);

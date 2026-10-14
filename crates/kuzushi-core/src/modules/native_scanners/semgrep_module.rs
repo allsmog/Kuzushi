@@ -285,15 +285,15 @@ pub(in crate::modules) fn sbom_scan_module() -> BuiltinModule {
         "Extract a deterministic dependency inventory from package manifests.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Scan,
+                ToolPhase::Map,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             ),
             vec![tool_with_options(
                 "sbom-scan:scan",
-                "Extract package manifest dependencies into an SBOM-style inventory.",
+                "Inventory declared and resolved dependencies. This produces no vulnerability findings or phase completion.",
                 vec![target_option()],
-            )],
+            ).without_phase_result()],
         ),
         vec![dag("sbom-scan:scan", "artifact", &["context:build"])],
     )

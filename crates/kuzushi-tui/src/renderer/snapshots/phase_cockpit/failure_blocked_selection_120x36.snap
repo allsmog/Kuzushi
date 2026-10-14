@@ -4,7 +4,7 @@ contract: failure-path decision cards render honest outcome copy and recovery ac
 scenario: blocked_selection
 size: 120x36
 ---
-KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
+KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · repo index not built · model unconfigured
  Map ● · Scan ○ · Review × · Report
  ▸ NEXT live run settlement is not healthy and durable; inspect the run before continuing
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts
@@ -16,7 +16,7 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN returned partial evidence. Review it and choose a recovery action.                           │
-          │receipt · partial · 1 run(s) · cost not recorded · findings unmeasured · 8 artifact(s) · 0...     │
+          │receipt · partial · 1 run(s) · cost not recorded · findings unmeasured · 8 artifact links · 0...  │
           │Result · Run SAST scan (sast:scan) · partial · scenario partial                                   │
           │⚠ scenario engine incomplete                                                                      │
           │artifacts: tool input=input.json, run metadata=run.json, run events=events.jsonl, semantic...     │
@@ -38,5 +38,5 @@ KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ i
 
 ⛭ autonomy:fix · shell route · 1 partial result · workbench · notify:unavailable · focus unknown · Map...     0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Esc prompt   o Open   r Run again   d Discard   Ctrl+C exit
+ Esc prompt   PgUp/PgDn scroll   o Open   r Run again   d Discard   Ctrl+C exit
 ▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

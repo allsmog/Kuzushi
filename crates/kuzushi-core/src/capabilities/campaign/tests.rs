@@ -619,6 +619,39 @@ fn coverage_report_discloses_unreadable_campaign_dirs() {
     assert_eq!(report.unreadable_campaigns, 1);
 }
 
+#[test]
+fn coverage_excludes_preparation_and_modern_non_shard_jobs() {
+    let root = tempdir().unwrap();
+    let dir = campaign_dir(root.path(), "progress-audit");
+    std::fs::create_dir_all(&dir).unwrap();
+    let plan = json!({"campaignId":"progress-audit", "tool":"sast:scan", "jobs":[
+        {"jobId":"map-only","tool":"context:build","shard":"workspace","input":{}},
+        {"jobId":"unknown","tool":"unknown:tool","shard":"workspace","input":{}},
+        {"jobId":"modern-study","tool":"sast:scan","input":{}},
+        {"jobId":"legacy-discovery","shard":"workspace","input":{}}
+    ]});
+    std::fs::write(dir.join("plan.json"), serde_json::to_vec(&plan).unwrap()).unwrap();
+    let jobs = ["map-only", "unknown", "modern-study", "legacy-discovery"]
+        .into_iter()
+        .map(|id| (id.to_string(), json!({"state":"completed"})))
+        .collect::<serde_json::Map<_, _>>();
+    std::fs::write(dir.join("queue.json"), json!({"jobs":jobs}).to_string()).unwrap();
+    let report = coverage::coverage_report(root.path(), &[]).unwrap();
+    assert_eq!(report.excluded_jobs, 3);
+    assert_eq!(report.columns, [coverage::UNSEASONED_COLUMN]);
+    assert_eq!(
+        report.rows[0].cells,
+        [coverage::CoverageCellState::Completed]
+    );
+    let mut no_discovery = plan;
+    no_discovery["jobs"].as_array_mut().unwrap().pop();
+    std::fs::write(dir.join("plan.json"), no_discovery.to_string()).unwrap();
+    let report = coverage::coverage_report(root.path(), &[]).unwrap();
+    assert_eq!(report.excluded_jobs, 3);
+    assert!(report.columns.is_empty());
+    assert!(report.rows[0].cells.is_empty());
+}
+
 /// A cell is Completed only when EVERY threat planned from its source
 /// completed for the shard; a lone completed threat yields Partial above,
 /// and all-completed yields Completed here.
@@ -811,7 +844,10 @@ fn coverage_without_a_findings_store_states_that_it_counted_nothing() {
 
     assert_eq!(result["data"]["findingLedger"], "no-store");
     let output = result["output"].as_str().unwrap();
-    assert!(output.contains("shard finding counts are NOT measured"), "{output}");
+    assert!(
+        output.contains("shard finding counts are NOT measured"),
+        "{output}"
+    );
 }
 
 #[test]
@@ -829,6 +865,15 @@ fn status_reports_workspace_trend_with_spend_even_without_a_findings_store() {
 
     let single = run_status(temp.path(), json!({"campaignId": "camp-trend"})).unwrap();
     let all = run_status(temp.path(), json!({})).unwrap();
+
+    for status in [&single, &all] {
+        assert_eq!(
+            status["data"]["historyWindow"],
+            json!({
+                "selection":"recent-valid-lines", "maxSnapshots":90, "maxReadBytes":1048576
+            })
+        );
+    }
 
     // Trend is workspace-level, so both status shapes carry the same object.
     for trend in [&single["data"]["trend"], &all["data"]["trend"]] {

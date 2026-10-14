@@ -38,11 +38,8 @@ pub(crate) fn activate_threat_model_adapter(
         "tool:threat-model:activate",
         mirror_action,
     )?;
-    let summary = format!(
-        "activated {}@{}",
-        model_ref.model_id, model_ref.revision_id
-    );
-    completed_command(summary, json!({"modelRef": model_ref}))
+    let summary = format!("activated {}@{}", model_ref.model_id, model_ref.revision_id);
+    completed_command(summary, json!({"modelRef": model_ref,"target":root}))
 }
 
 pub(crate) fn list_threat_model_revisions_adapter(
@@ -64,20 +61,17 @@ pub(crate) fn restore_threat_model_revision_adapter(
 ) -> Result<Value> {
     let root = workspace_root(ctx, "threat-model:restore")?;
     let revision_id = required_revision_id(&input)?;
-    let committed = restore_threat_model_revision(
-        root,
-        &revision_id,
-        "tool:threat-model:restore",
-    )?;
+    let committed = restore_threat_model_revision(root, &revision_id, "tool:threat-model:restore")?;
     completed_command(
-        format!("restored {revision_id} as {}", committed.model_ref.revision_id),
-        json!({"modelRef": committed.model_ref, "sourceRevisionId": revision_id}),
+        format!(
+            "restored {revision_id} as {}",
+            committed.model_ref.revision_id
+        ),
+        json!({"modelRef": committed.model_ref, "sourceRevisionId": revision_id,"target":root}),
     )
 }
 
-pub(crate) fn adopt_threat_model_mirror_adapter(
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
+pub(crate) fn adopt_threat_model_mirror_adapter(ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let root = workspace_root(ctx, "threat-model:adopt")?;
     if load_threat_model_manifest(root)?.is_none() {
         let manifest = open_writable_threat_model_store(root)?;
@@ -89,7 +83,10 @@ pub(crate) fn adopt_threat_model_mirror_adapter(
     }
     let committed = adopt_threat_model_mirror_edits(root, "tool:threat-model:adopt")?;
     completed_command(
-        format!("adopted mirror edits as {}", committed.model_ref.revision_id),
+        format!(
+            "adopted mirror edits as {}",
+            committed.model_ref.revision_id
+        ),
         json!({"modelRef": committed.model_ref, "source": "adopt"}),
     )
 }
@@ -130,3 +127,6 @@ fn completed_command(summary: String, data: Value) -> Result<Value> {
         data,
     ))
 }
+
+#[cfg(test)]
+mod tests;

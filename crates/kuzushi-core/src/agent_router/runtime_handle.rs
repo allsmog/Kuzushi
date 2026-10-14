@@ -17,6 +17,13 @@ impl<'a> RuntimeHandle<'a> {
 
 #[async_trait]
 impl<'a> AgentRuntime for RuntimeHandle<'a> {
+    fn authorize_tool_policy_blocking(
+        &self,
+        authorization: &crate::runtime::AgentToolPolicyAuthorization,
+    ) -> Result<crate::runtime::AgentToolPolicyReceipt> {
+        self.inner().authorize_tool_policy_blocking(authorization)
+    }
+
     fn semantic_cache_identity(
         &self,
         request: &AgentQueryRequest,

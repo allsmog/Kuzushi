@@ -3,6 +3,7 @@ mod pickers;
 mod report;
 pub(crate) use answers::{AnswerFocus, AnswersRouteState};
 pub(crate) use report::ReportOrigin;
+pub(crate) use report::ReportStudyRef;
 pub use report::{ReportReceipt, ReportRouteState};
 
 use super::ActivityRouteState;
@@ -16,6 +17,9 @@ use std::{path::PathBuf, time::Instant};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RouterState {
+    pub(crate) strategy_inspection: Option<(PathBuf, String)>,
+    pub(crate) lessons: crate::app::lessons::LessonsRouteState,
+    pub(crate) relationships: crate::app::RelationshipsRouteState,
     answers: AnswersRouteState,
     current: crate::app::ShellView,
     overlay_origin: Option<crate::app::ShellView>,
@@ -1096,6 +1100,9 @@ impl SceneRouteState {
         self.summary_scroll = self
             .summary_scroll
             .saturating_add(direction.signum().saturating_mul(amount));
+        if self.summary_component_selection == 0 {
+            self.summary_scroll = self.summary_scroll.max(0);
+        }
     }
 
     pub(crate) fn cycle_summary_component_selection(&mut self, direction: i32, len: usize) {
@@ -1171,6 +1178,7 @@ pub struct ThreatRouteState {
     view: crate::app::ThreatView,
     versions: Vec<kuzushi_core::findings::ThreatModelVersionRecord>,
     live_sha256: Option<String>,
+    history: Option<crate::app::ContextHistoryState>,
 }
 
 impl Default for ThreatRouteState {
@@ -1179,11 +1187,24 @@ impl Default for ThreatRouteState {
             view: crate::app::ThreatView::Summary,
             versions: Vec::new(),
             live_sha256: None,
+            history: None,
         }
     }
 }
 
 impl ThreatRouteState {
+    pub(crate) fn history(&self) -> Option<&crate::app::ContextHistoryState> {
+        self.history.as_ref()
+    }
+
+    pub(crate) fn history_mut(&mut self) -> Option<&mut crate::app::ContextHistoryState> {
+        self.history.as_mut()
+    }
+
+    pub(crate) fn set_history(&mut self, history: crate::app::ContextHistoryState) {
+        self.history = Some(history);
+    }
+
     pub(crate) fn view(&self) -> crate::app::ThreatView {
         self.view
     }
@@ -1393,6 +1414,15 @@ pub struct FindingsRouteState {
     cursor: usize,
     active_filter: Option<String>,
     selected_finding: Option<kuzushi_core::Finding>,
+    selected_reference: Option<SelectedFindingReference>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SelectedFindingReference {
+    anchor: String,
+    reference: String,
+    watermark: Option<u64>,
+    policy: kuzushi_core::findings::IdentityFoldPolicy,
 }
 
 impl FindingsRouteState {
@@ -1404,6 +1434,7 @@ impl FindingsRouteState {
         self.cursor = 0;
         self.active_filter = None;
         self.selected_finding = None;
+        self.selected_reference = None;
     }
 
     pub(crate) fn cursor(&self) -> usize {
@@ -1423,11 +1454,80 @@ impl FindingsRouteState {
     }
 
     pub(crate) fn selected_finding_mut(&mut self) -> &mut Option<kuzushi_core::Finding> {
+        self.selected_reference = None;
         &mut self.selected_finding
     }
 
     pub(crate) fn set_selected_finding(&mut self, finding: Option<kuzushi_core::Finding>) {
+        let anchor = finding
+            .as_ref()
+            .map(kuzushi_core::findings::finding_page_anchor);
+        if self
+            .selected_reference
+            .as_ref()
+            .is_some_and(|reference| Some(&reference.anchor) != anchor.as_ref())
+        {
+            self.selected_reference = None;
+        }
         self.selected_finding = finding;
+    }
+
+    pub(crate) fn bind_selected_reference(
+        &mut self,
+        reference: String,
+        watermark: Option<u64>,
+        policy: kuzushi_core::findings::IdentityFoldPolicy,
+    ) {
+        self.selected_reference =
+            self.selected_finding
+                .as_ref()
+                .map(|finding| SelectedFindingReference {
+                    anchor: kuzushi_core::findings::finding_page_anchor(finding),
+                    reference,
+                    watermark,
+                    policy,
+                });
+    }
+
+    pub(crate) fn selected_reference(
+        &self,
+        finding: &kuzushi_core::Finding,
+        watermark: Option<u64>,
+        policy: kuzushi_core::findings::IdentityFoldPolicy,
+    ) -> Option<String> {
+        let reference = self.selected_reference.as_ref()?;
+        let current = reference.watermark == watermark && reference.policy == policy;
+        (current && reference.anchor == kuzushi_core::findings::finding_page_anchor(finding))
+            .then(|| reference.reference.clone())
+    }
+
+    pub(crate) fn selection_is_explicit(&self) -> bool {
+        self.selected_reference.is_some()
+    }
+
+    pub(crate) fn selected_read_watermark(&self, finding: &kuzushi_core::Finding) -> Option<u64> {
+        let reference = self.selected_reference.as_ref()?;
+        (reference.anchor == kuzushi_core::findings::finding_page_anchor(finding))
+            .then_some(reference.watermark)
+            .flatten()
+    }
+
+    pub(crate) fn clear_selection(&mut self) {
+        self.selected_finding = None;
+        self.selected_reference = None;
+    }
+
+    pub(crate) fn refresh_selected_finding(&mut self, corpus: &[kuzushi_core::Finding]) {
+        let Some(selected) = &self.selected_finding else {
+            return;
+        };
+        let anchor = kuzushi_core::findings::finding_page_anchor(selected);
+        if let Some(current) = corpus
+            .iter()
+            .find(|finding| kuzushi_core::findings::finding_page_anchor(finding) == anchor)
+        {
+            self.selected_finding = Some(current.clone());
+        }
     }
 
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
@@ -1443,6 +1543,7 @@ impl FindingsRouteState {
     }
 
     pub(crate) fn step_direction(&mut self, direction: isize, len: usize) {
+        self.clear_selection();
         if direction < 0 {
             self.cursor = self.cursor.saturating_sub(1);
         } else {
@@ -1451,14 +1552,17 @@ impl FindingsRouteState {
     }
 
     pub(crate) fn page_down(&mut self, rows: usize, len: usize) {
+        self.clear_selection();
         self.cursor = (self.cursor + rows).min(len.saturating_sub(1));
     }
 
     pub(crate) fn page_up(&mut self, rows: usize) {
+        self.clear_selection();
         self.cursor = self.cursor.saturating_sub(rows);
     }
 
     pub(crate) fn jump(&mut self, to_start: bool, len: usize) {
+        self.clear_selection();
         self.cursor = if to_start { 0 } else { len.saturating_sub(1) };
     }
 }
@@ -1504,9 +1608,26 @@ pub struct LogsRouteState {
     query: String,
     filter_capture: bool,
     following: bool,
+    reader_origin: Option<(usize, bool)>,
 }
 
 impl LogsRouteState {
+    pub(crate) fn reader_open(&self) -> bool {
+        self.reader_origin.is_some()
+    }
+
+    pub(crate) fn expand_reader(&mut self) {
+        self.reader_origin
+            .get_or_insert((self.scroll(), self.following));
+    }
+
+    pub(crate) fn close_reader(&mut self) {
+        if let Some((scroll, following)) = self.reader_origin.take() {
+            self.scroll.set_scroll(scroll);
+            self.following = following;
+        }
+    }
+
     pub(crate) fn open(&mut self) {
         self.scroll.open();
     }
@@ -2061,6 +2182,17 @@ mod tests {
 
         route.reset_summary_navigation();
         assert_eq!(route.summary_component_selection(), 0);
+    }
+
+    #[test]
+    fn summary_pages_clamp_at_the_document_start_but_can_precede_a_selected_component() {
+        let mut route = SceneRouteState::default();
+        route.scroll_summary(-1, 2);
+        assert_eq!(route.summary_scroll(), 0);
+
+        route.set_summary_component_selection(1, 3);
+        route.scroll_summary(-1, 2);
+        assert_eq!(route.summary_scroll(), -2);
     }
 
     fn boot_snapshot() -> crate::app::BootSplashSnapshot {

@@ -1,0 +1,82 @@
+name: Generated recommendations have honest coverage and require allowance for model ranking
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+submit: recommendations
+require-live-snap: 25 deterministic; no model request | deterministic-reader
+expect: GENERATED SUGGESTIONS
+expect: coverage is not established
+expect-not: Map 1/3
+ask: Does the actual report explain deterministic ranking and limited coverage while leaving suggestions unapproved and Setup unfinished?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @TMP_TARGET @ART partial
+submit: recommendations
+require-live-snap: 25 partial; | partial-reader
+expect: clipped files
+expect: coverage is not established
+nav-mode:
+keys: r
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @TMP_TARGET @ART refreshed
+require-live-snap: 25 module-recommender:recommend partial: | refresh-completion
+wait: 1
+live-snap: refreshed-reader
+expect: partial;
+expect-not: Map 1/3
+ask: Does explicit refresh stay deterministic, leave the reader in focus, and preserve the partial-inventory disclosure without starting discovery?
+keys: Escape
+resize: 160x48
+wait: 0.5
+require-live-snap: 10 deterministic; no model request | reader-160x48
+resize: 96x89
+wait: 0.5
+require-live-snap: 10 deterministic; no model request | reader-96x89
+resize: 80x24
+wait: 0.5
+require-live-snap: 10 deterministic; no model request | reader-80x24
+resize: 60x20
+wait: 0.5
+require-live-snap: 10 deterministic; no model request | reader-60x20
+resize: 40x12
+wait: 0.5
+require-live-snap: 10 deterministic; no model request | reader-40x12
+keys: NPage
+live-snap: reader-page-40x12
+keys: G
+live-snap: reader-tail-40x12
+expect: context snapshot before long-running
+expect: analysis.
+expect-not: kz> G
+ask: Can inventory limits, rationale and the complete returned shortlist be read through paging at all six sizes?
+resize: 120x36
+submit: run module-recommender:recommend {"useModelRanking":true}
+submit: logs
+keys: End
+require-live-snap: 25 approved allowanceRef | unapproved-ranking-refused
+expect: generated suggestions retained
+expect-not: session model recommended
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-still-needed
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @TMP_TARGET @ART after
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted
+submit: recommendations
+require-live-snap: 25 deterministic; no model request | restarted-reader
+expect: GENERATED SUGGESTIONS
+expect: partial;
+expect: deterministic; no model request
+require-shell: python3 -B @REPO/scripts/devex/fixtures/recommendation_audit.py @TMP_TARGET @ART restarted
+ask: Do refusal, Setup return and no-color restart retain generated partial suggestions, unapproved work and zero provider/scanner requests?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

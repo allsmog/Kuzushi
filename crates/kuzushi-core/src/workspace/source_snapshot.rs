@@ -2,6 +2,7 @@ use crate::{ToolExecutionContext, WorkspaceTarget};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
+mod start_receipt;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SourceSnapshot {
@@ -22,7 +23,7 @@ pub(crate) fn run_source_bound_tool(
     Ok(snapshot.finish(ctx, tool, target, output))
 }
 
-fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
+pub(crate) fn mark_source_unverified(output: &mut Value, error: &anyhow::Error) {
     output["status"] = json!("partial");
     output["summary"] = json!("Source could not be verified after the run. Review the saved result, then run against the current source.");
     let mut warnings = output["warnings"].as_array().cloned().unwrap_or_default();
@@ -75,10 +76,12 @@ impl SourceSnapshot {
             &mut observer,
             &|| ctx.is_cancelled(),
         )?;
-        Ok(Self {
+        let source = Self {
             snapshot_hash: snapshot.snapshot_hash,
             tree_hash: snapshot.tree_hash,
-        })
+        };
+        start_receipt::persist(ctx, tool, target, &source)?;
+        Ok(source)
     }
 
     pub(crate) fn ensure_current(
@@ -87,17 +90,7 @@ impl SourceSnapshot {
         tool: &str,
         target: &Path,
     ) -> Result<()> {
-        let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
-        let mut observer = |files: usize| {
-            if heartbeat.ready() {
-                emit_source_progress(ctx, tool, files);
-            }
-        };
-        let current = crate::incremental_index::current_workspace_tree_hash_cancellable(
-            target,
-            &mut observer,
-            &|| ctx.is_cancelled(),
-        )?;
+        let current = inspect_current_source_hash(ctx, tool, target)?;
         anyhow::ensure!(
             current == self.tree_hash,
             "source changed during execution; run the tool again against the current source"
@@ -118,6 +111,24 @@ impl SourceSnapshot {
 struct SourceBoundFailure {
     snapshot: SourceSnapshot,
     cause: anyhow::Error,
+}
+
+pub(crate) fn inspect_current_source_hash(
+    ctx: &ToolExecutionContext<'_>,
+    tool: &str,
+    target: &Path,
+) -> Result<String> {
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let mut observer = |files: usize| {
+        if heartbeat.ready() {
+            emit_source_progress(ctx, tool, files);
+        }
+    };
+    crate::incremental_index::current_workspace_tree_hash_cancellable(
+        target,
+        &mut observer,
+        &|| ctx.is_cancelled(),
+    )
 }
 
 impl std::fmt::Display for SourceBoundFailure {

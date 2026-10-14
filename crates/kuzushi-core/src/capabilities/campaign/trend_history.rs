@@ -11,6 +11,8 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod recent;
+
 /// Snapshots surfaced to consumers (JSON + sparkline). The file may hold
 /// more; readers see the most recent window.
 pub const TREND_HISTORY_LIMIT: usize = 90;
@@ -70,7 +72,7 @@ pub fn record_trend_snapshot(root: &Path, metrics: &TrendMetrics) -> Result<bool
         provider_spend_unresolved: metrics.provider_spend_unresolved,
     };
     let path = trend_history_path(root);
-    if last_snapshot(&path).is_some_and(|last| last.same_state(&snapshot)) {
+    if last_snapshot(root, &path).is_some_and(|last| last.same_state(&snapshot)) {
         return Ok(false);
     }
     let parent = path
@@ -88,28 +90,22 @@ pub fn record_trend_snapshot(root: &Path, metrics: &TrendMetrics) -> Result<bool
     Ok(true)
 }
 
-fn last_snapshot(path: &Path) -> Option<TrendSnapshot> {
-    load_trend_history_from(path, 1).pop()
+fn last_snapshot(root: &Path, path: &Path) -> Option<TrendSnapshot> {
+    recent::load_recent_history(root, path, 1).ok()?.pop()
 }
 
-/// Most recent `limit` snapshots, oldest first. Unparsable lines (torn
-/// tails, hand edits) are skipped — history must degrade, not fail reads.
+/// Most recent valid snapshots, oldest first, up to `limit` or 90 rows.
+/// Reads at most the last 1 MiB; partial and malformed lines are skipped.
 pub fn load_trend_history(root: &Path, limit: usize) -> Vec<TrendSnapshot> {
-    load_trend_history_from(&trend_history_path(root), limit)
+    recent::load_recent_history(root, &trend_history_path(root), limit).unwrap_or_default()
 }
 
-fn load_trend_history_from(path: &Path, limit: usize) -> Vec<TrendSnapshot> {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let mut snapshots: Vec<TrendSnapshot> = body
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-    if snapshots.len() > limit {
-        snapshots.drain(..snapshots.len() - limit);
-    }
-    snapshots
+pub(super) fn history_window_json() -> Value {
+    serde_json::json!({
+        "selection": "recent-valid-lines",
+        "maxSnapshots": TREND_HISTORY_LIMIT,
+        "maxReadBytes": recent::MAX_HISTORY_BYTES,
+    })
 }
 
 pub fn history_json(history: &[TrendSnapshot]) -> Value {
@@ -153,17 +149,16 @@ pub fn sparkline(values: &[f64]) -> String {
         .collect()
 }
 
-/// One-line history strip rendered under the TREND strip, e.g.
-/// `HISTORY  fp ▁▂▇ · spend ▁▄█ · 3 snapshot(s)`. `None` below two
-/// snapshots — no fake sparkline.
+/// Compact recent history label; fewer than two snapshots has no trend.
 pub fn history_strip_label(history: &[TrendSnapshot]) -> Option<String> {
+    history_reading_lines(history).map(|lines| lines.join(" · "))
+}
+
+/// Separate count and chart labels so a narrow reader can retain qualifiers.
+pub fn history_reading_lines(history: &[TrendSnapshot]) -> Option<[String; 3]> {
     if history.len() < 2 {
         return None;
     }
-    let fp: Vec<f64> = history
-        .iter()
-        .map(|snapshot| snapshot.fp_rate().unwrap_or(0.0))
-        .collect();
     let spend: Vec<f64> = history
         .iter()
         .map(|snapshot| snapshot.campaign_spend_usd)
@@ -176,12 +171,21 @@ pub fn history_strip_label(history: &[TrendSnapshot]) -> Option<String> {
     } else {
         "spend"
     };
-    Some(format!(
-        "HISTORY  fp {} · {spend_label} {} · {} snapshot(s)",
-        sparkline(&fp),
-        sparkline(&spend),
-        history.len()
-    ))
+    Some([
+        format!("HISTORY recent · {} snapshot(s)", history.len()),
+        format!("fp {}", history_false_positive_plot(history)),
+        format!("{spend_label} {}", sparkline(&spend)),
+    ])
+}
+
+fn history_false_positive_plot(history: &[TrendSnapshot]) -> String {
+    let rates = history
+        .iter()
+        .map(TrendSnapshot::fp_rate)
+        .collect::<Option<Vec<_>>>();
+    rates
+        .map(|values| sparkline(&values))
+        .unwrap_or_else(|| "unavailable (snapshots without decisions)".into())
 }
 
 fn now_ms() -> u64 {
@@ -294,6 +298,24 @@ mod tests {
             provider_spend_unresolved: false,
         });
         let label = history_strip_label(&two).unwrap();
-        assert_eq!(label, "HISTORY  fp █▁ · spend ▁█ · 2 snapshot(s)");
+        assert_eq!(label, "HISTORY recent · 2 snapshot(s) · fp █▁ · spend ▁█");
+    }
+
+    #[test]
+    fn missing_decisions_do_not_become_a_zero_false_positive_trend() {
+        let history = vec![
+            TrendSnapshot {
+                ts_ms: 1,
+                decided_findings: 0,
+                confirmed_findings: 0,
+                rejected_false_positives: 0,
+                campaign_spend_usd: 0.0,
+                provider_spend_unresolved: true,
+            };
+            2
+        ];
+        let label = history_strip_label(&history).unwrap();
+        assert!(label.contains("fp unavailable (snapshots without decisions)"));
+        assert!(label.contains("spend >="));
     }
 }

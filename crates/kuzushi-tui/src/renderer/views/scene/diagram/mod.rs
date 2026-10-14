@@ -10,7 +10,7 @@ mod reverse_connectors;
 mod tree;
 use reverse_connectors::{connector_left, connector_up};
 
-pub(crate) use dfd::{DfdDiagram, DfdSummary};
+pub(crate) use dfd::{summary_reading_rows, DfdDiagram, DfdSummary};
 pub(crate) use tree::TreeDiagram;
 
 use ratatui::buffer::Buffer;

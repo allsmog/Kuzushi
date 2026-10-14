@@ -21,6 +21,8 @@ mod render_prompt_block;
 mod search_artifact_knowledge;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod lesson_tests;
 
 pub use from_text_source::ArtifactKnowledgeRecord;
 pub use from_text_source::ArtifactSearchResult;

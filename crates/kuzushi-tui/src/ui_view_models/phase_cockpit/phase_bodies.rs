@@ -2,19 +2,18 @@ use super::{
     FixPhaseModel, RemediationLifecycleModel, RemediationLifecycleStage, RemediationLoadState,
     ReviewPhaseModel, SelectionDisclosureModel,
 };
+use crate::ui_view_models::findings::finding_identity_label;
 use crate::ui_view_models::{
-    active_review_queue_mode, attack_tree, current_finding_for_detail, dfd_model,
-    finding_detail_model_for_projection, findings_model, patch_review_model, report_preview_model,
-    review_queue_model, selected_finding_detail_model, selected_finding_out_of_window_notice,
-    threat_patch_card_model, visible_finding_at_cursor, workbench_report_command,
+    active_review_queue_mode, attack_tree, current_finding_for_detail, dfd_model, findings_model,
+    patch_review_model, report_preview_model, review_queue_model, selected_finding_detail_model,
+    selected_finding_out_of_window_notice, threat_patch_card_model, workbench_report_command,
 };
 use crate::ShellApp;
 use crate::{FindingPatchTruthState, ViewDataState};
 use kuzushi_core::{PatchLifecycleRecord, PatchLifecycleState, WorkspaceExportFormat};
 
 pub(super) fn review_phase_model(app: &ShellApp) -> ReviewPhaseModel {
-    let finding = visible_finding_at_cursor(app)
-        .map(|(alias, finding)| finding_detail_model_for_projection(app, Some(alias), &finding));
+    let finding = selected_finding_detail_model(app);
     ReviewPhaseModel {
         comparison_control: review_comparison_control(app),
         review: review_queue_model(app, active_review_queue_mode(app)),
@@ -243,11 +242,25 @@ fn empty_remediation_model(stage: RemediationLifecycleStage) -> RemediationLifec
 }
 
 pub(super) fn review_selection_disclosure(app: &ShellApp) -> Option<SelectionDisclosureModel> {
-    let notice = selected_finding_out_of_window_notice(app)?;
+    selected_finding_out_of_window_notice(app)?;
+    let (alias, finding) = current_finding_for_detail(app)?;
+    let reference = alias.unwrap_or_else(|| finding_identity_label(&finding));
+    if let Some(current) = crate::ui_view_models::findings::current_observation_alias(app, &finding)
+    {
+        return Some(SelectionDisclosureModel {
+            message: format!(
+                "{reference} shows an earlier observation; decisions stay bound to it"
+            ),
+            filter: None,
+            reveal_command: format!("open {current}"),
+            reveal_label: "inspect current",
+        });
+    }
     Some(SelectionDisclosureModel {
-        message: format!("{notice}; Review actions target the highlighted visible row"),
-        filter: active_filter_label(app),
-        reveal_command: "findings",
+        message: format!("{reference} pinned outside list; decisions use this detail"),
+        filter: Some(active_filter_label(app)),
+        reveal_command: "findings".into(),
+        reveal_label: "reveal",
     })
 }
 
@@ -266,8 +279,9 @@ pub(super) fn actionable_selection_disclosure(
         message: format!(
             "{reference} is pinned outside this projection; actions target this displayed finding"
         ),
-        filter: active_filter_label(app),
-        reveal_command: "findings",
+        filter: Some(active_filter_label(app)),
+        reveal_command: "findings".into(),
+        reveal_label: "reveal",
     })
 }
 

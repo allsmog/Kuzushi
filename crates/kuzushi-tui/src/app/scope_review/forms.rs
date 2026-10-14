@@ -42,6 +42,7 @@ fn scope_fields(kind: ScopeEditKind, scope: &ProposedScanScope) -> Vec<(&'static
             ("File or directory path", String::new()),
             ("Reason for exclusion", String::new()),
         ],
+        ScopeEditKind::IncludePath => vec![("Exact recorded exclusion path", String::new())],
         ScopeEditKind::Boundary => vec![
             ("Boundary rationale", scope.rationale.clone()),
             (
@@ -75,6 +76,9 @@ impl ScopeEditForm {
                 path: self.text(0)?,
                 reason: self.text(1)?,
             },
+            ScopeEditKind::IncludePath => ScanScopeEdit::IncludePath {
+                path: self.exact_recorded_path()?,
+            },
             ScopeEditKind::Split => ScanScopeEdit::Split {
                 scope_id: id,
                 children: vec![self.child(0, revision)?, self.child(2, revision)?],
@@ -98,6 +102,17 @@ impl ScopeEditForm {
             .trim();
         anyhow::ensure!(!text.is_empty(), "Fill in {}.", self.fields[index].0);
         Ok(text.into())
+    }
+
+    fn exact_recorded_path(&self) -> Result<String> {
+        let path = self
+            .fields
+            .first()
+            .context("Missing recorded exclusion path")?
+            .1
+            .text();
+        anyhow::ensure!(!path.is_empty(), "Choose an exact recorded exclusion path");
+        Ok(path.into())
     }
 
     fn lines(&self, index: usize) -> Vec<String> {

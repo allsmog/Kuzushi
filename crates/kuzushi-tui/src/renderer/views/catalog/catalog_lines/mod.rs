@@ -56,7 +56,7 @@ fn append_selected_next_action(lines: &mut Vec<Line<'static>>, model: &CatalogMo
     if let Some(module) = model.selected_action.as_ref() {
         let hint = catalog_selected_action_hint(module, width);
         lines.push(next_action_line(&hint, width as usize));
-        lines.push(blank());
+        lines.extend(catalog_readiness_lines(model, width as usize));
     }
 }
 
@@ -97,6 +97,21 @@ mod tests {
 
         assert!(text.contains("target <path>"), "{text}");
         assert!(text.contains("demo"), "{text}");
+    }
+
+    #[test]
+    fn plain_catalog_names_selected_input_recovery() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(std::path::PathBuf::from(".")));
+        app.move_catalog_cursor(2);
+        let text = catalog_lines(&app, Rect::new(0, 0, 40, 12))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("options recon:import"), "{text}");
+        assert!(text.contains("INPUT REQUIRED"), "{text}");
     }
 
     #[test]

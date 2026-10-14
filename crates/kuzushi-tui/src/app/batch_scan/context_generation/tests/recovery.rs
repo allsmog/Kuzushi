@@ -263,7 +263,7 @@ fn assert_missing_output(app: &ShellApp) {
         .unwrap()
         .contains("no immutable context manifest"));
     for (width, height) in [(120, 36), (80, 24), (60, 20), (40, 12), (96, 89), (160, 48)] {
-        let body = crate::ui_view_models::context_generation::generation_body(width, height);
+        let body = crate::ui_view_models::context_generation::generation_body(width, height, false);
         let text =
             crate::ui_view_models::context_generation::generation_lines(app, body.width as usize)
                 .join(" ");

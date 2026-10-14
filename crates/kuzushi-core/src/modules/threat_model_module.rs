@@ -32,6 +32,9 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
         )),
         threat_model_verify_tool(),
         threat_model_import_tool(),
+        threat_model_revise_tool(),
+        threat_model_lesson_tool(),
+        threat_model_regenerate_tool(),
         threat_model_models_tool(),
         threat_model_activate_tool(),
         threat_model_revisions_tool(),
@@ -42,8 +45,50 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
             "threat-model:methodologies",
             "List supported threat-model methodologies.",
         )
-        .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
+        .with_policy(read_policy(
+            ToolPhase::Operate,
+            WorkspaceRequirement::Optional,
+        ))
+        .without_phase_result(),
     ]
+}
+
+fn threat_model_revise_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:revise",
+        "Save reviewed text edits as an inactive immutable context copy. No model requests.",
+        vec![
+            target_option(),
+            bound_threat_model_option().required(),
+            opt("edits", OptionType::Json, "Reviewed context text edits: pointer and text for system overview, component description/purpose or structured question answers.").required(),
+            opt("label", OptionType::String, "Name for the edited context copy."),
+        ],
+    ).with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)).without_phase_result()
+}
+
+fn threat_model_lesson_tool() -> ToolDescriptor {
+    let mut tool=tool_with_options("threat-model:reuse-lessons","Create an inactive immutable context copy using up to eight explicitly selected accepted lesson revisions. An empty selection removes lessons from the copy.",vec![
+        target_option(),bound_threat_model_option().required(),
+        opt("lessons",OptionType::Json,"Exact accepted lesson references. Choose zero to eight; this replaces the previous selection.").required(),
+        opt("label",OptionType::String,"Name for the context copy."),
+    ]).with_policy(workspace_policy(ToolPhase::Map,RuntimeRequirement::Never,FindingStoreRequirement::Required)).without_phase_result();
+    tool.approval = ApprovalPolicy::Explicit;
+    tool
+}
+
+fn threat_model_regenerate_tool() -> ToolDescriptor {
+    tool_with_options("threat-model:regenerate",
+        "Propose replacement text for selected fields of an exact context. One bounded synthesis request creates an inactive copy for comparison. Original and unselected text remain intact; no scan or finding verdict.",
+        vec![target_option(), bound_threat_model_option().required(),
+            opt("fields", OptionType::StringList, "One to eight editable context pointers to regenerate.").required(),
+            opt("guidance", OptionType::String, "Operator guidance for the selected text, at most 2048 bytes.").default(json!("")),
+            opt("maxSourceBytes", OptionType::Int, "Maximum source excerpt bytes; omitted material is disclosed.").integer_range(1024,262144).default(json!(32768)),
+            opt("contextLimit", OptionType::Int, "Maximum source files supplied to this request.").integer_range(1,200).default(json!(20)),
+            opt("maxOutputTokens", OptionType::Int, "Requested output tokens. OAuth transport may not enforce this ceiling; provider-request limits still apply.").integer_range(1024,8192).default(json!(4096)),
+            opt("thinkingLevel", OptionType::Enum, "Reasoning effort; omit to inherit the selected runtime.").choices(&["low","medium","high","xhigh"]),
+            model_option(),
+            opt("allowanceRef", OptionType::Json, "Approved investigation revision and work item. Each provider attempt requires a reservation.").required(),
+        ]).with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Always, FindingStoreRequirement::Optional)).without_phase_result()
 }
 
 fn threat_model_models_tool() -> ToolDescriptor {
@@ -80,6 +125,7 @@ fn threat_model_activate_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Optional,
     ))
+    .without_phase_result()
 }
 
 fn threat_model_revisions_tool() -> ToolDescriptor {
@@ -97,9 +143,10 @@ fn threat_model_revisions_tool() -> ToolDescriptor {
 fn threat_model_diff_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-model:diff",
-        "Compare two immutable threat-model revisions or lineage heads: threats \
-         added/removed/changed (keyed by stableId, else id), DFD node/flow/\
-         boundary deltas, entry-point coverage, and methodology.",
+        "Compare immutable context revisions or lineage heads. Show overview, \
+         component text and question-answer changes alongside threat/DFD \
+         membership, coverage and methodology. Disclose other changed stored \
+         sections; bounded text previews retain complete values in the result.",
         vec![
             target_option(),
             opt(
@@ -133,6 +180,7 @@ fn threat_model_restore_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Optional,
     ))
+    .without_phase_result()
 }
 
 fn threat_model_adopt_tool() -> ToolDescriptor {
@@ -146,14 +194,14 @@ fn threat_model_adopt_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Optional,
     ))
+    .without_phase_result()
 }
 
 fn threat_model_verify_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-model:verify",
-        "Verify the persisted threat model against the target: cited \
-         paths exist, documented revision vs HEAD, coverage vs fresh \
-         grounding surfaces. Stamps the verdict on the document.",
+        "Check context citations, links, source identity and bounded coverage. \
+         An exact reference saves an inactive checked revision; no model request.",
         threat_model_verify_options(),
     )
     .with_policy(workspace_policy(
@@ -183,11 +231,12 @@ fn threat_model_verify_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         threat_model_scope_option(),
+        bound_threat_model_option(),
         opt(
             "write",
             OptionType::Bool,
-            "Save the verification-stamped document back to \
-             .kuzushi/threat-model.json.",
+            "Save a checked revision. Exact-reference checks preserve the active \
+             context and compatibility mirror; unbound checks retain active-context behavior.",
         )
         .default(json!(true)),
     ]
@@ -261,8 +310,11 @@ fn threat_model_build_options() -> Vec<OptionSpec> {
 fn threat_model_source_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
+        opt("operatorBriefRef", OptionType::Json, "Exact reviewed operator goal for an approved fresh inactive source-only context build. Supplied as priorities, never source evidence or a finding verdict; requires a bound investigation work item."),
         threat_model_scope_option(),
         threat_model_methodology_option("stride"),
+        opt("scanScopeRef", OptionType::Json, "Exact accepted file-group reference for one bounded, tool-free inactive context build. Requires a separately approved context study; does not change discovery scope or start scans.").aliases(&["scan_scope_ref"]),
+        opt("inheritedContextRef", OptionType::Json, "Exact immutable context inherited by an accepted file-group build. Explicit null omits it; no global context is selected implicitly.").aliases(&["inherited_context_ref"]),
         opt(
             "sources",
             OptionType::StringList,
@@ -539,9 +591,10 @@ fn x_ray_tools() -> Vec<ToolDescriptor> {
     vec![
         x_ray_run_tool(write_policy, false),
         x_ray_run_tool(write_policy, true),
-        tool(
+        tool_with_options(
             "x-ray:read",
-            "Read the latest repository architecture and attack-surface report.",
+            "Read bounded stored architecture reports as recorded claims. Source freshness, original generation spend and security verdicts are not established by this reader.",
+            vec![target_option()],
         )
         .with_policy(tool_policy(
             ToolPhase::Map,
@@ -549,7 +602,8 @@ fn x_ray_tools() -> Vec<ToolDescriptor> {
             ToolEffect::Read,
             WorkspaceRequirement::Required,
             FindingStoreRequirement::Optional,
-        )),
+        ))
+        .without_phase_result(),
     ]
 }
 
@@ -634,21 +688,40 @@ pub(crate) fn secret_scan_module() -> BuiltinModule {
             ),
             vec![tool_with_options(
                 "secret-scan:scan",
-                "Scan source files for high-confidence secrets.",
-                vec![
-                    target_option(),
-                    opt(
-                        "maxFileBytes",
-                        OptionType::Int,
-                        "Maximum file size to scan.",
-                    )
-                    .aliases(&["max_file_bytes"])
-                    .integer_range(1024, crate::secret_scan::MAX_SUPPORTED_FILE_BYTES as i64)
-                    .default(json!(524288)),
-                    max_findings_option(1000).integer_range(1, 10_000),
-                ],
+                "Inspect source files for secret-like strings. Results require review.",
+                secret_scan_options(),
             )],
         ),
         vec![dag("secret-scan:scan", "findings", &["context:build"])],
     )
+}
+fn secret_scan_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        opt(
+            "maxFileBytes",
+            OptionType::Int,
+            "Maximum file size to scan.",
+        )
+        .aliases(&["max_file_bytes"])
+        .integer_range(1024, crate::secret_scan::MAX_SUPPORTED_FILE_BYTES as i64)
+        .default(json!(524288)),
+        opt(
+            "maxEntries",
+            OptionType::Int,
+            "Maximum directory entries inspected per scan.",
+        )
+        .aliases(&["max_entries"])
+        .integer_range(1, 100_000)
+        .default(json!(100_000)),
+        opt(
+            "maxTotalBytes",
+            OptionType::Int,
+            "Total content read allowance, including conservative reservations for failed reads.",
+        )
+        .aliases(&["max_total_bytes"])
+        .integer_range(1024, 536_870_912)
+        .default(json!(536_870_912)),
+        max_findings_option(1000).integer_range(1, 10_000),
+    ]
 }

@@ -1,0 +1,97 @@
+name: Compact actual finding reading, resize recovery and no-color restart without model work
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-wrapper-flow:
+launch: --target @TARGET
+submit: findings
+require-live-snap: 30 Viewing Review | review-list
+require-live-snap: 30 FINDINGS · 1 | settled-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned public documentation example | selected-detail
+resize: 160x48
+live-snap: detail-160x48
+resize: 96x89
+live-snap: detail-96x89
+resize: 80x24
+live-snap: detail-80x24
+resize: 60x20
+live-snap: detail-60x20
+resize: 40x12
+live-snap: compact-detail-first
+expect: F-0001
+expect: sources:3
+expect: PgUp/PgDn
+expect: q review list
+expect: REVIEW · NAVIGATE · Esc prompt
+keys: NPage
+live-snap: compact-detail-page-1
+keys: NPage
+live-snap: compact-detail-page-2
+keys: NPage
+live-snap: compact-detail-page-3
+keys: NPage
+live-snap: compact-detail-page-4
+keys: NPage
+live-snap: compact-detail-page-5
+keys: NPage
+live-snap: compact-detail-page-6
+keys: NPage
+live-snap: compact-detail-page-7
+keys: NPage
+live-snap: compact-detail-page-8
+keys: NPage
+live-snap: compact-detail-page-9
+keys: NPage
+live-snap: compact-detail-page-10
+keys: NPage
+live-snap: compact-detail-page-11
+keys: NPage
+live-snap: compact-detail-page-12
+keys: NPage
+live-snap: compact-detail-page-13
+keys: NPage
+live-snap: compact-detail-page-14
+keys: NPage
+live-snap: compact-detail-page-15
+keys: NPage
+live-snap: compact-detail-page-16
+keys: NPage
+live-snap: compact-detail-page-17
+keys: NPage
+live-snap: compact-detail-page-18
+keys: NPage
+live-snap: compact-detail-page-19
+keys: NPage
+live-snap: compact-detail-tail
+ask: Does compact Review give at least six readable detail rows, with the same finding, complete source/decision/provenance and paging/back controls?
+resize: 120x36
+live-snap: restored-detail
+expect: F-0001
+resize: 40x12
+live-snap: restored-compact-detail
+keys: q
+require-live-snap: 25 FINDINGS | compact-list
+ask: Does returning from the detail preserve the selected finding and let the operator read the list without another action or request?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART reading
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+submit: findings
+require-live-snap: 30 FINDINGS · 1 | restarted-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned public documentation example | restarted-detail
+resize: 40x12
+live-snap: restarted-compact-detail
+expect: sources:3
+expect: PgUp/PgDn
+expect: REVIEW · NAVIGATE · Esc prompt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_investigation.py @TARGET @ART reading
+ask: Does no-color restart retain the original human decision, source commit and four-call ledger while compact controls remain readable?
+keys: C-c
+require-exit: 10

@@ -1,0 +1,64 @@
+name: Filtered Review pins and external decision recovery
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py prepare @TARGET @ART/fixture
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings filter name:0656
+require-live-snap: 30 Synthetic Review candidate 0656 | filtered-list
+submit: open F-0952
+require-live-snap: 20 Synthetic Review candidate 0000 | filtered-pin
+expect: F-0952 pinned outside list
+ask: Do the filter, pinned identity, displayed evidence and Review action target agree, while full-ledger progress remains distinct?
+resize: 160x48
+wait: 1
+require-live-snap: 20 F-0952 | pin-160x48
+resize: 96x89
+wait: 1
+require-live-snap: 20 F-0952 | pin-96x89
+resize: 80x24
+wait: 1
+require-live-snap: 20 F-0952 | pin-80x24
+resize: 60x20
+wait: 1
+require-live-snap: 20 F-0952 | pin-60x20
+ask: Across the rail, tall and narrow layouts, can the operator distinguish the visible filtered row from the pinned action target?
+resize: 40x12
+wait: 1
+require-live-snap: 20 F-0952 | pin-40x12
+nav-mode:
+keys: Escape
+expect-echo-within: 300 retained-filtered-draft
+live-snap: pinned-draft
+expect: retained-filtered-draft
+ask: Does the tiny layout retain the intended finding identity and an editable draft without implying that the visible list row is selected?
+keys: C-u
+resize: 120x36
+nav-mode:
+keys: q
+keys: Down
+require-live-snap: 20 F-0001 · confirmed | returned-to-list
+ask: Does list navigation release the pin and return the detail and action target to the remaining visible row, keeping the query intact?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py mark-open @TARGET @ART/fixture
+submit: findings filter completeness:open
+require-live-snap: 30 Synthetic Review candidate 0000 | one-open-row
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py mark-confirmed @TARGET @ART/fixture
+require-live-snap: 30 Selected finding left this query | external-decision-recovery
+expect: Showing the first page
+require-live-snap: 20 Review ✓ | full-ledger-review-access
+ask: Does an external decision recover the now-empty query with an honest notice, without losing recorded decisions or changing the operator's filter?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: findings filter name:0656
+require-live-snap: 30 Synthetic Review candidate 0656 | restart-filter
+submit: open F-0952
+require-live-snap: 20 J104 confirmed | restart-pin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/large_review.py verify-filtered-review @TARGET @ART/fixture
+ask: Does no-color restart show the correct pinned finding and final decision, backed by exactly two explicit writes and unchanged source and observations?
+keys: C-c
+require-exit: 10

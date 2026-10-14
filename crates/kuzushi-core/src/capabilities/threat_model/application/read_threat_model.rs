@@ -1,5 +1,6 @@
 use super::*;
 mod exact_context;
+pub(crate) use exact_context::inspect_goal_guidance;
 
 pub(crate) fn read_threat_model(
     input: Value,
@@ -65,7 +66,9 @@ mod input_contract_tests {
         )
         .unwrap_err();
 
-        assert!(error.to_string().contains("cannot combine scope with outputDir"));
+        assert!(error
+            .to_string()
+            .contains("cannot combine scope with outputDir"));
     }
 }
 
@@ -200,6 +203,7 @@ struct ReadThreatModelResponse {
 }
 
 fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
+    let goal_state = inspect_goal_guidance(&response.target, &response.document);
     let threat_count = array_len(response.document.pointer("/threats"));
     let node_count = array_len(response.document.pointer("/dfd/nodes"));
     let flow_count = array_len(response.document.pointer("/dfd/flows"));
@@ -220,6 +224,7 @@ fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
         "document": response.document,
         "artifacts": response.artifacts.to_json(),
         "modelRef": response.model_ref,
+        "goalState":goal_state,
     });
     crate::module_result::completed_output_result(output.clone(), output, data)
 }

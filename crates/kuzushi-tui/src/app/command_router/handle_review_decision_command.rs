@@ -140,12 +140,7 @@ impl ShellApp {
         finding: Finding,
         decision: ReviewDecision,
     ) -> ShellEffect {
-        let read_watermark = self
-            .router
-            .workbench()
-            .review()
-            .read_watermark_for(finding_stable_fp(&finding))
-            .or_else(|| self.findings_read_watermark_for(&finding));
+        let read_watermark = self.manual_finding_read_watermark(&finding);
         let review_session_id = self.open_review_session_id(&finding);
         ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
@@ -161,40 +156,49 @@ impl ShellApp {
         &mut self,
         apply: SuppressionApply,
     ) -> Vec<ShellEffect> {
-        let Some(target) = apply.target.as_deref() else {
-            self.set_error_notice("suppress", "suppress needs an active target");
+        if self.refuse_pending_review_decision_write() {
             return Vec::new();
-        };
-        let workspace = match WorkspaceTarget::new(target) {
-            Ok(workspace) => workspace,
+        }
+        match self.persist_suppression_for_apply(&apply) {
+            Ok((message, fingerprint)) => self.finish_suppression_record(message, fingerprint),
             Err(error) => {
-                self.set_error_notice(
-                    "suppress",
-                    format!("could not open suppression workspace: {error}"),
-                );
-                return Vec::new();
-            }
-        };
-        match self.persist_suppression(&workspace, &apply) {
-            Ok((message, fingerprint)) => {
-                self.set_success_notice("suppress", message);
-                let filter = self.active_findings_filter();
-                let mut effects = vec![ShellEffect::RefreshFindings(FindingsRefresh {
-                    announce: false,
-                    filter: filter.clone(),
-                })];
-                if filter.is_some() {
-                    effects.push(ShellEffect::ReportFilteredFindingMovement(
-                        FilteredFindingMovementNotice { fingerprint },
-                    ));
-                }
-                effects
-            }
-            Err(error) => {
-                self.set_error_notice("suppress", format!("suppression not recorded: {error}"));
+                self.set_error_notice("suppress", format!("suppression not recorded: {error:#}"));
                 Vec::new()
             }
         }
+    }
+
+    fn persist_suppression_for_apply(
+        &self,
+        apply: &SuppressionApply,
+    ) -> anyhow::Result<(String, String)> {
+        let target = apply
+            .target
+            .as_deref()
+            .context("suppress needs an active target")?;
+        let workspace =
+            WorkspaceTarget::new(target).context("could not open suppression workspace")?;
+        self.persist_suppression(&workspace, apply)
+    }
+
+    fn finish_suppression_record(
+        &mut self,
+        message: String,
+        fingerprint: String,
+    ) -> Vec<ShellEffect> {
+        self.reset_findings_page_request();
+        self.set_success_notice("suppress", message);
+        let filter = self.active_findings_filter().clone();
+        let mut effects = vec![ShellEffect::RefreshFindings(FindingsRefresh {
+            announce: false,
+            filter: filter.clone(),
+        })];
+        if filter.is_some() {
+            effects.push(ShellEffect::ReportFilteredFindingMovement(
+                FilteredFindingMovementNotice { fingerprint },
+            ));
+        }
+        effects
     }
 
     fn persist_suppression(
@@ -203,10 +207,8 @@ impl ShellApp {
         apply: &SuppressionApply,
     ) -> anyhow::Result<(String, String)> {
         let store = kuzushi_core::FindingStore::open(workspace.findings_db_path())?;
-        let report = store.list_findings_filtered(&kuzushi_core::FindingListFilter::with_limit(
-            kuzushi_core::FindingListFilter::MAX_LIMIT,
-        ))?;
-        let finding = kuzushi_core::resolve_finding_alias(&report.findings, &apply.reference)
+        let finding = store
+            .finding_for_alias_with_identity_policy(&apply.reference, self.identity_fold_policy())?
             .or(store.get_finding_by_reference(&apply.reference)?)
             .ok_or_else(|| anyhow::anyhow!("no finding matches {:?}", apply.reference))?;
         let expires_at_unix = current_unix().saturating_add(apply.days.saturating_mul(86_400));
@@ -237,12 +239,26 @@ impl ShellApp {
     }
 
     fn findings_read_watermark_for(&self, finding: &Finding) -> Option<u64> {
-        let stable_fp = finding_stable_fp(finding);
+        let exact = kuzushi_core::findings::finding_page_anchor(finding);
         self.findings()
             .iter()
-            .any(|row| finding_stable_fp(row) == stable_fp)
+            .any(|row| kuzushi_core::findings::finding_page_anchor(row) == exact)
             .then(|| self.findings_read_watermark())
             .flatten()
+            .or_else(|| self.router.findings().selected_read_watermark(finding))
+    }
+
+    fn manual_finding_read_watermark(&self, finding: &Finding) -> Option<u64> {
+        self.router
+            .findings()
+            .selected_read_watermark(finding)
+            .or_else(|| {
+                self.router
+                    .workbench()
+                    .review()
+                    .read_watermark_for(finding_stable_fp(finding))
+            })
+            .or_else(|| self.findings_read_watermark_for(finding))
     }
 
     fn reduce_current_finding_dismissal(&mut self, reason: &str, note: &str) -> Vec<ShellEffect> {
@@ -256,11 +272,7 @@ impl ShellApp {
             return Vec::new();
         };
         let decision = ReviewDecision::dismissal(reason, &note, "operator");
-        let read_watermark = self
-            .router
-            .workbench()
-            .review()
-            .read_watermark_for(finding_stable_fp(&finding));
+        let read_watermark = self.manual_finding_read_watermark(&finding);
         let review_session_id = self.open_review_session_id(&finding);
         vec![ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
@@ -332,13 +344,16 @@ impl ShellApp {
     ) {
         self.router.workbench_mut().review_mut().session_decided += 1;
         let decided = self.router.workbench().review().session_decided;
-        self.set_success_notice(
-            "review",
-            format!(
+        let message = format!(
                 "decision saved; will carry forward as decision #{decision_id} ({} for {label}) · {decided} decided this session",
                 verdict.as_str()
-            ),
         );
+        if self.viewport().columns < 60 {
+            self.log("review", message);
+            self.set_success_notice("review", format!("saved #{decision_id} · {label}"));
+            return;
+        }
+        self.set_success_notice("review", message);
     }
 
     pub(crate) fn log_review_decision_write_error(

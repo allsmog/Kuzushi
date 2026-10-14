@@ -1,6 +1,8 @@
 use super::*;
 use rusqlite::types::Type;
 use std::collections::BTreeMap;
+mod grounding_candidates;
+mod recommendation_paths;
 
 /// The latest observation per stable identity — the ledger's current
 /// finding set. Shared by the full projection below and the narrow
@@ -90,6 +92,14 @@ select latest.finding_json,
   left join merged_sources on merged_sources.stable_key = latest.stable_key
  where latest.observation_rank = 1
 "#
+);
+
+const LATEST_FINDING_PATHS_SQL: &str = concat!(
+    latest_observation_ranking_cte!(),
+    "select json_extract(latest.finding_json, '$.file_path')
+       from ranked_observations as latest
+      where latest.observation_rank = 1
+      order by latest.stable_key limit ?1"
 );
 
 /// Only the two columns a review-decision lookup needs, straight from the
@@ -284,10 +294,7 @@ fn escape_like_prefix(reference: &str) -> String {
 
 /// Stable projection key: identity id when present, else fingerprint.
 pub(crate) fn finding_stable_fp(finding: &Finding) -> String {
-    finding
-        .identity_id
-        .clone()
-        .unwrap_or_else(|| finding.fingerprint.clone())
+    crate::findings::finding_observation_identity(finding).to_owned()
 }
 
 fn row_to_v3_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {

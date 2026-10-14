@@ -2,11 +2,11 @@ use super::batch_occurrence_lines::append_batch_occurrence;
 use super::batch_scan_config_lines::append_batch_scan_config;
 use super::*;
 use crate::app::CampaignRouteState;
+use crate::ui_view_models::campaign_job_scope_label as job_scope_label;
 use kuzushi_core::capabilities::campaign::snapshot::{CampaignJobSnapshot, CampaignSnapshot};
 
 const CAMPAIGN_LIST_WIDTHS: [usize; 4] = [18, 14, 6, 30];
 const JOB_LIST_WIDTHS: [usize; 7] = [4, 22, 10, 4, 5, 12, 5];
-const BURN_BAR_CELLS: usize = 10;
 
 /// The Campaign deck: list mode is one row per planned campaign; detail mode
 /// is the selected campaign's ranked job matrix with include/exclude marks.
@@ -17,6 +17,12 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     if append_study_surfaces(&mut lines, app, area) {
         return lines;
+    }
+    if deck.has_dispatcher_failure_notice() {
+        let context = lines;
+        lines = Vec::new();
+        append_campaign_notice(&mut lines, deck, area);
+        lines.extend(context);
     }
     match deck.selected_campaign().filter(|_| deck.detail) {
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
@@ -38,14 +44,23 @@ fn append_study_surfaces(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: R
     if append_study_picker(lines, app, area) {
         return true;
     }
-    if let Some(config) = app.router.campaign().batch_scan_config.as_ref() {
-        append_batch_scan_config(lines, config, area);
+    if let Some(config) = crate::ui_view_models::study_config::study_projection(app) {
+        append_batch_scan_config(lines, &config, area);
         return true;
     }
     false
 }
 
 fn append_study_picker(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {
+    if let Some(document) = crate::ui_view_models::study_resource_picker::resource_picker_document(
+        app,
+        area.width as usize,
+    ) {
+        lines.push(divider("HISTORICAL USAGE", area.width));
+        lines.extend(document.into_iter().map(Line::from));
+        lines.push(Line::from("↑↓ Enter · PgUp/Dn · r refresh · Esc back"));
+        return true;
+    }
     if app.study_engine_picker().is_some() {
         super::batch_scan_config_lines::append_study_engines(lines, app, area);
         return true;
@@ -54,25 +69,12 @@ fn append_study_picker(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rec
         super::batch_scan_config_lines::append_study_context(lines, app, area);
         return true;
     }
-    false
+    super::batch_scan_config_lines::append_scope_context(lines, app, area)
 }
 
 fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
     lines.push(divider("CAMPAIGNS", area.width));
-    if let Some(trend) = &deck.trend {
-        lines.push(Line::styled(
-            format!("  {}", trend.strip_label()),
-            theme::subtle(),
-        ));
-        if let Some(history) =
-            kuzushi_core::capabilities::campaign::trend_history::history_strip_label(
-                &deck.trend_history,
-            )
-        {
-            lines.push(Line::styled(format!("  {history}"), theme::subtle()));
-        }
-        lines.push(blank());
-    }
+    append_campaign_trend(lines, deck, area.width as usize);
     if deck.campaigns.is_empty() {
         append_empty_deck(lines);
         return;
@@ -88,6 +90,32 @@ fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteStat
             index == deck.selected_campaign,
             &widths,
         ));
+    }
+}
+
+fn append_campaign_trend(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, width: usize) {
+    if let Some(trend) = &deck.trend {
+        append_workspace_trend(lines, &trend.strip_label(), width);
+        if let Some(history) =
+            kuzushi_core::capabilities::campaign::trend_history::history_reading_lines(
+                &deck.trend_history,
+            )
+        {
+            for part in history {
+                push_deck_text(lines, &part, width, theme::subtle());
+            }
+        }
+        lines.push(blank());
+    }
+}
+
+fn append_workspace_trend(lines: &mut Vec<Line<'static>>, label: &str, width: usize) {
+    if width >= 80 {
+        push_deck_text(lines, label, width, theme::subtle());
+        return;
+    }
+    for part in label.split(" · ") {
+        push_deck_text(lines, part, width, theme::subtle());
     }
 }
 
@@ -143,7 +171,7 @@ fn campaign_display_id(campaign: &CampaignSnapshot) -> String {
     campaign.campaign_id.clone()
 }
 
-fn states_label(campaign: &CampaignSnapshot) -> String {
+pub(super) fn states_label(campaign: &CampaignSnapshot) -> String {
     let counts = campaign.state_counts();
     if counts.is_empty() {
         return "no jobs".to_string();
@@ -161,9 +189,7 @@ fn append_campaign_detail(
     campaign: &CampaignSnapshot,
     area: Rect,
 ) {
-    lines.push(divider(&campaign_detail_title(campaign), area.width));
-    lines.push(detail_summary_line(deck, campaign));
-    append_campaign_operational_detail(lines, campaign);
+    super::summary::append_campaign_summary(lines, deck, campaign, area.width as usize);
     lines.push(blank());
     append_campaign_jobs(lines, deck, campaign, area);
     if let Some(report) = deck
@@ -185,7 +211,24 @@ fn append_campaign_jobs(
         return;
     }
     let widths = job_list_widths(area);
-    lines.push(aligned_header(
+    let compact = compact_job_table(deck, &widths);
+    lines.push(job_table_header(compact, &widths));
+    for (index, job) in campaign.jobs.iter().enumerate() {
+        lines.push(job_row_line(
+            deck,
+            job,
+            index == deck.selected_job,
+            &widths,
+            compact,
+        ));
+    }
+}
+
+fn job_table_header(compact: bool, widths: &[usize; 9]) -> Line<'static> {
+    if compact {
+        return Line::styled("  job · state · attempt", theme::muted());
+    }
+    aligned_header(
         &[
             "  ",
             "in",
@@ -195,100 +238,10 @@ fn append_campaign_jobs(
             "prio",
             "cost",
             "find",
-            "shard / threat",
+            "scope / threat",
         ],
-        &widths,
-    ));
-    for (index, job) in campaign.jobs.iter().enumerate() {
-        lines.push(job_row_line(deck, job, index == deck.selected_job, &widths));
-    }
-}
-
-fn campaign_detail_title(campaign: &CampaignSnapshot) -> String {
-    let kind = if crate::app::is_scan_batch_snapshot(campaign) {
-        "BATCH"
-    } else {
-        "CAMPAIGN"
-    };
-    format!("{kind} {}", campaign.campaign_id)
-}
-
-fn append_campaign_operational_detail(lines: &mut Vec<Line<'static>>, campaign: &CampaignSnapshot) {
-    append_optional_campaign_detail(lines, batch_worker_policy_label(campaign), theme::subtle());
-    append_optional_campaign_detail(
-        lines,
-        burn_bar_label(campaign.total_cost_usd, campaign.budget_usd),
-        burn_bar_style(campaign.total_cost_usd, campaign.budget_usd),
-    );
-    append_optional_campaign_detail(
-        lines,
-        job_budget_label(campaign.job_budget_usd),
-        theme::subtle(),
-    );
-    append_optional_campaign_detail(
-        lines,
-        gap_fill_label(campaign.fill_gaps, campaign.skipped_covered_cells),
-        theme::subtle(),
-    );
-    append_optional_campaign_detail(
-        lines,
-        pause_countdown_label(campaign.paused_until_ms, unix_now_ms()),
-        theme::warn(),
-    );
-    append_optional_campaign_detail(
-        lines,
-        campaign
-            .provider_spend_unresolved
-            .then(|| "provider cost evidence is incomplete; dollar total is unknown".to_string()),
-        theme::warn(),
-    );
-}
-
-fn append_optional_campaign_detail(
-    lines: &mut Vec<Line<'static>>,
-    label: Option<String>,
-    style: Style,
-) {
-    if let Some(label) = label {
-        lines.push(Line::styled(format!("  {label}"), style));
-    }
-}
-
-fn detail_summary_line(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -> Line<'static> {
-    let dispatcher = deck
-        .dispatcher_pid
-        .map(|pid| format!("dispatcher pid {pid}"))
-        .unwrap_or_else(|| "no deck-launched dispatcher".to_string());
-    Line::styled(
-        format!(
-            "  {} job(s) · {} · {} · {} · {}",
-            campaign.jobs.len(),
-            states_label(campaign),
-            campaign_worker_label(deck, campaign),
-            campaign_spend_label(campaign),
-            dispatcher,
-        ),
-        theme::subtle(),
+        widths,
     )
-}
-
-fn campaign_worker_label(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -> String {
-    match (campaign.requested_workers, campaign.effective_workers) {
-        (Some(requested), Some(effective)) => {
-            format!("workers {effective} frozen (requested {requested})")
-        }
-        _ => format!("workers {}", deck.workers),
-    }
-}
-
-fn batch_worker_policy_label(campaign: &CampaignSnapshot) -> Option<String> {
-    if !crate::app::is_scan_batch_snapshot(campaign) {
-        return None;
-    }
-    Some(match campaign.parallel_safety_reason.as_deref() {
-        Some(reason) => format!("parallel safety — {reason}"),
-        None => "parallel safety — frozen by the immutable batch plan".to_string(),
-    })
 }
 
 fn job_list_widths(area: Rect) -> [usize; 9] {
@@ -307,7 +260,11 @@ fn job_row_line(
     job: &CampaignJobSnapshot,
     selected: bool,
     widths: &[usize; 9],
+    compact: bool,
 ) -> Line<'static> {
+    if compact {
+        return compact_job_row(deck, job, selected, widths.iter().sum::<usize>() + 16);
+    }
     let marker = if selected { "▸" } else { " " };
     let included = if deck.excluded.contains(&job.job_id) {
         "—"
@@ -315,6 +272,41 @@ fn job_row_line(
         "✓"
     };
     Line::from(job_row_spans(job, marker, included, widths))
+}
+
+fn compact_job_table(deck: &CampaignRouteState, widths: &[usize; 9]) -> bool {
+    let widest_job = deck
+        .selected_campaign()
+        .into_iter()
+        .flat_map(|campaign| campaign.jobs.iter())
+        .map(|job| display_width(&job.job_id))
+        .max()
+        .unwrap_or(JOB_LIST_WIDTHS[1]);
+    widths[2] < widest_job.max(JOB_LIST_WIDTHS[1]) || widths[3] < 10
+}
+
+fn compact_job_row(
+    deck: &CampaignRouteState,
+    job: &CampaignJobSnapshot,
+    selected: bool,
+    width: usize,
+) -> Line<'static> {
+    let marker = if selected { "▸" } else { " " };
+    let included = if deck.excluded.contains(&job.job_id) {
+        "×"
+    } else {
+        "✓"
+    };
+    let name = pad(
+        &fit(&job.job_id, width.saturating_sub(19).max(1)),
+        width.saturating_sub(19).max(1),
+    );
+    let text = format!(
+        "{marker} {included} {name} {} a{}",
+        fit(&job.state, 10),
+        job.attempts
+    );
+    Line::styled(fit(&text, width), job_state_style(&job.state))
 }
 
 fn job_row_spans(
@@ -376,29 +368,6 @@ pub(super) fn job_cost_label(job: &CampaignJobSnapshot) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-fn campaign_spend_label(campaign: &CampaignSnapshot) -> String {
-    let missing_cost = campaign
-        .jobs
-        .iter()
-        .any(|job| job.cost_usd.is_none() && job.state != "planned");
-    if missing_cost || campaign.provider_spend_unresolved {
-        return if campaign.total_cost_usd <= 0.0 {
-            "cost unavailable".into()
-        } else {
-            format!("≥${:.2} reported · total unknown", campaign.total_cost_usd)
-        };
-    }
-    format!("${:.2} spent", campaign.total_cost_usd)
-}
-
-fn job_scope_label(job: &CampaignJobSnapshot) -> String {
-    let shard = job.shard.as_deref().unwrap_or("workspace");
-    match job.threat_title.as_deref().or(job.threat_id.as_deref()) {
-        Some(threat) => format!("{shard} / {threat}"),
-        None => shard.to_string(),
-    }
-}
-
 fn job_state_style(state: &str) -> Style {
     match state {
         "completed" => theme::success(),
@@ -411,81 +380,35 @@ fn job_state_style(state: &str) -> Style {
     }
 }
 
-/// `▮▮▮▯▯▯▯▯▯▯ $3.20/$15.00 (21%)` — only when the last dispatcher declared
-/// Gap-fill provenance — this plan deliberately skipped already-covered
-/// shard × source cells, so a short job list is convergence, not a bug.
-fn gap_fill_label(fill_gaps: bool, skipped_covered_cells: Option<u64>) -> Option<String> {
-    fill_gaps.then(|| {
-        format!(
-            "gap-fill plan — {} already-covered cell(s) skipped at planning",
-            skipped_covered_cells.unwrap_or(0)
-        )
-    })
-}
-
-/// Per-job cap disclosure — running jobs are killed and parked
-/// `over-budget` when their live spend crosses this ceiling.
-fn job_budget_label(job_budget_usd: Option<f64>) -> Option<String> {
-    let cap = job_budget_usd.filter(|cap| *cap > 0.0)?;
-    Some(format!(
-        "job cap ${cap:.2} — a running job crossing it is stopped and parked over-budget"
-    ))
-}
-
-/// a budget; an unlimited campaign shows plain spend in the summary line.
-fn burn_bar_label(spent_usd: f64, budget_usd: Option<f64>) -> Option<String> {
-    let budget = budget_usd.filter(|budget| *budget > 0.0)?;
-    let ratio = (spent_usd / budget).clamp(0.0, 1.0);
-    let filled = (ratio * BURN_BAR_CELLS as f64).round() as usize;
-    let bar: String = "▮".repeat(filled) + &"▯".repeat(BURN_BAR_CELLS - filled);
-    Some(format!(
-        "{bar} ${spent_usd:.2}/${budget:.2} ({:.0}%)",
-        ratio * 100.0
-    ))
-}
-
-fn burn_bar_style(spent_usd: f64, budget_usd: Option<f64>) -> Style {
-    match budget_usd {
-        Some(budget) if budget > 0.0 && spent_usd / budget >= 0.8 => theme::danger(),
-        Some(budget) if budget > 0.0 && spent_usd / budget >= 0.5 => theme::warn(),
-        _ => theme::success(),
-    }
-}
-
-/// Countdown to the end of a dispatcher quota-wall pause; `None` once the
-/// pause expired (the queue keeps the stale timestamp until the next event).
-fn pause_countdown_label(paused_until_ms: Option<u64>, now_ms: u64) -> Option<String> {
-    let remaining_ms = paused_until_ms?.checked_sub(now_ms).filter(|ms| *ms > 0)?;
-    let seconds = remaining_ms.div_ceil(1000);
-    let clock = if seconds >= 60 {
-        format!("{}m {:02}s", seconds / 60, seconds % 60)
-    } else {
-        format!("{seconds}s")
-    };
-    Some(format!("⏸ quota-wall pause — dispatch resumes in {clock}"))
-}
-
-fn unix_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
+    if !deck.has_dispatcher_failure_notice() {
+        append_campaign_notice(lines, deck, area);
+    }
+    lines.push(blank());
+    lines.extend(command_list_lines(deck_commands(deck), area.width as usize));
+}
+
+fn append_campaign_notice(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState, area: Rect) {
     if let Some(notice) = &deck.notice {
-        lines.push(blank());
         lines.extend(
             wrap_text(notice, area.width.saturating_sub(2) as usize)
                 .into_iter()
                 .map(|line| Line::styled(format!("  {line}"), theme::warn())),
         );
+        lines.push(blank());
     }
-    lines.push(blank());
-    lines.push(command_list_line(deck_commands(deck), area.width as usize));
 }
 
-fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+pub(super) fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+    if deck.dispatcher_stop_requested {
+        return &[
+            "j/k",
+            "Stop requested",
+            "saving partial work",
+            "r refresh",
+            "q list",
+        ];
+    }
     let batch_detail = deck
         .selected_campaign()
         .is_some_and(crate::app::is_fixed_study_snapshot);
@@ -503,7 +426,7 @@ fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
             "x include/exclude",
             "w workers",
             "L launch",
-            "K kill",
+            "K stop",
             "e prompt",
             "r refresh",
             "q list",
@@ -512,6 +435,16 @@ fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
         &["j/k", "Enter jobs", "r refresh", "campaign <id>", "back"]
     }
 }
+
+const PAUSED_FIXED_WORK_COMMANDS: &[&str] = &[
+    "j/k",
+    "a plan/allowance",
+    "work paused",
+    "L resume after review",
+    "workbench partial/report",
+    "r refresh",
+    "q list",
+];
 
 fn fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
     let unfinished = deck.selected_campaign().is_some_and(|campaign| {
@@ -527,11 +460,14 @@ fn fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
             "jobs frozen",
             "workers frozen",
             "L launch",
-            "K kill",
+            "K stop",
             "r refresh",
             "q list",
         ]
-    } else {
+    } else if deck
+        .selected_campaign()
+        .is_some_and(|campaign| campaign.jobs.iter().all(|job| job.state == "completed"))
+    {
         &[
             "j/k",
             "a plan/allowance",
@@ -539,6 +475,8 @@ fn fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
             "r refresh",
             "q list",
         ]
+    } else {
+        PAUSED_FIXED_WORK_COMMANDS
     }
 }
 
@@ -572,6 +510,7 @@ fn append_empty_deck(lines: &mut Vec<Line<'static>>) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::summary::campaign_spend_label;
     use super::*;
     use kuzushi_core::capabilities::campaign::{
         BatchGateStatus, BatchOperationalStatus, BatchSecurityGateStatus, ScanBatchGateOutcome,
@@ -613,7 +552,8 @@ mod tests {
             let list_widths = campaign_list_widths(area);
             let job_widths = job_list_widths(area);
             let campaign_line = campaign_row_line(&campaign, true, &list_widths);
-            let job_line = job_row_line(&deck, &job, true, &job_widths);
+            let compact = compact_job_table(&deck, &job_widths);
+            let job_line = job_row_line(&deck, &job, true, &job_widths, compact);
 
             assert_eq!(table_width(&list_widths), width as usize);
             assert_eq!(table_width(&job_widths), width as usize);
@@ -637,11 +577,29 @@ mod tests {
     }
 
     #[test]
+    fn accepted_scope_identity_precedes_the_legacy_shard_label() {
+        let mut job = sample_job("j1", "planned");
+        job.input["scanScopeRef"] = serde_json::json!({"scopeId": "accepted-files"});
+        assert_eq!(job_scope_label(&job), "accepted-files / Token forgery");
+    }
+
+    #[test]
+    fn compact_rows_preserve_excluded_job_disposition() {
+        let mut deck = CampaignRouteState::default();
+        deck.excluded.insert("j1".into());
+        let widths = job_list_widths(Rect::new(0, 0, 40, 12));
+        let compact = compact_job_table(&deck, &widths);
+        let line = job_row_line(&deck, &sample_job("j1", "planned"), true, &widths, compact);
+        assert!(line.to_string().contains("▸ × j1"));
+    }
+
+    #[test]
     fn excluded_job_renders_dash_marker() {
         let mut deck = CampaignRouteState::default();
         deck.excluded.insert("j1".to_string());
         let widths = job_list_widths(Rect::new(0, 0, 120, 30));
-        let line = job_row_line(&deck, &sample_job("j1", "planned"), true, &widths);
+        let compact = compact_job_table(&deck, &widths);
+        let line = job_row_line(&deck, &sample_job("j1", "planned"), true, &widths, compact);
         let text = line
             .spans
             .iter()
@@ -687,7 +645,7 @@ mod tests {
         );
         assert!(text.contains("work finished"), "{text}");
         assert!(
-            !text.contains("L launch") && !text.contains("K kill"),
+            !text.contains("L launch") && !text.contains("K stop"),
             "{text}"
         );
         assert!(!text.contains("x include/exclude"), "{text}");
@@ -797,11 +755,29 @@ mod tests {
         deck.campaigns = vec![campaign];
         assert!(deck_commands(&deck).contains(&"a plan/allowance"));
         assert!(!deck_commands(&deck).contains(&"L launch"));
-        assert!(!deck_commands(&deck).contains(&"K kill"));
+        assert!(!deck_commands(&deck).contains(&"K stop"));
+        assert!(deck_commands(&deck).contains(&"work paused"));
+        assert!(!deck_commands(&deck).contains(&"work finished"));
         for state in ["planned", "running"] {
             deck.campaigns[0].jobs[0].state = state.into();
             assert!(deck_commands(&deck).contains(&"L launch"));
         }
+    }
+
+    #[test]
+    fn parked_fixed_work_keeps_partial_report_and_review_visible() {
+        let mut campaign = sample_campaign();
+        let mut parked = sample_job("waiting", "parked");
+        parked.reason = Some("allowance-exhausted".into());
+        campaign.jobs.push(parked);
+        let mut deck = CampaignRouteState::default();
+        deck.detail = true;
+        deck.campaigns = vec![campaign];
+        let commands = deck_commands(&deck);
+        assert!(commands.contains(&"work paused"));
+        assert!(commands.contains(&"a plan/allowance"));
+        assert!(commands.contains(&"workbench partial/report"));
+        assert!(!commands.contains(&"work finished"));
     }
 
     #[test]
@@ -836,7 +812,7 @@ mod tests {
                 .join(" ");
             assert!(text.contains("separate approval."), "{text}");
             assert!(
-                !text.contains("L launch") && !text.contains("K kill"),
+                !text.contains("L launch") && !text.contains("K stop"),
                 "{text}"
             );
             assert!(lines.iter().all(|line| line_width(line) <= width as usize));
@@ -930,66 +906,16 @@ mod tests {
     }
 
     #[test]
-    fn burn_bar_scales_and_hides_without_budget() {
-        assert_eq!(
-            burn_bar_label(3.0, Some(15.0)).unwrap(),
-            "▮▮▯▯▯▯▯▯▯▯ $3.00/$15.00 (20%)"
-        );
-        assert_eq!(
-            burn_bar_label(20.0, Some(15.0)).unwrap(),
-            "▮▮▮▮▮▮▮▮▮▮ $20.00/$15.00 (100%)"
-        );
-        assert!(burn_bar_label(3.0, None).is_none());
-        assert!(burn_bar_label(3.0, Some(0.0)).is_none());
-    }
-
-    #[test]
-    fn job_cap_label_discloses_the_ceiling_and_hides_when_unset() {
-        assert_eq!(
-            job_budget_label(Some(5.0)).unwrap(),
-            "job cap $5.00 — a running job crossing it is stopped and parked over-budget"
-        );
-        assert!(job_budget_label(None).is_none());
-        assert!(job_budget_label(Some(0.0)).is_none());
-    }
-
-    #[test]
-    fn gap_fill_label_discloses_skipped_cells_only_for_gap_fill_plans() {
-        assert_eq!(
-            gap_fill_label(true, Some(3)).unwrap(),
-            "gap-fill plan — 3 already-covered cell(s) skipped at planning"
-        );
-        assert_eq!(
-            gap_fill_label(true, None).unwrap(),
-            "gap-fill plan — 0 already-covered cell(s) skipped at planning"
-        );
-        assert!(gap_fill_label(false, Some(3)).is_none());
-    }
-
-    #[test]
-    fn pause_countdown_only_renders_future_pauses() {
-        assert_eq!(
-            pause_countdown_label(Some(100_000), 8_000).unwrap(),
-            "⏸ quota-wall pause — dispatch resumes in 1m 32s"
-        );
-        assert_eq!(
-            pause_countdown_label(Some(9_500), 8_000).unwrap(),
-            "⏸ quota-wall pause — dispatch resumes in 2s"
-        );
-        assert!(pause_countdown_label(Some(8_000), 8_000).is_none());
-        assert!(pause_countdown_label(Some(1_000), 8_000).is_none());
-        assert!(pause_countdown_label(None, 8_000).is_none());
-    }
-
-    #[test]
     fn deck_list_renders_the_workspace_trend_strip_when_folded() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.router.campaign_mut().trend = Some(
             kuzushi_core::capabilities::campaign::trend::trend_metrics(&[], 12.5),
         );
         let text = rendered_text(&app);
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains("TREND FP rate"), "{text}");
         assert!(
-            text.contains("TREND  FP rate — (no decisions) · 0 confirmed · $12.50 spent"),
+            text.contains("(no decisions) · 0 confirmed · $12.50 spent"),
             "{text}"
         );
     }

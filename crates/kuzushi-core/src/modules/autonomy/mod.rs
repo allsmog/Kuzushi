@@ -218,7 +218,9 @@ fn classification_gate(
 ) -> AutonomyDecision {
     match classification {
         ToolClassification::Phase(needed) => gate_phase(needed, posture),
-        ToolClassification::Read | ToolClassification::Report => AutonomyDecision::Allow,
+        ToolClassification::Read | ToolClassification::Report | ToolClassification::Operate => {
+            AutonomyDecision::Allow
+        }
     }
 }
 
@@ -367,10 +369,19 @@ mod tests {
         let sarif = registry.resolve_tool("report:sarif").unwrap();
         for posture in AutonomyPosture::ORDER {
             assert_eq!(gate_descriptor(report, *posture), AutonomyDecision::Allow);
-            assert_eq!(gate_descriptor(sarif, *posture), AutonomyDecision::RequireApproval);
+            assert_eq!(
+                gate_descriptor(sarif, *posture),
+                AutonomyDecision::RequireApproval
+            );
         }
-        assert_eq!(crate::modules::phase_results::phase_result_phase(report), None);
-        assert_eq!(crate::modules::phase_results::phase_result_phase(sarif), None);
+        assert_eq!(
+            crate::modules::phase_results::phase_result_phase(report),
+            None
+        );
+        assert_eq!(
+            crate::modules::phase_results::phase_result_phase(sarif),
+            None
+        );
     }
 
     #[test]
@@ -381,7 +392,10 @@ mod tests {
         tool.approval = ApprovalPolicy::Explicit;
         for effect in [ToolEffect::RepositoryExecute, ToolEffect::ExternalAction] {
             tool.effect = effect;
-            assert_eq!(gate_descriptor(&tool, AutonomyPosture::Fix), AutonomyDecision::RefuseUnclassified);
+            assert_eq!(
+                gate_descriptor(&tool, AutonomyPosture::Fix),
+                AutonomyDecision::RefuseUnclassified
+            );
         }
     }
 

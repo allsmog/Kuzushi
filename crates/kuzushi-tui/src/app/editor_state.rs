@@ -269,15 +269,19 @@ impl EditorState {
         true
     }
 
-    pub(crate) fn restore_last_cleared_input(&mut self) {
+    pub(crate) fn restore_last_cleared_input(&mut self) -> bool {
         if let Some(stashed) = self.last_cleared_input.take() {
             self.input = stashed;
             self.pasted_blocks = std::mem::take(&mut self.last_cleared_pasted_blocks);
             self.cursor = self.char_count();
             self.history_index = None;
             self.touch_completion_preview();
+            true
         } else if let Some(snapshot) = self.paste_undo.pop() {
             self.restore_input_snapshot(snapshot);
+            true
+        } else {
+            false
         }
     }
 

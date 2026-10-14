@@ -56,6 +56,12 @@ pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
         description: "show proposed phase strategies",
     },
     ShellCommandSpec {
+        command: "strategy inspect <id>",
+        aliases: &["/strategy inspect <id>"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "read one proposal's recorded approval, outcome and source without execution",
+    },
+    ShellCommandSpec {
         command: "strategy approve <id>",
         aliases: &["/strategy approve <id>", "strategy keep <id>"],
         category: ShellCommandCategory::OptionsTasks,

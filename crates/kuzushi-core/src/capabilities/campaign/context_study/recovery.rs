@@ -4,6 +4,16 @@ use crate::capabilities::threat_model::{
 };
 
 impl ContextStudyReceipt {
+    pub fn generated_lesson(&self, root: &Path) -> Result<Option<crate::findings::LessonRef>> {
+        anyhow::ensure!(
+            self.generation_tool == generation::LESSON_TOOL,
+            "This job does not generate a lesson"
+        );
+        let Some(run) = completed_context_run(root, self)? else {
+            return Ok(None);
+        };
+        authenticated_lesson_result(root, self, &run).map(Some)
+    }
     pub fn load_allowance(
         &self,
         root: &Path,
@@ -14,25 +24,18 @@ impl ContextStudyReceipt {
     /// Only an exact revision committed by this completed campaign job is a result.
     pub fn generated_context(&self, root: &Path) -> Result<Option<ThreatModelRef>> {
         anyhow::ensure!(
-            self.generation_tool == TOOL,
+            matches!(
+                self.generation_tool.as_str(),
+                TOOL | generation::REGENERATE_TOOL
+            ),
             "scope proposal jobs do not create accepted Map context"
         );
-        let snapshot = super::super::snapshot::load_campaign_snapshot(root, &self.campaign_id)?;
-        let job = snapshot
-            .jobs
-            .iter()
-            .find(|job| job.job_id == JOB)
-            .context("context study has no generation job")?;
-        if !context_job_completed(job)? {
+        let Some(run) = completed_context_run(root, self)? else {
             return Ok(None);
-        }
-        let run = job
-            .run_id
-            .as_deref()
-            .context("completed context job has no run identity")?;
+        };
         let manifest = load_threat_model_manifest(root)?
             .context("completed context job has no immutable context manifest")?;
-        let mut matches = revisions_for_run(manifest, run);
+        let mut matches = revisions_for_run(manifest, &run);
         anyhow::ensure!(
             !matches.is_empty(),
             "completed context job has no immutable revision for run {run}"
@@ -42,7 +45,8 @@ impl ContextStudyReceipt {
             "completed context job has ambiguous immutable revisions"
         );
         let reference = matches.remove(0);
-        load_exact_threat_model(root, &reference)?;
+        let document = load_exact_threat_model(root, &reference)?;
+        validate_generated_origin(self, &run, &document)?;
         Ok(Some(reference))
     }
 
@@ -75,6 +79,39 @@ impl ContextStudyReceipt {
     }
 }
 
+fn authenticated_lesson_result(
+    root: &Path,
+    receipt: &ContextStudyReceipt,
+    run: &str,
+) -> Result<crate::findings::LessonRef> {
+    let (_, body) =
+        crate::run_artifacts::read_run_artifact_text_bounded(root, run, "result.json", 256 * 1024)?;
+    let value: Value = serde_json::from_str(&body)?;
+    let reference: crate::findings::LessonRef =
+        serde_json::from_value(value["data"]["lessonRef"].clone())
+            .context("Completed lesson job has no exact lesson reference")?;
+    let workspace = crate::WorkspaceTarget::new(root)?;
+    let store = crate::FindingStore::open_read_only(workspace.findings_db_path())?;
+    let record = store.finding_lesson_revision(&reference)?;
+    let origin = record
+        .generation
+        .as_ref()
+        .context("Generated lesson has no model receipt")?;
+    anyhow::ensure!(
+        record.author == "model" && record.state == crate::findings::LessonState::Draft,
+        "Generation result must be an original model draft"
+    );
+    anyhow::ensure!(
+        origin.model == receipt.model && origin.run_id.as_deref() == Some(run),
+        "Lesson has a different generation model or run"
+    );
+    anyhow::ensure!(
+        serde_json::to_value(&record.origin)? == receipt.input["originRef"],
+        "Generated lesson has a different frozen origin"
+    );
+    Ok(reference)
+}
+
 fn load_saved_scope_result(
     root: &Path,
     run: &str,
@@ -100,6 +137,75 @@ fn load_saved_scope_result(
         "scope result disagrees with its committed immutable revision"
     );
     Ok(saved)
+}
+
+fn completed_context_run(root: &Path, receipt: &ContextStudyReceipt) -> Result<Option<String>> {
+    let snapshot = super::super::snapshot::load_campaign_snapshot(root, &receipt.campaign_id)?;
+    let job = snapshot
+        .jobs
+        .iter()
+        .find(|job| job.job_id == JOB)
+        .context("context study has no generation job")?;
+    anyhow::ensure!(
+        job.tool.as_deref() == Some(receipt.generation_tool.as_str()),
+        "context generation job tool changed"
+    );
+    if !context_job_completed(job)? {
+        return Ok(None);
+    }
+    Ok(Some(
+        job.run_id
+            .clone()
+            .context("completed context job has no run identity")?,
+    ))
+}
+
+pub(super) fn validate_generated_origin(
+    receipt: &ContextStudyReceipt,
+    run: &str,
+    document: &Value,
+) -> Result<()> {
+    if receipt.input.get("scanScopeRef").is_some() {
+        return validate_group_origin(receipt, run, document);
+    }
+    if receipt.generation_tool != generation::REGENERATE_TOOL {
+        return Ok(());
+    }
+    let origin = document
+        .pointer("/provenance/regeneration")
+        .context("regenerated context has no origin receipt")?;
+    anyhow::ensure!(
+        origin["sourceModelRef"] == receipt.input["threatModelRef"],
+        "regenerated context has a different exact parent"
+    );
+    anyhow::ensure!(
+        origin["receipt"]["model"] == receipt.model && origin["receipt"]["runId"] == run,
+        "regenerated context has a different model or run"
+    );
+    anyhow::ensure!(
+        origin["receipt"]["selectedFields"] == receipt.input["fields"],
+        "regenerated context has a different field selection"
+    );
+    Ok(())
+}
+
+fn validate_group_origin(receipt: &ContextStudyReceipt, run: &str, document: &Value) -> Result<()> {
+    let origin = document
+        .pointer("/provenance/scopeContext/receipt")
+        .context("File-group context has no generation receipt")?;
+    anyhow::ensure!(
+        origin["scopeRef"] == receipt.input["scanScopeRef"],
+        "Generated context belongs to a different accepted file group"
+    );
+    anyhow::ensure!(
+        origin["inheritedContextRef"] == receipt.input["inheritedContextRef"],
+        "Generated context has a different inherited revision"
+    );
+    anyhow::ensure!(
+        origin["runId"] == run && origin["model"] == receipt.model,
+        "Generated context has a different model or run"
+    );
+    Ok(())
 }
 
 fn context_job_completed(job: &super::super::snapshot::CampaignJobSnapshot) -> Result<bool> {

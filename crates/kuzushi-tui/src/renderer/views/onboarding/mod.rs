@@ -14,6 +14,7 @@ pub(crate) use file_picker::file_picker_lines;
 pub(crate) use map_run_config::map_run_config_lines;
 pub(crate) use model_picker::model_picker_lines;
 pub(crate) use planning_picker::{planning_option_error_scroll, planning_picker_lines};
+pub(crate) use setup::setup_detail_scroll;
 pub(crate) use setup::setup_lines;
 pub(crate) use target_picker::target_picker_lines;
 

@@ -54,6 +54,7 @@ fn executing_receipt_is_durable_before_terminal_outcome() {
         read_roots: authorization.policy.mcp_read_roots,
         write_shell_tools_mounted: false,
         mcp_tools_mounted: false,
+        read_scope_sha256: None,
     };
     record_agent_run_started(
         Some(target.path()),

@@ -13,10 +13,10 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if let Some(mut bindings) = crate::ui_view_models::phase_cockpit::result_keybindings(app) {
-        if scan_coverage_reader_is_open(app) {
-            bindings.insert(bindings.len().min(1), bind("PgUp/PgDn", "coverage"));
+        if let Some(reader) = result_reader_binding(app) {
+            bindings.insert(0, reader);
         }
-        bindings.push(bind("Ctrl+C", "exit"));
+        bindings.push(bind("Ctrl+C", workbench_exit_label(app)));
         return bindings;
     }
     let plan = workbench_plan(app);
@@ -24,6 +24,13 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return bindings;
     }
     regular_workbench_keybindings(app, plan.as_ref())
+}
+
+fn result_reader_binding(app: &ShellApp) -> Option<FooterKeybinding> {
+    if scan_coverage_reader_is_open(app) {
+        return Some(bind("PgUp/PgDn", "coverage"));
+    }
+    crate::renderer::workbench_scroll_page_rows(app).map(|_| bind("PgUp/PgDn", "scroll"))
 }
 
 fn scan_coverage_reader_is_open(app: &ShellApp) -> bool {
@@ -39,6 +46,7 @@ fn regular_workbench_keybindings(
     // first-match ordering.
     let mut bindings = Vec::new();
     push_workbench_view_keybindings(&mut bindings, app, plan);
+    combine_findings_page_controls(&mut bindings);
     match focused_enter_binding(app, plan) {
         Some(binding) => replace_enter_binding(&mut bindings, binding),
         None => bindings.retain(|binding| binding.key != "Enter"),
@@ -69,7 +77,7 @@ fn append_workbench_commands(bindings: &mut Vec<FooterKeybinding>, app: &ShellAp
     if !app.findings().is_empty() {
         bindings.push(bind(WORKBENCH_REPORT_COMMAND, "open Report"));
     }
-    bindings.push(bind("Ctrl+C", "exit"));
+    bindings.push(bind("Ctrl+C", workbench_exit_label(app)));
 }
 
 fn apply_map_gallery_controls(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
@@ -122,18 +130,25 @@ fn guided_workbench_keybindings(
 ) -> Option<Vec<FooterKeybinding>> {
     let guided =
         plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided);
-    guided.then(|| {
-        let label = if app.has_running_work() {
-            "request abort"
-        } else {
-            "exit"
-        };
-        vec![bind("Ctrl+C", label)]
-    })
+    guided.then(|| vec![bind("Ctrl+C", workbench_exit_label(app))])
+}
+
+fn workbench_exit_label(app: &ShellApp) -> &'static str {
+    if app.review_decision_write_pending() {
+        return "wait for save";
+    }
+    if app.has_running_work() {
+        return "request abort";
+    }
+    "exit"
 }
 
 const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..3", "Tab", "[", "]", "Z", "z", "Enter"];
-const REVIEW_KEYS: [&str; 18] = [
+const REVIEW_KEYS: [&str; 22] = [
+    "Ctrl+N/P",
+    "Ctrl+N",
+    "Ctrl+P",
+    "Ctrl+F",
     "Enter",
     "j/k/↑/↓",
     "PgUp/PgDn",
@@ -153,6 +168,16 @@ const REVIEW_KEYS: [&str; 18] = [
     "z",
     "g/G",
 ];
+
+fn combine_findings_page_controls(bindings: &mut Vec<FooterKeybinding>) {
+    let next = bindings.iter().position(|binding| binding.key == "Ctrl+N");
+    let previous = bindings.iter().position(|binding| binding.key == "Ctrl+P");
+    let (Some(next), Some(previous)) = (next, previous) else {
+        return;
+    };
+    bindings[next] = bind("Ctrl+N/P", "pages");
+    bindings.remove(previous);
+}
 
 fn prioritize_phase_controls(
     bindings: &mut [FooterKeybinding],

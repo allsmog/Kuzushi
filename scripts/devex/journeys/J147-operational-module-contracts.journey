@@ -1,0 +1,84 @@
+name: Operational inspection stays separate from accepted Map and allowance approval
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/operational_contracts.py @TMP_TARGET @ART prepare @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | ready
+expect: SETUP
+submit: run config:show {}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Effective configuration | configuration
+expect: openai-codex:gpt-5.5
+expect: Reasoning: medium
+expect: value hidden
+submit: run router:show {"MODEL_TRIAGE_ESCALATION":"openai-codex:gpt-6-luna"}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Configured routing only | routing
+expect: operator override
+ask: Do the configuration and routing receipts expose the actual selected values and override source without implying authenticated model execution?
+submit: run workspace:status {}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 workspace status | workspace
+expect: Checkpoints: 0 pending
+submit: run threat-model:methodologies {}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Selectable threat model methodologies | methodologies
+submit: run engagement:aim {"focus":"evidence handling","engines":["context:build"],"budgetUsd":2.5}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Recorded budget is not enforced | legacy-metadata
+expect: no scan work is approved
+expect: campaign:study
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | reader
+resize: 160x48
+live-snap: reader-160x48
+resize: 96x89
+live-snap: reader-96x89
+resize: 80x24
+live-snap: reader-80x24
+resize: 60x20
+live-snap: reader-60x20
+resize: 40x12
+live-snap: reader-40x12
+keys: End
+live-snap: reader-tail-40x12
+keys: PPage
+live-snap: reader-page-40x12
+ask: Can the operator read the legacy budget limitation and supported replacement through the existing transcript controls at all six sizes?
+keys: q
+resize: 120x36
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-still-needed
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/operational_contracts.py @TMP_TARGET @ART after
+ask: Do all five completed operational actions leave accepted Map, model authorization and investigation work uncreated, with the selected configuration intact?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted
+expect: SETUP
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | restarted-setup
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/operational_contracts.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the need for genuine Map work, with no provider requests, scanner jobs or finding decisions?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

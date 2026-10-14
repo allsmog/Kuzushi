@@ -50,7 +50,8 @@ fn strategy_queue_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings.push(bind("strategy skip <id>", "reject"));
     bindings.push(bind("strategy fire", "run approved"));
     bindings.push(bind("strategy correct <id>", "correct"));
-    bindings.push(bind("recommend", "refresh proposals"));
+    bindings.push(bind("strategy inspect <id>", "recorded details"));
+    bindings.push(bind("recommendations", "inspect or refresh suggestions"));
     bindings
 }
 

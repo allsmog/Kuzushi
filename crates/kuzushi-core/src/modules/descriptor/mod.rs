@@ -3,22 +3,22 @@ use super::*;
 pub(in crate::modules) use context_options::*;
 mod context_options;
 
+pub(in crate::modules) use descriptor_validation::validate_prompt_options;
 pub(in crate::modules) use max_findings_option::*;
 pub(in crate::modules) use mcp_options::*;
 pub(in crate::modules) use metadata::*;
-pub(in crate::modules) use descriptor_validation::validate_prompt_options;
 mod descriptor_validation;
 mod max_findings_option;
 mod mcp_options;
 mod metadata;
 mod module_maturity;
-mod tool_policy;
 #[cfg(test)]
 mod tests;
+mod tool_policy;
 pub use kuzushi_descriptor::{
-    ContinuationSupport, DagNodeDescriptor, FileReferenceSemantics, ModuleKind, ModuleMetadata,
-    OptionSpec, OptionType, PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor,
-    ToolPhase, canonical_tool_phase,
+    canonical_tool_phase, AllowanceCategory, ContinuationSupport, DagNodeDescriptor,
+    FileReferenceSemantics, ModuleKind, ModuleMetadata, OptionSpec, OptionType, PathSemantics,
+    PromptSpec, RuntimeRequirement, ToolDescriptor, ToolPhase,
 };
 pub use metadata::BuiltinModule;
 pub use module_maturity::ModuleMaturity;

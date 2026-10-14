@@ -25,6 +25,7 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
 
 fn setup_view_status(app: &ShellApp) -> String {
     match app.router.setup().editor() {
+        Some(crate::app::SetupEditor::Details) => "setup:details".to_string(),
         Some(crate::app::SetupEditor::Model) => "setup:model".to_string(),
         Some(crate::app::SetupEditor::Credentials) => format!(
             "setup:credentials:{}",

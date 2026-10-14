@@ -1,5 +1,5 @@
 //! Campaign deck behaviors: disk-snapshot refresh, cursor interaction, and
-//! detached dispatcher launch/kill. The deck never executes jobs in-process —
+//! detached dispatcher launch and cooperative Stop. The deck never executes jobs in-process.
 //! Launch spawns the matching campaign dispatcher/controller in its own
 //! process group, so closing the shell never kills a campaign.
 
@@ -11,6 +11,7 @@ use kuzushi_core::capabilities::campaign::snapshot::{
     campaign_ids, load_campaign_snapshot, CampaignSnapshot,
 };
 use std::path::Path;
+mod dispatcher_results;
 
 impl ShellApp {
     pub(crate) fn open_campaign_view(&mut self, requested: Option<String>) {
@@ -23,28 +24,28 @@ impl ShellApp {
     }
 
     fn select_campaign(&mut self, campaign_id: &str) {
-        let deck = self.router.campaign_mut();
-        let position = deck
+        let Some(index) = self
+            .router
+            .campaign()
             .campaigns
             .iter()
-            .position(|campaign| campaign.campaign_id == campaign_id);
-        match position {
-            Some(index) => {
-                deck.selected_campaign = index;
-                deck.selected_job = 0;
-                deck.read_scroll = 0;
-                deck.excluded.clear();
-                deck.detail = true;
-            }
-            None => deck.notice = Some(format!("campaign {campaign_id:?} not found")),
-        }
+            .position(|campaign| campaign.campaign_id == campaign_id)
+        else {
+            self.router.campaign_mut().notice = Some(format!("campaign {campaign_id:?} not found"));
+            return;
+        };
+        let deck = self.router.campaign_mut();
+        deck.selected_campaign = index;
+        deck.selected_job = 0;
+        deck.read_scroll = 0;
+        deck.excluded.clear();
+        deck.detail = true;
         deck.sync_selected_batch_workers();
+        self.restore_dispatcher_failure_notice();
     }
 
     pub(crate) fn refresh_campaign_deck(&mut self) {
-        if self.runtime_state.reap_exited_dispatcher() {
-            self.router.campaign_mut().dispatcher_pid = None;
-        }
+        self.collect_dispatcher_exit();
         let Some(target) = self.target_path_buf().cloned() else {
             self.router.campaign_mut().notice =
                 Some("select a target to load campaigns".to_string());
@@ -74,6 +75,7 @@ impl ShellApp {
         if active_batch_exists {
             self.refresh_active_batch_report();
         }
+        self.restore_dispatcher_failure_notice();
     }
 
     fn refresh_campaign_trend(
@@ -106,14 +108,8 @@ impl ShellApp {
 
     fn apply_campaign_deck_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
         match action {
-            ViewHotkeyAction::CampaignCursorPrevious => self.campaign_deck_edit(|deck| {
-                deck.move_cursor(-1);
-                deck.sync_selected_batch_workers();
-            }),
-            ViewHotkeyAction::CampaignCursorNext => self.campaign_deck_edit(|deck| {
-                deck.move_cursor(1);
-                deck.sync_selected_batch_workers();
-            }),
+            ViewHotkeyAction::CampaignCursorPrevious => self.move_visible_campaign_cursor(-1),
+            ViewHotkeyAction::CampaignCursorNext => self.move_visible_campaign_cursor(1),
             ViewHotkeyAction::CampaignOpenDetail => self.campaign_deck_edit(|deck| {
                 deck.detail = deck.selected_campaign().is_some();
                 deck.read_scroll = 0;
@@ -148,6 +144,18 @@ impl ShellApp {
     fn campaign_deck_edit(&mut self, edit: impl FnOnce(&mut CampaignRouteState)) -> InputUpdate {
         edit(self.router.campaign_mut());
         InputUpdate::handled()
+    }
+
+    fn move_visible_campaign_cursor(&mut self, delta: i64) -> InputUpdate {
+        let update = self.campaign_deck_edit(|deck| {
+            deck.move_cursor(delta);
+            deck.sync_selected_batch_workers();
+        });
+        self.restore_dispatcher_failure_notice();
+        if let Some(offset) = crate::renderer::campaign_selection_scroll(self) {
+            self.router.campaign_mut().read_scroll = offset;
+        }
+        update
     }
 
     fn cycle_campaign_workers(&mut self) -> InputUpdate {
@@ -197,7 +205,7 @@ impl ShellApp {
     pub(crate) fn launch_selected_campaign(&mut self) {
         if let Some(pid) = self.deck_dispatcher_blocking_relaunch() {
             self.router.campaign_mut().notice = Some(format!(
-                "dispatcher pid {pid} is still running — K kills it; one dispatcher per deck"
+                "dispatcher pid {pid} is still running; K requests Stop; one dispatcher per deck"
             ));
             return;
         }
@@ -210,11 +218,14 @@ impl ShellApp {
         match launched {
             Ok(child) => {
                 let pid = child.id();
-                self.runtime_state.set_dispatcher_child(Some(child));
+                self.runtime_state
+                    .hold_dispatcher(child, target, campaign_id.clone());
                 let deck = self.router.campaign_mut();
                 deck.dispatcher_pid = Some(pid);
+                deck.dispatcher_stop_requested = false;
+                deck.dispatcher_failure = None;
                 deck.notice = Some(format!(
-                    "dispatcher pid {pid} — logs: campaigns/{campaign_id}/logs/dispatcher.log"
+                    "dispatcher pid {pid}; logs: campaigns/{campaign_id}/logs/dispatcher.log"
                 ));
             }
             Err(error) => {
@@ -226,9 +237,7 @@ impl ShellApp {
     /// The pid blocking a relaunch, after first reaping an exited
     /// dispatcher so a finished run never blocks the next Launch.
     fn deck_dispatcher_blocking_relaunch(&mut self) -> Option<u32> {
-        if self.runtime_state.reap_exited_dispatcher() {
-            self.router.campaign_mut().dispatcher_pid = None;
-        }
+        self.collect_dispatcher_exit();
         self.router.campaign().dispatcher_pid
     }
 
@@ -256,32 +265,35 @@ impl ShellApp {
             return None;
         }
         let workers = campaign.effective_workers.unwrap_or(deck.workers);
-        let args =
+        let mut args =
             campaign_process_args(batch, &campaign_id, &target, workers, &included, total_jobs);
+        append_fixed_resume(&mut args, campaign);
         Some((target, campaign_id, args))
     }
 
-    /// Kill only the dispatcher THIS deck launched (whole process group, so
-    /// in-flight child runs die with it — the queue keeps their last state).
-    /// The held child handle proves the pid still belongs to our dispatcher
-    /// (an un-reaped child's pid cannot be recycled) and is reaped afterward
-    /// so no zombie survives.
+    /// Request Stop through the held child's original campaign. Keep its
+    /// handle while the dispatcher settles children and saves partial work.
     fn campaign_kill(&mut self) {
-        let Some(pid) = self.router.campaign().dispatcher_pid else {
-            self.router.campaign_mut().notice =
-                Some("no dispatcher was launched from this deck".to_string());
-            return;
-        };
-        let notice = match self.runtime_state.take_dispatcher_child() {
-            Some(child) => kill_and_reap_dispatcher(child, pid),
-            None => format!(
-                "dispatcher pid {pid} has no live handle — refusing to kill a possibly \
-                 recycled pid; stop it manually if it still runs"
-            ),
-        };
-        let deck = self.router.campaign_mut();
-        deck.dispatcher_pid = None;
-        deck.notice = Some(notice);
+        match self.runtime_state.request_dispatcher_stop() {
+            Ok(pid) => {
+                let deck = self.router.campaign_mut();
+                deck.dispatcher_stop_requested = true;
+                deck.notice = Some(format!(
+                    "Stop requested for dispatcher {pid}; saving partial work"
+                ));
+            }
+            Err(error) => {
+                self.router.campaign_mut().notice = Some(format!("Stop unavailable: {error:#}"))
+            }
+        }
+    }
+
+    pub(crate) fn poll_campaign_completion(&mut self) -> bool {
+        if !self.collect_dispatcher_exit() {
+            return false;
+        }
+        self.refresh_campaign_deck();
+        true
     }
 
     /// Preview the selected job's seasoning prompt in the transcript. The
@@ -322,6 +334,21 @@ impl ShellApp {
         if body.lines().count() > 20 {
             self.log("campaign", format!("… edit the full file at {relative}"));
         }
+    }
+}
+
+fn append_fixed_resume(args: &mut Vec<String>, campaign: &CampaignSnapshot) {
+    let paused = campaign.jobs.iter().any(|job| job.state == "parked");
+    if paused
+        && matches!(
+            campaign.kind.as_deref(),
+            Some(
+                kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND
+                    | kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND
+            )
+        )
+    {
+        args.push("--resume".into());
     }
 }
 
@@ -430,6 +457,7 @@ fn unsupported_platform_configure_detached_dispatcher(_command: &mut std::proces
 
 /// Group-kill a verified-live dispatcher, then reap it. `try_wait` first so
 /// an already-exited dispatcher is collected without signalling anything.
+#[cfg(test)]
 fn kill_and_reap_dispatcher(mut child: std::process::Child, pid: u32) -> String {
     if let Ok(Some(status)) = child.try_wait() {
         return format!("dispatcher pid {pid} had already exited ({status})");
@@ -446,14 +474,14 @@ fn kill_and_reap_dispatcher(mut child: std::process::Child, pid: u32) -> String 
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(test, unix))]
 use unix_kill_dispatcher_process_tree as kill_dispatcher_process_tree;
-#[cfg(not(any(unix, windows)))]
+#[cfg(all(test, not(any(unix, windows))))]
 use unsupported_platform_kill_dispatcher_process_tree as kill_dispatcher_process_tree;
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 use windows_kill_dispatcher_process_tree as kill_dispatcher_process_tree;
 
-#[cfg(unix)]
+#[cfg(all(test, unix))]
 fn unix_kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("/bin/kill")
         .args(["-9", "--", &format!("-{pid}")])
@@ -462,7 +490,7 @@ fn unix_kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::
         .status()
 }
 
-#[cfg(windows)]
+#[cfg(all(test, windows))]
 fn windows_kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
@@ -471,7 +499,7 @@ fn windows_kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::proces
         .status()
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(all(test, not(any(unix, windows))))]
 fn unsupported_platform_kill_dispatcher_process_tree(
     _pid: u32,
 ) -> std::io::Result<std::process::ExitStatus> {
@@ -506,7 +534,7 @@ mod tests {
         std::fs::write(&queue_path, serde_json::to_vec_pretty(&queue).unwrap()).unwrap();
     }
 
-    fn deck_app() -> (tempfile::TempDir, ShellApp) {
+    pub(super) fn deck_app() -> (tempfile::TempDir, ShellApp) {
         let temp = tempfile::tempdir().unwrap();
         write_fixture_campaign(temp.path());
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -561,6 +589,24 @@ mod tests {
         app.open_campaign_view(Some("nope".to_string()));
         let deck = app.router.campaign();
         assert!(deck.notice.as_deref().unwrap_or_default().contains("nope"));
+    }
+
+    #[test]
+    fn paused_matrix_launch_requests_resume_without_changing_its_jobs() {
+        let (_root, mut app) = deck_app();
+        app.open_campaign_view(Some("camp1".into()));
+        let mut campaign = app.router.campaign().selected_campaign().unwrap().clone();
+        campaign.kind = Some(kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND.into());
+        campaign.jobs[1].state = "parked".into();
+        let before = campaign.jobs.clone();
+        let mut args = vec!["campaign".into(), "run".into(), "camp1".into()];
+        append_fixed_resume(&mut args, &campaign);
+        assert!(args.contains(&"--resume".into()));
+        assert_eq!(campaign.jobs, before);
+        campaign.kind = None;
+        let mut legacy = vec!["campaign".into(), "run".into(), "camp1".into()];
+        append_fixed_resume(&mut legacy, &campaign);
+        assert!(!legacy.contains(&"--resume".into()));
     }
 
     #[test]

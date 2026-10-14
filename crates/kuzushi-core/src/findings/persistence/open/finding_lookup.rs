@@ -36,12 +36,32 @@ impl FindingStore {
         if reference.is_empty() {
             anyhow::bail!("finding reference must not be empty");
         }
+        if let Some(id) = reference.strip_prefix("generation:") {
+            return self.finding_generation_by_id(id);
+        }
 
         if let Some(finding) = self.get_finding_by_fingerprint(reference)? {
             return Ok(Some(finding));
         }
 
         self.hydrate_reference_match(reference, self.v3_reference_prefix_matches(reference)?)
+    }
+
+    fn finding_generation_by_id(&self, value: &str) -> Result<Option<Finding>> {
+        let id: i64 = value
+            .parse()
+            .context("Finding generation id must be an integer")?;
+        anyhow::ensure!(id > 0, "Finding generation id must be positive");
+        let raw: Option<String> = self.conn.query_row(
+            "select finding_json from finding_observations where cast(json_extract(finding_json,'$.id') as integer)=?1 order by created_seq desc limit 1",
+            [id],|row| row.get(0),
+        ).optional()?;
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let finding: Finding =
+            serde_json::from_str(&raw).context("Finding generation is malformed")?;
+        Ok(self.hydrate_v3_findings(vec![finding])?.pop())
     }
 
     /// Resolve an operator-supplied reference: exact fingerprint, unambiguous

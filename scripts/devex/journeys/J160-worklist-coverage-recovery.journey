@@ -1,0 +1,123 @@
+name: Actual context drives scoped advisory ranking and read-only coverage recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: logs
+submit: run worklist:rank
+require-live-snap: 25 no ranked files | empty-ranking
+submit: run context:build {"enrichment":false}
+require-live-snap: 40 context:build indexed | context-prepared
+submit: run coverage:recommend {"limit":1}
+require-live-snap: 25 recommendation(s) | recommendations
+submit: run worklist:rank {"limit":1}
+submit: worklist
+require-live-snap: 25 1 of 4 ranked files shown | capped-ranking
+expect: source freshness is unverified
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART capped
+ask: Does real deterministic context produce advisory file ranking with visible evidence, an honest row cap and no claim that priority establishes a vulnerability or completes Map?
+submit: logs
+submit: run worklist:rank {"limit":4}
+submit: worklist
+require-live-snap: 25 4 of 4 ranked files shown | full-ranking
+resize: 160x48
+live-snap: worklist-160x48
+resize: 96x89
+live-snap: worklist-96x89
+resize: 80x24
+live-snap: worklist-80x24
+resize: 60x20
+live-snap: worklist-60x20
+resize: 40x12
+live-snap: worklist-40x12
+expect: RISK WORKLIST
+expect: PgUp/PgDn page
+keys: NPage
+live-snap: worklist-page-1-40x12
+expect: RISK WORKLIST
+keys: NPage
+live-snap: worklist-page-2-40x12
+expect: RISK WORKLIST
+keys: NPage
+live-snap: worklist-page-3-40x12
+expect: RISK WORKLIST
+keys: NPage
+live-snap: worklist-page-4-40x12
+expect: RISK WORKLIST
+keys: NPage
+live-snap: worklist-page-5-40x12
+expect: RISK WORKLIST
+keys: NPage
+live-snap: worklist-page-6-40x12
+expect: RISK WORKLIST
+keys: NPage
+live-snap: worklist-page-7-40x12
+keys: NPage
+live-snap: worklist-page-8-40x12
+keys: NPage
+live-snap: worklist-page-9-40x12
+keys: NPage
+live-snap: worklist-page-10-40x12
+keys: NPage
+live-snap: worklist-page-11-40x12
+keys: NPage
+live-snap: worklist-page-12-40x12
+keys: NPage
+live-snap: worklist-page-13-40x12
+keys: NPage
+live-snap: worklist-page-14-40x12
+keys: NPage
+live-snap: worklist-tail-40x12
+expect: RISK WORKLIST
+expect: not requested
+ask: Are complete paths, raw contributor values, uncertainty and contributor status readable through keyboard paging at all six sizes?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART child-context @TMP_HOME @REPO/target/debug/kuzushi
+submit: logs
+submit: run worklist:rank {"target":"child","limit":1}
+require-live-snap: 25 1 of 1 ranked file(s) shown | child-ranking
+submit: worklist
+require-live-snap: 25 4 of 4 ranked files shown | parent-ranking-retained
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART child
+ask: Does explicit child ranking use child context while the parent gallery retains its own evidence and the child run remains inspectable in its receipt?
+submit: logs
+submit: run worklist:rank {"includeFanIn":true}
+require-live-snap: 25 not implemented | unsupported-contributor
+submit: run coverage:recommend {"limit":0}
+require-live-snap: 25 must be at least 1 | invalid-limit
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART malformed
+submit: run coverage:recommend
+require-live-snap: 25 schema version 0 | malformed-read-refused
+submit: run worklist:rank
+submit: worklist
+require-live-snap: 25 degraded: | degraded-worklist
+ask: Do invalid options fail clearly and malformed coverage history remain disclosed while other ranking evidence stays usable?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART repair
+submit: logs
+submit: run coverage:recommend {"limit":1}
+require-live-snap: 25 recommendation(s) | repaired-recommendations
+submit: run worklist:rank {"limit":4}
+submit: worklist
+require-live-snap: 25 C scan never-scanned | repaired-ranking
+expect: 4 of 4 ranked files shown
+expect-not: degraded:
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART repaired
+ask: Is recovery explicit, with the malformed database unchanged by reads and a separately recorded fixture repair before successful reruns?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: worklist
+require-live-snap: 25 4 of 4 ranked files shown | recovered-reading
+expect: A 42/100
+expect-not: no risk worklist
+require-shell: python3 -B @REPO/scripts/devex/fixtures/worklist_audit.py @TMP_TARGET @ART restarted
+ask: Does no-color restart reconstruct advisory ranking from saved context and preserve receipts without model calls, scans, source execution or invented findings?
+keys: C-c
+require-exit: 10

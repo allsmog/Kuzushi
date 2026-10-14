@@ -7,9 +7,14 @@ use super::{
 };
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
+mod dispatcher;
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeState {
+    pub(crate) brief_drafts:
+        std::collections::BTreeMap<std::path::PathBuf, super::batch_scan::BriefEditor>,
+    pub(crate) lesson_write: Option<super::lessons::LessonWrite>,
+    pub(crate) relationship_write: Option<super::RelationshipWrite>,
     worker_handles: WorkerHandleRegistry,
     loop_wake: Option<TerminalLoopWake>,
     scan_cancel: Option<ScanCancellation>,
@@ -29,11 +34,17 @@ pub(crate) struct RuntimeState {
     /// ordering function in any mode.
     review_yield: ReviewYieldState,
     /// Handle of the campaign dispatcher THIS shell launched. Held so the
-    /// deck can reap it (no zombie) and so kill targets a verified-live pid
+    /// deck can reap it (no zombie) and Stop targets a verified-live pid
     /// instead of a possibly recycled one.
     dispatcher_child: Option<std::process::Child>,
+    dispatcher_origin: Option<(PathBuf, String)>,
     /// Idle-tick stat probe that notices findings written by other processes.
     findings_store_probe: FindingsStoreProbe,
+    pub(crate) findings_refresh: super::FindingsRefreshState,
+    pub(crate) requested_findings_page: Option<kuzushi_core::findings::FindingPageRequest>,
+    pub(crate) review_write: super::ReviewWriteState,
+    pub(crate) context_edit_drafts:
+        std::collections::BTreeMap<(PathBuf, String), super::ContextEditDraft>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,6 +75,20 @@ impl RuntimeState {
 
     pub(crate) fn set_loop_wake(&mut self, wake: Option<TerminalLoopWake>) {
         self.loop_wake = wake;
+    }
+
+    pub(crate) fn has_terminal_loop(&self) -> bool {
+        self.loop_wake.is_some()
+    }
+
+    pub(crate) fn start_review_decision_write(
+        &mut self,
+        apply: super::ReviewDecisionApply,
+        origin: super::ShellView,
+        interaction: Option<std::time::Instant>,
+    ) -> anyhow::Result<()> {
+        self.review_write
+            .start(apply, origin, interaction, self.loop_wake.clone())
     }
 
     pub(crate) fn start_project_scope_discovery(&mut self, root: PathBuf) {
@@ -102,6 +127,7 @@ impl RuntimeState {
 
     pub(crate) fn invalidate_view_hydration(&mut self) {
         self.view_hydration.invalidate();
+        self.findings_refresh.invalidate_scheduling();
     }
 
     #[cfg(test)]
@@ -223,28 +249,5 @@ impl RuntimeState {
 
     pub(crate) fn jobs_mut(&mut self) -> &mut JobHub {
         &mut self.jobs
-    }
-
-    pub(crate) fn set_dispatcher_child(&mut self, child: Option<std::process::Child>) {
-        self.dispatcher_child = child;
-    }
-
-    pub(crate) fn take_dispatcher_child(&mut self) -> Option<std::process::Child> {
-        self.dispatcher_child.take()
-    }
-
-    /// Reap the deck-launched dispatcher if it has exited. Returns true when
-    /// a defunct dispatcher was just collected (callers then clear the pid).
-    pub(crate) fn reap_exited_dispatcher(&mut self) -> bool {
-        let exited = matches!(
-            self.dispatcher_child
-                .as_mut()
-                .map(std::process::Child::try_wait),
-            Some(Ok(Some(_)))
-        );
-        if exited {
-            self.dispatcher_child = None;
-        }
-        exited
     }
 }

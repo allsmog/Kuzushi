@@ -1,0 +1,73 @@
+# Inspect actual completed OAuth work. No launch, regeneration or credentials.
+name: Real OAuth context reaches explicit Map review and survives restart
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_context_receipts.py @TARGET @ART seed @TMP_HOME
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 1 completed | completed-context
+nav-mode:
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | real-context-result
+expect: m Review Map
+ask: Does the real completed job offer exact inspection and separate Map review without claiming its unknown dollar usage is zero?
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | exact-context
+expect: Components: 3
+ask: Can the operator inspect the exact live-generated context without activating it or starting another job?
+keys: v
+require-live-snap: 20 CONTEXT DATA FLOW | live-dfd
+keys: Down Down
+require-live-snap: 20 notes mapping | selected-notes-mapping
+ask: Can the operator navigate to the notes mapping in the real diagram while keeping exact context and back controls visible?
+resize: 160x48
+live-snap: dfd-160x48
+resize: 96x89
+live-snap: dfd-96x89
+resize: 80x24
+live-snap: dfd-80x24
+resize: 60x20
+live-snap: dfd-60x20
+resize: 40x12
+live-snap: dfd-40x12
+ask: At the smallest viewport, can the operator still inspect and return from the real diagram without losing the exact context?
+keys: Enter
+require-live-snap: 20 Enter diagram | narrow-details
+keys: End
+live-snap: narrow-details-tail
+ask: Does actual detail paging at 40x12 reach the selected component's final context while preserving its identity and return controls?
+keys: Enter
+require-live-snap: 20 Enter details | returned-narrow-diagram
+resize: 120x36
+keys: Escape
+require-live-snap: 20 CONTEXT SUMMARY | restored-exact-context
+keys: Escape
+require-live-snap: 20 CONTEXT JOB RESULT | returned-result
+keys: m
+require-live-snap: 30 RESULT READY | pending-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_context_receipts.py @TARGET @ART pending
+ask: Does the source-bound completed Map remain unaccepted until the visible operator action, with no additional model request?
+nav-mode:
+keys: u
+require-live-snap: 20 Map ✓ | accepted-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_context_receipts.py @TARGET @ART accepted
+submit: map
+require-live-snap: 20 accepted | durable-map
+keys: Tab
+require-live-snap: 20 DATA-FLOW DIAGRAM | durable-dfd
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 25 accepted | restored-map
+expect: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_context_receipts.py @TARGET @ART restarted
+ask: After no-color restart, does accepted context and its live request accounting persist without source changes, global activation or new work?
+keys: C-c
+require-exit: 10

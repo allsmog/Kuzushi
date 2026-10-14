@@ -73,12 +73,12 @@ fn card(row: &ReviewQueueRow, width: usize, height: usize, selected: bool) -> Ve
         .collect()
 }
 
-fn proof_label(row: &ReviewQueueRow) -> &'static str {
+fn proof_label(row: &ReviewQueueRow) -> &str {
     match row.proof_confidence {
         ProofConfidence::Confirmed => "runtime verified",
         ProofConfidence::Likely => "static evidence",
         ProofConfidence::Unverified => "unverified",
-        ProofConfidence::Dismissed => "dismissed",
+        ProofConfidence::Dismissed => row.proof_confidence_label.as_str(),
     }
 }
 

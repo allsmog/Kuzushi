@@ -151,6 +151,7 @@ pub(crate) fn build_agent_prompt(
         threat_quality_section().to_string(),
         output_contract_section().to_string(),
         prompt_override_section(input),
+        operator_brief_prompt(input)?,
     ]
     .into_iter()
     .filter(|section| !section.trim().is_empty())

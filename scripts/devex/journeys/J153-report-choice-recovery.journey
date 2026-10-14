@@ -1,0 +1,85 @@
+name: Report choices survive restart without exporting or restoring approval
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING KUZUSHI_AGENT_MCPS
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+submit: report
+require-live-snap: 25 Session choices | initial-report
+keys: j j j c e C-u
+paste-file: @ART/report-path.txt
+keys: Enter
+keys: S
+require-live-snap: 25 Saved for this target | saved-choices
+expect: json · open
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART saved
+ask: Does saving format, filter and destination preserve the operator draft and clearly avoid export, approval or investigation work?
+resize: 160x48
+wait: 0.5
+require-live-snap: 10 Saved for this target | report-160x48
+resize: 96x89
+wait: 0.5
+require-live-snap: 10 Saved for this target | report-96x89
+resize: 80x24
+wait: 0.5
+require-live-snap: 10 Saved for this target | report-80x24
+resize: 60x20
+wait: 0.5
+live-snap: report-60x20
+resize: 40x12
+wait: 0.5
+live-snap: report-40x12
+keys: NPage
+live-snap: report-page-40x12
+keys: End
+live-snap: report-controls-40x12
+expect: save choices
+expect-not: kz> End
+ask: Are the selected format/destination and persistence controls reachable at all six terminal sizes?
+resize: 120x36
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted
+submit: report
+require-live-snap: 25 Saved for this target | restored-report
+expect: json · open
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART restored
+ask: Does no-color restart restore the same choices while retaining an honest empty investigation and no automatic export?
+keys: s
+keys: Enter
+require-live-snap: 25 EXPORTED | explicit-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART exported
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART damage
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | damaged-restart
+submit: report
+require-live-snap: 25 Saved choices unavailable | damaged-preferences
+expect: Current choices
+expect: are shown.
+keys: j j j c e C-u
+paste-file: @ART/report-path.txt
+keys: Enter
+keys: s
+keys: Enter
+require-live-snap: 25 EXPORTED | export-with-damaged-choices
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART damaged-export
+keys: S
+require-live-snap: 25 Saved for this target | explicit-choice-repair
+require-shell: python3 -B @REPO/scripts/devex/fixtures/report_recovery.py @TMP_TARGET @ART repaired
+ask: Does damaged preference recovery retain current choices, keep malformed bytes through export, and require explicit S to replace them without restoring approvals or starting work?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-final-quit
+keys: y
+require-exit: 10

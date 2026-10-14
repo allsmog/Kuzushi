@@ -7,6 +7,7 @@ import {
   readConfinedText,
 } from "./confined-file-read.mjs";
 import { GREP_MAX_PATTERN_CHARS, scanBoundedRegex } from "./grep-regex-runner.mjs";
+import { readScopeForPolicy } from "./read-scope.mjs";
 
 const READ_MAX_LINES = 2000;
 const READ_DEFAULT_LINES = 250;
@@ -28,11 +29,12 @@ export function fileToolsForRequest(request, fileReadHooks = {}) {
   const roots = readRootsFor(request);
   if (roots.length === 0) return [];
   const granted = grantedToolNames(request);
+  const scope = readScopeForPolicy(request.toolPolicy ?? request.tool_policy, roots);
   const available = {
-    Read: readTool(roots, fileReadHooks),
-    LS: lsTool(roots, fileReadHooks),
-    Glob: globTool(roots),
-    Grep: grepTool(roots, fileReadHooks),
+    Read: readTool(roots, fileReadHooks, scope),
+    LS: lsTool(roots, fileReadHooks, scope),
+    Glob: globTool(roots, scope),
+    Grep: grepTool(roots, fileReadHooks, scope),
   };
   return Object.entries(available)
     .filter(([name]) => granted.has(name))
@@ -104,11 +106,11 @@ function authorizedPath(candidate, roots) {
   return canonical;
 }
 
-function readTool(roots, hooks) {
+function readTool(roots, hooks, scope) {
   return tool(
     ({ file_path, offset, limit }) => {
-      const path = authorizedPath(file_path, roots);
-      const text = readConfinedText(path, roots, null, () => hooks.afterFileValidation?.("Read", path));
+      const path = scope ? scope.authorizeFile(file_path) : authorizedPath(file_path, roots);
+      const text = readConfinedText(path, roots, null, () => hooks.afterFileValidation?.("Read", path), scope?.authorizeOpenedPath.bind(scope));
       return renderFileSlice(text, offset, limit);
     },
     {
@@ -139,9 +141,10 @@ function renderFileSlice(text, offset, limit) {
   return numbered.join("\n") || "(empty file)";
 }
 
-function lsTool(roots, hooks) {
+function lsTool(roots, hooks, scope) {
   return tool(
     ({ path }) => {
+      if (scope) return renderScopedDirectory(scope, path);
       const authorized = authorizedPath(path ?? roots[0], roots);
       hooks.afterDirectoryValidation?.("LS", authorized);
       return renderDirectory(authorized, roots);
@@ -167,6 +170,26 @@ function renderDirectory(path, roots) {
   return shown.join("\n") || "(empty directory)";
 }
 
+function renderScopedDirectory(scope, path) {
+  const entries = scope.directoryEntries(path);
+  const shown = entries.slice(0, LS_MAX_ENTRIES);
+  if (entries.length > shown.length) shown.push("More allowed source names omitted.");
+  return ["Accepted read membership; this is not a live directory inventory.", ...shown].join("\n");
+}
+
+function renderScopedGlob(scope, path, pattern) {
+  const base = scope.base(path);
+  const { kept, truncated } = scope.candidates(base, pattern, GLOB_MAX_RESULTS);
+  const shown = kept.map((file) => workspaceRelative(file.matchedPath, base));
+  if (truncated) shown.push("More allowed matches omitted; narrow the pattern.");
+  return shown.join("\n") || "No accepted files match this pattern.";
+}
+
+function scopedGrepCandidates(scope, base, glob) {
+  const { kept, truncated } = scope.candidates(base, glob, GREP_MAX_FILES);
+  return { files: kept, truncatedWalk: truncated };
+}
+
 function confinedDirectoryLabel(base, name, roots) {
   const canonical = confineToRoots(resolve(base, name), roots);
   if (canonical === null) return [];
@@ -177,9 +200,9 @@ function confinedDirectoryLabel(base, name, roots) {
   }
 }
 
-function globTool(roots) {
+function globTool(roots, scope) {
   return tool(
-    ({ pattern, path }) => renderGlob(pattern, authorizedPath(path ?? roots[0], roots), roots),
+    ({ pattern, path }) => scope ? renderScopedGlob(scope, path, pattern) : renderGlob(pattern, authorizedPath(path ?? roots[0], roots), roots),
     {
       name: "Glob",
       description:
@@ -202,10 +225,10 @@ function renderGlob(pattern, base, roots) {
   return shown.join("\n") || `no files match ${pattern}`;
 }
 
-function grepTool(roots, hooks) {
+function grepTool(roots, hooks, scope) {
   return tool(
     async ({ pattern, path, glob }) =>
-      renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob, hooks),
+      renderGrep(pattern, scope ? scope.base(path) : authorizedPath(path ?? roots[0], roots), roots, glob, hooks, scope),
     {
       name: "Grep",
       description:
@@ -223,21 +246,21 @@ function grepTool(roots, hooks) {
   );
 }
 
-async function renderGrep(pattern, base, roots, glob, hooks) {
-  const { files, truncatedWalk } = grepCandidateFiles(base, roots, glob);
-  const { lines, scanned } = await collectGrepMatches(files, base, pattern, roots, hooks);
+async function renderGrep(pattern, base, roots, glob, hooks, scope) {
+  const { files, truncatedWalk } = scope ? scopedGrepCandidates(scope, base, glob) : grepCandidateFiles(base, roots, glob);
+  const { lines, scanned } = await collectGrepMatches(files, base, pattern, roots, hooks, scope);
   const truncated = truncatedWalk || scanned < files.length;
   const note = grepScanNote(lines.length, scanned, truncated);
   if (note) lines.push(note);
   return lines.join("\n") || `no matches for ${pattern}`;
 }
 
-async function collectGrepMatches(files, base, pattern, roots, hooks) {
+async function collectGrepMatches(files, base, pattern, roots, hooks, scope) {
   const { matches, scanned } = await scanBoundedRegex({
     pattern,
     files,
     maxMatches: GREP_MAX_MATCHES,
-    readText: (candidate) => grepCandidateText(candidate, roots, hooks),
+    readText: (candidate) => grepCandidateText(candidate, roots, hooks, scope),
   });
   const lines = matches.map(({ fileIndex, line, preview }) => {
     const relative = workspaceRelative(files[fileIndex].matchedPath, base);
@@ -246,8 +269,8 @@ async function collectGrepMatches(files, base, pattern, roots, hooks) {
   return { lines, scanned };
 }
 
-function grepCandidateText(candidate, roots, hooks) {
-  const text = readGrepText(candidate.canonicalPath, roots, hooks);
+function grepCandidateText(candidate, roots, hooks, scope) {
+  const text = readGrepText(candidate.canonicalPath, roots, hooks, scope);
   if (text === null || text.includes("\u0000")) return null;
   return text;
 }
@@ -278,10 +301,11 @@ function confinedGrepCandidates(matches, base, roots) {
   return { files: kept, truncatedWalk: truncated };
 }
 
-function readGrepText(path, roots, hooks) {
+function readGrepText(path, roots, hooks, scope) {
   try {
     return readConfinedText(path, roots, GREP_MAX_FILE_BYTES, () =>
       hooks.afterFileValidation?.("Grep", path),
+      scope?.authorizeOpenedPath.bind(scope),
     );
   } catch {
     return null;

@@ -1,5 +1,5 @@
 use crate::{
-    ApprovalPolicy, FindingStoreRequirement, ToolEffect, ToolPhase, ToolPolicy,
+    ApprovalPolicy, FindingStoreRequirement, ModuleMaturity, ToolEffect, ToolPhase, ToolPolicy,
     WorkspaceRequirement,
 };
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,20 @@ pub struct ToolDescriptor {
     pub headless: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// A tool can further restrict its owning module's discovery tier.
+    #[serde(
+        default,
+        rename = "discoveryMaturity",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub discovery_maturity: Option<ModuleMaturity>,
+    /// Runtime-free readers may project historical spend inside their payload.
+    #[serde(
+        default,
+        rename = "costDataProjection",
+        skip_serializing_if = "is_false"
+    )]
+    pub cost_data_projection: bool,
     #[serde(default, skip_serializing_if = "RuntimeRequirement::is_never")]
     pub runtime_requirement: RuntimeRequirement,
     /// How a failed run of this tool can be continued. Declarative so the
@@ -50,6 +64,8 @@ pub struct ToolDescriptor {
     /// (which land in OPERATE) deserializable.
     #[serde(default)]
     pub phase: ToolPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowance_category: Option<AllowanceCategory>,
     /// Whether this tool can contribute a selectable phase result. This is
     /// independent of its authorization phase and effect. Omission preserves
     /// existing descriptors and their serialized identities.
@@ -82,9 +98,12 @@ impl PartialEq for ToolDescriptor {
             && self.description == other.description
             && self.headless == other.headless
             && self.hidden == other.hidden
+            && self.discovery_maturity == other.discovery_maturity
+            && self.cost_data_projection == other.cost_data_projection
             && self.runtime_requirement == other.runtime_requirement
             && self.continuation == other.continuation
             && self.phase == other.phase
+            && self.allowance_category == other.allowance_category
             && self.phase_result == other.phase_result
             && self.effect == other.effect
             && self.approval == other.approval
@@ -93,6 +112,17 @@ impl PartialEq for ToolDescriptor {
             && self.options == other.options
             && self.prompts == other.prompts
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AllowanceCategory {
+    Context,
+    Scope,
+    Discovery,
+    Review,
+    Report,
+    Learning,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -370,6 +400,27 @@ impl Eq for DagNodeDescriptor {}
 /// Descriptor-authoring internals used by Kuzushi's registration layer.
 #[doc(hidden)]
 impl ToolDescriptor {
+    pub fn with_cost_data_projection(mut self) -> Self {
+        self.cost_data_projection = true;
+        self
+    }
+    pub fn with_discovery_maturity(mut self, maturity: ModuleMaturity) -> Self {
+        self.discovery_maturity = Some(maturity);
+        self
+    }
+
+    /// Tool metadata cannot promote an experimental or compatibility module.
+    pub fn effective_maturity(&self, owner: ModuleMaturity) -> ModuleMaturity {
+        if owner.is_core() {
+            return self.discovery_maturity.unwrap_or(owner);
+        }
+        owner
+    }
+
+    pub fn with_allowance_category(mut self, category: AllowanceCategory) -> Self {
+        self.allowance_category = Some(category);
+        self
+    }
     pub fn with_prompt(mut self, prompt: PromptSpec) -> Self {
         self.prompts.push(prompt);
         self

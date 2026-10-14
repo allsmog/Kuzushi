@@ -28,6 +28,7 @@ pub(crate) struct RunDiffModel {
     pub(crate) unchanged_findings: Vec<RunDiffFindingRow>,
     pub(crate) decision_summary: Option<RunDiffDecisionSummary>,
     pub(crate) warnings: Vec<String>,
+    pub(crate) findings_ready: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,13 +82,9 @@ pub(crate) struct RunDiffDecisionSummary {
 }
 
 pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiffModel {
-    let mut warnings = Vec::new();
-    append_run_id_warning(&mut warnings, "left", left);
-    append_run_id_warning(&mut warnings, "right", right);
     let left_metadata = run_metadata(app, left);
     let right_metadata = run_metadata(app, right);
-    append_status_warning(&mut warnings, left, &left_metadata.status);
-    append_status_warning(&mut warnings, right, &right_metadata.status);
+    let mut warnings = comparison_warnings(left, right, &left_metadata, &right_metadata);
     let left_findings = load_run_findings(app, left, &mut warnings);
     let right_findings = load_run_findings(app, right, &mut warnings);
     let mut rows = classified_run_diff_rows(&left_findings, &right_findings);
@@ -119,7 +116,23 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
         unchanged_findings: rows.unchanged_findings,
         decision_summary,
         warnings,
+        findings_ready: assessment::findings_snapshot_available(app, left)
+            && assessment::findings_snapshot_available(app, right),
     }
+}
+
+fn comparison_warnings(
+    left: &str,
+    right: &str,
+    base: &RunDiffMetadata,
+    later: &RunDiffMetadata,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    append_run_id_warning(&mut warnings, "left", left);
+    append_run_id_warning(&mut warnings, "right", right);
+    append_status_warning(&mut warnings, left, &base.status);
+    append_status_warning(&mut warnings, right, &later.status);
+    warnings
 }
 
 struct ClassifiedRunDiffRows {

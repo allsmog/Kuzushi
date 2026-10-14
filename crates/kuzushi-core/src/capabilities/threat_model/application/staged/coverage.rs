@@ -114,8 +114,7 @@ fn deprioritized_entry_point_ids(rows: Option<&Value>) -> BTreeSet<String> {
 
 fn surface_is_covered(index: &CoverageIndex, surface: &AttackSurface) -> bool {
     index.deprioritized_ids.contains(&surface.id)
-        || (index.modeled_ids.contains(&surface.id)
-            && index.threatened_ids.contains(&surface.id))
+        || (index.modeled_ids.contains(&surface.id) && index.threatened_ids.contains(&surface.id))
 }
 
 pub(crate) fn apply_coverage(

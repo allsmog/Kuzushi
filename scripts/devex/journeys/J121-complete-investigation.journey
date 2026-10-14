@@ -1,0 +1,213 @@
+name: Fresh Setup, accepted Map, bounded passes, partial report, deliberate resume and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART seed @TMP_HOME
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | fresh-setup
+keys: Down Enter
+require-live-snap: 20 Build threat model | map-selection
+keys: Down Down Down Space Enter
+require-live-snap: 20 READY THE MAP RUN | selected-map-work
+expect: APPROVAL NEXT
+ask: Does a fresh target show the selected deterministic preparation, model-backed context, real credential state and explicit allowance requirement before any work?
+keys: Down Down Down Down Down Down Enter
+require-live-snap: 20 GENERATE STUDY CONTEXT | map-plan
+expect: 3 fixed jobs
+keys: t
+type: 5
+keys: Enter r
+type: 2
+keys: Enter Enter
+require-live-snap: 30 Draft ready | frozen-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-draft
+ask: Does preparing Map freeze its three real jobs, one worker and a five-call shared allowance with two protected for Review, without starting a request?
+keys: Enter End
+require-live-snap: 25 y approve | map-approval
+expect: 3 fixed jobs
+expect: Total provider calls: 5
+keys: y
+require-live-snap: 25 Open approved Map jobs | approved-map
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | map-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | map-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-completed
+keys: r
+require-live-snap: 25 3 job(s) · 3 completed | map-completed
+keys: a
+require-live-snap: 25 CONTEXT JOB RESULT | generated-context
+keys: m
+require-live-snap: 30 RESULT READY | map-result-loading
+require-live-snap: 30 Rust greeting writer | pending-map
+ask: Does the executed producer chain reach a source-grounded Map for explicit acceptance, with no injected completed queue, finding or global context activation?
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-accepted
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | discovery-plan
+expect: 1 committed / 5 total
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | discovery-engines
+keys: Down Down Down Down Down Down Down Down Down Space
+require-live-snap: 20 [x] agentic | selected-agentic-engine
+keys: a
+require-live-snap: 20 Engine choices updated | applied-discovery-engine
+ask: Does discovery inherit the exact accepted context and existing accounting while offering three fresh passes and one worker for review?
+keys: L
+require-live-snap: 30 Draft ready | frozen-discovery
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART scan-draft
+keys: Down NPage NPage NPage NPage
+require-live-snap: 25 Supporting context: no supplemental text | frozen-supporting-context
+ask: Can the operator read the supporting-context omission before approval, with the exact frozen scan options and no hidden live supplementation?
+keys: Up
+keys: L End
+require-live-snap: 25 y approve | discovery-approval
+expect: 3 fixed jobs
+expect: Total provider calls: 5
+expect: Protected review calls: 2
+keys: y
+require-live-snap: 25 Approval saved | approved-discovery
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART scan-approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | discovery-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | discovery-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART partial
+keys: r
+require-live-snap: 25 2 completed | stopped-at-limit
+expect: 1 parked
+ask: Does the approved plan stop with two completed passes and one parked pass, preserving the two Review calls without cap doubling, new jobs or a completeness claim?
+keys: L
+require-live-snap: 20 allowance exhausted | refused-unapproved-resume
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART refused
+resize: 160x48
+live-snap: refused-160x48
+resize: 96x89
+live-snap: refused-96x89
+resize: 80x24
+live-snap: refused-80x24
+resize: 60x20
+live-snap: refused-60x20
+resize: 40x12
+require-live-snap: 20 allowance exhausted | refused-40x12
+keys: NPage NPage NPage
+require-live-snap: 20 allowance exhausted | refused-paged-40x12
+ask: Does the blocked action remain visible while paging and resizing, with full details reachable and no focus, draft, job or spending change?
+resize: 120x36
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT partial | partial-scan
+nav-mode:
+keys: u
+require-live-snap: 25 partial acknowledged | accepted-partial
+keys: Escape
+paste-file: @ART/open-recurring.txt
+keys: Enter
+require-live-snap: 25 Labeled recurring observation | recurring-finding
+submit: dismiss false_positive Labeled synthetic greeting; no defect is claimed
+require-live-snap: 25 rejected_false_positive | false-positive-decision
+paste-file: @ART/open-later-only.txt
+keys: Enter
+require-live-snap: 25 Labeled later-only observation | second-finding
+submit: decision deferred Labeled offline workflow decision; retain raw observations
+require-live-snap: 25 deferred | deferred-decision
+submit: report
+require-live-snap: 25 3 committed / 5 calls | partial-report
+expect: 2 reviewed
+expect: 2 protected review remaining
+expect: 3 producer observations
+expect: 1 pending
+keys: Down Down Down
+require-live-snap: 25 json · all | partial-json-selection
+keys: Enter
+require-live-snap: 25 json · 2 finding(s) | partial-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART partial-report
+ask: Can the operator finish and export partial work with durable FP and deferral decisions, raw provenance, honest recurrence and unknown dollars while Review remains protected?
+keys: Escape
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-live-snap: 25 2 completed | existing-fixed-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 APPROVED STUDY | retained-study
+keys: Down Down Down Down Enter
+require-live-snap: 20 Total calls | revise-specific-allowance
+type: 6
+keys: Enter L End
+require-live-snap: 25 y approve | specific-new-approval
+expect: Total provider calls: 6
+expect: Protected review calls: 2
+expect: 3 fixed jobs
+ask: Does the six-call revision retain previous spending and the same three jobs, with exactly one new discovery call available and a separate approval decision?
+keys: y
+require-live-snap: 25 Approval saved | revised-approved
+keys: L
+require-live-snap: 25 Plan approved | remaining-job-approved
+keys: L
+require-live-snap: 25 dispatcher pid | remaining-job-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 3 completed | original-plan-completed
+ask: Does explicit resume run only the original remaining pass, preserve prior attempts and decisions, and keep a missed nondeterministic observation separate from a fix?
+keys: Escape
+submit: workbench
+require-live-snap: 25 RESULT READY | completed-scan
+nav-mode:
+keys: u
+require-live-snap: 25 result selected | accepted-complete
+keys: Escape
+submit: report
+require-live-snap: 25 1 reviewed | rediscovered-decision-needs-reassessment
+keys: Escape
+paste-file: @ART/open-later-only.txt
+keys: Enter
+require-live-snap: 25 Labeled later-only observation | rediscovered-finding
+require-live-snap: 25 Later source identity is unverified | rediscovered-source-unverified
+ask: Does the rediscovered observation retain the prior deferral but request reassessment because a dirty commit alone cannot establish unchanged source?
+submit: decision deferred Reassessed the owned fixture after pass 3
+require-live-snap: 25 deferred | reassessed-deferral
+submit: report
+require-live-snap: 25 4 committed / 6 calls | final-report
+expect: 4 producer observations
+expect: 2 protected review remaining
+require-live-snap: 25 2 reviewed | final-reviewed-report
+require-live-snap: 25 json · all | final-json-selection
+keys: Enter
+require-live-snap: 25 json · 2 finding(s) | final-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART final-report
+resize: 160x48
+keys: Home
+live-snap: report-160x48
+resize: 96x89
+keys: Home
+live-snap: report-96x89
+resize: 80x24
+keys: Home
+live-snap: report-80x24
+resize: 60x20
+keys: Home
+live-snap: report-60x20
+resize: 40x12
+keys: Home
+live-snap: report-40x12
+keys: End
+live-snap: report-controls-40x12
+ask: Is the final scoped report readable by paging at all six sizes, with model, source, raw observations, spending, review limits and export controls reachable?
+resize: 120x36
+keys: C-c
+require-live-snap: 25 CONFIRM SESSION EXIT | exit-confirmation
+expect: no active work
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 25 4 committed / 6 calls | recovered-report
+expect: 2 reviewed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART restart
+ask: Does no-color restart recover the accepted context, completed original jobs, both human decisions and shared consumption without another request or new investigation?
+keys: C-c
+require-exit: 10

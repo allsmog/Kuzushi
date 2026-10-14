@@ -26,6 +26,7 @@ pub(crate) fn parse_nested_shell_command(
             parse_campaign_surface_command(verb, args)
         }
         "queue" => parse_queue_command(args),
+        "relationships" | "groups" | "lessons" => parse_relationship_view(verb),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
         "proof" => parse_proof_command(args),
@@ -38,6 +39,14 @@ pub(crate) fn parse_nested_shell_command(
         _ => return None,
     };
     Some(command)
+}
+
+fn parse_relationship_view(verb: &str) -> ShellCommand {
+    match verb {
+        "groups" => ShellCommand::ShowFindingGroups,
+        "lessons" => ShellCommand::ShowLessons,
+        _ => ShellCommand::ShowRelationships,
+    }
 }
 
 fn parse_finding_surface_command(verb: &str, args: &[&str]) -> ShellCommand {
@@ -151,6 +160,9 @@ fn parse_project_command(args: &[&str]) -> ShellCommand {
 fn parse_strategy_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         None | Some("queue") => ShellCommand::Strategy(StrategyCommand::Show),
+        Some("inspect") if args.len() == 2 => {
+            ShellCommand::Strategy(StrategyCommand::Inspect(args[1].to_owned()))
+        }
         Some("approve") | Some("accept") | Some("keep") => args
             .get(1)
             .map(|id| ShellCommand::Strategy(StrategyCommand::Approve((*id).to_string())))

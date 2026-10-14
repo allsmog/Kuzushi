@@ -124,6 +124,9 @@ pub struct CoverageReport {
     /// absent from every cell, so the matrix may under-report coverage —
     /// the operator must see that, not a silently smaller fold.
     pub unreadable_campaigns: usize,
+    /// Modern scope studies, preparation and unclassified jobs cannot populate
+    /// the legacy shard/discovery progress cells.
+    pub excluded_jobs: usize,
 }
 
 pub const UNSEASONED_COLUMN: &str = "(unseasoned)";
@@ -148,6 +151,7 @@ pub fn coverage_report(root: &Path, findings: &[CoverageFinding]) -> Result<Cove
         rows,
         campaign_count: jobs.campaigns,
         unreadable_campaigns: jobs.unreadable,
+        excluded_jobs: jobs.excluded,
     })
 }
 
@@ -155,14 +159,17 @@ struct CampaignJobsFold {
     campaigns: usize,
     unreadable: usize,
     jobs: Vec<CampaignJobSnapshot>,
+    excluded: usize,
 }
 
 fn all_campaign_jobs(root: &Path) -> Result<CampaignJobsFold> {
     let ids = campaign_ids(root)?;
+    let registry = crate::ModuleRegistry::with_v2_builtins();
     let mut fold = CampaignJobsFold {
         campaigns: 0,
         unreadable: 0,
         jobs: Vec::new(),
+        excluded: 0,
     };
     for id in &ids {
         // Unreadable plans are skipped rather than failing the whole matrix
@@ -173,9 +180,37 @@ fn all_campaign_jobs(root: &Path) -> Result<CampaignJobsFold> {
             continue;
         };
         fold.campaigns += 1;
-        fold.jobs.extend(snapshot.jobs);
+        append_discovery_jobs(&mut fold, snapshot, &registry);
     }
     Ok(fold)
+}
+
+fn append_discovery_jobs(
+    fold: &mut CampaignJobsFold,
+    snapshot: super::snapshot::CampaignSnapshot,
+    registry: &crate::ModuleRegistry,
+) {
+    for job in snapshot.jobs {
+        if legacy_discovery_job(&job, snapshot.tool.as_deref(), registry) {
+            fold.jobs.push(job);
+        } else {
+            fold.excluded += 1;
+        }
+    }
+}
+
+fn legacy_discovery_job(
+    job: &CampaignJobSnapshot,
+    owner: Option<&str>,
+    registry: &crate::ModuleRegistry,
+) -> bool {
+    job.shard.is_some()
+        && job
+            .tool
+            .as_deref()
+            .or(owner)
+            .and_then(|name| registry.resolve_tool(name))
+            .is_some_and(|tool| tool.phase == crate::modules::ToolPhase::Scan)
 }
 
 fn source_columns(jobs: &[CampaignJobSnapshot]) -> Vec<String> {
@@ -351,6 +386,7 @@ mod tests {
             rows: Vec::new(),
             campaign_count: 1,
             unreadable_campaigns,
+            excluded_jobs: 0,
         }
     }
 
@@ -360,9 +396,15 @@ mod tests {
 
         let read = coverage_output_line(&report, FindingLedgerRead::Read);
         assert!(!read.contains("NOT measured"), "{read}");
-        for ledger in [FindingLedgerRead::NoStore, FindingLedgerRead::FindingsUnreadable] {
+        for ledger in [
+            FindingLedgerRead::NoStore,
+            FindingLedgerRead::FindingsUnreadable,
+        ] {
             let line = coverage_output_line(&report, ledger);
-            assert!(line.contains("shard finding counts are NOT measured"), "{line}");
+            assert!(
+                line.contains("shard finding counts are NOT measured"),
+                "{line}"
+            );
         }
         // Confirmed counts fall back on embedded triage verdicts that carry no
         // review reversal, so the note claims no direction, not a lower bound.
@@ -485,11 +527,12 @@ fn coverage_output_line(report: &CoverageReport, ledger: FindingLedgerRead) -> S
     let campaigns = unreadable_campaigns_note(report);
     let findings = ledger.degraded_note().unwrap_or_default();
     format!(
-        "campaign:coverage — {} shard(s) × {} threat source(s), {} shard(s) with completed coverage, {} campaign(s){campaigns}{findings}",
+        "Historical shard progress: {} shard(s) × {} threat source(s), {} shard(s) with completed discovery jobs, {} campaign(s){campaigns}{findings}. {} preparation, unclassified or non-shard job(s) excluded. Job completion does not establish repository coverage or current-source applicability.",
         report.rows.len(),
         report.columns.len(),
         covered,
         report.campaign_count,
+        report.excluded_jobs,
     )
 }
 
@@ -602,6 +645,9 @@ fn coverage_report_json(report: &CoverageReport, ledger: FindingLedgerRead) -> s
         "columns": report.columns,
         "campaignCount": report.campaign_count,
         "unreadableCampaigns": report.unreadable_campaigns,
+        "excludedJobs": report.excluded_jobs,
+        "coverageMeaning": "historical-shard-job-progress",
+        "limitations": ["Job completion is not repository coverage or current-source applicability.", "Accepted scope studies and non-discovery jobs do not populate this legacy matrix; use the investigation report."],
         "findingLedger": ledger.label(),
         "rows": report.rows.iter().map(|row| serde_json::json!({
             "shard": row.shard,

@@ -13,6 +13,7 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
         .unwrap_or_default();
     append_phase_receipt_outcome_keys(app, &mut keys);
     append_map_context_keys(app, &mut keys);
+    append_context_snapshot_key(app, &mut keys);
     append_checkpoint_revision_key(
         reality
             .as_ref()
@@ -63,13 +64,14 @@ fn append_view_hydration_keys(
 ) {
     match view {
         ShellView::Home => append_home_keys(app, keys),
-        ShellView::Recommend => append_latest_run_keys(app, keys),
+        ShellView::Recommend => append_recommendation_keys(app, keys),
         ShellView::Module => append_module_keys(app, keys),
         ShellView::Workbench => append_workbench_keys(app, workbench_page, keys),
         ShellView::Tune | ShellView::PromptsEditor => append_prompt_keys(app, keys),
         ShellView::Threat | ShellView::ThreatEditor | ShellView::Scene => {
             append_threat_model_key(app, keys);
             append_entry_point_catalog_key(app, keys);
+            append_scene_worklist_key(app, view, keys);
         }
         ShellView::RunDiff => append_run_diff_keys(app, keys),
         ShellView::Replay => append_replay_keys(app, keys, app.router.replay().run_id()),
@@ -78,9 +80,14 @@ fn append_view_hydration_keys(
         ShellView::ProjectModel => append_project_model_keys(app, keys),
         ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
         ShellView::Campaign => append_study_keys(app, keys),
-        ShellView::Report => keys.push(ViewHydrationKey::InvestigationReport {
-            run_refs: app.report_scan_run_refs(),
-        }),
+        ShellView::Report => keys.push(app.report_hydration_key()),
+        ShellView::Relationships => keys.push(app.relationship_hydration_key()),
+        ShellView::Lessons => {
+            keys.push(ViewHydrationKey::FindingLessons {
+                offset: app.router.lessons.offset,
+            });
+            keys.push(ViewHydrationKey::ThreatModelStore);
+        }
         ShellView::FailureHandoff => {
             append_latest_run_keys(app, keys);
         }
@@ -96,7 +103,29 @@ fn append_study_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     if config.context_generation.is_some() {
         return;
     }
+    if let Some(receipt) = &config.study.matrix.receipt {
+        keys.push(ViewHydrationKey::ContextMatrixReport {
+            campaign_id: receipt.campaign_id.clone(),
+            plan_sha256: receipt.plan_sha256.clone(),
+        });
+    }
+    append_resource_usage_keys(config, keys);
+}
+
+fn append_scene_worklist_key(app: &ShellApp, view: ShellView, keys: &mut Vec<ViewHydrationKey>) {
+    if view != ShellView::Scene {
+        return;
+    }
+    if app.router.scene().page() == crate::scene3d::VizPage::Worklist {
+        keys.push(ViewHydrationKey::ScanRecommendations);
+    }
+}
+
+fn append_resource_usage_keys(config: &BatchScanConfig, keys: &mut Vec<ViewHydrationKey>) {
     keys.push(ViewHydrationKey::StudyUsageCatalogue);
+    if config.resource_picker.is_some() {
+        keys.push(ViewHydrationKey::StudyHistory);
+    }
     if let Some(run_id) = &config.prior_run_id {
         keys.push(ViewHydrationKey::StudyUsageRun {
             run_id: run_id.clone(),
@@ -156,6 +185,21 @@ fn append_latest_run_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     }
 }
 
+fn append_recommendation_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    keys.push(ViewHydrationKey::LatestRunPointer);
+    let Some(run_id) = crate::ui_view_models::recommendation_run_id(app) else {
+        return;
+    };
+    for leaf in [
+        "result.json",
+        "recommendations.json",
+        "attack-surface.json",
+        "failures.json",
+    ] {
+        keys.push(run_artifact_key(&run_id, leaf));
+    }
+}
+
 fn cached_latest_run_id(app: &ShellApp) -> Option<String> {
     let state = app
         .workbench_cache()
@@ -188,6 +232,7 @@ fn append_workbench_keys(
     append_scanned_snippet_key(app, keys);
     append_selected_proof_key(app, keys);
     append_finding_audit_dataflow_key(app, keys);
+    append_finding_review_source_key(app, workbench_page, keys);
     append_finding_patch_truth_key(app, workbench_page, keys);
     keys.extend([
         ViewHydrationKey::StrategyQueue,
@@ -222,6 +267,22 @@ fn append_finding_audit_dataflow_key(app: &ShellApp, keys: &mut Vec<ViewHydratio
     keys.push(ViewHydrationKey::FindingAuditDataflow {
         fingerprint: finding.fingerprint,
     });
+}
+
+fn append_finding_review_source_key(
+    app: &ShellApp,
+    page: WorkbenchPage,
+    keys: &mut Vec<ViewHydrationKey>,
+) {
+    if page != WorkbenchPage::Review {
+        return;
+    }
+    let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(app) else {
+        return;
+    };
+    keys.extend(crate::ui_view_models::finding_review_source::hydration_key(
+        app, &finding,
+    ));
 }
 
 fn append_finding_patch_truth_key(
@@ -293,10 +354,7 @@ fn append_scanned_snippet_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) 
     if finding.start_line == 0 {
         return;
     }
-    let stable_fp = finding
-        .identity_id
-        .clone()
-        .unwrap_or_else(|| finding.fingerprint.clone());
+    let stable_fp = kuzushi_core::findings::finding_observation_identity(&finding).to_owned();
     keys.push(ViewHydrationKey::ScannedSnippet {
         stable_fp,
         scan_id: finding.scan_id,
@@ -363,6 +421,12 @@ fn append_entry_point_catalog_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKe
     keys.push(ViewHydrationKey::JsonFile {
         path: kuzushi_core::workspace::workspace_state_root(target).join("entry-points.json"),
     });
+}
+
+fn append_context_snapshot_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let Some(target) = app.target() else {
+        return;
+    };
     keys.push(ViewHydrationKey::JsonFile {
         path: kuzushi_core::context_snapshot_path(target),
     });

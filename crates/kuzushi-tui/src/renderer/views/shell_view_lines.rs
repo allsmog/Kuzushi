@@ -40,7 +40,7 @@ fn primary_shell_view_lines(
     Some(match view {
         ShellView::Home => home_lines(app, area),
         ShellView::Catalog => catalog_view_lines(app, area),
-        ShellView::Recommend => recommend_lines(app, area),
+        ShellView::Recommend => default_scrolled_lines(app, area, recommend_lines(app, area)),
         ShellView::Module => viewport_lines(
             module_lines(app, area),
             area.height,
@@ -74,10 +74,14 @@ fn primary_shell_view_lines(
 }
 
 fn scene_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let scroll = default_scroll_offset(app);
+    if let Some(lines) = scene_line_page_viewport_lines(app, area, scroll) {
+        return lines;
+    }
     pinned_document_viewport_lines(
         scene_page_lines(app, area, app.router.scene().page()),
         area.height,
-        default_scroll_offset(app),
+        scroll,
         3,
     )
 }
@@ -104,6 +108,8 @@ fn threat_run_shell_view_lines(
         ShellView::Jobs => default_scrolled_lines(app, area, jobs_lines(app, area)),
         ShellView::Campaign => campaign_view_lines(app, area),
         ShellView::Coverage => default_scrolled_lines(app, area, coverage_lines(app, area)),
+        ShellView::Relationships => super::relationships::relationship_lines(app, area),
+        ShellView::Lessons => super::lessons::lesson_lines(app, area),
         ShellView::RunDiff => run_diff_view_lines(app, area),
         ShellView::Replay => default_scrolled_lines(
             app,
@@ -253,7 +259,7 @@ fn default_scroll_offset(app: &ShellApp) -> usize {
     app.router.default_scroll().offset() as usize
 }
 
-fn default_scrolled_lines(
+pub(super) fn default_scrolled_lines(
     app: &ShellApp,
     area: Rect,
     lines: Vec<Line<'static>>,
@@ -278,6 +284,7 @@ mod tests {
     fn default_scroll_reaches_the_tail_of_every_document_view_that_advertises_it() {
         let area = Rect::new(0, 0, 60, 4);
         for view in [
+            ShellView::Recommend,
             ShellView::Runs,
             ShellView::Context,
             ShellView::FailureHandoff,

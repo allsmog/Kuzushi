@@ -55,7 +55,11 @@ fn engagement_section(app: &ShellApp, width: usize) -> RailSection {
         rows.push(muted_row(&chip, width));
     }
     RailSection {
-        title: "ENGAGEMENT",
+        title: if super::journey::investigation_chrome_is_visible(app) {
+            "ENGAGEMENT"
+        } else {
+            "TARGET"
+        },
         rows,
     }
 }
@@ -158,13 +162,16 @@ fn findings_section(app: &ShellApp, width: usize) -> Option<RailSection> {
 /// metering is labelled a lower bound.
 fn cost_section(app: &ShellApp) -> RailSection {
     let session = app.session();
-    let rows = match session.session_budget_usd() {
+    let mut rows = match session.session_budget_usd() {
         Some(budget) if budget > 0.0 => budget_rows(budget_spend(app), budget),
         _ => vec![
             Line::styled(unbudgeted_spend_label(app), theme::muted()),
-            Line::styled("budget not enforced".to_string(), theme::subtle()),
+            Line::styled("session dollar cap unset".to_string(), theme::subtle()),
         ],
     };
+    if app.shell_view() == crate::ShellView::Workbench {
+        rows.push(Line::styled("report · prior usage", theme::subtle()));
+    }
     RailSection {
         title: "SESSION COST",
         rows,
@@ -181,9 +188,16 @@ fn unbudgeted_spend_label(app: &ShellApp) -> String {
         session.cost_accounting_error(),
     );
     if session.session_cost_report().is_complete() && session.cost_accounting_error().is_none() {
-        return format!("{spent} spent");
+        return metered_spend_label(spent, session.session_cost_usd());
     }
     spent
+}
+
+fn metered_spend_label(spent: String, usd: f64) -> String {
+    if usd == 0.0 {
+        return "No spend recorded".to_string();
+    }
+    format!("{spent} spent")
 }
 
 /// How firmly the rail may state spend against a budget.
@@ -279,7 +293,7 @@ mod tests {
     fn idle_targetless_rail_carries_only_identity_and_cost() {
         let app = ShellApp::new(V2Config::default(), None);
 
-        assert_eq!(section_titles(&app), vec!["ENGAGEMENT", "SESSION COST"]);
+        assert_eq!(section_titles(&app), vec!["TARGET", "SESSION COST"]);
     }
 
     #[test]
@@ -291,13 +305,24 @@ mod tests {
     }
 
     #[test]
-    fn unset_budget_reads_not_enforced() {
+    fn unset_session_dollar_cap_does_not_claim_that_investigation_limits_are_unenforced() {
         let app = ShellApp::new(V2Config::default(), None);
         let sections = rail_sections(&app, 33);
         let cost = sections.last().unwrap();
 
-        assert_eq!(cost.rows[0].to_string(), "$0.00 spent");
-        assert_eq!(cost.rows[1].to_string(), "budget not enforced");
+        assert_eq!(cost.rows[0].to_string(), "No spend recorded");
+        assert_eq!(cost.rows[1].to_string(), "session dollar cap unset");
+    }
+
+    #[test]
+    fn workbench_cost_points_to_durable_prior_usage_after_restart() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Workbench);
+        let sections = rail_sections(&app, 33);
+        let cost = sections.last().unwrap();
+
+        assert_eq!(cost.title, "SESSION COST");
+        assert_eq!(cost.rows[2].to_string(), "report · prior usage");
     }
 
     #[test]

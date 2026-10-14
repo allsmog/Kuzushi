@@ -50,6 +50,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "open phase-native recommended capabilities",
     },
     ShellCommandSpec {
+        command: "recommendations",
+        aliases: &["recommendations", "/recommendations"],
+        category: ShellCommandCategory::Navigation,
+        description: "read generated module suggestions; r refreshes deterministic ranking",
+    },
+    ShellCommandSpec {
         command: "tools [query]",
         aliases: &["/tools", "show tools", "tools semgrep", "tools --fav"],
         category: ShellCommandCategory::Navigation,

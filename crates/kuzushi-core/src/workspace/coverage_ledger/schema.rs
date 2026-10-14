@@ -24,6 +24,17 @@ pub(super) fn initialize(conn: &Connection) -> Result<()> {
     record_schema_version(conn)
 }
 
+pub(super) fn require_initialized(conn: &Connection) -> Result<()> {
+    let current: i32 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .context("Could not read coverage ledger schema version")?;
+    anyhow::ensure!(current == COVERAGE_SCHEMA_VERSION,
+        "coverage ledger schema version {current} is unavailable for read-only inspection; expected {COVERAGE_SCHEMA_VERSION}. Restore an initialized ledger or migrate it explicitly before reading");
+    conn.prepare("SELECT scope_id, phase, mode, run_id, revision_sha, branch, dirty, ts FROM scan_baselines LIMIT 0")
+        .context("Coverage ledger schema is incomplete; restore an initialized ledger before reading")?;
+    Ok(())
+}
+
 fn record_schema_version(conn: &Connection) -> Result<()> {
     let current: i32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))

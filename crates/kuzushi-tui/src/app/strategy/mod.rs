@@ -2,6 +2,10 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn open_strategy_queue(&mut self) {
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_strategy_queue();
+        self.invalidate_view_hydration();
         self.set_shell_view(ShellView::StrategyQueue);
         self.router.default_scroll_mut().reset();
     }
@@ -13,7 +17,13 @@ impl ShellApp {
         self.open_strategy_queue();
         match command {
             StrategyCommand::Show => {
+                self.router.strategy_inspection = None;
                 self.log("strategy", "showing strategy queue");
+                Vec::new()
+            }
+            StrategyCommand::Inspect(id) => {
+                self.router.strategy_inspection =
+                    self.target_owned().map(|root| (root, id.clone()));
                 Vec::new()
             }
             StrategyCommand::Approve(id) => self.strategy_status_update_effects(
@@ -38,6 +48,11 @@ impl ShellApp {
                 Vec::new()
             }
         }
+    }
+
+    pub(crate) fn inspected_strategy_id(&self) -> Option<&str> {
+        let (root, id) = self.router.strategy_inspection.as_ref()?;
+        (Some(root.as_path()) == self.target()).then_some(id.as_str())
     }
 
     fn strategy_status_update_effects(

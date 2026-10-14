@@ -55,21 +55,25 @@ pub(crate) fn run_agentic_sast_report(
 ) -> Result<AgenticSastReport> {
     let runtime = required_agentic_sast_runtime(runtime)?;
     let run = AgenticSastRun::from_input(input, ctx)?;
+    acknowledge_scoped_agent_policy(runtime, &run)?;
     let parent_step = emit_agentic_sast_start(ctx, &run);
     emit_agentic_sast_inventory_count(ctx, parent_step, run.inventory.len());
     let mut result = collect_agentic_sast_findings(runtime, &run, ctx, parent_step)?;
+    let held_observations = retain_discovery_findings(run.scope.as_ref(), &mut result.value);
     apply_agentic_sast_whitebox_profile(&run, &mut result.value)?;
     let persisted = persist_agentic_sast_findings(&run.target, &result.value, ctx)?;
     emit_agentic_sast_persisted(ctx, parent_step, result.value.len(), persisted.as_ref());
     emit_agentic_sast_finding_delta(ctx, persisted.as_ref(), &result.value)?;
     emit_agentic_sast_done(ctx, result.value.len());
-    Ok(agentic_sast_report(
+    let mut report = agentic_sast_report(
         &run,
         result.value,
         persisted,
         result.cost_usd,
         result.cost_usd_exact,
-    ))
+    );
+    report.out_of_scope_observations = held_observations;
+    Ok(report)
 }
 
 fn collect_agentic_sast_findings(
@@ -261,6 +265,9 @@ fn agentic_sast_report(
         persisted,
         cost_usd,
         cost_usd_exact,
+        inventory_coverage: Some(run.inventory_coverage.clone()),
+        scope: scope_receipt(run),
+        out_of_scope_observations: Vec::new(),
     }
 }
 
@@ -388,7 +395,9 @@ pub(crate) struct AgenticSastRun {
     pub(crate) tool_policy: AgentToolPolicy,
     pub(crate) whitebox_static: bool,
     pub(crate) inventory: Vec<(String, String)>,
+    pub(crate) inventory_coverage: AgenticInventoryCoverage,
     pub(crate) enrichment: PromptEnrichment,
+    pub(crate) scope: Option<crate::workspace::AcceptedScanScopeSelection>,
 }
 
 impl AgenticSastRun {
@@ -398,14 +407,13 @@ impl AgenticSastRun {
         let model = agentic_sast_model(input, ctx)?;
         let whitebox_static = whitebox_static_profile_requested(input)?;
         let system_prompt = agentic_sast_prompt_from_input(input, whitebox_static, &target)?;
-        let tool_policy = agent_tool_policy_for_input_and_target(input, &target)?;
-        let inventory = collect_agentic_repo_inventory_with_filters(
-            &target,
-            options.max_inventory_files,
-            options.max_bytes_per_file,
-            &options.include_patterns,
-            &options.exclude_patterns,
-        )?;
+        let scope = selected_agentic_scope(input, ctx, &target)?;
+        let tool_policy = match &scope {
+            Some(scope) => scoped_agent_policy(&target, scope)?,
+            None => agent_tool_policy_for_input_and_target(input, &target)?,
+        };
+        let prepared = prepare_agentic_inventory(&target, scope.as_ref(), &options, ctx)?;
+        ctx.ensure_active()?;
         let enrichment = PromptEnrichment::for_run(&target, &tool_policy, input)?;
         Ok(Self {
             target,
@@ -414,9 +422,26 @@ impl AgenticSastRun {
             system_prompt,
             tool_policy,
             whitebox_static,
-            inventory,
+            inventory: prepared.snippets,
+            inventory_coverage: prepared.coverage,
             enrichment,
+            scope,
         })
+    }
+}
+
+pub(crate) fn emit_inventory_preparation(ctx: &ToolExecutionContext<'_>, entries: usize) {
+    if !entries.is_multiple_of(1000) {
+        return;
+    }
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "scan",
+                format!("Source preparation: {entries} entries enumerated"),
+            )
+            .emit();
     }
 }
 

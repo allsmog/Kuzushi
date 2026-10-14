@@ -1,21 +1,17 @@
-//! `findings:ground` — re-run import grounding over the open corpus.
-//!
-//! Runtime-free and descriptive: every open finding's citation is re-checked
-//! against the target tree at the current revision, per-status counts are
-//! reported, and each finding whose anchor *newly* went stale gets one audit
-//! event. Grounding never retires or re-verdicts a finding — a missing file
-//! is a flag for triage honesty, not proof the bug is gone.
-
+//! Bounded, descriptive citation inspection over the authoritative finding ledger.
+use crate::findings::{Finding, FindingStore, GroundingStatus};
+use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-
-use crate::findings::{
-    ground_finding_location, Finding, FindingStore, GroundingStatus,
-};
-use crate::modules::ToolExecutionContext;
-
-const DEFAULT_GROUND_LIMIT: usize = 500;
+mod audit;
+#[cfg(test)]
+#[path = "findings_ground/tests.rs"]
+mod contract_tests;
+mod limits;
+mod pass;
+mod presentation;
+mod source;
 
 pub fn execute_findings_ground(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let workspace = ctx
@@ -26,157 +22,50 @@ pub fn execute_findings_ground(input: &Value, ctx: &ToolExecutionContext<'_>) ->
     let store = ctx
         .findings_store
         .context("findings:ground requires the findings store")?;
-    let limit = ground_limit(input)?;
-    let revision = crate::workspace::target_git_metadata(workspace.root()).map(|meta| meta.sha);
-    let pass = ground_open_findings(store, workspace.root(), revision.as_deref(), limit)?;
-    let output = ground_output(pass.checked, &pass.counts, pass.newly_drifted.len());
+    let limits = limits::GroundingLimits::from_input(input)?;
+    let git = git_inspection(workspace.root());
+    let pass = pass::inspect_candidates(ctx, store, workspace.root(), limits, &git)?;
+    let output = presentation::output(&pass);
+    let data = pass_data(&pass, workspace.root(), limits, &git);
+    if pass.partial() {
+        return Ok(crate::module_result::partial_output_result(
+            output.clone(),
+            output,
+            presentation::warnings(&pass)
+                .into_iter()
+                .map(Value::String)
+                .collect(),
+            data,
+        ));
+    }
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({
-            "checked": pass.checked,
-            "counts": pass.counts,
-            "newlyDrifted": pass.newly_drifted,
-            "revision": revision,
-        }),
+        data,
     ))
 }
 
-struct GroundingPass {
-    checked: usize,
-    counts: BTreeMap<&'static str, usize>,
-    newly_drifted: Vec<String>,
-}
-
-fn ground_open_findings(
-    store: &FindingStore,
+fn pass_data(
+    pass: &pass::GroundingPass,
     root: &std::path::Path,
-    revision: Option<&str>,
-    limit: usize,
-) -> Result<GroundingPass> {
-    let rekeyed = store.rekeyed_stable_keys()?;
-    let mut pass = GroundingPass {
-        checked: 0,
-        counts: BTreeMap::new(),
-        newly_drifted: Vec::new(),
-    };
-    let open = store
-        .list_all_findings()?
-        .into_iter()
-        .filter(|finding| !finding.suppressed && !rekeyed.contains(&stable_key(finding)))
-        .take(limit);
-    for finding in open {
-        pass.checked += 1;
-        let status = ground_one(root, &finding, revision);
-        *pass.counts.entry(status.label()).or_default() += 1;
-        if anchor_newly_stale(&finding, &status) && !already_audited(store, &finding) {
-            record_drift_audit(store, &finding, &status);
-            pass.newly_drifted.push(finding.fingerprint.clone());
-        }
-    }
-    Ok(pass)
+    limits: limits::GroundingLimits,
+    git: &Value,
+) -> Value {
+    json!({
+        "checked":pass.checked,"counts":pass.counts,"newlyDrifted":pass.newly_drifted,
+        "revision":git["sha"],"target":root,"git":git,"inspections":pass.inspections,
+        "coverage":{"selected":pass.selected,"excluded":pass.excluded,"hasMoreCandidates":pass.has_more,
+            "maxFindings":limits.findings,"maxBytesPerFile":limits.per_file,"maxTotalBytes":limits.total_bytes,
+            "capturedBytes":pass.bytes,"reservedReadBytes":pass.reserved_bytes,"stopReason":pass.stopped,"complete":!pass.partial(),
+            "meaning":"Citation checks for the selected ledger window. This does not establish repository scan coverage or finding validity."},
+        "findingVerdictsChanged":false,
+    })
 }
 
-fn ground_limit(input: &Value) -> Result<usize> {
-    let Some(value) = input.get("limit") else {
-        return Ok(DEFAULT_GROUND_LIMIT);
-    };
-    value
-        .as_u64()
-        .map(|count| count as usize)
-        .context("findings:ground: limit must be a non-negative integer")
-}
-
-fn stable_key(finding: &Finding) -> String {
-    finding
-        .identity_id
-        .clone()
-        .unwrap_or_else(|| finding.fingerprint.clone())
-}
-
-/// Re-check the finding's anchor: the first disk-verifiable evidence snippet
-/// sharpens the check; findings with only reasoning evidence ground on the
-/// file/line alone.
-fn ground_one(
-    root: &std::path::Path,
-    finding: &Finding,
-    revision: Option<&str>,
-) -> GroundingStatus {
-    let snippet = finding
-        .evidence
-        .iter()
-        .find(|item| {
-            !item.kind.trim().eq_ignore_ascii_case("reasoning")
-                && item.request_blob.is_none()
-                && !item.snippet.trim().is_empty()
-        })
-        .map(|item| item.snippet.as_str())
-        .unwrap_or("");
-    ground_finding_location(root, &finding.file_path, finding.start_line, snippet, revision)
-}
-
-/// A drift audit event fires only on the transition into a stale anchor:
-/// findings already stamped stale at import stay quiet.
-fn anchor_newly_stale(finding: &Finding, status: &GroundingStatus) -> bool {
-    let stale_now = matches!(
-        status,
-        GroundingStatus::LineDrift { .. } | GroundingStatus::FileMissing { .. }
-    );
-    let stale_before = matches!(
-        finding.grounding,
-        Some(GroundingStatus::LineDrift { .. }) | Some(GroundingStatus::FileMissing { .. })
-    );
-    stale_now && !stale_before
-}
-
-/// Repeated `findings:ground` runs stay quiet for anchors that already
-/// carry a grounding audit event.
-fn already_audited(store: &FindingStore, finding: &Finding) -> bool {
-    use rusqlite::OptionalExtension;
-    store
-        .conn
-        .query_row(
-            "select 1 from audit_events
-              where actor = 'findings:ground'
-                and subject = 'grounding'
-                and stable_fp = ?1
-              limit 1",
-            [stable_key(finding)],
-            |_| Ok(()),
-        )
-        .optional()
-        .ok()
-        .flatten()
-        .is_some()
-}
-
-fn record_drift_audit(store: &FindingStore, finding: &Finding, status: &GroundingStatus) {
-    let Some(finding_id) = finding.id else {
-        return;
-    };
-    let _ = store.record_finding_audit_event(
-        finding_id,
-        "findings:ground",
-        "grounding",
-        format!("citation anchor went stale: {}", status.label()),
-        serde_json::to_value(status).unwrap_or(Value::Null),
-    );
-}
-
-fn ground_output(checked: usize, counts: &BTreeMap<&'static str, usize>, drifted: usize) -> String {
-    let breakdown = counts
-        .iter()
-        .map(|(label, count)| format!("{label}={count}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!(
-        "findings:ground checked {checked} finding(s): {breakdown}{}",
-        if drifted > 0 {
-            format!(" — {drifted} newly drifted (audited, not retired)")
-        } else {
-            String::new()
-        }
-    )
+fn git_inspection(root: &std::path::Path) -> Value {
+    crate::workspace::target_git_metadata(root)
+        .map(|metadata| json!({"sha":metadata.sha,"branch":metadata.branch,"dirty":metadata.dirty}))
+        .unwrap_or(Value::Null)
 }
 
 #[cfg(test)]

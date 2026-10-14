@@ -225,7 +225,7 @@ mod tests {
     }
 }
 
-fn finding_noun(count: usize) -> &'static str {
+pub(crate) fn finding_noun(count: usize) -> &'static str {
     if count == 1 {
         "finding"
     } else {

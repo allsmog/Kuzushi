@@ -42,6 +42,8 @@ fn commit_document(root: &std::path::Path, label: &str, document: &Value) -> Thr
 }
 
 mod diagram;
+mod goal_guidance;
+mod scopes;
 
 #[test]
 fn existing_context_map_review_requires_inspection_and_uses_shared_dispatch() {

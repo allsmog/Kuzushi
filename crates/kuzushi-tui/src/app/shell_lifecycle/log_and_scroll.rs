@@ -32,6 +32,8 @@ impl ShellApp {
     fn shift_default_scroll(&mut self, amount: isize) {
         let max = crate::renderer::run_artifact_max_scroll(self)
             .map(usize::from)
+            .or_else(|| crate::renderer::recommendation_max_scroll(self).map(usize::from))
+            .or_else(|| crate::renderer::strategy_queue_max_scroll(self).map(usize::from))
             .or_else(|| crate::renderer::keymap_reader_scroll(self).map(|reader| reader.max_offset))
             .unwrap_or(usize::from(u16::MAX))
             .min(usize::from(u16::MAX));

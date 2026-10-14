@@ -7,6 +7,7 @@ pub struct WorkspaceFindingReviewContext {
     pub(super) decision: ReviewDecision,
     pub(super) triage_verdict: Option<TriageVerdict>,
     pub(super) decided_at: Option<String>,
+    pub(super) read_watermark: Option<u64>,
     source: WorkspaceFindingReviewSource,
 }
 
@@ -23,6 +24,7 @@ impl WorkspaceFindingReviewContext {
             decision,
             triage_verdict,
             decided_at: None,
+            read_watermark: None,
             source: WorkspaceFindingReviewSource::Unknown,
         }
     }
@@ -32,6 +34,10 @@ impl WorkspaceFindingReviewContext {
             decision: record.decision.clone(),
             triage_verdict: record.triage_verdict,
             decided_at: Some(record.created_at.clone()),
+            read_watermark: record
+                .provenance
+                .as_ref()
+                .and_then(|value| value.read_watermark),
             source: WorkspaceFindingReviewSource::Unknown,
         }
     }
@@ -54,6 +60,7 @@ impl WorkspaceFindingReviewContext {
             decision,
             triage_verdict,
             decided_at: None,
+            read_watermark: None,
             source: carried_decision_source(carried_from_durable_identity),
         }
     }
@@ -63,6 +70,7 @@ impl WorkspaceFindingReviewContext {
             decision: ReviewDecision::from_triage(triage, finding.triaged_by),
             triage_verdict: Some(triage.verdict),
             decided_at: None,
+            read_watermark: None,
             source: WorkspaceFindingReviewSource::SelectedFinding,
         })
     }

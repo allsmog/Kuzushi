@@ -10,12 +10,16 @@ pub(crate) fn pack_module() -> BuiltinModule {
         "Validate out-of-tree knowledge packs before installing them into a workspace.",
         vec![
             pack_lint_tool()
-                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
-            suggest_shards_tool().with_policy(workspace_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Optional,
-            )),
+                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional))
+                .without_phase_result(),
+            suggest_shards_tool()
+                .with_policy(workspace_policy(
+                    ToolPhase::Map,
+                    RuntimeRequirement::Never,
+                    FindingStoreRequirement::Optional,
+                ))
+                .without_phase_result()
+                .with_discovery_maturity(ModuleMaturity::Compatibility),
             scopes::descriptor().with_policy(workspace_policy(
                 ToolPhase::Map,
                 RuntimeRequirement::Never,
@@ -85,6 +89,9 @@ fn pack_lint_tool() -> ToolDescriptor {
                 OptionType::String,
                 "Lint only this [products.<name>] block. Default: all products.",
             ),
+            opt("maxWalkEntries",OptionType::Int,"Shared pack/target walk-entry limit, from 1 to 100000.").default(json!(100000)).advanced(),
+            opt("maxBytesPerFile",OptionType::Int,"Maximum bytes per pack document, from 1 to 8388608.").default(json!(8*1024*1024)).advanced(),
+            opt("maxReadBytes",OptionType::Int,"Shared document read allowance, from 1 to 536870912 bytes. Failed reads retain reservations.").default(json!(64*1024*1024)).advanced(),
         ],
     )
 }

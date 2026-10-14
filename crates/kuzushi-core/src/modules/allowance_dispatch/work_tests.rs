@@ -110,7 +110,14 @@ fn prepared_dispatch_executes_three_fresh_offline_passes_and_refuses_a_fourth() 
     );
 }
 
-fn execute_offline_pass(registry: &ModuleRegistry, workspace: &WorkspaceTarget, config: &V2Config, store: &FindingStore, plan: &Value, index: usize) {
+fn execute_offline_pass(
+    registry: &ModuleRegistry,
+    workspace: &WorkspaceTarget,
+    config: &V2Config,
+    store: &FindingStore,
+    plan: &Value,
+    index: usize,
+) {
     let trace = crate::run_lifecycle::RunObservationHandle::jsonl(
         workspace.root(),
         format!("offline-pass-{index}"),
@@ -152,7 +159,7 @@ fn source_drift_and_changed_plan_cannot_inherit_an_old_approval() {
     let draft = draft(&registry, &ctx);
     std::fs::write(&source, "fn main() { changed(); }\n").unwrap();
     let error = approve_draft(&registry, &ctx, &draft).unwrap_err();
-    assert!(error.to_string().contains("changed"), "{error:#}");
+    assert!(error.to_string().contains("different source"), "{error:#}");
     std::fs::write(&source, "fn main() {}\n").unwrap();
     let mut wrong = draft;
     wrong["data"]["planSha256"] = json!("a".repeat(64));

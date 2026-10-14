@@ -13,6 +13,7 @@ pub(crate) const SCOPE_ACTIONS: &[&str] = &[
     "Review acceptance",
     "Build a new inventory draft",
     "Plan selected scope",
+    "Include an excluded file or directory",
     "Suggest scan scopes with AI",
 ];
 
@@ -44,11 +45,41 @@ impl ShellApp {
                 self.open_scope_acceptance();
                 InputUpdate::handled()
             }
-            9 => self.dispatch_scope_request(json!({"operation":"create"})),
             10 => self.plan_selected_scope(),
-            11 => self.open_scope_ai_priorities(),
+            _ => return self.apply_scope_inventory_action(index),
+        }
+    }
+
+    fn apply_scope_inventory_action(&mut self, index: usize) -> InputUpdate {
+        match index {
+            9 => self.dispatch_scope_request(json!({"operation":"create"})),
+            11 => {
+                self.open_scope_inclusion();
+                InputUpdate::handled()
+            }
+            12 => self.open_scope_ai_priorities(),
             _ => InputUpdate::handled(),
         }
+    }
+
+    fn open_scope_inclusion(&mut self) {
+        let Some(review) = self.scope_review().and_then(|state| state.review.clone()) else {
+            return;
+        };
+        let Some(exclusion) = review.record.draft.exclusions.first() else {
+            self.scope_notice("No recorded exclusions to include. Scope membership is unchanged.");
+            return;
+        };
+        let Some(scope) = review.record.draft.scopes.first() else {
+            return;
+        };
+        let mut form = ScopeEditForm::for_scope(ScopeEditKind::IncludePath, scope);
+        form.fields[0].1 = crate::app::FieldEditor::new(&exclusion.path);
+        let state = self.router.scope_review_mut().as_mut().unwrap();
+        state.menu = None;
+        state.form = Some(form);
+        state.scroll = 0;
+        state.notice = Some(format!("Remove only this exclusion rule. Current reason: {}. Coverage is recomputed; acceptance and scan approval remain separate.", exclusion.reason));
     }
 
     pub(super) fn send_scope_edit(&mut self, edit: ScanScopeEdit) -> InputUpdate {

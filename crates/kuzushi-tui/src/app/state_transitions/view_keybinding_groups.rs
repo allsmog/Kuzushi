@@ -1,5 +1,31 @@
 use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
+pub(super) fn relationship_keybindings() -> Vec<ViewKeybinding> {
+    use ViewHotkeyAction::*;
+    let actions = [
+        ('j', "j", "next", RelationshipNext),
+        ('k', "k", "previous", RelationshipPrevious),
+        ('a', "a", "accept", RelationshipAccept),
+        (
+            ' ',
+            "Space",
+            "select relationship",
+            RelationshipToggleSelection,
+        ),
+        ('*', "*", "select page", RelationshipSelectPage),
+        ('c', "c", "clear selection", RelationshipClearSelection),
+        ('A', "A", "review selected", RelationshipReviewSelection),
+        ('r', "r", "keep separate", RelationshipReject),
+        ('u', "u", "unlink", RelationshipRemove),
+        ('R', "R", "refresh", RelationshipsRefresh),
+        ('n', "n", "next page", RelationshipsNextPage),
+        ('p', "p", "previous page", RelationshipsPreviousPage),
+    ];
+    actions
+        .into_iter()
+        .map(|(key, hint, label, action)| bind_char(key, hint, label, action))
+        .collect()
+}
 
 pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
     let mut bindings = campaign_navigation_keybindings();
@@ -18,7 +44,7 @@ pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
         ),
         bind_char('w', "w", "workers", ViewHotkeyAction::CampaignCycleWorkers),
         bind_char('L', "L", "launch", ViewHotkeyAction::CampaignLaunch),
-        bind_char('K', "K", "kill dispatcher", ViewHotkeyAction::CampaignKill),
+        bind_char('K', "K", "stop dispatcher", ViewHotkeyAction::CampaignKill),
         bind_char('e', "e", "prompt", ViewHotkeyAction::CampaignShowPrompt),
         bind_char('r', "r", "refresh", ViewHotkeyAction::CampaignRefresh),
     ]);
@@ -137,7 +163,39 @@ pub(super) fn home_keybindings() -> Vec<ViewKeybinding> {
     )]
 }
 
-pub(super) fn recommend_keybindings() -> Vec<ViewKeybinding> {
+pub(super) fn recommend_keybindings(has_components: bool) -> Vec<ViewKeybinding> {
+    let mut bindings = vec![bind_char(
+        'r',
+        "r",
+        "refresh deterministic",
+        ViewHotkeyAction::RecommendRefresh,
+    )];
+    if has_components {
+        bindings.extend(recommend_component_keybindings());
+    }
+    bindings
+}
+
+fn recommend_component_keybindings() -> Vec<ViewKeybinding> {
+    let mut bindings = recommend_component_navigation();
+    bindings.extend([
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "scan component",
+            ViewHotkeyAction::RecommendScanComponent,
+        ),
+        bind_char(
+            'p',
+            "p",
+            "promote target",
+            ViewHotkeyAction::RecommendPromoteComponent,
+        ),
+    ]);
+    bindings
+}
+
+fn recommend_component_navigation() -> Vec<ViewKeybinding> {
     vec![
         bind_char(
             'j',
@@ -163,18 +221,6 @@ pub(super) fn recommend_keybindings() -> Vec<ViewKeybinding> {
             "component",
             ViewHotkeyAction::RecommendCursorPrevious,
         ),
-        bind(
-            HotkeyTrigger::Enter,
-            "Enter",
-            "scan component",
-            ViewHotkeyAction::RecommendScanComponent,
-        ),
-        bind_char(
-            'p',
-            "p",
-            "promote target",
-            ViewHotkeyAction::RecommendPromoteComponent,
-        ),
     ]
 }
 
@@ -184,6 +230,113 @@ pub(super) fn workbench_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
 }
 
 pub(super) fn workbench_keybindings_for_plan(
+    app: &ShellApp,
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+) -> Vec<ViewKeybinding> {
+    let mut bindings = review_ledger_filter_keybindings(app);
+    let mut layout = workbench_layout_keybindings(app, plan);
+    yield_last_row_key_to_review_ledger(&bindings, &mut layout);
+    bindings.extend(layout);
+    bindings
+}
+
+/// Review's ledger owns `G` (finding groups) and is searched first, so a
+/// `G` last-row jump would never dispatch. Stop advertising the shadowed
+/// binding and present the surviving `g` honestly as "first".
+fn yield_last_row_key_to_review_ledger(
+    ledger: &[ViewKeybinding],
+    layout: &mut Vec<ViewKeybinding>,
+) {
+    let claimed: Vec<HotkeyTrigger> = ledger.iter().map(|binding| binding.trigger).collect();
+    let shadows_last = |binding: &ViewKeybinding| {
+        binding.action == ViewHotkeyAction::WorkbenchScrollLast
+            && claimed.contains(&binding.trigger)
+    };
+    if !layout.iter().any(shadows_last) {
+        return;
+    }
+    layout.retain(|binding| !shadows_last(binding));
+    for binding in layout
+        .iter_mut()
+        .filter(|binding| binding.action == ViewHotkeyAction::WorkbenchScrollFirst)
+    {
+        binding.hint = "g".into();
+        binding.label = "first".into();
+    }
+}
+
+fn review_ledger_filter_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if app.input_mode() != InputMode::Navigate || !app.input().is_empty() {
+        return Vec::new();
+    }
+    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Review {
+        return Vec::new();
+    }
+    let mut bindings = vec![bind(
+        HotkeyTrigger::ControlChar('f'),
+        "Ctrl+F",
+        "filter ledger",
+        ViewHotkeyAction::WorkbenchReviewLedgerFilter,
+    )];
+    bindings.extend(review_context_reader_keybindings());
+    append_findings_page_bindings(app, &mut bindings);
+    bindings.push(bind_char(
+        'G',
+        "G",
+        if app
+            .router
+            .relationships
+            .bulk
+            .as_ref()
+            .is_some_and(|review| review.return_from_source)
+        {
+            "return to reviewed selection"
+        } else {
+            "groups"
+        },
+        ViewHotkeyAction::FindingGroupsOpen,
+    ));
+    bindings
+}
+
+fn review_context_reader_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char(
+            'L',
+            "L",
+            "relationships",
+            ViewHotkeyAction::RelationshipsOpen,
+        ),
+        bind_char('l', "l", "lessons", ViewHotkeyAction::LessonsOpen),
+    ]
+}
+
+fn append_findings_page_bindings(app: &ShellApp, bindings: &mut Vec<ViewKeybinding>) {
+    if app.findings_refresh_status().is_some() {
+        return;
+    }
+    let Some(page) = app.domain().findings_page() else {
+        return;
+    };
+    if page.next_cursor.is_some() {
+        bindings.push(bind(
+            HotkeyTrigger::ControlChar('n'),
+            "Ctrl+N",
+            "next page",
+            ViewHotkeyAction::WorkbenchFindingsPageNext,
+        ));
+    }
+    if page.previous_cursor.is_some() {
+        bindings.push(bind(
+            HotkeyTrigger::ControlChar('p'),
+            "Ctrl+P",
+            "prev page",
+            ViewHotkeyAction::WorkbenchFindingsPagePrevious,
+        ));
+    }
+}
+
+fn workbench_layout_keybindings(
     app: &ShellApp,
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
 ) -> Vec<ViewKeybinding> {
@@ -624,17 +777,18 @@ pub(super) fn threat_view_for_digit(key: char) -> Option<ThreatView> {
         '3' => ThreatView::Scope,
         '4' => ThreatView::Summary,
         '5' => ThreatView::Versions,
+        '6' => ThreatView::Models,
         _ => return None,
     })
 }
 
 pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
-    let mut bindings = ('1'..='5')
+    let mut bindings = ('1'..='6')
         .filter_map(|key| {
             let view = threat_view_for_digit(key)?;
             Some(bind_char(
                 key,
-                "1..5",
+                "1..6",
                 "switch threat view",
                 ViewHotkeyAction::ThreatView(view),
             ))
@@ -646,11 +800,16 @@ pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
 
 fn threat_model_cycle_keybindings() -> Vec<ViewKeybinding> {
     vec![
-        bind_char('m', "m/M", "next model", ViewHotkeyAction::ThreatModelNext),
+        bind_char(
+            'm',
+            "m/M",
+            "activate next model",
+            ViewHotkeyAction::ThreatModelNext,
+        ),
         bind_char(
             'M',
             "m/M",
-            "previous model",
+            "activate previous model",
             ViewHotkeyAction::ThreatModelPrevious,
         ),
     ]

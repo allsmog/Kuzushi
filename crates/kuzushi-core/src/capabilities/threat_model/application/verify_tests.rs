@@ -8,7 +8,11 @@ fn fixture_target() -> tempfile::TempDir {
 }
 
 fn initialize_git(target: &Path) {
-    for args in [&["init", "-q"][..], &["add", "-A"], &["commit", "-qm", "init"]] {
+    for args in [
+        &["init", "-q"][..],
+        &["add", "-A"],
+        &["commit", "-qm", "init"],
+    ] {
         let status = std::process::Command::new("git")
             .args(args)
             .current_dir(target)
@@ -336,10 +340,7 @@ fn stamped_failed_verdict_warns_without_revision_drift() {
 fn verification_checks_every_catalog_row_and_fails_uncovered_ingress() {
     let target = fixture_target();
     let (catalog, ids) = write_explicit_catalog(target.path());
-    let mut doc = cover_current_grounding(
-        catalog_backed_document(&catalog, &ids),
-        target.path(),
-    );
+    let mut doc = cover_current_grounding(catalog_backed_document(&catalog, &ids), target.path());
 
     let complete = verify_threat_model_document(&doc, target.path()).unwrap();
     assert!(
@@ -401,10 +402,8 @@ fn catalog_receipt_source_identity_must_match_authenticated_catalog() {
 fn tampered_catalog_counts_cannot_shrink_verification_scope() {
     let target = fixture_target();
     let (catalog, ids) = write_explicit_catalog(target.path());
-    let mut doc = cover_current_grounding(
-        catalog_backed_document(&catalog, &ids[..1]),
-        target.path(),
-    );
+    let mut doc =
+        cover_current_grounding(catalog_backed_document(&catalog, &ids[..1]), target.path());
     let receipt = &mut doc["provenance"]["entryPointCatalog"];
     receipt["records"] = json!(1);
     receipt["recordsSelected"] = json!(1);
@@ -424,10 +423,7 @@ fn explicit_catalog_rejects_same_head_dirty_tree_byte_drift() {
     initialize_git(target.path());
     std::fs::write(target.path().join("src/app.py"), "dirty version one\n").unwrap();
     let (catalog, ids) = write_explicit_catalog(target.path());
-    let doc = cover_current_grounding(
-        catalog_backed_document(&catalog, &ids),
-        target.path(),
-    );
+    let doc = cover_current_grounding(catalog_backed_document(&catalog, &ids), target.path());
     std::fs::write(target.path().join("src/app.py"), "dirty version two\n").unwrap();
 
     let error = verify_threat_model_document(&doc, target.path()).unwrap_err();
@@ -460,7 +456,10 @@ fn disabled_catalog_rejects_same_head_dirty_tree_byte_drift() {
 
     let error = verify_threat_model_document(&doc, target.path()).unwrap_err();
 
-    assert!(error.to_string().contains("source tree is stale"), "{error:#}");
+    assert!(
+        error.to_string().contains("source tree is stale"),
+        "{error:#}"
+    );
 }
 
 #[test]
@@ -469,11 +468,16 @@ fn dirty_no_catalog_document_requires_a_bound_tree_identity() {
     initialize_git(target.path());
     std::fs::write(target.path().join("src/app.py"), "dirty\n").unwrap();
     let mut doc = cover_current_grounding(document(&["src/app.py"]), target.path());
-    doc["provenance"].as_object_mut().unwrap().remove("treeHash");
+    doc["provenance"]
+        .as_object_mut()
+        .unwrap()
+        .remove("treeHash");
 
     let error = verify_threat_model_document(&doc, target.path()).unwrap_err();
 
-    assert!(error.to_string().contains("requires a bound provenance treeHash"));
+    assert!(error
+        .to_string()
+        .contains("requires a bound provenance treeHash"));
 }
 
 #[test]
@@ -564,8 +568,16 @@ fn scoped_fixture() -> (tempfile::TempDir, ThreatModelBuildRoots) {
     let web = workspace.path().join("services/web");
     std::fs::create_dir_all(api.join("src")).unwrap();
     std::fs::create_dir_all(web.join("src")).unwrap();
-    std::fs::write(api.join("src/app.py"), "def api(request):\n    return request\n").unwrap();
-    std::fs::write(web.join("src/app.py"), "def web(request):\n    return request\n").unwrap();
+    std::fs::write(
+        api.join("src/app.py"),
+        "def api(request):\n    return request\n",
+    )
+    .unwrap();
+    std::fs::write(
+        web.join("src/app.py"),
+        "def web(request):\n    return request\n",
+    )
+    .unwrap();
     let roots = ThreatModelBuildRoots {
         workspace_root: workspace.path().canonicalize().unwrap(),
         analysis_root: api.canonicalize().unwrap(),
@@ -616,10 +628,7 @@ fn cover_scoped_grounding(mut doc: Value, roots: &ThreatModelBuildRoots) -> Valu
 #[test]
 fn scoped_verification_resolves_workspace_paths_and_uses_only_scope_surfaces() {
     let (_workspace, roots) = scoped_fixture();
-    let doc = cover_scoped_grounding(
-        document(&["services/api/src/app.py"]),
-        &roots,
-    );
+    let doc = cover_scoped_grounding(document(&["services/api/src/app.py"]), &roots);
     let scoped_surfaces = scoped_verification_grounding(&roots).unwrap().surfaces;
 
     let verification = verify_threat_model_document_with_roots(&doc, &roots).unwrap();
@@ -633,10 +642,7 @@ fn scoped_verification_resolves_workspace_paths_and_uses_only_scope_surfaces() {
 #[test]
 fn scoped_verification_refuses_a_workspace_sibling_citation() {
     let (_workspace, roots) = scoped_fixture();
-    let doc = cover_scoped_grounding(
-        document(&["services/web/src/app.py"]),
-        &roots,
-    );
+    let doc = cover_scoped_grounding(document(&["services/web/src/app.py"]), &roots);
 
     let verification = verify_threat_model_document_with_roots(&doc, &roots).unwrap();
 

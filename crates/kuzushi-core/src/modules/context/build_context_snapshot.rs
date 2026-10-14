@@ -12,8 +12,9 @@ pub(in crate::modules) fn build_context_snapshot(
             tool_name,
         ))?;
     let options = context_build_options(tool_name, &input)?;
+    anyhow::ensure!(!ctx.is_cancelled(), "Context preparation canceled before repository inspection");
     emit_context_build_start(ctx, workspace.root());
-    let starting = trace_snapshot_provenance(workspace, ctx, ContextBuildStage::ScanFiles)?;
+    let starting = trace_snapshot_provenance(workspace, ctx, ContextBuildStage::BuildInventory)?;
     let mut artifact = build_context_artifact(workspace.root(), &options, ctx)?;
     let (snapshot_path, provenance, cost) = finalize_context_artifact(
         &mut artifact,
@@ -267,30 +268,15 @@ fn assemble_context_snapshot(
     options: &ContextBuildOptions,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<(ContextFileSample, Value)> {
-    emit_context_build_stage(ctx, ContextBuildStage::ScanFiles, None);
-    let file_sample = collect_context_file_sample(root, options.sample_limit)?;
-    let snapshot = context_snapshot_value_with_progress(
+    let (file_sample, snapshot) = context_snapshot_value_with_progress(
         root,
         options,
-        &file_sample,
         |stage, detail| {
-            let detail = context_stage_detail(stage, detail, file_sample.files_indexed);
             emit_context_build_stage(ctx, stage, detail);
         },
         &|| ctx.is_cancelled(),
     )?;
     Ok((file_sample, snapshot))
-}
-
-fn context_stage_detail(
-    stage: ContextBuildStage,
-    detail: Option<String>,
-    files_indexed: usize,
-) -> Option<String> {
-    detail.or_else(|| {
-        (stage == ContextBuildStage::InferRepository)
-            .then(|| format!("{files_indexed} files indexed"))
-    })
 }
 
 fn trace_snapshot_provenance(
@@ -395,7 +381,7 @@ pub(crate) fn build_context_snapshot_value_for_root(
     sample_limit: usize,
 ) -> Result<Value> {
     let options = ContextBuildOptions {
-        sample_limit: sample_limit.min(2_000),
+        sample_limit: sample_limit.min(MAX_CONTEXT_SAMPLE_FILES),
         discovery: "auto".to_string(),
         enrichment: false,
         scope: "all".to_string(),
@@ -409,8 +395,7 @@ fn build_context_snapshot_value_for_root_with_options(
 ) -> Result<Value> {
     let starting_tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
         .context("context snapshot requires a content tree identity")?;
-    let file_sample = collect_context_file_sample(root, options.sample_limit)?;
-    let mut snapshot = context_snapshot_value(root, options, &file_sample)?;
+    let (_, mut snapshot) = context_snapshot_value_with_progress(root, options, |_, _| {}, &|| false)?;
     let tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
         .context("context snapshot requires a content tree identity")?;
     require_unchanged_context_tree(&starting_tree_hash, &tree_hash)?;
@@ -431,16 +416,10 @@ impl ContextBuildOptions {
     }
 }
 
-struct ContextFileSample {
-    files_indexed: usize,
-    files_sample: Vec<String>,
-    walk_truncated: bool,
-}
-
 fn context_build_options(tool_name: &str, input: &Value) -> Result<ContextBuildOptions> {
     let enrichment = read_enrichment(input);
     let options = ContextBuildOptions {
-        sample_limit: read_sample_limit(input),
+        sample_limit: read_sample_limit(input)?,
         discovery: read_discovery(input),
         enrichment,
         scope: read_scope(input),
@@ -449,13 +428,16 @@ fn context_build_options(tool_name: &str, input: &Value) -> Result<ContextBuildO
     Ok(options)
 }
 
-fn read_sample_limit(input: &Value) -> usize {
-    input
+fn read_sample_limit(input: &Value) -> Result<usize> {
+    let Some(value) = input
         .get("sampleLimit")
         .or_else(|| input.get("limit"))
-        .and_then(Value::as_u64)
-        .unwrap_or(200)
-        .min(2_000) as usize
+    else {
+        return Ok(200);
+    };
+    let limit = value.as_u64().context("sampleLimit must be an integer from 1 to 2000")?;
+    anyhow::ensure!((1..=MAX_CONTEXT_SAMPLE_FILES as u64).contains(&limit), "sampleLimit must be an integer from 1 to 2000");
+    Ok(limit as usize)
 }
 
 fn read_discovery(input: &Value) -> String {
@@ -496,31 +478,6 @@ fn validate_context_build_options(tool_name: &str, options: &ContextBuildOptions
     Ok(())
 }
 
-fn collect_context_file_sample(root: &Path, sample_limit: usize) -> Result<ContextFileSample> {
-    let mut files_sample = Vec::new();
-    let mut files_indexed = 0;
-    let walk_truncated = collect_context_files(
-        root,
-        root,
-        sample_limit,
-        &mut files_indexed,
-        &mut files_sample,
-    )?;
-    Ok(ContextFileSample {
-        files_indexed,
-        files_sample,
-        walk_truncated,
-    })
-}
-
-fn context_snapshot_value(
-    root: &Path,
-    options: &ContextBuildOptions,
-    file_sample: &ContextFileSample,
-) -> Result<Value> {
-    context_snapshot_value_with_progress(root, options, file_sample, |_, _| {}, &|| false)
-}
-
 /// Heartbeat cadence for the inventory walk: monorepo walks run for minutes,
 /// and without intra-stage progress the run watchdog reports a healthy walk
 /// as NO PROGRESS SIGNAL.
@@ -529,27 +486,30 @@ const INVENTORY_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(
 fn context_snapshot_value_with_progress(
     root: &Path,
     options: &ContextBuildOptions,
-    file_sample: &ContextFileSample,
     mut progress: impl FnMut(ContextBuildStage, Option<String>),
     should_cancel: &dyn Fn() -> bool,
-) -> Result<Value> {
-    progress(ContextBuildStage::InferRepository, None);
-    let mut repo_context = infer_repo_context(root, &file_sample.files_sample)?;
+) -> Result<(ContextFileSample, Value)> {
     let repository_inventory = build_context_inventory(root, &mut progress, should_cancel)?;
+    anyhow::ensure!(!should_cancel(), "Context preparation canceled after bounded inventory; prior snapshot was not replaced");
+    progress(ContextBuildStage::ScanFiles, None);
+    let file_sample = inventory_file_sample(&repository_inventory, options.sample_limit)?;
+    progress(ContextBuildStage::InferRepository, Some(format!("{} files enumerated", file_sample.files_indexed)));
+    let mut repo_context = infer_repo_context(root, &file_sample.files_sample)?;
     apply_inventory_repo_context(&mut repo_context, &repository_inventory);
     progress(ContextBuildStage::MapAttackSurface, None);
     let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
         root,
         &repository_inventory,
     )?;
-    context_snapshot_document(
+    let snapshot = context_snapshot_document(
         root,
         options,
-        file_sample,
+        &file_sample,
         repo_context,
         repository_inventory,
         attack_surface_map,
-    )
+    )?;
+    Ok((file_sample, snapshot))
 }
 
 fn build_context_inventory(
@@ -583,6 +543,11 @@ fn context_snapshot_document(
     attack_surface_map: crate::attack_surface::AttackSurfaceMap,
 ) -> Result<Value> {
     let provenance = context_snapshot_revision(root);
+    let mut index = file_index(file_sample);
+    if let Some(inspection) = &repository_inventory.inspection {
+        index["enumeration"] = json!(inspection.enumeration);
+        index["sampleOrder"] = json!("depth_then_path");
+    }
     Ok(json!({
         "target": root.display().to_string(),
         "timestamp": now_ms()?,
@@ -594,7 +559,7 @@ fn context_snapshot_document(
         "repoContext": repo_context,
         "repositoryInventory": repository_inventory,
         "attackSurfaceMap": attack_surface_map,
-        "fileIndex": file_index(file_sample),
+        "fileIndex": index,
         "appModel": app_model(&attack_surface_map),
         "generatedSlices": generated_context_slices(&options.scope, options.enrichment),
         "staleSlices": stale_context_slices(&options.scope),
@@ -670,9 +635,9 @@ const CONTEXT_BUILD_STAGE_COUNT: usize = 7;
 impl ContextBuildStage {
     fn position(self) -> usize {
         match self {
-            Self::ScanFiles => 1,
-            Self::InferRepository => 2,
-            Self::BuildInventory => 3,
+            Self::BuildInventory => 1,
+            Self::ScanFiles => 2,
+            Self::InferRepository => 3,
             Self::MapAttackSurface => 4,
             Self::FinalizeSlices => 5,
             Self::RegisterTreeIdentity => 6,
@@ -682,7 +647,7 @@ impl ContextBuildStage {
 
     fn label(self) -> &'static str {
         match self {
-            Self::ScanFiles => "scanning repository files",
+            Self::ScanFiles => "selecting inventory file sample",
             Self::InferRepository => "inferring repository context",
             Self::BuildInventory => "building repository inventory",
             Self::MapAttackSurface => "mapping attack surface",
@@ -888,7 +853,7 @@ fn context_build_output(
     );
     if partial {
         output.push_str(
-            "\n  Coverage: PARTIAL — a walk cap was reached and the snapshot is marked truncated; \
+            "\n  Coverage: PARTIAL. An inspection cap was reached and the snapshot is marked truncated; \
              scope the target (or audit via shards) for full coverage",
         );
     }
@@ -908,15 +873,24 @@ mod stage_tests {
     use super::*;
 
     #[test]
+    fn inventory_cancellation_stops_before_inference_and_publication() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("owned.rs"), "// Owned cancellation fixture.\n").unwrap();
+        let options = ContextBuildOptions { sample_limit:2, discovery:"auto".into(), enrichment:false, scope:"all".into() };
+        let checks = std::cell::Cell::new(0);
+        let cancel = || { checks.set(checks.get()+1); checks.get()>1 };
+        let mut stages = Vec::new();
+        let error = context_snapshot_value_with_progress(root.path(), &options, |stage,_| stages.push(stage), &cancel).unwrap_err();
+        assert!(error.to_string().contains("canceled after bounded inventory"));
+        assert_eq!(stages, [ContextBuildStage::BuildInventory]);
+        assert!(!crate::context::context_snapshot_path(root.path()).exists());
+    }
+
+    #[test]
     fn context_snapshot_reports_each_expensive_assembly_stage_in_order() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(temp.path().join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
-        let sample = ContextFileSample {
-            files_indexed: 1,
-            files_sample: vec!["src/lib.rs".to_string()],
-            walk_truncated: false,
-        };
         let options = ContextBuildOptions {
             sample_limit: 10,
             discovery: "auto".to_string(),
@@ -928,7 +902,6 @@ mod stage_tests {
         context_snapshot_value_with_progress(
             temp.path(),
             &options,
-            &sample,
             |stage, _| stages.push(stage),
             &|| false,
         )
@@ -937,8 +910,9 @@ mod stage_tests {
         assert_eq!(
             stages,
             vec![
-                ContextBuildStage::InferRepository,
                 ContextBuildStage::BuildInventory,
+                ContextBuildStage::ScanFiles,
+                ContextBuildStage::InferRepository,
                 ContextBuildStage::MapAttackSurface,
             ]
         );

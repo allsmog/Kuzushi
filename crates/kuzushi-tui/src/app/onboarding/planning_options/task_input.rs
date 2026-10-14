@@ -15,6 +15,7 @@ pub(crate) fn planning_task_explicit_input(
 
 pub(crate) fn planning_task_preset_input(task: PlanningTaskId) -> Value {
     match task {
+        PlanningTaskId::ImportThreatModel => json!({"activate": false}),
         // Legacy decode-only rows keep their historical presets so older
         // saved plans replay unchanged. The merged BuildThreatModel row has
         // no preset: methodology and seedMode arrive through the

@@ -34,6 +34,18 @@ pub enum IdentityFoldPolicy {
 }
 
 impl IdentityFoldPolicy {
+    /// The fold a run-scoped reader uses while it holds no operator-resolved
+    /// policy of its own.
+    ///
+    /// `sast:scan` folds by the `identityFold` the dispatch boundary bound for
+    /// it, and an occurrence report by the policy it already carries. A study
+    /// export, `report:sarif` over a study, and the investigation report have
+    /// no such value in hand, and resolving one from the identity-audit
+    /// approval gate alone would ignore the explicit operator override that
+    /// the scan and the Review ledger both honour. They keep this reading
+    /// until the stored option reaches them.
+    pub const UNRESOLVED_RUN_SCOPE: Self = Self::Safe;
+
     pub fn parse(value: Option<&str>) -> Result<Self> {
         match value.unwrap_or("legacy").trim() {
             "legacy" => Ok(Self::Legacy),
@@ -102,6 +114,21 @@ pub struct BatchOccurrenceReport {
 }
 
 impl BatchOccurrenceReport {
+    /// Ledger membership from every recorded attempt, including incomplete work.
+    /// Recurrence rows and completed-pass counts remain separate.
+    pub fn retained_observation_fingerprints(
+        &self,
+        root: &Path,
+        store: &FindingStore,
+    ) -> Result<std::collections::BTreeSet<String>> {
+        let runs = crate::run_artifacts::scan_finding_run_refs(root, &self.all_attempt_run_ids())?;
+        Ok(store
+            .list_distinct_findings_for_scan_ids_with_identity_policy(&runs, self.identity_fold)?
+            .into_iter()
+            .map(|finding| finding.fingerprint)
+            .collect())
+    }
+
     pub fn completed_run_ids(&self) -> Vec<String> {
         let mut run_ids = self
             .trials
@@ -216,15 +243,37 @@ fn derive_batch_occurrence_report_inner(
     let checked =
         crate::capabilities::campaign::validate_scan_batch_execution_plan(batch_id, &plan)?;
     let queue = read_optional_batch_document(root, batch_id, "queue.json")?;
+    let mut report = derive_occurrence_from_documents(
+        root,
+        batch_id,
+        store,
+        &plan,
+        queue.as_ref(),
+        checked.equivalence_key,
+    )?;
+    if hydrate_gate {
+        report.gate = load_batch_gate(root, batch_id, &plan, store, &report)?;
+    }
+    Ok(report)
+}
+
+pub(super) fn derive_occurrence_from_documents(
+    root: &Path,
+    batch_id: &str,
+    store: &FindingStore,
+    plan: &Value,
+    queue: Option<&Value>,
+    equivalence_key: String,
+) -> Result<BatchOccurrenceReport> {
     let policy = IdentityFoldPolicy::parse(plan.get("identityFold").and_then(Value::as_str))?;
-    let mut trials = trial_reports(&plan, queue.as_ref());
+    let mut trials = trial_reports(plan, queue);
     hydrate_finding_run_ids(root, &mut trials);
-    validate_batch_trial_receipts(root, &plan, queue.as_ref(), &trials)?;
+    validate_batch_trial_receipts(root, plan, queue, &trials)?;
     let counts = LogicalTrialCounts::from_trials(&trials);
-    let mut report = BatchOccurrenceReport {
+    Ok(BatchOccurrenceReport {
         schema_version: 1,
         batch_id: batch_id.to_string(),
-        equivalence_key: checked.equivalence_key,
+        equivalence_key,
         identity_fold: policy,
         planned: counts.planned,
         completed: counts.completed,
@@ -233,11 +282,11 @@ fn derive_batch_occurrence_report_inner(
         gate: None,
         rows: occurrence_rows(store, &trials, policy, counts)?,
         trials,
-    };
-    if hydrate_gate {
-        report.gate = load_batch_gate(root, batch_id, &plan, store, &report)?;
-    }
-    Ok(report)
+    })
+}
+
+pub(super) fn read_occurrence_queue(root: &Path, id: &str) -> Result<Option<Value>> {
+    read_optional_batch_document(root, id, "queue.json")
 }
 
 fn load_batch_gate(

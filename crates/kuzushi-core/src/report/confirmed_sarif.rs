@@ -1,8 +1,8 @@
 //! `report:sarif` — SARIF 2.1.0 export of review-confirmed findings.
 //!
 //! Exports only findings whose LATEST review decision confirms them
-//! (`Confirmed` or `ToFix`), using the same reversal rule as the trend and
-//! coverage folds: a confirm followed by a rejection is a rejection. Rules
+//! (`Confirmed` or `ToFix`). Shared dispatch reads the canonical effective
+//! review across observations; a later rejection reverses confirmation. Rules
 //! are derived from CWE ids; the run carries the workspace trend object
 //! (FP rate, cost per confirmed finding) as properties, so a CI consumer
 //! sees effectiveness alongside the findings. Deterministic; no model calls.
@@ -17,6 +17,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+mod metadata;
 
 const SARIF_SCHEMA: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 const SARIF_VERSION: &str = "2.1.0";
@@ -37,40 +38,98 @@ pub fn export_confirmed_sarif(
     input: &Value,
     selection: &ConfirmedSarifSelection<'_>,
 ) -> Result<Value> {
-    let confirmed = confirmed_findings(selection.findings, selection.records);
-    let trend = trend_json(&trend_metrics_with_spend(
+    let receipt = selection
+        .investigation
+        .map(serde_json::to_value)
+        .transpose()?;
+    export_selection(
+        root,
+        input,
+        selection.findings,
         selection.records,
+        receipt,
+        &[],
+    )
+}
+
+pub(crate) fn export_confirmed_sarif_document(
+    root: &Path,
+    input: &Value,
+    findings: &[Finding],
+    records: &[ReviewDecisionRecord],
+    investigation: Option<&crate::workspace::InvestigationReportDocument>,
+    metadata: &[crate::workspace::WorkspaceFindingExportRecord],
+) -> Result<Value> {
+    let receipt = investigation.map(serde_json::to_value).transpose()?;
+    export_selection(root, input, findings, records, receipt, metadata)
+}
+
+fn export_selection(
+    root: &Path,
+    input: &Value,
+    findings: &[Finding],
+    records: &[ReviewDecisionRecord],
+    receipt: Option<Value>,
+    metadata: &[crate::workspace::WorkspaceFindingExportRecord],
+) -> Result<Value> {
+    let confirmed = confirmed_findings_with_metadata(findings, records, metadata);
+    let trend = trend_json(&trend_metrics_with_spend(
+        records,
         workspace_campaign_spend_report(root),
     ));
     let mut document = sarif_document(&confirmed, trend.clone());
-    attach_investigation(&mut document, selection.investigation)?;
+    metadata::attach_export_metadata(
+        &mut document,
+        &confirmed,
+        records,
+        metadata,
+        receipt.is_some(),
+    )?;
+    attach_investigation(&mut document, receipt)?;
     let path = write_sarif(root, input, &document)?;
     Ok(export_result(&path, &confirmed, trend))
 }
 
 /// Same location `workspace:export-findings` uses for SARIF receipts.
-fn attach_investigation(
-    document: &mut Value,
-    investigation: Option<&InvestigationReportReceipt>,
-) -> Result<()> {
+fn attach_investigation(document: &mut Value, investigation: Option<Value>) -> Result<()> {
     let Some(receipt) = investigation else {
         return Ok(());
     };
-    document["runs"][0]["properties"]["kuzushiExport"]["investigation"] =
-        serde_json::to_value(receipt).context("Could not serialize investigation receipt")?;
+    document["runs"][0]["properties"]["kuzushiExport"]["investigation"] = receipt;
     Ok(())
 }
 
-/// A finding is exported iff its latest review decision is `Confirmed` or
-/// `ToFix` (the shared `latest_confirmed_finding_ids` fold). Undecided,
-/// rejected, suppressed, deferred, and accepted-risk findings are excluded —
+/// The public compatibility export selects the latest decision by finding id.
+/// Shared dispatch uses canonical review metadata across observations. Undecided,
+/// rejected, review-suppressed, deferred, and accepted-risk findings are excluded.
 /// this export is the "hand a CI gate only what a review stood behind"
 /// surface, unlike `workspace:export-findings`.
+/// Rule suppression remains independent and is disclosed in result properties.
 fn confirmed_findings(findings: &[Finding], records: &[ReviewDecisionRecord]) -> Vec<Finding> {
     let confirmed_ids = latest_confirmed_finding_ids(records);
     findings
         .iter()
         .filter(|finding| finding.id.is_some_and(|id| confirmed_ids.contains(&id)))
+        .cloned()
+        .collect()
+}
+
+fn confirmed_findings_with_metadata(
+    findings: &[Finding],
+    records: &[ReviewDecisionRecord],
+    metadata: &[crate::workspace::WorkspaceFindingExportRecord],
+) -> Vec<Finding> {
+    if metadata.is_empty() {
+        return confirmed_findings(findings, records);
+    }
+    let confirmed = metadata
+        .iter()
+        .filter(|record| matches!(record.review_decision.as_str(), "confirmed" | "to_fix"))
+        .map(|record| record.fingerprint.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    findings
+        .iter()
+        .filter(|finding| confirmed.contains(finding.fingerprint.as_str()))
         .cloned()
         .collect()
 }

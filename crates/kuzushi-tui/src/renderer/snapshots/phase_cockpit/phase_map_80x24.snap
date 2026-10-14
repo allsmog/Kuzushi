@@ -18,12 +18,12 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │product summary.                                                              │
 │                                                                              │
 │shape · 1 entities · 1 processes · 1 stores                                   │
-│context · 0 entries · 0 gates · 0 assets · 0 threats                          │
+│context · 0 entries, 0 gates, 0 assets, 0 threats                             │
 │                                                                              │
 │OVERALL DATA FLOW                                                             │
 │external → application · 1 flow · boundary                                    │
 └──────────────────────────────────────────────────────────────────────────────┘
-unverified · ./phase-target · rev:unknown · context:current · indexed=3...
+unverified · ./phase-target · rev:unknown · repo index:current · indexed=3...
 ⛭ autonomy:fix · run route · ⠋ context:b... 6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

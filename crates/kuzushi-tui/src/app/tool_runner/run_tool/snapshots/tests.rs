@@ -3,6 +3,105 @@ use kuzushi_core::V2Config;
 use serde_json::json;
 
 #[test]
+fn sbom_completion_repairs_component_inventory_without_changing_focus_or_input() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("package.json"), "{invalid}").unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(root.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while app.active_target_facts().is_none() && std::time::Instant::now() < deadline {
+        app.apply_target_candidate_discovery_results();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(app
+        .active_target_facts()
+        .unwrap()
+        .component_inventory_error
+        .is_some());
+    assert!(app
+        .available_viz_pages()
+        .contains(&crate::scene3d::VizPage::Components));
+    std::fs::write(
+        root.path().join("package.json"),
+        r#"{"dependencies":{"owned-library":"^1.0"}}"#,
+    )
+    .unwrap();
+    let ctx = kuzushi_core::ToolExecutionContext {
+        config: app.config(),
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let prepared = app
+        .registry()
+        .prepare_dispatch_input("sbom-scan:scan", json!({}), &ctx, None)
+        .unwrap();
+    let output = app
+        .registry()
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .unwrap();
+    app.set_shell_view(ShellView::Logs);
+    app.set_input("preserved dependency draft");
+    app.set_cursor(4);
+    assert!(app
+        .cache_tool_snapshot("sbom-scan:scan", &output)
+        .is_empty());
+    let facts = app.active_target_facts().unwrap();
+    assert!(facts.component_inventory_error.is_none());
+    assert!(facts.component_inventory_from_tool);
+    assert_eq!(
+        facts.component_inventory.as_ref().unwrap().components[0].name,
+        "owned-library"
+    );
+    assert_eq!(app.shell_view(), ShellView::Logs);
+    assert_eq!(
+        (app.input(), app.cursor()),
+        ("preserved dependency draft", 4)
+    );
+    let malformed = json!({"status":"completed","data":{"target":workspace.root().to_string_lossy(),"componentCount":2}});
+    app.cache_tool_snapshot("sbom-scan:scan", &malformed);
+    assert!(app
+        .active_target_facts()
+        .unwrap()
+        .component_inventory
+        .is_none());
+    assert!(app
+        .active_target_facts()
+        .unwrap()
+        .component_inventory_error
+        .as_deref()
+        .unwrap()
+        .contains("malformed"));
+    app.cache_tool_snapshot("sbom-scan:scan", &output);
+    assert!(app
+        .active_target_facts()
+        .unwrap()
+        .component_inventory
+        .is_some());
+    app.apply_tool_event(ToolEvent::Finished {
+        tool_name: "sbom-scan:scan".into(),
+        result: json!({"status":"failed","error":"Owned malformed manifest","data":{"target":workspace.root().to_string_lossy()}}),
+    });
+    assert!(app
+        .active_target_facts()
+        .unwrap()
+        .component_inventory
+        .is_none());
+    assert!(app
+        .active_target_facts()
+        .unwrap()
+        .component_inventory_error
+        .as_deref()
+        .unwrap()
+        .contains("Owned malformed manifest"));
+    assert!(app
+        .available_viz_pages()
+        .contains(&crate::scene3d::VizPage::Components));
+}
+
+#[test]
 fn hydrate_reloads_persisted_taint_and_exploit_snapshots() {
     let dir = tempfile::tempdir().expect("tempdir");
     kuzushi_core::capabilities::save_persistent_taint_flow(
@@ -156,6 +255,34 @@ fn worklist_rank_result_is_captured_into_app_state() {
         .worklist_snapshot_for(temp.path(), None)
         .expect("worklist captured");
     assert_eq!(snapshot["rows"][0]["path"], "src/deep.rs");
+}
+
+#[test]
+fn an_explicit_child_worklist_preserves_parent_evidence_focus_and_draft() {
+    let root = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.path().to_path_buf()));
+    app.cache_tool_snapshot("worklist:rank", &worklist_rank_result());
+    let draft = "owned unsubmitted draft";
+    app.set_input(draft);
+    app.set_cursor(4);
+    let origin = app.shell_view();
+    let mut child = worklist_rank_result();
+    child["data"]["target"] = json!(root.path().join("child"));
+    child["data"]["rows"][0]["path"] = json!("child-only.rs");
+    app.cache_tool_snapshot("worklist:rank", &child);
+    assert_eq!(app.shell_view(), origin);
+    assert_eq!((app.input(), app.cursor()), (draft, 4));
+    let snapshot = app
+        .domain()
+        .worklist_snapshot_for(root.path(), None)
+        .unwrap();
+    assert_eq!(snapshot["rows"][0]["path"], "src/deep.rs");
+    assert!(!worklist_result_matches_target(&app, &child["data"]));
+    child["data"]["target"] = json!(root.path());
+    assert!(worklist_result_matches_target(&app, &child["data"]));
+    child["data"]["target"] = json!(3);
+    assert!(!worklist_result_matches_target(&app, &child["data"]));
 }
 
 #[test]
