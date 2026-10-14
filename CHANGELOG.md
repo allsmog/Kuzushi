@@ -45,6 +45,21 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- The entry-point browser's clip disclosure counts catalog entries, not pane
+  rows. Its title names the selection in entry terms (`1/1250`) but derived
+  `+N above`/`+N below` from a row total that folded the disposition group
+  headers in with the entries. A viewport too short to clear the first
+  header therefore scrolled that header past the top and reported it as a
+  hidden entry: at the true first of 1250 entries an 80x24 terminal read
+  `ENTRY POINTS · 1/1250 · +1 above`, claiming content above a row with
+  nothing above it. The same arithmetic inflated both counts by every header
+  outside the window, so a multi-group catalog overstated what it was
+  hiding on either side. `entry_list_window` now reports the entries the
+  viewport leaves out, measured by discounting the header rows, and a
+  header scrolled out of view is treated as the pane chrome it is. The
+  honesty contract the disclosure exists to serve — never hide a catalog row
+  in silence — is unchanged; it no longer invents one. Reported against a
+  real target in #172 (2026-10-07).
 - A gallery line page's position label counts the projection's rows, not the
   display lines a canvas wrapped them into. One real 2731-component tree
   reported three totals for the same model: `rows 1-10/2731` on Map's
