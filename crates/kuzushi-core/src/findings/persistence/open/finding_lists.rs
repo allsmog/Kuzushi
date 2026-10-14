@@ -93,6 +93,22 @@ impl FindingStore {
         collect_filtered_findings(self, self.policy_projected_findings(policy)?, filter)
     }
 
+    /// Full-ledger fetch under the policy the caller resolved.
+    ///
+    /// An export is a reader of the same ledger an operator reviewed, so it
+    /// must fold the same way. [`Self::list_all_findings`] projects the
+    /// compatibility generation only, which collapses repeated observations of
+    /// one durable finding but keeps two same-issue rows from different
+    /// channels apart. Exporting that set published a finding count the Review
+    /// ledger denied on the same screen, and assigned export aliases by
+    /// positions the shell's own alias resolution never produced.
+    pub fn list_all_findings_with_identity_policy(
+        &self,
+        policy: IdentityFoldPolicy,
+    ) -> Result<Vec<Finding>> {
+        self.policy_projected_findings(policy)
+    }
+
     pub fn list_relevant_findings_with_identity_policy(
         &self,
         policy: IdentityFoldPolicy,

@@ -1482,7 +1482,7 @@ mod tests {
         // verification) reads `unverified`.
         assert!(body.contains("not_recorded,unverified,not attempted"));
         assert!(body.contains(
-            "all,2,2,cwe;reviewDecisionReason;snoozedUntil;evidence.sourceCount;evidence.rawHttpBlobPresent"
+            "all,2,2,reviewDecisionBasis;lessons;cwe;reviewDecisionReason;snoozedUntil;evidence.sourceCount;evidence.rawHttpBlobPresent"
         ));
         assert!(body.contains("fixture/rule-0"));
         assert!(body.contains("fixture/rule-1"));
@@ -1567,6 +1567,61 @@ mod tests {
         let record: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(record["ruleId"], "fixture/rule-0");
         assert_eq!(record["kind"], "scanner_finding");
+    }
+
+    /// An export is a reader of the ledger an operator reviewed, so it must
+    /// present the same finding set. The workspace export projected the
+    /// compatibility generation only, which keeps two same-issue rows apart,
+    /// so an export published a count the Review ledger denied on the same
+    /// screen. Both folds are asserted, because a fix that simply hardcoded a
+    /// more aggressive fold would be the same defect with a different number.
+    #[test]
+    fn workspace_export_folds_by_the_bound_identity_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-1", workspace.root(), "completed")
+            .unwrap();
+        // Two channels reporting one issue: the store derives a separate
+        // identity for each, so only a dedup-keyed fold folds them.
+        for (rule_id, line) in [("fixture/channel-a", 10), ("fixture/channel-b", 20)] {
+            let mut finding = fixture_finding(rule_id, Severity::High, line);
+            finding.dedup_key = Some("same-issue".to_string());
+            store.insert_finding("run-1", &finding).unwrap();
+        }
+
+        for (policy, expected) in [
+            (crate::findings::IdentityFoldPolicy::Legacy, 1),
+            (crate::findings::IdentityFoldPolicy::Aggressive, 2),
+        ] {
+            let output = tmp.path().join(format!("{policy:?}.json"));
+            let report = export_workspace_findings_with_options(
+                &workspace,
+                &output,
+                &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+                    .with_identity_fold(Some(policy)),
+            )
+            .unwrap();
+
+            assert_eq!(report.count, expected, "export count under {policy:?}");
+            assert_eq!(
+                report.count,
+                store
+                    .list_all_findings_with_identity_policy(policy)
+                    .unwrap()
+                    .len(),
+                "export disagrees with the ledger under {policy:?}"
+            );
+            let document: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+            assert_eq!(document["totalCount"], expected);
+            assert_eq!(document["findings"].as_array().unwrap().len(), expected);
+        }
+
+        // The unfolded compatibility projection the export used to read keeps
+        // both rows, which is the count no ledger view reports.
+        assert_eq!(store.list_all_findings().unwrap().len(), 2);
     }
 
     #[test]
