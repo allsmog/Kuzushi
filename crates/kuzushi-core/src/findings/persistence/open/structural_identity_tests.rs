@@ -35,6 +35,12 @@ fn persist_scan(store: &FindingStore, target: &Path, run_id: &str, engine: &dyn 
     store.insert_findings(run_id, &findings).unwrap();
 }
 
+fn scan_scope(store: &FindingStore, runs: &[&str], policy: IdentityFoldPolicy) -> Vec<Finding> {
+    store
+        .list_distinct_findings_for_scan_ids_with_identity_policy(runs, policy)
+        .unwrap()
+}
+
 fn identities(findings: &[Finding]) -> BTreeSet<String> {
     findings
         .iter()
@@ -65,7 +71,7 @@ fn repeated_producer_observation_uses_the_same_safe_projection_as_review() {
         store.insert_finding(run, &finding).unwrap();
     }
     let runs = ["first-pass", "second-pass"];
-    let findings = store.list_distinct_findings_for_scan_ids(&runs).unwrap();
+    let findings = scan_scope(&store, &runs, IdentityFoldPolicy::Safe);
     assert_eq!(findings.len(), 1);
     assert_eq!(
         store
@@ -209,9 +215,7 @@ fn run_distinct_findings_never_fold_distinct_weak_identity_observations() {
     }
 
     let rows = store.list_findings_for_scan_id("run-lines").unwrap();
-    let distinct = store
-        .list_distinct_findings_for_scan_ids(&["run-lines"])
-        .unwrap();
+    let distinct = scan_scope(&store, &["run-lines"], IdentityFoldPolicy::Safe);
 
     assert_eq!(identities(&rows).len(), 1, "identical statements stay weak");
     assert_eq!(distinct.len(), 2);
@@ -221,4 +225,69 @@ fn run_distinct_findings_never_fold_distinct_weak_identity_observations() {
             .unwrap(),
         2
     );
+}
+
+fn secret_in_one_bucket(line: u32, locator: &str, fingerprint: &str) -> Finding {
+    let mut finding = Finding::new_tool(
+        "secret-scan",
+        "secret/aws-access-key",
+        "src/config.js",
+        line,
+        None,
+        Severity::High,
+        "Hardcoded AWS access key (CWE-798)",
+    );
+    finding.fingerprint = fingerprint.into();
+    finding.symbol_locator = Some(locator.into());
+    finding
+}
+
+/// Two secrets inside one dedup bucket: distinct source-locator identities
+/// over one shared dedup key, so the policies genuinely disagree about how
+/// many findings these runs hold. The ledger an operator reads beside a scan
+/// receipt folds the corpus through the effective identity-fold policy, which
+/// the approval gate keeps at `legacy` until an operator approves the identity
+/// audit. A run-scoped reader that chose `Safe` for itself therefore reported
+/// one more finding than the ledger directly above it.
+#[test]
+fn a_run_scoped_count_folds_like_the_ledger_under_every_policy() {
+    let target = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(target.path().join("src")).unwrap();
+    std::fs::write(target.path().join("src/config.js"), "a\nb\nc\n").unwrap();
+    let store = open_store(target.path());
+    store
+        .record_run_started("run-native", target.path(), "running")
+        .unwrap();
+    store
+        .insert_findings(
+            "run-native",
+            &[
+                secret_in_one_bucket(1, "secret:aws:aaa#1", "fp-first"),
+                secret_in_one_bucket(2, "secret:aws:bbb#1", "fp-second"),
+            ],
+        )
+        .unwrap();
+
+    let runs = ["run-native"];
+    let counted = |policy| scan_scope(&store, &runs, policy).len();
+    let ledger = |policy| {
+        store
+            .list_relevant_findings_with_identity_policy(policy)
+            .unwrap()
+            .len()
+    };
+
+    for policy in [
+        IdentityFoldPolicy::Legacy,
+        IdentityFoldPolicy::Safe,
+        IdentityFoldPolicy::Aggressive,
+    ] {
+        assert_eq!(
+            counted(policy),
+            ledger(policy),
+            "{policy:?}: the run-scoped count disagreed with the ledger"
+        );
+    }
+    assert_eq!(counted(IdentityFoldPolicy::Legacy), 1);
+    assert_eq!(counted(IdentityFoldPolicy::Safe), 2);
 }

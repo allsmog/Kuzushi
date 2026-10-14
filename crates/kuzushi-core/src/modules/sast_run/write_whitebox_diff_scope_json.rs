@@ -4,10 +4,11 @@ pub(in crate::modules) fn write_whitebox_diff_scope_json(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
     run_ids: &SastRunIds,
+    fold: IdentityFoldPolicy,
     artifacts: &SastRunArtifacts,
     diff_base: &str,
 ) -> Result<Value> {
-    let current_findings = findings_for_sast_runs(store, run_ids)?;
+    let current_findings = findings_for_sast_runs(store, run_ids, fold)?;
     let previous_findings = store.list_findings(FindingListFilter::MAX_LIMIT)?;
     let artifact_path = artifacts.dir.join("whitebox-diff-scope.json");
     let mut report = serde_json::to_value(build_whitebox_diff_scope_report(

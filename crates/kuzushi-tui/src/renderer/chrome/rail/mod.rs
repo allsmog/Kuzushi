@@ -82,11 +82,13 @@ mod tests {
     }
 
     #[test]
-    fn rail_leads_with_engagement_and_ends_with_cost() {
+    fn rail_leads_with_target_before_engagement_and_ends_with_cost() {
+        // Engagement chrome stays hidden until `Start Map` commits it, so an
+        // uncommitted shell anchors the rail on its TARGET section.
         let app = ShellApp::new(V2Config::default(), None);
         let rows = rendered_rows(&app, 36, 12);
 
-        assert!(rows[0].contains("ENGAGEMENT"));
+        assert!(rows[0].contains("TARGET"));
         assert!(rows.iter().any(|row| row.contains("COST")));
         assert!(rows.iter().any(|row| row.contains("no target")));
     }

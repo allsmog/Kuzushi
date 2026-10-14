@@ -37,7 +37,7 @@ fn execute(
 ) -> Value {
     let record = ToolRunRecord::new(fixture.root.path(), run, "tool", tool);
     try_record_tool_run_started_with_reproducibility(
-        record.clone(),
+        record,
         &input,
         None,
         None,
