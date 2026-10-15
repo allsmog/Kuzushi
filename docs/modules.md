@@ -2511,7 +2511,12 @@ fail explicitly. No repair loop or replacement job starts automatically.
 
 The Context picker's scanner preview reads the matching study receipt. It
 labels saved text and current or historical source state; the full immutable
-document remains separate. `threat-model:read` accepts both references for the
+document remains separate. Frozen read previews include `frozenReference` as
+inspection metadata. The picker matches this object reference and the context
+revision before accepting a completion; late reads cannot replace the current
+plan's preview or reset its position. The reference is added to the returned
+copy, so it creates no self-reference in the content object.
+`threat-model:read` accepts both references for the
 same historical inspection. Earlier approved model work without the new
 binding requires explicit preparation and approval of a replacement, retaining
 prior attempts and spending. Direct unbudgeted invocations without this option

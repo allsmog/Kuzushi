@@ -90,6 +90,7 @@ fn selected_preview(
         .ok()
         .map(|current| current == frozen.source_identity);
     let mut preview = frozen.preview;
+    preview["frozenReference"] = value.clone();
     preview["sourceMatchesAtInspection"] = json!(matches);
     Ok(Some(preview))
 }

@@ -157,6 +157,14 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 14, 2026: [exact context receipt matching](../assessments/context-receipt-matching-2026-10-14.md)
+prevents late ordinary or different-projection reads from replacing a study's
+saved scanner preview. Matching reuses the dispatch input builder and preserves
+nonzero narrow-terminal scroll and composer state. The locked build and 33
+focused Rust tests pass. Sequential J273/J121 record 136 machine passes and
+109 live capture pairs, with 18 human judgments still pending. Four requests
+are fully intercepted; no live allowance is spent. Broad milestones remain open.
+
 October 14, 2026: [frozen scanner text](../assessments/frozen-scanner-context-2026-10-14.md)
 binds exact rendered threat-model text and its disclosures into existing fixed
 job fingerprints. Execution rechecks source and reviewed lessons without

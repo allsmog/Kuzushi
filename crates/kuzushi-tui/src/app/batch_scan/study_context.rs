@@ -295,28 +295,40 @@ impl ShellApp {
         if data["target"].as_str().map(std::path::Path::new) != self.target() {
             return;
         }
+        if !self.matches_study_context_read(data) {
+            return;
+        }
         let target = self.target_owned();
         self.edit_context_picker(|config| {
             let Some(picker) = config.context_picker.as_mut() else {
                 return;
             };
-            if serde_json::from_value::<ThreatModelRef>(data["modelRef"].clone()).ok()
-                == picker.selected
-            {
-                match context_preview(data, target.as_deref()) {
-                    Ok(preview) => {
-                        picker.preview = Some(preview);
-                        picker.detail_scroll = 0;
-                        config.notice = None;
-                    }
-                    Err(error) => {
-                        picker.preview = None;
-                        picker.diagram_visible = false;
-                        config.notice = Some(format!("Context preview unavailable: {error:#}"));
-                    }
+            match context_preview(data, target.as_deref()) {
+                Ok(preview) => {
+                    picker.preview = Some(preview);
+                    picker.detail_scroll = 0;
+                    config.notice = None;
+                }
+                Err(error) => {
+                    picker.preview = None;
+                    picker.diagram_visible = false;
+                    config.notice = Some(format!("Context preview unavailable: {error:#}"));
                 }
             }
         });
+    }
+
+    fn matches_study_context_read(&self, data: &Value) -> bool {
+        let Some(reference) = self
+            .study_context_picker()
+            .and_then(|picker| picker.selected.as_ref())
+        else {
+            return false;
+        };
+        let expected = self.study_context_inspection_input(reference);
+        data["modelRef"] == json!(reference)
+            && expected.get("threatModelDigestRef")
+                == data["scannerContextPreview"].get("frozenReference")
     }
 
     fn accept_study_context(&mut self) {

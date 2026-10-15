@@ -2,6 +2,53 @@ use super::*;
 use crate::app::StudyContextTextView;
 
 #[test]
+fn late_context_reads_cannot_replace_the_current_frozen_projection() {
+    let (root, mut app, first, _) = fixture();
+    app.handle_study_context_key(KeyCode::Up);
+    let response = inspect(&app, root.path(), &first);
+    let current = json!({"schemaVersion":1,"object":{"hash":"synthetic-current-projection"}});
+    let picker = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .context_picker
+        .as_mut()
+        .unwrap();
+    picker.scan_input["threatModelRef"] = json!(first);
+    picker.scan_input["threatModelDigestRef"] = current.clone();
+    let mut matching = response.clone();
+    matching["data"]["scannerContextPreview"]["frozenReference"] = current;
+    matching["data"]["scannerContextPreview"]["origin"] = json!("frozen-study");
+    app.cache_tool_snapshot("threat-model:read", &matching);
+    let expected = app.study_context_picker().unwrap().preview.clone();
+    assert!(expected.is_some());
+    app.set_input("retained investigation draft");
+    app.set_cursor(6);
+    app.handle_study_context_key(KeyCode::Char('p'));
+    app.reduce_resize(40, 12);
+    app.handle_study_context_key(KeyCode::End);
+    let scroll = app.study_context_picker().unwrap().detail_scroll;
+    assert!(scroll > 0);
+    for reference in [Value::Null, json!({"synthetic":"older-projection"})] {
+        let mut late = response.clone();
+        if !reference.is_null() {
+            late["data"]["scannerContextPreview"]["frozenReference"] = reference;
+        }
+        app.cache_tool_snapshot("threat-model:read", &late);
+        let picker = app.study_context_picker().unwrap();
+        assert_eq!(picker.preview, expected);
+        assert_eq!(picker.detail_scroll, scroll);
+        assert_eq!(picker.text_view, StudyContextTextView::Scanner);
+        assert_eq!(
+            (app.input(), app.cursor()),
+            ("retained investigation draft", 6)
+        );
+    }
+}
+
+#[test]
 fn inspection_binds_saved_scanner_bytes_only_to_the_matching_context() {
     let (_root, mut app, first, active) = fixture();
     let frozen = json!({"schemaVersion":1,"object":{"hash":"synthetic-reference"}});
@@ -31,6 +78,19 @@ fn inspection_binds_saved_scanner_bytes_only_to_the_matching_context() {
         json!(first)
     );
     assert_eq!((app.input(), app.cursor()), ("retained draft", 5));
+}
+
+#[test]
+fn a_saved_projection_cannot_replace_an_unbound_revision_preview() {
+    let (root, mut app, first, _) = fixture();
+    app.handle_study_context_key(KeyCode::Up);
+    let mut response = inspect(&app, root.path(), &first);
+    app.cache_tool_snapshot("threat-model:read", &response);
+    let expected = app.study_context_picker().unwrap().preview.clone();
+    response["data"]["scannerContextPreview"]["frozenReference"] =
+        json!({"synthetic":"unrequested-projection"});
+    app.cache_tool_snapshot("threat-model:read", &response);
+    assert_eq!(app.study_context_picker().unwrap().preview, expected);
 }
 
 #[test]

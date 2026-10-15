@@ -1143,6 +1143,13 @@ part of every release commit.
   Unbudgeted direct calls retain their compatibility renderer. Imported variant
   patterns are described as unverified leads, not confirmed current findings.
 
+- Frozen scanner-context inspection adds `frozenReference` to its version-1
+  preview metadata. This identifies the authenticated object read, without
+  changing saved text or artifact formats. The study picker matches both the
+  context revision and this reference before accepting a completed read. Late
+  ordinary reads or another saved projection cannot replace the current plan's
+  preview, scroll or draft. Ordinary revision inspection remains unbound.
+
 - Discovery plans add `scanContextRef` schema 1 to pin the agentic adapter's
   supplemental Map text in an authenticated, target-bound content object. The
   64 KiB limit includes metadata. Empty snapshots remain empty across retries

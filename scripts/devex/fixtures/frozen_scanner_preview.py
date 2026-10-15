@@ -36,6 +36,7 @@ def verify(root, evidence, stage):
     data = run_tool(os.environ["KUZUSHI_NATIVE_BIN"], root, evidence, stage + "-read", "threat-model:read",
                     {"threatModelRef": refs["selected"], "threatModelDigestRef": frozen})["data"]
     preview = data["scannerContextPreview"]
+    assert preview["frozenReference"] == frozen
     assert preview["origin"] == "frozen-study" and preview["sourceMatchesAtInspection"] is True
     assert preview["sha256"] == "sha256:" + hashlib.sha256(preview["text"].encode()).hexdigest()
     assert "alpha" in preview["text"] and "beta" not in preview["text"]
@@ -49,6 +50,7 @@ def verify(root, evidence, stage):
     check_empty_store(root)
     save(evidence, stage + "-check", {"providerRequests": 0, "jobsStarted": 0, "plans": 1,
         "fixedJobs": 3, "activeContextUnchanged": True, "sourceExecuted": False,
+        "receiptReferenceMatchesPlan": True,
         "savedTextHash": preview["sha256"], "operatorVisualApproval": False})
 
 
