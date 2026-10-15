@@ -73,7 +73,7 @@ fn selected_detail(state: &ScopeReviewState) -> Vec<String> {
             format!("Scope id: {}", scope.id),
         ];
         lines.push(format!(
-            "Inventory limited: {}. Unbound included files across all scopes: {}.",
+            "Inventory limited: {}. Included files without content identity: {}.",
             review.coverage.inventory_limited, review.identity_omissions.total
         ));
         lines.push(format!(
@@ -178,7 +178,8 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
 
 fn source_detail(review: &kuzushi_core::workspace::ScanScopeReview) -> Vec<String> {
     let source = &review.record.source;
-    vec![format!("Recorded Git SHA: {}", source.git_revision.as_deref().unwrap_or("unavailable")), format!("Recorded working tree: {}", match source.dirty { Some(true) => "modified", Some(false) => "clean", None => "unavailable" }),
+    vec![format!("Inventory membership binding: {}", if source.enumeration_hash.is_some() { "recorded; checked again before new work" } else { "legacy scope; build and accept a new inventory draft before new work" }),
+        format!("Recorded Git SHA: {}", source.git_revision.as_deref().unwrap_or("unavailable")), format!("Recorded working tree: {}", match source.dirty { Some(true) => "modified", Some(false) => "clean", None => "unavailable" }),
         format!("Source snapshot: {}", source.snapshot_hash), format!("Inventory: {}", review.record.inventory_hash),
         "Reads show recorded source. Editing and acceptance recheck current content and Git revision. A later scan missing a finding does not prove it was fixed.".into()]
 }

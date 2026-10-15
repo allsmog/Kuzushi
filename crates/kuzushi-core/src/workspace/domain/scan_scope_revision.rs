@@ -8,6 +8,9 @@ pub struct ScanScopeSource {
     pub tree_hash: String,
     pub git_revision: Option<String>,
     pub dirty: Option<bool>,
+    /// Binds the enumerated membership separately from working-tree contents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enumeration_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

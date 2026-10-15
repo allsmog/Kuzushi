@@ -193,6 +193,17 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 15, 2026: [Scope membership audit](../assessments/scope-membership-2026-10-15.md)
+reproduces stale inventory after staging an existing untracked file without
+changing SHA or source bytes. Captured enumeration and metadata now bind cache
+reuse and current-use approval. Legacy history stays readable, with an explicit
+rebuild requirement for new work. Core scope production feeds a fixed three-job
+study draft through shared dispatch; the draft stays unapproved and unstarted.
+There are 193 focused checks, a workspace build and sequential native J278 with
+19 machine passes, zero failures and five pending human judgments. No provider
+requests occur. This repairs an audited Core path without closing a broad
+milestone or claiming complete module usefulness.
+
 October 15, 2026: [Scope source comparison](../assessments/scope-source-comparison-2026-10-15.md)
 adds visible last-observed SHA comparison and reload without making repository
 facts an authorization gate. A matching SHA leaves contents unchecked; changed

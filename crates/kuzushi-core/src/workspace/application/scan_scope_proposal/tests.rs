@@ -1,6 +1,7 @@
 use super::*;
 use std::fs;
 mod additions;
+mod membership;
 
 fn context<'a>(
     workspace: &'a WorkspaceTarget,

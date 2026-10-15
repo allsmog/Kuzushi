@@ -1,5 +1,12 @@
 # Module maturity tiers
 
+Core scope review now binds inventory membership independently of working-file
+contents. Staging changes, cache reuse, legacy reading, current-use refusal and
+finite-study consumption have scoped evidence in the
+[membership audit](assessments/scope-membership-2026-10-15.md). Legacy scopes need
+an explicit rebuild and acceptance before new work. This does not qualify live
+model usefulness, giant repositories or every module's complete option matrix.
+
 CodeQL database preparation and scanning are Labs and auxiliary. Preparation
 retains explicit repository-execution consent and produces a source-bound
 database, without completing Map. Query scans require an authenticated managed

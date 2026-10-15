@@ -1,5 +1,18 @@
 # Releasing Kuzushi
 
+- Scope sources add optional `enumerationHash`, binding the captured Git path
+  list and inspected membership separately from working-file content. Staging
+  an existing untracked file now invalidates inventory reuse and current-use
+  approval even when SHA and content hashes are unchanged. Cache paths include
+  this binding. Historical records without the field remain readable, but
+  edits, acceptance, study preparation and execution require a newly built and
+  accepted membership-bound scope. Existing findings, spending and completed
+  history are preserved; no jobs or allowances are automatically approved.
+  Rust callers constructing `ScanScopeSource` literals must add
+  `enumeration_hash: None` for legacy data or the recorded binding for new data.
+  Older strict readers do not understand the added field; upgrade readers
+  before opening new records and retain original history when rolling back.
+
 - Scope review compares its recorded revision with asynchronously observed
   repository facts. A differing SHA shows `SHA DIFFERS`; matching SHAs leave
   file content explicitly unchecked. `r reload` refreshes saved scope history

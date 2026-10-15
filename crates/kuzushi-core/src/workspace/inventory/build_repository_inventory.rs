@@ -4,7 +4,7 @@ use crate::workspace::infrastructure::{
 };
 use std::io::Read;
 
-const MAX_REPOSITORY_ENTRIES: usize = 100_000;
+pub(crate) const MAX_REPOSITORY_ENTRIES: usize = 100_000;
 pub(crate) const MAX_REPOSITORY_INSPECTED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_FILE_INSPECTION_BYTES: usize = 256 * 1024;
 
@@ -61,6 +61,41 @@ pub(crate) fn build_repository_inventory_with_limits(
     on_entries: &mut dyn FnMut(usize),
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<RepositoryInventory> {
+    build_with_enumeration(
+        root,
+        max_entries,
+        max_inspected_bytes,
+        on_entries,
+        should_cancel,
+        None,
+    )
+}
+
+pub(crate) fn build_repository_inventory_from_enumeration(
+    root: &Path,
+    on_entries: &mut dyn FnMut(usize),
+    should_cancel: &dyn Fn() -> bool,
+    enumeration: crate::workspace::GitIndexEnumeration,
+    max_inspected_bytes: usize,
+) -> Result<RepositoryInventory> {
+    build_with_enumeration(
+        root,
+        MAX_REPOSITORY_ENTRIES,
+        max_inspected_bytes,
+        on_entries,
+        should_cancel,
+        Some(enumeration),
+    )
+}
+
+fn build_with_enumeration(
+    root: &Path,
+    max_entries: usize,
+    max_inspected_bytes: usize,
+    on_entries: &mut dyn FnMut(usize),
+    should_cancel: &dyn Fn() -> bool,
+    enumeration: Option<crate::workspace::GitIndexEnumeration>,
+) -> Result<RepositoryInventory> {
     let root = root
         .canonicalize()
         .with_context(|| format!("repository root {} does not exist", root.display()))?;
@@ -72,8 +107,14 @@ pub(crate) fn build_repository_inventory_with_limits(
     let mut budget = InventoryBudget::new(max_entries, max_inspected_bytes, on_entries);
     budget.cancel = Some(should_cancel);
     let reader = InventoryRoot::new(&root)?;
-    let enumeration =
-        enumerate_repository(&root, &reader, &mut builder, &mut budget, should_cancel)?;
+    let enumeration = enumerate_repository(
+        &root,
+        &reader,
+        &mut builder,
+        &mut budget,
+        should_cancel,
+        enumeration,
+    )?;
     reader.verify_current_root()?;
     let inspection = budget.receipt(enumeration);
     let truncation = budget
@@ -88,10 +129,15 @@ fn enumerate_repository(
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
     should_cancel: &dyn Fn() -> bool,
+    enumeration: Option<crate::workspace::GitIndexEnumeration>,
 ) -> Result<&'static str> {
     use crate::workspace::GitIndexEnumeration;
-    match crate::workspace::git_tracked_relative_paths(root, budget.max_entries, should_cancel)? {
-        GitIndexEnumeration::Tracked(paths) => {
+    let enumeration = enumeration.map_or_else(
+        || crate::workspace::git_tracked_relative_paths(root, budget.max_entries, should_cancel),
+        Ok,
+    )?;
+    match enumeration {
+        GitIndexEnumeration::Tracked { paths, .. } => {
             walk_git_index(root, reader, &paths, builder, budget)?;
             Ok("git-index")
         }

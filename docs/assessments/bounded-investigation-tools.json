@@ -2424,7 +2424,7 @@
       ],
       "executionEvidence": "Shared prepared dispatch, 35 focused scope tests, 12 final native CLI cases and J81 native TUI evidence cover inventory/draft creation, exact reads, named split, merge, rename, scope/path exclusion, acceptance, file paging, source drift, committed history and recovery. J81 has 23 machine passes and 14 separately judged passing screens, with actual no-color restart. See scope-review-foundation-2026-10-05.md. No scans or provider requests start. The additive latest-head operation and scope UI lock cancellation are verified by J82 (11 machine passes, six separate screen judgments); 38 focused scope tests and source traversal regressions pass. See source-traversal-2026-10-05.md.",
       "readinessVerdict": "scoped native editing, acceptance, finite planning and historical export evidence; live proposal usefulness and complete monorepo workflow pending",
-      "scopeEvidence": "Membership and coverage are validated against enumerated inventory. Included members absent from authenticated content identity block acceptance. This does not prove scanner scope enforcement or complete inventory.",
+      "scopeEvidence": "Membership and coverage are validated against enumerated inventory. Included members absent from authenticated content identity block acceptance. This does not prove scanner scope enforcement or complete inventory. October 15 membership audit reproduces staging drift with unchanged content identity. New enumeration binding invalidates stale inventory and current use; history remains readable. Shared consumer refuses legacy or changed membership and accepts a newly reviewed three-job draft. See scope-membership-2026-10-15.md.",
       "resourceEvidence": "Eight primary scopes plus optional shared context; previews/pages capped at 128. Inventory limits remain 100,000 entries/512 MiB inspection/256 KiB per file. Iterative source identity has a separate 1,000,000-entry/1,000,000-file/16-GiB bound and 64-MiB per-file limit. Basic deep/wide traversal, byte growth and cancellation are tested. No model calls or scan allowances are created. Large-scale and cross-platform performance remain unproven.",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
       "auditDimensions": {
@@ -2435,7 +2435,7 @@
         "artifactConsumption": "Accepted revision 3 supplies two literal members to a fixed three-job study. Revision 5 supplies three members to a separate fixed plan. The original plan remains byte-identical and its native JSON report retains the old exclusion. No scan result is manufactured.",
         "failureAndRecovery": "Native omitted exclusion acknowledgement, unknown inclusion and planning an unaccepted revision refuse. Entered invalid text survives correction. Core checks source drift, concurrent publication, interrupted queue history and invalid scopes; native no-color restart retains the revised acceptance. All IO timing remains pending.",
         "approvedResources": "The native audit creates two finite unexecuted three-job plans with one worker, zero provider reservations and zero work attempts. Only the original plan receives an offline one-call allowance, all protected for Review. Scope inventory bounds remain unchanged; live cost/usefulness remain unproven.",
-        "scopeEnforcement": "Whole repository preserves exclusions and reasons. Inclusion removes one exact rule, retains other rules, recomputes coverage and clears acceptance. The owned source stays unchanged. This planning audit does not newly qualify scanner/runtime file access.",
+        "scopeEnforcement": "Whole repository preserves exclusions and reasons. Inclusion removes one exact rule, retains other rules, recomputes coverage and clears acceptance. The owned source stays unchanged. This planning audit does not newly qualify scanner/runtime file access. Captured Git paths drive inventory; complete captured output and bounded metadata membership bind cache reuse and current-use checks. Equivalent existing-file staging preserves reuse. Legacy records require explicit rebuild before new work.",
         "interfaceParity": "Descriptor-backed shell/run dispatch, visible action/form, six viewport sizes, real paging and no-color restart in J170. Scan-engine embedding, all global configurations, platform behavior and full product parity remain pending."
       },
       "declaredModuleMaturity": "core",
@@ -9634,5 +9634,20 @@
     "capturePairs": 36,
     "pendingHuman": 3,
     "providerRequests": 0
+  },
+  "scopeMembershipAudit": {
+    "tools": [
+      "pack:scopes",
+      "campaign:study"
+    ],
+    "sourceBeforeChange": "fa3f844789070d6cfce3ef3048157dfb46219419",
+    "assessment": "docs/assessments/scope-membership-2026-10-15.md",
+    "reproduced": "Staging an existing untracked file reused stale inventory and allowed old-scope acceptance despite unchanged SHA and content hashes.",
+    "result": "Captured enumeration and metadata bind scope cache and current-use checks. Historical legacy records remain readable; explicit rebuild and acceptance are required for new work.",
+    "coreChecks": 154,
+    "tuiScopeChecks": 39,
+    "nativeJourney": "J278",
+    "newProviderRequests": 0,
+    "limits": "The study draft is not approved or executed. Human judgments, large-repository performance and full investigation qualification remain open."
   }
 }

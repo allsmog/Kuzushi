@@ -51,8 +51,15 @@ pub(super) fn cache_inventory_hash(
 
 fn cache_path(source: &ScanScopeSource) -> Result<PathBuf> {
     crate::identity::Blake3Hash::new(source.snapshot_hash.clone())?;
+    let suffix = match &source.enumeration_hash {
+        Some(hash) => {
+            crate::identity::Blake3Hash::new(hash.clone())?;
+            format!("-{}", hash)
+        }
+        None => String::new(),
+    };
     Ok(PathBuf::from(".kuzushi/v3/scan-scopes/snapshots")
-        .join(format!("{}.json", source.snapshot_hash)))
+        .join(format!("{}{suffix}.json", source.snapshot_hash)))
 }
 
 pub(super) fn save_inventory(

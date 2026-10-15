@@ -160,3 +160,20 @@ fn failed_scope_request_reveals_its_notice_after_paging_without_replacing_draft(
     assert!(text.contains("Action stopped"));
     assert!(text.contains("r reload"));
 }
+
+#[test]
+fn legacy_scope_binding_is_visible_without_changing_its_recorded_approval() {
+    let (_root, app, _) = accepted_repository();
+    let mut state = app.scope_review().unwrap().clone();
+    let mut legacy = state.review.as_deref().unwrap().clone();
+    legacy.record.source.enumeration_hash = None;
+    state.review = Some(std::sync::Arc::new(legacy));
+    let source = scope_source_view(&app, &state);
+    assert!(source.unbound());
+    assert!(scope_title(&state, &source).contains("MEMBERSHIP UNBOUND"));
+    assert_eq!(source.label(), "Membership unbound; rebuild required");
+    assert!(state.review.as_ref().unwrap().record.acceptance.is_some());
+    let text =
+        crate::ui_view_models::scope_review::scope_detail_lines(&state, &source, 120).join("\n");
+    assert!(text.contains("Included files without content identity: 0"));
+}

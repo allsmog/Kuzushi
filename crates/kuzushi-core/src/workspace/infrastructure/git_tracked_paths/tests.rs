@@ -19,10 +19,38 @@ fn tracked_paths_keep_only_the_processing_limit_and_one_overflow_witness() {
     }
     git(root.path(), &["add", "."]);
     let result = git_tracked_relative_paths(root.path(), 2, &|| false).unwrap();
-    let GitIndexEnumeration::Tracked(paths) = result else {
+    let GitIndexEnumeration::Tracked { paths, .. } = result else {
         panic!("expected tracked paths")
     };
     assert_eq!(paths, ["a.rs", "b.rs", "c.rs"]);
+}
+
+#[test]
+fn fingerprint_covers_paths_beyond_the_retained_processing_prefix() {
+    let root = tempfile::tempdir().unwrap();
+    git(root.path(), &["init", "--quiet"]);
+    for name in ["a.rs", "z.rs"] {
+        std::fs::write(root.path().join(name), "// owned inert source\n").unwrap();
+    }
+    git(root.path(), &["add", "a.rs"]);
+    let GitIndexEnumeration::Tracked {
+        paths: first,
+        fingerprint: before,
+    } = git_tracked_relative_paths(root.path(), 0, &|| false).unwrap()
+    else {
+        panic!("missing first index")
+    };
+    git(root.path(), &["add", "z.rs"]);
+    let GitIndexEnumeration::Tracked {
+        paths: second,
+        fingerprint: after,
+    } = git_tracked_relative_paths(root.path(), 0, &|| false).unwrap()
+    else {
+        panic!("missing second index")
+    };
+    assert_eq!(first, second);
+    assert_eq!(first, ["a.rs"]);
+    assert_ne!(before, after);
 }
 
 #[test]

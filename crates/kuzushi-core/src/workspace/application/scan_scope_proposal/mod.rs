@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 
 mod identity_coverage;
 mod inventory;
+mod membership;
 mod persistence;
 mod revision;
 mod selection;

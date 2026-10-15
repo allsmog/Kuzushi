@@ -16,7 +16,10 @@ use std::fs;
 use std::path::Path;
 mod add_source_file;
 mod build_repository_inventory;
-pub(crate) use build_repository_inventory::MAX_REPOSITORY_INSPECTED_BYTES;
+pub(crate) use build_repository_inventory::{
+    build_repository_inventory_from_enumeration, MAX_REPOSITORY_ENTRIES,
+    MAX_REPOSITORY_INSPECTED_BYTES,
+};
 mod extract_first_quoted;
 mod generated_vendor_path;
 mod inspect_entrypoints;

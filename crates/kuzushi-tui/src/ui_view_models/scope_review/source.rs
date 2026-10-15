@@ -3,6 +3,7 @@ use crate::app::{ScopeReviewState, ShellApp};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScopeRevisionStatus {
     NoInventory,
+    Unbound,
     Checking,
     Unavailable,
     Different,
@@ -27,6 +28,12 @@ pub(crate) fn scope_source_view(app: &ShellApp, state: &ScopeReviewState) -> Sco
     ScopeSourceView {
         status: if state.review.is_none() {
             ScopeRevisionStatus::NoInventory
+        } else if state
+            .review
+            .as_ref()
+            .is_some_and(|review| review.record.source.enumeration_hash.is_none())
+        {
+            ScopeRevisionStatus::Unbound
         } else {
             revision_status(
                 recorded,
@@ -66,6 +73,9 @@ fn matched_revision(dirty: Option<bool>) -> ScopeRevisionStatus {
 }
 
 impl ScopeSourceView {
+    pub fn unbound(&self) -> bool {
+        self.status == ScopeRevisionStatus::Unbound
+    }
     pub fn differs(&self) -> bool {
         self.status == ScopeRevisionStatus::Different
     }
@@ -92,6 +102,7 @@ fn unchecked_label(state: ScopeRevisionStatus) -> &'static str {
     match state {
         ScopeRevisionStatus::NoInventory => "Build inventory to bind source",
         ScopeRevisionStatus::Checking => "Reading repository facts",
+        ScopeRevisionStatus::Unbound => "Membership unbound; rebuild required",
         _ => "Source unchecked; facts incomplete",
     }
 }

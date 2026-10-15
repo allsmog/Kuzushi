@@ -17,6 +17,13 @@ belong in migration ledgers, not in this current operator contract.
 
 ## Shared Boundary
 
+`pack:scopes` binds its cache and new source records to captured enumeration and
+metadata membership. Shared edits, acceptance and current-use resolution reject
+changed membership and legacy unbound records; historical reads remain valid.
+The shell adds `MEMBERSHIP UNBOUND` guidance and keeps content-identity counts
+distinct. `campaign:study` consumes the same gate. No mode-local exception or
+new provider allowance is introduced.
+
 The shell adds a last-observed Git comparison to scope reading, including
 `SHA DIFFERS`, modified-tree and unchecked-content hints plus `r reload`.
 Plain shell output uses the same view model. Headless `pack:scopes` continues

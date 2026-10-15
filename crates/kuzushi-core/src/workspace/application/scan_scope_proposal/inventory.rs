@@ -16,15 +16,20 @@ pub(super) fn load_or_build(
     let git = target_git_metadata(workspace.root());
     let snapshot = SourceSnapshot::capture(ctx, "pack:scopes", workspace.root())?;
     let (snapshot_hash, tree_hash) = snapshot.hashes();
+    let enumeration = membership::capture(ctx)?;
     let source = ScanScopeSource {
         snapshot_hash: snapshot_hash.into(),
         tree_hash: tree_hash.into(),
         git_revision: git.as_ref().map(|git| git.sha.clone()),
         dirty: git.map(|git| git.dirty),
+        enumeration_hash: Some(enumeration.hash.clone()),
     };
-    let (inventory, cached_hash) = cached_or_collect(ctx, workspace, &source)?;
+    let (inventory, cached_hash) =
+        cached_or_collect(ctx, workspace, &source, enumeration.enumeration)?;
+    membership::ensure_collected(&enumeration.metadata_hash, &inventory)?;
     snapshot.ensure_current(ctx, "pack:scopes", workspace.root())?;
     ensure_git_current(workspace, &source)?;
+    membership::ensure_current(ctx, &source)?;
     anyhow::ensure!(!ctx.is_cancelled(), "scope inventory was canceled");
     let hash = save_collected_inventory(workspace, &source, &inventory, cached_hash)?;
     Ok((source, inventory, hash))
@@ -34,12 +39,13 @@ fn cached_or_collect(
     ctx: &ToolExecutionContext<'_>,
     workspace: &WorkspaceTarget,
     source: &ScanScopeSource,
+    enumeration: crate::workspace::GitIndexEnumeration,
 ) -> Result<(RepositoryInventory, Option<String>)> {
     if let Some(hash) = persistence::cached_inventory_hash(workspace, source)? {
         return Ok((persistence::load_inventory(workspace, &hash)?, Some(hash)));
     }
     let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
-    let inventory = build_repository_inventory_with_observer(
+    let inventory = crate::workspace::inventory::build_repository_inventory_from_enumeration(
         workspace.root(),
         &mut |entries| {
             if heartbeat.ready() {
@@ -47,6 +53,8 @@ fn cached_or_collect(
             }
         },
         &|| ctx.is_cancelled(),
+        enumeration,
+        crate::workspace::inventory::MAX_REPOSITORY_INSPECTED_BYTES,
     )?;
     anyhow::ensure!(!ctx.is_cancelled(), "scope inventory was canceled");
     Ok((inventory, None))
@@ -89,7 +97,8 @@ pub(super) fn ensure_current(
         "source content changed; generate a new scope draft before acceptance"
     );
     anyhow::ensure!(!ctx.is_cancelled(), "scope review was canceled");
-    ensure_git_current(workspace, source)
+    ensure_git_current(workspace, source)?;
+    membership::ensure_current(ctx, source)
 }
 
 fn ensure_git_current(workspace: &WorkspaceTarget, source: &ScanScopeSource) -> Result<()> {

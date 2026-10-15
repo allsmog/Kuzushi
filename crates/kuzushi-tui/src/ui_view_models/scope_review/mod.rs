@@ -12,21 +12,25 @@ pub(crate) fn scope_title(state: &ScopeReviewState, source: &ScopeSourceView) ->
     }
     state.review.as_ref().map_or_else(
         || "SCAN SCOPES".into(),
-        |r| {
-            if source.differs() {
-                return format!("SHA DIFFERS · SCOPES r{}", r.reference.revision);
-            }
-            format!(
-                "{} SCOPES · r{}",
-                if r.record.acceptance.is_some() {
-                    "ACCEPTED"
-                } else {
-                    "DRAFT"
-                },
-                r.reference.revision
-            )
-        },
+        |review| saved_scope_title(review, source),
     )
+}
+
+fn saved_scope_title(
+    review: &kuzushi_core::workspace::ScanScopeReview,
+    source: &ScopeSourceView,
+) -> String {
+    let label = match (
+        source.unbound(),
+        source.differs(),
+        review.record.acceptance.is_some(),
+    ) {
+        (true, _, _) => "MEMBERSHIP UNBOUND · SCOPES",
+        (false, true, _) => "SHA DIFFERS · SCOPES",
+        (false, false, true) => "ACCEPTED SCOPES",
+        _ => "DRAFT SCOPES",
+    };
+    format!("{label} · r{}", review.reference.revision)
 }
 
 fn form_title(form: &crate::app::ScopeEditForm) -> Option<&'static str> {

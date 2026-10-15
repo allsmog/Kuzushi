@@ -503,6 +503,24 @@ not a continuous source watcher or permission to run. Shared preparation and
 execution still validate the source independently. Plain shell output carries
 the same comparison and observed revision.
 
+Scope source `enumerationHash` binds captured Git membership as well as the
+bounded metadata membership receipt. Git acquisition fingerprints its complete
+captured path output, including paths beyond the processing prefix. Inventory
+construction consumes that captured enumeration. Metadata checks reserve zero
+content-inspection bytes and retain the existing entry limit, containment,
+cancellation and subprocess bounds. Cached membership must match the captured
+receipt. These are additional metadata reads; the inventory limits are not a
+total IO or latency guarantee.
+
+Staging an existing untracked file can change inventory membership while Git
+SHA, working-file bytes and content snapshot hashes remain unchanged. Such a
+change requires a new scope draft and acceptance before new work. Staging
+already tracked bytes without changing membership does not invalidate equivalent
+inventory. Legacy records remain readable but show `MEMBERSHIP UNBOUND` until
+the operator explicitly builds and accepts a new draft. A new study must then
+receive its own approval. No discovery jobs or provider capacity are granted by
+this migration. See [RELEASING.md](../RELEASING.md) for reader compatibility.
+
 Shared `findings:list` pages and the full shell Review reader use one SQLite
 snapshot for their related ledger queries. Page rows, aliases, decisions,
 lifecycle state, corpus counts and source-completion reads share the recorded

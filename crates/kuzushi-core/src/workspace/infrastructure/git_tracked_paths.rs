@@ -9,8 +9,12 @@ use crate::scan::ScanCancellation;
 const INDEX_DEADLINE: Duration = Duration::from_secs(30);
 const CANCEL_POLL: Duration = Duration::from_millis(25);
 
+#[derive(Clone)]
 pub(crate) enum GitIndexEnumeration {
-    Tracked(Vec<String>),
+    Tracked {
+        paths: Vec<String>,
+        fingerprint: String,
+    },
     Unavailable,
     Canceled,
 }
@@ -122,7 +126,13 @@ fn parse_index_output(output: Output, max_entries: usize) -> Result<GitIndexEnum
         .take(max_entries.saturating_add(1))
         .map(|segment| String::from_utf8_lossy(segment).into_owned())
         .collect();
-    Ok(GitIndexEnumeration::Tracked(paths))
+    let mut fingerprint = blake3::Hasher::new();
+    fingerprint.update(b"git-inventory-paths-v1\0");
+    fingerprint.update(&output.stdout);
+    Ok(GitIndexEnumeration::Tracked {
+        paths,
+        fingerprint: fingerprint.finalize().to_hex().to_string(),
+    })
 }
 
 fn classify_git_failure(stderr: &[u8]) -> Result<GitIndexEnumeration> {
