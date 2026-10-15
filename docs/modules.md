@@ -1763,8 +1763,9 @@ metadata-only Review requires an explicit input change and a new draft.
 `sourceEvidenceRef` identifies the immutable version 1 evidence document in the
 existing content store. Its target, selected generations, primary paths, source
 snapshot, tree, file hashes and byte counts are authenticated before execution.
-Source drift requires another draft and approval. The original observation stays
-unchanged. Each standard vote receives its own frozen source block through the
+Source drift requires another draft and approval. Original discovery evidence stays
+unchanged; later triage updates its projection and appends a durable decision.
+Each standard vote receives its own frozen source block through the
 shared untrusted-data wrapper in the user prompt. The full block survives the
 adapter's compact finding formatting. Matching bytes do not settle a verdict.
 This option does not change deep strategies or grant calls, retries or jobs.

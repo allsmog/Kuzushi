@@ -1,5 +1,15 @@
 # TUI DevEx Audit Journeys
 
+## J284: Actual source-input Review at the exhausted allowance
+
+Read the completed, separately approved Review on the owned invoice library.
+Inspect one consumed job at six sizes and reopen its exact frozen primary file.
+Keep missing downstream evidence, automatic authority and 3/3 recurrence distinct.
+Export with five of five calls settled, zero protected capacity and unknown dollars,
+then recover both completed Reviews without color. The helper starts no work and
+checks original discovery fields and the retained earlier decision. Judge useful
+evidence, source reading and limit clarity separately from machine assertions.
+
 ## J184: Review model identity and source history
 
 The current source-history journey first reads the newly recorded Review in

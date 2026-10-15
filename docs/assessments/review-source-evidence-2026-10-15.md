@@ -30,7 +30,8 @@ unchanged source; historical reading retains the frozen bytes. Matching source
 bytes do not determine finding correctness or prove that a later SHA is fixed.
 
 Each standard vote receives its selected source through the shared untrusted
-repository wrapper in the user prompt. The original observation is unchanged.
+repository wrapper in the user prompt. Original discovery evidence is unchanged;
+later triage updates its projection and records a separate durable decision.
 The adapter caps compact finding messages at 2,000 characters, so source is
 delivered through the full prompt template. An adapter check proves that a long
 encoded record survives and decodes to its complete original bytes. That is

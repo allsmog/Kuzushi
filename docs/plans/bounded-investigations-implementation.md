@@ -1,5 +1,14 @@
 # Bounded investigations implementation
 
+The [actual source-input Review checkpoint](../assessments/live-source-review-2026-10-15.md)
+completes the separately approved job with one new request, reaching thirteen
+cumulative experiment requests. The opinion cites the frozen route but still
+needs downstream evidence; it remains automatic `needs_review`. J284 has 32
+machine passes, zero failures, 22 capture pairs and five pending human judgments.
+The allowance is exhausted, raw discovery evidence and the earlier decision are
+retained, and no follow-up is approved. Explicit supporting-file selection is the
+next evidence-delivery improvement. All broad milestones remain open.
+
 The [Review stage accounting increment](../assessments/review-stage-accounting-2026-10-15.md)
 corrects classification cost attributed to deduplication, identifies the model
 stage with an optional canonical kind and keeps its historical tag compatible.

@@ -1,0 +1,77 @@
+name: Actual source-input Review preserves uncertainty, original evidence and an exhausted allowance
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_source_review_receipts.py @TARGET @ART initial
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign live-application-source-review-20261015
+require-live-snap: 25 1 completed | completed-source-review
+expect: work finished
+expect-not: L resume
+nav-mode:
+keys: Enter
+require-live-snap: 25 SELECTED JOB | review-job
+expect: gpt-6-luna
+resize: 160x48
+live-snap: job-160x48
+resize: 96x89
+live-snap: job-96x89
+resize: 80x24
+live-snap: job-80x24
+resize: 60x20
+live-snap: job-60x20
+resize: 40x12
+require-live-snap: 20 Jobs: 1 · 1 completed | job-40x12
+ask: Is the completed actual Review clearly one consumed job, with no remaining request capacity or resume action, across terminal sizes?
+resize: 120x36
+keys: a
+require-live-snap: 25 PLAN FINDING REVIEW | frozen-plan
+expect: Cited source: 1/1 primary files
+keys: v Home
+require-live-snap: 25 FROZEN SOURCE INPUT | frozen-code
+expect: service.lookup
+ask: Can the operator inspect the exact primary source supplied to this completed job while seeing that dependency code was not included automatically?
+keys: Escape
+require-live-snap: 20 1 completed | returned-campaign
+submit: campaign live-application-scans-20261015
+require-live-snap: 25 3 completed | original-discovery
+nav-mode:
+keys: o
+require-live-snap: 25 BATCH OCCURRENCE | recurrence
+expect: seen 3 / completed 3
+submit: findings
+require-live-snap: 25 Viewing Review | review-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 recorded: needs_review · auto | automatic-opinion
+expect: needs-runtime
+expect: downstream
+ask: Does the more specific model opinion remain distinct from recurrence, human authority and runtime proof, with its missing downstream evidence understandable?
+submit: report
+require-live-snap: 25 5 committed / 5 calls | exhausted-report
+expect: 0 protected review remaining
+expect: 3 producer observations
+expect: 0 reviewed
+require-live-snap: 25 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_source_review_receipts.py @TARGET @ART exported
+ask: Does Report retain unknown dollars and unfinished human Review at the exhausted limit without implying that a more confident model opinion confirms the finding?
+keys: C-c
+require-exit: 10
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: campaign live-application-source-review-20261015
+require-live-snap: 25 1 completed | recovered-source-review
+submit: campaign live-application-review-20261015
+require-live-snap: 25 1 completed | earlier-review
+submit: report
+require-live-snap: 25 5 committed / 5 calls | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_source_review_receipts.py @TARGET @ART restarted
+ask: Does no-color recovery retain both completed Review jobs, the original decision history and exactly five settled calls with no new work?
+keys: C-c
+require-exit: 10
