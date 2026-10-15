@@ -493,6 +493,16 @@ inventory requires its own acknowledgement and does not approve scans or
 spending. A new Git SHA requires a new source-bound scope draft even when the
 file tree is identical; historical reading does not authorize current work.
 
+The shell compares recorded scope revisions with its last observed repository
+facts. `SHA DIFFERS` identifies a mismatch; matching SHAs leave file contents
+unchecked. Unknown or loading facts remain explicit. In scope navigation,
+`r reload` refreshes saved scope history and repository facts. The comparison
+uses full revisions and target ownership, preserves recorded approval and
+operator input, and creates no scan or model request. It is an observation hint,
+not a continuous source watcher or permission to run. Shared preparation and
+execution still validate the source independently. Plain shell output carries
+the same comparison and observed revision.
+
 Shared `findings:list` pages and the full shell Review reader use one SQLite
 snapshot for their related ledger queries. Page rows, aliases, decisions,
 lifecycle state, corpus counts and source-completion reads share the recorded

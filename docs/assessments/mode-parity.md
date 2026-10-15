@@ -17,6 +17,13 @@ belong in migration ledgers, not in this current operator contract.
 
 ## Shared Boundary
 
+The shell adds a last-observed Git comparison to scope reading, including
+`SHA DIFFERS`, modified-tree and unchecked-content hints plus `r reload`.
+Plain shell output uses the same view model. Headless `pack:scopes` continues
+to return its recorded source; the shell hint adds no authorization. Full
+source validation for edits, acceptance, study preparation and execution
+remains shared.
+
 `pack:scopes` returns the same bounded inspection disclosure through shell and
 run dispatch: recorded omissions and reasons, prefix-limited files and all three
 caps. The shell acceptance reader pages this shared text. Acknowledgement never

@@ -60,7 +60,7 @@ impl ShellApp {
             return None;
         }
         use crate::ui_view_models::{
-            scope_review::{scope_detail_lines, scope_layout, scope_rows},
+            scope_review::{scope_detail_lines, scope_layout, scope_rows, scope_source_view},
             study_config::study_config_area,
         };
         let viewport = self.viewport();
@@ -70,9 +70,10 @@ impl ShellApp {
             scope_rows(state).0.len(),
         )
         .detail;
-        let maximum = scope_detail_lines(state, area.width as usize)
-            .len()
-            .saturating_sub(area.height as usize);
+        let maximum =
+            scope_detail_lines(state, &scope_source_view(self, state), area.width as usize)
+                .len()
+                .saturating_sub(area.height as usize);
         let current = state.scroll.min(maximum);
         let page = area.height.max(1) as usize;
         let offset = if code == KeyCode::PageUp {

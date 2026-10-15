@@ -193,6 +193,15 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 15, 2026: [Scope source comparison](../assessments/scope-source-comparison-2026-10-15.md)
+adds visible last-observed SHA comparison and reload without making repository
+facts an authorization gate. A matching SHA leaves contents unchecked; changed
+revisions keep recorded approval distinct from current work. Forty focused
+tests and the workspace build pass. Extended native J277 has 33 machine passes,
+zero failures, 28 capture pairs and six pending human judgments. Input,
+acceptance ownership, modified files and no-color recovery have scoped evidence.
+Broader source freshness and complete workflow qualification remain open.
+
 October 15, 2026: [Real repository inventory](../assessments/real-repository-inventory-2026-10-15.md)
 adds named omissions, prefix limits and inspection caps to shared scope coverage
 and acceptance. Sequential native J277 covers an isolated 5,771-file source

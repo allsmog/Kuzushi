@@ -37,6 +37,7 @@ impl ShellApp {
         };
         if self.scope_review().is_some() {
             self.router.scope_review_mut().as_mut().unwrap().open = true;
+            self.refresh_scope_source_facts();
             return Vec::new();
         }
         *self.router.scope_review_mut() = Some(ScopeReviewState::new(target.clone()));
@@ -54,6 +55,9 @@ impl ShellApp {
         if self.has_running_work() {
             self.scope_notice("Wait for active work. Your scope draft is preserved.");
             return InputUpdate::handled();
+        }
+        if input["operation"] != "files" {
+            self.refresh_scope_source_facts();
         }
         let Some(state) = self.router.scope_review_mut().as_mut() else {
             return InputUpdate::handled();
@@ -110,7 +114,17 @@ impl ShellApp {
         }
         let state = self.router.scope_review_mut().as_mut().unwrap();
         if state.pending.take().is_some() {
+            state.scroll = 0;
             state.notice = Some(format!("Action stopped: {error}. Your draft is preserved."));
+        }
+    }
+
+    fn refresh_scope_source_facts(&mut self) {
+        if self.active_target_facts_loading() {
+            return;
+        }
+        if let Some(target) = self.scope_review().map(|state| state.target.clone()) {
+            self.start_active_target_facts(target);
         }
     }
 }

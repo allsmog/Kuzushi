@@ -24,16 +24,17 @@ pub(super) fn render_scope_review(frame: &mut Frame<'_>, app: &ShellApp) -> bool
             .borders(Borders::ALL)
             .border_style(theme::subtle())
             .title(Line::styled(
-                format!(" {} ", scope_title(state)),
+                format!(" {} ", scope_title(state, &scope_source_view(app, state))),
                 theme::heading(),
             )),
         area,
     );
     render_scope_target(frame, state, area);
+    render_scope_source(frame, app, state, area);
     if state.form.is_some() {
         render_scope_form(frame, state, area);
     } else {
-        render_scope_panels(frame, state, area);
+        render_scope_panels(frame, app, state, area);
     }
     let controls = scope_controls(state).map(|text| Line::styled(text, theme::accent()));
     frame.render_widget(
@@ -61,7 +62,30 @@ fn render_scope_target(frame: &mut Frame<'_>, state: &ScopeReviewState, area: Re
     );
 }
 
-fn render_scope_panels(frame: &mut Frame<'_>, state: &ScopeReviewState, area: Rect) {
+fn render_scope_source(
+    frame: &mut Frame<'_>,
+    app: &ShellApp,
+    state: &ScopeReviewState,
+    area: Rect,
+) {
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            fit(
+                scope_source_view(app, state).label(),
+                area.width.saturating_sub(4) as usize,
+            ),
+            theme::muted(),
+        )),
+        Rect::new(area.x + 2, area.y + 2, area.width.saturating_sub(4), 1),
+    );
+}
+
+fn render_scope_panels(
+    frame: &mut Frame<'_>,
+    app: &ShellApp,
+    state: &ScopeReviewState,
+    area: Rect,
+) {
     let (rows, cursor) = scope_rows(state);
     let layout = scope_layout(area, rows.len());
     let start = cursor.saturating_sub(layout.list.height.saturating_sub(1) as usize);
@@ -85,7 +109,11 @@ fn render_scope_panels(frame: &mut Frame<'_>, state: &ScopeReviewState, area: Re
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), layout.list);
-    let detail = scope_detail_lines(state, layout.detail.width as usize);
+    let detail = scope_detail_lines(
+        state,
+        &scope_source_view(app, state),
+        layout.detail.width as usize,
+    );
     render_scope_document(frame, detail, state.scroll, layout.detail);
 }
 
@@ -144,11 +172,16 @@ pub(super) fn scope_review_plain_lines(app: &ShellApp, width: usize) -> Option<V
     }
     let state = app.scope_review()?;
     let mut text = vec![
-        scope_title(state),
+        scope_title(state, &scope_source_view(app, state)),
         format!("Repository: {}", state.target.display()),
+        scope_source_view(app, state).label().into(),
     ];
     text.extend(scope_rows(state).0);
-    text.extend(scope_detail_lines(state, width));
+    text.extend(scope_detail_lines(
+        state,
+        &scope_source_view(app, state),
+        width,
+    ));
     if let Some(form) = &state.form {
         text.extend(
             form.fields
