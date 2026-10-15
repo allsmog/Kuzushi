@@ -167,7 +167,7 @@ fn scan_detail_lines(recorded: usize, attempted: usize) -> Vec<String> {
         "Engine details: {recorded} / {attempted} attempted jobs recorded; {missing} unavailable."
     )];
     if missing > 0 {
-        lines.push("Missing engine details do not establish coverage. Inspect interrupted run records before further work.".into());
+        lines.push("Missing engine details do not establish coverage. Inspect incomplete run records before further work.".into());
     }
     lines
 }

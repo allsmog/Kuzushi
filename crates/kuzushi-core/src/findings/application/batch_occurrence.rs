@@ -122,7 +122,7 @@ impl BatchOccurrenceReport {
         root: &Path,
         store: &FindingStore,
     ) -> Result<std::collections::BTreeSet<String>> {
-        let runs = crate::run_artifacts::scan_finding_run_refs(root, &self.all_attempt_run_ids())?;
+        let runs = load::observation_run_refs(root, &self.all_attempt_run_ids())?;
         Ok(store
             .list_distinct_findings_for_scan_ids_with_identity_policy(&runs, self.identity_fold)?
             .into_iter()
@@ -188,17 +188,25 @@ impl BatchOccurrenceReport {
 }
 
 impl BatchOccurrenceRow {
+    pub fn completed_pass_hint(&self) -> Option<&'static str> {
+        (self.seen == 0)
+            .then_some("Retained outside completed passes. Review its recorded evidence.")
+    }
+
     fn output_line(&self) -> String {
         let occurrence = format!(
             "seen {} / completed {} · planned {} · failed {}",
             self.seen, self.completed, self.planned, self.failed
         );
         format!(
-            "{occurrence:<39} {:<9} {}  {}{}",
+            "{occurrence:<39} {:<9} {}  {}{}{}",
             self.representative_severity,
             self.representative_location,
             self.representative_title,
-            variance_suffix(self)
+            variance_suffix(self),
+            self.completed_pass_hint()
+                .map(|hint| format!(" [{hint}]"))
+                .unwrap_or_default()
         )
     }
 }
@@ -281,7 +289,7 @@ pub(super) fn derive_occurrence_from_documents(
         failed: counts.failed,
         pending: counts.pending,
         gate: None,
-        rows: occurrence_rows(store, &trials, policy, counts)?,
+        rows: occurrence_rows(root, store, &trials, policy, counts)?,
         trials,
     })
 }

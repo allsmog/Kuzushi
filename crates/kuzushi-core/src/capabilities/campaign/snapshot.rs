@@ -58,7 +58,10 @@ pub struct CampaignJobSnapshot {
     pub prompt_path: Option<String>,
     pub input: Value,
     pub state: String,
+    /// Current retry-ladder count, retained for compatibility. Resume may reset it.
     pub attempts: u64,
+    /// Lifetime dispatched attempts. Missing or contradictory legacy counters are unknown.
+    pub dispatches: Option<u64>,
     pub exit_code: Option<i64>,
     pub cost_usd: Option<f64>,
     pub provider_spend_unresolved: bool,
@@ -168,6 +171,7 @@ fn job_snapshot(
         input: row.get("input").cloned().unwrap_or(Value::Null),
         state: string_field(&entry, "state").unwrap_or_else(|| "planned".to_string()),
         attempts: entry.get("attempts").and_then(Value::as_u64).unwrap_or(0),
+        dispatches: recorded_dispatches(&entry),
         exit_code: entry.get("exitCode").and_then(Value::as_i64),
         cost_usd: entry.get("costUsd").and_then(Value::as_f64),
         provider_spend_unresolved: entry
@@ -178,6 +182,23 @@ fn job_snapshot(
         reason: job_reason(root, row, &entry),
         job_id,
     }
+}
+
+fn recorded_dispatches(entry: &Value) -> Option<u64> {
+    if entry.is_null() {
+        return Some(0);
+    }
+    let total = entry.get("dispatches")?.as_u64()?;
+    let current = entry.get("attempts").and_then(Value::as_u64).unwrap_or(0);
+    let history = entry
+        .get("attemptRuns")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get("runId").and_then(Value::as_str))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len() as u64;
+    (total >= current.max(history)).then_some(total)
 }
 
 fn job_reason(root: &Path, row: &Value, entry: &Value) -> Option<String> {

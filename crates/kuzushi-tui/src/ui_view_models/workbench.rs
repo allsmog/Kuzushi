@@ -411,6 +411,9 @@ fn replace_review_decision_hint(hints: &mut [WorkbenchHint], app: &ShellApp) {
         return;
     };
     hint.verb = Cow::Owned(workbench_navigate_control_hint(app, "B"));
+    if super::review_backlog_active(app) {
+        hint.label = Cow::Borrowed("backlog off; t tool filter; T trace");
+    }
 }
 
 fn expose_pending_patch_actions(hints: &mut [WorkbenchHint]) {

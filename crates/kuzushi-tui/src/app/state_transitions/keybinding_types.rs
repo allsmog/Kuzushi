@@ -178,6 +178,7 @@ pub(crate) enum ViewHotkeyAction {
     CampaignCycleWorkers,
     CampaignLaunch,
     CampaignReviewStudy,
+    CampaignOpenObservations,
     CampaignKill,
     CampaignShowPrompt,
     CampaignRefresh,

@@ -1,5 +1,17 @@
 # Bounded investigations implementation
 
+The [attempt and recurrence checkpoint](../assessments/attempts-and-recurrence-2026-10-15.md)
+separates lifetime dispatch totals from resettable counters, retains canceled and
+superseded observations with honest zero completed-pass recurrence, and fixes
+Review's tool-filter/trace collision and active-backlog disclosure. J275 records
+32 machine passes, zero failures and 22 capture pairs across six detail sizes
+and no-color restart. Five human judgments remain open. This uses explicitly
+synthetic reader history and closes no broad delivery checkbox.
+Sequential J121 on that same frozen build retains 123 machine passes, zero
+failures and 96 capture pairs for cancellation, bounded recovery, partial/final
+reporting and restart. Across both journeys, 22 human judgments remain pending;
+no live provider request was added.
+
 The [combined cancellation recovery journey](../assessments/cancellation-recovery-2026-10-15.md)
 now covers an admitted request, retained reservation and attempt, explicit retry
 and allowance approval, partial Report, final successful-run acceptance and

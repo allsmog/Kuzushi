@@ -131,6 +131,16 @@ partial receipts retain every attempt reference. Report readers authenticate
 either the exact final-run set or the legacy exact full-attempt set. An arbitrary
 subset cannot stand in for a selected investigation.
 
+`campaign:status` keeps `attempts` as the current retry counter and adds
+`dispatches` for the recorded lifetime attempt count. Legacy or contradictory
+lifetime counts are null. Resuming work does not refund consumed attempts.
+Batch recurrence uses the final run of each completed logical pass; all raw
+attempt observations remain available, including candidates seen in no completed
+pass. Recurrence changes do not change finding verdicts or clear severity gates.
+The campaign's `o observations` action explicitly selects its batch Review scope;
+`batch clear` returns Review to workspace history.
+
+
 `codeql:create-db` and `codeql:scan` keep exact dispatch as Labs, auxiliary Map
 and Scan actions. Database creation retains explicit repository-execution
 authorization and its isolated checkout. It records the source commit and

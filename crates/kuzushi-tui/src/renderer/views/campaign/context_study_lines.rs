@@ -24,9 +24,9 @@ pub(super) fn append_context_jobs(
     }
     if let Some(job) = campaign.jobs.get(deck.selected_job) {
         let detail = format!(
-            "  {} · {} attempt(s) · cost {}",
+            "  {} · {} · cost {}",
             job.job_id,
-            job.attempts,
+            crate::ui_view_models::campaign_job_attempt_summary(job),
             super::campaign_lines::job_cost_label(job)
         );
         lines.extend(
@@ -35,6 +35,7 @@ pub(super) fn append_context_jobs(
                 .map(|line| muted(&line)),
         );
     }
+    super::campaign_lines::append_attempt_count_hint(lines, campaign, width);
 }
 
 fn marked_lines(text: &str, marker: &str, width: usize) -> Vec<Line<'static>> {

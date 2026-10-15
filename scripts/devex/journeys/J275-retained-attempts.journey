@@ -1,0 +1,82 @@
+name: Total attempts and retained observations stay distinct from completed-pass recurrence
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_attempts.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign batch-test
+require-live-snap: 25 BATCH batch-test | total-attempts
+expect: 2 total attempts
+expect: pass 1/3
+nav-mode:
+keys: Enter
+require-live-snap: 20 Current attempt counter: 1 | selected-attempts
+expect: 2 total attempts
+expect: Total attempts do not reset on resume
+resize: 160x48
+live-snap: detail-160x48
+resize: 96x89
+live-snap: detail-96x89
+resize: 80x24
+live-snap: detail-80x24
+resize: 60x20
+live-snap: detail-60x20
+resize: 40x12
+live-snap: detail-40x12
+keys: NPage
+live-snap: detail-paged-40x12
+ask: Are total attempts, the current counter and recorded run identity distinguishable and reachable at all six sizes without suggesting that resume refunds consumption?
+resize: 120x36
+keys: q
+require-live-snap: 20 2 total attempts | returned-jobs
+keys: o
+require-live-snap: 20 BATCH OCCURRENCE | opened-observations
+expect: batch clear restores workspace history
+keys: NPage
+require-live-snap: 20 Retained outside completed passes | retained-observation
+expect: seen 0 / completed 3
+expect: run-trial-1-a1
+ask: Does a retained observation show zero completed-pass recurrence with its exact canceled source, without implying a false positive or a fix?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_attempts.py @TMP_TARGET @ART legacy
+keys: PPage r
+require-live-snap: 20 current attempt | legacy-attempts
+expect: Lifetime totals unavailable
+expect-not: 2 total attempts
+keys: Enter
+require-live-snap: 20 Lifetime attempt total unavailable | legacy-detail
+expect: Current attempt counter: 1
+ask: Does legacy history disclose the unavailable lifetime total while preserving its current counter and recorded evidence?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_attempts.py @TMP_TARGET @ART restore
+keys: q r
+require-live-snap: 20 2 total attempts | restored-totals
+keys: Escape
+submit: findings
+require-live-snap: 20 FINDINGS | review-readers
+nav-mode:
+keys: B
+require-live-snap: 20 REVIEW BACKLOG | backlog-active
+expect: backlog off
+keys: t
+require-live-snap: 20 owned-fixture | backlog-tool-filter
+expect: Viewing Review
+ask: Does t filter by the producing tool in backlog mode while the visible T binding retains trace access, without changing a finding decision?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: campaign batch-test
+require-live-snap: 25 2 total attempts | recovered-totals
+nav-mode:
+keys: o
+require-live-snap: 20 BATCH OCCURRENCE | recovered-observations
+keys: NPage
+require-live-snap: 20 Retained outside completed passes | recovered-recurrence
+expect: seen 0 / completed 3
+require-shell: python3 -B @REPO/scripts/devex/fixtures/retained_attempts.py @TMP_TARGET @ART verify
+ask: Does no-color restart retain attempt consumption and honest recurrence without new discovery, provider calls or finding decisions?
+keys: C-c
+require-exit: 10

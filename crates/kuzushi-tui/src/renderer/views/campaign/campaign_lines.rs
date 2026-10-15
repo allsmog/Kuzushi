@@ -198,11 +198,27 @@ fn append_campaign_detail(
     super::summary::append_campaign_summary(lines, deck, campaign, area.width as usize);
     lines.push(blank());
     append_campaign_jobs(lines, deck, campaign, area);
+    append_observations_hint(lines, campaign, area);
     if let Some(report) = deck
         .active_batch_report()
         .filter(|report| report.batch_id == campaign.campaign_id)
     {
         append_batch_occurrence(lines, report, area);
+    }
+}
+
+fn append_observations_hint(
+    lines: &mut Vec<Line<'static>>,
+    campaign: &CampaignSnapshot,
+    area: Rect,
+) {
+    if crate::app::is_scan_batch_snapshot(campaign) {
+        push_deck_text(
+            lines,
+            "o observations · scopes Review to this batch · batch clear restores history",
+            area.width as usize,
+            theme::muted(),
+        );
     }
 }
 
@@ -231,6 +247,17 @@ fn append_campaign_jobs(
             &widths,
             compact,
         ));
+    }
+    append_attempt_count_hint(lines, campaign, area.width as usize);
+}
+
+pub(super) fn append_attempt_count_hint(
+    lines: &mut Vec<Line<'static>>,
+    campaign: &CampaignSnapshot,
+    width: usize,
+) {
+    if campaign.jobs.iter().any(|job| job.dispatches.is_none()) {
+        push_deck_text(lines, "Lifetime totals unavailable for legacy rows. Current counts reset on resume; ? marks current counts in tables.", width, theme::muted());
     }
 }
 
@@ -314,7 +341,7 @@ fn compact_job_row(
     let text = format!(
         "{marker} {included} {name} {} a{}",
         fit(&job.state, 10),
-        job.attempts
+        crate::ui_view_models::campaign_job_attempt_cell(job)
     );
     Line::styled(fit(&text, width), job_state_style(&job.state))
 }
@@ -335,7 +362,11 @@ fn job_row_spans(
         job_cell(included, widths[1], theme::subtle()),
         job_cell(&job.job_id, widths[2], theme::accent()),
         job_cell(&job.state, widths[3], job_state_style(&job.state)),
-        job_cell(&job.attempts.to_string(), widths[4], theme::subtle()),
+        job_cell(
+            &crate::ui_view_models::campaign_job_attempt_cell(job),
+            widths[4],
+            theme::subtle(),
+        ),
         job_cell(&job.priority.to_string(), widths[5], theme::subtle()),
         job_cell(&job_cost_label(job), widths[6], theme::primary()),
         job_cell(&job_findings_label(job), widths[7], findings_style),
@@ -740,7 +771,7 @@ mod tests {
                 assert!(text.contains(tool), "{text}");
             }
             assert!(
-                text.contains("job-2") && text.contains("0 attempt(s)"),
+                text.contains("job-2") && text.contains("0 total attempts"),
                 "{text}"
             );
             assert!(lines.len() <= 6, "{text}");
@@ -761,6 +792,7 @@ mod tests {
             input: serde_json::Value::Null,
             state: state.to_string(),
             attempts: 0,
+            dispatches: Some(0),
             exit_code: None,
             cost_usd: None,
             provider_spend_unresolved: false,
@@ -879,7 +911,7 @@ mod tests {
         assert!(deck_commands(&deck).contains(&"L launch"));
     }
 
-    fn sample_campaign() -> CampaignSnapshot {
+    pub(super) fn sample_campaign() -> CampaignSnapshot {
         CampaignSnapshot {
             campaign_id: "batch-1".to_string(),
             kind: Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND.to_string()),
@@ -992,5 +1024,40 @@ mod tests {
             .map(|span| span.content.as_ref())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+}
+
+#[cfg(test)]
+mod attempt_display_tests {
+    use super::*;
+    use crate::app::CampaignRouteState;
+
+    #[test]
+    fn resumed_jobs_keep_total_and_pass_identity_at_every_width() {
+        let mut campaign = super::tests::sample_campaign();
+        campaign.kind = Some("scan-batch".into());
+        let job = campaign.jobs.first_mut().unwrap();
+        job.display_label = Some("Discovery · pass 1/3".into());
+        job.attempts = 1;
+        job.dispatches = Some(2);
+        for width in [40, 60, 80, 96, 120, 160] {
+            let mut lines = Vec::new();
+            super::super::fixed_jobs::append_fixed_jobs(
+                &mut lines,
+                &CampaignRouteState::default(),
+                &campaign,
+                width,
+            );
+            let text = lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(lines.iter().all(|line| line.width() <= width), "{text}");
+            assert!(
+                text.contains("pass 1/3") && text.contains("2 total attempts"),
+                "{text}"
+            );
+        }
     }
 }

@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn backlog_state_and_trace_key_are_visible_after_real_key_dispatch() {
+    let mut app = workbench_app_with_findings();
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('B'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        app.set_viewport(crate::TerminalViewport::new(width, height));
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let text = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        assert!(text.contains("REVIEW BACKLOG"), "{width}x{height}: {text}");
+        if width >= 120 {
+            assert!(text.contains("T · source trace"), "{text}");
+            assert!(
+                text.contains("backlog off; t tool filter; T trace"),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
 fn compact_review_preserves_the_running_tool_cancellation_control() {
     let mut app = workbench_app_with_findings();
     app.set_input_mode(crate::InputMode::Navigate);

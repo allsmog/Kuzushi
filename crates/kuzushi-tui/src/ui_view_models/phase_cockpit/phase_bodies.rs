@@ -51,7 +51,14 @@ fn source_trace_control(app: &ShellApp) -> Option<String> {
     if !app.input().is_empty() || current_finding_for_detail(app).is_none() {
         return None;
     }
-    let keys = app.ui().keymap_binding_labels("workbench", "trace", &["t"]);
+    let default_key = if super::super::review_backlog_active(app) {
+        "T"
+    } else {
+        "t"
+    };
+    let keys = app
+        .ui()
+        .keymap_binding_labels("workbench", "trace", &[default_key]);
     (!keys.is_empty()).then(|| format!("{} · source trace", review_comparison_keys(app, keys)))
 }
 

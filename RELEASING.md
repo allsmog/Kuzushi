@@ -1,5 +1,17 @@
 # Releasing Kuzushi
 
+- Campaign status adds `dispatches`, the lifetime attempt count. Existing
+  `attempts` keeps its current retry-counter meaning. Missing or contradictory
+  lifetime totals serialize as null and are disclosed in the shell. Rust callers
+  constructing `CampaignJobSnapshot` literals must add `dispatches: None` for
+  unknown history, or the recorded total when available. Existing queue formats
+  remain readable. Derived recurrence now uses each completed pass's final run;
+  canceled and superseded observations remain visible with zero recurrence when
+  later attempts miss them. Raw observations and human decisions are unchanged.
+  Occurrence-row run references now identify actual observation sources rather
+  than every run in the logical pass. The shell adds explicit `o observations`
+  access to the batch Review scope; `batch clear` restores workspace history.
+
 - Completed study acceptance now references each trial's final successful run.
   Canceled and superseded attempts remain in the original queue, findings ledger
   and investigation exports. Partial acceptance retains all attempt references.

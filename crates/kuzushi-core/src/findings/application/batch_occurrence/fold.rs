@@ -3,7 +3,10 @@ use crate::findings::{
     is_attack_chain_finding, Finding, FindingIdentityBasis, FindingStore, Severity,
     StaticProofState,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::path::Path;
+mod observations;
+use observations::load_observations;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn finding_projection_key(finding: &Finding, policy: IdentityFoldPolicy) -> String {
@@ -86,15 +89,25 @@ fn trial_is_failed(trial: &BatchTrialReport) -> bool {
 }
 
 pub(super) fn occurrence_rows(
+    root: &Path,
     store: &FindingStore,
     trials: &[BatchTrialReport],
     policy: IdentityFoldPolicy,
     counts: LogicalTrialCounts,
 ) -> Result<Vec<BatchOccurrenceRow>> {
-    let fold_context = OccurrenceFoldContext::load(store, trials)?;
+    let observations = load_observations(root, store, trials)?;
+    let fold_context = OccurrenceFoldContext::load(&observations);
     let mut groups = BTreeMap::<String, OccurrenceAccumulator>::new();
+    fold_retained_observations(&observations, policy, &fold_context, &mut groups);
     for trial in trials.iter().filter(|trial| trial.state == "completed") {
-        fold_completed_trial(store, trial, policy, &fold_context, &mut groups)?;
+        fold_completed_trial(
+            root,
+            trial,
+            &observations,
+            policy,
+            &fold_context,
+            &mut groups,
+        )?;
     }
     Ok(groups
         .into_iter()
@@ -102,28 +115,50 @@ pub(super) fn occurrence_rows(
         .collect())
 }
 
-fn fold_completed_trial(
-    store: &FindingStore,
-    trial: &BatchTrialReport,
+fn fold_retained_observations(
+    observations: &BTreeMap<String, Vec<Finding>>,
     policy: IdentityFoldPolicy,
-    fold_context: &OccurrenceFoldContext,
+    context: &OccurrenceFoldContext,
     groups: &mut BTreeMap<String, OccurrenceAccumulator>,
-) -> Result<()> {
-    anyhow::ensure!(
-        !trial.finding_run_ids.is_empty(),
-        "completed batch trial {} has no runId",
-        trial.job_id
-    );
-    let mut trial_groups = BTreeMap::<String, Vec<Finding>>::new();
-    for run_id in &trial.finding_run_ids {
-        for finding in store.list_findings_for_scan_id(run_id)? {
-            trial_groups
-                .entry(fold_context.projection_key(&finding, policy))
+) {
+    for (run, findings) in observations {
+        for finding in findings {
+            groups
+                .entry(context.projection_key(finding, policy))
                 .or_default()
-                .push(finding);
+                .observe_finding(run, finding);
         }
     }
-    observe_trial_groups(groups, &trial.finding_run_ids, trial_groups);
+}
+
+fn fold_completed_trial(
+    root: &Path,
+    trial: &BatchTrialReport,
+    observations: &BTreeMap<String, Vec<Finding>>,
+    policy: IdentityFoldPolicy,
+    context: &OccurrenceFoldContext,
+    groups: &mut BTreeMap<String, OccurrenceAccumulator>,
+) -> Result<()> {
+    let current = trial
+        .run_id
+        .as_ref()
+        .context("completed batch trial has no current run")?;
+    let runs = super::load::observation_run_refs(root, std::slice::from_ref(current))?;
+    let mut keys = BTreeSet::new();
+    for run in runs {
+        for finding in observations
+            .get(&run)
+            .context("completed run is outside retained observations")?
+        {
+            keys.insert(context.projection_key(finding, policy));
+        }
+    }
+    for key in keys {
+        groups
+            .get_mut(&key)
+            .context("completed observation has no retained group")?
+            .seen += 1;
+    }
     Ok(())
 }
 
@@ -133,16 +168,12 @@ struct OccurrenceFoldContext {
 }
 
 impl OccurrenceFoldContext {
-    fn load(store: &FindingStore, trials: &[BatchTrialReport]) -> Result<Self> {
+    fn load(observations: &BTreeMap<String, Vec<Finding>>) -> Self {
         let mut context = Self::default();
-        for trial in trials.iter().filter(|trial| trial.state == "completed") {
-            for run_id in &trial.finding_run_ids {
-                for finding in store.list_findings_for_scan_id(run_id)? {
-                    context.observe(&finding);
-                }
-            }
+        for finding in observations.values().flatten() {
+            context.observe(finding);
         }
-        Ok(context)
+        context
     }
 
     fn observe(&mut self, finding: &Finding) {
@@ -176,19 +207,6 @@ impl OccurrenceFoldContext {
     }
 }
 
-fn observe_trial_groups(
-    groups: &mut BTreeMap<String, OccurrenceAccumulator>,
-    run_ids: &[String],
-    trial_groups: BTreeMap<String, Vec<Finding>>,
-) {
-    for (key, findings) in trial_groups {
-        groups
-            .entry(key)
-            .or_default()
-            .observe_trial(run_ids, findings);
-    }
-}
-
 #[derive(Default)]
 struct OccurrenceAccumulator {
     seen: usize,
@@ -203,18 +221,15 @@ struct OccurrenceAccumulator {
 }
 
 impl OccurrenceAccumulator {
-    fn observe_trial(&mut self, run_ids: &[String], findings: Vec<Finding>) {
-        self.seen += 1;
-        self.run_ids.extend(run_ids.iter().cloned());
-        for finding in findings {
-            self.observe_variants(&finding);
-            if self
-                .representative
-                .as_ref()
-                .is_none_or(|current| evidence_rank(&finding) > evidence_rank(current))
-            {
-                self.representative = Some(finding);
-            }
+    fn observe_finding(&mut self, run: &str, finding: &Finding) {
+        self.run_ids.insert(run.to_string());
+        self.observe_variants(finding);
+        if self
+            .representative
+            .as_ref()
+            .is_none_or(|current| evidence_rank(finding) > evidence_rank(current))
+        {
+            self.representative = Some(finding.clone());
         }
     }
 

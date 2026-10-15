@@ -282,6 +282,22 @@ mod keymap_collision_tests {
         let binds = app.view_keybindings_for_view(ShellView::Workbench);
 
         assert_no_accidental_collisions("Workbench/Review+backlog", &binds);
+        assert_eq!(
+            binds
+                .iter()
+                .find(|binding| binding.trigger == HotkeyTrigger::Char('t'))
+                .unwrap()
+                .action,
+            ViewHotkeyAction::WorkbenchBacklogToolCycle
+        );
+        assert_eq!(
+            binds
+                .iter()
+                .find(|binding| binding.trigger == HotkeyTrigger::Char('T'))
+                .unwrap()
+                .action,
+            ViewHotkeyAction::WorkbenchTraceView
+        );
         // The decisions the preset advertises must actually be armed.
         for key in ['c', 'f', 'd', 'w', 'u'] {
             assert!(

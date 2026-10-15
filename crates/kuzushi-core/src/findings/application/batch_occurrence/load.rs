@@ -23,7 +23,8 @@ fn trial_report(index: usize, row: &Value, queue: Option<&Value>) -> BatchTrialR
         .get("jobId")
         .and_then(Value::as_str)
         .filter(|job_id| !job_id.is_empty());
-    let state = job_id.and_then(|job_id| queue.and_then(|doc| doc.pointer(&format!("/jobs/{job_id}"))));
+    let state =
+        job_id.and_then(|job_id| queue.and_then(|doc| doc.pointer(&format!("/jobs/{job_id}"))));
     let run_id = state_field(state, "runId");
     BatchTrialReport {
         trial: row
@@ -97,6 +98,20 @@ fn finding_run_ids(root: &Path, outer_run_id: &str) -> Vec<String> {
         collect_result_run_ids(&outcome.result, &mut run_ids);
     }
     run_ids.into_iter().collect()
+}
+
+/// Retain canonical stage membership and correlated legacy result membership.
+pub(super) fn observation_run_refs(root: &Path, parents: &[String]) -> Result<Vec<String>> {
+    let mut runs = crate::run_artifacts::scan_finding_run_refs(root, parents)?
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    for parent in parents {
+        runs.extend(finding_run_ids(root, parent));
+    }
+    for run in &runs {
+        crate::RunId::parse(run).context("invalid batch observation run reference")?;
+    }
+    Ok(runs.into_iter().collect())
 }
 
 fn collect_result_run_ids(result: &Value, run_ids: &mut BTreeSet<String>) {

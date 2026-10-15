@@ -12,6 +12,7 @@ use kuzushi_core::capabilities::campaign::snapshot::{
 };
 use std::path::Path;
 mod dispatcher_results;
+mod observations;
 
 impl ShellApp {
     pub(crate) fn open_campaign_view(&mut self, requested: Option<String>) {
@@ -112,6 +113,7 @@ impl ShellApp {
             ViewHotkeyAction::CampaignCursorPrevious => self.move_visible_campaign_cursor(-1),
             ViewHotkeyAction::CampaignCursorNext => self.move_visible_campaign_cursor(1),
             ViewHotkeyAction::CampaignOpenDetail => self.inspect_campaign_selection(),
+            ViewHotkeyAction::CampaignOpenObservations => self.open_selected_batch_observations(),
             ViewHotkeyAction::CampaignBackToList => self.back_from_campaign_detail(),
             ViewHotkeyAction::CampaignToggleExclude => self.toggle_campaign_exclusion(),
             ViewHotkeyAction::CampaignCycleWorkers => self.cycle_campaign_workers(),

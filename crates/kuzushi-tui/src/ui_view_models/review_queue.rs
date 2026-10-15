@@ -170,6 +170,13 @@ impl ReviewQueueModel {
     }
 
     fn population_title_without_save(&self) -> String {
+        if self.completeness_mode == "backlog" {
+            return format!("REVIEW BACKLOG · {}", self.visible_count);
+        }
+        self.findings_population_title()
+    }
+
+    fn findings_population_title(&self) -> String {
         if self.refresh_status.is_some() {
             return "FINDINGS · previous results".into();
         }

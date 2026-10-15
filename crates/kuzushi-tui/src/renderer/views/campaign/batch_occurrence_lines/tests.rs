@@ -56,3 +56,21 @@ fn terminal_buffer_keeps_the_title_visible_before_occurrence_metadata() {
     assert!(rendered.contains("run-discovery-exact-reference-2"));
     assert!(!rendered.contains("..."));
 }
+
+#[test]
+fn retained_only_observations_keep_guidance_and_provenance_at_every_width() {
+    let mut row = long_row();
+    row.seen = 0;
+    for width in [40, 60, 80, 96, 120, 160] {
+        let lines = batch_occurrence_row(&row, width);
+        assert!(lines.iter().all(|line| line.width() <= width));
+        let text = lines
+            .iter()
+            .map(|line| line.to_string().trim().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Retained outside completed passes"));
+        assert!(text.contains("seen 0 / completed 3"));
+        assert!(text.contains("run-discovery-exact-reference-1"));
+    }
+}

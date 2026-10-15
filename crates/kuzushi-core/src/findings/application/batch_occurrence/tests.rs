@@ -3,6 +3,7 @@ use crate::capabilities::campaign::ScanBatchGateBinding;
 use crate::findings::{Finding, FindingIdentityBasis, FindingStore, Severity};
 use serde_json::json;
 use std::path::Path;
+mod retained_attempts;
 
 #[test]
 fn gate_receipt_must_match_batch_equivalence_and_frozen_policy() {
@@ -688,7 +689,9 @@ fn retained_observations_include_partial_attempts_without_increasing_recurrence(
     assert!(fingerprints.contains(&finding.fingerprint));
     assert!(!fingerprints.contains(&outside.fingerprint));
     assert_eq!((report.completed, report.failed), (2, 1));
-    assert!(report.rows.is_empty());
+    assert_eq!(report.rows.len(), 1);
+    assert_eq!(report.rows[0].seen, 0);
+    assert_eq!(report.rows[0].run_ids, ["run-trial-3-a2"]);
 }
 
 fn write_child_equivalence_receipt(root: &Path, run_id: &str) {

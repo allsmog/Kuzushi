@@ -13,6 +13,7 @@ pub(super) fn append_fixed_jobs(
     for (index, job) in campaign.jobs.iter().enumerate() {
         append_job_row(lines, job, index == deck.selected_job, width);
     }
+    super::campaign_lines::append_attempt_count_hint(lines, campaign, width);
 }
 
 fn append_job_row(
@@ -24,28 +25,25 @@ fn append_job_row(
     let marker = if selected { "▸" } else { " " };
     let (name, pass) = job_label_parts(job);
     let style = super::campaign_lines::job_state_style(&job.state);
+    let usage = crate::ui_view_models::campaign_job_attempt_summary(job);
     if width < 80 {
         lines.push(styled(
-            &format!("{marker} {}", fit(name, width.saturating_sub(2))),
+            &format!(
+                "{marker} {}",
+                fitted_job_label(name, pass, width.saturating_sub(2))
+            ),
             theme::primary(),
         ));
-        let pass = pass
-            .map(|pass| format!("pass {pass} · "))
-            .unwrap_or_default();
-        let status = format!(
-            "  {pass}{} · {} attempt(s)",
-            fit(&job.state, 16),
-            job.attempts
-        );
+        let state_width = width.saturating_sub(display_width(&usage) + 5);
+        let status = format!("  {} · {usage}", fit(&job.state, state_width));
         lines.push(styled(&fit(&status, width), style));
         return;
     }
-    let label_width = width.saturating_sub(30);
+    let label_width = width.saturating_sub(display_width(&usage) + 18);
     let text = format!(
-        "{marker} {}  {}  {} attempt(s)",
+        "{marker} {}  {}  {usage}",
         pad(&fitted_job_label(name, pass, label_width), label_width),
         pad(&fit(&job.state, 12), 12),
-        job.attempts
     );
     lines.push(styled(&fit(&text, width), style));
 }

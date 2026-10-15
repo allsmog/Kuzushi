@@ -46,6 +46,12 @@ pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
         bind_char('L', "L", "launch", ViewHotkeyAction::CampaignLaunch),
         bind_char('K', "K", "stop dispatcher", ViewHotkeyAction::CampaignKill),
         bind_char('e', "e", "prompt", ViewHotkeyAction::CampaignShowPrompt),
+        bind_char(
+            'o',
+            "o",
+            "observations and Review scope",
+            ViewHotkeyAction::CampaignOpenObservations,
+        ),
         bind_char('r', "r", "refresh", ViewHotkeyAction::CampaignRefresh),
     ]);
     bindings
@@ -695,7 +701,7 @@ fn workbench_page_action_keybindings(page: WorkbenchPage, backlog: bool) -> Vec<
 /// cannot record a decision by a stray keypress.
 fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
     let mut bindings = vec![
-        bind_char('t', "t", "trace", ViewHotkeyAction::WorkbenchTraceView),
+        review_trace_keybinding(backlog),
         bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
         bind_char(
             'C',
@@ -727,6 +733,11 @@ fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
         bindings.extend(backlog_decision_keybindings());
     }
     bindings
+}
+
+fn review_trace_keybinding(backlog: bool) -> ViewKeybinding {
+    let (key, hint) = if backlog { ('T', "T") } else { ('t', "t") };
+    bind_char(key, hint, "trace", ViewHotkeyAction::WorkbenchTraceView)
 }
 
 fn backlog_decision_keybindings() -> Vec<ViewKeybinding> {

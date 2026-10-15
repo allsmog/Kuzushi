@@ -136,6 +136,7 @@ fn job_rows(root: &Path, snapshot: &CampaignSnapshot) -> Vec<Value> {
                 "priority": job.priority,
                 "state": job.state,
                 "attempts": job.attempts,
+                "dispatches": job.dispatches,
                 "exitCode": job.exit_code,
                 "costUsd": job.cost_usd,
                 "providerSpendUnresolved": job.provider_spend_unresolved,

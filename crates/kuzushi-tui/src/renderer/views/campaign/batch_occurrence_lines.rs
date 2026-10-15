@@ -88,6 +88,9 @@ fn batch_occurrence_row(row: &BatchOccurrenceRow, width: usize) -> Vec<Line<'sta
     );
     let mut lines = vec![blank()];
     lines.extend(batch_wrapped(&title, width, theme::primary()));
+    if let Some(hint) = row.completed_pass_hint() {
+        lines.extend(batch_wrapped(hint, width, theme::muted()));
+    }
     lines.extend(batch_wrapped(
         &format!(
             "seen {} / completed {} · planned {} · failed {}",

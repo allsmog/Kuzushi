@@ -139,5 +139,29 @@ fn explicit_queue_diagnostics_are_bounded_without_rewriting_the_queue() {
     let reason = row.reason.unwrap();
     assert!(reason.chars().count() <= 500);
     assert!(!reason.chars().any(char::is_control));
-    assert_eq!(entry,before);
+    assert_eq!(entry, before);
+}
+
+#[test]
+fn lifetime_attempts_survive_a_reset_retry_counter_without_guessing_legacy_history() {
+    let root = tempfile::tempdir().unwrap();
+    let row = snapshot(
+        root.path(),
+        json!({"state":"completed","attempts":1,"dispatches":2,
+        "attemptRuns":[{"runId":"canceled"},{"runId":"completed"}]}),
+    );
+    assert_eq!(row.attempts, 1);
+    assert_eq!(row.dispatches, Some(2));
+    assert_eq!(
+        snapshot(root.path(), json!({"attempts":1})).dispatches,
+        None
+    );
+    assert_eq!(snapshot(root.path(), Value::Null).dispatches, Some(0));
+    for entry in [
+        json!({"attempts":2,"dispatches":1}),
+        json!({"attempts":1,"dispatches":1,"attemptRuns":[{"runId":"one"},{"runId":"two"}]}),
+        json!({"attempts":1,"dispatches":"2"}),
+    ] {
+        assert_eq!(snapshot(root.path(), entry).dispatches, None);
+    }
 }

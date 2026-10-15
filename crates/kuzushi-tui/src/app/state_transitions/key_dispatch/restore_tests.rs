@@ -1,6 +1,41 @@
 use super::*;
 
 #[test]
+fn review_backlog_keys_reach_their_actions_through_the_full_reducer() {
+    for modifiers in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Review));
+        app.set_input_mode(InputMode::Navigate);
+        *app.findings_mut() = vec![kuzushi_core::Finding::new_tool(
+            "owned-fixture",
+            "owned",
+            "source.rs",
+            1,
+            None,
+            kuzushi_core::Severity::Info,
+            "Owned inert observation",
+        )];
+        assert!(
+            app.reduce_key(KeyEvent::new(KeyCode::Char('B'), modifiers))
+                .handled
+        );
+        assert!(app.router.workbench().review().backlog);
+        app.reduce_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert_eq!(
+            app.router.workbench().review().backlog_tool.as_deref(),
+            Some("owned-fixture")
+        );
+        assert!(!app.router.workbench().trace_view_open());
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+        assert!(app.input().is_empty());
+        assert_eq!(app.router.workbench().review().session_decided, 0);
+    }
+}
+
+#[test]
 fn reader_draft_restore_keeps_navigation_until_prompt_is_requested() {
     for encoding in ['_', '7'] {
         let mut app = ShellApp::new(V2Config::default(), None);

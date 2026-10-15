@@ -13,10 +13,10 @@ pub(crate) fn campaign_job_detail_lines(job: &CampaignJobSnapshot) -> Vec<String
     let mut lines = vec![
         job.display_label.as_deref().unwrap_or(&job.job_id).into(),
         format!(
-            "{} · {} · {} attempt(s)",
+            "{} · {} · {}",
             job.tool.as_deref().unwrap_or("Tool not recorded"),
             job.state,
-            job.attempts
+            campaign_job_attempt_summary(job)
         ),
         format!(
             "Findings: {}",
@@ -25,6 +25,13 @@ pub(crate) fn campaign_job_detail_lines(job: &CampaignJobSnapshot) -> Vec<String
                 .unwrap_or_else(|| "not recorded".into())
         ),
     ];
+    lines.push(format!(
+        "Current attempt counter: {}. Total attempts do not reset on resume.",
+        job.attempts
+    ));
+    if job.dispatches.is_none() {
+        lines.push("Lifetime attempt total unavailable for this legacy record.".into());
+    }
     if let Some(reason) = &job.reason {
         lines.push(format!("Outcome: {reason}"));
     }
@@ -37,6 +44,22 @@ pub(crate) fn campaign_job_detail_lines(job: &CampaignJobSnapshot) -> Vec<String
         job.run_id.as_deref().unwrap_or("no run recorded")
     ));
     lines
+}
+
+pub(crate) fn campaign_job_attempt_summary(job: &CampaignJobSnapshot) -> String {
+    let (count, kind) = match job.dispatches {
+        Some(total) => (total, "total"),
+        None => (job.attempts, "current"),
+    };
+    let noun = if count == 1 { "attempt" } else { "attempts" };
+    format!("{count} {kind} {noun}")
+}
+
+pub(crate) fn campaign_job_attempt_cell(job: &CampaignJobSnapshot) -> String {
+    match job.dispatches {
+        Some(total) => total.to_string(),
+        None => format!("{}?", job.attempts),
+    }
 }
 
 pub(crate) fn campaign_job_cost_label(job: &CampaignJobSnapshot) -> String {
@@ -117,6 +140,38 @@ fn discovery_scope_label<'a>(input: &'a Value, legacy_shard: Option<&'a str>) ->
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn total_attempts_and_current_retry_count_are_distinct() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = kuzushi_core::capabilities::campaign::campaign_dir(root.path(), "attempts");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plan.json"),
+            json!({"jobs":[{"jobId":"one"}]}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("queue.json"),
+            json!({"jobs":{"one":{"attempts":1,"dispatches":2}}}).to_string(),
+        )
+        .unwrap();
+        let mut job = kuzushi_core::capabilities::campaign::snapshot::load_campaign_snapshot(
+            root.path(),
+            "attempts",
+        )
+        .unwrap()
+        .jobs
+        .remove(0);
+        assert_eq!(campaign_job_attempt_summary(&job), "2 total attempts");
+        let detail = campaign_job_detail_lines(&job).join("\n");
+        assert!(detail.contains("Current attempt counter: 1"));
+        job.dispatches = None;
+        assert_eq!(campaign_job_attempt_cell(&job), "1?");
+        assert!(campaign_job_detail_lines(&job)
+            .join("\n")
+            .contains("Lifetime attempt total unavailable"));
+    }
 
     #[test]
     fn accepted_scope_precedes_legacy_shard() {
