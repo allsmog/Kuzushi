@@ -1,5 +1,18 @@
 # TUI DevEx Audit Journeys
 
+## J286: Actual Review with selected supporting code
+
+Read the separately approved, completed invoice Review with 3,336 frozen bytes
+and eight supporting files. Inspect its job and source at six sizes, retain
+three-of-three discovery recurrence and the automatic source-level opinion,
+export at six of six investigation calls and recover without color. The helper
+starts no work, checks all original discovery fields except the mutable triage
+projection, and retains both earlier decisions. Compatibility reviewed/confirmed
+totals include the automatic terminal decision; the helper separately proves
+zero human decisions. Human judgment remains open for source reading, opinion
+authority and Report's unqualified totals. Fourteen cumulative experiment
+requests are spent; this reader grants no further work or allowance.
+
 ## J285: Explicit supporting files for standard Review
 
 Use an owned inert fixture with an authenticated synthetic observation. Choose

@@ -48,7 +48,7 @@ checkboxes remain open until their complete requirements are reconciled.
 | Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes; current Review probe; warmed Review renderer tests | Scoped. [Current responsiveness evidence](../assessments/active-review-input-2026-10-14.md) covers one native workload and warmed local rendering, not every active surface or physical/reference latency. |
 | One complete journey including cancellation, partial work, exhausted allowance and restart | [Combined J121 evidence](../assessments/cancellation-recovery-2026-10-15.md): 123 machine passes, zero failures, 96 capture pairs, one retained cancellation and no live requests | Scoped. This named case covers cancellation, partial Report, explicit retry and call approvals, final acceptance and restart. Seventeen human judgments and other failure combinations remain open. J275 separately qualifies cumulative attempt presentation on retained reader history. |
 | DFD links to context/evidence/findings/scoped actions and understandable next proposals | Map/DFD view models, linked readers and scope/proposal actions | Scoped. Reconcile all concrete element/action links and human diagram usefulness. |
-| Sequential real-model validation under approved allowance | [Owned application Scan](../assessments/live-application-scan-2026-10-15.md), [standard Review](../assessments/live-application-review-2026-10-15.md) and [source-input Review](../assessments/live-source-review-2026-10-15.md): three Scan calls and two separately approved Review calls, with durable observations, opinions, export and restart | Scoped. Thirteen cumulative experiment requests used, reaching the latest approved maximum. All five current-investigation calls are settled, including both protected Review calls. No capacity or approved follow-up remains. The newest opinion still needs downstream evidence; model usefulness and full investigation qualification remain open. |
+| Sequential real-model validation under approved allowance | [Owned application Scan](../assessments/live-application-scan-2026-10-15.md), [standard Review](../assessments/live-application-review-2026-10-15.md), [source-input Review](../assessments/live-source-review-2026-10-15.md) and [supporting-code Review](../assessments/live-supporting-review-2026-10-15.md): three Scan calls and three separately approved Review calls, with durable observations, opinions, export and restart | Scoped. Fourteen cumulative experiment requests used, reaching the approved maximum. All six current-investigation calls are settled, including three protected Review calls. No capacity or follow-up approval remains. One supporting-code opinion establishes the source path while disclosing unproven deployed exposure; general model usefulness and full investigation qualification remain open. |
 | Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |
 
 The [supporting-file increment](../assessments/review-supporting-files-2026-10-15.md)
@@ -57,11 +57,15 @@ core checks, 25 TUI checks and the workspace build pass. Enhanced J285 records 4
 passes, zero failures and three pending human judgments across six picker sizes,
 frozen-source reading and no-color restart. It retains one unapproved job and
 zero calls or approvals, including after Enter and hidden planner shortcuts in
-the reader with positive draft limits. A separate invoice Review draft freezes
-3,336 bytes and eight supporting files without changing its five calls or two
-existing decisions. It is unapproved and unstarted. Model usefulness with supporting code remains untested;
-the thirteen-request experiment cap stays exhausted. This focused increment
-does not complete a broad milestone or qualify reference-level UX parity.
+the reader with positive draft limits. The separately approved invoice Review then consumes one request with
+3,336 bytes and eight supporting files. J286 records 35 machine passes, zero
+failures, 28 capture pairs and three pending human judgments. All original
+discovery fields and both earlier decisions remain. Its source-level TP opinion
+is automatic; no human decision or runtime proof is added. Compatible Report
+totals include this automatic terminal decision and need clearer authority
+wording. Fourteen cumulative experiment requests are spent, with no capacity
+left. This one case does not complete a broad milestone, qualify general model
+accuracy or establish reference-level UX parity.
 
 Exploit development, reproducers and vulnerability patching remain excluded.
 

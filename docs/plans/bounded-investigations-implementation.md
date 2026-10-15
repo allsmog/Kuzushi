@@ -1,5 +1,19 @@
 # Bounded investigations implementation
 
+The [actual supporting-code Review](../assessments/live-supporting-review-2026-10-15.md)
+now completes its separately approved one-request job. The model uses the route
+and eight chosen files to give a source-level true-positive opinion at 0.85
+confidence while disclosing unproven deployed exposure. Fourteen cumulative
+experiment requests are spent, with six settled calls in the current
+investigation and no remaining capacity. J286 has 35 machine passes, zero
+failures, 28 capture pairs and three pending human judgments through source
+reading, exhausted export and no-color restart. Earlier decisions and original
+discovery fields remain. Report's automatic-decision authority needs clearer
+headline wording. This one case establishes no general accuracy or operator
+acceptance claim; all nine broad milestones remain open.
+
+Earlier checkpoint descriptions below retain their original approval limits.
+
 The [supporting-file increment](../assessments/review-supporting-files-2026-10-15.md)
 adds explicit finite file selection for standard Review, authenticated immutable
 capture under the existing shared source-byte cap, and a readable selection
