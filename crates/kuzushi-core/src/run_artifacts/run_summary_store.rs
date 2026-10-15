@@ -214,6 +214,20 @@ pub fn load_run_summary_without_repair(target: &Path, run_id: &str) -> Result<Ru
     load_run_summary_raw(target, run_id).map(|(_, summary)| summary)
 }
 
+pub(super) fn recover_published_terminal_under_lock(
+    target: &Path,
+    summary: RunSummary,
+) -> Result<RunSummary> {
+    if summary.status != "running" {
+        return Ok(summary);
+    }
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, &summary.run_id)?;
+    if projection.terminal.is_none() {
+        return Ok(summary);
+    }
+    recover_summary_from_terminal_intent(target, summary, &projection)
+}
+
 pub fn read_latest_run_pointer(target: impl AsRef<Path>) -> Result<LatestRunPointerState> {
     let target = target.as_ref();
     let path = match checked_latest_run_path(target) {

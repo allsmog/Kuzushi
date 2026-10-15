@@ -9,6 +9,7 @@ use std::path::Path;
 
 #[path = "terminal_persistence/artifacts.rs"]
 mod artifacts;
+mod stop_activity;
 use artifacts::emit_artifact_references;
 pub use artifacts::{verified_result_artifact_reference, verified_run_artifact_reference};
 
@@ -23,9 +24,14 @@ pub(crate) fn emit_recovered_interruption(
         return Ok(());
     }
     let observation = RunObservationHandle::jsonl(target.to_path_buf(), run_id.to_string())?;
-    interrupt_open_calls(&observation, &projection, target, run_id)?;
-    interrupt_open_tasks(&observation, &projection, reason)?;
-    interrupt_open_plan(&observation, &projection)?;
+    stop_activity::stop_open_activity(
+        &observation,
+        &projection,
+        target,
+        run_id,
+        reason,
+        RunItemStatus::Interrupted,
+    )?;
     observation.emit_and_flush(RunItemRecord::new(
         RunItemId::new(),
         RunItemSource::Persistence,
@@ -40,162 +46,6 @@ pub(crate) fn emit_recovered_interruption(
         },
     ))?;
     observation.flush()
-}
-
-fn interrupt_open_calls(
-    observation: &RunObservationHandle,
-    projection: &RunProjection,
-    target: &Path,
-    run_id: &str,
-) -> Result<()> {
-    for call_id in &projection.call_order {
-        let call = &projection.calls[call_id];
-        if call.status.is_terminal() {
-            continue;
-        }
-        let result = recovered_root_result_reference(target, run_id, call)?;
-        observation.emit_and_flush(interrupted_call_record(*call_id, call, result)?)?;
-    }
-    Ok(())
-}
-
-fn interrupted_call_record(
-    call_id: RunCallId,
-    call: &crate::run_lifecycle::CallProjection,
-    result: Option<crate::run_lifecycle::ArtifactReference>,
-) -> Result<RunItemRecord> {
-    let item = match (call.kind, call.status) {
-        (CallKind::Tool, RunItemStatus::Pending) => RunItemV1::ToolCallRejected {
-            reason_class: SafeText::operator_visible("process_interrupted"),
-            detail: SafeText::operator_visible("execution stopped before the tool started"),
-        },
-        (CallKind::Tool, _) => interrupted_tool_finish(result),
-        (CallKind::Model, _) => interrupted_model_finish(call),
-    };
-    Ok(scope_call_record(
-        RunItemRecord::new(call.item_id, RunItemSource::Persistence, item),
-        call_id,
-        call,
-    ))
-}
-
-fn recovered_root_result_reference(
-    target: &Path,
-    run_id: &str,
-    call: &crate::run_lifecycle::CallProjection,
-) -> Result<Option<crate::run_lifecycle::ArtifactReference>> {
-    if call.kind != CallKind::Tool
-        || call.parent_item_id.is_some()
-        || call.status == RunItemStatus::Pending
-    {
-        return Ok(None);
-    }
-    // The host's recovered result belongs only to the root call. Nested
-    // engines retain missing results; no engine membership is reconstructed.
-    verified_result_artifact_reference(target, run_id, call.item_id).map(Some)
-}
-
-fn interrupted_tool_finish(result: Option<crate::run_lifecycle::ArtifactReference>) -> RunItemV1 {
-    RunItemV1::ToolCallFinished {
-        status: RunItemStatus::Interrupted,
-        cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
-        result_artifact: result,
-        preview: vec![SafeText::operator_visible("tool execution was interrupted")],
-        warning_count: 0,
-        error_count: 1,
-    }
-}
-
-fn interrupted_model_finish(call: &crate::run_lifecycle::CallProjection) -> RunItemV1 {
-    RunItemV1::ModelCallFinished {
-        provider: call
-            .provider
-            .clone()
-            .unwrap_or_else(|| SafeText::operator_visible("unknown")),
-        model: call.model.clone().unwrap_or_else(|| call.label.clone()),
-        status: RunItemStatus::Interrupted,
-        latency_ms: elapsed_call_ms(call),
-        usage: ModelUsage {
-            input_tokens: None,
-            output_tokens: None,
-        },
-        cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
-        error_class: Some(SafeText::operator_visible("process_interrupted")),
-        failure: None,
-    }
-}
-
-fn elapsed_call_ms(call: &crate::run_lifecycle::CallProjection) -> u64 {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    now.saturating_sub(call.started_at_ms.unwrap_or(now))
-}
-
-fn scope_call_record(
-    mut record: RunItemRecord,
-    call_id: RunCallId,
-    call: &crate::run_lifecycle::CallProjection,
-) -> RunItemRecord {
-    record = record.with_call(call_id);
-    if let Some(task_id) = call.task_id {
-        record = record.with_task(task_id);
-    }
-    if let Some(parent_item_id) = call.parent_item_id {
-        record = record.with_parent(parent_item_id);
-    }
-    record
-}
-
-fn interrupt_open_tasks(
-    observation: &RunObservationHandle,
-    projection: &RunProjection,
-    reason: &str,
-) -> Result<()> {
-    for task_id in &projection.task_order {
-        let task = &projection.tasks[task_id];
-        if task.status.is_terminal() {
-            continue;
-        }
-        observation.emit_and_flush(
-            RunItemRecord::new(
-                task.item_id,
-                RunItemSource::Persistence,
-                RunItemV1::TaskUpdated {
-                    title: task.title.clone(),
-                    status: RunItemStatus::Interrupted,
-                    detail: Some(SafeText::operator_visible(reason)),
-                },
-            )
-            .with_task(*task_id),
-        )?;
-    }
-    Ok(())
-}
-
-fn interrupt_open_plan(
-    observation: &RunObservationHandle,
-    projection: &RunProjection,
-) -> Result<()> {
-    let Some(plan) = projection
-        .plan
-        .as_ref()
-        .filter(|plan| !plan.status.is_terminal())
-    else {
-        return Ok(());
-    };
-    observation.emit_and_flush(RunItemRecord::new(
-        plan.item_id,
-        RunItemSource::Persistence,
-        RunItemV1::PlanUpdated {
-            revision: plan.revision.saturating_add(1),
-            title: plan.title.clone(),
-            status: RunItemStatus::Interrupted,
-            task_ids: plan.task_ids.clone(),
-        },
-    ))?;
-    Ok(())
 }
 
 pub fn emit_persisted_terminal_outcome(
@@ -536,4 +386,28 @@ fn lifecycle_status(status: &str) -> Result<RunItemStatus> {
         "interrupted" => Ok(RunItemStatus::Interrupted),
         other => anyhow::bail!("run {other:?} is not terminal"),
     }
+}
+
+pub(crate) fn close_stopped_run_activity(
+    target: &Path,
+    run_id: &str,
+    reason: &str,
+    status: RunItemStatus,
+) -> Result<()> {
+    anyhow::ensure!(
+        matches!(status, RunItemStatus::Canceled | RunItemStatus::Interrupted),
+        "only stopped execution may close unfinished activity"
+    );
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
+    anyhow::ensure!(
+        projection.health == crate::run_lifecycle::ProjectionHealth::Healthy,
+        "cannot close a degraded run stream"
+    );
+    anyhow::ensure!(
+        projection.terminal.is_none(),
+        "run already has a terminal outcome"
+    );
+    let observation = RunObservationHandle::jsonl(target.to_path_buf(), run_id.to_string())?;
+    stop_activity::stop_open_activity(&observation, &projection, target, run_id, reason, status)?;
+    observation.flush()
 }

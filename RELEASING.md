@@ -1,5 +1,12 @@
 # Releasing Kuzushi
 
+- Completed study acceptance now references each trial's final successful run.
+  Canceled and superseded attempts remain in the original queue, findings ledger
+  and investigation exports. Partial acceptance retains all attempt references.
+  Report readers accept both the exact final-run set and the legacy exact full
+  attempt set; arbitrary subsets remain invalid. Existing artifact formats and
+  historical phase receipts remain readable.
+
 - Goal relevance adds `findings:goals`, `findings:goal-assess` and a shell
   browser without changing finding truth or guided phase completion. Version-1
   `finding-goal-relevance-v1` diagnostic audit records retain exact published

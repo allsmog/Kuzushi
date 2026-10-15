@@ -148,3 +148,49 @@ fn background_failure_does_not_navigate_to_the_campaign() {
     assert_eq!(app.shell_view(), ShellView::Report);
     assert_eq!(app.input(), "keep this");
 }
+
+#[test]
+fn operator_stop_retains_its_cause_and_the_operator_draft() {
+    let (root, mut app) = deck_app();
+    park_for_stop(root.path());
+    app.open_campaign_view(Some("camp1".into()));
+    app.set_input("held draft");
+    let origin = app.shell_view();
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: campaign camp1: 1 completed, 1 parked\n"),
+    );
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.clone().unwrap();
+    assert!(notice.contains("Stopped by operator: 1 completed, 1 parked"));
+    assert!(notice.contains("unresolved spending remain recorded"));
+    assert!(notice.contains("attempt allowance"));
+    assert!(!notice.contains("failure"));
+    app.refresh_campaign_deck();
+    assert_eq!(app.router.campaign().notice, Some(notice));
+    assert_eq!(app.shell_view(), origin);
+    assert_eq!(app.input(), "held draft");
+}
+
+#[test]
+fn old_operator_stop_does_not_mask_a_new_source_failure() {
+    let (root, mut app) = deck_app();
+    park_for_stop(root.path());
+    app.open_campaign_view(Some("camp1".into()));
+    failed_dispatcher(&mut app, root.path(), Some("Error: source changed\n"));
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.as_deref().unwrap();
+    assert!(notice.contains("source changed"));
+    assert!(notice.contains("Review the recorded failure"));
+    assert!(!notice.contains("Stopped by operator"));
+}
+
+fn park_for_stop(root: &Path) {
+    park_for_allowance(root);
+    let path = kuzushi_core::capabilities::campaign::campaign_queue_path(root, "camp1");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["j2"]["reason"] = serde_json::json!("canceled");
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+}

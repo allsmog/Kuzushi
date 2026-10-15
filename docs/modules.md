@@ -121,6 +121,16 @@ completion. Legacy phase inference requires a compatible completed run receipt;
 partial or auxiliary observations remain readable without advancing the guided
 journey after restart. Modern phase attempts still require explicit acceptance.
 
+Campaign Stop records operator cancellation separately from unexpected
+interruption. It reaps the owned job processes, closes unfinished lifecycle
+activity and retains consumed attempts and unresolved provider reservations.
+Retry approval and call-allowance approval remain separate. A completed study's
+Scan receipt references each trial's final successful run. Earlier canceled or
+superseded attempts remain in its queue, raw findings and investigation report;
+partial receipts retain every attempt reference. Report readers authenticate
+either the exact final-run set or the legacy exact full-attempt set. An arbitrary
+subset cannot stand in for a selected investigation.
+
 `codeql:create-db` and `codeql:scan` keep exact dispatch as Labs, auxiliary Map
 and Scan actions. Database creation retains explicit repository-execution
 authorization and its isolated checkout. It records the source commit and

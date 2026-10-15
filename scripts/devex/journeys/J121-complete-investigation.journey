@@ -1,9 +1,9 @@
-name: Fresh Setup, accepted Map, bounded passes, partial report, deliberate resume and restart
+name: Fresh Setup through admitted-request cancellation, bounded recovery, partial report and restart
 size: 120x36
 cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART seed @TMP_HOME
 require-wrapper-flow:
 launch: --target @TMP_TARGET
 require-live-snap: 30 READY THE MAP RUN | fresh-setup
@@ -19,30 +19,30 @@ keys: Down Down Down Down Down Down Enter
 require-live-snap: 20 GENERATE STUDY CONTEXT | map-plan
 expect: 3 fixed jobs
 keys: t
-type: 5
+type: 6
 keys: Enter r
 type: 2
 keys: Enter Enter
 require-live-snap: 30 Draft ready | frozen-map
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-draft
-ask: Does preparing Map freeze its three real jobs, one worker and a five-call shared allowance with two protected for Review, without starting a request?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART map-draft
+ask: Does preparing Map freeze its three real jobs, one worker and a six-call shared allowance with two protected for Review, without starting a request?
 keys: Enter End
 require-live-snap: 25 y approve | map-approval
 expect: 3 fixed jobs
-expect: Total provider calls: 5
+expect: Total provider calls: 6
 keys: y
 require-live-snap: 25 Open approved Map jobs | approved-map
 keys: Enter
 require-live-snap: 25 L starts the approved jobs | map-jobs
 keys: L
 require-live-snap: 25 dispatcher pid | map-running
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-completed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART map-completed
 keys: r
 require-live-snap: 25 Jobs: 3 · 3 completed | map-completed
 keys: a
 require-live-snap: 25 CONTEXT JOB RESULT | generated-context
 require-live-snap: 25 Owned greeting application | generated-context-summary
-expect: Calls: 1 / 5
+expect: Calls: 1 / 6
 expect: Components: 3
 resize: 160x48
 live-snap: context-result-160x48
@@ -77,10 +77,10 @@ ask: Does the executed producer chain reach a source-grounded Map for explicit a
 keys: u
 require-live-snap: 25 Map ✓ | accepted-map
 expect-not: workspace:stale inventory
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART map-accepted
 submit: scan batch
 require-live-snap: 25 PLAN A STUDY | discovery-plan
-expect: 1 committed / 5 total
+expect: 1 committed / 6 total
 keys: Down Down Enter
 require-live-snap: 20 CHOOSE DISCOVERY ENGINES | discovery-engines
 keys: Down Down Down Down Down Down Down Down Down Space
@@ -90,7 +90,7 @@ require-live-snap: 20 Engine choices updated | applied-discovery-engine
 ask: Does discovery inherit the exact accepted context and existing accounting while offering three fresh passes and one worker for review?
 keys: L
 require-live-snap: 30 Draft ready | frozen-discovery
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART scan-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART scan-draft
 keys: Down
 require-live-snap: 25 frozen snapshot contains no supplemental text | frozen-context-overview
 keys: Tab Tab Tab NPage NPage NPage NPage
@@ -100,16 +100,44 @@ keys: Up
 keys: L End
 require-live-snap: 25 y approve | discovery-approval
 expect: 3 fixed jobs
-expect: Total provider calls: 5
+expect: Total provider calls: 6
 expect: Protected review calls: 2
 keys: y
 require-live-snap: 25 Approval saved | approved-discovery
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART scan-approved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART scan-approved
 keys: L
 require-live-snap: 25 L starts its fixed jobs | discovery-jobs
 keys: L
 require-live-snap: 25 dispatcher pid | discovery-running
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART admitted
+keys: K
+require-live-snap: 20 Stop requested || Stopped by operator | cancellation-requested
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART canceled
+keys: r
+require-live-snap: 25 1 completed | canceled-partial-work
+expect: 2 parked
+expect: Stopped by operator
+expect-not: Review the recorded failure
+ask: Does Stop retain the completed first pass, name the canceled admitted attempt, preserve its unresolved call and leave the remaining fixed jobs unstarted?
+keys: a
+require-live-snap: 25 APPROVED STUDY | cancellation-plan
+keys: Down Down Down Down Down Down Down
+require-live-snap: 20 Attempts per job | attempt-allowance-row
+keys: Enter
+require-live-snap: 20 Attempts per job | revise-attempts
+type: 2
+keys: Enter L End
+require-live-snap: 25 y approve | retry-approval
+expect: Total provider calls: 6
+expect: Protected review calls: 2
+ask: Does retrying the canceled job require an explicit two-attempt approval for the same fixed plan, with prior call consumption and unknown cost retained?
+keys: y
+require-live-snap: 25 Approval saved | retry-approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | retry-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | retry-running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART partial
 keys: r
 require-live-snap: 25 2 completed | stopped-at-limit
 expect: 1 parked
@@ -118,7 +146,7 @@ expect-not: Review the recorded failure
 ask: Does the approved plan stop with two completed passes and one parked pass, preserving the two Review calls without cap doubling, new jobs or a completeness claim?
 keys: L
 require-live-snap: 20 allowance exhausted | refused-unapproved-resume
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART refused
 resize: 160x48
 live-snap: refused-160x48
 resize: 96x89
@@ -151,7 +179,7 @@ require-live-snap: 25 Labeled later-only observation | second-finding
 submit: decision deferred Labeled offline workflow decision; retain raw observations
 require-live-snap: 25 deferred | deferred-decision
 submit: report
-require-live-snap: 25 3 committed / 5 calls | partial-report
+require-live-snap: 25 4 committed / 6 calls | partial-report
 expect: 2 reviewed
 expect: 2 protected review remaining
 expect: 3 producer observations
@@ -160,7 +188,7 @@ keys: Down Down Down
 require-live-snap: 25 format json (4/6) · all | partial-json-selection
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | partial-export
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART partial-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART partial-report
 ask: Can the operator finish and export partial work with durable FP and deferral decisions, raw provenance, honest recurrence and unknown dollars while Review remains protected?
 keys: Escape
 paste-file: @ART/scan-command.txt
@@ -173,20 +201,20 @@ keys: Down Down Down Down Down
 require-live-snap: 20 ▸ Total calls | allowance-row-focused
 keys: Enter
 require-live-snap: 20 Total calls | revise-specific-allowance
-type: 6
+type: 7
 keys: Enter L End
 require-live-snap: 25 y approve | specific-new-approval
-expect: Total provider calls: 6
+expect: Total provider calls: 7
 expect: Protected review calls: 2
 expect: 3 fixed jobs
-ask: Does the six-call revision retain previous spending and the same three jobs, with exactly one new discovery call available and a separate approval decision?
+ask: Does the seven-call revision retain previous spending and the same three jobs, with exactly one new discovery call available and a separate approval decision?
 keys: y
 require-live-snap: 25 Approval saved | revised-approved
 keys: L
 require-live-snap: 25 Plan approved | remaining-job-approved
 keys: L
 require-live-snap: 25 dispatcher pid | remaining-job-running
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART completed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART completed
 keys: r
 require-live-snap: 25 3 completed | original-plan-completed
 ask: Does explicit resume run only the original remaining pass, preserve prior attempts and decisions, and keep a missed nondeterministic observation separate from a fix?
@@ -208,7 +236,7 @@ ask: Does the rediscovered observation retain the prior deferral but request rea
 submit: decision deferred Reassessed the owned fixture after pass 3
 require-live-snap: 25 deferred | reassessed-deferral
 submit: report
-require-live-snap: 25 4 committed / 6 calls | final-report
+require-live-snap: 25 5 committed / 7 calls | final-report
 expect: 4 producer observations
 expect: 2 protected review remaining
 require-live-snap: 25 2 reviewed | final-reviewed-report
@@ -218,7 +246,7 @@ expect-not: unreadable/invalid
 require-live-snap: 25 format json (4/6) · all | final-json-selection
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | final-export
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART final-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART final-report
 resize: 160x48
 keys: Home
 live-snap: report-160x48
@@ -247,11 +275,11 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 KUZUSHI_SKIP_ONBOARDING=
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 submit: report
-require-live-snap: 25 4 committed / 6 calls | recovered-report
+require-live-snap: 25 5 committed / 7 calls | recovered-report
 expect: 2 reviewed
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART restart
 ask: Does no-color restart recover the accepted context, completed original jobs, both human decisions and shared consumption without another request or new investigation?
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART hide-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART hide-context
 paste-file: @ART/context-command.txt
 keys: Enter
 require-live-snap: 25 Jobs: 3 | recorded-context-jobs-after-loss
@@ -267,6 +295,6 @@ require-live-snap: 20 Inspect context job outcome | missing-context-result-40x12
 expect: Enter outcome
 expect-not: Owned greeting application
 ask: Does a missing owned-fixture manifest produce an honest outcome view, retain inspection/back controls at 40x12, and avoid substituting another context or starting work?
-require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART restore-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_cancellation.py @TMP_TARGET @ART restore-context
 keys: C-c
 require-exit: 10

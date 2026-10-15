@@ -424,7 +424,7 @@ struct Dispatcher {
     store: QueueStore,
     settings: DispatchSettings,
     wall: QuotaWall,
-    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    shutdown_rx: tokio::sync::watch::Receiver<shutdown::StopCause>,
     _lease: CampaignDispatcherLease,
 }
 
@@ -474,7 +474,7 @@ impl Dispatcher {
         )?;
         let mut running: JoinSet<(String, String, Result<ChildReport>)> = JoinSet::new();
         loop {
-            if *self.shutdown_rx.borrow() {
+            if self.shutdown_rx.borrow().requested() {
                 break;
             }
             self.wait_out_quota_pause().await;
@@ -529,11 +529,20 @@ impl Dispatcher {
     }
 
     fn stop_before_dispatch(&mut self) -> Result<bool> {
-        if !*self.shutdown_rx.borrow() && !shutdown::requested_or_invalid(&self._lease.control()) {
+        let cause = self.stop_cause();
+        if !cause.requested() {
             return Ok(false);
         }
-        self.park_pending("interrupted")?;
+        self.park_pending(cause.outcome().label())?;
         Ok(true)
+    }
+
+    fn stop_cause(&self) -> shutdown::StopCause {
+        let observed = *self.shutdown_rx.borrow();
+        if observed.requested() {
+            return observed;
+        }
+        shutdown::requested_cause(&self._lease.control()).unwrap_or_default()
     }
 
     fn dispatch_stop_reason(&self) -> Option<&'static str> {
@@ -819,8 +828,7 @@ impl Dispatcher {
         if running.is_empty() {
             return Ok(());
         }
-        // The watch flag is already true, so every child future kills its
-        // process group and reports Interrupted; await them all.
+        // Each child preserves the shutdown cause while reaping its process group.
         while let Some(joined) = running.join_next().await {
             let (job_id, run_id, report) = joined.context("job worker panicked")?;
             self.settle_job(&job_id, &run_id, report?)?;
@@ -829,8 +837,9 @@ impl Dispatcher {
     }
 
     fn finish(mut self) -> Result<()> {
-        if *self.shutdown_rx.borrow() {
-            self.park_pending("interrupted")?;
+        let cause = *self.shutdown_rx.borrow();
+        if cause.requested() {
+            self.park_pending(cause.outcome().label())?;
         }
         let counts = self.store.state_counts();
         let cost = self.store.total_cost_usd();
@@ -986,6 +995,7 @@ fn outcome_requires_unresolved_spend(outcome: JobOutcome) -> bool {
     matches!(
         outcome,
         JobOutcome::TimedOut
+            | JobOutcome::Canceled
             | JobOutcome::Interrupted
             | JobOutcome::OverBudget
             | JobOutcome::BudgetEvidenceUnavailable
@@ -1061,13 +1071,16 @@ async fn job_future(
     spec: ChildSpec,
     job_id: String,
     run_id: String,
-    shutdown: tokio::sync::watch::Receiver<bool>,
+    shutdown: tokio::sync::watch::Receiver<shutdown::StopCause>,
 ) -> (String, String, Result<ChildReport>) {
     let report = run_child(&spec, shutdown).await;
     (job_id, run_id, report)
 }
 
-async fn sleep_or_shutdown(wait: Duration, shutdown: &mut tokio::sync::watch::Receiver<bool>) {
+async fn sleep_or_shutdown(
+    wait: Duration,
+    shutdown: &mut tokio::sync::watch::Receiver<shutdown::StopCause>,
+) {
     tokio::select! {
         _ = tokio::time::sleep(wait) => {}
         _ = shutdown.changed() => {}

@@ -102,7 +102,10 @@ def verify(root, evidence, stage):
     context = context[0]
     assert [job["tool"] for job in context["jobs"]] == ["context:build", "entry-points:extract", "threat-model:build"]
     assert context["workers"] == 1 and len(context["jobs"]) == 3
-    expected_calls = 0 if stage == "map-draft" else 1 if stage in ["map-completed", "map-accepted", "scan-draft", "scan-approved"] else 4 if stage in ["completed", "final-report", "restart"] else 3
+    canceled = (evidence / "cancellation-profile.json").exists()
+    complete = stage in ["completed", "final-report", "restart"]
+    early = stage in ["map-completed", "map-accepted", "scan-draft", "scan-approved"]
+    expected_calls = 0 if stage == "map-draft" else 1 if early else (4 if complete else 3) + int(canceled)
     if stage == "map-completed":
         wait_jobs(root, context, {"completed"})
     scans = [plan for plan in plans(root) if plan["kind"] == "scan-batch"]
@@ -128,10 +131,10 @@ def verify(root, evidence, stage):
             wait_jobs(root, scan, terminal)
         if expected_calls >= 3:
             occurrence = read_native(root, evidence, "occurrence-" + stage, ["findings", "batch", scan["campaignId"], "--json"])
-            assert occurrence["completed"] == (3 if expected_calls == 4 else 2)
+            assert occurrence["completed"] == (3 if complete else 2)
             assert occurrence["planned"] == 3
-            assert occurrence["failed"] == 0 and occurrence["pending"] == (0 if expected_calls == 4 else 1)
-            assert sorted(row["seen"] for row in occurrence["rows"]) == ([2, 2] if expected_calls == 4 else [1, 2])
+            assert occurrence["failed"] == 0 and occurrence["pending"] == (0 if complete else 1)
+            assert sorted(row["seen"] for row in occurrence["rows"]) == ([2, 2] if complete else [1, 2])
             for row in occurrence["rows"]:
                 title = row["representativeTitle"]
                 kind = "recurring" if "recurring" in title else "later-only"
@@ -148,9 +151,9 @@ def verify(root, evidence, stage):
         manifest = json.loads((root / ".kuzushi/threat-models/manifest.json").read_text())
         assert manifest.get("active") is None
         account = accounting(root, context["investigationId"])
-        assert account["reservations"] == [expected_calls, 0, 0]
+        assert account["reservations"] == [expected_calls, int(canceled and expected_calls >= 3), 0]
         last = account["revisions"][-1]
-        assert last["limits"] == {"maxProviderCalls": 6 if expected_calls == 4 else 5, "protectedReviewCalls": 2}
+        assert last["limits"] == {"maxProviderCalls": (6 if complete else 5) + int(canceled), "protectedReviewCalls": 2}
         model_job = json.loads((root / ".kuzushi/v3/campaigns" / context["campaignId"] / "queue.json").read_text())["jobs"]["context-001"]
         model_result = json.loads((root / ".kuzushi/v3/runs" / model_job["runId"] / "result.json").read_text())
         generated = model_result["data"]["modelRef"]
@@ -170,10 +173,10 @@ def verify(root, evidence, stage):
         assert sorted(row["reviewDecision"] for row in exported["findings"]) == ["deferred", "rejected_false_positive"]
         receipt = exported["metadata"]["investigation"]
         assert receipt["reviewedCount"] == 2
-        assert receipt["observationCount"] == (4 if expected_calls == 4 else 3)
-        assert receipt["occurrence"]["completed"] == (3 if expected_calls == 4 else 2)
+        assert receipt["observationCount"] == (4 if complete else 3)
+        assert receipt["occurrence"]["completed"] == (3 if complete else 2)
         with closing(query_ledger(root)) as db:
-            assert db.execute("select count(*) from review_decisions").fetchone()[0] == (3 if expected_calls == 4 else 2)
+            assert db.execute("select count(*) from review_decisions").fetchone()[0] == (3 if complete else 2)
     (evidence / (stage + "-check.json")).write_text(json.dumps({"stage": stage, "interceptedRequests": expected_calls,
         "liveProviderRequests": 0, "sourceExecuted": False, "sourceUnchanged": True, "activeContextUnchanged": True,
         "contextCampaign": context["campaignId"], "investigationId": context["investigationId"],
@@ -184,19 +187,19 @@ def hide_context_output(root, evidence):
     manifest = root / ".kuzushi/threat-models/manifest.json"
     retained = evidence / "manifest-before-owned-failure.json"
     assert manifest.is_file() and not retained.exists()
-    assert len(calls(evidence)) == 4
+    assert len(calls(evidence)) == 4 + int((evidence / "cancellation-profile.json").exists())
     shutil.copy2(manifest, retained)
     manifest.unlink()
     context = next(plan for plan in plans(root) if plan["kind"] == "context-study")
     (evidence / "context-command.txt").write_text("campaign " + context["campaignId"])
-    (evidence / "owned-failure-start.json").write_text(json.dumps({"scope":"Temporary fixture metadata only", "sourceUnchanged": source_hashes(root) == json.loads((evidence / "before.json").read_text())["sources"], "interceptedRequests":4, "liveProviderRequests":0}) + "\n")
+    (evidence / "owned-failure-start.json").write_text(json.dumps({"scope":"Temporary fixture metadata only", "sourceUnchanged": source_hashes(root) == json.loads((evidence / "before.json").read_text())["sources"], "interceptedRequests":len(calls(evidence)), "liveProviderRequests":0}) + "\n")
 
 
 def restore_context_output(root, evidence):
     manifest = root / ".kuzushi/threat-models/manifest.json"
     retained = evidence / "manifest-before-owned-failure.json"
     assert not manifest.exists() and retained.is_file()
-    assert len(calls(evidence)) == 4
+    assert len(calls(evidence)) == 4 + int((evidence / "cancellation-profile.json").exists())
     shutil.copy2(retained, manifest)
     assert manifest.read_bytes() == retained.read_bytes()
     verify(root, evidence, "restart")

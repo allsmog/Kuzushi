@@ -43,6 +43,7 @@ mod tool_output_cost;
 mod tool_run_failure_result;
 mod tool_run_record;
 mod tool_run_record_events;
+mod tool_run_stop;
 mod tool_stage;
 mod trace_handle;
 mod write_run_artifact_json;
@@ -128,6 +129,7 @@ pub use tool_run_record::{
     try_record_tool_run_refused_observed, try_record_tool_run_refused_settled,
     try_record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
+pub use tool_run_stop::stop_tool_run_child;
 pub use tool_stage::{
     append_tool_stage_receipt, load_tool_stage_receipts, ToolStageReceipt, TOOL_STAGES_JSONL_FILE,
 };

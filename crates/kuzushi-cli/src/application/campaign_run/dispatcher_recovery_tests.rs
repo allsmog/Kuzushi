@@ -43,7 +43,7 @@ async fn leave_terminal_child_unsettled(target: &Path, batch_id: &str, binary: &
     dispatcher
         .mark_job_running(&job.job_id, &run_id, attempt, dispatch)
         .unwrap();
-    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
     let report = run_child(&dispatcher.child_spec(&job, &run_id), shutdown_rx)
         .await
         .unwrap();

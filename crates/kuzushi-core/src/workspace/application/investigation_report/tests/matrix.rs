@@ -495,3 +495,89 @@ fn unstarted_matrix_creates_no_scan_attempt() {
             .is_empty()
     );
 }
+
+#[test]
+fn completed_retry_selection_keeps_canceled_history_and_observations_in_reports() {
+    let fixture = Fixture::new();
+    fixture.plan(true);
+    let selected = fixture.observations();
+    let plan = read_campaign_plan_document(fixture.root.path(), "matrix-report").unwrap();
+    let job = &plan["jobs"][0];
+    let run = "matrix-prior-canceled";
+    let consumed = verify_scan_batch_child_equivalence(
+        fixture.root.path(),
+        run,
+        &job["input"],
+        &fixture.config,
+        &fixture.registry,
+    )
+    .unwrap()
+    .unwrap();
+    let record =
+        crate::run_artifacts::ToolRunRecord::new(fixture.root.path(), run, "run", "sast:scan");
+    crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        record,
+        &job["input"],
+        None,
+        Some(consumed.consumed.components.config_sha256),
+        vec![],
+    )
+    .unwrap();
+    crate::run_artifacts::try_record_tool_run_canceled(record, "owned fixture cancellation")
+        .unwrap();
+    let path = crate::capabilities::campaign::campaign_dir(fixture.root.path(), "matrix-report")
+        .join("queue.json");
+    let mut queue: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    queue["jobs"][job["jobId"].as_str().unwrap()]["attemptRuns"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, json!({"runId":run,"outcome":"canceled"}));
+    fs::write(path, queue.to_string()).unwrap();
+    let store = FindingStore::open(fixture.workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started(run, fixture.root.path(), "canceled")
+        .unwrap();
+    let mut finding = labeled_observation();
+    finding.rule_id = "canceled-observation".into();
+    finding.fingerprint = "canceled-observation".into();
+    store.insert_finding(run, &finding).unwrap();
+    let document = load_investigation_report_document_for_runs(&fixture.workspace, &selected)
+        .unwrap()
+        .unwrap();
+    assert_eq!(document.summary().attempts.len(), 10);
+    assert_eq!(document.summary().observation_count, 7);
+    assert_eq!(
+        document.phase_result_run_ids().unwrap(),
+        selected
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>()
+    );
+    let mut legacy = selected.clone();
+    legacy.push(run.into());
+    assert!(
+        load_investigation_report_document_for_runs(&fixture.workspace, &legacy)
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        load_investigation_report_document_for_runs(&fixture.workspace, &selected[..8]).is_err()
+    );
+    let id = crate::capabilities::campaign::record_scan_batch_phase_result(
+        fixture.root.path(),
+        "matrix-report",
+        &store,
+    )
+    .unwrap()
+    .unwrap();
+    let ledger = crate::workflow_attempts::load_phase_attempt_ledger(fixture.root.path()).unwrap();
+    let result = ledger.attempt(&id).unwrap();
+    assert_eq!(
+        result.completed.outcome,
+        crate::workflow_attempts::PhaseAttemptOutcome::Completed
+    );
+    assert_eq!(result.completed.run_refs.len(), 9);
+    assert!(!result.completed.run_refs.iter().any(|id| id == run));
+}

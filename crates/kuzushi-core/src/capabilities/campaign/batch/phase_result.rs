@@ -25,7 +25,7 @@ pub fn record_scan_batch_phase_result(
         return record_matrix_result(root, batch_id);
     }
     let report = derive_batch_occurrence_report_for_controller(root, batch_id, store)?;
-    let runs = report.all_attempt_run_ids();
+    let runs = report.phase_result_run_ids()?;
     if runs.is_empty() {
         return Ok(None);
     }
@@ -38,12 +38,7 @@ fn record_matrix_result(root: &Path, id: &str) -> Result<Option<String>> {
     use crate::workspace::load_investigation_report_document;
     let workspace = crate::WorkspaceTarget::new(root)?;
     let document = load_investigation_report_document(&workspace, id)?;
-    let runs = document
-        .summary()
-        .attempts
-        .iter()
-        .map(|attempt| attempt.run_id.clone())
-        .collect::<Vec<_>>();
+    let runs = document.phase_result_run_ids()?;
     if runs.is_empty() {
         return Ok(None);
     }

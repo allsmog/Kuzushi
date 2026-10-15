@@ -13,6 +13,7 @@ use std::path::Path;
 mod fold;
 mod gate_binding;
 mod load;
+mod phase_runs;
 #[cfg(test)]
 mod tests;
 

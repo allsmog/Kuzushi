@@ -87,8 +87,10 @@ pub fn load_investigation_report_document_for_runs(
         .iter()
         .map(|attempt| attempt.run_id.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let completed: std::collections::BTreeSet<_> =
+        receipt.phase_result_run_ids()?.into_iter().collect();
     anyhow::ensure!(
-        expected == actual,
+        expected == actual || expected == completed,
         "selected Scan runs do not match the study's authenticated attempts"
     );
     Ok(Some(receipt))

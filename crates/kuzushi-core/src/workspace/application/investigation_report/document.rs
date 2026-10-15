@@ -107,6 +107,41 @@ pub struct InvestigationWorkCounts {
 }
 
 impl InvestigationReportDocument {
+    pub(crate) fn phase_result_run_ids(&self) -> Result<Vec<String>> {
+        let work = self.work_counts();
+        if work.completed != work.planned || work.planned == 0 {
+            return Ok(self
+                .summary()
+                .attempts
+                .iter()
+                .map(|attempt| attempt.run_id.clone())
+                .collect());
+        }
+        let mut runs = std::collections::BTreeSet::new();
+        for occurrence in self.phase_occurrences() {
+            runs.extend(occurrence.phase_result_run_ids()?);
+        }
+        Ok(runs.into_iter().collect())
+    }
+
+    fn phase_occurrences(&self) -> Vec<&crate::findings::BatchOccurrenceReport> {
+        match self {
+            Self::Study(receipt) => vec![&receipt.occurrence],
+            Self::ContextMatrix(receipt) => receipt
+                .occurrence
+                .cases
+                .iter()
+                .map(|case| &case.occurrence)
+                .collect(),
+            Self::ScopeStudy(receipt) => receipt
+                .occurrence
+                .cases
+                .iter()
+                .map(|case| &case.occurrence)
+                .collect(),
+        }
+    }
+
     pub fn frozen_source_identity(&self) -> Result<&str> {
         let components = match self {
             Self::Study(receipt) => &receipt.equivalence.components,

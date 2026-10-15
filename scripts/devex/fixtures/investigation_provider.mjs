@@ -1,7 +1,7 @@
 // Owned greeting fixture. Every transport request is intercepted, with no network fallback.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -116,7 +116,10 @@ function recordDiagnostic(url, body, input) {
 function assertRequest(url, init, body, input, count) {
   assert.equal(String(url), "https://chatgpt.com/backend-api/codex/responses");
   assert.equal(init.headers.authorization, "Bearer offline-investigation-fixture");
-  assert.ok(count < 4, "Exactly one Map and three separately approved discovery requests");
+  assert.ok(
+    count < (cancellationProfile() ? 5 : 4),
+    "Requests stay within the explicit fixture allowance",
+  );
   assert.equal(body.model, "gpt-5.5");
   assert.deepEqual(body.reasoning, { effort: "medium" });
   assert.equal(body.previous_response_id, undefined);
@@ -222,5 +225,40 @@ globalThis.fetch = async (url, init) => {
   const count = priorCalls();
   assertRequest(url, init, body, input, count);
   recordAcceptedRequest(body, input, count);
-  return fixtureResponse(responseValue(count));
+  if (cancellationProfile() && count === 2) {
+    writeFileSync(
+      join(evidence, "cancellation-admitted.json"),
+      JSON.stringify({
+        bridgePid: process.pid,
+        call: count + 1,
+        responseReturned: false,
+        liveProviderRequests: 0,
+      }),
+    );
+    return holdForOperatorStop(init.signal);
+  }
+  return fixtureResponse(responseValue(responseOrdinal(count, cancellationProfile())));
 };
+
+function cancellationProfile() {
+  return existsSync(join(evidence, "cancellation-profile.json"));
+}
+
+export function responseOrdinal(count, cancellation) {
+  return cancellation && count > 2 ? count - 1 : count;
+}
+
+function holdForOperatorStop(signal) {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Fixture expected operator Stop within 45 seconds")),
+      45_000,
+    );
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new Error("Owned intercepted request aborted"));
+    };
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+  });
+}

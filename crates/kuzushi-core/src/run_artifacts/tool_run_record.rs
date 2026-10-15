@@ -506,6 +506,16 @@ fn try_record_reason_terminal(
         execution_may_have_occurred,
         || prepare_reason_terminal(record, status, reason, source.as_ref()),
     )?;
+    persist_reason_terminal(record, status, observation, completion, prepared)
+}
+
+fn persist_reason_terminal(
+    record: ToolRunRecord<'_>,
+    status: &'static str,
+    observation: Option<&crate::run_lifecycle::RunObservationHandle>,
+    completion: Option<crate::modules::PendingToolCallCompletion>,
+    prepared: PreparedReasonTerminal,
+) -> Result<()> {
     let failure_context = settlement_failure_context(completion.as_ref());
     let producing_call = settle_reason_result(record, completion, reason_terminal_status(status)?)?;
     persist_terminal_after_settlement(
@@ -516,6 +526,21 @@ fn try_record_reason_terminal(
         producing_call,
         failure_context,
     )
+}
+
+pub(super) fn record_stopped_under_lock(
+    record: ToolRunRecord<'_>,
+    status: &'static str,
+    reason: &str,
+) -> Result<()> {
+    let prepared = prepare_reason_terminal(record, status, reason, None)?;
+    crate::run_lifecycle::close_stopped_run_activity(
+        record.target,
+        record.run_id,
+        reason,
+        reason_terminal_status(status)?,
+    )?;
+    persist_reason_terminal(record, status, None, None, prepared)
 }
 
 struct PreparedReasonTerminal {

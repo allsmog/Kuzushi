@@ -7,6 +7,7 @@
 
 use super::budget::{BudgetEvidenceDecision, BudgetEvidenceGuard, LiveSpendPoller};
 use super::policy::{budget_exhausted, JobOutcome};
+use super::shutdown;
 use anyhow::{Context, Result};
 use kuzushi_core::scan::{PreparedProcessGroup, RegisteredChild, ScanCancellation};
 use std::path::{Path, PathBuf};
@@ -53,7 +54,7 @@ struct SupervisionReport {
 /// child so no zombie survives the dispatcher.
 pub(super) async fn run_child(
     spec: &ChildSpec,
-    shutdown: tokio::sync::watch::Receiver<bool>,
+    shutdown: tokio::sync::watch::Receiver<shutdown::StopCause>,
 ) -> Result<ChildReport> {
     let log = std::fs::File::create(&spec.log_path)
         .with_context(|| format!("Could not create {}", spec.log_path.display()))?;
@@ -77,7 +78,7 @@ pub(super) async fn run_child(
 async fn supervise_child(
     child: &RegisteredChild,
     spec: &ChildSpec,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    mut shutdown: tokio::sync::watch::Receiver<shutdown::StopCause>,
 ) -> Result<SupervisionReport> {
     let timeout = tokio::time::sleep(spec.timeout);
     tokio::pin!(timeout);
@@ -97,7 +98,7 @@ async fn supervise_child(
                 return terminal_stop(child, JobOutcome::TimedOut, spec, &mut spend, &mut guard);
             }
             _ = shutdown.changed() => {
-                return terminal_stop(child, JobOutcome::Interrupted, spec, &mut spend, &mut guard);
+                return terminal_stop(child, shutdown.borrow().outcome(), spec, &mut spend, &mut guard);
             }
             _ = spend_poll.tick(), if spec.job_budget_usd.is_some() => {
                 if let Some(report) = budget_stop(child, spec, &mut spend, &mut guard)? {
@@ -131,7 +132,32 @@ fn terminal_stop(
     evidence_guard: &mut BudgetEvidenceGuard,
 ) -> Result<SupervisionReport> {
     let report = terminal_report(outcome, None, spec, spend_poller, evidence_guard);
+    if matches!(
+        report.outcome,
+        JobOutcome::Canceled | JobOutcome::Interrupted
+    ) {
+        return stop_recorded_child(child, report, spec);
+    }
     stop_child(child, report.outcome, report.observed_spend_usd)
+}
+
+fn stop_recorded_child(
+    child: &RegisteredChild,
+    mut report: SupervisionReport,
+    spec: &ChildSpec,
+) -> Result<SupervisionReport> {
+    use kuzushi_core::run_artifacts::{stop_tool_run_child, ToolRunRecord};
+    use kuzushi_core::scan::CancellationDisposition;
+    let disposition = match report.outcome {
+        JobOutcome::Canceled => CancellationDisposition::Canceled,
+        _ => CancellationDisposition::Interrupted,
+    };
+    let record = ToolRunRecord::new(&spec.target, &spec.run_id, "tool", &spec.tool);
+    if let Some(summary) = stop_tool_run_child(record, child, disposition)? {
+        report.outcome = JobOutcome::from_persisted_status(&summary.status)
+            .context("Stopped child has unknown persisted status")?;
+    }
+    Ok(report)
 }
 
 fn terminal_report(
@@ -348,6 +374,24 @@ mod tests {
         assert_eq!(tail.as_bytes(), expected_tail);
     }
 
+    #[tokio::test]
+    async fn operator_stop_reaps_the_child_and_preserves_cancellation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let binary = fake_child(tmp.path(), "operator-sleeper", "sleep 30");
+        let (tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tx.send(shutdown::StopCause::Operator).unwrap();
+        });
+        let report = run_child(&spec(tmp.path(), binary, "operator", None), rx)
+            .await
+            .unwrap();
+        assert_eq!(report.outcome, JobOutcome::Canceled);
+        assert!(super::super::outcome_requires_unresolved_spend(
+            report.outcome
+        ));
+    }
+
     #[test]
     fn terminal_refresh_preserves_unavailable_budget_evidence() {
         let tmp = tempfile::tempdir().unwrap();
@@ -377,7 +421,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "sleeper", "sleep 30");
         write_over_cap_lifecycle(tmp.path(), "burning", 9.9);
-        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (_tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
         let started = std::time::Instant::now();
         let report = run_child(&spec(tmp.path(), binary, "burning", Some(5.0)), rx)
             .await
@@ -393,7 +437,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "corrupt-sleeper", "sleep 30");
         write_malformed_lifecycle(tmp.path(), "corrupt");
-        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (_tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
         let started = std::time::Instant::now();
         let report = run_child(&spec(tmp.path(), binary, "corrupt", Some(5.0)), rx)
             .await
@@ -409,7 +453,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "clean-exit", "exit 0");
         write_over_cap_lifecycle(tmp.path(), "uncapped", 99.0);
-        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (_tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
         let report = run_child(&spec(tmp.path(), binary, "uncapped", None), rx)
             .await
             .unwrap();
@@ -429,7 +473,7 @@ mod tests {
             "forker",
             &format!("sleep 60 & echo $! > {}", grand_pid_path.display()),
         );
-        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (_tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
         let report = run_child(&spec(tmp.path(), binary, "forking", None), rx)
             .await
             .unwrap();
@@ -461,7 +505,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "cheap", "exit 0");
         write_over_cap_lifecycle(tmp.path(), "cheap-run", 0.5);
-        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let (_tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
         let report = run_child(&spec(tmp.path(), binary, "cheap-run", Some(5.0)), rx)
             .await
             .unwrap();

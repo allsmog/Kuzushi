@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodedThreatContext } from "./investigation_provider.mjs";
+import { decodedThreatContext, responseOrdinal } from "./investigation_provider.mjs";
 
 function body(content, bytes = Buffer.byteLength(content)) {
   const encoded = [...Buffer.from(content)]
@@ -31,4 +31,13 @@ test("request verification decodes exact newlines, Unicode, underscores and perc
 test("request verification refuses missing framing and mismatched byte counts", () => {
   assert.throws(() => decodedThreatContext({ input: [{ content: "Unframed context" }] }));
   assert.throws(() => decodedThreatContext(body("Owned context", 1)));
+});
+
+test("a canceled request consumes a call without becoming a discovery response", () => {
+  assert.deepEqual(
+    [0, 1, 2, 3].map((count) => responseOrdinal(count, false)),
+    [0, 1, 2, 3],
+  );
+  assert.equal(responseOrdinal(3, true), 2);
+  assert.equal(responseOrdinal(4, true), 3);
 });

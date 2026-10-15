@@ -1,5 +1,13 @@
 # Bounded investigations implementation
 
+The [combined cancellation recovery journey](../assessments/cancellation-recovery-2026-10-15.md)
+now covers an admitted request, retained reservation and attempt, explicit retry
+and allowance approval, partial Report, final successful-run acceptance and
+no-color restart. J121 records 123 machine passes, zero failures and 96 capture
+pairs; 17 human judgments remain open. Completed acceptance excludes superseded
+canceled runs while the report preserves every attempt and observation. This
+scoped increment closes no broad delivery checkbox.
+
 This checklist tracks the accepted September 9, 2026 implementation plan.
 Checked items require implementation and recorded verification; registration or
 documentation alone is not functional evidence.
