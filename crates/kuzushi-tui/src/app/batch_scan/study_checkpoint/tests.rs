@@ -110,7 +110,7 @@ fn restart_restores_case_baseline_passes_and_partial_unicode_field_without_autho
             .draft_recovery,
         StudyDraftRecovery::Choices { .. }
     ));
-    assert!(next.capture_context_case_name_paste("must not enter the composer") == false);
+    assert!(!next.capture_context_case_name_paste("must not enter the composer"));
     key(&mut next, KeyCode::Enter);
     settle(&mut next);
     let restored = next.router.campaign().batch_scan_config.as_ref().unwrap();

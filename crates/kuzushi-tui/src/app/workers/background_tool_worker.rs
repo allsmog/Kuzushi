@@ -159,6 +159,15 @@ impl CostedWorkerError {
 
 #[derive(Debug)]
 pub(crate) enum PlanEvent {
+    // Compatibility event retained for persisted/test event folds; planning now
+    // emits reviewed study proposals instead of a worker plan. Only the tests
+    // still construct it, so the expectation is scoped to the build where the
+    // variant really is dead: a production emitter appearing again leaves the
+    // expectation unfulfilled and fails the gate.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no worker emits a plan proposal any more")
+    )]
     Proposed {
         plan: PlanProposal,
         audit: AgentCallAudit,
