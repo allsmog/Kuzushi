@@ -5,6 +5,7 @@
 
 use crate::ShellApp;
 mod answers;
+pub(crate) mod goal_review;
 pub(crate) mod source_review;
 pub(crate) use answers::*;
 

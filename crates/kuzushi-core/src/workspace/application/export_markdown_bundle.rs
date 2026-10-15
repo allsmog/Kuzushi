@@ -160,6 +160,7 @@ fn build_manifest_entry(
         "reviewDecision": record.review_decision,
         "reviewDecisionBasis": record.review_decision_basis,
         "reviewedSource": record.reviewed_source,
+        "goalAssessments": record.goal_assessments,
         "relationships": record.relationships,
         "observationGap": record.observation_gap,
         "observationNote": record.observation_note,

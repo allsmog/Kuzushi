@@ -44,6 +44,7 @@ mod campaign_reader;
 mod chrome;
 mod context_generation;
 mod context_history;
+mod goal_review;
 pub(crate) mod logs_reader;
 mod paste_inspection;
 mod review_study;

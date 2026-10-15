@@ -30,6 +30,10 @@ pub enum ControlCommand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecisionCommand {
+    FindingGoalAssessment {
+        record: crate::findings::FindingGoalAssessment,
+        expected_revision: u64,
+    },
     FindingLesson {
         record: crate::findings::FindingLesson,
         expected: Option<crate::findings::LessonRef>,

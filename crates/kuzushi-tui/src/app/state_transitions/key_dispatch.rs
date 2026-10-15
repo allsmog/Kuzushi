@@ -64,7 +64,8 @@ impl ShellApp {
 
     fn reduce_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         let update = self
-            .handle_source_review_key(key)
+            .handle_goal_review_key(key)
+            .or_else(|| self.handle_source_review_key(key))
             .or_else(|| self.handle_lesson_key(key))
             .or_else(|| self.handle_relationship_key(key))
             .unwrap_or_else(|| self.handle_modal_key(key));

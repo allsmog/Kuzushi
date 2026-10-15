@@ -9,6 +9,7 @@ pub(super) fn render_bundle_finding_markdown(
     let mut out = String::new();
     push_bundle_header(&mut out, record);
     push_bundle_relationships(&mut out, record);
+    push_markdown_goals(&mut out, record);
     crate::workspace::application::export_lessons::push_markdown_lessons(&mut out, &record.lessons);
     push_bundle_security_context(&mut out, record);
     push_bundle_message(&mut out, finding);
@@ -353,4 +354,20 @@ fn push_bundle_evidence(out: &mut String, evidence: &FindingEvidence) {
     if !evidence.rationale.is_empty() {
         out.push_str(&fenced_snippet_block(&evidence.rationale));
     }
+}
+
+pub(super) fn push_markdown_goals(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    if record.goal_assessments.is_empty() {
+        return;
+    }
+    out.push_str("## Goal relevance history\n\nOperator priorities, separate from finding verdicts. Each assessment applies only to its recorded brief and observation. Later source revisions require independent review.\n\n");
+    for assessment in &record.goal_assessments {
+        let reason = markdown_inline_text(&assessment.reason);
+        let brief_text = markdown_inline_text(&assessment.brief_text);
+        out.push_str(&format!("- **{}**, assessment v{}: {}\n  Brief {} v{}, object {}. Finding generation #{}, observation {}, source snapshot {}, run {}.\n  Reviewed goal: {brief_text}\n",
+            assessment.relevance.label(), assessment.revision, reason,
+            assessment.brief_ref.brief_id, assessment.brief_ref.revision, assessment.brief_ref.object.hash,
+            assessment.basis.finding_id, assessment.basis.observation_seq, assessment.basis.snapshot_hash, assessment.basis.run_id));
+    }
+    out.push('\n');
 }

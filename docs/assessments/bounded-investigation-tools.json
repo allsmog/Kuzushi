@@ -4998,6 +4998,97 @@
         "scopeEnforcement": "This is a workflow draft rather than a scanner. Proposed run tools cannot change target, model, allowance or internal work bindings.",
         "interfaceParity": "Canonical descriptor/preparation/dispatch are shared with headless execution. /plan and selected-phase prose open the same study. Keyboard and full reference-product acceptance remain open."
       }
+    },
+    {
+      "tool": "findings:goals",
+      "module": "findings",
+      "declaredMaturity": "core",
+      "declaredPhase": "review",
+      "purpose": "Browse findings by operator-assessed relevance to an exact saved brief. Priorities never determine finding verdicts.",
+      "scope": "One target ledger, exact published brief revision and finding observation. No applicability to another source revision is inferred.",
+      "runtimeRequirement": "never",
+      "headlessDeclared": true,
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "required",
+      "requiredOptions": [],
+      "declaredOptions": [
+        "briefId",
+        "briefRef",
+        "filter",
+        "limit",
+        "offset",
+        "findingId",
+        "allowanceRef"
+      ],
+      "declaredEffect": "read",
+      "approval": "none",
+      "readinessVerdict": "Scoped manual goal assessment over owned policy observations; broad UX, scale and investigation acceptance remain open.",
+      "executionEvidence": "Seven focused core checks, two TUI behavior checks and fixture setup pass. Final J274: 46 machine passes, zero failures, 36 paired native captures and three pending human judgments. Thirteen immutable executables and stable before/after Rust inputs are verified. No provider requests or finding decisions.",
+      "runtimeDeclaration": "Never; operator assessment makes no model request, executes no target source and creates no jobs.",
+      "auditDimensions": {
+        "purposeAndValue": "Prioritize findings relative to the reviewed operator brief without changing finding truth. Owned policy fixtures establish workflow behavior, not vulnerability relevance quality.",
+        "phaseAgreement": "Runtime-free Review operations with phase_result=false. Neither reading nor assessment completes Review.",
+        "requiredInputs": "Published brief reference, recorded generation/event/run/snapshot, relevance, reason and expected assessment revision. No credentials or scanner dependency.",
+        "sharedDispatchExecution": "Shell reads and writes execute the same descriptor-backed prepared boundary as headless run. The UI confirmation reviews the exact replacement.",
+        "artifactConsumption": "Version-1 diagnostic audit records feed paged relevance views, generation history, JSON/JSONL, SARIF, Markdown and external finding exports. CSV names the omitted history.",
+        "failureAndRecovery": "Invalid references, stale revisions, concurrent writers, changed observations, restart and projection rebuild are tested. Reasons stay session-only until saved; navigation and Quit preserve or disclose them. Native failures and qualification limits remain recorded.",
+        "approvedResources": "No provider requests, retries or study jobs. Shell pages contain 50 findings, descriptor pages permit 1 to 200; reasons are limited to 4096 bytes. Complete generation history and whole-ledger matching still need large-history qualification.",
+        "scopeEnforcement": "Exact target-published brief and finding observation binding; a newer brief or observation is not automatically assessed. The current checkout is explicitly not reassessed.",
+        "interfaceParity": "Shared shell/run boundary, focused concurrency/export/rebuild checks and native J274. Scan does not schedule relevance assessment automatically. Pending human UX judgments remain separate."
+      },
+      "evidence": [
+        "docs/assessments/goal-relevance-2026-10-15.md"
+      ],
+      "declaredModuleMaturity": "core",
+      "discoveryMaturityOverride": null
+    },
+    {
+      "tool": "findings:goal-assess",
+      "module": "findings",
+      "declaredMaturity": "core",
+      "declaredPhase": "review",
+      "purpose": "Record, replace or clear an operator goal assessment. Saves history; changes no finding truth, confidence, severity or decisions.",
+      "scope": "One target ledger, exact published brief revision and finding observation. No applicability to another source revision is inferred.",
+      "runtimeRequirement": "never",
+      "headlessDeclared": true,
+      "workspaceRequirement": "required",
+      "findingStoreRequirement": "required",
+      "requiredOptions": [
+        "briefRef",
+        "basis",
+        "relevance",
+        "reason",
+        "expectedRevision"
+      ],
+      "declaredOptions": [
+        "briefRef",
+        "basis",
+        "relevance",
+        "reason",
+        "expectedRevision",
+        "allowanceRef"
+      ],
+      "declaredEffect": "workspace-write",
+      "approval": "none",
+      "readinessVerdict": "Scoped manual goal assessment over owned policy observations; broad UX, scale and investigation acceptance remain open.",
+      "executionEvidence": "Seven focused core checks, two TUI behavior checks and fixture setup pass. Final J274: 46 machine passes, zero failures, 36 paired native captures and three pending human judgments. Thirteen immutable executables and stable before/after Rust inputs are verified. No provider requests or finding decisions.",
+      "runtimeDeclaration": "Never; operator assessment makes no model request, executes no target source and creates no jobs.",
+      "auditDimensions": {
+        "purposeAndValue": "Prioritize findings relative to the reviewed operator brief without changing finding truth. Owned policy fixtures establish workflow behavior, not vulnerability relevance quality.",
+        "phaseAgreement": "Runtime-free Review operations with phase_result=false. Neither reading nor assessment completes Review.",
+        "requiredInputs": "Published brief reference, recorded generation/event/run/snapshot, relevance, reason and expected assessment revision. No credentials or scanner dependency.",
+        "sharedDispatchExecution": "Shell reads and writes execute the same descriptor-backed prepared boundary as headless run. The UI confirmation reviews the exact replacement.",
+        "artifactConsumption": "Version-1 diagnostic audit records feed paged relevance views, generation history, JSON/JSONL, SARIF, Markdown and external finding exports. CSV names the omitted history.",
+        "failureAndRecovery": "Invalid references, stale revisions, concurrent writers, changed observations, restart and projection rebuild are tested. Reasons stay session-only until saved; navigation and Quit preserve or disclose them. Native failures and qualification limits remain recorded.",
+        "approvedResources": "No provider requests, retries or study jobs. Shell pages contain 50 findings, descriptor pages permit 1 to 200; reasons are limited to 4096 bytes. Complete generation history and whole-ledger matching still need large-history qualification.",
+        "scopeEnforcement": "Exact target-published brief and finding observation binding; a newer brief or observation is not automatically assessed. The current checkout is explicitly not reassessed.",
+        "interfaceParity": "Shared shell/run boundary, focused concurrency/export/rebuild checks and native J274. Scan does not schedule relevance assessment automatically. Pending human UX judgments remain separate."
+      },
+      "evidence": [
+        "docs/assessments/goal-relevance-2026-10-15.md"
+      ],
+      "declaredModuleMaturity": "core",
+      "discoveryMaturityOverride": null
     }
   ],
   "curationChanges": [
@@ -5941,7 +6032,7 @@
     "scope": "all non-hidden operator-visible tools; internal nodes require separate executor evidence",
     "count": 113
   },
-  "currentOperatorToolCount": 114,
+  "currentOperatorToolCount": 116,
   "catalogSource": "/tmp/kuzushi-tui-integration-20261012/scanner-omissions-catalog.json",
   "currentPolicyInventory": {
     "registeredToolCount": 184,
@@ -9526,5 +9617,22 @@
       "Independent review of supplied historical pattern claims",
       "Human visual and reference-product acceptance"
     ]
+  },
+  "goalRelevanceCatalogCheckpoint": {
+    "visibleTools": 116,
+    "maturityCounts": {
+      "core": 79,
+      "labs": 32,
+      "compatibility": 5
+    },
+    "assessment": "docs/assessments/goal-relevance-2026-10-15.md",
+    "qualification": "Two additive runtime-free tools. Existing tool policy and maturity are unchanged; prior catalog and policy captures remain historical.",
+    "nativeSha256": "bebc06042db4ee7456e1ee9047bfcd1791d69d6e48fa21dec50db0ded212f548",
+    "catalogSha256": "39bcc1d3beb457fde0ab06a3a60d17b873a443fd9e35771e9e07def634119767",
+    "machinePass": 46,
+    "machineFail": 0,
+    "capturePairs": 36,
+    "pendingHuman": 3,
+    "providerRequests": 0
   }
 }

@@ -17,6 +17,16 @@ belong in migration ledgers, not in this current operator contract.
 
 ## Shared Boundary
 
+`findings:goals` and `findings:goal-assess` use the shared prepared dispatch
+boundary for exact brief and observation binding, option validation and
+revision-checked writes. The shell's `goals [brief-id]` command and Review `G`
+navigation open a keyboard browser and reason editor over those tools. Their
+background completions do not open or move the underlying workflow page.
+These controls are shell presentation; scan orchestration never assesses
+relevance automatically. Relevance is operator priority and cannot supply a
+finding verdict or complete Review. Assessments and clears remain readable
+after restart and projection rebuild. Unsaved reasons are session-only.
+
 `campaign:review-study` uses the shared boundary to freeze a finite Review job.
 The shell adds a Review form, explicit allowance review and named restart
 recovery; headless callers use the same draft and approval tools. A generic

@@ -26,7 +26,7 @@ pub(crate) fn parse_nested_shell_command(
             parse_campaign_surface_command(verb, args)
         }
         "queue" => parse_queue_command(args),
-        "relationships" | "groups" | "lessons" => parse_relationship_view(verb),
+        "relationships" | "groups" | "lessons" | "goals" => parse_relationship_view(verb, args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
         "proof" => parse_proof_command(args),
@@ -41,10 +41,11 @@ pub(crate) fn parse_nested_shell_command(
     Some(command)
 }
 
-fn parse_relationship_view(verb: &str) -> ShellCommand {
+fn parse_relationship_view(verb: &str, args: &[&str]) -> ShellCommand {
     match verb {
         "groups" => ShellCommand::ShowFindingGroups,
         "lessons" => ShellCommand::ShowLessons,
+        "goals" => ShellCommand::ShowGoalReview(args.first().map(|id| (*id).to_string())),
         _ => ShellCommand::ShowRelationships,
     }
 }

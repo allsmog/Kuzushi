@@ -1,10 +1,14 @@
 pub use application::scan_reassessment_block;
 mod application;
+pub(crate) use application::read_goals;
+pub use application::{FindingGoalPage, FindingGoalRow};
 mod domain;
 pub use domain::distinct_recorded_source_count;
 pub(crate) use domain::merge_ordered_source_histories;
 pub(crate) use domain::FINDING_LESSON_SUBJECT;
+pub(crate) use domain::GOAL_RELEVANCE_SUBJECT;
 pub(crate) use domain::{validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT};
+pub use domain::{FindingGoalAssessment, FindingGoalBasis, GoalRelevance};
 pub use domain::{
     FindingLesson, LessonContent, LessonGeneration, LessonOrigin, LessonRef, LessonState,
 };

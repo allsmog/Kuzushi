@@ -125,6 +125,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub(crate) mod goal_review;
 pub(crate) mod lessons;
 mod onboarding;
 mod prompts;

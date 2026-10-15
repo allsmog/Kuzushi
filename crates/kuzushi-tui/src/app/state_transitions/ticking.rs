@@ -18,6 +18,7 @@ impl ShellApp {
         changed |= self.poll_relationship_write();
         changed |= self.poll_lesson_write();
         changed |= self.poll_source_review();
+        changed |= self.poll_goal_review();
         changed
     }
 
@@ -120,7 +121,13 @@ impl ShellApp {
     }
 
     pub fn has_running_work(&self) -> bool {
-        if self.runtime_state.source_review_worker.is_some() {
+        if self.runtime_state.source_review_worker.is_some()
+            || self
+                .runtime_state
+                .goal_review_worker
+                .as_ref()
+                .is_some_and(|worker| worker.writing)
+        {
             return true;
         }
         let scan_running = self.scan().is_some_and(|scan| scan.running);

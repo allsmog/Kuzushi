@@ -116,6 +116,7 @@ fn volatile_session_rows(app: &ShellApp) -> Vec<String> {
         model_study_draft_row(app),
         scope_draft_row(app),
         goal_draft_row(app),
+        goal_assessment_draft_row(app),
         context_copy_draft_row(app),
         context_checkpoint_pending_row(app),
         context_checkpoint_cleanup_row(app),
@@ -510,4 +511,8 @@ mod tests {
             );
         }
     }
+}
+
+fn goal_assessment_draft_row(app: &ShellApp) -> Option<String> {
+    app.has_goal_assessment_drafts().then(|| "    !   goal relevance draft   session-only assessment and reason will be discarded; content hidden".into())
 }

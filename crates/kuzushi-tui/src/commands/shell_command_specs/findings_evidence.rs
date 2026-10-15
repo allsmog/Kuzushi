@@ -114,6 +114,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "review and undo finding relationships while preserving finding verdicts",
     },
     ShellCommandSpec {
+        command: "goals",
+        aliases: &["/goals"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "review goal relevance against a saved brief with goals [brief-id]",
+    },
+    ShellCommandSpec {
         command: "lessons",
         aliases: &["/lessons"],
         category: ShellCommandCategory::FindingsEvidence,

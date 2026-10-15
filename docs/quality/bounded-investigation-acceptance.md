@@ -16,7 +16,7 @@ checkboxes remain open until their complete requirements are reconciled.
 | Optional AI proposal, one request, no delegation/repair, at most eight primary scopes plus shared scope | `modules/pack_module/suggest_scopes.rs`; accepted/rejected real-model receipts in [scope proposal evidence](../assessments/live-scope-proposal-2026-10-14.md) | Scoped. Larger architectural usefulness remains open. Regeneration and further splitting still need separate approved work. |
 | Validate paths, overlap, uncovered files and shared dependencies; review and edit boundaries visually | `workspace/domain/scan_scope_proposal`; scope edit journeys including J206/J260 | Scoped. AI suggestions are not acceptance; shared context must not add discovery jobs. |
 | Fixed jobs and one-worker/three-pass defaults; no recursive job creation | `capabilities/campaign/batch.rs`, `context_matrix`, `scope_study`; J121/J206 execute their fixed plans | Scoped. Reconcile all stale-plan, scope-adapter and cancellation branches against the original acceptance list. |
-| Per-tool purpose, phase, inputs, real executor, outputs, failures, resources, interfaces and value | [114-tool matrix](../assessments/bounded-investigation-tools.json) and linked per-tool assessments | Open. Registration and input metadata do not qualify useful execution. Product value and full supported-path readiness remain incomplete for several tools. |
+| Per-tool purpose, phase, inputs, real executor, outputs, failures, resources, interfaces and value | [116-tool matrix](../assessments/bounded-investigation-tools.json) and linked per-tool assessments | Open. Registration and input metadata do not qualify useful execution. Product value and full supported-path readiness remain incomplete for several tools. |
 | Curated Core/Labs/Compatibility defaults, distinct readiness and evidence-backed retirement proposals | Registry maturity/readiness policy, [retirement candidates](../assessments/module-retirement-candidates.md) | Scoped. No speculative deletion or promotion; keep exact dispatch and public compatibility. |
 | Phase consumers and scope enforcement are real execution behavior | Shared prepared dispatch; Context study producer jobs; exact native/agentic scope adapters; J121/J206 | Scoped. Unsupported adapters require separately reviewed whole-repository work. General DAG metadata is not credited as execution ordering. |
 
@@ -30,7 +30,7 @@ checkboxes remain open until their complete requirements are reconciled.
 | Raw observations, provenance, reversible duplicates/relationships and human decisions | Findings ledger/application services; relationship and Review journeys | Scoped. Keep related variants and uncertain matches distinct from duplicates. Reconcile scale and all interface paths. |
 | SHA/content-aware comparison and honest recurrence | Finding identity/source history, batch occurrence, J121 dirty-source reassessment and retained FP/deferral decisions | Scoped. A missing later observation never establishes a fix or safe cross-branch decision reuse. |
 | Severity, confidence, recurrence and scope views | Review queue, canonical filters, batch occurrence and scope-case views | Scoped. The general `findings:list` filter explicitly rejects `scope`; existing scope access is through study/case views. Do not claim a global scope filter exists. |
-| Goal-relevance view separate from finding verdicts | Brief revisions exist in `campaign/brief/domain.rs`; Review page ordering and canonical finding filters contain no goal-relevance assessment/view | **Missing.** Add source- and brief-revision-bound relevance assessment and a usable Review view. Keep it separate from severity, confidence and human verdicts, reversible, and exportable. A saved brief alone does not satisfy this requirement. |
+| Goal-relevance view separate from finding verdicts | `findings:goals`, `findings:goal-assess`, Review `G`/`goals`, immutable audit history and export; [goal relevance evidence](../assessments/goal-relevance-2026-10-15.md) | Scoped. Manual assessments bind exact saved briefs and recorded observations, with reversible clears and conflict review. J274 verifies the six-size browser, compact forms and no-color restart. Large histories, rapid key sequences and human UX acceptance remain open. |
 | Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | Finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests | Scoped. Reviewed reuse is not evidence of useful lessons on every target; keep legacy imported patterns explicitly unverified. |
 | Source-only variants and next-investigation proposals have their own approved question, scope and allowance | Proposal/context study machinery and experimental source-pattern adapters | Scoped. Do not credit unaccepted drafts as executed follow-ups or useful variant coverage. |
 
@@ -53,5 +53,7 @@ checkboxes remain open until their complete requirements are reconciled.
 
 Exploit development, reproducers and vulnerability patching remain excluded.
 Their compatibility implementations are not work items for completing this plan.
-The next concrete implementation item is the missing goal-relevance surface;
-the remaining rows still require evidence at the scope of their original claims.
+The goal-relevance surface now has scoped manual workflow evidence. The next
+integration item is the complete cancellation, partial-work, limit and restart
+journey. The remaining rows still need evidence at the scope of their original
+claims.

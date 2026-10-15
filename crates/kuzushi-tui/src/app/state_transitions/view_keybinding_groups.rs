@@ -313,6 +313,7 @@ fn review_context_reader_keybindings() -> Vec<ViewKeybinding> {
             "relationships",
             ViewHotkeyAction::RelationshipsOpen,
         ),
+        bind_char('G', "G", "goal relevance", ViewHotkeyAction::GoalReviewOpen),
         bind_char('l', "l", "lessons", ViewHotkeyAction::LessonsOpen),
     ]
 }

@@ -4,6 +4,9 @@ use super::presentation::{proof_state_label, runtime_validation_label};
 pub use scan_assessment::scan_reassessment_block;
 use serde::Serialize;
 
+mod goal_review;
+pub(crate) use goal_review::read_goals;
+pub use goal_review::{FindingGoalPage, FindingGoalRow};
 mod batch_occurrence;
 mod context_matrix_occurrence;
 mod scope_study_occurrence;

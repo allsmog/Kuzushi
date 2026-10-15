@@ -54,6 +54,7 @@ fn is_movement_hotkey(action: ViewHotkeyAction) -> bool {
             | ThreatModelPrevious
             | FindingGroupsOpen
             | RelationshipsOpen
+            | GoalReviewOpen
             | LessonsOpen
             | Back
     )
@@ -115,6 +116,7 @@ impl ShellApp {
             }
             ViewHotkeyAction::RelationshipsOpen => self.open_relationships(),
             ViewHotkeyAction::LessonsOpen => self.open_lessons(),
+            ViewHotkeyAction::GoalReviewOpen => self.open_goal_review(None),
             _ => return None,
         }
         Some(InputUpdate::handled())

@@ -1,5 +1,32 @@
 # Kuzushi modules
 
+Goal relevance is an explicit operator assessment, separate from finding
+validity, severity, confidence and Review completion. Open `goals [brief-id]`
+in the shell, or press `G` in Review navigation. The browser covers workspace
+findings and does not inherit the ordinary finding filter or selected study.
+It shows the exact saved brief, fifty rows per page, a relevance filter and
+the recorded observation receipt. `?` lists its controls. `1` to `4` choose
+Direct, Related, Outside goal or Uncertain; `u` clears an assessment. Add a
+reason, use Ctrl+S to inspect the replacement, then Enter to save.
+
+`findings:goals` exposes the same read surface headlessly, including exact
+`briefRef` reading and generation-specific history through `findingId`.
+`findings:goal-assess` requires that published reference, the exact observation
+`basis`, `relevance`, `reason` and `expectedRevision`. Both use prepared
+dispatch and require no model. Assessments bind one finding generation and
+observation, not the current checkout. Other source revisions need independent
+review. `r` refreshes the same brief; `R` explicitly opens its latest saved
+revision. Older assessments never carry automatically into a new brief.
+
+Assessment reasons remain session-only until saved. Back, target switches and
+brief switches retain them in the running shell; Quit discloses their presence
+without printing their text. Conflicts retain the reason. Refresh and explicitly
+select the assessment again to review the current revision before replacing it.
+`h` reads recorded history. JSON/JSONL, SARIF, Markdown bundles and external
+finding exports include the assessment history separately from finding verdicts.
+CSV explicitly lists this history as omitted. Clearing records another revision;
+it never deletes the history or resolves a finding.
+
 Plan approval begins with a compact overview of the frozen workload and its
 recorded execution models. Current accounting and spending limits precede scope
 and context receipts. All distinct models remain visible; missing model records

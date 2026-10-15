@@ -71,6 +71,7 @@ const VULN_FINDINGS_OMITTED: &[&str] = &[
 ];
 
 const CSV_OMITTED: &[&str] = &[
+    "goalAssessments",
     "reviewDecisionBasis",
     "lessons",
     "cwe",

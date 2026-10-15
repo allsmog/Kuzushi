@@ -11,6 +11,10 @@ mod dispatcher;
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeState {
+    pub(crate) goal_review: super::goal_review::GoalReviewState,
+    pub(crate) goal_review_states:
+        std::collections::BTreeMap<(PathBuf, String), super::goal_review::GoalReviewState>,
+    pub(crate) goal_review_worker: Option<super::goal_review::GoalReviewWorker>,
     pub(crate) source_review_forms:
         std::collections::BTreeMap<(PathBuf, i64), super::source_review::SourceReviewForm>,
     pub(crate) source_review_visible: Option<(PathBuf, i64)>,

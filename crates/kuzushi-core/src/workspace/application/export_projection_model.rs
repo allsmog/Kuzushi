@@ -23,6 +23,8 @@ pub struct WorkspaceFindingExportRecord {
     /// Recorded grouping decisions remain separate from finding verdicts.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub relationships: Vec<crate::findings::FindingRelationship>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub goal_assessments: Vec<crate::findings::FindingGoalAssessment>,
     /// Historical guidance and its current review state, separate from verdicts.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub lessons: Vec<super::export_lessons::WorkspaceLessonExportRecord>,

@@ -31,6 +31,10 @@ impl StorageWriter {
 
     fn execute_decision_command(&mut self, command: DecisionCommand) -> Result<WriteReceipt> {
         match command {
+            DecisionCommand::FindingGoalAssessment {
+                record,
+                expected_revision,
+            } => self.record_goal_assessment(record, expected_revision),
             DecisionCommand::FindingLesson { record, expected } => {
                 self.record_finding_lesson(record, expected)
             }

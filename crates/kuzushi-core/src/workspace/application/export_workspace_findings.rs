@@ -349,7 +349,8 @@ fn prepare_workspace_findings_export(
         return Ok(prepared);
     }
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = store.list_all_findings_with_identity_policy(export_identity_fold(options))?;
+    let all_findings =
+        store.list_all_findings_with_identity_policy(export_identity_fold(options))?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);
@@ -371,11 +372,10 @@ fn prepare_scan_findings_export(
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings =
-        store.list_distinct_findings_for_scan_ids_with_identity_policy(
-            run_ids,
-            export_identity_fold(options),
-        )?;
+    let all_findings = store.list_distinct_findings_for_scan_ids_with_identity_policy(
+        run_ids,
+        export_identity_fold(options),
+    )?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);
@@ -420,6 +420,7 @@ fn enriched_export_records(
     attach_remediation_records(store, &mut records)?;
     super::export_relationships::attach_relationships(store, &filtered.findings, &mut records)?;
     super::export_lessons::attach_lessons(store, &filtered.findings, &mut records)?;
+    super::export_goals::attach_goals(store, &filtered.findings, &mut records)?;
     attach_filtered_decision_basis(workspace, store, filtered, &mut records)?;
     Ok(records)
 }

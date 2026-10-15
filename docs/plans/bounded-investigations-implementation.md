@@ -142,8 +142,11 @@ security investigation workflow while adopting their interaction discipline.
 
 The [working acceptance ledger](../quality/bounded-investigation-acceptance.md)
 separates current scoped evidence from concrete implementation gaps and
-qualification still needed. In particular, a saved investigation brief does not
-yet provide the required goal-relevance view in Review.
+qualification still needed. The [goal relevance browser](../assessments/goal-relevance-2026-10-15.md)
+now records operator assessments against exact briefs and observations, with
+reversible history and export. Native J274 has 46 machine passes, zero failures
+and three pending human judgments. This closes that concrete implementation gap
+without qualifying the complete operator experience or closing a broad milestone.
 
 - [ ] Bounded iterative inventory and inventory-derived scope suggestions.
 - [ ] Registry-derived per-tool functional matrix and curated phase readiness.

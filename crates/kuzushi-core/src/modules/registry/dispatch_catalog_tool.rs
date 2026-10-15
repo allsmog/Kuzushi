@@ -149,6 +149,9 @@ fn dispatch_finding_ledger_tool(
 ) -> ToolDispatchResult {
     match name {
         "findings:list" => Some(list_findings_tool(input, ctx)),
+        "findings:goals" | "findings:goal-assess" => {
+            Some(super::super::findings_goals::execute(name, input, ctx))
+        }
         "findings:lessons" | "findings:lesson-save" | "findings:lesson-review" => {
             Some(super::super::findings_lessons::execute(name, input, ctx))
         }

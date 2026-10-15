@@ -134,7 +134,9 @@ impl ShellApp {
         self.capture_picker_editor_paste(text)
     }
     fn capture_primary_field_paste(&mut self, text: &str) -> bool {
-        self.paste_browser_option(text) || self.insert_source_review_paste(text)
+        self.paste_goal_reason(text)
+            || self.paste_browser_option(text)
+            || self.insert_source_review_paste(text)
     }
     fn capture_existing_context_paste(&mut self, text: &str) -> bool {
         self.study_draft_recovery_open()

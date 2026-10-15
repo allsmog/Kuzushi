@@ -5,6 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 
 mod finding_store;
+pub(crate) mod goal_reads;
 pub(crate) mod lesson_reads;
 mod open;
 pub(crate) use open::validate_lesson_origin;

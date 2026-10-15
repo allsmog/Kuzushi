@@ -1,0 +1,111 @@
+name: Goal relevance stays separate from finding truth and exact source history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_review.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 25 FINDINGS | review-origin
+nav-mode:
+keys: G
+require-live-snap: 25 Unassessed | goals
+keys: b
+require-live-snap: 20 EXACT SAVED BRIEF | brief
+expect: never finding verdicts
+keys: b i
+require-live-snap: 20 Source snapshot | observation-receipt
+keys: i
+resize: 160x48
+live-snap: goals-160x48
+resize: 96x89
+live-snap: goals-96x89
+resize: 80x24
+live-snap: goals-80x24
+resize: 60x20
+live-snap: goals-60x20
+resize: 40x12
+require-live-snap: 20 Esc return | goals-40x12
+keys: ?
+require-live-snap: 20 GOAL REVIEW CONTROLS | controls-40x12
+keys: NPage
+live-snap: controls-page-40x12
+keys: Escape
+ask: Are goal priorities, source limitations and actions understandable at all six sizes, with no implication that relevance establishes validity?
+resize: 120x36
+keys: 1
+paste-file: @ART/reason.txt
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | quit-with-reason
+expect: goal relevance draft
+keys: n
+require-live-snap: 20 Ctrl+S review | stayed-with-reason
+keys: C-s
+require-live-snap: 20 REVIEW GOAL ASSESSMENT | confirm-direct
+expect: No model calls
+keys: Enter
+require-live-snap: 25 Saved assessment v1 | saved-direct
+expect: Relevance: Direct
+resize: 40x12
+require-live-snap: 20 Saved assessment v1 | saved-direct-40x12
+keys: 2
+require-live-snap: 20 Ctrl+S review | reason-40x12
+expect: note.txt:1
+keys: C-s
+require-live-snap: 20 REVIEW GOAL ASSESSMENT | review-40x12
+resize: 120x36
+require-live-snap: 20 REVIEW GOAL ASSESSMENT | pending-second
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_review.py @TMP_TARGET @ART conflict
+keys: Enter
+require-live-snap: 25 Goal relevance changed | conflict
+expect: reason is retained
+keys: Escape
+require-live-snap: 20 Ctrl+S review | conflict-reason
+keys: Escape
+require-live-snap: 20 GOAL RELEVANCE · workspace | conflict-list
+keys: r
+require-live-snap: 25 Relevance: Uncertain | refreshed-conflict
+keys: 2
+keys: C-s
+require-live-snap: 20 Previous reason | reviewed-replacement
+expect: 東京 reason
+keys: Enter
+require-live-snap: 25 Saved assessment v3 | replaced
+expect: Relevance: Related
+keys: h
+require-live-snap: 20 second operator | history
+expect: GOAL ASSESSMENT HISTORY
+keys: Escape
+require-live-snap: 20 GOAL RELEVANCE · workspace | history-return
+keys: u
+require-live-snap: 20 Ctrl+S review | clear-reason
+keys: C-s
+require-live-snap: 20 REVIEW GOAL ASSESSMENT | clear-review
+keys: Enter
+require-live-snap: 25 Saved assessment v4 | cleared
+expect: Relevance: Unassessed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_review.py @TMP_TARGET @ART revised
+keys: r
+require-live-snap: 25 Showing saved brief repository v1 | frozen-brief
+keys: R
+require-live-snap: 25 repository v2 | latest-brief
+expect: Unassessed
+ask: Does a conflicting write retain the reason, require review of the replacement, and keep cleared and older-brief assessments in history without changing finding verdicts?
+keys: Escape
+require-live-snap: 20 Viewing Review | review-restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_review.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: goals
+require-live-snap: 25 repository v2 | restarted-goals
+expect: Unassessed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/goal_review.py @TMP_TARGET @ART verify
+ask: Does no-color restart retain exact brief revisions, all four assessment revisions and the three unchanged policy observations with no model requests or finding decisions?
+keys: Escape
+keys: C-c
+require-exit: 10

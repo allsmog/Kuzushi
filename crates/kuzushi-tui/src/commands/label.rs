@@ -153,6 +153,7 @@ pub enum ShellCommand {
     ShowCoverage,
     ShowRelationships,
     ShowLessons,
+    ShowGoalReview(Option<String>),
     ShowFindingGroups,
     /// Queue a command to dispatch after the current run finishes. `queue
     /// <tool|verb>`.

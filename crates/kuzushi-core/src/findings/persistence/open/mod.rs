@@ -10,6 +10,7 @@ mod finding_lookup;
 mod finding_rekeys;
 mod finding_sources;
 mod finding_writes;
+mod goal_relevance;
 mod lessons;
 mod lifecycle_event_reads;
 pub(crate) use lessons::validate_lesson_origin;

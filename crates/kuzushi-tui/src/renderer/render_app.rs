@@ -81,6 +81,7 @@ fn render_shell_app(frame: &mut Frame<'_>, app: &ShellApp) {
 
 fn render_priority_overlay(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     render_compact_quit(frame, app)
+        || super::goal_review::render(frame, app)
         || super::source_review::render(frame, app)
         || super::allowance_review::render_allowance_review(frame, app)
         || super::scope_review::render_scope_review(frame, app)

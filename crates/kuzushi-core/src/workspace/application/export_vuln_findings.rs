@@ -37,6 +37,7 @@ fn vuln_finding_row(record: &WorkspaceFindingExportRecord) -> serde_json::Value 
         "recommendation": record.recommendation.clone().unwrap_or_default(),
         // Provenance extras (ignored by schema-strict consumers, invaluable
         // for backfill joins): the durable kuzushi identifiers and verdict.
+        "goal_assessments": record.goal_assessments,
         "fingerprint": record.fingerprint,
         "triage_verdict": record.triage_verdict,
         "observation_gap": record.observation_gap,

@@ -2,6 +2,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod goal_relevance;
+pub(crate) use goal_relevance::GOAL_RELEVANCE_SUBJECT;
+pub use goal_relevance::{FindingGoalAssessment, FindingGoalBasis, GoalRelevance};
 mod confidence_band;
 mod deterministic_scanners;
 mod extract_cwe;

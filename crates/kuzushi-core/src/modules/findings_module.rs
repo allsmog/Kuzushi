@@ -9,6 +9,7 @@ pub(crate) fn findings_module() -> BuiltinModule {
     ];
     tools.extend(super::findings_relationships::relationship_tools());
     tools.push(super::findings_groups::groups_tool());
+    tools.extend(super::findings_goals::tools());
     tools.extend(super::findings_lessons::lesson_tools());
     tools.push(super::findings_lessons::generation_tool());
     tools.push(super::findings_source_review::tool());

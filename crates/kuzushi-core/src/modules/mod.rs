@@ -70,6 +70,7 @@ pub mod display_name;
 mod dynamic_loader;
 mod engagement_module;
 mod execution_context;
+mod findings_goals;
 mod findings_groups;
 mod findings_lessons;
 mod findings_module;

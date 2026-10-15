@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 mod commands;
 mod dispatch;
+mod goal_relevance;
 mod lessons;
 mod lifecycle;
 mod relationships;

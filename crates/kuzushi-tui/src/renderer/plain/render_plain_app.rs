@@ -62,8 +62,8 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
 }
 
 fn plain_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
-    if let Some(form) = app.source_review_form() {
-        return Some(crate::ui_view_models::source_review::source_review_plain_lines(form));
+    if let Some(lines) = goal_or_source_overlay(app) {
+        return Some(lines);
     }
     if let Some(lines) = primary_overlay_lines(app, width) {
         return Some(lines);
@@ -299,4 +299,12 @@ fn plain_live_activity_lines(model: PlainLiveActivityModel, width: usize) -> Vec
     let mut lines = vec![plain_section_divider(model.title, width)];
     lines.extend(model.rows);
     lines
+}
+
+fn goal_or_source_overlay(app: &ShellApp) -> Option<Vec<String>> {
+    if let Some(state) = app.goal_review() {
+        return Some(crate::ui_view_models::goal_review::plain_lines(state));
+    }
+    app.source_review_form()
+        .map(crate::ui_view_models::source_review::source_review_plain_lines)
 }

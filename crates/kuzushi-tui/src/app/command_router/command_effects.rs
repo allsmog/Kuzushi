@@ -121,6 +121,7 @@ impl ShellApp {
                 Some(Vec::new())
             }
             ShellCommand::ShowRelationships
+            | ShellCommand::ShowGoalReview(_)
             | ShellCommand::ShowLessons
             | ShellCommand::ShowFindingGroups => self.reduce_review_reader_command(command),
             ShellCommand::QueueCommand(raw) => Some(self.reduce_queue_command(raw)),
@@ -142,6 +143,7 @@ impl ShellApp {
         match command {
             ShellCommand::ShowRelationships => self.open_relationships(),
             ShellCommand::ShowLessons => self.open_lessons(),
+            ShellCommand::ShowGoalReview(id) => self.open_goal_review(id.as_deref()),
             ShellCommand::ShowFindingGroups => self.open_finding_groups(),
             _ => return None,
         }

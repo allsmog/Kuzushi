@@ -1,5 +1,19 @@
 # Releasing Kuzushi
 
+- Goal relevance adds `findings:goals`, `findings:goal-assess` and a shell
+  browser without changing finding truth or guided phase completion. Version-1
+  `finding-goal-relevance-v1` diagnostic audit records retain exact published
+  brief references, reviewed goal text, finding generation, observation event,
+  run and snapshot identity. Revision-checked replacements and clears append
+  history through the existing writer. Older tools and finding records retain
+  their contracts. Exports add optional `goalAssessments` history; SARIF uses
+  `kuzushiGoalAssessments` and external finding rows use `goal_assessments`.
+  CSV reports the omitted history explicitly. Unsaved assessment forms stay
+  session-only and are named in Quit without revealing their text. No new
+  work, model selection or allowance authority is introduced.
+  Rust callers constructing `WorkspaceFindingExportRecord` literals must add
+  `goal_assessments: vec![]` or initialize remaining fields with `..Default::default()`.
+
 - Private study checkpoints now cover changed ordinary discovery settings and
   unaccepted goal text as well as context cases. The additive optional
   `briefDraft` field preserves the exact prior revision, text, cursor and mode.

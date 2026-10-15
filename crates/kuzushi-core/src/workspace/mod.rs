@@ -1,6 +1,6 @@
 mod application;
 pub(crate) use application::read_workspace_finding_export_records;
-pub use application::{execute_lesson_action, load_finding_lessons};
+pub use application::{execute_goal_review, execute_lesson_action, load_finding_lessons};
 pub mod artifact_kb;
 pub mod artifacts;
 pub mod attack_surface;

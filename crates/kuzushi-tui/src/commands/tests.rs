@@ -1313,6 +1313,7 @@ mod tests {
             ShellCommand::ShowCoverage => "coverage",
             ShellCommand::ShowRelationships => "relationships",
             ShellCommand::ShowLessons => "lessons",
+            ShellCommand::ShowGoalReview(_) => "goals",
             ShellCommand::ShowFindingGroups => "groups",
             ShellCommand::QueueCommand(_) => "queue-command",
             ShellCommand::Background => "background",

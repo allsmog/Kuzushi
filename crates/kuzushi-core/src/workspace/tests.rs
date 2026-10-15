@@ -2183,6 +2183,7 @@ mod tests {
 
     fn sentinel_export_record() -> WorkspaceFindingExportRecord {
         WorkspaceFindingExportRecord {
+            goal_assessments: vec![],
             alias: "sentinel-alias".to_string(),
             identity_id: Some("sentinel-identity-id".to_string()),
             fingerprint: "sentinel-fingerprint".to_string(),

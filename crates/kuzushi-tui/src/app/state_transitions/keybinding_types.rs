@@ -63,6 +63,7 @@ impl HotkeyTrigger {
 pub(crate) enum ViewHotkeyAction {
     RelationshipsOpen,
     LessonsOpen,
+    GoalReviewOpen,
     FindingGroupsOpen,
     RelationshipNext,
     RelationshipPrevious,

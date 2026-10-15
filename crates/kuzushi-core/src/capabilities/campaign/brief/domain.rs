@@ -60,7 +60,7 @@ pub(super) fn validate_text(text: &str) -> Result<()> {
 }
 
 impl BriefReference {
-    pub(super) fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         validate_id(&self.brief_id)?;
         anyhow::ensure!(
             self.schema_version == 1 && self.revision > 0,
