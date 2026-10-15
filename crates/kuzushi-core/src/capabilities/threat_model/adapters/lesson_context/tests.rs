@@ -114,6 +114,14 @@ fn selected_accepted_lessons_create_an_inactive_copy_and_retirement_blocks_scann
         .unwrap()
         .get("reviewedLessons")
         .is_none());
+    let mut frozen = json!({"threatModelRef":reference});
+    crate::scan::freeze_threat_model_digest(root.path(), &mut frozen, "agentic-sast:scan").unwrap();
+    assert!(
+        crate::capabilities::agentic_sast::selected_threat_model_scan_context(root.path(), &frozen)
+            .unwrap()
+            .unwrap()
+            .contains("Unique accepted lesson marker")
+    );
     store
         .review_finding_lesson(
             &accepted.reference().unwrap(),
@@ -122,6 +130,16 @@ fn selected_accepted_lessons_create_an_inactive_copy_and_retirement_blocks_scann
         )
         .unwrap();
     assert!(load_selected_threat_model(root.path(), &selection).is_err());
+    assert!(
+        crate::capabilities::agentic_sast::selected_threat_model_scan_context(root.path(), &frozen)
+            .is_err()
+    );
+    assert!(crate::scan::inspect_threat_model_digest(
+        root.path(),
+        &frozen["threatModelDigestRef"],
+        &reference
+    )
+    .is_ok());
     assert_eq!(
         load_exact_threat_model(root.path(), &reference).unwrap(),
         document

@@ -81,6 +81,7 @@ fn prepare_case_input(
         .context("scanInput must be an object")?;
     anyhow::ensure!(!object.contains_key("threatModelRef") && !object.contains_key("threat_model_ref"), "Context matrix bindings belong in contextCases; remove the duplicate scanInput context selection");
     object.insert("threatModelRef".into(), case.threat_model_ref.clone());
+    object.remove("threatModelDigestRef");
     force_discovery_only(&mut scan_input)?;
     anyhow::ensure!(
         scan_input.get("allowanceRef").is_none(),
@@ -94,6 +95,13 @@ fn prepare_case_input(
             .context("Context matrix requires a workspace")?
             .root(),
         &mut frozen,
+    )?;
+    crate::scan::freeze_threat_model_digest(
+        ctx.workspace
+            .context("Context matrix requires a workspace")?
+            .root(),
+        &mut frozen,
+        "sast:scan",
     )?;
     Ok(frozen)
 }

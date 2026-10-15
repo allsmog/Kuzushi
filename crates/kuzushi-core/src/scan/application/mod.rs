@@ -5,11 +5,16 @@ mod run_scan_engines_with_options;
 mod run_semgrep_scan;
 mod scan_context;
 mod scan_scope;
+mod threat_model_digest;
 pub(crate) use scan_context::{
     freeze_scan_context, inspect_scan_context, read_bound_scan_context, selected_scan_context,
 };
 pub(crate) use scan_scope::{
     normalized_scan_path, require_directory_scope, resolve_scan_scopes, ScanScope,
+};
+pub(crate) use threat_model_digest::{
+    freeze_threat_model_digest, inspect_threat_model_digest, read_bound_threat_model_digest,
+    require_frozen_threat_model_digest,
 };
 
 pub use prepare_scan_workspace::{

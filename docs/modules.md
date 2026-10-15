@@ -2499,6 +2499,25 @@ current content and Git revision can be consumed. Exact membership comes from
 the authenticated inventory, including literal loose files and exclusions,
 rather than the 128-file preview. Scope identity contributes to batch equivalence.
 
+Model-backed discovery and Review studies freeze `threatModelDigestRef` schema
+1 alongside the exact `threatModelRef`. This separate, authenticated blob holds
+the exact rendered threat-model text, including absence, disclosure limits and
+omissions. Its 512 KiB serialized limit bounds storage, not tokens or dollars.
+Existing input fingerprints bind the reference into every fixed job. Execution
+rechecks source identity and lesson eligibility, then uses saved text without
+rerendering it. Changing the active context or upgrading the renderer cannot
+replace these bytes. Missing, damaged, oversized, foreign or mismatched blobs
+fail explicitly. No repair loop or replacement job starts automatically.
+
+The Context picker's scanner preview reads the matching study receipt. It
+labels saved text and current or historical source state; the full immutable
+document remains separate. `threat-model:read` accepts both references for the
+same historical inspection. Earlier approved model work without the new
+binding requires explicit preparation and approval of a replacement, retaining
+prior attempts and spending. Direct unbudgeted invocations without this option
+retain compatibility rendering. Imported variant patterns remain leads that
+require independent source assessment.
+
 Finite studies also freeze `scanContextRef` schema 1. It identifies an
 authenticated target-bound blob containing the exact supporting Map digest
 used by `agentic-sast:scan`, with a 64 KiB serialized limit. Other engines do

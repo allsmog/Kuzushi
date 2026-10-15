@@ -27,6 +27,7 @@ use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy)]
 struct SharedToolPolicy {
+    frozen_threat_context: bool,
     runtime: crate::modules::RuntimeRequirement,
     finding_store: crate::modules::FindingStoreRequirement,
     workspace: crate::modules::WorkspaceRequirement,
@@ -44,6 +45,10 @@ fn shared_tool_policies() -> &'static BTreeMap<String, SharedToolPolicy> {
                 (
                     tool.name.clone(),
                     SharedToolPolicy {
+                        frozen_threat_context: tool
+                            .options
+                            .iter()
+                            .any(|option| option.name == "threatModelDigestRef"),
                         runtime: tool.runtime_requirement,
                         finding_store: tool.finding_store_requirement,
                         workspace: tool.workspace_requirement,
@@ -53,6 +58,13 @@ fn shared_tool_policies() -> &'static BTreeMap<String, SharedToolPolicy> {
             })
             .collect()
     })
+}
+
+pub(crate) fn tool_uses_frozen_threat_context(tool_name: &str, input: &Value) -> bool {
+    shared_tool_policies()
+        .get(tool_name)
+        .is_some_and(|policy| policy.frozen_threat_context)
+        && tool_needs_runtime(tool_name, input)
 }
 
 pub fn tool_uses_agent_runtime(tool_name: &str) -> bool {

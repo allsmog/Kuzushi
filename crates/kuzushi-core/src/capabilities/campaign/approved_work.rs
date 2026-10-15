@@ -154,6 +154,7 @@ fn validate_investigation_binding(plan: &Value, input: &Value) -> Result<()> {
 }
 
 fn validate_discovery_input(input: &Value) -> Result<()> {
+    crate::scan::require_frozen_threat_model_digest(input, "sast:scan")?;
     for key in ["triage", "verify", "autoPatch"] {
         anyhow::ensure!(
             input.get(key) == Some(&Value::Bool(false)),
@@ -213,6 +214,7 @@ pub(crate) fn require_study_reference(input: &Value, ctx: &ToolExecutionContext<
     let Some(batch) = input.get("batchId").and_then(Value::as_str) else {
         return Ok(());
     };
+    crate::scan::require_frozen_threat_model_digest(input, "sast:scan")?;
     let workspace = ctx
         .workspace
         .context("scan-batch work requires a workspace")?;

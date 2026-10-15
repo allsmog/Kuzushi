@@ -291,8 +291,22 @@ fn planning_freezes_exact_observations_without_reducing_review_quality_or_starti
 #[test]
 fn review_approval_preserves_fixed_work_and_charges_internal_attempts_to_protected_review() {
     let fixture = Fixture::new();
+    let reference = crate::capabilities::threat_model::commit_test_model(
+        fixture.root.path(),
+        "Owned review context",
+    );
     let receipt = fixture
-        .draft(json!({"strategy":"standard","prefilterThreshold":0,"identityReconcile":"off"}));
+        .draft(json!({"strategy":"standard","prefilterThreshold":0,"identityReconcile":"off","threatModelRef":reference}));
+    let frozen = crate::scan::inspect_threat_model_digest(
+        fixture.root.path(),
+        &receipt.input["threatModelDigestRef"],
+        &reference,
+    )
+    .unwrap();
+    assert!(frozen.preview["text"]
+        .as_str()
+        .unwrap()
+        .contains("Owned review context"));
     fixture.approve(fixture.approval(&receipt, 2)).unwrap();
     let allowance = fixture
         .ledger()

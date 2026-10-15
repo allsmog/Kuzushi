@@ -30,6 +30,7 @@
       "declaredOptions": [
         "target",
         "threatModelRef",
+        "threatModelDigestRef",
         "scanContextRef",
         "maxFindings",
         "scanScopeRef",
@@ -2920,6 +2921,7 @@
         "trial",
         "batchEquivalenceKey",
         "threatModelRef",
+        "threatModelDigestRef",
         "scanContextRef",
         "identityFold",
         "maxFindings",
@@ -3994,6 +3996,7 @@
       "declaredOptions": [
         "target",
         "threatModelRef",
+        "threatModelDigestRef",
         "scope",
         "outputDir",
         "methodology",
@@ -4421,6 +4424,7 @@
       "requiredOptions": [],
       "declaredOptions": [
         "threatModelRef",
+        "threatModelDigestRef",
         "scanId",
         "scope",
         "fingerprint",

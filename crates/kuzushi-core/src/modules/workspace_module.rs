@@ -286,6 +286,7 @@ fn sast_batch_provenance_options() -> Vec<OptionSpec> {
         batch_trial_option(),
         batch_equivalence_key_option(),
         bound_threat_model_option(),
+        bound_threat_model_digest_option(),
         bound_scan_context_option(),
         identity_fold_option(),
     ]
@@ -683,6 +684,7 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
     let mut options = vec![
         target_option(),
         bound_threat_model_option(),
+        bound_threat_model_digest_option(),
         bound_scan_context_option(),
         max_findings_option(40),
         opt("scanScopeRef", OptionType::Json, "Exact accepted discovery membership with inherited context-only files. Standard strategy uses an acknowledged read-only file policy; runtimes without it refuse execution. MCP and chunked scoped discovery are unsupported.").aliases(&["scan_scope_ref"]).advanced(),

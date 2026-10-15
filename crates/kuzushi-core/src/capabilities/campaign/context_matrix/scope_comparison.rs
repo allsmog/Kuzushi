@@ -22,6 +22,10 @@ pub(super) fn capture_omission_scope(root: &Path, input: &Value) -> Result<Optio
     }
     let mut omitted = input.clone();
     omitted["threatModelRef"] = Value::Null;
+    omitted
+        .as_object_mut()
+        .unwrap()
+        .remove("threatModelDigestRef");
     batch::equivalence::scope_sha256(root, &omitted).map(Some)
 }
 

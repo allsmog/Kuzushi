@@ -23,11 +23,14 @@ use uuid::Uuid;
 mod adapters;
 pub mod application;
 pub(crate) use application::{
-    freeze_scan_context, inspect_scan_context, read_bound_scan_context, selected_scan_context,
+    freeze_scan_context, freeze_threat_model_digest, inspect_scan_context,
+    inspect_threat_model_digest, read_bound_scan_context, read_bound_threat_model_digest,
+    require_frozen_threat_model_digest, selected_scan_context,
 };
-pub(crate) use domain::ScanContextDocument;
 pub use domain::ScanContextRef;
+pub(crate) use domain::{ScanContextDocument, ThreatModelDigestDocument};
 pub(crate) use infrastructure::{load_scan_context, save_scan_context};
+pub(crate) use infrastructure::{load_threat_model_digest, save_threat_model_digest};
 pub mod domain;
 pub mod engines;
 pub mod infrastructure;

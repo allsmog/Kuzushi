@@ -72,9 +72,11 @@ impl Fixture {
 fn matrix_freezes_nine_case_bound_jobs_without_combining_condition_keys_or_starting_work() {
     let fixture = Fixture::new();
     let active = std::fs::read(fixture.root.path().join(".kuzushi/threat-model.json")).unwrap();
+    let mut input = fixture.input();
+    input["scanInput"]["tasks"] = json!(["agentic"]);
     let output = fixture
         .registry
-        .execute_tool("campaign:study", fixture.input(), &fixture.ctx())
+        .execute_tool("campaign:study", input, &fixture.ctx())
         .unwrap();
     let receipt: ContextMatrixReceipt = serde_json::from_value(output["data"].clone()).unwrap();
     assert_eq!(receipt.job_count, 9);
@@ -94,6 +96,21 @@ fn matrix_freezes_nine_case_bound_jobs_without_combining_condition_keys_or_start
             .supporting_context_sha256
             .is_some());
         assert_eq!(case.base_input["threatModelRef"], fixture.references[index]);
+        let reference = serde_json::from_value(fixture.references[index].clone()).unwrap();
+        let frozen = crate::scan::inspect_threat_model_digest(
+            fixture.root.path(),
+            &case.base_input["threatModelDigestRef"],
+            &reference,
+        )
+        .unwrap();
+        assert!(frozen.preview["text"]
+            .as_str()
+            .unwrap()
+            .contains(["Alpha", "Beta", "Gamma"][index]));
+        assert_eq!(
+            plan["jobs"][index * 3]["input"]["threatModelDigestRef"],
+            case.base_input["threatModelDigestRef"]
+        );
         assert_eq!(plan["jobs"][index * 3]["caseId"], case.id);
         assert_eq!(
             plan["jobs"][index * 3]["input"]["batchEquivalenceKey"],

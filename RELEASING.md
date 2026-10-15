@@ -1128,6 +1128,21 @@ part of every release commit.
   rejects `costDataProjection`: worker cost claims are sanitized and current
   execution charges remain owned by the broker.
 
+- Model-backed discovery and Review plans add declared `threatModelDigestRef`
+  schema 1. Its authenticated, target-bound blob freezes exact threat-model
+  text, absence, limits and omissions separately from supporting Map text.
+  The 512 KiB serialized limit is a storage bound, not a token or dollar cap.
+  The reference participates in existing prepared-input and approval hashes.
+  Execution rechecks source and reviewed-lesson eligibility, then consumes
+  saved bytes without invoking the current renderer. Historical reads remain
+  available after source drift. `threat-model:read` accepts the reference with
+  its exact `threatModelRef`; the study picker uses it for matching receipts.
+  Missing or damaged objects never trigger context substitution. Legacy
+  approved model work without this binding requires a separately prepared and
+  approved replacement; consumed attempts, spending and history remain intact.
+  Unbudgeted direct calls retain their compatibility renderer. Imported variant
+  patterns are described as unverified leads, not confirmed current findings.
+
 - Discovery plans add `scanContextRef` schema 1 to pin the agentic adapter's
   supplemental Map text in an authenticated, target-bound content object. The
   64 KiB limit includes metadata. Empty snapshots remain empty across retries

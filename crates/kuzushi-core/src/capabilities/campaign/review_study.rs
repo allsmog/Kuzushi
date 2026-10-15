@@ -78,6 +78,13 @@ fn prepare_review(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<(Valu
     let model = crate::tool_execution_model(TOOL, &frozen, ctx.config)
         .context("Select a model before planning review")?;
     frozen["model"] = json!(model);
+    crate::scan::freeze_threat_model_digest(
+        ctx.workspace
+            .context("review context requires a workspace")?
+            .root(),
+        &mut frozen,
+        TOOL,
+    )?;
     crate::modules::freeze_triage_review_input(&frozen, ctx)
 }
 

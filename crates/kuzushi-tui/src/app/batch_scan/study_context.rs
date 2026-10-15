@@ -235,10 +235,32 @@ impl ShellApp {
         self.set_batch_config_notice(
             "Reading the selected immutable context. No model request is made.",
         );
-        InputUpdate::handled_with_effects(self.reduce_run_tool(
-            Some("threat-model:read".into()),
-            Some(json!({"threatModelRef": reference}).to_string()),
-        ))
+        let input = self.study_context_inspection_input(&reference);
+        InputUpdate::handled_with_effects(
+            self.reduce_run_tool(Some("threat-model:read".into()), Some(input.to_string())),
+        )
+    }
+
+    fn study_context_inspection_input(&self, reference: &ThreatModelRef) -> Value {
+        let mut input = json!({"threatModelRef":reference});
+        let saved = self
+            .study_context_picker()
+            .map(|picker| &picker.scan_input)
+            .filter(|value| matching_saved_context(value, reference))
+            .or_else(|| {
+                self.router
+                    .campaign()
+                    .batch_scan_config
+                    .as_ref()?
+                    .study
+                    .receipt
+                    .as_ref()
+                    .map(|receipt| &receipt.scan_input)
+            });
+        if let Some(saved) = saved.filter(|value| matching_saved_context(value, reference)) {
+            input["threatModelDigestRef"] = saved["threatModelDigestRef"].clone();
+        }
+        input
     }
 
     fn review_existing_context_map(&mut self) -> InputUpdate {
@@ -310,6 +332,7 @@ impl ShellApp {
         }
         self.edit_context_picker(|config| {
             let mut input = picker.scan_input;
+            input.as_object_mut().unwrap().remove("threatModelDigestRef");
             input["threatModelRef"] = json!(picker.selected);
             if config.study.scan_input.as_ref() != Some(&input) {
                 config.study.invalidate_plan();
@@ -378,6 +401,10 @@ impl ShellApp {
             };
         });
     }
+}
+
+fn matching_saved_context(input: &Value, reference: &ThreatModelRef) -> bool {
+    input["threatModelRef"] == json!(reference) && input.get("threatModelDigestRef").is_some()
 }
 
 fn requested_text_view(code: KeyCode) -> Option<StudyContextTextView> {

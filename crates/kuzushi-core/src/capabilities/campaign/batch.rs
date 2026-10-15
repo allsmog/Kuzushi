@@ -244,6 +244,7 @@ fn prepare_batch_scan_input(
     equivalence::force_discovery_only(&mut input)?;
     bind_threat_model_ref(&mut input, lease.model_ref())?;
     crate::scan::freeze_scan_context(spec.root, &mut input)?;
+    crate::scan::freeze_threat_model_digest(spec.root, &mut input, "sast:scan")?;
     Ok((input, lease))
 }
 

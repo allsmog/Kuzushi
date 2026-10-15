@@ -135,7 +135,7 @@ pub fn stamp_verification(document: &mut Value, verification: &ThreatModelVerifi
 }
 
 /// Cheap consumption warning: revision drift, grounding that could not use
-/// the entry-point catalog, or a stamped non-verified verdict. Never blocks —
+/// the entry-point catalog, or a stamped non-verified verdict. Never blocks;
 /// consumers prepend it and proceed.
 pub fn verification_warning(document: &Value, target: &Path) -> Option<String> {
     revision_drift_warning(document, target)
@@ -149,7 +149,7 @@ fn revision_drift_warning(document: &Value, target: &Path) -> Option<String> {
         return None;
     }
     Some(format!(
-        "threat-model warning: document was built at revision {} but the target is now at {} — cited paths and lines may be stale (run threat-model:verify)",
+        "threat-model warning: document was built at revision {} but the target is now at {}; cited paths and lines may be stale (run threat-model:verify)",
         short_sha(revision.documented.as_deref()),
         short_sha(revision.current.as_deref()),
     ))
@@ -160,14 +160,14 @@ fn degraded_grounding_warning(document: &Value) -> Option<String> {
         .pointer("/verification/groundingDegraded")
         .and_then(Value::as_str)?;
     Some(format!(
-        "threat-model warning: the last verification could not use the entry-point catalog — {disclosure}"
+        "threat-model warning: the last verification could not use the entry-point catalog; {disclosure}"
     ))
 }
 
 fn stamped_verdict_warning(document: &Value) -> Option<String> {
     match document.pointer("/verification/verdict").and_then(Value::as_str) {
         Some("failed") => Some(
-            "threat-model warning: the last verification failed evidence, security-context-link, or entry-point coverage checks — treat this model as incomplete or unreliable".to_string(),
+            "threat-model warning: the last verification failed evidence, security-context-link, or entry-point coverage checks; treat this model as incomplete or unreliable".to_string(),
         ),
         Some("stale") => Some(
             "threat-model warning: the last verification marked this document stale against the target revision".to_string(),

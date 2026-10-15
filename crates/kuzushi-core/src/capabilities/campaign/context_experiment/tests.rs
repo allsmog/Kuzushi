@@ -6,6 +6,23 @@ use crate::{
 };
 use serde_json::json;
 
+#[test]
+fn controlled_conditions_exclude_only_the_selected_context_and_its_saved_projection() {
+    let first = json!({"tasks":["agentic"],"threatModelRef":{"synthetic":"alpha"},"threatModelDigestRef":{"synthetic":"alpha-bytes"}});
+    let mut second = first.clone();
+    second["threatModelRef"] = json!({"synthetic":"beta"});
+    second["threatModelDigestRef"] = json!({"synthetic":"beta-bytes"});
+    assert_eq!(
+        conditions::controlled_input_digest(&first).unwrap(),
+        conditions::controlled_input_digest(&second).unwrap()
+    );
+    second["tasks"] = json!(["secret-scan"]);
+    assert_ne!(
+        conditions::controlled_input_digest(&first).unwrap(),
+        conditions::controlled_input_digest(&second).unwrap()
+    );
+}
+
 struct Fixture {
     root: tempfile::TempDir,
     workspace: WorkspaceTarget,

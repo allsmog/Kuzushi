@@ -157,6 +157,17 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 14, 2026: [frozen scanner text](../assessments/frozen-scanner-context-2026-10-14.md)
+binds exact rendered threat-model text and its disclosures into existing fixed
+job fingerprints. Execution rechecks source and reviewed lessons without
+rerendering accepted bytes. The TUI distinguishes saved text, historical source
+and missing objects. Imported patterns remain unverified leads. The locked
+build, 280 focused Rust tests and two framed-request Node tests pass. Sequential
+J273/J272/J121 record 164 machine passes and 130 live text/ANSI pairs on the
+same frozen runtime; 21 human judgments remain pending. Three actual discovery
+requests decode to the same saved context under intercepted transport. No live
+request was added, no tool was promoted, and all broad milestones remain open.
+
 October 14, 2026: [named context omissions](../assessments/scanner-context-omissions-2026-10-14.md)
 identify ordinary-field cuts, raw questions and flattened historical-pattern
 limits without changing execution digest bytes. Matching code cuts retain exact

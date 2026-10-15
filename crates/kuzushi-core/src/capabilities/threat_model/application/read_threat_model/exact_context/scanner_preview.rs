@@ -29,7 +29,7 @@ const COUNTED_SECTIONS: &[(&str, &str, usize)] = &[
     ("Reviewed lessons", "/reviewedLessons", MAX_DIGEST_LESSONS),
 ];
 
-pub(super) fn build(document: &Value) -> Value {
+pub(crate) fn build(document: &Value) -> Value {
     let text = crate::capabilities::agentic_sast::render_threat_model_digest(document);
     let sha256 = text.as_deref().map(crate::options::prompt_content_sha256);
     json!({

@@ -145,9 +145,24 @@ pub(crate) fn selected_threat_model_scan_context(
     target: &Path,
     input: &Value,
 ) -> Result<Option<String>> {
-    use crate::capabilities::threat_model::{load_selected_threat_model, ThreatModelSelection};
+    use crate::capabilities::threat_model::ThreatModelSelection;
     let selection = ThreatModelSelection::from_input(input)?;
-    let Some(document) = load_selected_threat_model(target, &selection)? else {
+    if input.get("allowanceRef").is_some() {
+        crate::scan::require_frozen_threat_model_digest(input, "agentic-sast:scan")?;
+    }
+    if let Some(value) = input.get("threatModelDigestRef") {
+        return frozen_threat_context(target, value, &selection);
+    }
+    render_selected_threat_context(target, &selection)
+}
+
+fn render_selected_threat_context(
+    target: &Path,
+    selection: &crate::capabilities::threat_model::ThreatModelSelection,
+) -> Result<Option<String>> {
+    let Some(document) =
+        crate::capabilities::threat_model::load_selected_threat_model(target, selection)?
+    else {
         return Ok(None);
     };
     let Some(digest) = render_threat_model_digest(&document) else {
@@ -159,6 +174,19 @@ pub(crate) fn selected_threat_model_scan_context(
             None => Some(digest),
         },
     )
+}
+
+fn frozen_threat_context(
+    target: &Path,
+    value: &Value,
+    selection: &crate::capabilities::threat_model::ThreatModelSelection,
+) -> Result<Option<String>> {
+    use crate::capabilities::threat_model::ThreatModelSelection;
+    let ThreatModelSelection::Revision(reference) = selection else {
+        anyhow::bail!("Frozen scanner context requires an exact threatModelRef");
+    };
+    let frozen = crate::scan::read_bound_threat_model_digest(target, value, reference)?;
+    Ok(frozen.preview["text"].as_str().map(str::to_owned))
 }
 
 pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
@@ -177,7 +205,7 @@ pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
             attack_surface_lines(document, "externalSinks", external_sink_line),
         ),
         (
-            "Confirmed-finding variant patterns (hunt for siblings of these proven call sites)",
+            "Context variant patterns (unverified leads; assess current source independently)",
             variant_pattern_lines(document),
         ),
     ]
@@ -371,7 +399,7 @@ mod tests {
         let digest = render_threat_model_digest(&document).unwrap();
 
         assert!(
-            digest.contains("Confirmed-finding variant patterns"),
+            digest.contains("Context variant patterns (unverified leads"),
             "{digest}"
         );
         assert!(digest.contains(

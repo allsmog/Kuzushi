@@ -13,10 +13,11 @@ pub(super) fn bound_base_input(input: Value) -> Value {
 
 pub(super) fn controlled_input_digest(input: &Value) -> Result<String> {
     let mut input = bound_base_input(input.clone());
-    input
+    let object = input
         .as_object_mut()
-        .context("Context experiment input must be an object")?
-        .remove("threatModelRef");
+        .context("Context experiment input must be an object")?;
+    object.remove("threatModelRef");
+    object.remove("threatModelDigestRef");
     digest_serializable(&input)
 }
 

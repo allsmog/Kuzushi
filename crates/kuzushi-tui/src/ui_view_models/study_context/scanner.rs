@@ -5,7 +5,8 @@ pub(super) fn picker_lines(picker: &crate::app::StudyContextPicker) -> Vec<Strin
         return vec!["Select an exact context revision and press Enter to inspect it. No model request is made.".into()];
     };
     let mut lines = context_lines(&preview.scanner_context);
-    lines.insert(0, preview.source_state.clone());
+    let source = frozen_source_notice(&preview.scanner_context).unwrap_or(&preview.source_state);
+    lines.insert(0, source.to_string());
     if let Some(reference) = picker.selected.as_ref() {
         lines.extend([
             format!("Context revision: {}", reference.revision_id),
@@ -15,11 +16,28 @@ pub(super) fn picker_lines(picker: &crate::app::StudyContextPicker) -> Vec<Strin
     lines
 }
 
+fn frozen_source_notice(preview: &Value) -> Option<&'static str> {
+    if preview["origin"] != "frozen-study" {
+        return None;
+    }
+    Some(match preview["sourceMatchesAtInspection"].as_bool() {
+        Some(true) => "Saved scanner text matches this source at inspection. Context claims still require independent review.",
+        Some(false) => "Saved scanner text belongs to earlier source. Reading is historical; execution requires a new plan.",
+        None => "Saved scanner source could not be checked. Treat this text as historical before further work.",
+    })
+}
+
 pub(super) fn context_lines(preview: &Value) -> Vec<String> {
     let mut lines = Vec::new();
     if !valid_preview(preview) {
         lines.push("Scanner projection is unavailable or malformed in this receipt. Enter rereads the exact revision. No context was substituted.".into());
         return lines;
+    }
+    if preview["origin"] == "frozen-study" {
+        lines.push(
+            "Saved scanner text for this study. Renderer updates do not replace these bytes."
+                .into(),
+        );
     }
     append_strings(&mut lines, preview.get("limitations"));
     append_strings(&mut lines, preview.get("omissions"));
@@ -97,6 +115,19 @@ fn append_limits(lines: &mut Vec<String>, limits: &Value) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn saved_source_notices_distinguish_current_historical_and_unknown_inspections() {
+        for (state, expected) in [
+            (json!(true), "matches this source"),
+            (json!(false), "belongs to earlier source"),
+            (Value::Null, "could not be checked"),
+        ] {
+            let preview = json!({"origin":"frozen-study","sourceMatchesAtInspection":state});
+            assert!(frozen_source_notice(&preview).unwrap().contains(expected));
+        }
+        assert!(frozen_source_notice(&json!({})).is_none());
+    }
 
     #[test]
     fn valid_projection_keeps_included_text_and_omissions_separate_from_full_document() {

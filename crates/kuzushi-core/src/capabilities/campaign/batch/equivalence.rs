@@ -134,6 +134,9 @@ fn bound_threat_model_ref(root: &Path, input: &Value) -> Result<Option<Value>> {
         let expected: crate::capabilities::threat_model::ThreatModelRef =
             serde_json::from_value(bound.clone()).context("invalid bound threatModelRef")?;
         crate::capabilities::threat_model::load_exact_threat_model(root, &expected)?;
+        if let Some(frozen) = input.get("threatModelDigestRef") {
+            crate::scan::read_bound_threat_model_digest(root, frozen, &expected)?;
+        }
         return Ok(Some(bound.clone()));
     }
     Ok(None)

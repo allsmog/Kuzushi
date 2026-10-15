@@ -2,6 +2,38 @@ use super::*;
 use crate::app::StudyContextTextView;
 
 #[test]
+fn inspection_binds_saved_scanner_bytes_only_to_the_matching_context() {
+    let (_root, mut app, first, active) = fixture();
+    let frozen = json!({"schemaVersion":1,"object":{"hash":"synthetic-reference"}});
+    let picker = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .context_picker
+        .as_mut()
+        .unwrap();
+    picker.scan_input["threatModelRef"] = json!(first);
+    picker.scan_input["threatModelDigestRef"] = frozen.clone();
+    assert_eq!(
+        app.study_context_inspection_input(&first)["threatModelDigestRef"],
+        frozen
+    );
+    assert!(app
+        .study_context_inspection_input(&active)
+        .get("threatModelDigestRef")
+        .is_none());
+    app.set_input("retained draft");
+    app.set_cursor(5);
+    assert_eq!(
+        app.study_context_inspection_input(&first)["threatModelRef"],
+        json!(first)
+    );
+    assert_eq!((app.input(), app.cursor()), ("retained draft", 5));
+}
+
+#[test]
 fn scanner_context_view_uses_the_read_receipt_and_preserves_study_and_composer() {
     let (root, mut app, first, active) = fixture();
     app.handle_study_context_key(KeyCode::Up);

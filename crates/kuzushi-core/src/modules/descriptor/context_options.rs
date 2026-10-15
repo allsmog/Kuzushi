@@ -1,5 +1,11 @@
 use super::*;
 
+pub(in crate::modules) fn bound_threat_model_digest_option() -> OptionSpec {
+    opt("threatModelDigestRef", OptionType::Json,
+        "Exact saved agentic/triage threat-model text for this source and context revision. Finite model-backed studies freeze it before approval; missing or mismatched bytes refuse execution.")
+        .advanced()
+}
+
 pub(in crate::modules) fn bound_scan_context_option() -> OptionSpec {
     opt("scanContextRef", OptionType::Json,
         "Frozen supporting repository context for agentic discovery; null omits this supplement. Study preparation captures an authenticated immutable reference. Other adapters do not consume this supplement.")

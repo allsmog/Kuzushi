@@ -28,6 +28,7 @@ pub fn verify_scan_batch_child_equivalence(
     let Some((batch_id, trial, expected_key)) = batch_provenance(input)? else {
         return Ok(None);
     };
+    crate::scan::require_frozen_threat_model_digest(input, "sast:scan")?;
     let consumed = capture_batch_equivalence(root, &trial_base_input(input), config, registry)
         .context("scan-batch child refused BatchEquivalenceKey drift: frozen conditions could not be authenticated")?;
     anyhow::ensure!(

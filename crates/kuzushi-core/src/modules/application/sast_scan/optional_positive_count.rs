@@ -144,8 +144,14 @@ fn run_optional_threat_model_feedback(
     }
     threat_model_lease.release();
     let refine = json!({ "mode": "refine" });
-    let output =
-        dispatch_sast_subtool(registry, "threat-model:build", refine, ctx, runtime, option_store);
+    let output = dispatch_sast_subtool(
+        registry,
+        "threat-model:build",
+        refine,
+        ctx,
+        runtime,
+        option_store,
+    );
     Some(output.unwrap_or_else(|error| {
         json!({
             "ok": false,
@@ -228,6 +234,9 @@ pub(in crate::modules) fn run_sast_triage(
     if let Some(reference) = input.get("threatModelRef") {
         triage_input["threatModelRef"] = reference.clone();
     }
+    if let Some(reference) = input.get("threatModelDigestRef") {
+        triage_input["threatModelDigestRef"] = reference.clone();
+    }
     let triage_input =
         with_sast_prompt_override(triage_input, input, ctx, "triage", "TRIAGE_PROMPT")?;
     let output = run_sast_phase_subtool(
@@ -309,8 +318,12 @@ fn record_phase_dispatch(
 /// output and its partial phase receipt. Every other failure-like result ends
 /// the run: a partial caused by an actual failure makes no such guarantee.
 fn stopped_at_configured_budget(output: &Value) -> bool {
-    crate::module_result::tool_result_status(output) == crate::module_result::ToolResultStatus::Partial
-        && output.pointer("/data/stoppedAtBudget").and_then(Value::as_bool) == Some(true)
+    crate::module_result::tool_result_status(output)
+        == crate::module_result::ToolResultStatus::Partial
+        && output
+            .pointer("/data/stoppedAtBudget")
+            .and_then(Value::as_bool)
+            == Some(true)
 }
 
 pub(in crate::modules) fn validate_sast_subtool_result(name: &str, output: &Value) -> Result<()> {

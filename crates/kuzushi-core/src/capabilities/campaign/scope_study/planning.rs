@@ -147,6 +147,9 @@ fn bind_scope_context(
 ) -> Result<()> {
     if let Some(reference) = &case.threat_model_ref {
         scan.as_object_mut().unwrap().remove("threat_model_ref");
+        if scan["threatModelRef"] != *reference {
+            scan.as_object_mut().unwrap().remove("threatModelDigestRef");
+        }
         scan["threatModelRef"] = reference.clone();
     }
     super::super::study_plan::bind_accepted_map_context(scan, ctx)

@@ -118,6 +118,7 @@ fn common_input(input: &Value) -> Result<Value> {
         .context("Scope case input must be an object")?;
     object.remove("scanScopeRef");
     object.remove("threatModelRef");
+    object.remove("threatModelDigestRef");
     Ok(input)
 }
 

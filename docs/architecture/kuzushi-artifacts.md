@@ -38,6 +38,22 @@ writer actor.
 
 ## Per-Run Bundle Files
 
+Finite model-backed Scan and Review jobs retain a `threatModelDigestRef`
+schema-1 reference to an existing content-store blob. Its version-1
+`threat-model-digest` document records canonical target, source identity, exact
+threat-model revision and scanner preview. The preview contains exact text or
+absence, its text hash, limits and omissions. The serialized document is bounded
+at 512 KiB. CAS authentication and the existing prepared-input fingerprint bind
+the text to work approval without adding another job store or orchestration
+format. This is separate from the supplemental `scanContextRef` artifact.
+
+Execution verifies target, revision, current source and reviewed lessons before
+consuming saved bytes. Historical inspection authenticates the object while
+permitting source drift and disclosing it. A missing object is an integrity
+error, never a request to rebuild context from the live document. Legacy
+approved model work requires a new reviewed plan before further execution;
+recorded work and spending are preserved.
+
 Every run should converge on these files:
 
 | File | Purpose |

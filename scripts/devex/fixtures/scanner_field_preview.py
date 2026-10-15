@@ -48,8 +48,10 @@ def inspect(root, output, stage):
     data = native(root, output, "read-" + stage, "threat-model:read",
                   {"threatModelRef": expected["reference"]})
     preview = data["scannerContextPreview"]
-    assert preview["text"] == expected["previousDigest"]
-    assert preview["sha256"] == expected["previousDigestHash"]
+    old_heading = "Confirmed-finding variant patterns (hunt for siblings of these proven call sites)"
+    new_heading = "Context variant patterns (unverified leads; assess current source independently)"
+    assert old_heading in expected["previousDigest"]
+    assert preview["text"] == expected["previousDigest"].replace(old_heading, new_heading)
     assert preview["sha256"] == "sha256:" + hashlib.sha256(preview["text"].encode()).hexdigest()
     assert "Component 2 description: first 200 of 218 characters; 18 omitted." in preview["omissions"]
     assert "Variant patterns: first 12 of 13 items; 1 omitted." in preview["omissions"]
@@ -69,7 +71,7 @@ def inspect(root, output, stage):
     save(output, stage + "-check", {"sourceUnchanged": True, "sourceExecuted": False,
          "providerRequests": 0, "findings": 0, "campaignPlans": 0,
          "activeContextUnchanged": True, "documentTailsRetained": True,
-         "digestUnchangedFromPreviousRuntime": True, "digestHash": preview["sha256"],
+         "digestOnlyChangesHistoricalPatternQualification": True, "digestHash": preview["sha256"],
          "operatorVisualApproval": False})
 
 

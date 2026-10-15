@@ -507,6 +507,7 @@ fn threat_model_read_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         bound_threat_model_option(),
+        bound_threat_model_digest_option(),
         threat_model_scope_option(),
         opt(
             "outputDir",

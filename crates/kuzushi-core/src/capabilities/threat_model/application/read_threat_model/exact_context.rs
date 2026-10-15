@@ -3,6 +3,7 @@ mod goal_state;
 mod scanner_preview;
 mod source_state;
 pub(crate) use goal_state::inspect as inspect_goal_guidance;
+pub(crate) use scanner_preview::build as build_scanner_preview;
 
 /// Explicit context reads authenticate the same object that scanners consume.
 pub(super) fn read_exact_context(
@@ -11,6 +12,10 @@ pub(super) fn read_exact_context(
 ) -> Result<Option<Value>> {
     let selection = ThreatModelSelection::from_input(input)?;
     if !selection.is_bound() {
+        anyhow::ensure!(
+            input.get("threatModelDigestRef").is_none(),
+            "Frozen scanner context requires an exact threatModelRef"
+        );
         return Ok(None);
     }
     refuse_read_overrides(input)?;
@@ -25,8 +30,9 @@ pub(super) fn read_exact_context(
         ThreatModelSelection::Revision(reference) => Some(reference),
         _ => None,
     };
+    let preview = selected_preview(input, &target, reference.as_ref(), document.as_ref())?;
     Ok(Some(exact_context_result(
-        ctx, target, document, reference,
+        ctx, target, document, reference, preview,
     )?))
 }
 
@@ -35,6 +41,7 @@ fn exact_context_result(
     target: PathBuf,
     document: Option<Value>,
     reference: Option<ThreatModelRef>,
+    preview: Option<Value>,
 ) -> Result<Value> {
     let lesson_state = document
         .as_ref()
@@ -63,9 +70,28 @@ fn exact_context_result(
             "sourceState": source_state,
             "lessonState":lesson_state,
             "goalState":document.as_ref().map(|document| goal_state::inspect(&target, document)),
-            "scannerContextPreview":document.as_ref().map(scanner_preview::build),
+            "scannerContextPreview":preview,
         }),
     ))
+}
+
+fn selected_preview(
+    input: &Value,
+    target: &Path,
+    reference: Option<&ThreatModelRef>,
+    document: Option<&Value>,
+) -> Result<Option<Value>> {
+    let Some(value) = input.get("threatModelDigestRef") else {
+        return Ok(document.map(scanner_preview::build));
+    };
+    let reference = reference.context("Frozen scanner context cannot accompany omitted context")?;
+    let frozen = crate::scan::inspect_threat_model_digest(target, value, reference)?;
+    let matches = crate::incremental_index::current_workspace_resume_identity(target)
+        .ok()
+        .map(|current| current == frozen.source_identity);
+    let mut preview = frozen.preview;
+    preview["sourceMatchesAtInspection"] = json!(matches);
+    Ok(Some(preview))
 }
 
 fn inspect_lesson_state(target: &Path, document: &Value) -> Value {

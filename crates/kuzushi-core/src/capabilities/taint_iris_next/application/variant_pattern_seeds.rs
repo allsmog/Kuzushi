@@ -1,6 +1,5 @@
-//! Variant patterns on the active threat model (confirmed findings that
-//! refine compacted onto their threats) seed the matching CWE's structural
-//! queries, so the next hunt searches for siblings of the proven call site.
+//! Context variant patterns seed the matching CWE's structural queries.
+//! Imported patterns and historical claims require independent source review.
 //! The pattern CWE itself already earns the threat-model rank bonus because
 //! `collect_taint_iris_next_cwes` walks the whole document.
 
@@ -8,7 +7,7 @@ use super::*;
 
 const MAX_SEEDED_KEYWORDS_PER_ENTRY: usize = 12;
 /// A pattern's keywords run in source order, so the receiver and method of
-/// the proven call come first; later identifiers only widen the sweep.
+/// the recorded call come first; later identifiers only widen the sweep.
 const MAX_SEEDED_KEYWORDS_PER_PATTERN: usize = 4;
 
 pub(crate) fn seed_catalog_with_variant_patterns(
@@ -28,7 +27,10 @@ fn seed_matching_entries(catalog: &mut [TaintIrisNextRankedCatalogEntry], patter
     let Some(cwe) = pattern.get("cwe").and_then(Value::as_str) else {
         return;
     };
-    for entry in catalog.iter_mut().filter(|entry| entry.cwe.eq_ignore_ascii_case(cwe)) {
+    for entry in catalog
+        .iter_mut()
+        .filter(|entry| entry.cwe.eq_ignore_ascii_case(cwe))
+    {
         seed_entry(entry, pattern);
     }
 }
@@ -64,7 +66,7 @@ fn variant_reason(pattern: &Value) -> String {
         .get("location")
         .and_then(Value::as_str)
         .unwrap_or("unknown location");
-    format!("threat-model variant pattern from a confirmed finding at {location}")
+    format!("context variant lead at {location}; assess current source independently")
 }
 
 #[cfg(test)]
@@ -100,8 +102,13 @@ mod tests {
             Some(&model),
         );
 
-        assert_eq!(catalog[0].structural_queries, vec!["SELECT", "sequelize", "query"]);
+        assert_eq!(
+            catalog[0].structural_queries,
+            vec!["SELECT", "sequelize", "query"]
+        );
         assert!(catalog[0].reasons[0].contains("routes/search.ts:23"));
+        assert!(catalog[0].reasons[0].contains("assess current source independently"));
+        assert!(!catalog[0].reasons[0].contains("confirmed"));
         assert_eq!(catalog[1].structural_queries, vec!["SELECT"]);
         assert!(catalog[1].reasons.is_empty());
     }

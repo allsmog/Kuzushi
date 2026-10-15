@@ -164,6 +164,7 @@ pub use dynamic_loader::{
 };
 pub use options::{coerce_option_text, coerce_option_value, ensure_declared_tool_option};
 pub use registry::{missing_executable_requirements, ExecutableRequirement, ModuleRegistry};
+pub(crate) use runtime_requirements::tool_uses_frozen_threat_context;
 pub use runtime_requirements::{
     agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace, tool_execution_model,
     tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime,

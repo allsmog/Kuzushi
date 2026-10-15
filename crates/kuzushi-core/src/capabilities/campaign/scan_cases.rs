@@ -15,6 +15,7 @@ pub(super) fn freeze_input(
     let lease = batch::acquire_plan_threat_model_lease(root, input)?;
     batch::bind_threat_model_ref(&mut frozen, lease.model_ref())?;
     crate::scan::freeze_scan_context(root, &mut frozen)?;
+    crate::scan::freeze_threat_model_digest(root, &mut frozen, "sast:scan")?;
     Ok((frozen, lease))
 }
 
@@ -111,6 +112,7 @@ pub(super) fn review_case(
     ctx: &ToolExecutionContext<'_>,
     registry: &ModuleRegistry,
 ) -> Result<()> {
+    crate::scan::require_frozen_threat_model_digest(&case.base_input, "sast:scan")?;
     let prepared =
         registry.prepare_dispatch_input("sast:scan", case.base_input.clone(), ctx, None)?;
     let current = capture_batch_equivalence(root, prepared.value(), ctx.config, registry)?;

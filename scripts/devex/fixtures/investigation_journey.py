@@ -116,6 +116,9 @@ def verify(root, evidence, stage):
         assert scan["baseInput"]["scanContextRef"]["schemaVersion"] == 1
         assert scan["equivalence"]["supportingContextSha256"]
         assert all(job["input"]["scanContextRef"] == scan["baseInput"]["scanContextRef"] for job in scan["jobs"])
+        frozen = scan["baseInput"]["threatModelDigestRef"]
+        assert frozen["schemaVersion"] == 1
+        assert all(job["input"]["threatModelDigestRef"] == frozen for job in scan["jobs"])
         (evidence / "scan-command.txt").write_text("campaign " + scan["campaignId"])
         (evidence / "batch-command.txt").write_text("batch " + scan["campaignId"])
         if stage in ["partial", "completed"]:
@@ -154,7 +157,10 @@ def verify(root, evidence, stage):
         if scans:
             assert scans[0]["baseInput"]["threatModelRef"] == generated
             ref = read_native(root, evidence, "context-job-" + stage,
-                ["run", "threat-model:read", "--input", json.dumps({"threatModelRef": scans[0]["baseInput"]["threatModelRef"]})])["data"]
+                ["run", "threat-model:read", "--input", json.dumps({"threatModelRef": scans[0]["baseInput"]["threatModelRef"],
+                    "threatModelDigestRef": scans[0]["baseInput"]["threatModelDigestRef"]})])["data"]
+            assert ref["scannerContextPreview"]["origin"] == "frozen-study"
+            assert ref["scannerContextPreview"]["sourceMatchesAtInspection"] is True
             assert ref["document"]["title"] == "Owned greeting application"
             assert ref["sourceState"]["status"] == "matches"
             assert ref["document"]["provenance"]["treeHash"] == model_result["data"]["treeHash"]

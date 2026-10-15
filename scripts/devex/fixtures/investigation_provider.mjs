@@ -1,7 +1,7 @@
 // Owned greeting fixture. Every transport request is intercepted, with no network fallback.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -148,11 +148,49 @@ function recordAcceptedRequest(body, input, count) {
       reasoning: body.reasoning,
       inputSha256: createHash("sha256").update(input).digest("hex"),
       instructionsSha256: createHash("sha256").update(body.instructions).digest("hex"),
+      frozenContextTextSha256: count === 0 ? null : requireSavedContext(body),
       tools: body.tools?.length ?? 0,
       liveProviderRequests: 0,
       toolCallsReturned: 0,
     })}\n`,
   );
+}
+
+function requireSavedContext(body) {
+  const state = join(evidence, "fixture-target/.kuzushi/v3");
+  const plan = readdirSync(join(state, "campaigns"))
+    .map((name) => JSON.parse(readFileSync(join(state, "campaigns", name, "plan.json"), "utf8")))
+    .find((value) => value.kind === "scan-batch");
+  assert.ok(plan, "Discovery must belong to the fixed study");
+  const hash = plan.baseInput.threatModelDigestRef.object.hash;
+  const document = JSON.parse(
+    readFileSync(join(state, "objects/blake3", hash.slice(0, 2), hash.slice(2, 4), hash), "utf8"),
+  );
+  const preview = document.preview;
+  assert.equal(preview.origin, "frozen-study");
+  const supplied = decodedThreatContext(body);
+  assert.equal(supplied, preview.text, "The actual request must include the exact saved context");
+  assert.equal(preview.sha256, `sha256:${createHash("sha256").update(preview.text).digest("hex")}`);
+  return preview.sha256;
+}
+
+export function decodedThreatContext(body) {
+  const text = body.input
+    .flatMap((message) => message.content ?? [])
+    .map((part) => (typeof part === "string" ? part : (part.text ?? "")))
+    .join("\n");
+  const records = text.matchAll(
+    /UNTRUSTED_DERIVED_BEGIN\nrecord_version=1\nkind=derived\nencoding=percent-v1\nlabel_bytes=(\d+)\ncontent_bytes=(\d+)\nlabel=([^\n]*)\ncontent=([^\n]*)\nUNTRUSTED_DERIVED_END/g,
+  );
+  const record = [...records].find(
+    (match) => decodeURIComponent(match[3]) === "threat-model-digest",
+  );
+  assert.ok(record, "The actual request must include the framed threat-model digest");
+  const label = decodeURIComponent(record[3]);
+  const content = decodeURIComponent(record[4]);
+  assert.equal(Buffer.byteLength(label), Number(record[1]));
+  assert.equal(Buffer.byteLength(content), Number(record[2]));
+  return content;
 }
 
 function responseValue(count) {

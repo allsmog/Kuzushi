@@ -1,5 +1,6 @@
 use super::*;
 mod exact_context;
+pub(crate) use exact_context::build_scanner_preview;
 pub(crate) use exact_context::inspect_goal_guidance;
 
 pub(crate) fn read_threat_model(
