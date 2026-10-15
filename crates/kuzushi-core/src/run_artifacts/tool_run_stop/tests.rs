@@ -3,7 +3,9 @@ use crate::run_artifacts::{
     load_run_summary, try_record_tool_run_complete,
     try_record_tool_run_started_with_reproducibility,
 };
-use crate::scan::{PreparedProcessGroup, ScanCancellation};
+use crate::scan::{
+    CancellationDisposition, PreparedProcessGroup, RegisteredChild, ScanCancellation,
+};
 use serde_json::json;
 
 fn child() -> (RegisteredChild, u32) {
@@ -41,9 +43,7 @@ fn stopped_child_records_operator_intent_and_keeps_unknown_cost_unknown() {
         let record = ToolRunRecord::new(root.path(), "stopped", "tool", "fixture:scan");
         started(record);
         let (child, pid) = child();
-        let summary = stop_tool_run_child(record, &child, disposition)
-            .unwrap()
-            .unwrap();
+        let summary = stop_child(record, &child, disposition).unwrap().unwrap();
         assert_eq!(summary.status, expected);
         assert_eq!(summary.model.as_deref(), Some("fixture:model"));
         assert_eq!(summary.cost_usd, None);
@@ -73,7 +73,7 @@ fn completed_child_result_wins_the_stop_race_without_rewriting_artifacts() {
     let path = super::super::run_artifact_path(root.path(), "done", "run.json");
     let before = std::fs::read(&path).unwrap();
     let (child, pid) = child();
-    let summary = stop_tool_run_child(record, &child, CancellationDisposition::Canceled)
+    let summary = stop_child(record, &child, CancellationDisposition::Canceled)
         .unwrap()
         .unwrap();
     assert_stopped(pid);
@@ -87,7 +87,7 @@ fn child_stopped_before_start_does_not_manufacture_execution_metadata() {
     let record = ToolRunRecord::new(root.path(), "not-started", "tool", "fixture:scan");
     let (child, pid) = child();
     assert!(
-        stop_tool_run_child(record, &child, CancellationDisposition::Canceled)
+        stop_child(record, &child, CancellationDisposition::Canceled)
             .unwrap()
             .is_none()
     );
@@ -124,9 +124,7 @@ fn stopping_closes_open_model_tool_and_semantic_activity_before_the_terminal() {
         started(record);
         seed_open_activity(root.path());
         let (child, pid) = child();
-        let summary = stop_tool_run_child(record, &child, disposition)
-            .unwrap()
-            .unwrap();
+        let summary = stop_child(record, &child, disposition).unwrap().unwrap();
         assert_stopped(pid);
         let projection = load_run_projection_unhydrated(root.path(), "active").unwrap();
         assert_eq!(projection.health, ProjectionHealth::Healthy);
@@ -233,7 +231,7 @@ fn published_terminal_intent_wins_a_late_stop_before_summary_publication() {
     super::super::terminal_intent::write_terminal_intent(root.path(), &completed).unwrap();
     crate::run_artifacts::write_run_summary(root.path(), &running).unwrap();
     let (child, pid) = child();
-    let summary = stop_tool_run_child(record, &child, CancellationDisposition::Canceled)
+    let summary = stop_child(record, &child, CancellationDisposition::Canceled)
         .unwrap()
         .unwrap();
     assert_stopped(pid);
@@ -247,5 +245,59 @@ fn published_terminal_intent_wins_a_late_stop_before_summary_publication() {
     assert_eq!(
         projection.terminal.unwrap().status,
         crate::run_lifecycle::RunItemStatus::Completed
+    );
+}
+
+fn stop_child(
+    record: ToolRunRecord<'_>,
+    child: &RegisteredChild,
+    disposition: CancellationDisposition,
+) -> anyhow::Result<Option<crate::RunSummary>> {
+    let status = match disposition {
+        CancellationDisposition::Canceled => crate::run_lifecycle::RunItemStatus::Canceled,
+        CancellationDisposition::Interrupted => crate::run_lifecycle::RunItemStatus::Interrupted,
+    };
+    record_tool_run_stop(record, status, || child.kill_and_wait())
+}
+
+#[test]
+fn invalid_stop_status_cannot_invoke_the_execution_adapter() {
+    let root = tempfile::tempdir().unwrap();
+    let record = ToolRunRecord::new(root.path(), "invalid", "tool", "fixture:scan");
+    let invoked = std::cell::Cell::new(false);
+    let result = record_tool_run_stop(
+        record,
+        crate::run_lifecycle::RunItemStatus::Completed,
+        || {
+            invoked.set(true);
+            Ok(())
+        },
+    );
+    assert!(result.is_err());
+    assert!(!invoked.get());
+}
+
+#[test]
+fn failed_stop_adapter_does_not_publish_a_false_terminal() {
+    let root = tempfile::tempdir().unwrap();
+    let record = ToolRunRecord::new(root.path(), "failed-stop", "tool", "fixture:scan");
+    started(record);
+    let result = record_tool_run_stop(
+        record,
+        crate::run_lifecycle::RunItemStatus::Canceled,
+        || anyhow::bail!("owned fixture adapter failure"),
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        load_run_summary_without_repair(root.path(), "failed-stop")
+            .unwrap()
+            .status,
+        "running"
+    );
+    assert!(
+        crate::run_lifecycle::load_run_projection_unhydrated(root.path(), "failed-stop")
+            .unwrap()
+            .terminal
+            .is_none()
     );
 }

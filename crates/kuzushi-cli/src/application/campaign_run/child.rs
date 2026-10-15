@@ -146,14 +146,18 @@ fn stop_recorded_child(
     mut report: SupervisionReport,
     spec: &ChildSpec,
 ) -> Result<SupervisionReport> {
-    use kuzushi_core::run_artifacts::{stop_tool_run_child, ToolRunRecord};
-    use kuzushi_core::scan::CancellationDisposition;
+    use kuzushi_core::run_artifacts::{record_tool_run_stop, ToolRunRecord};
+    use kuzushi_core::run_lifecycle::RunItemStatus;
     let disposition = match report.outcome {
-        JobOutcome::Canceled => CancellationDisposition::Canceled,
-        _ => CancellationDisposition::Interrupted,
+        JobOutcome::Canceled => RunItemStatus::Canceled,
+        _ => RunItemStatus::Interrupted,
     };
-    let record = ToolRunRecord::new(&spec.target, &spec.run_id, "tool", &spec.tool);
-    if let Some(summary) = stop_tool_run_child(record, child, disposition)? {
+    let record = ToolRunRecord::new(&spec.target, &spec.run_id, "run", &spec.tool);
+    if let Some(summary) = record_tool_run_stop(record, disposition, || {
+        child
+            .kill_and_wait()
+            .context("Could not stop campaign job child")
+    })? {
         report.outcome = JobOutcome::from_persisted_status(&summary.status)
             .context("Stopped child has unknown persisted status")?;
     }
@@ -376,8 +380,15 @@ mod tests {
 
     #[tokio::test]
     async fn operator_stop_reaps_the_child_and_preserves_cancellation() {
+        use kuzushi_core::run_artifacts::{
+            load_run_summary, record_tool_run_started, ToolRunRecord,
+        };
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "operator-sleeper", "sleep 30");
+        record_tool_run_started(
+            ToolRunRecord::new(tmp.path(), "operator", "run", "noop:tool"),
+            &serde_json::json!({}),
+        );
         let (tx, rx) = tokio::sync::watch::channel(shutdown::StopCause::Running);
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -387,6 +398,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.outcome, JobOutcome::Canceled);
+        let summary = load_run_summary(tmp.path(), "operator").unwrap();
+        assert_eq!(summary.kind, "run");
+        assert_eq!(summary.tool.as_deref(), Some("noop:tool"));
         assert!(super::super::outcome_requires_unresolved_spend(
             report.outcome
         ));

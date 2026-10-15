@@ -51,12 +51,12 @@ Scan publication then correctly refused to call the earlier canceled attempt
 complete. It is retained as the regression for final-run selection versus
 historical evidence; it is not a passing acceptance receipt.
 
-The final frozen bundle passes 135 focused Rust tests: eight phase-handoff,
-20 report, five stop, 19 recovery, 75 campaign and eight TUI checks. One native
+The final frozen bundle passes 137 focused Rust tests: eight phase-handoff,
+20 report, seven stop, 19 recovery, 75 campaign and eight TUI checks. One native
 fixture setup test is intentionally ignored. Empty filtered invocations are
 retained but are not credited. The locked workspace build and risk proxy pass.
 
-Final J121: `v3-tui/20261015-013609/J121`, with 123 machine passes, zero failures
+Final J121: `v5-disk-retry-tui/20261015-015821/J121`, with 123 machine passes, zero failures
 and 96 live text/ANSI capture pairs. Seventeen human judgments remain pending.
 The assistant inspected the cancellation and allowance notices, partial and final
 receipts, accepted Scan, compact Report controls, no-color restart and missing
@@ -69,12 +69,27 @@ retains one unresolved reservation and two protected Review calls. No live model
 request or target source execution occurs. No queue completion is injected.
 
 Thirteen executables are frozen. The native SHA-256 is
-`7c98ee0b6cb7d138d7d861119b24fd52e56446d84c40f7289067bece9c75e8b1`.
+`d500f844122231d77105e3b56b6c4047e9c6113b6daeebf88798f375bf88d28e`.
 All 4,143 Rust/build input files remain identical before tests, after the locked
 workspace build and at capture review. Runtime and journey inputs also match
-recorded hashes. See `native-v3-manifest.json`, `source-v3-before.json`,
-`source-v3-after.json`, `v3-runtime-inputs.json` and `v3-assistant-review.json`
+recorded hashes. See `native-v5-manifest.json`, `source-v5-before.json`,
+`source-v5-after.json`, `v5-runtime-inputs.json` and `v5-assistant-review.json`
 under `/tmp/kuzushi-cancel-integration-20261015`.
+
+The first clean verification rejected a scanner-type dependency in artifact
+recording. The final API receives a caller-owned stop adapter under the same
+terminal lock. Artifact recording has no scanner dependency; the dispatcher
+owns reaping. Invalid stop states cannot invoke the adapter, adapter failure
+cannot publish a false terminal, and canceled campaign records retain their
+original `run` category and tool. The full architecture command passes without
+changing its rules.
+
+The first run of this final bundle reached cancellation and the call limit but
+then hit a disk-full error while reading fixture accounting. Its captures remain
+in `v5-tui/20261015-015525/J121`. Superseded generated library cache was removed
+from this task's build directory. Frozen binaries, failed captures and source
+were retained. The final repeat uses identical executables and runtime inputs.
+The earlier passing v3 journey remains separate evidence for its own revision.
 
 Campaign rows still show the current legacy retry counter rather than cumulative
 admissions. The generic Report hint also calls incomplete records interrupted.

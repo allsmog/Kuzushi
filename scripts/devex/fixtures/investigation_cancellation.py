@@ -67,6 +67,7 @@ def canceled(root, evidence):
     assert len(unstarted) == 1 and unstarted[0]["dispatches"] == 0 and unstarted[0]["attempts"] == 0
     summary = json.loads((root / ".kuzushi/v3/runs" / stopped[0]["runId"] / "run.json").read_text())
     assert summary["status"] == "canceled", summary["status"]
+    assert summary["kind"] == "run" and summary["tool"] == "sast:scan"
     bridge = before["admittedRequest"]["bridgePid"]
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
