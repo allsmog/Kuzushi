@@ -448,9 +448,10 @@ impl ShellApp {
                 .and_then(|index| readiness.rows.get(index))
                 .map(|row| row.detail.as_str())
                 .unwrap_or("setup is incomplete");
-            self.set_warn_notice("setup", format!("Start Map blocked — {blocker}"));
+            self.set_warn_notice("setup", format!("Start Map blocked: {blocker}"));
             return InputUpdate::handled();
         }
+        self.router.setup_mut().clear_launch_failure();
         self.engagement.set_phase(WorkflowPhase::Map);
         self.engagement
             .planning_picker_mut()

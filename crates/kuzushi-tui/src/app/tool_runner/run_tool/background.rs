@@ -10,6 +10,9 @@ mod dispatch;
 #[cfg(test)]
 mod phase_result_tests;
 mod preflight;
+mod setup_launch;
+#[cfg(test)]
+mod setup_launch_tests;
 #[cfg(test)]
 mod task_binding_tests;
 
@@ -194,7 +197,7 @@ impl ShellApp {
         let mut seed = match self.background_tool_run_seed(workspace, tool_name, input.value()) {
             Ok(seed) => seed,
             Err(error) => {
-                self.report_tool_launch_persistence_failure(tool_name, error);
+                self.report_tool_launch_persistence_failure(workspace, tool_name, error);
                 return None;
             }
         };
@@ -275,11 +278,17 @@ impl ShellApp {
         )
     }
 
-    fn report_tool_launch_persistence_failure(&mut self, tool_name: &str, error: anyhow::Error) {
+    fn report_tool_launch_persistence_failure(
+        &mut self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        error: anyhow::Error,
+    ) {
         self.context_history_failed(tool_name, &error.to_string());
         let message =
             format!("{tool_name} launch blocked: could not initialize run artifacts: {error}");
         self.log("error", message.clone());
+        self.retain_failed_setup_launch(workspace, tool_name, &message);
         self.set_error_notice("artifacts", message);
         self.set_failed_activity(
             tool_name.to_string(),

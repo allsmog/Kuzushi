@@ -129,6 +129,14 @@ fn setup_summary_lines(
     model: &crate::ui_view_models::SetupReadinessModel,
     width: usize,
 ) -> Vec<Line<'static>> {
+    if model.rows.last().is_some_and(|row| row.status == "RETRY") {
+        return wrapped_lines(
+            "LAST START FAILED · inspect Start Map details, correct the cause and retry",
+            " ",
+            width,
+            theme::warn(),
+        );
+    }
     if !model.can_start {
         return vec![styled(
             &fit(

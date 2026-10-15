@@ -1,5 +1,18 @@
 # TUI DevEx Audit Journeys
 
+## J280: Visible Setup recovery through Report
+
+Use an owned two-file public-example fixture and a manual context document.
+Choose import, edit its path and start Map through Setup. Observe the workspace
+policy refusal, inspect the complete Start Map cause, explicitly repair only
+the fixture's ignored policy path, then retry the same selection. Accept Map,
+use guided `next`, select three `secret-scan` passes and approve zero model
+capacity with one worker. Preserve six observations, record two human FP
+decisions, export and recover the exact study after no-color restart. Helpers
+must not create plans, jobs or product dispatches. Judge explanation, reading,
+approval and recovery separately from machine checks. The initial launch guard
+and the driver's session-exit ownership check must remain enforced.
+
 Scripted developer-experience audits for the Rust Ratatui shell
 (`crates/kuzushi-tui`), driven live under **tmux** — the only layer that
 exercises the TUI the way an operator does (real keystrokes, real timing, real

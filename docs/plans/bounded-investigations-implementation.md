@@ -1,5 +1,12 @@
 # Bounded investigations implementation
 
+The [visible Setup recovery checkpoint](../assessments/guided-investigation-2026-10-15.md)
+keeps a Map launch refusal readable and retryable without dropping the selected
+plan. J280 completes manual context acceptance, three local passes, human FP
+decisions, export and no-color restart using visible controls and zero provider
+capacity. It records 46 machine passes, zero failures and five pending human
+judgments. Broader acceptance and all nine delivery checkboxes remain open.
+
 The [zero-call investigation checkpoint](../assessments/zero-provider-calls-2026-10-15.md)
 allows explicit zero provider capacity for finite local plans. J279 completes
 three real local passes, consolidation, human triage, export and restart without

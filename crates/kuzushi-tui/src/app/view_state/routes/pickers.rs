@@ -71,9 +71,23 @@ pub struct SetupRouteState {
     budget_return_view: Option<crate::app::ShellView>,
     map_run_config: MapRunConfigRouteState,
     detail_scroll: [usize; 8],
+    launch_failure: Option<String>,
 }
 
 impl SetupRouteState {
+    pub(crate) fn launch_failure(&self) -> Option<&str> {
+        self.launch_failure.as_deref()
+    }
+
+    pub(crate) fn record_launch_failure(&mut self, message: String) {
+        self.launch_failure = Some(message);
+        self.detail_scroll[SetupRowId::ALL.len() - 1] = 0;
+    }
+
+    pub(crate) fn clear_launch_failure(&mut self) {
+        self.launch_failure = None;
+    }
+
     pub(crate) fn detail_scroll(&self) -> usize {
         self.detail_scroll[self.cursor.min(SetupRowId::ALL.len() - 1)]
     }

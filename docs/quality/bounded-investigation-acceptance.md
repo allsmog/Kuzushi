@@ -52,6 +52,15 @@ checkboxes remain open until their complete requirements are reconciled.
 | Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |
 
 Exploit development, reproducers and vulnerability patching remain excluded.
+
+The [visible Setup recovery checkpoint](../assessments/guided-investigation-2026-10-15.md)
+adds a real initial Map launch refusal and explicit retry to the guided local
+Setup-to-Report flow. J280 records 46 machine passes, zero failures, 39 capture
+pairs and five pending human judgments. All plan and job creation uses visible
+controls; helpers only seed source, repair the disclosed owned ignore policy
+and inspect state. Three local passes retain six observations, two human FP
+decisions and a report through no-color restart, with zero provider capacity.
+This adds scoped evidence without closing the broader acceptance requirements.
 Their compatibility implementations are not work items for completing this plan.
 The goal-relevance surface now has scoped manual workflow evidence. The combined cancellation, partial-work, limit and restart journey now has scoped
 native evidence. Cumulative attempt presentation and canceled-only recurrence

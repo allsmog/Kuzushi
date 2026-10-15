@@ -3,6 +3,8 @@ use crate::app::{PlanningTaskId, PlanningTaskRow, SetupEditor, ShellView};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{backend::TestBackend, Terminal};
 
+mod launch_failures;
+
 fn import_setup() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);

@@ -4,6 +4,7 @@ use crate::app::{
 use crate::ShellApp;
 
 mod context_import;
+mod launch_failure;
 mod readiness_rows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +104,7 @@ pub(crate) fn setup_readiness_model(app: &ShellApp) -> SetupReadinessModel {
     if selected_model_tasks > 0 && can_start {
         start.detail = "Review the fixed Map jobs and shared call allowance. Nothing starts until approval and launch.".into();
     }
+    launch_failure::apply_launch_failure(app, &mut start);
     rows.push(start);
     SetupReadinessModel {
         rows,

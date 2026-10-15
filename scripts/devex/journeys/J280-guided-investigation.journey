@@ -1,0 +1,120 @@
+name: Guided Setup to Report uses visible controls and zero model capacity
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 GIT_CONFIG_GLOBAL=@ART/git-config GIT_CONFIG_SYSTEM=@ART/git-config
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_investigation.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+keys: Down Enter
+require-live-snap: 25 MAP | map-plan
+keys: Down Down Down Space Enter
+require-live-snap: 25 Choose a context JSON path | missing-context
+keys: Down Enter
+require-live-snap: 25 Enter edits this path | import-options
+keys: Enter
+require-live-snap: 25 EDITING OPTION · threat-model:import | context-path
+type: .kuzushi/manual-context.json
+keys: Enter
+require-live-snap: 25 From: this run | saved-path
+keys: Escape
+require-live-snap: 25 TASKS FOCUS | returned-tasks
+keys: Enter
+require-live-snap: 25 saves an inactive revision | configured-context
+ask: Can the operator choose manual context through visible Setup controls, see the missing-input blocker and keep model credentials unnecessary for this local Map?
+keys: Down Down Down Down Down Enter
+require-live-snap: 30 LAST START FAILED · inspect Start Map details | launch-refused
+keys: Tab
+require-live-snap: 20 LAST START FAILED | refusal-detail
+expect: scope.toml
+expect: No worker started
+ask: Is the failed launch visible in Setup with a readable cause, explicit recovery and preserved plan selection?
+keys: Tab
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_investigation.py @TMP_TARGET @ART repair-policy
+keys: Enter
+require-live-snap: 45 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: next
+require-live-snap: 25 PLAN A STUDY | guided-scan
+expect: Discovery passes
+expect: Workers
+keys: Down Down Enter
+require-live-snap: 25 CHOOSE DISCOVERY ENGINES | choose-engine
+keys: Down Down Down Down Down Down Space
+require-live-snap: 25 [x] secret-scan | selected-native-engine
+keys: a
+require-live-snap: 25 Engine choices updated | applied-engine
+keys: Down Down Down Enter
+require-live-snap: 20 Total calls | call-limit
+type: 0
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | review-limit
+type: 0
+keys: Enter L
+require-live-snap: 35 Draft ready | prepared-study
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_investigation.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 ZERO PROVIDER CALLS | approval
+expect: Total provider calls: 0
+expect: Protected review calls: 0
+ask: Does guided Scan inherit the accepted inactive context and offer exactly three local passes with one worker, without silently selecting model discovery or granting model capacity?
+resize: 160x48
+live-snap: approval-160x48
+resize: 96x89
+live-snap: approval-96x89
+resize: 80x24
+live-snap: approval-80x24
+resize: 60x20
+live-snap: approval-60x20
+resize: 40x12
+keys: Home
+require-live-snap: 20 ZERO PROVIDER CALLS | approval-40x12
+keys: End
+require-live-snap: 20 y approve | approval-tail-40x12
+resize: 120x36
+keys: End y
+require-live-snap: 25 Approval saved | approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_investigation.py @TMP_TARGET @ART completed
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+submit: findings
+require-live-snap: 25 FINDINGS · 2 | findings
+submit: open F-0001
+require-live-snap: 25 signal-only | first-finding
+submit: dismiss false_positive Owned public example is not an active credential
+submit: open F-0002
+require-live-snap: 25 signal-only | second-finding
+submit: dismiss false_positive Owned public example is not an active credential
+submit: report
+require-live-snap: 25 0 committed / 0 calls | report
+expect: 2 reviewed
+expect: 6 producer observations
+keys: j j j Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_investigation.py @TMP_TARGET @ART exported
+ask: Does the actual guided journey preserve six observations, separate recurrence and two reversible human decisions through export, with no helper-created plan, job or product dispatch?
+keys: C-c
+require-live-snap: 15 CONFIRM SESSION EXIT | exit-choices
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 GIT_CONFIG_GLOBAL=@ART/git-config GIT_CONFIG_SYSTEM=@ART/git-config
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 3 completed | recovered-jobs
+submit: report
+require-live-snap: 25 0 committed / 0 calls | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_investigation.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the approved context, exact finite study, two human decisions and report choices without starting work or requiring model credentials?
+keys: C-c
+require-exit: 10

@@ -623,6 +623,7 @@ impl ShellApp {
     pub fn set_target(&mut self, target: Option<PathBuf>) {
         let changed = self.target() != target.as_deref();
         if changed {
+            self.router.setup_mut().clear_launch_failure();
             let prior = self.target_owned();
             self.router
                 .answers_mut()
