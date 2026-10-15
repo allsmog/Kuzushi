@@ -1,5 +1,11 @@
 # Prepared source-only application model test
 
+Update, October 15: the operator approved the six-request Scan. The
+[live application result](live-application-scan-2026-10-15.md) records its
+current-contract replacement, three completed passes, three requests, one
+consolidated unreviewed finding and native export/restart inspection. The notes
+below retain the original unapproved preparation and its historical digest.
+
 This test is prepared, unapproved and unlaunched. It makes no claim about model
 accuracy or vulnerability verdicts. It extends the earlier live experiment beyond
 benign greeting text into a small source-level authorization contract.

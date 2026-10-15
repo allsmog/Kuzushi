@@ -1,0 +1,66 @@
+name: Read actual three-pass model discovery with recurrence, untouched Review and honest costs
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_application_receipts.py @TARGET @ART initial
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign live-application-scans-20261015
+require-live-snap: 25 3 completed | completed-passes
+nav-mode:
+keys: Enter
+require-live-snap: 25 SELECTED JOB | actual-job
+expect: gpt-6-luna
+expect: completed
+resize: 160x48
+live-snap: job-160x48
+resize: 96x89
+live-snap: job-96x89
+resize: 80x24
+live-snap: job-80x24
+resize: 60x20
+live-snap: job-60x20
+resize: 40x12
+require-live-snap: 20 Jobs: 3 · 3 completed | job-40x12
+keys: NPage
+live-snap: job-details-40x12
+ask: Do actual completed passes retain the exact model, immutable context and source scope across sizes, with no invitation to treat unused allowance as approved follow-up work?
+resize: 120x36
+keys: q
+require-live-snap: 25 o observations | observation-control
+nav-mode:
+keys: o
+require-live-snap: 25 BATCH OCCURRENCE | recurrence
+expect: seen 3 / completed 3
+submit: findings
+require-live-snap: 25 Viewing Review | findings
+expect: batch:live-application-scans-20261015
+nav-mode:
+keys: Enter
+require-live-snap: 25 needs-runtime | finding-detail
+ask: Is three-pass recurrence distinguishable from confidence and verification, while varied raw model observations remain inspectable and no human decision is forged?
+submit: report
+require-live-snap: 25 3 committed / 8 calls | report
+expect: 2 protected review remaining
+expect: 3 producer observations
+expect: 0 reviewed
+require-live-snap: 25 format json (4/6) | saved-json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_application_receipts.py @TARGET @ART exported
+ask: Does the exported report retain actual unreviewed observations, 3/3 recurrence, unknown provider charges and both unused protected Review calls without implying deployment proof?
+keys: C-c
+require-exit: 10
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: campaign live-application-scans-20261015
+require-live-snap: 25 3 completed | recovered-passes
+submit: report
+require-live-snap: 25 3 committed / 8 calls | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_application_receipts.py @TARGET @ART restarted
+ask: Does no-color restart preserve real findings and report provenance with exactly three requests, no Review decisions and no additional job or request?
+keys: C-c
+require-exit: 10

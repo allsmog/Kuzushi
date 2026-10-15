@@ -101,12 +101,14 @@ restart. Full mixed-state counts stay readable in the document. This resolves
 the initial-count gap noted in the wide-scope experiment; broader visual and
 module qualification remains open.
 
-A [fourteen-file application study](../assessments/prepared-application-model-test-2026-10-14.md)
-is now prepared with an accepted manual Map, immutable inactive context and
-three fixed real-model discovery jobs. Its native preflight spends no calls.
-The prior eight-request allowance is exhausted; the proposed six-request Scan
-requires a new explicit allowance decision. Real-model usefulness is not yet
-claimed for this case.
+The operator approved the [fourteen-file application Scan](../assessments/live-application-scan-2026-10-15.md).
+Three real source-only passes complete using three requests and consolidate
+three raw observations into one unreviewed identity with 3/3 recurrence. J281
+records 24 machine passes, zero failures and four pending human judgments across
+job reading, scoped Review, export and no-color restart. Cumulative experiment
+use is eleven requests. The fixed plan is finished; unused capacity and the two
+protected Review calls approve no follow-up work. Broader model usefulness and
+the complete acceptance bar remain open.
 
 ## Contract
 
