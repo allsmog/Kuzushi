@@ -104,6 +104,7 @@ fn inventory_limitations(inventory: &RepositoryInventory) -> Vec<String> {
     if let Some(inspection) = &inventory.inspection {
         lines.push(format!("Enumeration: {}; {} omitted paths; {} files inspected only in part; {} bytes inspected.",
             inspection.enumeration, inspection.omitted_paths.len(), inspection.truncated_files.len(), inspection.inspected_bytes));
+        lines.extend(super::inspection_limits::details(inspection));
     }
     lines
 }

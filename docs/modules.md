@@ -484,6 +484,15 @@ Context values wrap at the available width. Page Up and Page Down use the
 actual body height, including lower chrome and the input surface, so narrow
 terminals do not skip unread rows. Paging preserves the command draft.
 
+`pack:scopes` coverage and acceptance disclose the recorded omitted paths with
+their reasons, prefix-limited files, and all three inspection bounds. Each
+category previews at most 128 paths, with an explicit remaining count. The full
+recorded lists remain in the immutable inventory artifact. The shell uses the
+same coverage details, with Page Up and Page Down for reading. Accepting limited
+inventory requires its own acknowledgement and does not approve scans or
+spending. A new Git SHA requires a new source-bound scope draft even when the
+file tree is identical; historical reading does not authorize current work.
+
 Shared `findings:list` pages and the full shell Review reader use one SQLite
 snapshot for their related ledger queries. Page rows, aliases, decisions,
 lifecycle state, corpus counts and source-completion reads share the recorded

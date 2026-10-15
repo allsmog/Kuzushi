@@ -1,5 +1,11 @@
 # Releasing Kuzushi
 
+- Scope coverage and acceptance now name recorded omitted paths and their
+  reasons, prefix-limited files, and the inspection bounds. Each path category
+  previews at most 128 entries and discloses additional recorded entries.
+  Existing scope references and artifact formats are unchanged. Acknowledging
+  inspection limits still approves boundaries only, never scans or spending.
+
 - Review navigation keeps `G` for finding groups and uses `O` for goal relevance.
   This removes the duplicate default `G` assignment. Both readers remain usable
   with a retained composer draft; opening them preserves its text and cursor.

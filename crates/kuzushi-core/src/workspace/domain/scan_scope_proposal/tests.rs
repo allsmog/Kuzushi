@@ -1,6 +1,6 @@
 use super::*;
-mod editing;
 mod additions;
+mod editing;
 
 #[test]
 fn loose_root_files_and_prefix_collisions_remain_uncovered() {
@@ -145,6 +145,35 @@ fn inventory_gaps_and_legacy_unknown_membership_are_honest() {
         .unwrap_err()
         .to_string()
         .contains("rebuild inventory"));
+}
+
+#[test]
+fn inspection_disclosure_reaches_scope_review_and_requires_acknowledgement() {
+    let draft = draft(vec![scope("all", &["."])]);
+    let mut inventory = inventory(&["large.rs"]);
+    let inspection = inventory.inspection.as_mut().unwrap();
+    inspection.truncated_files.push("large.rs".into());
+    inspection
+        .omitted_paths
+        .push(crate::workspace::InventoryPathClassification {
+            path: "vendor".into(),
+            kind: "omitted".into(),
+            reason: "ignored directory".into(),
+        });
+    let coverage = draft.evaluate(&inventory).unwrap();
+    assert!(coverage.inventory_limited);
+    assert!(coverage
+        .ensure_acceptable(&ScopeCoverageApproval::default())
+        .is_err());
+    let lines = coverage.limitations.join("\n");
+    assert!(lines.contains("Omitted: vendor. Reason: ignored directory."));
+    assert!(lines.contains("Prefix only: large.rs. Inspected at most 262144 bytes."));
+    assert!(coverage
+        .ensure_acceptable(&ScopeCoverageApproval {
+            inventory_limitations: true,
+            ..Default::default()
+        })
+        .is_ok());
 }
 
 #[test]

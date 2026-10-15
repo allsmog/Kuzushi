@@ -1,0 +1,83 @@
+name: Real repository inventory retains limits, explicit acceptance, cache and SHA boundaries
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 GIT_CONFIG_GLOBAL=@ART/empty-git-config GIT_CONFIG_SYSTEM=@ART/empty-git-config
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: run context:build {"enrichment":false}
+submit: logs
+require-live-snap: 90 context:build partial inventory | real-partial-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO context
+expect: CLAUDE.md
+ask: Does real source inspection keep progress visible and explain the excluded symlink without claiming complete context?
+submit: scopes
+require-live-snap: 30 Enter / c build inventory | empty-scopes
+keys: c
+require-live-snap: 90 DRAFT SCOPES | real-whole-repository
+expect: Inventory limited: true
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO draft
+keys: f
+require-live-snap: 30 Files 1..32 | first-members
+keys: End
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO last-page
+require-live-snap: 30 Files | last-members
+expect-not: Files 1..32
+keys: Escape
+require-live-snap: 30 Boundary: . | returned-from-members
+keys: c
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO cached
+require-live-snap: 30 DRAFT SCOPES | cached-inventory
+keys: a
+require-live-snap: 30 Accept exact boundaries | limited-acceptance
+expect: files inspected only
+expect: Omitted: .cargo. Reason: ignored directory.
+ask: Can the operator understand omitted and prefix-limited material and review whole-repository membership before accepting?
+resize: 160x48
+live-snap: acceptance-160x48
+resize: 96x89
+live-snap: acceptance-96x89
+resize: 80x24
+live-snap: acceptance-80x24
+resize: 60x20
+live-snap: acceptance-60x20
+resize: 40x12
+live-snap: acceptance-40x12
+keys: NPage
+live-snap: acceptance-paged-40x12
+resize: 120x36
+keys: NPage
+require-live-snap: 30 Prefix only: kuzushi-logo.png | recorded-prefix-paths
+keys: PPage
+keys: End Enter
+require-live-snap: 30 Action stopped | limits-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO refused
+keys: Home Enter End Enter
+require-live-snap: 60 ACCEPTED SCOPES | limits-acknowledged
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO accepted
+ask: Does refusal preserve the draft, then require a separate limit acknowledgement without authorizing scans or spending?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO advance
+keys: Enter Enter
+require-live-snap: 30 Field 1/1 | rename-after-new-sha
+keys: C-Home C-k
+type: Historical source scope
+keys: Enter
+require-live-snap: 60 Action stopped | same-tree-new-sha-refused
+expect: Git revision changed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO drifted
+ask: Does a new SHA with identical files refuse mutation of the old accepted scope while preserving the entered draft and historical record?
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 GIT_CONFIG_GLOBAL=@ART/empty-git-config GIT_CONFIG_SYSTEM=@ART/empty-git-config
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scopes
+require-live-snap: 30 ACCEPTED SCOPES | historical-no-color-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO restarted
+ask: Does restart clearly retain historical source and inspection limits without approving the new SHA or repeating discovery work?
+keys: C-c
+require-exit: 10

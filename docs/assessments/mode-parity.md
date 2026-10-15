@@ -17,6 +17,12 @@ belong in migration ledgers, not in this current operator contract.
 
 ## Shared Boundary
 
+`pack:scopes` returns the same bounded inspection disclosure through shell and
+run dispatch: recorded omissions and reasons, prefix-limited files and all three
+caps. The shell acceptance reader pages this shared text. Acknowledgement never
+approves discovery work; a new SHA requires a new source-bound draft even when
+the file tree is unchanged.
+
 `findings:goals` and `findings:goal-assess` use the shared prepared dispatch
 boundary for exact brief and observation binding, option validation and
 revision-checked writes. The shell's `goals [brief-id]` command and Review `O`

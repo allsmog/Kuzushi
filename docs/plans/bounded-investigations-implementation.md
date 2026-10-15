@@ -193,6 +193,15 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 15, 2026: [Real repository inventory](../assessments/real-repository-inventory-2026-10-15.md)
+adds named omissions, prefix limits and inspection caps to shared scope coverage
+and acceptance. Sequential native J277 covers an isolated 5,771-file source
+snapshot, full membership paging, repeated drafts, explicit limit acceptance,
+identical-tree SHA refusal and no-color recovery. It records 25 machine passes,
+zero failures and five pending human judgments. The source passes 175 focused
+Rust checks and a locked workspace build. The diagnostic probe and narrow-reader
+limits remain disclosed. This does not close a broad milestone.
+
 October 14, 2026: [Review under native work](../assessments/active-review-input-2026-10-14.md)
 adds 24 live-dispatcher send-to-observed-echo samples across all six sizes.
 Median is 28.05 ms and maximum 36.74 ms rounded up, including tmux capture

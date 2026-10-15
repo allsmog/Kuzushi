@@ -8,6 +8,7 @@ mod acceptance;
 mod coverage;
 mod editing;
 mod identity_coverage;
+mod inspection_limits;
 mod paging;
 pub use acceptance::ScopeCoverageApproval;
 pub use editing::ScanScopeEdit;
