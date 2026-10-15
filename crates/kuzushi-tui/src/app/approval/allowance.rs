@@ -39,6 +39,7 @@ pub(crate) fn with_accounting_terms(
             .map(|summary| summary.overview.join("\n"))
             .unwrap_or_default(),
         accounting_terms(app, input),
+        zero_call_terms(input),
         confirm
             .rationale
             .take()
@@ -55,6 +56,13 @@ pub(crate) fn with_accounting_terms(
             .join("\n\n"),
     );
     confirm
+}
+
+fn zero_call_terms(input: &serde_json::Value) -> String {
+    if input["maxProviderCalls"].as_u64() != Some(0) {
+        return String::new();
+    }
+    "ZERO PROVIDER CALLS\nEvery model request is blocked, including internal turns, retries and model-assisted Review or Report. Approved model-free work, human triage and stored reports remain available. Model-backed follow-up requires a specific allowance change.".into()
 }
 
 fn work_summary(
@@ -150,6 +158,20 @@ mod tests {
 
     const TEST_MODEL: &str = "openai-codex:gpt-5.5";
     mod hierarchy;
+
+    #[test]
+    fn zero_calls_disclose_blocked_model_review_and_available_human_work() {
+        let app = ShellApp::new(Default::default(), None);
+        let input = json!({"maxProviderCalls":0,"protectedReviewCalls":0});
+        let text = with_accounting_terms(&app, &input, confirmation(&input))
+            .rationale
+            .unwrap();
+        assert!(text.contains("ZERO PROVIDER CALLS"));
+        assert!(text.contains("model-assisted Review or Report"));
+        assert!(text.contains("human triage and stored reports remain available"));
+        assert!(zero_call_terms(&json!({"maxProviderCalls":1})).is_empty());
+        assert!(zero_call_terms(&json!({})).is_empty());
+    }
 
     fn app_with_commitments(root: &std::path::Path) -> ShellApp {
         let mut app = ShellApp::new(Default::default(), None);

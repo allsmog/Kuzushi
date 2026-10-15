@@ -8,7 +8,7 @@ pub(super) fn approve_tool() -> ToolDescriptor {
             investigation_option(),
             opt("expectedRevision", OptionType::Int, "Current allowance revision; zero for the first approval.").required().integer_range(0, i64::from(u32::MAX)),
             opt("model", OptionType::String, "Exact selected provider:model; no fallback.").required(),
-            opt("maxProviderCalls", OptionType::Int, "Total calls including internal turns and retries across all phases.").required().integer_range(1, 1_000_000),
+            opt("maxProviderCalls", OptionType::Int, "Total calls including internal turns and retries across all phases. Zero forbids every provider request.").required().integer_range(0, 1_000_000),
             opt("protectedReviewCalls", OptionType::Int, "Calls within the total protected for Review and Report.").required().integer_range(0, 1_000_000),
             opt("reason", OptionType::String, "Operator reason for approving these exact limits.").required(),
             opt("campaignId", OptionType::String, "Existing discovery or context study to bind as the finite work plan."),

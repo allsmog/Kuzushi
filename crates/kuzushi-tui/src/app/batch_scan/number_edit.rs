@@ -35,7 +35,7 @@ impl BatchScanConfigRow {
         [
             (Self::Trials, MIN_BATCH_TRIALS, BATCH_HARD_CAP),
             (Self::Workers, 1, MAX_BATCH_WORKERS),
-            (Self::ProviderCalls, 1, 1_000_000),
+            (Self::ProviderCalls, 0, 1_000_000),
             (Self::ReviewCalls, 0, 1_000_000),
             (Self::Attempts, 1, 10),
             (Self::CasePasses, 1, 100),

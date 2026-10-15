@@ -74,6 +74,34 @@ fn approve(first: &mut ShellApp, output: &serde_json::Value) {
 }
 
 #[test]
+fn zero_call_choices_recover_as_explicit_limits_without_execution_authority() {
+    let target = tempfile::tempdir().unwrap();
+    std::fs::write(target.path().join("note.md"), "Owned inert source.\n").unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let mut first = shell(target.path(), home.path());
+    prepare(&mut first);
+    let config = first
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    config.study.max_provider_calls = Some(0);
+    config.study.protected_review_calls = Some(0);
+    first.checkpoint_study_choices();
+    settle(&mut first);
+    let mut next = shell(target.path(), home.path());
+    key(&mut next, KeyCode::Enter);
+    settle(&mut next);
+    let config = next.router.campaign().batch_scan_config.as_ref().unwrap();
+    assert_eq!(config.study.max_provider_calls, Some(0));
+    assert_eq!(config.study.protected_review_calls, Some(0));
+    assert!(config.study.plan_identity().is_none());
+    assert!(!config.study.approved());
+    assert!(!next.has_running_work());
+}
+
+#[test]
 fn prepared_scan_keeps_unapproved_call_and_attempt_choices_after_restart() {
     let target = tempfile::tempdir().unwrap();
     std::fs::write(

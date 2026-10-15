@@ -1,5 +1,12 @@
 # Bounded investigations implementation
 
+The [zero-call investigation checkpoint](../assessments/zero-provider-calls-2026-10-15.md)
+allows explicit zero provider capacity for finite local plans. J279 completes
+three real local passes, consolidation, human triage, export and restart without
+granting model capacity. It records 29 machine passes, zero failures and five
+pending human judgments. The broader milestones and live-model qualification
+remain open.
+
 The [Review reader integration](../assessments/review-reader-controls-2026-10-15.md)
 removes the `G` collision, keeps `O` goals and `G` groups distinct, preserves
 retained drafts, and keeps the bulk return control visible. Sequential

@@ -148,7 +148,8 @@ fn native_resource_lines(config: &BatchScanConfig) -> Option<Vec<String>> {
     Some(vec![
         format!("Frozen discovery: {} native jobs · 0 model-provider requests.", receipt.job_count),
         "Model-provider charges for these jobs: $0. Local compute and scanner-service costs are not estimated.".into(),
-        "Protected Review capacity remains reserved. Model-backed follow-ups require separately approved work.".into(),
+        format!("Protected Review limit: {}. Model-backed follow-ups require separately approved work.",
+            config.study.protected_review_calls.map_or_else(|| "not set".into(), |calls| format!("{calls} calls within the total"))),
     ])
 }
 

@@ -14,8 +14,8 @@ pub struct AllowanceLimits {
 impl AllowanceLimits {
     pub(super) fn validate(&self) -> Result<()> {
         anyhow::ensure!(
-            (1..=MAX_PROVIDER_CALLS).contains(&self.max_provider_calls),
-            "provider call limit must be between 1 and {MAX_PROVIDER_CALLS}"
+            self.max_provider_calls <= MAX_PROVIDER_CALLS,
+            "provider call limit must be between 0 and {MAX_PROVIDER_CALLS}"
         );
         anyhow::ensure!(
             self.protected_review_calls <= self.max_provider_calls,

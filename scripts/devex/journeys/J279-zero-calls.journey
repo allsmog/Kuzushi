@@ -1,0 +1,93 @@
+name: Explicit zero calls allow finite local discovery and human review without model authority
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/zero_calls.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+paste-file: @ART/map-command.txt
+keys: Enter
+submit: map
+require-live-snap: 30 RESULT READY | imported-map
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/zero_calls.py @TMP_TARGET @ART prepare
+submit: campaign owned-zero-calls
+require-live-snap: 25 owned-zero-calls | unapproved-plan
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN A STUDY | study-form
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 Total calls | total-editor
+type: 0
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | review-editor
+type: 0
+keys: Enter L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | allowance-start
+expect: Total provider calls: 0
+expect: Protected review calls: 0
+require-live-snap: 20 ZERO PROVIDER CALLS | zero-authority
+expect: model-assisted Review
+expect: Protected Review limit: 0 calls within the total
+ask: Does zero clearly forbid all model requests while keeping the three approved local passes and human review available, without silently lowering an existing Review allocation?
+resize: 160x48
+live-snap: allowance-160x48
+resize: 96x89
+live-snap: allowance-96x89
+resize: 80x24
+live-snap: allowance-80x24
+resize: 60x20
+live-snap: allowance-60x20
+resize: 40x12
+keys: Home
+live-snap: allowance-start-40x12
+keys: End
+require-live-snap: 20 y approve | allowance-tail-40x12
+ask: Are the zero-call terms and exact fixed workload readable through paging at narrow sizes, with approval reachable only after reviewing the document?
+resize: 120x36
+keys: End y
+require-live-snap: 25 Approval saved | approved-zero
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-shell: python3 -B @REPO/scripts/devex/fixtures/zero_calls.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 3 completed | completed
+ask: Do three separate completed local runs show their observations with zero provider calls and no fourth job or implicit model-assisted review?
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+submit: findings
+require-live-snap: 25 FINDINGS · 2 | deduplicated-list
+submit: open F-0001
+require-live-snap: 25 signal-only | first-review
+submit: dismiss false_positive Owned public example is not an active credential
+submit: open F-0002
+require-live-snap: 25 signal-only | second-review
+submit: dismiss false_positive Owned public example is not an active credential
+submit: report
+require-live-snap: 25 Scope: study owned-zero-calls | report
+expect: 0 committed / 0 calls
+keys: j j j Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/zero_calls.py @TMP_TARGET @ART exported
+ask: Does the export retain six raw observations, two reversible human decisions, source context and the explicit zero-call ceiling without implying model validation?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: campaign owned-zero-calls
+require-live-snap: 25 3 completed | recovered-jobs
+submit: report
+require-live-snap: 25 Scope: study owned-zero-calls | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/zero_calls.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve the completed plan, zero allowance and both human decisions without restarting work?
+keys: C-c
+require-exit: 10

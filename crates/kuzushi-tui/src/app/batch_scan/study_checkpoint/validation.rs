@@ -90,9 +90,7 @@ fn validate_selections(snapshot: &StudyCheckpointSnapshot) -> anyhow::Result<()>
         "Saved investigation id is invalid"
     );
     anyhow::ensure!(
-        snapshot
-            .max_provider_calls
-            .is_none_or(|n| (1..=1_000_000).contains(&n))
+        snapshot.max_provider_calls.is_none_or(|n| n <= 1_000_000)
             && snapshot
                 .protected_review_calls
                 .is_none_or(|n| n <= 1_000_000),

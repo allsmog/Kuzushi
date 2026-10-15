@@ -200,7 +200,7 @@ fn approval_rejects_stale_revision_unknown_keys_and_invalid_limits() {
         .contains("revision changed"));
     for (key, value) in [
         ("unknown", json!(true)),
-        ("maxProviderCalls", json!(0)),
+        ("maxProviderCalls", json!(-1)),
         ("protectedReviewCalls", json!(4)),
     ] {
         let mut input = approval();

@@ -1,5 +1,13 @@
 # Releasing Kuzushi
 
+- Investigation allowances now accept explicit zero provider calls with zero
+  protected Review calls. This grants no model capacity; finite local jobs,
+  human triage and stored reports remain available. Tool names, version 1
+  formats, positive defaults and existing accounting remain unchanged. Upgrade
+  before approving zero limits or recovering zero-limit study drafts; older
+  validators enforce a positive minimum. Future increases require a new explicit
+  revision, and reducing a limit cannot erase committed or unresolved calls.
+
 - Scope sources add optional `enumerationHash`, binding the captured Git path
   list and inspected membership separately from working-file content. Staging
   an existing untracked file now invalidates inventory reuse and current-use

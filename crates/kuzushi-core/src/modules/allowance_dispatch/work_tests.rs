@@ -18,9 +18,19 @@ fn approve_draft(
     ctx: &ToolExecutionContext<'_>,
     draft: &Value,
 ) -> Result<Value> {
+    approve_draft_with_limits(registry, ctx, draft, 9, 3)
+}
+
+fn approve_draft_with_limits(
+    registry: &ModuleRegistry,
+    ctx: &ToolExecutionContext<'_>,
+    draft: &Value,
+    calls: u32,
+    review: u32,
+) -> Result<Value> {
     let mut input = approval();
-    input["maxProviderCalls"] = json!(9);
-    input["protectedReviewCalls"] = json!(3);
+    input["maxProviderCalls"] = json!(calls);
+    input["protectedReviewCalls"] = json!(review);
     input["campaignId"] = json!("finite");
     input["campaignJobs"] = json!(3);
     input["maxJobAttempts"] = json!(1);
@@ -78,7 +88,7 @@ fn study_draft_never_starts_jobs_and_unapproved_children_are_refused() {
 }
 
 #[test]
-fn prepared_dispatch_executes_three_fresh_offline_passes_and_refuses_a_fourth() {
+fn zero_calls_allow_three_fresh_offline_passes_and_refuse_a_fourth() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("main.rs"), "fn main() {}\n").unwrap();
     let workspace = WorkspaceTarget::new(root.path()).unwrap();
@@ -89,7 +99,7 @@ fn prepared_dispatch_executes_three_fresh_offline_passes_and_refuses_a_fourth() 
     let mut ctx = context(&workspace, &config);
     ctx.findings_store = Some(&store);
     let draft = draft(&registry, &ctx);
-    approve_draft(&registry, &ctx, &draft).unwrap();
+    approve_draft_with_limits(&registry, &ctx, &draft, 0, 0).unwrap();
     let plan = plan(root.path());
     for index in 0..3 {
         execute_offline_pass(&registry, &workspace, &config, &store, &plan, index);
@@ -100,14 +110,14 @@ fn prepared_dispatch_executes_three_fresh_offline_passes_and_refuses_a_fourth() 
         .execute_tool("sast:scan", bound_input(&plan, 0), &ctx)
         .unwrap_err();
     assert!(error.to_string().contains("attempt limit"), "{error:#}");
-    assert_eq!(
-        open_ledger(&ctx)
-            .unwrap()
-            .allowance_snapshot("study")
-            .unwrap()
-            .committed_calls,
-        0
-    );
+    let snapshot = open_ledger(&ctx)
+        .unwrap()
+        .allowance_snapshot("study")
+        .unwrap();
+    assert_eq!(snapshot.limits.max_provider_calls, 0);
+    assert_eq!(snapshot.limits.protected_review_calls, 0);
+    assert_eq!(snapshot.committed_calls, 0);
+    assert_eq!(snapshot.unresolved_calls, 0);
 }
 
 fn execute_offline_pass(

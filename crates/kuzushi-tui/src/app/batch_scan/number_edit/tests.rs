@@ -17,6 +17,27 @@ fn press(app: &mut ShellApp, code: KeyCode) {
 }
 
 #[test]
+fn explicit_zero_calls_are_saved_without_dispatch_or_implicit_review_reduction() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = app_with_config(target.path());
+    let config = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    config.study.protected_review_calls = Some(2);
+    config.begin_number_edit(BatchScanConfigRow::ProviderCalls);
+    app.reduce_paste("0");
+    press(&mut app, KeyCode::Enter);
+    let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
+    assert_eq!(config.study.max_provider_calls, Some(0));
+    assert_eq!(config.study.protected_review_calls, Some(2));
+    assert!(!config.study.approved());
+    assert!(!target.path().join(".kuzushi/v3/campaigns").exists());
+}
+
+#[test]
 fn enter_opens_direct_trial_input_and_saves_fifty_without_launching() {
     let target = tempfile::tempdir().unwrap();
     let mut app = app_with_config(target.path());

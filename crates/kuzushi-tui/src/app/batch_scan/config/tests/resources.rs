@@ -89,7 +89,7 @@ fn frozen_native_jobs_need_no_model_requests_but_other_costs_stay_unknown() {
         "{text}"
     );
     assert!(text.contains("Local compute and scanner-service costs are not estimated"));
-    assert!(text.contains("Protected Review capacity remains reserved"));
+    assert!(text.contains("Protected Review limit: 2 calls within the total"));
     assert!(!text.contains("One job can make several requests"));
     let accounting = config.study.allowance.as_ref().unwrap();
     assert_eq!(accounting.committed_calls, 4);
@@ -117,6 +117,24 @@ fn absent_model_or_unfrozen_work_never_implies_zero_requests() {
     let text = crate::ui_view_models::study_config::study_resource_lines(&config).join("\n");
     assert!(text.contains("Provider requests: not estimated"));
     assert!(!text.contains("0 model-provider requests"));
+}
+
+#[test]
+fn native_estimate_discloses_zero_and_unset_review_limits_without_claiming_reservation() {
+    let (_root, mut config) = fixture_with_engine("secret-scan");
+    for (limit, label) in [
+        (Some(0), "0 calls within the total"),
+        (Some(2), "2 calls within the total"),
+        (None, "not set"),
+    ] {
+        config.study.protected_review_calls = limit;
+        let text = crate::ui_view_models::study_config::study_resource_lines(&config).join("\n");
+        assert!(
+            text.contains(&format!("Protected Review limit: {label}.")),
+            "{text}"
+        );
+        assert!(!text.contains("capacity remains reserved"));
+    }
 }
 
 #[test]

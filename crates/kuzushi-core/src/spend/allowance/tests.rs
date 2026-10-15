@@ -1,5 +1,6 @@
 use super::*;
 use crate::{runtime::{RuntimeCost, RuntimeCostReport}, spend::SpendLimiter};
+mod zero_calls;
 
 fn approval(calls: u32, review: u32) -> AllowanceApprovalV1 {
     AllowanceApprovalV1 {
@@ -190,7 +191,7 @@ fn reservation_cannot_settle_another_investigations_ledger() {
 #[test]
 fn approval_validation_rejects_invalid_versions_identities_models_and_limits() {
     let ledger = SpendLimiter::open_in_memory().unwrap();
-    for invalid in [approval(0, 0), approval(2, 3)] {
+    for invalid in [approval(0, 1), approval(2, 3), approval(1_000_001, 0)] {
         assert!(ledger.approve_allowance(&invalid).is_err());
     }
     let mut invalid = approval(2, 1);

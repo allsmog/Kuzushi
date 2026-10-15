@@ -95,6 +95,43 @@ fn assert_allowance_refused(error: anyhow::Error) {
 }
 
 #[test]
+fn zero_call_approval_refuses_model_tools_before_the_runtime_is_called() {
+    let (_root, workspace, config) = fixture();
+    let ctx = context(&workspace, &config);
+    let registry = ModuleRegistry::with_v2_builtins();
+    let mut input = approval();
+    input["maxProviderCalls"] = json!(0);
+    input["protectedReviewCalls"] = json!(0);
+    let prepared = registry
+        .prepare_dispatch_input("campaign:approve-allowance", input, &ctx, None)
+        .unwrap()
+        .authorize_explicit_headless();
+    registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .unwrap();
+    let runtime = bound_runtime(&ctx, &AccountingRuntime::default());
+    for tool in ["context:build", "threat-model:build", "triage:run"] {
+        let descriptor = registry.resolve_tool(tool).unwrap();
+        let error = bind_runtime(
+            descriptor,
+            &json!({"enrichment":true}),
+            &ctx,
+            Some(&runtime),
+        )
+        .err()
+        .unwrap();
+        assert_allowance_refused(error);
+    }
+    assert_eq!(runtime.calls.load(Ordering::SeqCst), 0);
+    let snapshot = open_ledger(&ctx)
+        .unwrap()
+        .allowance_snapshot("study")
+        .unwrap();
+    assert_eq!(snapshot.committed_calls, 0);
+    assert_eq!(snapshot.unresolved_calls, 0);
+}
+
+#[test]
 fn unbound_model_tools_refuse_before_executor_or_ledger_creation() {
     let (root, workspace, config) = fixture();
     let ctx = context(&workspace, &config);

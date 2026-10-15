@@ -262,10 +262,10 @@ fn question_cannot_use_an_allowance_without_a_frozen_job() {
     let runtime = OfflineQuestionRuntime::default();
     let result=fixture.run(json!({"question":"What does app do?","threatModelRef":fixture.selected,
         "allowanceRef":{"schemaVersion":1,"investigationId":"legacy-question","revision":1,"workId":"unplanned-question"}}),&runtime);
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("approved fixed question job"));
+    let error = result.unwrap_err();
+    assert!(error.to_string().contains("require an approved fixed job"), "{error:#}");
+    assert_eq!(crate::runtime::runtime_failure_metadata(&error).unwrap().error_class,
+        crate::RuntimeFailureClass::AllowanceRefused);
     assert!(runtime.requests.lock().unwrap().is_empty());
 }
 

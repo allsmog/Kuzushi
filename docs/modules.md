@@ -1615,6 +1615,15 @@ Page Down scroll the document at every supported terminal size; approval is
 available on its final page. Escape cancels and preserves the composer and
 navigation origin. Plain output includes the complete terms.
 
+An explicit `maxProviderCalls: 0` with `protectedReviewCalls: 0` forbids every
+provider request, including internal turns, retries and model-assisted Review or
+Report. Fixed model-free jobs can still run; human triage and stored reports
+remain available. Zero differs from an unset allowance and survives draft and
+ledger recovery. The selected model remains explicit, and future model work
+requires a newly approved allowance revision. An existing positive protected
+Review allocation is never silently reduced to fit zero. Reducing a total also
+cannot erase already committed calls or unresolved reservations.
+
 `campaign:study` drafts an immutable discovery batch using the existing campaign
 compiler. It starts no children. The optional `campaignId`,
 `campaignPlanSha256`, `campaignJobs` and `maxJobAttempts` approval options bind
