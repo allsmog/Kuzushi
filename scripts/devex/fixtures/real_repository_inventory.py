@@ -182,6 +182,18 @@ def advance_revision(root, evidence, home):
     save(evidence, "revision-change", {"before": before, "after": after, "sameGitTree": tree})
 
 
+def change_readme(root, evidence):
+    path = root / "README.md"
+    assert path.is_file() and not path.is_symlink()
+    (evidence / "original-readme.bin").write_bytes(path.read_bytes())
+    path.write_bytes(path.read_bytes() + b"\nOwned source-drift marker. Never executed.\n")
+
+
+def restore_readme(root, evidence, home):
+    (root / "README.md").write_bytes((evidence / "original-readme.bin").read_bytes())
+    assert source_files(root, evidence, home) == json.loads((evidence / "source-before.json").read_text())
+
+
 if __name__ == "__main__":
     root, evidence, home, repository = [Path(value).resolve() for value in sys.argv[1:5]]
     stage = sys.argv[5]
@@ -189,4 +201,6 @@ if __name__ == "__main__":
     elif stage == "context": verify_context(root, evidence)
     elif stage == "advance": advance_revision(root, evidence, home)
     elif stage == "last-page": last_page(root, evidence)
+    elif stage == "dirty": change_readme(root, evidence)
+    elif stage == "restore": restore_readme(root, evidence, home)
     else: verify(root, evidence, home, stage)

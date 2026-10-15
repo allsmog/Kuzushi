@@ -1,16 +1,21 @@
 //! Pure scope-review projections. No workspace reads or dispatch policy.
 mod detail;
+mod source;
 use crate::app::{merge_destinations, ScopeReviewState, SCOPE_ACTIONS};
 use crate::renderer::shared::text::wrap_text;
 pub(crate) use detail::scope_detail;
+pub(crate) use source::{scope_source_view, ScopeSourceView};
 
-pub(crate) fn scope_title(state: &ScopeReviewState) -> String {
+pub(crate) fn scope_title(state: &ScopeReviewState, source: &ScopeSourceView) -> String {
     if let Some(title) = state.form.as_ref().and_then(form_title) {
         return title.into();
     }
     state.review.as_ref().map_or_else(
         || "SCAN SCOPES".into(),
         |r| {
+            if source.differs() {
+                return format!("SHA DIFFERS · SCOPES r{}", r.reference.revision);
+            }
             format!(
                 "{} SCOPES · r{}",
                 if r.record.acceptance.is_some() {
@@ -181,16 +186,31 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
     }
     [
         "↑↓ Space mark · p plan · Enter menu",
-        "f files · PgUp/Dn read · Esc back",
+        "f files  r reload  PgUp/Dn  Esc back",
     ]
 }
 
-pub(crate) fn scope_detail_lines(state: &ScopeReviewState, width: usize) -> Vec<String> {
+pub(crate) fn scope_detail_lines(
+    state: &ScopeReviewState,
+    source: &ScopeSourceView,
+    width: usize,
+) -> Vec<String> {
     let mut text = Vec::new();
     if let Some(notice) = &state.notice {
         text.extend([notice.clone(), String::new()]);
     }
     text.extend(scope_detail(state));
+    if let Some(review) = &state.review {
+        text.push(format!(
+            "Recorded boundary approval: {}.",
+            if review.record.acceptance.is_some() {
+                "accepted"
+            } else {
+                "not accepted"
+            }
+        ));
+    }
+    text.extend(source.details());
     text.into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()

@@ -1,5 +1,12 @@
 # Releasing Kuzushi
 
+- Scope review compares its recorded revision with asynchronously observed
+  repository facts. A differing SHA shows `SHA DIFFERS`; matching SHAs leave
+  file content explicitly unchecked. `r reload` refreshes saved scope history
+  and repository facts, preserving boundary approval as a recorded decision.
+  This presentation hint does not authorize work or replace shared source
+  validation during preparation and execution. No artifact formats change.
+
 - Scope coverage and acceptance now name recorded omitted paths and their
   reasons, prefix-limited files, and the inspection bounds. Each path category
   previews at most 128 entries and discloses additional recorded entries.

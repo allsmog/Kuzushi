@@ -19,6 +19,7 @@ require-live-snap: 30 Enter / c build inventory | empty-scopes
 keys: c
 require-live-snap: 90 DRAFT SCOPES | real-whole-repository
 expect: Inventory limited: true
+require-live-snap: 30 SHA matches; files unchecked | sha-match-not-content-proof
 require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO draft
 keys: f
 require-live-snap: 30 Files 1..32 | first-members
@@ -51,7 +52,7 @@ live-snap: acceptance-paged-40x12
 resize: 120x36
 keys: NPage
 require-live-snap: 30 Prefix only: kuzushi-logo.png | recorded-prefix-paths
-keys: PPage
+keys: PPage PPage
 keys: End Enter
 require-live-snap: 30 Action stopped | limits-refused
 require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO refused
@@ -59,7 +60,22 @@ keys: Home Enter End Enter
 require-live-snap: 60 ACCEPTED SCOPES | limits-acknowledged
 require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO accepted
 ask: Does refusal preserve the draft, then require a separate limit acknowledgement without authorizing scans or spending?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO dirty
+keys: r
+require-live-snap: 30 Last check: working tree modified | same-sha-modified-files
+ask: Does a matching SHA keep modified files unchecked while preserving the recorded boundary approval?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO restore
+keys: r
+require-live-snap: 30 SHA matches; files unchecked | restored-files-still-unchecked
 require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO advance
+keys: r
+require-live-snap: 30 SHA DIFFERS | changed-sha-visible-before-edit
+expect: Last observed SHA differs
+keys: a
+require-live-snap: 30 Accept exact boundaries | changed-sha-acceptance
+expect: Last observed SHA differs
+keys: Escape
+require-live-snap: 30 Boundary: . | changed-sha-return
 keys: Enter Enter
 require-live-snap: 30 Field 1/1 | rename-after-new-sha
 keys: C-Home C-k
@@ -76,7 +92,7 @@ env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 submit: scopes
-require-live-snap: 30 ACCEPTED SCOPES | historical-no-color-restart
+require-live-snap: 30 SHA DIFFERS | historical-no-color-restart
 require-shell: python3 -B @REPO/scripts/devex/fixtures/real_repository_inventory.py @TMP_TARGET @ART @TMP_HOME @REPO restarted
 ask: Does restart clearly retain historical source and inspection limits without approving the new SHA or repeating discovery work?
 keys: C-c
