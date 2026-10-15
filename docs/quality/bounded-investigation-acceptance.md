@@ -60,7 +60,10 @@ pending human judgments through export and restart. The opinion stays
 `needs_review` because supplied source excerpts were absent. This qualifies
 bounded execution and persistence, not useful vulnerability validation. The
 three observations, zero human decisions and zero confirmed findings remain
-honest. Source-grounded Review inputs remain a concrete product gap.
+honest. The later [frozen source-input increment](../assessments/review-source-evidence-2026-10-15.md)
+adds an explicit bounded primary-file choice, immutable capture and a reader
+before approval. It starts no provider work. New live-model usefulness and full
+source-grounded Review acceptance remain open.
 
 The [visible Setup recovery checkpoint](../assessments/guided-investigation-2026-10-15.md)
 adds a real initial Map launch refusal and explicit retry to the guided local

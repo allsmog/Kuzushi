@@ -9,6 +9,7 @@ use std::sync::{
 };
 
 const MODEL: &str = "openai:gpt-5.5";
+mod source_evidence;
 
 #[test]
 fn review_approval_accepts_broad_selection_with_multiple_observation_generations() {

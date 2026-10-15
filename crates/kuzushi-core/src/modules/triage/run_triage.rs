@@ -17,6 +17,7 @@ pub(in crate::modules) fn run_triage(
         ctx,
         runtime,
         &cache_source,
+        snapshot.hashes().1,
     ));
     let result = result.map(|output| snapshot.finish(ctx, "triage:run", workspace.root(), output));
     runtime_cache::discard_unverified_run(&cache_source, &result);
@@ -28,8 +29,9 @@ fn run_triage_against_source(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     cache_source: &str,
+    source_tree: &str,
 ) -> Result<Value> {
-    let mut run = prepare_triage_run(input, ctx)?;
+    let mut run = prepare_triage_run(input, ctx, source_tree)?;
     if run.findings.is_empty() {
         emit_triage_no_findings(ctx);
         let mut response = empty_triage_response(&run.input, run.missing_fingerprints);
@@ -62,6 +64,7 @@ struct PreparedTriageRun<'a> {
 fn prepare_triage_run<'a>(
     input: Value,
     ctx: &'a ToolExecutionContext<'_>,
+    source_tree: &str,
 ) -> Result<PreparedTriageRun<'a>> {
     let workspace = require_triage_workspace(ctx)?;
     let store = require_triage_store(ctx)?;
@@ -70,6 +73,8 @@ fn prepare_triage_run<'a>(
     apply_threat_model_triage_context(&mut input, workspace.root(), &raw_input)?;
     emit_triage_start(ctx, &input);
     let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
+    input.source_evidence =
+        source_evidence::load_for_execution(&raw_input, &findings, ctx, source_tree)?;
     input.suppression_feedback =
         suppression_feedback::suppression_feedback_notes(workspace, &findings)?;
     input.reviewed_refutation_priors =

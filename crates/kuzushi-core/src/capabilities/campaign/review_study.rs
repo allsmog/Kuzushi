@@ -10,6 +10,9 @@ use serde_json::json;
 
 mod approval;
 mod observation_sources;
+pub use crate::modules::source_evidence::{
+    ReviewSourceBinding, ReviewSourceEvidence, ReviewSourceObservation,
+};
 pub(super) use approval::approve_review_work;
 pub use observation_sources::ReviewObservationSource;
 
@@ -31,6 +34,8 @@ pub struct ReviewStudyReceipt {
     pub findings: Vec<Finding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observation_sources: Vec<ReviewObservationSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_evidence: Option<ReviewSourceEvidence>,
 }
 
 pub fn execute_review_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
@@ -44,7 +49,7 @@ pub fn execute_review_study(input: &Value, ctx: &ToolExecutionContext<'_>) -> Re
     validate_scan_batch_id(&id)?;
     let investigation = required_text(input, "investigationId")?;
     let document = plan_document(&id, &investigation, review, findings, ctx)?;
-    let receipt = receipt_from_plan(&id, &document)?;
+    let receipt = receipt_from_plan(root, &id, &document)?;
     std::fs::create_dir_all(campaigns_dir(root))?;
     std::fs::create_dir(campaign_dir(root, &id))
         .context("review study already exists; prepare a new draft")?;
@@ -85,7 +90,9 @@ fn prepare_review(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<(Valu
         &mut frozen,
         TOOL,
     )?;
-    crate::modules::freeze_triage_review_input(&frozen, ctx)
+    let (mut frozen, findings) = crate::modules::freeze_triage_review_input(&frozen, ctx)?;
+    crate::modules::source_evidence::freeze(&mut frozen, &findings, ctx)?;
+    Ok((frozen, findings))
 }
 
 fn plan_document(
@@ -128,7 +135,11 @@ fn bind_review_context(input: &mut Value, ctx: &ToolExecutionContext<'_>) -> Res
 }
 
 pub fn load_review_study(root: &Path, id: &str) -> Result<ReviewStudyReceipt> {
-    receipt_from_plan(id, &super::approved_work::read_bounded_plan(root, id)?)
+    receipt_from_plan(
+        root,
+        id,
+        &super::approved_work::read_bounded_plan(root, id)?,
+    )
 }
 
 pub fn load_review_study_allowance(
@@ -138,12 +149,13 @@ pub fn load_review_study_allowance(
     super::study_receipt::load_investigation_allowance(root, &receipt.investigation_id)
 }
 
-fn receipt_from_plan(id: &str, plan: &Value) -> Result<ReviewStudyReceipt> {
+fn receipt_from_plan(root: &Path, id: &str, plan: &Value) -> Result<ReviewStudyReceipt> {
     validate_plan_shape(id, plan)?;
     let findings: Vec<Finding> = serde_json::from_value(plan["findings"].clone())?;
     let input = plan["jobs"][0]["input"].clone();
     validate_frozen_selection(plan, &findings, &input)?;
     let observation_sources = observation_sources::from_plan(plan, &findings)?;
+    let source_evidence = crate::modules::source_evidence::inspect(root, &input, &findings)?;
     Ok(ReviewStudyReceipt {
         schema_version: 1,
         campaign_id: id.into(),
@@ -155,6 +167,7 @@ fn receipt_from_plan(id: &str, plan: &Value) -> Result<ReviewStudyReceipt> {
         input,
         findings,
         observation_sources,
+        source_evidence,
     })
 }
 

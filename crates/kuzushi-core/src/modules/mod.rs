@@ -105,6 +105,7 @@ mod trace;
 mod trace_module;
 mod triage;
 pub(crate) use triage::freeze_triage_review_input;
+pub(crate) use triage::source_evidence;
 mod vendor_assessment;
 mod verification_mode;
 mod verify;

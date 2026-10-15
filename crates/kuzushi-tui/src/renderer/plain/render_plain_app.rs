@@ -121,7 +121,7 @@ fn review_plain_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String
         );
     }
     lines.extend(
-        crate::ui_view_models::review_study::review_controls()
+        crate::ui_view_models::review_study::review_controls(&config)
             .lines()
             .map(str::to_owned),
     );

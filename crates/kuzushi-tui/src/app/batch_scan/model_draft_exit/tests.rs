@@ -140,6 +140,7 @@ fn unprepared_review_requires_a_choice_before_back() {
         planning_step: None,
         scroll: 7,
         show_options: true,
+        show_evidence: false,
     });
     let original = config.review_plan.clone();
     app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

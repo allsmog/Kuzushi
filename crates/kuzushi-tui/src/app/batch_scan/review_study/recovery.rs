@@ -79,6 +79,7 @@ fn restored_config(target: &std::path::Path, id: &str) -> Result<BatchScanConfig
         planning_step: None,
         scroll: 0,
         show_options: false,
+        show_evidence: false,
     });
     config.study.review_receipt = Some(receipt);
     Ok(config)

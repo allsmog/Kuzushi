@@ -1,5 +1,16 @@
 # TUI DevEx Audit Journeys
 
+## J283: Frozen source input for standard Review
+
+Use an owned inert source-reader fixture with one labeled synthetic observation
+and an authenticated source receipt. Explicitly select standard Review and cited
+source, then prepare one job without granting calls or starting work. Read the
+exact supplied text, limits and omissions at six terminal sizes, return to the
+plan and recover its immutable input after no-color restart. The helper seeds
+only fixture data and verifies zero approvals, attempts and provider requests.
+It never dispatches a product tool. Judge source readability, deliberate policy
+selection and recovery separately from machine checks and model usefulness.
+
 ## J282: Actual application Review, uncertainty and restart
 
 Read the completed, separately approved Review on the retained owned application

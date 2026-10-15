@@ -26,6 +26,7 @@ mod review_plan;
 mod run_triage;
 pub(crate) use review_plan::freeze_triage_review_input;
 mod runtime_cache;
+pub(crate) mod source_evidence;
 pub(in crate::modules) mod suppression_feedback;
 #[cfg(test)]
 mod tests;

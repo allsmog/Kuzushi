@@ -1736,6 +1736,29 @@ Source, configuration, findings and options are revalidated before the existing
 `campaign:approve-allowance` approves its exact plan. Internal turns and retries
 use the same investigation ledger under Review. Another attempt requires another
 explicit plan; legacy standalone triage remains compatible.
+
+Standard Review can explicitly select `sourceEvidence=cited`. Preparation freezes
+complete primary files from the authenticated observation source, with one shared
+`maxSourceEvidenceBytes` allowance (32,768 bytes by default, at most 262,144).
+Changed or unverifiable observation sources supply no code. Excluded, missing,
+oversized and binary files remain disclosed omissions. No dependency files are
+added automatically. A cited draft with no captured text cannot be approved;
+metadata-only Review requires an explicit input change and a new draft.
+
+`sourceEvidenceRef` identifies the immutable version 1 evidence document in the
+existing content store. Its target, selected generations, primary paths, source
+snapshot, tree, file hashes and byte counts are authenticated before execution.
+Source drift requires another draft and approval. The original observation stays
+unchanged. Each standard vote receives its own frozen source block through the
+shared untrusted-data wrapper in the user prompt. The full block survives the
+adapter's compact finding formatting. Matching bytes do not settle a verdict.
+This option does not change deep strategies or grant calls, retries or jobs.
+
+The Review form exposes `e` to change this policy and `v` to read frozen text and
+omissions before allowance approval. The reader numbers source lines and supports
+Home, End and paging. Raw source bytes and formatted source-block bytes are
+reported separately; dollar consumption remains uncertain. Inputs without these
+optional fields retain their existing behavior.
 New drafts also freeze recorded observation commits from bounded run metadata.
 The form separates those commits from its planned Review source and calls out
 a different commit. Missing, malformed and legacy metadata remain unknown;

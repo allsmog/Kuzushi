@@ -32,6 +32,7 @@ pub(in crate::modules) enum ModelDedupePolicy {
 
 #[derive(Debug, Clone)]
 pub(in crate::modules) struct TriageRunInput {
+    pub(in crate::modules) source_evidence: std::collections::BTreeMap<i64, String>,
     pub(in crate::modules) fingerprints: Option<Vec<String>>,
     pub(in crate::modules) prompt_template: Option<String>,
     pub(in crate::modules) threat_model_context: Option<String>,
@@ -105,6 +106,7 @@ impl TriageRunInput {
             parse_triage_scope(input)?
         };
         Ok(Self {
+            source_evidence: std::collections::BTreeMap::new(),
             deep: triage_deep_enabled(input, scope, fingerprints.is_none()),
             fingerprints,
             prompt_template: parse_triage_prompt_template(input, cwd)?,

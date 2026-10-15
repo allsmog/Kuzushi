@@ -688,6 +688,14 @@ part of every release commit.
   Existing allowance approval preserves consumption and protects Review calls;
   approval starts no work. Generic approval can read workspace findings when
   its optional handle is absent. Legacy `triage:run` inputs remain compatible.
+  Standard Review adds optional `sourceEvidence`, `maxSourceEvidenceBytes` and
+  `sourceEvidenceRef` inputs. Cited preparation stores an immutable version 1
+  source-evidence document and adds optional `sourceEvidence` to
+  `ReviewStudyReceipt`. Older plans omit it and retain their existing behavior.
+  Rust callers constructing receipt literals should set `source_evidence: None`
+  when absent. No finding, campaign queue or allowance schema changes are needed.
+  Saved evidence is read historically without replacing its bytes with the live
+  checkout; new execution still requires matching source and exact approval.
   The Review picker prepares the bounded form before authentication, preserving
   explicit options and other paused choices. Draft completion restores the form
   without treating deferred choices as active continuation.

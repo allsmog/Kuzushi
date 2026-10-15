@@ -99,6 +99,9 @@ pub use review_decision_receipt::{
     WorkspaceReviewDecisionReceipt,
 };
 pub use review_source_capture::execute_source_review_action;
+pub(crate) use review_source_capture::{
+    capture_cited_file_from_tree, read_captured_file, ReviewSourceTree,
+};
 pub use review_source_capture::{
     capture_review_source, decide_on_review_source, read_decision_reviewed_source,
     read_review_source_capture, WorkspaceReviewSourceCapture,

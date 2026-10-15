@@ -1,6 +1,6 @@
 use super::*;
 use crate::ui_view_models::{
-    review_study::{review_controls, review_study_lines},
+    review_study::{review_body_height, review_controls, review_study_lines},
     study_config::study_projection,
 };
 use ratatui::widgets::{Block, Borders};
@@ -20,7 +20,7 @@ pub(super) fn render_review_study(frame: &mut Frame<'_>, app: &ShellApp, area: R
         area.x + 2,
         area.y + 2,
         area.width.saturating_sub(4),
-        area.height.saturating_sub(7),
+        review_body_height(&config, area.height),
     );
     let lines = review_study_lines(
         &config,
@@ -29,19 +29,31 @@ pub(super) fn render_review_study(frame: &mut Frame<'_>, app: &ShellApp, area: R
     );
     let max = lines.len().saturating_sub(usize::from(body.height));
     let offset = review.scroll.min(max);
+    let visible = lines
+        .into_iter()
+        .skip(offset)
+        .take(usize::from(body.height))
+        .collect::<Vec<_>>()
+        .join("\n");
+    frame.render_widget(Paragraph::new(visible), body);
+    render_controls(frame, area, body, &config);
+}
+
+fn render_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    body: Rect,
+    config: &crate::app::BatchScanConfig,
+) {
+    let controls = review_controls(&config);
+    let rows = controls.lines().count() as u16;
     frame.render_widget(
-        Paragraph::new(
-            lines
-                .into_iter()
-                .skip(offset)
-                .take(usize::from(body.height))
-                .collect::<Vec<_>>()
-                .join("\n"),
+        Paragraph::new(controls),
+        Rect::new(
+            body.x,
+            area.bottom().saturating_sub(rows + 1),
+            body.width,
+            rows,
         ),
-        body,
-    );
-    frame.render_widget(
-        Paragraph::new(review_controls()),
-        Rect::new(body.x, area.bottom().saturating_sub(5), body.width, 4),
     );
 }

@@ -166,6 +166,13 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_votes_option(),
         triage_stage2_tier_option(),
         triage_strategy_option(),
+        triage_source_evidence_option(),
+        opt("maxSourceEvidenceBytes", OptionType::Int,
+            "Total cited source bytes frozen for a Review plan; defaults to 32768 when cited evidence is selected. Omitted files remain disclosed.")
+            .integer_range(1, 262144),
+        opt("sourceEvidenceRef", OptionType::String,
+            "Immutable source-evidence reference prepared by campaign:review-study. Execution authenticates the selected observations and source before model work.")
+            .advanced(),
         deep_triage_options(),
         taint_tools_option(),
         triage_prompt_option(),
@@ -321,6 +328,15 @@ fn triage_strategy_option() -> OptionSpec {
     )
     .choices(&["standard", "deep", "gate-deep"])
     .advanced()
+}
+
+fn triage_source_evidence_option() -> OptionSpec {
+    opt(
+        "sourceEvidence",
+        OptionType::Enum,
+        "Standard Review input: none keeps supplied finding evidence only; cited freezes bounded primary source files whose recorded snapshots match. Prepare cited evidence through campaign:review-study before approval.",
+    )
+    .choices(&["none", "cited"])
 }
 
 fn deep_triage_options() -> OptionSpec {

@@ -94,7 +94,11 @@ fn triage_prompt_notes(input: &TriageRunInput, finding: &Finding) -> Vec<String>
     let feedback = suppression_feedback::feedback_note_for(&input.suppression_feedback, finding)
         .map(str::to_string);
     let prior = reviewed_refutation_prompt_note(input, finding);
-    [grounding, feedback, prior].into_iter().flatten().collect()
+    let source = source_evidence::model_note(input, finding);
+    [grounding, feedback, prior, source]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 fn append_triage_prompt_notes(mut prompt: String, notes: &[String]) -> String {

@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 mod guided;
 pub(super) mod recovery;
+mod source_evidence;
 #[cfg(test)]
 mod tests;
 
@@ -16,6 +17,7 @@ pub(crate) struct ReviewStudyDraft {
     pub(crate) planning_step: Option<PlanningRunStep>,
     pub(crate) scroll: usize,
     pub(crate) show_options: bool,
+    pub(crate) show_evidence: bool,
 }
 
 impl ShellApp {
@@ -32,6 +34,7 @@ impl ShellApp {
             planning_step: Some(step),
             scroll: 0,
             show_options: false,
+            show_evidence: false,
         });
         config.notice=Some("Prepare exact review observations, then approve the shared allowance. The selected task stays queued until approved jobs open. No model request has started.".into());
         self.show_study_form(config);
@@ -90,6 +93,7 @@ impl ShellApp {
             KeyCode::Char('s') => self.cycle_review_strategy(),
             KeyCode::Char('n') => self.clear_review_plan(),
             KeyCode::Char('c') => self.toggle_review_context(),
+            KeyCode::Char('e') => self.toggle_review_source_evidence(),
             _ => self.scroll_review_study(code),
         }
     }
@@ -149,7 +153,10 @@ impl ShellApp {
         let Some(projection) = crate::ui_view_models::study_config::study_projection(self) else {
             return;
         };
-        let page = usize::from(viewport.rows.saturating_sub(7).max(1));
+        let page = usize::from(
+            crate::ui_view_models::review_study::review_body_height(&projection, viewport.rows)
+                .max(1),
+        );
         let width = usize::from(viewport.columns.min(120).saturating_sub(4));
         let max = crate::ui_view_models::review_study::review_study_lines(
             &projection,
@@ -166,6 +173,13 @@ impl ShellApp {
         };
         if code == KeyCode::Tab {
             review.show_options = !review.show_options;
+            review.show_evidence = false;
+            review.scroll = 0;
+            return;
+        }
+        if code == KeyCode::Char('v') {
+            review.show_evidence = !review.show_evidence;
+            review.show_options = false;
             review.scroll = 0;
             return;
         }
@@ -253,6 +267,14 @@ fn review_page(code: KeyCode, current: usize, page: usize, max: usize) -> Option
     match code {
         KeyCode::PageUp => Some(current.saturating_sub(page)),
         KeyCode::PageDown => Some(current.saturating_add(page).min(max)),
+        _ => review_edge(code, max),
+    }
+}
+
+fn review_edge(code: KeyCode, max: usize) -> Option<usize> {
+    match code {
+        KeyCode::Home => Some(0),
+        KeyCode::End => Some(max),
         _ => None,
     }
 }

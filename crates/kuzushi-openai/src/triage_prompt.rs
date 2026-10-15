@@ -134,6 +134,46 @@ mod tests {
     use kuzushi_core::{Finding, Severity};
 
     #[test]
+    fn source_evidence_survives_compact_finding_transport() {
+        let message = format!(
+            "{}MESSAGE_TAIL_OMITTED",
+            "m".repeat(TRIAGE_MESSAGE_LIMIT + 100)
+        );
+        let finding = Finding::new_tool(
+            "owned",
+            "reader",
+            "note.md",
+            1,
+            None,
+            Severity::Low,
+            &message,
+        );
+        let source = format!("{}SOURCE_TEXT_END", "Owned source data.\n".repeat(1_000));
+        let record =
+            kuzushi_core::runbooks::untrusted::render_untrusted_repo_block("note.md", &source);
+        let block = kuzushi_core::runbooks::untrusted::render_untrusted_repo_section(&[(
+            "note.md".into(),
+            source.clone(),
+        )]);
+        let template = format!(
+            "{}\n\n{block}",
+            kuzushi_core::runtime::DEFAULT_TRIAGE_PROMPT
+        );
+        let prompt = compact_triage_prompt(&finding, Some(&template)).unwrap();
+        assert!(prompt.contains(&block));
+        assert!(prompt.contains(&record));
+        assert_eq!(
+            kuzushi_core::runbooks::untrusted::decode_untrusted_record(&record)
+                .unwrap()
+                .content,
+            source
+        );
+        assert!(!prompt.contains("MESSAGE_TAIL_OMITTED"));
+        assert!(prompt.contains("UNTRUSTED_DERIVED_FINDING_BEGIN"));
+        assert_eq!(finding.message, message);
+    }
+
+    #[test]
     fn compact_triage_prompt_omits_raw_http_blobs() {
         let mut finding = Finding::new_tool(
             "burp",

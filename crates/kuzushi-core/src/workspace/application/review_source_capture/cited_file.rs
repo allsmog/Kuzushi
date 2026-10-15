@@ -1,14 +1,26 @@
 //! Read only the exact file bytes authenticated by the captured tree.
 use super::*;
-use crate::content_store::{object_hash, TreeObject};
+use crate::content_store::object_hash;
 use crate::findings::{ReviewCapturedFile, ReviewCapturedFileState};
+mod tree;
+pub(crate) use tree::ReviewSourceTree;
 
 pub const MAX_REVIEW_SOURCE_BYTES: usize = 256 * 1024;
 
-pub(super) fn capture_cited_file(
+pub(crate) fn capture_cited_file(
     workspace: &WorkspaceTarget,
     finding: &Finding,
     tree_hash: &str,
+    limit: usize,
+) -> Result<ReviewCapturedFile> {
+    let tree = ReviewSourceTree::load(workspace, tree_hash)?;
+    capture_cited_file_from_tree(workspace, finding, &tree, limit)
+}
+
+pub(crate) fn capture_cited_file_from_tree(
+    workspace: &WorkspaceTarget,
+    finding: &Finding,
+    tree: &ReviewSourceTree,
     limit: usize,
 ) -> Result<ReviewCapturedFile> {
     anyhow::ensure!(
@@ -17,7 +29,7 @@ pub(super) fn capture_cited_file(
     );
     let path = relative_source_path(workspace, &finding.file_path)?;
     let store = ContentStore::open(workspace.objects_dir())?;
-    let expected = tree_file_hash(&store, tree_hash, &path)?;
+    let expected = tree.file_hash(&path);
     let Some(expected) = expected else {
         return Ok(omitted(path, ReviewCapturedFileState::ExcludedOrMissing));
     };
@@ -80,21 +92,6 @@ fn relative_source_path(workspace: &WorkspaceTarget, raw: &str) -> Result<String
     Ok(path.replace('\\', "/"))
 }
 
-fn tree_file_hash(store: &ContentStore, raw: &str, path: &str) -> Result<Option<Blake3Hash>> {
-    let hash = Blake3Hash::new(raw.into())?;
-    let bytes = store.get(&hash)?;
-    anyhow::ensure!(
-        object_hash(ObjectKind::Tree, &bytes) == hash,
-        "Captured tree failed its content integrity check"
-    );
-    let tree: TreeObject = serde_json::from_slice(&bytes)?;
-    Ok(tree
-        .entries
-        .into_iter()
-        .find(|entry| entry.name == path)
-        .map(|entry| entry.hash))
-}
-
 fn ensure_regular_source_path(workspace: &WorkspaceTarget, path: &std::path::Path) -> Result<()> {
     let relative = path.strip_prefix(workspace.root())?;
     let mut current = workspace.root().to_path_buf();
@@ -130,6 +127,13 @@ pub fn read_captured_review_code(
     let Some(file) = &source.cited_file else {
         return Ok(None);
     };
+    read_captured_file(workspace, file)
+}
+
+pub(crate) fn read_captured_file(
+    workspace: &WorkspaceTarget,
+    file: &ReviewCapturedFile,
+) -> Result<Option<String>> {
     if file.state != ReviewCapturedFileState::Captured {
         return Ok(None);
     }

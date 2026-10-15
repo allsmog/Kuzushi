@@ -156,6 +156,15 @@ impl ContentStore {
         hash: &Blake3Hash,
         limit: usize,
     ) -> Result<Option<Vec<u8>>> {
+        self.get_bounded(hash, ObjectKind::Blob, limit)
+    }
+
+    pub(crate) fn get_bounded(
+        &self,
+        hash: &Blake3Hash,
+        kind: ObjectKind,
+        limit: usize,
+    ) -> Result<Option<Vec<u8>>> {
         let path = self.object_path(hash);
         self.validate_object_parent(&path)?;
         if !existing_object_is_file(&path)? {
@@ -168,7 +177,7 @@ impl ContentStore {
             return Ok(None);
         }
         anyhow::ensure!(
-            object_hash(ObjectKind::Blob, &bytes) == *hash,
+            object_hash(kind, &bytes) == *hash,
             "Captured source failed its content integrity check"
         );
         Ok(Some(bytes))

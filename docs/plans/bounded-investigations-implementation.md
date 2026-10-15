@@ -1,5 +1,14 @@
 # Bounded investigations implementation
 
+The [frozen Review source-input increment](../assessments/review-source-evidence-2026-10-15.md)
+adds explicit bounded primary-file capture, immutable evidence references and a
+reader before approval. Changed or unverifiable source remains omitted; source
+drift blocks new execution. Full source blocks survive compact adapter formatting
+without rewriting raw observations. Preparation spends no model allowance. Live
+usefulness and the broad operator acceptance bar remain open. Final J283 has
+27 machine passes, zero failures, 24 capture pairs and three pending human
+judgments. Seventy-eight focused Rust checks and the workspace build pass.
+
 The [application Review checkpoint](../assessments/live-application-review-2026-10-15.md)
 completes the separately approved single job using one new request. It preserves
 three observations and an automatic `needs_review` opinion through native export

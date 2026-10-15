@@ -13,7 +13,8 @@ pub(in crate::capabilities::campaign) fn approve_review_work(
     if document["kind"] != REVIEW_STUDY_KIND {
         return Ok(None);
     }
-    let receipt = receipt_from_plan(id, &document)?;
+    let receipt = receipt_from_plan(root, id, &document)?;
+    validate_source_text(&receipt)?;
     validate_approval(&receipt, input, ctx)?;
     Ok(Some(ApprovedWorkPlanV1 {
         schema_version: 1,
@@ -28,6 +29,14 @@ pub(in crate::capabilities::campaign) fn approve_review_work(
             max_attempts: 1,
         }],
     }))
+}
+
+fn validate_source_text(receipt: &ReviewStudyReceipt) -> Result<()> {
+    if let Some(evidence) = &receipt.source_evidence {
+        anyhow::ensure!(evidence.included_bytes > 0,
+            "No cited source text was captured. Resolve the disclosed omissions, or explicitly choose sourceEvidence=none and prepare a new metadata-only Review draft");
+    }
+    Ok(())
 }
 
 fn validate_approval(

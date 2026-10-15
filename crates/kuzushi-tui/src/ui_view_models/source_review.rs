@@ -22,7 +22,7 @@ pub(crate) fn source_review_wrapped_lines(form: &SourceReviewForm, width: usize)
         .collect()
 }
 
-fn wrap_code_line(line: &str, width: usize) -> Vec<String> {
+pub(super) fn wrap_code_line(line: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut rows = Vec::new();
     let mut current = String::new();

@@ -1,5 +1,6 @@
 use crate::app::BatchScanConfig;
 use crate::renderer::shared::text::wrap_text;
+mod source_evidence;
 
 pub(crate) fn review_study_lines(
     config: &BatchScanConfig,
@@ -7,8 +8,18 @@ pub(crate) fn review_study_lines(
     width: usize,
 ) -> Vec<String> {
     let mut lines = review_attention_lines(config);
+    if config
+        .review_plan
+        .as_ref()
+        .is_some_and(|review| review.show_evidence)
+    {
+        lines.extend(source_evidence::details(config));
+        lines.extend(review_budget_lines(config));
+        return wrap_review_document(lines, width, true);
+    }
     lines.extend(review_summary(config, model));
     lines.extend(review_budget_lines(config));
+    lines.extend(source_evidence::summary(config));
     if let Some(notice) = config
         .notice
         .as_ref()
@@ -17,9 +28,19 @@ pub(crate) fn review_study_lines(
         lines.push(notice.clone());
     }
     lines.extend(review_selection_lines(config));
+    wrap_review_document(lines, width, false)
+}
+
+fn wrap_review_document(lines: Vec<String>, width: usize, source: bool) -> Vec<String> {
     lines
         .into_iter()
-        .flat_map(|line| wrap_text(&line, width.max(1)))
+        .flat_map(|line| {
+            if source && line.contains(" │ ") {
+                super::source_review::wrap_code_line(&line, width)
+            } else {
+                wrap_text(&line, width.max(1))
+            }
+        })
         .collect()
 }
 
@@ -174,8 +195,19 @@ fn recorded_commit_lines(
     lines
 }
 
-pub(crate) fn review_controls() -> &'static str {
-    "t total · r protect · M model\nc context · s strategy · n new\nTab options · PgUp/Dn read\nEnter next · Esc back"
+pub(crate) fn review_controls(config: &BatchScanConfig) -> &'static str {
+    if config
+        .review_plan
+        .as_ref()
+        .is_some_and(|review| review.show_evidence)
+    {
+        return "PgUp/Dn read · Home/End\nv plan · Tab input · Esc back";
+    }
+    "t total · r protect · M model\nc context · s strategy · e source\nv evidence · Tab input · n new\nPgUp/Dn Home/End · Enter next · Esc"
+}
+
+pub(crate) fn review_body_height(config: &BatchScanConfig, height: u16) -> u16 {
+    height.saturating_sub(review_controls(config).lines().count() as u16 + 3)
 }
 
 #[cfg(test)]

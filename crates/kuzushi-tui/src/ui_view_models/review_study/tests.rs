@@ -1,4 +1,14 @@
 use super::*;
+
+#[test]
+fn review_source_wrapping_preserves_code_indentation_and_unicode() {
+    let source = "    2 │     if 東京 == e\u{301}:  # keep  spaces";
+    for width in [12, 36, 76, 116, 156] {
+        let rows = wrap_review_document(vec![source.into()], width, true);
+        assert_eq!(rows.concat(), source);
+        assert!(!rows.iter().any(|row| row.starts_with('\u{301}')));
+    }
+}
 use kuzushi_core::capabilities::campaign::{ReviewObservationSource, ReviewStudyReceipt};
 use kuzushi_core::run_artifacts::RunTargetGitMetadata;
 use serde_json::json;
@@ -14,6 +24,7 @@ fn receipt() -> ReviewStudyReceipt {
         source_identity: format!("git:{};tree:{}", "b".repeat(40), "c".repeat(64)),
         input: json!({}),
         findings: vec![],
+        source_evidence: None,
         observation_sources: vec![ReviewObservationSource {
             generation_id: 7,
             run_id: Some("original-run".into()),
