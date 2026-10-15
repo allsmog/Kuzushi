@@ -305,6 +305,7 @@ fn compact_review_resize_keeps_scroll_selection_and_visible_reading_keys() {
 
 #[test]
 fn compact_review_keeps_source_errors_and_dismissal_visible() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let (_root, mut app) = compact_review_fixture();
     app.set_error_notice(
         "source",
@@ -312,7 +313,18 @@ fn compact_review_keeps_source_errors_and_dismissal_visible() {
     );
     let warning = review_screen(&mut app, 40, 12);
     assert!(warning.contains("Esc dismiss"), "{warning}");
-    assert!(warning.contains("Source evidence"), "{warning}");
+    assert!(warning.contains("Ctrl+G → logs"), "{warning}");
+    app.reduce_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    for ch in "logs".chars() {
+        app.reduce_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.shell_view(), crate::ShellView::Logs);
+    let details = review_screen(&mut app, 80, 24);
+    assert!(
+        details.contains("Source evidence is unavailable"),
+        "{details}"
+    );
 }
 
 #[test]

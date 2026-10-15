@@ -23,6 +23,7 @@ fn reader_with_config(width: u16, height: u16, config: V2Config) -> ShellApp {
     app.set_viewport(crate::TerminalViewport::new(width, height));
     key(&mut app, KeyCode::Tab);
     key(&mut app, KeyCode::Char('V'));
+    app.clear_notice();
     app
 }
 
@@ -55,23 +56,27 @@ fn key(app: &mut ShellApp, code: KeyCode) {
 
 fn output_area(app: &ShellApp) -> Rect {
     let viewport = app.viewport();
+    let workspace = crate::renderer::workbench_primary_area(
+        app,
+        Rect::new(0, 0, viewport.columns, viewport.rows),
+    );
     let ActivityViewModel::Active(activity) = crate::ui_view_models::activity_view_model(app)
     else {
         panic!("expected active reader");
     };
     let now = std::time::Instant::now();
-    let (_, health) = activity.heartbeat_rows(viewport.columns, now);
-    let mut geometry = activity.frame_layout(viewport.columns, health.len());
-    if let Some(chrome) = activity.compact_chrome(viewport.columns, viewport.rows) {
+    let (_, health) = activity.heartbeat_rows(workspace.width, now);
+    let mut geometry = activity.frame_layout(workspace.width, health.len());
+    if let Some(chrome) = activity.compact_chrome(workspace.width, workspace.height) {
         geometry.header_rows = chrome.header.len() as u16;
         geometry.footer_rows = chrome.footer.len() as u16;
     }
     let area = Rect::new(
-        0,
-        geometry.header_rows,
-        viewport.columns,
-        viewport
-            .rows
+        workspace.x,
+        workspace.y + geometry.header_rows,
+        workspace.width,
+        workspace
+            .height
             .saturating_sub(geometry.header_rows + geometry.footer_rows),
     );
     let pane = match activity.pane_layout(area.width, area.height, now) {
@@ -209,6 +214,8 @@ fn activity_reader_compact_control_map_keeps_origin_and_output_position() {
     key(&mut app, KeyCode::Char('g'));
     key(&mut app, KeyCode::PageDown);
     let before = draw_output(&app);
+    let mode = app.input_mode();
+    let scroll = app.router.activity().feed_scroll;
     assert!(
         app.reduce_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL))
             .handled
@@ -232,6 +239,8 @@ fn activity_reader_compact_control_map_keeps_origin_and_output_position() {
     }
     key(&mut app, KeyCode::Esc);
     assert_eq!(app.shell_view(), ShellView::Activity);
+    assert_eq!(app.input_mode(), mode);
+    assert_eq!(app.router.activity().feed_scroll, scroll);
     assert_eq!(draw_output(&app), before);
 }
 

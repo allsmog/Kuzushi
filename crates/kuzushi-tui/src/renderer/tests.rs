@@ -2368,7 +2368,7 @@ fn focused_offense_review_module_renders_recent_threat_hunt_activity() {
 
     assert!(rendered.contains("TOOLS · module:offense-review"));
     assert!(rendered.contains("offense-review:threat-hunt"));
-    assert!(rendered.contains("SCAN"));
+    assert!(rendered.contains("headless"));
     assert!(!rendered.contains("RECENT THREAT-HUNT ACTIVITY"));
 }
 
