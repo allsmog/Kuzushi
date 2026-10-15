@@ -2,11 +2,11 @@
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 from rejected_context import execute
+from secret_settings import ledger
 
 
 def prepare(root, evidence):
@@ -46,7 +46,7 @@ def verify(root, evidence, stage):
     assert all(endpoints[row["id"]] == (row["from"], row["to"]) for row in rows)
     page = execute(root, home, evidence, "groups-" + stage, "findings:groups", {})
     assert (page["totalFindings"], page["totalGroups"]) == (4, groups)
-    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+    with ledger(root, evidence) as db:
         assert db.execute("select count(*) from finding_observations").fetchone()[0] == 4
         assert db.execute("select count(*) from review_decisions").fetchone()[0] == 0
         assert db.execute("select count(*) from rekey_edges").fetchone()[0] == 0

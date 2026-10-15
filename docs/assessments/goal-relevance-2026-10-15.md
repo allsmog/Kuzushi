@@ -1,5 +1,9 @@
 # Goal relevance in Review
 
+The [subsequent reader integration](review-reader-controls-2026-10-15.md) keeps
+`G` for finding groups and moves goal relevance to `O`. The original captures
+below used the earlier conflicting `G` binding and remain historical evidence.
+
 Operators can now assess and browse relevance to an exact saved investigation
 brief. This fills the missing goal-relevance surface in the bounded plan.
 It does not supply finding validity, confidence, severity or Review completion.

@@ -10,7 +10,7 @@ require-live-snap: 30 KUZUSHI | ready
 submit: findings
 require-live-snap: 25 FINDINGS | review-origin
 nav-mode:
-keys: G
+keys: O
 require-live-snap: 25 Unassessed | goals
 keys: b
 require-live-snap: 20 EXACT SAVED BRIEF | brief

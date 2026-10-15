@@ -19,8 +19,11 @@ belong in migration ledgers, not in this current operator contract.
 
 `findings:goals` and `findings:goal-assess` use the shared prepared dispatch
 boundary for exact brief and observation binding, option validation and
-revision-checked writes. The shell's `goals [brief-id]` command and Review `G`
-navigation open a keyboard browser and reason editor over those tools. Their
+revision-checked writes. The shell's `goals [brief-id]` command and Review `O`
+navigation open a keyboard browser and reason editor over those tools. The
+reader shortcuts remain available in Navigate with retained composer text;
+`G` opens groups. Query drafting and ledger paging keep the empty-composer
+restriction so those actions cannot replace held input. Their
 background completions do not open or move the underlying workflow page.
 These controls are shell presentation; scan orchestration never assesses
 relevance automatically. Relevance is operator priority and cannot supply a

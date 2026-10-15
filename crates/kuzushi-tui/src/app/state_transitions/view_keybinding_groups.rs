@@ -245,7 +245,7 @@ pub(super) fn workbench_keybindings_for_plan(
     app: &ShellApp,
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
 ) -> Vec<ViewKeybinding> {
-    let mut bindings = review_ledger_filter_keybindings(app);
+    let mut bindings = review_ledger_keybindings(app);
     let mut layout = workbench_layout_keybindings(app, plan);
     yield_last_row_key_to_review_ledger(&bindings, &mut layout);
     bindings.extend(layout);
@@ -277,21 +277,15 @@ fn yield_last_row_key_to_review_ledger(
     }
 }
 
-fn review_ledger_filter_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
-    if app.input_mode() != InputMode::Navigate || !app.input().is_empty() {
+fn review_ledger_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if app.input_mode() != InputMode::Navigate {
         return Vec::new();
     }
     if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Review {
         return Vec::new();
     }
-    let mut bindings = vec![bind(
-        HotkeyTrigger::ControlChar('f'),
-        "Ctrl+F",
-        "filter",
-        ViewHotkeyAction::WorkbenchReviewLedgerFilter,
-    )];
+    let mut bindings = review_query_keybindings(app);
     bindings.extend(review_context_reader_keybindings());
-    append_findings_page_bindings(app, &mut bindings);
     bindings.push(bind_char(
         'G',
         "G",
@@ -302,12 +296,26 @@ fn review_ledger_filter_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
             .as_ref()
             .is_some_and(|review| review.return_from_source)
         {
-            "return to reviewed selection"
+            "return"
         } else {
             "groups"
         },
         ViewHotkeyAction::FindingGroupsOpen,
     ));
+    bindings
+}
+
+fn review_query_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if !app.input().is_empty() {
+        return Vec::new();
+    }
+    let mut bindings = vec![bind(
+        HotkeyTrigger::ControlChar('f'),
+        "Ctrl+F",
+        "filter",
+        ViewHotkeyAction::WorkbenchReviewLedgerFilter,
+    )];
+    append_findings_page_bindings(app, &mut bindings);
     bindings
 }
 
@@ -319,7 +327,7 @@ fn review_context_reader_keybindings() -> Vec<ViewKeybinding> {
             "relationships",
             ViewHotkeyAction::RelationshipsOpen,
         ),
-        bind_char('G', "G", "goal relevance", ViewHotkeyAction::GoalReviewOpen),
+        bind_char('O', "O", "goals", ViewHotkeyAction::GoalReviewOpen),
         bind_char('l', "l", "lessons", ViewHotkeyAction::LessonsOpen),
     ]
 }
@@ -440,7 +448,7 @@ fn guided_workbench_bindings(
     }
     let mut bindings = review_comparison_keybindings(app);
     bindings.extend(workbench_page_keybindings());
-    bindings.extend(focused_detail_paging(plan));
+    bindings.extend(focused_detail_paging(plan, page));
     bindings.extend(workbench_secondary_action_keybindings(
         page,
         crate::ui_view_models::review_backlog_active(app),
@@ -450,12 +458,13 @@ fn guided_workbench_bindings(
 
 fn focused_detail_paging(
     plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+    page: WorkbenchPage,
 ) -> Vec<ViewKeybinding> {
     plan.and_then(|plan| plan.surface(plan.effective_focus))
         .filter(|surface| {
             surface.interaction == crate::ui_view_models::SurfaceInteraction::Scrollable
         })
-        .map(|_| Vec::from(workbench_detail_paging()))
+        .map(|_| Vec::from(workbench_detail_paging(page)))
         .unwrap_or_default()
 }
 
@@ -571,7 +580,7 @@ fn workbench_movement_keybindings(
         workbench_last_keybinding(page),
     ];
     if interaction == Some(crate::ui_view_models::SurfaceInteraction::Scrollable) {
-        bindings.extend(workbench_detail_paging());
+        bindings.extend(workbench_detail_paging(page));
     }
     bindings
 }
@@ -595,18 +604,23 @@ fn workbench_first_keybinding(page: WorkbenchPage) -> ViewKeybinding {
     bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst)
 }
 
-fn workbench_detail_paging() -> [ViewKeybinding; 2] {
+fn workbench_detail_paging(page: WorkbenchPage) -> [ViewKeybinding; 2] {
+    let label = if page == WorkbenchPage::Review {
+        "read"
+    } else {
+        "scroll"
+    };
     [
         bind(
             HotkeyTrigger::PageDown,
             "PgUp/PgDn",
-            "scroll",
+            label,
             ViewHotkeyAction::ViewPageDown,
         ),
         bind(
             HotkeyTrigger::PageUp,
             "PgUp/PgDn",
-            "scroll",
+            label,
             ViewHotkeyAction::ViewPageUp,
         ),
     ]

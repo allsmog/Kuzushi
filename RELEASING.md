@@ -1,5 +1,11 @@
 # Releasing Kuzushi
 
+- Review navigation keeps `G` for finding groups and uses `O` for goal relevance.
+  This removes the duplicate default `G` assignment. Both readers remain usable
+  with a retained composer draft; opening them preserves its text and cursor.
+  Typed `groups` and `goals` commands and configured action identities stay
+  unchanged.
+
 - Campaign status adds `dispatches`, the lifetime attempt count. Existing
   `attempts` keeps its current retry-counter meaning. Missing or contradictory
   lifetime totals serialize as null and are disclosed in the shell. Rust callers

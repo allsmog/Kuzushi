@@ -1,5 +1,13 @@
 # Bounded investigations implementation
 
+The [Review reader integration](../assessments/review-reader-controls-2026-10-15.md)
+removes the `G` collision, keeps `O` goals and `G` groups distinct, preserves
+retained drafts, and keeps the bulk return control visible. Sequential
+J276/J274/J117 evidence records 105 machine passes, zero failures and 93 capture
+pairs. Eleven human judgments remain pending. The assessment distinguishes the
+v4 reader/matrix evidence from the final v5 bulk-return caption check; no live
+provider request or broad milestone closure follows.
+
 The [attempt and recurrence checkpoint](../assessments/attempts-and-recurrence-2026-10-15.md)
 separates lifetime dispatch totals from resettable counters, retains canceled and
 superseded observations with honest zero completed-pass recurrence, and fixes

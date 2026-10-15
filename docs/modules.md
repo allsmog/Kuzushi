@@ -2,8 +2,9 @@
 
 Goal relevance is an explicit operator assessment, separate from finding
 validity, severity, confidence and Review completion. Open `goals [brief-id]`
-in the shell, or press `G` in Review navigation. The browser covers workspace
-findings and does not inherit the ordinary finding filter or selected study.
+in the shell, or press `O` in Review navigation. `G` opens finding groups. The
+browser covers workspace findings and does not inherit the ordinary finding
+filter or selected study.
 It shows the exact saved brief, fifty rows per page, a relevance filter and
 the recorded observation receipt. `?` lists its controls. `1` to `4` choose
 Direct, Related, Outside goal or Uncertain; `u` clears an assessment. Add a

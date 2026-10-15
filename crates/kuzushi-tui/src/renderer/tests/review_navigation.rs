@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn review_reader_controls_fit_with_answers_and_detail_paging() {
+    let mut app = workbench_app_with_findings();
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.set_agent_chat(Some(crate::app::AgentChatView::default()));
+    for focus in [PhaseSurfaceId::ReviewQueue, PhaseSurfaceId::ReviewDetail] {
+        app.router.workbench_mut().set_focus(focus);
+        app.set_viewport(crate::TerminalViewport::new(120, 36));
+        let mut terminal = Terminal::new(TestBackend::new(120, 2)).unwrap();
+        terminal
+            .draw(|frame| render_keybind_footer(frame, frame.area(), &app))
+            .unwrap();
+        let text = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+        for control in [
+            "Ctrl+T answers",
+            "Esc prompt",
+            "Ctrl+F filter",
+            "End last",
+            "G groups",
+            "O goals",
+            "/keys all",
+        ] {
+            assert!(
+                text.contains(control),
+                "{focus:?}: missing {control}\n{text}"
+            );
+        }
+    }
+}
+
+#[test]
 fn backlog_state_and_trace_key_are_visible_after_real_key_dispatch() {
     let mut app = workbench_app_with_findings();
     app.set_shell_view(ShellView::Workbench);
@@ -76,5 +110,8 @@ fn review_queue_exposes_filter_detail_groups_and_last_row_across_viewports() {
             text.contains("Enter detail") || text.contains("Enter open detail"),
             "{text}"
         );
+        if width >= 120 {
+            assert!(text.contains("O goals"), "{text}");
+        }
     }
 }

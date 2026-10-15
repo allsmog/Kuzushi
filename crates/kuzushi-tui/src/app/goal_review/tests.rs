@@ -74,6 +74,32 @@ fn settle(app: &mut ShellApp) {
 }
 
 #[test]
+fn review_reader_shortcuts_preserve_the_composer_and_open_distinct_views() {
+    for modifiers in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+        let root = tempfile::tempdir().unwrap();
+        let mut app = fixture_at(root.path());
+        app.set_input("Unsent review draft\n東京 cursor evidence");
+        app.set_cursor(5);
+        app.set_input_mode(InputMode::Navigate);
+        app.router.findings_mut().set_cursor(1);
+        app.reduce_key(KeyEvent::new(KeyCode::Char('O'), modifiers));
+        settle(&mut app);
+        assert!(app.goal_review().is_some());
+        assert_eq!(app.shell_view(), ShellView::Workbench);
+        app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.goal_review().is_none());
+        assert_eq!(app.router.findings().cursor(), 1);
+        app.reduce_key(KeyEvent::new(KeyCode::Char('G'), modifiers));
+        assert_eq!(app.shell_view(), ShellView::Relationships);
+        assert!(app.router.relationships.show_groups);
+        assert_eq!(app.input(), "Unsent review draft\n東京 cursor evidence");
+        assert_eq!(app.cursor(), 5);
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+        assert!(!app.has_running_work());
+    }
+}
+
+#[test]
 fn goal_review_preserves_composer_drafts_and_controls_across_sizes() {
     let root = tempfile::tempdir().unwrap();
     let mut app = fixture_at(root.path());

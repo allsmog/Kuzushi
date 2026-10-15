@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn review_filter_shortcut_cannot_replace_a_retained_composer_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_input("Unsent operator text");
+    app.set_input_mode(InputMode::Navigate);
+    app.reduce_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    assert_eq!(app.input(), "Unsent operator text");
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+#[test]
 fn review_backlog_keys_reach_their_actions_through_the_full_reducer() {
     for modifiers in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
         let mut app = ShellApp::new(V2Config::default(), None);

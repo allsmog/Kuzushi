@@ -309,6 +309,43 @@ mod keymap_collision_tests {
         }
     }
 
+    #[test]
+    fn review_navigation_keymap_stays_unambiguous_with_drafts_and_backlog() {
+        for backlog in [false, true] {
+            for draft in ["", "Unsent operator draft"] {
+                let mut app = ShellApp::new(V2Config::default(), None);
+                app.set_shell_view(ShellView::Workbench);
+                app.router
+                    .workbench_mut()
+                    .set_page(Some(crate::app::WorkbenchPage::Review));
+                app.router.workbench_mut().review_mut().backlog = backlog;
+                app.set_input_mode(crate::InputMode::Navigate);
+                app.set_input(draft);
+                for (width, height) in
+                    [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)]
+                {
+                    app.set_viewport(crate::TerminalViewport::new(width, height));
+                    let bindings = app.view_keybindings();
+                    assert_no_accidental_collisions("Review navigation", &bindings);
+                    assert_eq!(
+                        bindings.iter().any(|binding| binding.action
+                            == ViewHotkeyAction::WorkbenchReviewLedgerFilter),
+                        draft.is_empty()
+                    );
+                    for action in [
+                        ViewHotkeyAction::FindingGroupsOpen,
+                        ViewHotkeyAction::GoalReviewOpen,
+                    ] {
+                        assert!(
+                            bindings.iter().any(|binding| binding.action == action),
+                            "missing {action:?} with backlog={backlog} draft={draft:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// The pause/resume overlays join Activity's extras conditionally at
     /// runtime; compose the maximal union statically so a future extra can
     /// never collide with `p`/`P`/`r`/`R` unnoticed.

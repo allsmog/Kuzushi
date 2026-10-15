@@ -14924,7 +14924,8 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
         navigate_advertised
             .iter()
             .all(|binding| binding.hint != "g/G"
-                && binding.action != ViewHotkeyAction::WorkbenchScrollLast),
+                && !(binding.trigger == HotkeyTrigger::Char('G')
+                    && binding.action == ViewHotkeyAction::WorkbenchScrollLast)),
         "a shadowed `G` last-row jump must not be advertised beside `G` groups"
     );
     for binding in navigate_advertised {
@@ -14971,6 +14972,17 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 app.router.findings_mut().set_cursor(7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 0);
+            }
+            ViewHotkeyAction::WorkbenchScrollLast => {
+                app.router
+                    .workbench_mut()
+                    .set_page(Some(WorkbenchPage::Review));
+                app.router
+                    .workbench_mut()
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
+                app.router.findings_mut().set_cursor(0);
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.router.findings().cursor(), 24);
             }
             ViewHotkeyAction::WorkbenchOpenFocusedVisualization => {
                 use crate::scene3d::VizPage;
@@ -15144,6 +15156,11 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             ViewHotkeyAction::RelationshipsOpen | ViewHotkeyAction::FindingGroupsOpen => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.shell_view(), ShellView::Relationships);
+            }
+            ViewHotkeyAction::GoalReviewOpen => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(app.goal_review().is_some());
+                assert_eq!(app.shell_view(), ShellView::Workbench);
             }
             ViewHotkeyAction::LessonsOpen => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));

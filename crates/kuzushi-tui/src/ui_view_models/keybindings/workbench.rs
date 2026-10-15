@@ -158,7 +158,7 @@ fn workbench_exit_label(app: &ShellApp) -> &'static str {
 }
 
 const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..3", "Tab", "[", "]", "Z", "z", "Enter"];
-const REVIEW_KEYS: [&str; 25] = [
+const REVIEW_KEYS: [&str; 26] = [
     "Ctrl+N/P",
     "Ctrl+N",
     "Ctrl+P",
@@ -167,6 +167,7 @@ const REVIEW_KEYS: [&str; 25] = [
     "j/k/↑/↓",
     "End",
     "G",
+    "O",
     "g",
     "PgUp/PgDn",
     "q",
@@ -239,7 +240,7 @@ fn focused_enter_binding(
     }
     (surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable).then(|| {
         if page == WorkbenchPage::Review {
-            bind("Enter", "open detail")
+            bind("Enter", "detail")
         } else {
             bind("Enter", "open")
         }

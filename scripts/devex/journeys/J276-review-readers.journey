@@ -1,0 +1,82 @@
+name: Review groups and goals have distinct controls and preserve the composer
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_readers.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 25 FINDINGS | review-origin
+nav-mode:
+require-live-snap: 20 O goals | review-navigation
+expect: G groups
+keys: G
+require-live-snap: 25 GROUPED FINDINGS | groups
+expect: 3 findings
+keys: Enter
+require-live-snap: 25 GROUP MEMBERS | members
+keys: Enter
+require-live-snap: 25 Viewing Review | selected-member
+keys: O
+require-live-snap: 25 Unassessed | goals
+expect: GOAL RELEVANCE
+expect: workspace
+keys: Escape
+require-live-snap: 20 Viewing Review | restored-review
+keys: Escape
+paste-file: @ART/reader-draft.txt
+live-snap: composer-draft
+keys: Escape
+nav-mode:
+keys: C-_
+live-snap: restored-draft-navigation
+keys: G
+require-live-snap: 25 GROUP MEMBERS | members-with-draft
+keys: Escape
+require-live-snap: 20 GROUPED FINDINGS | groups-with-draft
+keys: Escape
+require-live-snap: 20 Viewing Review | review-with-draft
+keys: O
+require-live-snap: 25 Unassessed | goals-with-draft
+resize: 160x48
+live-snap: readers-160x48
+resize: 96x89
+live-snap: readers-96x89
+resize: 80x24
+live-snap: readers-80x24
+resize: 60x20
+live-snap: readers-60x20
+resize: 40x12
+require-live-snap: 20 Esc return | readers-40x12
+ask: Do groups and goals open distinct views, preserve selection and the unsent draft, and retain readable controls at all six sizes without implying a finding verdict?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 Viewing Review | returned-review
+keys: Escape
+require-live-snap: 20 paste #1 | prompt-restored
+keys: C-y
+require-live-snap: 20 Unsent review draft | paste-inspected
+expect: 東京 cursor evidence
+keys: Escape
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: findings
+require-live-snap: 25 FINDINGS | restarted-review
+nav-mode:
+keys: G
+require-live-snap: 25 GROUPED FINDINGS | restarted-groups
+keys: Escape
+require-live-snap: 20 Viewing Review | restarted-origin
+keys: O
+require-live-snap: 25 Unassessed | restarted-goals
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_readers.py @TMP_TARGET @ART verify
+ask: Does no-color restart keep both readers reachable with three unchanged observations, no finding or goal decisions, and no approved or billable work?
+keys: Escape
+keys: C-c
+require-exit: 10

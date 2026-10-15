@@ -144,7 +144,16 @@ pub(crate) fn keybindings_line(app: &ShellApp, width: usize) -> Line<'static> {
         .into_iter()
         .map(|binding| (binding.key, binding.label))
         .collect();
-    Line::from(keybinding_spans_with_hint(bindings, width, OverflowHint::ShowIf(false)).0)
+    let gap = if app.input_mode() == crate::InputMode::Navigate
+        && crate::ui_view_models::workbench_prompt_mode(app)
+            == Some(crate::app::WorkbenchPage::Review)
+        && !app.has_running_work()
+    {
+        2
+    } else {
+        3
+    };
+    Line::from(keybinding_spans_with_spacing(bindings, width, OverflowHint::ShowIf(false), gap).0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +167,15 @@ fn keybinding_spans_with_hint<K: Into<String>, L: Into<String>>(
     width: usize,
     hint: OverflowHint,
 ) -> (Vec<Span<'static>>, bool) {
+    keybinding_spans_with_spacing(bindings, width, hint, 3)
+}
+
+fn keybinding_spans_with_spacing<K: Into<String>, L: Into<String>>(
+    bindings: Vec<(K, L)>,
+    width: usize,
+    hint: OverflowHint,
+    gap: usize,
+) -> (Vec<Span<'static>>, bool) {
     const TAIL: &str = "/keys all";
     let inherited_overflow = matches!(hint, OverflowHint::ShowIf(true));
     let reserve = match hint {
@@ -169,7 +187,7 @@ fn keybinding_spans_with_hint<K: Into<String>, L: Into<String>>(
         .map(|(key, label)| (key.into(), label.into()))
         .collect::<Vec<_>>();
     let bindings_len = bindings.len();
-    let mut layout = KeybindingLineLayout::new(width, reserve);
+    let mut layout = KeybindingLineLayout::new(width, reserve, gap);
     let mut spans = vec![Span::raw(" ")];
 
     for (i, binding) in bindings.into_iter().enumerate() {
@@ -197,16 +215,18 @@ struct KeybindingLineLayout {
     reserve: usize,
     used: usize,
     width: usize,
+    gap: usize,
 }
 
 impl KeybindingLineLayout {
-    fn new(width: usize, reserve: usize) -> Self {
+    fn new(width: usize, reserve: usize, gap: usize) -> Self {
         Self {
             overflow: false,
             placed: 0,
             reserve,
             used: 1,
             width,
+            gap,
         }
     }
 
@@ -240,7 +260,7 @@ impl KeybindingLineLayout {
         if self.placed == 0 {
             0
         } else {
-            3
+            self.gap
         }
     }
 
@@ -254,8 +274,8 @@ impl KeybindingLineLayout {
 
     fn push_separator(&mut self, spans: &mut Vec<Span<'static>>) {
         if self.placed > 0 {
-            spans.push(Span::raw("   "));
-            self.used += 3;
+            spans.push(Span::raw(" ".repeat(self.gap)));
+            self.used += self.gap;
         }
     }
 }

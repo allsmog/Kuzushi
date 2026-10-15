@@ -4,6 +4,7 @@ cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR NODE_OPTIONS KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE
 env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
 require-shell: python3 -B @REPO/scripts/devex/fixtures/bulk_relationships.py prepare @TMP_TARGET @ART
+require-wrapper-flow:
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
 submit: relationships
@@ -16,7 +17,9 @@ require-live-snap: 25 3 selected | selected-page
 keys: A
 require-live-snap: 20 REVIEW 3 RELATIONSHIPS | review-selection
 keys: ] Enter
-require-live-snap: 20 SELECTED FINDING | recorded-source
+require-live-snap: 20 Owned greeting. Never executed. | recorded-source
+expect: Viewing Review
+expect: G return
 keys: G
 require-live-snap: 20 REVIEW 3 RELATIONSHIPS | returned-review
 expect: Inspecting destination
