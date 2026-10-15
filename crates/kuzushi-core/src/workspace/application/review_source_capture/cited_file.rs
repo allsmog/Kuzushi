@@ -23,11 +23,20 @@ pub(crate) fn capture_cited_file_from_tree(
     tree: &ReviewSourceTree,
     limit: usize,
 ) -> Result<ReviewCapturedFile> {
+    capture_source_file_from_tree(workspace, &finding.file_path, tree, limit)
+}
+
+pub(crate) fn capture_source_file_from_tree(
+    workspace: &WorkspaceTarget,
+    raw_path: &str,
+    tree: &ReviewSourceTree,
+    limit: usize,
+) -> Result<ReviewCapturedFile> {
     anyhow::ensure!(
         (1..=MAX_REVIEW_SOURCE_BYTES).contains(&limit),
         "Cited source limit must be 1 to 262144 bytes"
     );
-    let path = relative_source_path(workspace, &finding.file_path)?;
+    let path = relative_source_path(workspace, raw_path)?;
     let store = ContentStore::open(workspace.objects_dir())?;
     let expected = tree.file_hash(&path);
     let Some(expected) = expected else {

@@ -3,6 +3,9 @@ use super::*;
 const FILE_PICKER_HEADER_LINES: u16 = 8;
 
 pub(crate) fn file_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if app.router.file_picker().purpose() == crate::app::FilePickerPurpose::ReviewEvidence {
+        return crate::renderer::review_source_files::lines(app, area);
+    }
     let mut lines: Vec<Line<'static>> = Vec::new();
     let document = app.router.file_picker().purpose() == crate::app::FilePickerPurpose::MapDocument;
     lines.push(divider(

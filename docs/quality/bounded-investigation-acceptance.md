@@ -51,6 +51,18 @@ checkboxes remain open until their complete requirements are reconciled.
 | Sequential real-model validation under approved allowance | [Owned application Scan](../assessments/live-application-scan-2026-10-15.md), [standard Review](../assessments/live-application-review-2026-10-15.md) and [source-input Review](../assessments/live-source-review-2026-10-15.md): three Scan calls and two separately approved Review calls, with durable observations, opinions, export and restart | Scoped. Thirteen cumulative experiment requests used, reaching the latest approved maximum. All five current-investigation calls are settled, including both protected Review calls. No capacity or approved follow-up remains. The newest opinion still needs downstream evidence; model usefulness and full investigation qualification remain open. |
 | Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |
 
+The [supporting-file increment](../assessments/review-supporting-files-2026-10-15.md)
+adds explicit bounded downstream source input to standard Review. Thirty-five
+core checks, 25 TUI checks and the workspace build pass. Enhanced J285 records 45 machine
+passes, zero failures and three pending human judgments across six picker sizes,
+frozen-source reading and no-color restart. It retains one unapproved job and
+zero calls or approvals, including after Enter and hidden planner shortcuts in
+the reader with positive draft limits. A separate invoice Review draft freezes
+3,336 bytes and eight supporting files without changing its five calls or two
+existing decisions. It is unapproved and unstarted. Model usefulness with supporting code remains untested;
+the thirteen-request experiment cap stays exhausted. This focused increment
+does not complete a broad milestone or qualify reference-level UX parity.
+
 Exploit development, reproducers and vulnerability patching remain excluded.
 
 The [Review stage accounting increment](../assessments/review-stage-accounting-2026-10-15.md)

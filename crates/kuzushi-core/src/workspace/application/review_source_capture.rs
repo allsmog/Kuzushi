@@ -11,7 +11,10 @@ const CAPTURE_PREFIX: &str = "review-source:";
 const MAX_CAPTURE_BYTES: usize = 32 * 1024;
 mod cited_file;
 mod manual_dispatch;
-pub(crate) use cited_file::{capture_cited_file_from_tree, read_captured_file, ReviewSourceTree};
+pub(crate) use cited_file::{
+    capture_cited_file_from_tree, capture_source_file_from_tree, read_captured_file,
+    ReviewSourceTree,
+};
 pub use cited_file::{read_captured_review_code, MAX_REVIEW_SOURCE_BYTES};
 pub use manual_dispatch::execute_source_review_action;
 

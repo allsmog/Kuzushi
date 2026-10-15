@@ -5,7 +5,9 @@ use kuzushi_core::{
     Finding, FindingStore, Severity, ToolExecutionContext, V2Config, WorkspaceTarget,
 };
 use ratatui::{backend::TestBackend, Terminal};
+mod reader_input;
 mod source_evidence;
+mod supporting_files;
 
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
@@ -219,7 +221,8 @@ fn review_layout_controls_and_paging_work_across_all_six_sizes() {
             "s strategy",
             "n new",
             "e source",
-            "v evidence",
+            "v read",
+            "f files",
             "Tab input",
             "PgUp/Dn",
             "Home/End",

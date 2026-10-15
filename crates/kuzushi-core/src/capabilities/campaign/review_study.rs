@@ -11,7 +11,8 @@ use serde_json::json;
 mod approval;
 mod observation_sources;
 pub use crate::modules::source_evidence::{
-    ReviewSourceBinding, ReviewSourceEvidence, ReviewSourceObservation,
+    ReviewSourceBinding, ReviewSourceEvidence, ReviewSourceObservation, ReviewSupportingFile,
+    MAX_REVIEW_SUPPORTING_FILES,
 };
 pub(super) use approval::approve_review_work;
 pub use observation_sources::ReviewObservationSource;

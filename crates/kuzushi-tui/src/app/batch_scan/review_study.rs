@@ -55,10 +55,35 @@ impl ShellApp {
         if self.study_notice_captures_escape() {
             return self.handle_review_attention(code);
         }
+        if self.review_source_reader_is_open() {
+            return self.handle_review_source_reader_key(code);
+        }
+        self.handle_review_plan_key(code)
+    }
+
+    fn handle_review_plan_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
             KeyCode::Enter => return self.advance_review_study(),
             KeyCode::Esc => return self.close_batch_config(),
             _ => self.apply_review_edit_key(code),
+        }
+        InputUpdate::handled()
+    }
+
+    fn review_source_reader_is_open(&self) -> bool {
+        self.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .and_then(|config| config.review_plan.as_ref())
+            .is_some_and(|review| review.show_evidence)
+    }
+
+    fn handle_review_source_reader_key(&mut self, code: KeyCode) -> InputUpdate {
+        match code {
+            KeyCode::Esc => return self.close_batch_config(),
+            KeyCode::Char('f') => self.open_review_source_file_picker(),
+            _ => self.scroll_review_study(code),
         }
         InputUpdate::handled()
     }
@@ -94,6 +119,7 @@ impl ShellApp {
             KeyCode::Char('n') => self.clear_review_plan(),
             KeyCode::Char('c') => self.toggle_review_context(),
             KeyCode::Char('e') => self.toggle_review_source_evidence(),
+            KeyCode::Char('f') => self.open_review_source_file_picker(),
             _ => self.scroll_review_study(code),
         }
     }

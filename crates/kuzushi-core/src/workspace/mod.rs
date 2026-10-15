@@ -1,6 +1,9 @@
 mod application;
 pub(crate) use application::read_workspace_finding_export_records;
-pub(crate) use application::{capture_cited_file_from_tree, read_captured_file, ReviewSourceTree};
+pub(crate) use application::{
+    capture_cited_file_from_tree, capture_source_file_from_tree, read_captured_file,
+    ReviewSourceTree,
+};
 pub use application::{execute_goal_review, execute_lesson_action, load_finding_lessons};
 pub mod artifact_kb;
 pub mod artifacts;

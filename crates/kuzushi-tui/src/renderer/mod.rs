@@ -47,6 +47,7 @@ mod context_history;
 mod goal_review;
 pub(crate) mod logs_reader;
 mod paste_inspection;
+mod review_source_files;
 mod review_study;
 mod scope_context;
 mod scope_review;

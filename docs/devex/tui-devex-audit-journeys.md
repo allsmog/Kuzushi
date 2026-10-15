@@ -1,5 +1,17 @@
 # TUI DevEx Audit Journeys
 
+## J285: Explicit supporting files for standard Review
+
+Use an owned inert fixture with an authenticated synthetic observation. Choose
+two supporting files, inspect the basket, cancel a third choice and retain the
+original selection. Draft positive call limits, check the picker at six terminal
+sizes, prepare one fixed unapproved job and read exactly the frozen selected
+code. Enter and hidden planner shortcuts must not approve or change the plan
+from the source reader. Discard unsaved limits explicitly, then recover the same
+bundle after no-color restart. The helper seeds only fixture data and verifies
+zero requests, approvals, attempts and decisions. Human judgments assess the
+picker, reader and recovery separately from machine assertions.
+
 ## J284: Actual source-input Review at the exhausted allowance
 
 Read the completed, separately approved Review on the owned invoice library.

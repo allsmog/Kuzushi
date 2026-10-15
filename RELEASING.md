@@ -698,6 +698,16 @@ part of every release commit.
   `sourceEvidenceRef` inputs. Cited preparation stores an immutable version 1
   source-evidence document and adds optional `sourceEvidence` to
   `ReviewStudyReceipt`. Older plans omit it and retain their existing behavior.
+  Optional `sourceEvidenceFiles` selects up to 16 explicit supporting paths.
+  Nonempty selections use evidence version 2 with optional `supportingFiles`
+  on each observation; empty selections retain version 1. Rust callers building
+  `ReviewSourceObservation` literals must initialize `supporting_files` with an
+  empty vector when absent. Supporting files share the existing whole-batch
+  source byte cap. New readers retain version 1 support. Older binaries reject
+  version 2 or its new options rather than silently omitting supporting input.
+  Evidence metadata reads are bounded to 16 MiB to accommodate path receipts;
+  the raw source text maximum stays 256 KiB. There is no new queue, allowance,
+  finding or job schema, and no automatic dependency expansion.
   Rust callers constructing receipt literals should set `source_evidence: None`
   when absent. No finding, campaign queue or allowance schema changes are needed.
   Saved evidence is read historically without replacing its bytes with the live

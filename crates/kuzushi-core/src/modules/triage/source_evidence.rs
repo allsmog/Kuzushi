@@ -8,12 +8,14 @@ mod capture;
 mod persistence;
 mod recorded_sources;
 mod request;
+mod supporting_files;
 pub(crate) use capture::freeze;
 pub(crate) use persistence::inspect;
 use recorded_sources::RecordedSources;
 pub(super) use request::{load_for_execution, model_note};
 
 pub const DEFAULT_REVIEW_SOURCE_BYTES: usize = 32 * 1024;
+pub const MAX_REVIEW_SUPPORTING_FILES: usize = 16;
 const MAX_REVIEW_SOURCE_BYTES: usize = 256 * 1024;
 const REFERENCE_PREFIX: &str = "review-evidence:";
 
@@ -37,6 +39,15 @@ pub struct ReviewSourceObservation {
     pub binding: ReviewSourceBinding,
     pub file: Option<ReviewCapturedFile>,
     pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supporting_files: Vec<ReviewSupportingFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewSupportingFile {
+    pub file: ReviewCapturedFile,
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,11 +62,23 @@ pub enum ReviewSourceBinding {
 impl ReviewSourceObservation {
     /// Exact repository-data block added to this generation's Review user prompt.
     pub fn model_input(&self) -> String {
-        match &self.text {
+        let primary = match &self.text {
             Some(text) => crate::runbooks::untrusted::render_untrusted_repo_section(&[(self.path.clone(), text.clone())]),
             None => format!("No primary source text was supplied. Frozen source receipt: binding={:?}, file={:?}. Missing text does not establish a fix or refute the finding.",
                 self.binding, self.file.as_ref().map(|file| file.state)),
+        };
+        if self.supporting_files.is_empty() {
+            return primary;
         }
+        let items = self.supporting_files.iter().map(|source| {
+            let text = source.text.clone().unwrap_or_else(|| format!(
+                "Source text omitted. Frozen file receipt: {:?}. Missing text does not refute the finding.", source.file.state));
+            (source.file.path.clone(), text)
+        }).collect::<Vec<_>>();
+        format!(
+            "{primary}\n\n{}",
+            crate::runbooks::untrusted::render_untrusted_repo_section(&items)
+        )
     }
 }
 
@@ -80,10 +103,11 @@ fn byte_limit(input: &Value) -> Result<usize> {
 
 fn validate_policy(input: &Value) -> Result<bool> {
     let enabled = cited_enabled(input)?;
+    let supporting = supporting_files::selected_paths(input)?;
     if !enabled {
         anyhow::ensure!(
-            input.get("sourceEvidenceRef").is_none(),
-            "A source-evidence reference requires sourceEvidence=cited"
+            input.get("sourceEvidenceRef").is_none() && supporting.is_empty(),
+            "A source-evidence reference or supporting files require sourceEvidence=cited"
         );
         return Ok(false);
     }

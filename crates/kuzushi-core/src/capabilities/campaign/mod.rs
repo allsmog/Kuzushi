@@ -68,7 +68,7 @@ mod review_study;
 pub use review_study::{
     execute_review_study, load_review_study, load_review_study_allowance, ReviewObservationSource,
     ReviewSourceBinding, ReviewSourceEvidence, ReviewSourceObservation, ReviewStudyReceipt,
-    REVIEW_STUDY_KIND,
+    ReviewSupportingFile, MAX_REVIEW_SUPPORTING_FILES, REVIEW_STUDY_KIND,
 };
 mod scope_allowance;
 pub use context_study::{

@@ -81,6 +81,7 @@ fn plain_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
 
 fn primary_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
     crate::renderer::allowance_review::allowance_review_plain_lines(app, width)
+        .or_else(|| crate::renderer::review_source_files::plain_lines(app, width))
         .or_else(|| review_plain_overlay_lines(app, width))
         .or_else(|| super::super::scope_review::scope_review_plain_lines(app, width))
         .or_else(|| crate::ui_view_models::context_history::history_plain_lines(app, width))

@@ -18,14 +18,21 @@ impl ShellApp {
             return;
         }
         review.input["sourceEvidence"] = json!(next);
-        review
-            .input
-            .as_object_mut()
-            .unwrap()
-            .remove("sourceEvidenceRef");
+        reset_source_selection(&mut review.input, next);
         review.scroll = 0;
         config.study.invalidate_plan();
-        config.notice = Some("Source input changed explicitly. Enter freezes the new draft; v reads its captured text and omissions before approval. Prior attempts and spending remain recorded.".into());
+        config.notice = Some(format!("Source input changed explicitly. {} Enter freezes the new draft; v reads text and omissions before approval. Prior attempts and spending remain recorded.",
+            if next == "none" { "Supporting-file choices cleared." } else { "f chooses supporting files." }));
+    }
+}
+
+fn reset_source_selection(input: &mut Value, policy: &str) {
+    let Some(input) = input.as_object_mut() else {
+        return;
+    };
+    input.remove("sourceEvidenceRef");
+    if policy == "none" {
+        input.remove("sourceEvidenceFiles");
     }
 }
 

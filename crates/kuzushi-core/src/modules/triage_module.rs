@@ -167,6 +167,8 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_stage2_tier_option(),
         triage_strategy_option(),
         triage_source_evidence_option(),
+        opt("sourceEvidenceFiles", OptionType::StringList,
+            "Explicit supporting files for cited standard Review. At most 16 exact repository-relative paths; no dependency expansion. All source text shares maxSourceEvidenceBytes. Freeze and inspect the bundle before approval."),
         opt("maxSourceEvidenceBytes", OptionType::Int,
             "Total cited source bytes frozen for a Review plan; defaults to 32768 when cited evidence is selected. Omitted files remain disclosed.")
             .integer_range(1, 262144),

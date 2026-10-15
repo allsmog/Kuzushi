@@ -38,6 +38,34 @@ fn capture_document(
         .workspace
         .context("Source evidence requires a workspace")?;
     let max_bytes = byte_limit(input)?;
+    let supporting = supporting_files::selected_paths(input)?;
+    let (observations, included_bytes) =
+        capture_observations(ctx, findings, snapshot, max_bytes, &supporting)?;
+    Ok(ReviewSourceEvidence {
+        schema_version: if supporting.is_empty() { 1 } else { 2 },
+        target: workspace
+            .root()
+            .canonicalize()?
+            .to_string_lossy()
+            .into_owned(),
+        snapshot_hash: snapshot.hashes().0.into(),
+        tree_hash: snapshot.hashes().1.into(),
+        max_bytes,
+        included_bytes,
+        observations,
+    })
+}
+
+fn capture_observations(
+    ctx: &ToolExecutionContext<'_>,
+    findings: &[Finding],
+    snapshot: &SourceSnapshot,
+    max_bytes: usize,
+    supporting: &[String],
+) -> Result<(Vec<ReviewSourceObservation>, usize)> {
+    let workspace = ctx
+        .workspace
+        .context("Source evidence requires a workspace")?;
     let mut remaining = max_bytes;
     let mut observations = Vec::new();
     let tree = ReviewSourceTree::load(workspace, snapshot.hashes().1)?;
@@ -49,23 +77,12 @@ fn capture_document(
             "Cited source path exceeds the 4096-byte receipt limit"
         );
         let binding = recorded.binding(finding, snapshot.hashes().1);
-        let source = capture_observation(workspace, finding, &tree, binding, remaining)?;
+        let mut source = capture_observation(workspace, finding, &tree, binding, remaining)?;
         remaining = remaining.saturating_sub(source.text.as_ref().map_or(0, String::len));
+        supporting_files::capture(ctx, finding, &tree, supporting, &mut source, &mut remaining)?;
         observations.push(source);
     }
-    Ok(ReviewSourceEvidence {
-        schema_version: 1,
-        target: workspace
-            .root()
-            .canonicalize()?
-            .to_string_lossy()
-            .into_owned(),
-        snapshot_hash: snapshot.hashes().0.into(),
-        tree_hash: snapshot.hashes().1.into(),
-        max_bytes,
-        included_bytes: max_bytes - remaining,
-        observations,
-    })
+    Ok((observations, max_bytes - remaining))
 }
 
 fn capture_observation(
@@ -83,6 +100,7 @@ fn capture_observation(
         binding,
         file: None,
         text: None,
+        supporting_files: Vec::new(),
     };
     if binding != ReviewSourceBinding::MatchingRecordedSnapshot {
         return Ok(source);

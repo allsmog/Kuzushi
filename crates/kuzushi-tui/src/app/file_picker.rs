@@ -3,11 +3,13 @@ use crate::app::state_transitions::InputUpdate;
 use std::path::{Path, PathBuf};
 
 mod discovery;
+mod review_evidence;
 #[cfg(test)]
 use discovery::{
     synthetic_file_candidates, FileDiscovery, FileDiscoveryBudget, FILE_PICKER_DIRECTORY_CHUNK,
 };
 pub(crate) use discovery::{workspace_file_candidates, workspace_file_candidates_cancellable};
+pub(crate) use review_evidence::ReviewFileSelection;
 
 pub(crate) const FILE_PICKER_MAX_FILES: usize = 5_000;
 const FILE_PICKER_PAGE_STEP: usize = 10;
@@ -59,6 +61,9 @@ impl ShellApp {
     }
 
     pub(crate) fn handle_file_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if self.handle_review_file_picker_key(key) {
+            return InputUpdate::handled();
+        }
         match key.code {
             KeyCode::Up => self.router.file_picker_mut().move_cursor(-1),
             KeyCode::Down => self.router.file_picker_mut().move_cursor(1),
@@ -109,6 +114,10 @@ impl ShellApp {
     }
 
     fn accept_file_picker_selection(&mut self) -> InputUpdate {
+        if self.router.file_picker().purpose() == FilePickerPurpose::ReviewEvidence {
+            self.apply_review_source_files();
+            return InputUpdate::handled();
+        }
         let Some(source) = self.router.file_picker().selected_path() else {
             self.log("files", "no file matches the current filter");
             return InputUpdate::handled();

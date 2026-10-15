@@ -1,13 +1,25 @@
 # Bounded investigations implementation
 
+The [supporting-file increment](../assessments/review-supporting-files-2026-10-15.md)
+adds explicit finite file selection for standard Review, authenticated immutable
+capture under the existing shared source-byte cap, and a readable selection
+basket with Apply/Cancel. Thirty-five focused core checks, 25 TUI checks and the
+workspace build pass. Enhanced J285 has 45 machine passes, zero failures, 33 capture pairs
+and three pending human judgments. Preparation and restart consume no calls.
+The source reader ignores Enter and hidden planner shortcuts, preserving the
+draft and spending choice. A real-data supporting-code Review draft is prepared
+and inspectable but remains unapproved and unstarted.
+Live usefulness with supporting code and the nine broad milestones remain open.
+
 The [actual source-input Review checkpoint](../assessments/live-source-review-2026-10-15.md)
 completes the separately approved job with one new request, reaching thirteen
 cumulative experiment requests. The opinion cites the frozen route but still
 needs downstream evidence; it remains automatic `needs_review`. J284 has 32
 machine passes, zero failures, 22 capture pairs and five pending human judgments.
 The allowance is exhausted, raw discovery evidence and the earlier decision are
-retained, and no follow-up is approved. Explicit supporting-file selection is the
-next evidence-delivery improvement. All broad milestones remain open.
+retained, and no follow-up is approved. The supporting-file increment now
+addresses evidence delivery; another live test needs a new explicit allowance.
+All broad milestones remain open.
 
 The [Review stage accounting increment](../assessments/review-stage-accounting-2026-10-15.md)
 corrects classification cost attributed to deduplication, identifies the model

@@ -162,7 +162,7 @@ fn review_source_evidence_reader_reaches_every_line_at_all_sizes_and_in_plain_ou
         let first_page = evidence_screen(&app);
         assert!(first_page.contains("FROZEN SOURCE INPUT"));
         for control in [
-            "PgUp/Dn read",
+            "PgUp/Dn Home/End",
             "Home/End",
             "v plan",
             "Tab input",
@@ -207,4 +207,62 @@ fn review_source_evidence_reader_reaches_every_line_at_all_sizes_and_in_plain_ou
         }
         assert!(!app.has_running_work());
     }
+}
+
+#[test]
+fn review_supporting_source_reader_includes_selected_text_and_omissions() {
+    use kuzushi_core::capabilities::campaign::ReviewSupportingFile;
+    use kuzushi_core::findings::{ReviewCapturedFile, ReviewCapturedFileState};
+    let (_root, mut app) = reader_fixture();
+    let evidence = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .study
+        .review_receipt
+        .as_mut()
+        .unwrap()
+        .source_evidence
+        .as_mut()
+        .unwrap();
+    // Presentation-only DTOs. Core tests authenticate captured hashes and path order.
+    for (path, state, text) in [
+        (
+            "service.txt",
+            ReviewCapturedFileState::Captured,
+            Some("    SERVICE_INPUT\n".into()),
+        ),
+        ("large.txt", ReviewCapturedFileState::TooLarge, None),
+    ] {
+        evidence.observations[0]
+            .supporting_files
+            .push(ReviewSupportingFile {
+                file: ReviewCapturedFile {
+                    path: path.into(),
+                    state,
+                    blob_hash: None,
+                    byte_count: None,
+                },
+                text,
+            });
+    }
+    let plain = crate::renderer::render_plain_app(&app, 40);
+    for label in [
+        "Supporting · service.txt",
+        "SERVICE_INPUT",
+        "Supporting · large.txt",
+        "remaining byte limit",
+    ] {
+        assert!(plain.contains(label), "missing {label}: {plain}");
+    }
+    let mut seen = String::new();
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
+    for _ in 0..100 {
+        seen.push_str(&evidence_screen(&app));
+        app.handle_review_study_key(KeyCode::PageDown);
+    }
+    assert!(seen.contains("SERVICE_INPUT"));
+    assert!(seen.contains("remaining byte limit"));
 }

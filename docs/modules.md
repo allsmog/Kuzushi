@@ -1760,7 +1760,16 @@ oversized and binary files remain disclosed omissions. No dependency files are
 added automatically. A cited draft with no captured text cannot be approved;
 metadata-only Review requires an explicit input change and a new draft.
 
-`sourceEvidenceRef` identifies the immutable version 1 evidence document in the
+`sourceEvidenceFiles` selects at most 16 exact, normalized repository-relative
+supporting paths for standard cited Review. It performs no glob expansion,
+dependency discovery or follow-up work. Primary files and selected supporting
+files share the same byte cap across the entire batch, in observation and
+selection order. A path already used as that observation's primary is not added
+twice. Repeated supporting input for different observations counts each time.
+Every omission remains visible. Unauthenticated observation sources receive no
+supporting code.
+
+`sourceEvidenceRef` identifies the immutable evidence document in the
 existing content store. Its target, selected generations, primary paths, source
 snapshot, tree, file hashes and byte counts are authenticated before execution.
 Source drift requires another draft and approval. Original discovery evidence stays
@@ -1769,12 +1778,26 @@ Each standard vote receives its own frozen source block through the
 shared untrusted-data wrapper in the user prompt. The full block survives the
 adapter's compact finding formatting. Matching bytes do not settle a verdict.
 This option does not change deep strategies or grant calls, retries or jobs.
+Empty supporting selections retain version 1. Nonempty selections use version 2
+with optional `supportingFiles` on each observation. Readers authenticate the
+selected path order and every captured hash and size. The metadata read is capped
+at 16 MiB, while raw source text remains capped at 256 KiB.
 
-The Review form exposes `e` to change this policy and `v` to read frozen text and
+The Review form exposes `e` to change this policy, `f` to choose supporting files,
+and `v` to read frozen text and
 omissions before allowance approval. The reader numbers source lines and supports
 Home, End and paging. Raw source bytes and formatted source-block bytes are
 reported separately; dollar consumption remains uncertain. Inputs without these
 optional fields retain their existing behavior.
+The file picker uses Space to toggle, Tab to inspect the selection basket, Enter
+to apply and Esc to cancel. Apply invalidates a prepared plan only when choices
+change. Cancel preserves the Review input. Switching source policy to `none`
+explicitly clears supporting choices. New choices require preparation and a new
+approval; selection itself grants no allowance and starts no job.
+The frozen-source reader owns its input. Enter and hidden planner shortcuts for
+new drafts, strategy, context, model and call limits are inactive while reading.
+Use `v` to return to the plan before editing or approving it. Paging, `Tab` input,
+`f` files and `Esc` back retain their displayed behavior.
 New drafts also freeze recorded observation commits from bounded run metadata.
 The form separates those commits from its planned Review source and calls out
 a different commit. Missing, malformed and legacy metadata remain unknown;

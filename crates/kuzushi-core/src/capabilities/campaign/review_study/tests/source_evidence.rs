@@ -3,6 +3,7 @@ use crate::findings::ReviewCapturedFileState;
 use crate::run_artifacts::ToolRunRecord;
 use crate::run_lifecycle::{RunItemStatus, RunObservationHandle};
 use crate::ApplicationToolCall;
+mod supporting_files;
 
 fn recorded_fixture() -> Fixture {
     let fixture = Fixture::new();
@@ -373,7 +374,20 @@ fn prepare_native_review_source_evidence_fixture() {
     let root = std::path::PathBuf::from(
         std::env::var("KUZUSHI_REVIEW_SOURCE_FIXTURE_OUT").expect("owned native fixture output"),
     );
-    std::fs::create_dir_all(&root).unwrap();
+    prepare_native_source_fixture(&root, false);
+}
+
+#[test]
+#[ignore = "Explicit native supporting-file fixture preparation only"]
+fn prepare_native_review_supporting_files_fixture() {
+    let root = std::path::PathBuf::from(
+        std::env::var("KUZUSHI_REVIEW_SOURCE_FIXTURE_OUT").expect("owned native fixture output"),
+    );
+    prepare_native_source_fixture(&root, true);
+}
+
+fn prepare_native_source_fixture(root: &std::path::Path, supporting: bool) {
+    std::fs::create_dir_all(root).unwrap();
     assert!(
         !root.join("note.md").exists(),
         "Do not overwrite an existing source fixture"
@@ -383,6 +397,18 @@ fn prepare_native_review_source_evidence_fixture() {
         text.push_str(&format!("SOURCE_LINE_{index:02} · owned inert text\n"));
     }
     std::fs::write(root.join("note.md"), text).unwrap();
+    if supporting {
+        for (path, text) in [
+            (
+                "service.txt",
+                "SERVICE_INPUT · owned inert supporting text\n",
+            ),
+            ("store.txt", "STORE_INPUT · owned inert supporting text\n"),
+            ("policy.txt", "POLICY_INPUT · owned inert supporting text\n"),
+        ] {
+            std::fs::write(root.join(path), text).unwrap();
+        }
+    }
     let workspace = WorkspaceTarget::new(&root).unwrap();
     assert!(
         !workspace.findings_db_path().exists(),

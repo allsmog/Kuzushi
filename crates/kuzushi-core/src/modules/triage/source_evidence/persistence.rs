@@ -24,7 +24,7 @@ pub(crate) fn inspect(
         .context("sourceEvidenceRef must be a saved reference")?;
     let workspace = WorkspaceTarget::new(root)?;
     let document = read(&workspace, reference)?;
-    validate_document(&workspace, &document, findings, byte_limit(input)?)?;
+    validate_document(&workspace, &document, findings, input)?;
     Ok(Some(document))
 }
 
@@ -36,7 +36,7 @@ fn read(workspace: &WorkspaceTarget, reference: &str) -> Result<ReviewSourceEvid
             .into(),
     )?;
     let bytes = ContentStore::open(workspace.objects_dir())?
-        .get_blob_bounded(&hash, 4 * 1024 * 1024)?
+        .get_blob_bounded(&hash, 16 * 1024 * 1024)?
         .context("Frozen Review source evidence is missing or exceeds its read limit")?;
     Ok(serde_json::from_slice(&bytes)?)
 }
@@ -45,9 +45,14 @@ fn validate_document(
     workspace: &WorkspaceTarget,
     document: &ReviewSourceEvidence,
     findings: &[Finding],
-    limit: usize,
+    input: &Value,
 ) -> Result<()> {
-    validate_header(workspace, document, limit)?;
+    let supporting = supporting_files::selected_paths(input)?;
+    validate_header(workspace, document, byte_limit(input)?)?;
+    anyhow::ensure!(
+        document.schema_version == if supporting.is_empty() { 1 } else { 2 },
+        "Review source-evidence version does not match the selected files"
+    );
     validate_snapshot(workspace, document)?;
     anyhow::ensure!(
         (1..=100).contains(&findings.len()) && document.observations.len() == findings.len(),
@@ -66,6 +71,7 @@ fn validate_document(
             finding,
         )?;
         included += source.text.as_ref().map_or(0, String::len);
+        included += supporting_files::validate(workspace, finding, &tree, source, &supporting)?;
     }
     anyhow::ensure!(
         included == document.included_bytes,
@@ -80,7 +86,7 @@ fn validate_header(
     limit: usize,
 ) -> Result<()> {
     anyhow::ensure!(
-        document.schema_version == 1,
+        matches!(document.schema_version, 1 | 2),
         "Unsupported Review source-evidence version"
     );
     anyhow::ensure!(
@@ -115,7 +121,7 @@ fn validate_observation(
             source.path == relative_finding_path(workspace, finding)?,
             "Review code does not belong to the selected primary source file"
         );
-        validate_captured_file(files, source, file)?;
+        validate_captured_file(files, file, source.text.as_deref())?;
     } else {
         anyhow::ensure!(
             source.text.is_none() && source.path == finding.file_path,
@@ -153,22 +159,19 @@ fn validate_binding(
     Ok(())
 }
 
-fn validate_captured_file(
+pub(super) fn validate_captured_file(
     files: &crate::workspace::ReviewSourceTree,
-    source: &ReviewSourceObservation,
     file: &ReviewCapturedFile,
+    text: Option<&str>,
 ) -> Result<()> {
     if file.state != ReviewCapturedFileState::Captured {
         anyhow::ensure!(
-            source.text.is_none() && file.blob_hash.is_none() && file.byte_count.is_none(),
+            text.is_none() && file.blob_hash.is_none() && file.byte_count.is_none(),
             "Omitted source cannot supply code"
         );
         return Ok(());
     }
-    let text = source
-        .text
-        .as_ref()
-        .context("Captured Review code is missing")?;
+    let text = text.context("Captured Review code is missing")?;
     anyhow::ensure!(
         file.byte_count == Some(text.len() as u64),
         "Captured Review code size changed"
@@ -185,7 +188,10 @@ fn validate_captured_file(
     Ok(())
 }
 
-fn relative_finding_path(workspace: &WorkspaceTarget, finding: &Finding) -> Result<String> {
+pub(super) fn relative_finding_path(
+    workspace: &WorkspaceTarget,
+    finding: &Finding,
+) -> Result<String> {
     let input = Path::new(&finding.file_path);
     let relative = if input.is_absolute() {
         input.strip_prefix(workspace.root())?

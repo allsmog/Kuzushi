@@ -201,9 +201,9 @@ pub(crate) fn review_controls(config: &BatchScanConfig) -> &'static str {
         .as_ref()
         .is_some_and(|review| review.show_evidence)
     {
-        return "PgUp/Dn read · Home/End\nv plan · Tab input · Esc back";
+        return "PgUp/Dn Home/End · f files\nv plan · Tab input · Esc back";
     }
-    "t total · r protect · M model\nc context · s strategy · e source\nv evidence · Tab input · n new\nPgUp/Dn Home/End · Enter next · Esc"
+    "t total · r protect · M model\nc context · s strategy · e source\nf files · v read · Tab input · n new\nPgUp/Dn Home/End · Enter next · Esc"
 }
 
 pub(crate) fn review_body_height(config: &BatchScanConfig, height: u16) -> u16 {

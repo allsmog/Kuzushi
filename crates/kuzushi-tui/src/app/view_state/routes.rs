@@ -1363,6 +1363,7 @@ pub(crate) enum FilePickerPurpose {
     #[default]
     KnowledgeBase,
     MapDocument,
+    ReviewEvidence,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1372,6 +1373,7 @@ pub struct FilePickerRouteState {
     cursor: usize,
     truncated: bool,
     purpose: FilePickerPurpose,
+    review_selection: crate::app::file_picker::ReviewFileSelection,
 }
 
 impl FilePickerRouteState {
@@ -1381,6 +1383,7 @@ impl FilePickerRouteState {
         self.cursor = 0;
         self.truncated = truncated;
         self.purpose = FilePickerPurpose::KnowledgeBase;
+        self.review_selection = Default::default();
     }
 
     pub(crate) fn purpose(&self) -> FilePickerPurpose {
@@ -1389,6 +1392,22 @@ impl FilePickerRouteState {
 
     pub(crate) fn set_purpose(&mut self, purpose: FilePickerPurpose) {
         self.purpose = purpose;
+    }
+
+    pub(crate) fn review_selection(&self) -> &crate::app::file_picker::ReviewFileSelection {
+        &self.review_selection
+    }
+
+    pub(crate) fn review_selection_mut(
+        &mut self,
+    ) -> &mut crate::app::file_picker::ReviewFileSelection {
+        &mut self.review_selection
+    }
+
+    pub(crate) fn toggle_review_basket(&mut self) {
+        self.review_selection
+            .switch_view(&mut self.query, &mut self.cursor);
+        self.clamp_cursor();
     }
 
     pub(crate) fn replace_files(&mut self, files: Vec<String>, truncated: bool) {
@@ -1432,8 +1451,13 @@ impl FilePickerRouteState {
     }
 
     pub(crate) fn filtered_paths(&self) -> Vec<String> {
+        let files = if self.purpose == FilePickerPurpose::ReviewEvidence {
+            self.review_selection.candidates(&self.files)
+        } else {
+            self.files.clone()
+        };
         crate::app::line_editor::rank_fuzzy(
-            crate::app::line_editor::dedupe_sorted(self.files.clone()),
+            crate::app::line_editor::dedupe_sorted(files),
             self.query(),
         )
     }
