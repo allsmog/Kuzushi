@@ -122,6 +122,7 @@ impl TriageRunStats {
         self.record_failure_detail(json!({
             "fingerprint": finding.fingerprint,
             "stage": "haiku",
+            "stageKind": "model-review",
             "error": summary,
         }));
     }
@@ -179,6 +180,7 @@ impl TriageRunStats {
         let mut result = json!({
             "fingerprint": finding.fingerprint,
             "stage": "haiku",
+            "stageKind": "model-review",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": "finding lacked SQLite id; verdict not persisted",
@@ -224,6 +226,7 @@ impl TriageRunStats {
         let mut result = json!({
             "fingerprint": finding.fingerprint,
             "stage": if decision_applied { "haiku" } else { "model-opinion" },
+            "stageKind": "model-review",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,

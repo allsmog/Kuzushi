@@ -232,7 +232,11 @@ pub(in crate::modules) fn triage_response(
     missing_fingerprints: Vec<String>,
 ) -> Value {
     let dropped_high_conf_fp = stats.high_confidence_false_positive_count();
-    let summary = triage_summary(stage1, stats, &missing_fingerprints);
+    let summary = format!(
+        "{}\n      Selected Review model: {}",
+        triage_summary(stage1, stats, &missing_fingerprints),
+        config.stage2_model
+    );
     let warnings = triage_warnings(stats, &missing_fingerprints);
     let data = triage_response_data(
         input,
@@ -430,7 +434,7 @@ pub(in crate::modules) fn triage_stages(
     stats: &TriageRunStats,
     dropped_high_conf_fp: usize,
 ) -> Value {
-    let mut stages = Value::Array(vec![
+    Value::Array(vec![
         json!({
             "stage": "prefilter",
             "kept": stage1.kept_count,
@@ -446,22 +450,20 @@ pub(in crate::modules) fn triage_stages(
                 crate::findings::ingest_contract::CLUSTER_WINDOW_LINES
             ),
         }),
-        triage_haiku_stage(input, config, stats, dropped_high_conf_fp),
-    ]);
-    if let Some(stage) = stages.get_mut(1) {
-        crate::module_result::apply_runtime_cost_report(stage, stats.cost_report());
-    }
-    stages
+        triage_model_stage(input, config, stats, dropped_high_conf_fp),
+    ])
 }
 
-fn triage_haiku_stage(
+fn triage_model_stage(
     input: &TriageRunInput,
     config: &TriageExecutionConfig,
     stats: &TriageRunStats,
     dropped_high_conf_fp: usize,
 ) -> Value {
-    json!({
+    let mut stage = json!({
         "stage": "haiku",
+        "stageKind": "model-review",
+        "stageLabel": "Model review",
         "model": config.stage2_model,
         "concurrency": input.concurrency,
         "votes": input.votes,
@@ -480,5 +482,7 @@ fn triage_haiku_stage(
         "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
         "costCapHit": stats.cost_cap_hit,
         "pendingAfterCap": stats.pending_after_cap,
-    })
+    });
+    crate::module_result::apply_runtime_cost_report(&mut stage, stats.cost_report());
+    stage
 }

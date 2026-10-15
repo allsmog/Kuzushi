@@ -1,5 +1,15 @@
 # TUI DevEx Audit Journeys
 
+## J184: Review model identity and source history
+
+The current source-history journey first reads the newly recorded Review in
+Replay and checks its selected-model summary. Its owned fixture performs two
+prepared dispatches through explicit synthetic allowance accounting. The helper
+also checks classification cost on the model stage and retained compatibility
+tags. Continue through both source revisions, six-size Review, scripted human
+deferral, export and no-color restart. These outcomes are labeled synthetic and
+create no live provider request. Human judgments remain separate from assertions.
+
 ## J283: Frozen source input for standard Review
 
 Use an owned inert source-reader fixture with one labeled synthetic observation

@@ -764,6 +764,21 @@ does not assert that an automatic decision was written. Unapplied FP opinions
 cannot remove findings; real storage errors remain failures. A failed, consumed
 fixed Review job stays in history and needs a new approved plan for further work.
 
+New Review receipts identify the model stage with `stageKind=model-review` and
+`stageLabel=Model review`. The stage's `model` field and the selected-model line
+in its summary identify the selected model. The historical `stage=haiku` tag is
+retained as a compatibility alias; it is not a provider or model assertion.
+Per-finding model results and runtime errors also add `stageKind=model-review`.
+Unapplied opinions retain `stage=model-opinion` and their application status.
+
+Model cost fields now belong to the model-review stage. Earlier receipts placed
+the run's classification cost on the deduplication row by mistake. Historical
+receipts are not rewritten: readers should use their run total and actual model
+metadata rather than infer deduplication spending from that old row. Consumers
+of new receipts should find `stageKind=model-review` rather than use an array
+index. Stage order and legacy tags remain unchanged. Unknown provider charges
+remain unavailable; an explicitly reported zero remains distinguishable.
+
 Model-backed investigation dispatch requires an approved `allowanceRef`.
 The native model adapter also requires a host allowance binding for direct
 queries and tool-loop steps. `preflight_model_work_blocking` checks model and

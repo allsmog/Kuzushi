@@ -53,6 +53,12 @@ checkboxes remain open until their complete requirements are reconciled.
 
 Exploit development, reproducers and vulnerability patching remain excluded.
 
+The [Review stage accounting increment](../assessments/review-stage-accounting-2026-10-15.md)
+corrects classification cost attached to the dedupe row and adds canonical model
+stage metadata while retaining legacy aliases. Run totals and spending admission
+are unchanged. Historical receipts retain their original bytes and documented
+limits. This focused correction does not qualify every billing or interface path.
+
 The [separately approved application Review](../assessments/live-application-review-2026-10-15.md)
 completes one standard opinion job with one new request, for twelve cumulative
 experiment requests. J282 records 27 machine passes, zero failures and four

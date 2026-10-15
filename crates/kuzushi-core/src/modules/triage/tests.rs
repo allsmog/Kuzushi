@@ -855,6 +855,39 @@ mod tests {
     }
 
     #[test]
+    fn model_review_cost_is_not_attributed_to_deduplication() {
+        let (input, mut config, stage1) = one_finding_triage_context();
+        config.stage2_model = "openai-codex:gpt-6-luna".into();
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::Low, "owned", "Synthetic source-only observation"),
+                TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.2,
+                    rationale: "Synthetic accounting check".into(),
+                    cost_usd: 0.125,
+                    cost_usd_exact: true,
+                    estimated_cost_usd: None,
+                },
+            )
+            .unwrap();
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+        let stages = response["data"]["stages"].as_array().unwrap();
+        let model = stages.iter().find(|s| s["stage"] == "haiku").unwrap();
+        let dedupe = stages.iter().find(|s| s["stage"] == "dedupe").unwrap();
+        assert_eq!(model["costUsd"], json!(0.125));
+        assert!(dedupe.get("costUsd").is_none());
+        assert!(dedupe.get("providerSpendUnresolved").is_none());
+        assert_eq!(model["model"], config.stage2_model);
+        assert_eq!(model["stageKind"], "model-review");
+        assert_eq!(model["stageLabel"], "Model review");
+        assert_eq!(response["data"]["results"][0]["stageKind"], "model-review");
+    }
+
+    #[test]
     fn triage_response_preserves_unresolved_provider_spend() {
         let (input, config, stage1) = one_finding_triage_context();
         let mut stats = TriageRunStats::default();
@@ -885,7 +918,7 @@ mod tests {
             json!(0.0)
         );
         assert_eq!(
-            response["data"]["stages"][1]["providerSpendUnresolved"],
+            response["data"]["stages"][2]["providerSpendUnresolved"],
             json!(true)
         );
         assert!(triage_cost_cap_reached(Some(1.0), stats.cost_report()));
@@ -963,7 +996,7 @@ mod tests {
         assert_eq!(response["costUsd"], json!(0.0));
         assert_eq!(response["data"]["costUsd"], json!(0.0));
         assert_eq!(response["data"]["results"][0]["costUsd"], json!(0.0));
-        assert_eq!(response["data"]["stages"][1]["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["stages"][2]["costUsd"], json!(0.0));
         assert!(!triage_cost_cap_reached(Some(1.0), stats.cost_report()));
     }
 

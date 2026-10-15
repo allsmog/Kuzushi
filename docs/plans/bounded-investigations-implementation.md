@@ -1,5 +1,13 @@
 # Bounded investigations implementation
 
+The [Review stage accounting increment](../assessments/review-stage-accounting-2026-10-15.md)
+corrects classification cost attributed to deduplication, identifies the model
+stage with an optional canonical kind and keeps its historical tag compatible.
+Selected-model summaries make the source of the opinion explicit. Live model
+usefulness and all nine broad delivery milestones remain open. Verification
+passes 145 focused Rust checks and a workspace build. Final J184 has 18 machine
+passes, zero failures, 21 capture pairs and four pending human judgments.
+
 The [frozen Review source-input increment](../assessments/review-source-evidence-2026-10-15.md)
 adds explicit bounded primary-file capture, immutable evidence references and a
 reader before approval. Changed or unverifiable source remains omitted; source

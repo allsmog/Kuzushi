@@ -688,6 +688,12 @@ part of every release commit.
   Existing allowance approval preserves consumption and protects Review calls;
   approval starts no work. Generic approval can read workspace findings when
   its optional handle is absent. Legacy `triage:run` inputs remain compatible.
+  Review stage receipts now add `stageKind=model-review` and a readable
+  `stageLabel`, retaining `stage=haiku` as a deprecated compatibility alias.
+  Consumers should select the model stage by kind and read its `model` field.
+  Classification cost fields move from the incorrectly annotated dedupe row to
+  that model stage. Array order and run totals remain unchanged. Historical
+  receipts are preserved; use their run total rather than the old dedupe cost.
   Standard Review adds optional `sourceEvidence`, `maxSourceEvidenceBytes` and
   `sourceEvidenceRef` inputs. Cited preparation stores an immutable version 1
   source-evidence document and adds optional `sourceEvidence` to

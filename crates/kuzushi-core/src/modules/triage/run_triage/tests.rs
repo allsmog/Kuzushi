@@ -5,6 +5,16 @@ struct ReviewRuntime {
 }
 
 impl AgentRuntime for ReviewRuntime {
+    fn with_allowance_binding(
+        &self,
+        binding: crate::allowance::AllowanceBinding,
+    ) -> Result<Box<dyn AgentRuntime + '_>> {
+        Ok(Box::new(AccountedReview {
+            inner: self,
+            binding,
+        }))
+    }
+
     fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
         if let Some(path) = &self.source_to_change {
             std::fs::write(path, "fn changed() {}\n")?;
@@ -54,14 +64,22 @@ fn dispatch_review(change_source: bool) -> Value {
     let runtime = ReviewRuntime {
         source_to_change: change_source.then_some(source),
     };
-    crate::modules::ModuleRegistry::with_v2_builtins()
-        .execute_tool_with_runtime(
+    let registry = crate::ModuleRegistry::with_v2_builtins();
+    let allowance = approve_fixture_review(&registry, &ctx);
+    let prepared = registry
+        .prepare_dispatch_input(
             "triage:run",
-            json!({"prefilterThreshold": 0, "strategy": "standard"}),
+            json!({"prefilterThreshold":0,"strategy":"standard","allowanceRef":allowance}),
             &ctx,
-            Some(&runtime),
+            None,
         )
         .unwrap()
+        .authorize_explicit_headless();
+    let result = registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+        .unwrap();
+    assert_fixture_review_settled(&workspace);
+    result
 }
 
 #[test]
@@ -71,6 +89,14 @@ fn registry_triage_binds_success_to_source_and_preserves_outcome_and_spend() {
     assert_eq!(result["data"]["triaged"], 1);
     assert_eq!(result["data"]["fp"], 1);
     assert_eq!(result["data"]["costUsd"], 0.125);
+    let stage = &result["data"]["stages"][2];
+    assert_eq!(stage["stageKind"], "model-review");
+    assert_eq!(stage["costUsd"], 0.125);
+    assert!(result["data"]["stages"][1].get("costUsd").is_none());
+    assert!(result["output"]
+        .as_str()
+        .unwrap()
+        .contains("Selected Review model: openai:gpt-5.5"));
     for field in ["snapshotHash", "treeHash"] {
         assert!(
             result["data"][field]
@@ -101,6 +127,16 @@ fn registry_triage_source_change_is_partial_without_erasing_classification_or_co
 fn source_changed_during_prepared_review_cannot_seed_the_runtime_cache() {
     struct ChangingRuntime(std::sync::Mutex<Option<TriageRequest>>);
     impl AgentRuntime for ChangingRuntime {
+        fn with_allowance_binding(
+            &self,
+            binding: crate::allowance::AllowanceBinding,
+        ) -> Result<Box<dyn AgentRuntime + '_>> {
+            Ok(Box::new(AccountedReview {
+                inner: self,
+                binding,
+            }))
+        }
+
         fn triage_semantic_cache_identity(
             &self,
             _: &TriageRequest,
@@ -163,10 +199,11 @@ fn source_changed_during_prepared_review_cannot_seed_the_runtime_cache() {
     };
     let runtime = ChangingRuntime(std::sync::Mutex::new(None));
     let registry = crate::ModuleRegistry::with_v2_builtins();
+    let allowance = approve_fixture_review(&registry, &ctx);
     let prepared = registry
         .prepare_dispatch_input(
             "triage:run",
-            json!({"strategy":"standard", "prefilterThreshold":0}),
+            json!({"strategy":"standard", "prefilterThreshold":0,"allowanceRef":allowance}),
             &ctx,
             None,
         )
@@ -186,4 +223,53 @@ fn source_changed_during_prepared_review_cannot_seed_the_runtime_cache() {
     .unwrap();
     assert!(key.is_some());
     assert!(runtime_cache::reusable_outcome(key.as_ref(), false).is_none());
+    assert_fixture_review_settled(&workspace);
+}
+
+struct AccountedReview<'a> {
+    inner: &'a dyn AgentRuntime,
+    binding: crate::allowance::AllowanceBinding,
+}
+
+impl AgentRuntime for AccountedReview<'_> {
+    fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+        Some(&self.binding)
+    }
+
+    fn triage_semantic_cache_identity(
+        &self,
+        request: &TriageRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner.triage_semantic_cache_identity(request)
+    }
+
+    fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
+        let reservation = self.binding.reserve(&request.model)?;
+        let outcome = self.inner.triage_finding_blocking(request)?;
+        self.binding
+            .settle(reservation, crate::runtime::triage_cost_report(&outcome)?)?;
+        Ok(outcome)
+    }
+}
+
+fn approve_fixture_review(
+    registry: &crate::ModuleRegistry,
+    ctx: &ToolExecutionContext<'_>,
+) -> Value {
+    let prepared = registry.prepare_dispatch_input("campaign:approve-allowance", json!({
+        "investigationId":"source-review-test","expectedRevision":0,"model":ctx.config.model,
+        "maxProviderCalls":1,"protectedReviewCalls":1,
+        "reason":"One explicit synthetic Review invocation; no provider request"
+    }), ctx, None).unwrap().authorize_explicit_headless();
+    registry
+        .dispatch_prepared_input_with_runtime(prepared, ctx, None)
+        .unwrap();
+    json!({"schemaVersion":1,"investigationId":"source-review-test","revision":1,"workId":"review"})
+}
+
+fn assert_fixture_review_settled(workspace: &WorkspaceTarget) {
+    let limiter = crate::SpendLimiter::open(workspace.findings_db_path()).unwrap();
+    let allowance = limiter.allowance_snapshot("source-review-test").unwrap();
+    assert_eq!(allowance.committed_calls, 1);
+    assert_eq!(allowance.unresolved_calls, 0);
 }

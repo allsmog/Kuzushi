@@ -7,6 +7,10 @@ env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
 require-shell: python3 -B @REPO/scripts/devex/fixtures/triage_source.py @TMP_TARGET @ART seed @TMP_HOME
 require-wrapper-flow:
 launch: --target @TMP_TARGET
+submit: replay triage-second
+require-live-snap: 30 Selected Review model: openai:gpt-5.5 | selected-review-model
+expect-not: Selected Review model: haiku
+ask: Does Replay identify the selected Review model without presenting the retained legacy stage alias as an executed provider or model?
 paste-file: @ART/open-second.txt
 keys: Enter
 require-live-snap: 30 Second source revision | current-review

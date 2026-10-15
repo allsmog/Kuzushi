@@ -42,6 +42,15 @@ def verify(root, evidence, stage):
     assert first["status"] == second["status"] == "completed"
     assert first["data"]["triaged"] == second["data"]["triaged"] == 1
     assert first["data"]["snapshotHash"] != second["data"]["snapshotHash"]
+    for result in [first, second]:
+        stages = result["data"]["stages"]
+        model = next(row for row in stages if row.get("stageKind") == "model-review")
+        dedupe = next(row for row in stages if row["stage"] == "dedupe")
+        assert model["stage"] == "haiku" and model["stageLabel"] == "Model review"
+        assert model["model"] == "openai:gpt-5.5" and model["costUsd"] == 0.01
+        assert "costUsd" not in dedupe and "providerSpendUnresolved" not in dedupe
+        assert result["data"]["results"][0]["stageKind"] == "model-review"
+        assert "Selected Review model: openai:gpt-5.5" in result["output"]
     assert hashlib.sha256((root / "note.md").read_bytes()).hexdigest() == json.loads((evidence / "source-before.json").read_text())["sha256"]
     results = list((root / ".kuzushi/v3/runs").glob("*/result.json"))
     assert len(results) == 4, "Reading must not start another tool"
