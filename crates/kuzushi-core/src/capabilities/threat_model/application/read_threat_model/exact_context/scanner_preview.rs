@@ -4,6 +4,7 @@ use crate::capabilities::agentic_sast::{
     MAX_DIGEST_THREATS,
 };
 use serde_json::{json, Value};
+mod field_omissions;
 
 const COUNTED_SECTIONS: &[(&str, &str, usize)] = &[
     ("Threats", "/threats", MAX_DIGEST_THREATS),
@@ -65,7 +66,47 @@ fn omissions(document: &Value) -> Vec<String> {
         }
     }
     omitted.extend(lesson_omissions(document));
+    omitted.extend(field_omissions::collect(document));
+    omitted.extend(variant_omissions(document));
     omitted
+}
+
+fn variant_omissions(document: &Value) -> Vec<String> {
+    let patterns = crate::capabilities::threat_model::threat_variant_patterns(document);
+    let mut notices = Vec::new();
+    if patterns.len() > MAX_DIGEST_ENTRIES {
+        notices.push(format!(
+            "Variant patterns: first {MAX_DIGEST_ENTRIES} of {} items; {} omitted.",
+            patterns.len(),
+            patterns.len() - MAX_DIGEST_ENTRIES
+        ));
+    }
+    for (count, indexes) in variant_code_cuts(&patterns) {
+        let indexes = indexes
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        notices.extend(field_omissions::character_count_notice(
+            &format!("Variant pattern code fields {indexes} (each)"),
+            count,
+        ));
+    }
+    notices
+}
+
+fn variant_code_cuts(patterns: &[&Value]) -> std::collections::BTreeMap<usize, Vec<usize>> {
+    let mut groups = std::collections::BTreeMap::<usize, Vec<usize>>::new();
+    for (index, pattern) in patterns.iter().take(MAX_DIGEST_ENTRIES).enumerate() {
+        let Some(code) = pattern.get("code").and_then(Value::as_str) else {
+            continue;
+        };
+        let count = code.chars().count();
+        if count > MAX_DIGEST_FIELD_CHARS {
+            groups.entry(count).or_default().push(index + 1);
+        }
+    }
+    groups
 }
 
 fn lesson_omissions(document: &Value) -> Vec<String> {

@@ -1759,6 +1759,13 @@ Exact `threat-model:read` results add `data.scannerContextPreview`, with
 The text hash identifies that digest, not a complete prompt or source snapshot.
 An unavailable or malformed preview produces reread guidance in the TUI.
 Context documents, references, accepted plans and execution prompts are unchanged.
+The omission list names truncated ordinary fields and open questions using the
+same string trimming, array joining and fallback selection as execution. It
+also reports the flattened pattern limit and groups matching pattern-code cuts
+by exact indexes; grouped character counts apply to each named field. Fields
+outside selected items and unrenderable architecture rows do not claim partial
+inclusion. Some historical pattern labels remain included in full. The preview
+does not impose a new prompt, token or dollar limit.
 
 The context browser's `e` action edits a copy of the inspected exact revision.
 It offers overview, component description/purpose and human question answers.

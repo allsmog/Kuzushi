@@ -32,6 +32,7 @@
         "threatModelRef",
         "scanContextRef",
         "maxFindings",
+        "scanScopeRef",
         "passes",
         "mode",
         "AGENTIC_SAST_PROMPT",
@@ -325,9 +326,10 @@
         "generationTool",
         "preparationJobs",
         "contextInput",
-        "allowanceRef",
         "briefRef",
-        "useBriefGuidance"
+        "useBriefGuidance",
+        "scopeStudyOrigin",
+        "allowanceRef"
       ],
       "executionEvidence": "Shared prepared dispatch freezes one context job and up to two deterministic preparation jobs without spending. Core tests execute both preparation tools, run the real generator with a mocked provider, retain a non-active immutable result, refuse a second attempt, recover the run-associated revision, and approve a subsequent scan study under the same consumed allowance. CLI integration binds every exact job and refuses worker expansion. J67 verifies Setup entry, Back/draft preservation, exact inputs, paged approval, named jobs and a proven fresh no-color restart: 35 machine checks and 16 manual judgments pass. No live provider quality claim. Current recovery tests distinguish pending generation from stopped or unavailable output. J69 verifies Setup result inspection, same-investigation scan-plan binding, complete error reading, unknown cost, all viewport sizes and a proven fresh no-color restart: 53 machine checks and 16 manual judgments pass. Its imported context and injected queue outcomes test recovery UI only; no generator, scan job or provider runs in that journey.",
       "readinessVerdict": "scoped native finite planning/approval/status evidence; full option, scale and live-model acceptance pending",
@@ -476,16 +478,19 @@
       "readinessVerdict": "scoped native finite planning/approval/status evidence; full option, scale and live-model acceptance pending",
       "declaredOptions": [
         "campaignId",
+        "briefRef",
         "investigationId",
         "trials",
         "workers",
         "baselineRunId",
+        "resourceBaselineCampaignId",
         "contextBaselineRunId",
         "contextCases",
         "baselineCaseId",
+        "scopeProposalRef",
+        "scopeCases",
         "scanInput",
-        "allowanceRef",
-        "briefRef"
+        "allowanceRef"
       ],
       "requiredOptions": [
         "scanInput"
@@ -731,9 +736,7 @@
       "workspaceRequirement": "required",
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
-      "declaredOptions": [
-        "allowanceRef"
-      ],
+      "declaredOptions": [],
       "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md.",
       "readinessVerdict": "scoped historical source-integrity inspection verified; full IO/cancellation/scope and TUI acceptance pending",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
@@ -766,8 +769,7 @@
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
       "declaredOptions": [
-        "limit",
-        "allowanceRef"
+        "limit"
       ],
       "executionEvidence": "161 distinct focused passing tests (60 Core, 101 TUI), workspace build, risk proxy and J160 with 34 machine passes, 36 native captures and six separate assistant judgments. See docs/assessments/worklist-coverage-module-audit-2026-10-10.md.",
       "readinessVerdict": "scoped default advisory reading and recovery evidence; query-wide resource bounds, deep execution, calibrated usefulness and complete investigation acceptance remain open",
@@ -803,8 +805,7 @@
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
       "declaredOptions": [
-        "writeSkips",
-        "allowanceRef"
+        "writeSkips"
       ],
       "executionEvidence": "Real Rust CLI/TUI prepared dispatch in J148, two actual owned Git commits, same-SHA edit and synthetic historical metadata. See docs/assessments/source-baseline-integrity-2026-10-09.md.",
       "readinessVerdict": "scoped historical source-integrity inspection verified; full IO/cancellation/scope and TUI acceptance pending",
@@ -923,8 +924,7 @@
       "declaredOptions": [
         "focus",
         "engines",
-        "budget",
-        "allowanceRef"
+        "budget"
       ],
       "executionEvidence": "Shared prepared-dispatch core checks and J147 execute the actual Rust actions, consume their outputs, retain source/config bytes and verify no provider, scanner or finding work. See docs/assessments/operational-startup-audit-2026-10-09.md",
       "readinessVerdict": "scoped operational metadata and native consumer evidence; scale, all options/interfaces and complete investigation acceptance pending",
@@ -2927,8 +2927,8 @@
         "maxBytesPerFile",
         "semgrepConfig",
         "semgrepBinary",
-        "semgrepTimeoutMs",
         "semgrepJobs",
+        "semgrepTimeoutMs",
         "cargoAuditBinary",
         "cargoAuditAdvisoryDb",
         "cargoAuditOffline",
@@ -3059,7 +3059,8 @@
         "maxFileBytes",
         "maxEntries",
         "maxTotalBytes",
-        "maxFindings"
+        "maxFindings",
+        "allowanceRef"
       ],
       "executionEvidence": "Shared prepared dispatch and real native J173 exercise finding, byte and entry limits, retained signal-only observations, human false-positive review, JSON export and restart. Source remains unchanged. No model or credential-validation request runs. October 10: J174 freezes explicit SAST limits, approves three one-attempt jobs, retains partial observations through direct Review, selected-study export and restart. Batch-filtered incomplete observations remain a TUI gap.",
       "readinessVerdict": "scoped native bounded inspection and Review/report consumer evidence; source-race timing, every interface/option and complete investigation usefulness remain pending",
@@ -3100,8 +3101,8 @@
         "whiteboxStatic",
         "staticProofState",
         "config",
-        "timeoutMs",
         "jobs",
+        "timeoutMs",
         "allowanceRef"
       ],
       "executionEvidence": "J203 runs installed Semgrep against harmless owned Python policy text. A 1 ms job fails without findings; three separately approved 60000 ms jobs create three raw observations, one signal-only finding, a scripted owner deferral and JSON export. No-color restart preserves source/context and allowance. Shared input repairs preserve the selected rule array and setting-value draft. 206 distinct focused checks and 48 native machine passes support scoped qualification; no provider request or target execution. J265/J267 adds 24 actual one-worker exact-file jobs with 48 analysis processes, 27 observations, nine signals and nine scripted owner deferrals, JSON export and restart. A controlled 1025-file one-worker comparison reduces 17 process starts to two with identical literal membership. See wide-semgrep-2026-10-14.md for retained failures and qualified timing.",
@@ -3755,8 +3756,11 @@
       "requiredOptions": [],
       "declaredOptions": [
         "target",
+        "operatorBriefRef",
         "scope",
         "methodology",
+        "scanScopeRef",
+        "inheritedContextRef",
         "sources",
         "seed",
         "designDocs",
@@ -3789,8 +3793,7 @@
         "newModel",
         "activate",
         "model",
-        "allowanceRef",
-        "operatorBriefRef"
+        "allowanceRef"
       ],
       "executionEvidence": "J175 executes deterministic context and entry-point producers, one real GPT-6 Luna/low OAuth synthesis, explicit inactive context acceptance, three scoped discovery passes, scripted human fixture triage, selected-study export and no-color restart. Source remains inert at a real clean Git commit. This proves a small owned workflow, not production precision or completeness.",
       "readinessVerdict": "one-live-fixture-draft-verified; reliability, precision and full workflow remain open",
@@ -3918,9 +3921,7 @@
       "workspaceRequirement": "optional",
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
-      "declaredOptions": [
-        "allowanceRef"
-      ],
+      "declaredOptions": [],
       "executionEvidence": "Shared prepared-dispatch core checks and J147 execute the actual Rust actions, consume their outputs, retain source/config bytes and verify no provider, scanner or finding work. See docs/assessments/operational-startup-audit-2026-10-09.md",
       "readinessVerdict": "scoped operational metadata and native consumer evidence; scale, all options/interfaces and complete investigation acceptance pending",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
@@ -4722,9 +4723,7 @@
       "workspaceRequirement": "optional",
       "findingStoreRequirement": "optional",
       "requiredOptions": [],
-      "declaredOptions": [
-        "allowanceRef"
-      ],
+      "declaredOptions": [],
       "executionEvidence": "Shared prepared-dispatch core checks and J147 execute the actual Rust actions, consume their outputs, retain source/config bytes and verify no provider, scanner or finding work. See docs/assessments/operational-startup-audit-2026-10-09.md",
       "readinessVerdict": "scoped operational metadata and native consumer evidence; scale, all options/interfaces and complete investigation acceptance pending",
       "runtimeDeclaration": "Current serialized registry field; omitted runtime_requirement is the descriptor serde default Never.",
@@ -4876,10 +4875,10 @@
         "op",
         "finding",
         "sourceRef",
+        "maxCitedSourceBytes",
         "verdict",
         "reason",
-        "allowanceRef",
-        "maxCitedSourceBytes"
+        "allowanceRef"
       ],
       "declaredEffect": "workspace-write",
       "approval": "explicit",
@@ -5938,15 +5937,15 @@
     "scope": "all non-hidden operator-visible tools; internal nodes require separate executor evidence",
     "count": 113
   },
-  "currentOperatorToolCount": 113,
-  "catalogSource": "/tmp/kuzushi-xray-phase-audit-20261011/isolated-native-tui/20261011-202837/J217/all-catalog.json; frozen native generation-audit binary with local changes",
+  "currentOperatorToolCount": 114,
+  "catalogSource": "/tmp/kuzushi-tui-integration-20261012/scanner-omissions-catalog.json",
   "currentPolicyInventory": {
     "registeredToolCount": 184,
     "fingerprint": "f287cbbdb9c9c04a3794d88843d989e0a5c8c5296d0bff53f064895f9dc75fb4",
     "source": "modules::registry::tests::builtin_dispatch_policy_inventory_is_reviewed_as_one_contract",
     "meaning": "Legacy policy-field fingerprint includes the preceding context-question tuple. Preceding tuples are unchanged. Maturity, phaseResult and allowanceCategory are separately covered by architecture generation tests."
   },
-  "catalogFactsRefreshed": "2026-10-11 main f8649511f7 plus approved context-question changes",
+  "catalogFactsRefreshed": "2026-10-14 main 38160a8acd plus local context-omission changes; frozen runtime 8c57334b63ce61b6dfad01d3279f36de374c491243a271691a49a7ce98388052",
   "functionalAuditCheckpoint": {
     "scope": "Deterministic source context and Map consumers; no exploit development, reproducer work, patching, model calls or source execution.",
     "testFile": "crates/kuzushi-core/tests/map_context_contract.rs",
@@ -9465,5 +9464,63 @@
     "completeCapturePairs": 87,
     "completeHumanJudgmentsPending": 15,
     "interceptedCompleteJourneyRequests": 4
+  },
+  "scannerContextFieldOmissionsAudit": {
+    "assessment": "docs/assessments/scanner-context-omissions-2026-10-14.md",
+    "sourceCommit": "38160a8acd25581291de5535a42493cf2e1ac3a8",
+    "sourceState": "Local additive preview metadata and TUI copy; runtime digest bytes unchanged.",
+    "nativeSha256": "8c57334b63ce61b6dfad01d3279f36de374c491243a271691a49a7ce98388052",
+    "focusedRustTests": 42,
+    "journeys": {
+      "J272": {
+        "path": "scanner-omissions-grouped-tui/20261014-213603/J272",
+        "machinePasses": 28,
+        "liveCapturePairs": 21,
+        "humanJudgmentsPending": 3
+      },
+      "J121": {
+        "path": "scanner-omissions-final-complete-tui/20261014-213706/J121",
+        "machinePasses": 109,
+        "liveCapturePairs": 87,
+        "humanJudgmentsPending": 15
+      }
+    },
+    "liveProviderRequests": 0,
+    "completeJourneyInterceptedRequests": 4,
+    "targetSourceExecuted": false,
+    "previewDigestMatchesPreviousRuntime": true,
+    "includedTextHeadingAt120x36": {
+      "before": 29,
+      "after": 19
+    },
+    "catalogToolNamesMatch": true,
+    "catalogMaturityCounts": {
+      "core": 77,
+      "labs": 32,
+      "compatibility": 5
+    },
+    "refreshedOptionLists": [
+      "agentic-sast:scan",
+      "campaign:context-study",
+      "campaign:study",
+      "coverage:baselines",
+      "coverage:recommend",
+      "coverage:sweep",
+      "engagement:aim",
+      "sast:scan",
+      "secret-scan:scan",
+      "semgrep:scan",
+      "threat-model:build",
+      "threat-model:methodologies",
+      "workspace:status",
+      "findings:review-source"
+    ],
+    "functionalPromotion": false,
+    "remaining": [
+      "Complete request preview and other engines context",
+      "Real-model usefulness under a separately approved allowance",
+      "Independent review of supplied historical pattern claims",
+      "Human visual and reference-product acceptance"
+    ]
   }
 }

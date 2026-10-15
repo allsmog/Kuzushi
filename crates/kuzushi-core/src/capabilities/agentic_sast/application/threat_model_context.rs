@@ -282,18 +282,36 @@ fn external_sink_line(sink: &Value) -> String {
 }
 
 fn field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| match value.get(key) {
-        Some(Value::String(text)) if !text.trim().is_empty() => Some(cap(text.trim())),
-        Some(Value::Array(items)) => {
-            let joined = items
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            (!joined.is_empty()).then(|| cap(&joined))
-        }
+    select_threat_digest_field(value, keys).map(|(_, text)| cap(&text))
+}
+
+pub(crate) fn select_threat_digest_field<'a>(
+    value: &Value,
+    keys: &[&'a str],
+) -> Option<(&'a str, String)> {
+    keys.iter()
+        .find_map(|key| digest_field_text(value.get(key)?).map(|text| (*key, text)))
+}
+
+fn digest_field_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => nonempty_digest_text(text.trim()),
+        Value::Array(items) => joined_digest_text(items),
         _ => None,
-    })
+    }
+}
+
+fn nonempty_digest_text(text: &str) -> Option<String> {
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+fn joined_digest_text(items: &[Value]) -> Option<String> {
+    let joined = items
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    nonempty_digest_text(&joined)
 }
 
 fn joined_list(value: &Value, key: &str) -> Option<String> {

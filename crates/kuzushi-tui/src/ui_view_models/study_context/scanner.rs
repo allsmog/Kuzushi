@@ -86,7 +86,7 @@ fn append_strings(lines: &mut Vec<String>, values: Option<&Value>) {
 
 fn append_limits(lines: &mut Vec<String>, limits: &Value) {
     lines.push(String::new());
-    lines.push(format!("Projection limits: {} threats; {} items per other section; {} characters per ordinary field.",limits["threats"],limits["itemsPerSection"],limits["ordinaryFieldCharacters"]));
+    lines.push(format!("Projection limits: {} threats; {} items per other section. Selected ordinary fields and pattern code are capped at {} characters; other fields can appear in full.",limits["threats"],limits["itemsPerSection"],limits["ordinaryFieldCharacters"]));
     lines.push(format!(
         "Lesson limits: at most {}; {} characters per field. The saved document remains unchanged.",
         limits["reviewedLessons"], limits["lessonFieldCharacters"]
@@ -101,12 +101,15 @@ mod tests {
     #[test]
     fn valid_projection_keeps_included_text_and_omissions_separate_from_full_document() {
         let text = "Modeled threats:\n- Owned review principle";
-        let preview = json!({"schemaVersion":1,"kind":"agentic-threat-model-digest","text":text,"sha256":kuzushi_core::prompt_content_sha256(text),"omissions":["Threats: first 12 of 13 items; 1 omitted."],"limitations":["Other engines may consume different context."],"limits":{"threats":12,"itemsPerSection":12,"ordinaryFieldCharacters":200,"reviewedLessons":8,"lessonFieldCharacters":2048}});
+        let preview = json!({"schemaVersion":1,"kind":"agentic-threat-model-digest","text":text,"sha256":kuzushi_core::prompt_content_sha256(text),"omissions":["Threats: first 12 of 13 items; 1 omitted.", "Component 2 description: first 200 of 218 characters; 18 omitted.", "Variant patterns: first 12 of 13 items; 1 omitted."],"limitations":["Other engines may consume different context."],"limits":{"threats":12,"itemsPerSection":12,"ordinaryFieldCharacters":200,"reviewedLessons":8,"lessonFieldCharacters":2048}});
         let lines = context_lines(&preview).join("\n");
         assert!(lines.contains(text));
         assert!(lines.contains("1 omitted"));
         assert!(lines.contains("Other engines"));
         assert!(lines.contains("2048 characters"));
+        assert!(lines.contains("Component 2 description"));
+        assert!(lines.contains("Variant patterns: first 12 of 13"));
+        assert!(lines.contains("other fields can appear in full"));
     }
 
     #[test]

@@ -157,6 +157,18 @@ validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
 
+October 14, 2026: [named context omissions](../assessments/scanner-context-omissions-2026-10-14.md)
+identify ordinary-field cuts, raw questions and flattened historical-pattern
+limits without changing execution digest bytes. Matching code cuts retain exact
+indexes in one per-field notice; included text starts ten rows earlier in the
+120x36 owned fixture. Forty-two focused Rust checks and the locked build pass.
+Sequential final J272/J121 record 137 machine passes, zero failures and 108 live
+text/ANSI capture pairs on the same frozen runtime. Eighteen human judgments
+remain pending. Four intercepted requests exercise the complete journey, with
+zero live calls or target-code execution. The native 114-tool catalog also
+refreshes fourteen stale canonical option lists in the matrix. No broad
+milestone or module promotion follows, and the live Scan allowance is pending.
+
 October 14, 2026: [scanner-context inspection](../assessments/scanner-context-preview-2026-10-14.md)
 adds a read-only view of the existing agentic/triage threat-model digest, its
 shared limits and omissions, alongside the complete immutable document. Forty-six

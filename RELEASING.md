@@ -809,6 +809,10 @@ part of every release commit.
   documents, accepted plans, model selection and execution prompt text remain
   unchanged. Preview hashes identify the digest portion only. Runtime source
   checks, supporting context and other engines' context behavior remain separate.
+  Omission notices now identify selected ordinary fields, open questions and
+  flattened historical pattern limits. Matching pattern-code cuts share one
+  notice with exact indexes and counts for each field. Schema version 1 and
+  digest text/hash remain compatible; no accepted work is rewritten.
 
 - `sbom-scan:scan` now declares Map with `phase_result: false`; dependency
   inventory cannot complete Map or Scan. Its tool name, input options,
