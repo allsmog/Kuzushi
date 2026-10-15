@@ -57,7 +57,7 @@ impl PhaseCompositionContract {
     fn assert_sections(self, text: &str, width: u16) {
         for section in adaptive_sections(self.phase, width) {
             assert!(
-                text.contains(section),
+                contains_contract_atom(text, section),
                 "{} missing {section}:\n{text}",
                 self.slug
             );
@@ -153,7 +153,7 @@ fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static
         (WorkflowPhase::Scan, true, _) => &["ENGINE OUTCOMES", "SCAN RECEIPT", "SCOPE / PLAN"],
         (WorkflowPhase::Scan, false, true) => &["ENGINE OUTCOMES", "SCAN RECEIPT"],
         (WorkflowPhase::Scan, false, false) => &["ENGINE OUTCOMES"],
-        (WorkflowPhase::Review, _, true) => &["FINDINGS", "F-0001 · FINDING"],
+        (WorkflowPhase::Review, _, true) => &["FINDINGS", "SELECTED FINDING"],
         (WorkflowPhase::Review, _, false) => &["FINDINGS"],
         (WorkflowPhase::Prove, true, _) => &["STATUS / NEXT", "EVIDENCE", "PROOF LADDER"],
         (WorkflowPhase::Prove, false, true) => &["STATUS / NEXT", "EVIDENCE"],
@@ -169,6 +169,9 @@ fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static
 const RUNTIME_PROOF_SPELLINGS: [&str; 3] = ["[●●●]", "[***]", "runtime verified"];
 
 fn contains_contract_atom(text: &str, atom: &str) -> bool {
+    if atom == "SELECTED FINDING" {
+        return text.contains(atom) || text.contains("F-0001 · FINDING");
+    }
     if RUNTIME_PROOF_SPELLINGS.contains(&atom) {
         return RUNTIME_PROOF_SPELLINGS
             .iter()

@@ -2351,7 +2351,7 @@ fn recon_module_is_focusable_from_catalog() {
 }
 
 #[test]
-fn focused_offense_review_module_renders_recent_threat_hunt_activity() {
+fn focused_module_opens_scoped_tools_without_claiming_a_run() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -2368,7 +2368,8 @@ fn focused_offense_review_module_renders_recent_threat_hunt_activity() {
 
     assert!(rendered.contains("TOOLS · module:offense-review"));
     assert!(rendered.contains("offense-review:threat-hunt"));
-    assert!(rendered.contains("headless"));
+    assert_eq!(app.shell_view(), ShellView::Tools);
+    assert!(!app.has_running_work());
     assert!(!rendered.contains("RECENT THREAT-HUNT ACTIVITY"));
 }
 
