@@ -633,6 +633,7 @@ impl ShellApp {
             export.completeness.as_deref(),
             export.allow_empty,
             self.review_yield_export_provenance(),
+            self.identity_fold_policy(),
             None,
         ) {
             Ok(report) => {
@@ -671,6 +672,7 @@ impl ShellApp {
             Some(export.completeness.as_str()),
             true,
             self.review_yield_export_provenance(),
+            self.identity_fold_policy(),
             export.campaign_id.as_deref(),
         );
         let receipt = match result {

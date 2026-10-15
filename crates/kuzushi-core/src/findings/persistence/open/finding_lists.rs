@@ -13,22 +13,25 @@ impl FindingStore {
         self.v3_findings_for_scan_id(scan_id)
     }
 
-    /// The shared run-scoped definition of "a finding": one row per safe
-    /// identity-fold key. Strong identities corroborate across the runs, while
-    /// weak file-fallback identities stay distinct unless their exact source
-    /// evidence matches, so two different issues are never counted as one.
-    pub fn list_distinct_findings_for_scan_ids<S: AsRef<str>>(
+    /// The shared run-scoped definition of "a finding": one row per
+    /// identity-fold key under the policy the caller resolved. The ledger
+    /// views an operator reads beside a scan receipt project the corpus
+    /// through the effective policy, so a run-scoped reader that chooses its
+    /// own reports a different total for the same runs on the same screen.
+    ///
+    /// Every caller must name a policy. A reader with no resolved policy in
+    /// hand passes [`IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE`], which says
+    /// so, rather than letting this method pick one on its behalf.
+    pub fn list_distinct_findings_for_scan_ids_with_identity_policy<S: AsRef<str>>(
         &self,
         run_ids: &[S],
+        policy: IdentityFoldPolicy,
     ) -> Result<Vec<Finding>> {
         let mut findings = Vec::new();
         for run_id in run_ids {
             findings.extend(self.list_findings_for_scan_id(run_id.as_ref())?);
         }
-        Ok(project_finding_generations(
-            findings,
-            IdentityFoldPolicy::Safe,
-        ))
+        Ok(project_finding_generations(findings, policy))
     }
 
     /// Raw producer observations recorded by these runs, before same-issue
@@ -88,6 +91,22 @@ impl FindingStore {
         policy: IdentityFoldPolicy,
     ) -> Result<FindingListReport> {
         collect_filtered_findings(self, self.policy_projected_findings(policy)?, filter)
+    }
+
+    /// Full-ledger fetch under the policy the caller resolved.
+    ///
+    /// An export is a reader of the same ledger an operator reviewed, so it
+    /// must fold the same way. [`Self::list_all_findings`] projects the
+    /// compatibility generation only, which collapses repeated observations of
+    /// one durable finding but keeps two same-issue rows from different
+    /// channels apart. Exporting that set published a finding count the Review
+    /// ledger denied on the same screen, and assigned export aliases by
+    /// positions the shell's own alias resolution never produced.
+    pub fn list_all_findings_with_identity_policy(
+        &self,
+        policy: IdentityFoldPolicy,
+    ) -> Result<Vec<Finding>> {
+        self.policy_projected_findings(policy)
     }
 
     pub fn list_relevant_findings_with_identity_policy(

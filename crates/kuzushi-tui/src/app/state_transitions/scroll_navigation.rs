@@ -1,5 +1,6 @@
 use super::page_scroll::{page_scroll_kind, PageScrollKind};
 use super::*;
+use crate::renderer::PageDirection;
 
 impl ShellApp {
     pub(super) fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
@@ -85,7 +86,7 @@ impl ShellApp {
     }
 
     pub(super) fn page_down_current_view(&mut self) {
-        let step = self.current_page_step();
+        let step = self.current_page_step(PageDirection::Down);
         if self.page_findings_down() {
             return;
         }
@@ -101,7 +102,7 @@ impl ShellApp {
     }
 
     pub(super) fn page_up_current_view(&mut self) {
-        let step = self.current_page_step();
+        let step = self.current_page_step(PageDirection::Up);
         if self.page_findings_up() {
             return;
         }
@@ -116,7 +117,7 @@ impl ShellApp {
         }
     }
 
-    fn current_page_step(&self) -> usize {
+    fn current_page_step(&self, direction: PageDirection) -> usize {
         crate::renderer::workbench_scroll_page_rows(self)
             .or_else(|| crate::renderer::finding_group_page_rows(self))
             .or_else(|| {
@@ -133,7 +134,7 @@ impl ShellApp {
             .or_else(|| crate::renderer::coverage_page_rows(self))
             .or_else(|| crate::renderer::context_page_rows(self))
             .or_else(|| crate::renderer::cost_page_rows(self))
-            .or_else(|| crate::renderer::scene_page_rows(self))
+            .or_else(|| crate::renderer::scene_page_rows(self, direction))
             .unwrap_or(VIEWPORT_PAGE_LINES)
     }
 
@@ -290,7 +291,7 @@ mod coverage_scroll_tests {
         app.set_viewport(crate::TerminalViewport::new(40, 12));
         app.set_input_mode(InputMode::Navigate);
         app.set_input("saved component draft");
-        let rows = crate::renderer::scene_page_rows(&app).unwrap();
+        let rows = crate::renderer::scene_page_rows(&app, PageDirection::Down).unwrap();
         assert!(rows < VIEWPORT_PAGE_LINES);
         app.page_down_current_view();
         assert_eq!(usize::from(app.router.default_scroll().offset()), rows);

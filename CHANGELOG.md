@@ -45,6 +45,85 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- A findings export folds by the policy the operator's ledger resolved. The
+  Review ledger resolves its identity fold from operator state and the
+  identity-audit approval, the scan-scoped export hardcoded the conservative
+  run-scope fold, and the workspace-scoped export applied no fold at all, so a
+  session could write `sarif · 31 finding(s)` one line below its own
+  `29 findings` header and assign export aliases from positions the shell's own
+  alias resolution never produced. `WorkspaceExportOptions` now carries the
+  fold the exporting session resolved, both preparations read under it, and the
+  Report route and `workspace export findings` bind their own ledger's policy.
+  `kuzushi findings export` and `workspace:export-findings` hold no resolved
+  policy and still read under the conservative run-scope fold; see
+  [docs/operator-control-surfaces.md](./docs/operator-control-surfaces.md).
+- The entry-point browser's clip disclosure counts catalog entries, not pane
+  rows. Its title names the selection in entry terms (`1/1250`) but derived
+  `+N above`/`+N below` from a row total that folded the disposition group
+  headers in with the entries. A viewport too short to clear the first
+  header therefore scrolled that header past the top and reported it as a
+  hidden entry: at the true first of 1250 entries an 80x24 terminal read
+  `ENTRY POINTS · 1/1250 · +1 above`, claiming content above a row with
+  nothing above it. The same arithmetic inflated both counts by every header
+  outside the window, so a multi-group catalog overstated what it was
+  hiding on either side. `entry_list_window` now reports the entries the
+  viewport leaves out, measured by discounting the header rows, and a
+  header scrolled out of view is treated as the pane chrome it is. The
+  honesty contract the disclosure exists to serve — never hide a catalog row
+  in silence — is unchanged; it no longer invents one. Reported against a
+  real target in #172 (2026-10-07).
+- A gallery line page's position label counts the projection's rows, not the
+  display lines a canvas wrapped them into. One real 2731-component tree
+  reported three totals for the same model: `rows 1-10/2731` on Map's
+  embedded canvas, `rows 1-25/2732` in the full-frame `z` zoom at the same
+  terminal size, and `rows 1-4/2737` at 80 columns. The embedded canvas
+  measured `page_body_lines(...).len()` after the component tree wrapped each
+  long dependency under its own continuation glyphs, so a narrower canvas
+  invented rows; the zoom measured the same body through the generic pinned
+  document viewport, whose three pinned rows left the gallery's blank
+  separator counted as the first row of content. A wrapped value is one row
+  however many display lines it occupies, so `component_tree_rows` now groups
+  its display lines per row and `LinePageRows` windows those rows for both
+  projections: the total is the model's, the window names whole rows, and a
+  row taller than its canvas is clipped with the clip disclosed rather than
+  skipped. Scrolling past the end still lands on the last rows, now by
+  measuring rows from the end instead of clamping a `Paragraph` offset.
+  The worklist, whose values also wrap, groups its rows the same way, and
+  PgUp/PgDn on a line page (full-frame or embedded in Map) move to the
+  adjacent window of whole rows, so paging neither skips nor repeats a row.
+  Reported against a real target in #172 (2026-10-09).
+- A scan's own finding count folds the way the ledger beside it does.
+  `sast:scan` declares `identityFold` and the shared dispatch boundary binds
+  the operator's resolved value on every dispatch, but no executor read it:
+  `list_distinct_findings_for_scan_ids` hardcoded the `safe` fold for every
+  run-scoped reader. The approval gate holds the effective policy at `legacy`
+  until an operator approves the identity audit, and Review, the rail, and the
+  footer all project the corpus through that effective policy — so two secrets
+  inside one dedup bucket (distinct source-locator identities, one shared dedup
+  key) counted as two findings in the scan receipt, `data.findingsCount`, and
+  `coreFindings`, and as one in the Review ledger printed in the same frame.
+  The query now requires the policy its caller resolved, so no reader picks one
+  silently: `sast:scan` folds by its bound `identityFold`, and a repeated-trial
+  occurrence report by the policy it already carries. A study export,
+  `report:sarif` over a study, and the investigation report hold no resolved
+  policy, so they pass the named `IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE` and
+  keep their existing fold; resolving one from the identity-audit approval gate
+  alone would ignore the explicit operator override that the scan and the
+  ledger both honour. Reported on #172, measured at 31 against 29 on a real
+  target on 2026-10-06 and again on 2026-10-10. Two readings are still not the
+  operator's and remain open: the workspace-wide export reads
+  `list_all_findings`, and the three readers above await the stored
+  `identityFold` option reaching them.
+- The batch SARIF export accounts for every planned trial. `kuzushiBatch`
+  published `trialsPlanned`, `trialsCompleted` and `trialsFailed` but never
+  `trialsPending`, and unstarted parked trials stopped being counted as
+  failures when they became resumable. A batch whose trials were all parked
+  before their first attempt — equivalence drift, an exhausted allowance —
+  therefore exported `planned 3, completed 0, failed 0`, which reads to a
+  SARIF consumer as a batch where nothing went wrong, while the sibling
+  `gate.json` disclosed `pendingTrials: 3`. The export now publishes
+  `trialsPending` alongside the other counts, so the two artifacts agree and
+  every planned trial lands in a bucket its reader can see.
 - Map's embedded gallery owns the keys it advertises. The renderer draws the
   Summary/DFD/Entry/Components gallery as Map's page body for every
   composition that gives `MapDfd` the canvas role — a ready Map and an

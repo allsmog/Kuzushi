@@ -71,7 +71,8 @@ pub(super) fn seed(app: &mut ShellApp, target: &Path) -> Result<(), String> {
     add_escalated_split_proof(&mut findings[1]);
     add_refused_split_proof(&mut findings[2]);
     add_audited_dataflow_finding(&mut findings[4]);
-    persist_reference_findings(target, &findings)?;
+    let generations = persist_reference_findings(target, &findings)?;
+    bind_persisted_generations(&mut findings, &generations);
     let selected = findings[0].clone();
     let counts = crate::ui_view_models::finding_ledger_counts(
         &findings,
@@ -99,7 +100,15 @@ fn reference_proof_snapshot(
         .map_err(|error| error.to_string())
 }
 
-fn persist_reference_findings(target: &Path, findings: &[Finding]) -> Result<(), String> {
+/// The in-memory ledger must name the generations the store actually holds:
+/// a refresh reselects by exact generation, never by fingerprint alone.
+fn bind_persisted_generations(findings: &mut [Finding], generations: &[i64]) {
+    for (finding, id) in findings.iter_mut().zip(generations) {
+        finding.id = Some(*id);
+    }
+}
+
+fn persist_reference_findings(target: &Path, findings: &[Finding]) -> Result<Vec<i64>, String> {
     let workspace = WorkspaceTarget::new(target).map_err(|error| error.to_string())?;
     let database = workspace.findings_db_path();
     reset_finding_store(&database, &workspace.event_log_dir())?;
@@ -123,7 +132,7 @@ fn persist_reference_findings(target: &Path, findings: &[Finding]) -> Result<(),
     store
         .record_run_finished(REFERENCE_SCAN_ID, "completed", findings.len())
         .map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(ids)
 }
 
 /// F4: record the deep-auditor's cited dataflow as `deep-audit:evidence` audit

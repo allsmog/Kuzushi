@@ -321,6 +321,18 @@ struct FilteredWorkspaceFindings {
     positions: Vec<WorkspaceFindingExportPosition>,
 }
 
+/// The fold this export reads the ledger under.
+///
+/// The exporting session resolves its own policy from operator state and the
+/// identity-audit approval and binds it on the options. A caller that holds
+/// none keeps `IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE`, which names that
+/// gap rather than presenting a reader-local choice as the operator's.
+fn export_identity_fold(options: &WorkspaceExportOptions) -> crate::findings::IdentityFoldPolicy {
+    options
+        .identity_fold
+        .unwrap_or(crate::findings::IdentityFoldPolicy::UNRESOLVED_RUN_SCOPE)
+}
+
 fn prepare_workspace_findings_export(
     workspace: &WorkspaceTarget,
     options: &WorkspaceExportOptions,
@@ -337,7 +349,7 @@ fn prepare_workspace_findings_export(
         return Ok(prepared);
     }
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = store.list_all_findings()?;
+    let all_findings = store.list_all_findings_with_identity_policy(export_identity_fold(options))?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);
@@ -359,7 +371,11 @@ fn prepare_scan_findings_export(
     options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = store.list_distinct_findings_for_scan_ids(run_ids)?;
+    let all_findings =
+        store.list_distinct_findings_for_scan_ids_with_identity_policy(
+            run_ids,
+            export_identity_fold(options),
+        )?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);

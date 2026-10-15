@@ -891,6 +891,11 @@ fn first_map_run_chip_never_reads_scan_before_its_terminal_event() {
     app.set_active_tool_run_id_for_test("map-run-1");
     app.set_running_tool_for_test("context:build");
     app.set_shell_view(ShellView::Activity);
+    // A fresh target opens Setup; `Start Map` commits the engagement (and
+    // with it the journey chip) before the first Map run launches.
+    app.engagement
+        .planning_picker_mut()
+        .set_return_to_setup(false);
 
     // A fresh target retains Setup ownership until Start Map commits its plan.
     assert!(crate::ui_view_models::journey_footer_segment(&app).is_none());
@@ -12742,6 +12747,9 @@ fn make_projected_duplicate(severity: Severity, fp: &str, title: &str) -> Findin
 }
 
 fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
+    if let HotkeyTrigger::ControlChar(ch) = trigger {
+        return KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL);
+    }
     let code = hotkey_trigger_code(trigger);
     KeyEvent::new(code, KeyModifiers::empty())
 }
@@ -14833,6 +14841,44 @@ fn wide_fix_tab_cycles_only_meaningful_rendered_surfaces() {
 }
 
 #[test]
+fn advertised_last_row_key_still_jumps_on_pages_where_it_is_not_shadowed() {
+    // Review's ledger owns `G`; elsewhere the advertised `G` must still
+    // dispatch `workbench_jump(false)` on the focused scrollable surface.
+    let (_target, mut app) = app_with_findings_and_full_phase_access(25);
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Fix));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::FixRemediation);
+    let last = app
+        .view_keybindings()
+        .into_iter()
+        .find(|binding| binding.action == ViewHotkeyAction::WorkbenchScrollLast)
+        .expect("Fix advertises a last-row binding");
+    assert_eq!(last.hint, "g/G");
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::FixRemediation),
+        0
+    );
+
+    press_key(&mut app, key_event_for_trigger(last.trigger));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::FixRemediation),
+        u16::MAX
+    );
+}
+
+#[test]
 fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
     let mut app = app_with_findings(25);
     let advertised = app.view_keybindings();
@@ -14864,7 +14910,24 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             && binding.label == "defer proof"
     }));
 
-    for binding in advertised {
+    // Drive each binding in the same mode and state that advertises it: the
+    // Navigate-mode Review ledger adds its own keys and owns `G` (groups).
+    let navigate_advertised = {
+        let (_target, mut app) = app_with_findings_and_full_phase_access(25);
+        app.set_input_mode(crate::InputMode::Navigate);
+        app.view_keybindings()
+    };
+    assert!(navigate_advertised.iter().any(|binding| {
+        binding.hint == "G" && binding.action == ViewHotkeyAction::FindingGroupsOpen
+    }));
+    assert!(
+        navigate_advertised
+            .iter()
+            .all(|binding| binding.hint != "g/G"
+                && binding.action != ViewHotkeyAction::WorkbenchScrollLast),
+        "a shadowed `G` last-row jump must not be advertised beside `G` groups"
+    );
+    for binding in navigate_advertised {
         let (_target, mut app) = app_with_findings_and_full_phase_access(25);
         app.set_input_mode(crate::InputMode::Navigate);
         match binding.action {
@@ -14908,17 +14971,6 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 app.router.findings_mut().set_cursor(7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 0);
-            }
-            ViewHotkeyAction::WorkbenchScrollLast => {
-                app.router
-                    .workbench_mut()
-                    .set_page(Some(WorkbenchPage::Review));
-                app.router
-                    .workbench_mut()
-                    .set_focus(PhaseSurfaceId::ReviewQueue);
-                app.router.findings_mut().set_cursor(7);
-                press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.router.findings().cursor(), 24);
             }
             ViewHotkeyAction::WorkbenchOpenFocusedVisualization => {
                 use crate::scene3d::VizPage;
@@ -15083,6 +15135,19 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.shell_view(), ShellView::Workbench);
                 assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+            }
+            ViewHotkeyAction::WorkbenchReviewLedgerFilter => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.input(), "findings filter ");
+                assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+            }
+            ViewHotkeyAction::RelationshipsOpen | ViewHotkeyAction::FindingGroupsOpen => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.shell_view(), ShellView::Relationships);
+            }
+            ViewHotkeyAction::LessonsOpen => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.shell_view(), ShellView::Lessons);
             }
             other => panic!("unexpected workbench hotkey action: {other:?}"),
         }

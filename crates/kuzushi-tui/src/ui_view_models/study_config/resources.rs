@@ -1,6 +1,8 @@
 use crate::app::BatchScanConfig;
 use crate::app::ViewDataState;
-use kuzushi_core::capabilities::campaign::{ScanResourceEvidence, StudyResourceProjection};
+use kuzushi_core::capabilities::campaign::{
+    ScanResourceEvidence, ScopeStudyDraft, StudyResourceProjection,
+};
 mod campaign_resources;
 
 pub(super) fn row_value(config: &BatchScanConfig) -> String {
@@ -68,10 +70,7 @@ fn selected_resource_lines(config: &BatchScanConfig) -> Vec<String> {
     selected_single_resource_lines(config)
 }
 
-fn scope_resource_lines(
-    config: &BatchScanConfig,
-    draft: &kuzushi_core::capabilities::campaign::ScopeStudyDraft,
-) -> Vec<String> {
+fn scope_resource_lines(config: &BatchScanConfig, draft: &ScopeStudyDraft) -> Vec<String> {
     let jobs = draft.job_count();
     let mut lines = vec![format!(
         "{} selected boundaries · {jobs} fixed discovery jobs · {} maximum starts per job ({} starts).",

@@ -2,11 +2,19 @@
 //! degraded banner, the contributor legend, and the unranked footer. Line-based
 //! (the page is not frame-rendered), so plain/non-TTY output inherits it.
 
+use super::line_page::LinePageRows;
 use crate::theme;
 use crate::ui_view_models::{LegendEntry, WorklistRowModel, WorklistViewModel};
 use ratatui::prelude::{Line, Span};
 
-pub(super) fn worklist_lines(width: usize, model: &WorklistViewModel) -> Vec<Line<'static>> {
+/// The worklist as the rows it projects. Each ranked file, banner, and legend
+/// entry is one row however many display lines its value wraps onto, so the
+/// page's row total is the same at every canvas width.
+pub(super) fn worklist_rows(width: usize, model: &WorklistViewModel) -> LinePageRows {
+    LinePageRows::from_document_lines(worklist_document_lines(model), width)
+}
+
+fn worklist_document_lines(model: &WorklistViewModel) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
         let mut lines = crate::renderer::empty_state_panel(
             "no risk worklist",
@@ -17,7 +25,7 @@ pub(super) fn worklist_lines(width: usize, model: &WorklistViewModel) -> Vec<Lin
             ],
         );
         append_degraded_banner(&mut lines, model);
-        return wrap_lines(lines, width);
+        return lines;
     }
     let mut lines = vec![count_line(model)];
     lines.push(Line::from(
@@ -29,11 +37,7 @@ pub(super) fn worklist_lines(width: usize, model: &WorklistViewModel) -> Vec<Lin
     }
     append_legend(&mut lines, model);
     append_unranked_footer(&mut lines, model);
-    wrap_lines(lines, width)
-}
-
-fn wrap_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
-    crate::renderer::shared::text::wrap_document_lines(lines, width.min(u16::MAX as usize) as u16)
+    lines
 }
 
 fn count_line(model: &WorklistViewModel) -> Line<'static> {
@@ -103,6 +107,10 @@ fn append_unranked_footer(lines: &mut Vec<Line<'static>>, model: &WorklistViewMo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn worklist_lines(width: usize, model: &WorklistViewModel) -> Vec<Line<'static>> {
+        worklist_rows(width, model).into_lines()
+    }
 
     fn line_text(line: &Line<'static>) -> String {
         line.spans
@@ -226,5 +234,42 @@ mod tests {
             .collect::<String>();
         assert!(text.contains("Coverage schema unavailable; explicit repair required"));
         assert!(text.contains("run worklist:rank"));
+    }
+
+    /// The defect #329 fixed for the component tree, guarded here for the
+    /// worklist: its values wrap to the canvas, so a total counted in display
+    /// lines would change with the terminal width. Every ranked file stays
+    /// one row at every width.
+    #[test]
+    fn the_row_count_is_the_same_at_every_width() {
+        let model = WorklistViewModel {
+            rows: (1..=12)
+                .map(|rank| {
+                    row(
+                        rank,
+                        "AC",
+                        &format!("services/owned component/very-long-name/src/file_{rank}.rs:12"),
+                        "A 92/100 C scan coverage missing for selected component",
+                    )
+                })
+                .collect(),
+            legend: vec![legend('F', "call-graph fan-in", Some("no cpg graph"), true)],
+            degraded: vec!["Coverage schema unavailable; explicit repair required".into()],
+            unranked_count: 3,
+            ranked_total: 40,
+            empty_hint: None,
+        };
+
+        let totals = [40, 60, 80, 120, 200].map(|width| worklist_rows(width, &model).len());
+        let display_lines = [40, 200].map(|width| worklist_rows(width, &model).into_lines().len());
+
+        assert!(
+            totals.windows(2).all(|pair| pair[0] == pair[1]),
+            "{totals:?}"
+        );
+        assert!(
+            display_lines[0] > display_lines[1],
+            "fixture must wrap at 40 columns: {display_lines:?}"
+        );
     }
 }

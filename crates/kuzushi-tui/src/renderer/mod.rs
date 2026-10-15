@@ -33,6 +33,7 @@ pub(in crate::renderer) use views::*;
 pub(crate) use views::{activity_output_scroll, ActivityOutputScroll};
 pub(crate) use views::{campaign_reader_scroll, campaign_selection_scroll, coverage_page_rows};
 pub(crate) use views::{cost_max_scroll, cost_page_rows};
+pub(crate) use views::{map_gallery_page_rows, PageDirection};
 pub(crate) use views::{option_detail_page_bounds, option_error_page_bounds};
 pub(crate) use views::{recommendation_max_scroll, recommendation_page_rows};
 pub(crate) use views::{run_artifact_max_scroll, run_artifact_page_rows};

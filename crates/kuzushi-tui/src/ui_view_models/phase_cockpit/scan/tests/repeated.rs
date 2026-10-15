@@ -75,9 +75,13 @@ fn selected_attempt_projects_every_parent_and_engine_with_distinct_findings() {
     assert_eq!(attempt.run_refs.len(), 6);
     assert_eq!(attempt.findings, Some(2));
     assert_eq!(attempt.findings_observed, Some(3));
+    // The three receipts recorded a combined 2 + 1 fingerprint delta for runs
+    // the ledger attributes two findings to, so that delta no longer counts
+    // the findings the breakdown below describes and the panel states the
+    // reconciled `distinct`/`observations` pair instead (issue #172).
     assert_eq!(
         (attempt.findings_added, attempt.findings_updated),
-        (Some(2), Some(1))
+        (None, None)
     );
     assert_eq!(
         attempt.severity_counts,
