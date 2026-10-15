@@ -140,6 +140,11 @@ security investigation workflow while adopting their interaction discipline.
 
 ## Delivery
 
+The [working acceptance ledger](../quality/bounded-investigation-acceptance.md)
+separates current scoped evidence from concrete implementation gaps and
+qualification still needed. In particular, a saved investigation brief does not
+yet provide the required goal-relevance view in Review.
+
 - [ ] Bounded iterative inventory and inventory-derived scope suggestions.
 - [ ] Registry-derived per-tool functional matrix and curated phase readiness.
 - [ ] Explicit allowance, durable reservations, and honest unknown-cost states.
@@ -156,6 +161,16 @@ Record focused tests and integration results here as work completes. Live model
 validation requires an explicitly approved test allowance and runs sequentially.
 
 ## Current implementation evidence
+
+October 14, 2026: [Review under native work](../assessments/active-review-input-2026-10-14.md)
+adds 24 live-dispatcher send-to-observed-echo samples across all six sizes.
+Median is 28.05 ms and maximum 36.74 ms rounded up, including tmux capture
+overhead. The extended J206 records 70 machine passes and 56 live capture
+pairs, with five human judgments pending; nine actual native jobs, Report and
+restart preserve the Review draft and approved accounting. Three warmed Review
+performance checks pass separately. These are scoped local measurements, not
+physical/reference parity or complete product acceptance. No live model call
+was added.
 
 October 14, 2026: [exact context receipt matching](../assessments/context-receipt-matching-2026-10-14.md)
 prevents late ordinary or different-projection reads from replacing a study's

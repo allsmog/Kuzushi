@@ -124,7 +124,19 @@ keys: L
 require-live-snap: 25 L starts its fixed jobs | fixed-jobs
 keys: L
 require-live-snap: 25 dispatcher pid | running
+submit: findings
+require-live-snap: 25 Owned policy marker needs an owner decision | active-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/active_review_input.py @TMP_TARGET @ART
+live-snap: after-active-review-typing
 require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART completed
+require-live-snap: 20 retained-review-draft | review-draft-after-completion
+expect: Viewing Review
+ask: Does Review keep its draft, reading origin and usable controls while the remaining approved native jobs complete, with no background focus change or extra work?
+keys: C-u
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 9 completed | completed-jobs-return
+nav-mode:
 keys: r
 require-live-snap: 25 9 completed | completed
 submit: workbench

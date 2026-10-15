@@ -1,0 +1,57 @@
+# Bounded investigation acceptance ledger
+
+This working ledger maps the original bounded-investigation plan to current
+source and named evidence. It does not replace that plan or certify completion.
+`Scoped` means there is implementation and limited functional evidence.
+`Open` means the stated requirement still lacks sufficient qualification.
+`Missing` identifies a concrete implementation gap. All nine broad delivery
+checkboxes remain open until their complete requirements are reconciled.
+
+## Repository, scopes and modules
+
+| Requirement | Current evidence | State and remaining work |
+| --- | --- | --- |
+| One bounded inventory, iterative fallback, containment and symlink exclusion | `workspace/inventory/build_repository_inventory.rs`; 100,000 entries, 512 MiB overall and 256 KiB per file; deep-tree/cycle tests; native J206/J232 | Scoped. Qualify larger real repositories and reconcile every cancellation/truncation case before closing the inventory milestone. |
+| Whole repository remains available; loose files, exclusions and partial inspection stay visible | `capabilities/shard_suggest.rs`, `workspace/domain/scan_scope_proposal`; native J206 preserves 65/65/1 primary memberships and separate shared context | Scoped. Complete coverage cannot be inferred from enumeration or pass completion. |
+| Optional AI proposal, one request, no delegation/repair, at most eight primary scopes plus shared scope | `modules/pack_module/suggest_scopes.rs`; accepted/rejected real-model receipts in [scope proposal evidence](../assessments/live-scope-proposal-2026-10-14.md) | Scoped. Larger architectural usefulness remains open. Regeneration and further splitting still need separate approved work. |
+| Validate paths, overlap, uncovered files and shared dependencies; review and edit boundaries visually | `workspace/domain/scan_scope_proposal`; scope edit journeys including J206/J260 | Scoped. AI suggestions are not acceptance; shared context must not add discovery jobs. |
+| Fixed jobs and one-worker/three-pass defaults; no recursive job creation | `capabilities/campaign/batch.rs`, `context_matrix`, `scope_study`; J121/J206 execute their fixed plans | Scoped. Reconcile all stale-plan, scope-adapter and cancellation branches against the original acceptance list. |
+| Per-tool purpose, phase, inputs, real executor, outputs, failures, resources, interfaces and value | [114-tool matrix](../assessments/bounded-investigation-tools.json) and linked per-tool assessments | Open. Registration and input metadata do not qualify useful execution. Product value and full supported-path readiness remain incomplete for several tools. |
+| Curated Core/Labs/Compatibility defaults, distinct readiness and evidence-backed retirement proposals | Registry maturity/readiness policy, [retirement candidates](../assessments/module-retirement-candidates.md) | Scoped. No speculative deletion or promotion; keep exact dispatch and public compatibility. |
+| Phase consumers and scope enforcement are real execution behavior | Shared prepared dispatch; Context study producer jobs; exact native/agentic scope adapters; J121/J206 | Scoped. Unsupported adapters require separately reviewed whole-repository work. General DAG metadata is not credited as execution ordering. |
+
+## Context, findings and learning
+
+| Requirement | Current evidence | State and remaining work |
+| --- | --- | --- |
+| Exact immutable context, source, scope, model and prompt binding without changing global active context | `scan/application/threat_model_digest.rs`, `campaign/batch/equivalence.rs`; [frozen text](../assessments/frozen-scanner-context-2026-10-14.md) and [receipt matching](../assessments/context-receipt-matching-2026-10-14.md) | Scoped. Accepted bytes and source/lesson eligibility are checked separately; historical reading does not approve current execution. |
+| Generate, question, edit, selectively regenerate, diff and accept context; preserve operator edits and show supplied text/omissions | `app/batch_scan/context_edit`, context generation/question readers and immutable revision tools | Scoped. The field editor uses named text fields, not mandatory JSON editing. Real-model answer/generation usefulness and every failure branch remain open. |
+| Fresh repetitions versus explicit context experiments with a finite matrix and baseline | `campaign/context_matrix`, `context_experiment`; J121 and matrix journeys | Scoped. Failed attempts and retries remain separate; a matrix does not prove statistical improvement. |
+| Raw observations, provenance, reversible duplicates/relationships and human decisions | Findings ledger/application services; relationship and Review journeys | Scoped. Keep related variants and uncertain matches distinct from duplicates. Reconcile scale and all interface paths. |
+| SHA/content-aware comparison and honest recurrence | Finding identity/source history, batch occurrence, J121 dirty-source reassessment and retained FP/deferral decisions | Scoped. A missing later observation never establishes a fix or safe cross-branch decision reuse. |
+| Severity, confidence, recurrence and scope views | Review queue, canonical filters, batch occurrence and scope-case views | Scoped. The general `findings:list` filter explicitly rejects `scope`; existing scope access is through study/case views. Do not claim a global scope filter exists. |
+| Goal-relevance view separate from finding verdicts | Brief revisions exist in `campaign/brief/domain.rs`; Review page ordering and canonical finding filters contain no goal-relevance assessment/view | **Missing.** Add source- and brief-revision-bound relevance assessment and a usable Review view. Keep it separate from severity, confidence and human verdicts, reversible, and exportable. A saved brief alone does not satisfy this requirement. |
+| Accepted findings produce draft lessons; only reviewed lessons enter future accepted context | Finding lesson tools, `threat-model:reuse-lessons`, eligibility validation and retirement tests | Scoped. Reviewed reuse is not evidence of useful lessons on every target; keep legacy imported patterns explicitly unverified. |
+| Source-only variants and next-investigation proposals have their own approved question, scope and allowance | Proposal/context study machinery and experimental source-pattern adapters | Scoped. Do not credit unaccepted drafts as executed follow-ups or useful variant coverage. |
+
+## Spending, interfaces and operator acceptance
+
+| Requirement | Current evidence | State and remaining work |
+| --- | --- | --- |
+| Explicit allowance before supported model work; all categories share durable accounting | `modules/allowance_dispatch.rs`, `spend/allowance`; model work needs explicit or inherited binding | Scoped. Core discovery/context/Review paths are covered; excluded Prove/Fix actions are not qualified here. |
+| Atomic reservations, internal attempts/retries, workers, cancellation and restart | Allowance admission/settlement/work-plan tests and native limit/recovery journeys | Scoped. Unresolved reservations are retained. Reconcile every original concurrency and revised-plan acceptance case. |
+| Show exact model/workload/concurrency, protected Review capacity and uncertainty before approval | Study form/approval readers, J121/J206 | Scoped. The default selected model contract is GPT-5.5 OAuth with medium reasoning and no fallback. Separately approved low-model experiments are explicit overrides, not proof of every default-model path. |
+| Strict dollars only with a conservative enforceable upper bound; otherwise explicit finite limits and unknown dollars | Shared runtime limiter and allowance UI; J121 reports unknown cost and protects two Review calls | Scoped. Unknown is not zero. Do not claim an enforceable dollar ceiling for an adapter without charge bounds. |
+| Finish/report, revise remaining work or approve a specific new allowance; no implicit cap doubling or review downgrade | J121 stops at two completed passes and resumes after explicit five-to-six-call revision | Scoped. Approval does not approve later proposals or silently increase attempt bounds. |
+| Versioned brief, scope proposal, immutable context reference, study plan, reservation and accepted lesson artifacts | Existing campaign/workspace/CAS/findings/spend contracts; documented additive migrations | Scoped. Keep shared prepared dispatch and public module/artifact compatibility; do not add parallel orchestration. |
+| Keyboard-only journey, visible actions, palette/composer ownership, draft/selection/scroll continuity, six sizes and plain/no-color | J121/J206 and focused input, context, findings and recovery tests | Scoped. Per-journey human judgments remain pending; machine state checks are not operator delight approval. |
+| Typing/scroll/resize under active work; background focus and cancellation | Logs and inventory probes; current Review probe; warmed Review renderer tests | Scoped. [Current responsiveness evidence](../assessments/active-review-input-2026-10-14.md) covers one native workload and warmed local rendering, not every active surface or physical/reference latency. |
+| One complete journey including cancellation, partial work, exhausted allowance and restart | Latest J121 covers partial work/limit/restart; J206 covers native scope work and reporting; separate cancellation journeys exist | Open integration qualification. Reconcile cancellation into the combined supported journey before closing this acceptance requirement. |
+| DFD links to context/evidence/findings/scoped actions and understandable next proposals | Map/DFD view models, linked readers and scope/proposal actions | Scoped. Reconcile all concrete element/action links and human diagram usefulness. |
+| Sequential real-model validation under approved allowance | Eight approved requests exhausted; fourteen-file discovery study prepared | Open. The separate six-request Scan allowance is unanswered. No further live calls are authorized by elapsed time or by this ledger. |
+| Focused checks, shared dispatch, workspace build, risk proxy and exact summary verification | Named assessment receipts and signed clean-commit verification | Scoped. Local quick checks do not prove the full Rust suite, CI/platform matrix, release qualification or the complete product outcome. |
+
+Exploit development, reproducers and vulnerability patching remain excluded.
+Their compatibility implementations are not work items for completing this plan.
+The next concrete implementation item is the missing goal-relevance surface;
+the remaining rows still require evidence at the scope of their original claims.
