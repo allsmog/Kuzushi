@@ -44,6 +44,7 @@ fn visible_ai_action_preserves_multiline_priorities_and_opens_only_budget_review
     assert_eq!((app.input().to_owned(), app.editor().cursor()), input);
     assert!(!app.scope_review_is_visible());
     app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    discard_unprepared_study(&mut app);
     assert!(app.scope_review_is_visible());
     assert!(app.scope_review().unwrap().form.as_ref().unwrap().fields[0]
         .1

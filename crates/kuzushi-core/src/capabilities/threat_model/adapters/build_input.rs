@@ -57,9 +57,7 @@ fn apply_target_build_input(
     reject_refine_with_fresh_seed(&build.mode, &build.seed_mode)?;
     let target = resolve_target(input, ctx)?;
     let context_mode = read_context_mode(input);
-    let run_id = Uuid::new_v4().to_string();
-    build.output_dir = read_string(input, &["outputDir", "output_dir"])
-        .unwrap_or_else(|| flavor.default_output_dir(&target, &run_id));
+    build.output_dir = resolve_build_output_dir(input, ctx, flavor, &target);
     build.repo_name = repo_name(&target);
     build.methodology = read_methodology(input, flavor.default_methodology());
     build.sources = read_source_artifacts(input, flavor, &context_mode)?;

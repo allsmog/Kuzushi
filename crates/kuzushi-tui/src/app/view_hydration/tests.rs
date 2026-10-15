@@ -25,7 +25,7 @@ fn run_entry_with_git(sha: &str, dirty: bool) -> kuzushi_core::RunSummaryEntry {
 }
 
 #[test]
-fn returning_workspace_drift_detects_revision_and_worktree_changes() {
+fn returning_workspace_drift_requires_observed_revision_change() {
     let clean_current = RunTargetGitMetadata {
         sha: "bbbbbbbbbbbb".to_string(),
         branch: Some("main".to_string()),
@@ -44,13 +44,15 @@ fn returning_workspace_drift_detects_revision_and_worktree_changes() {
         dirty: true,
         ..clean_current.clone()
     };
-    let worktree_drift =
-        returning_workspace_drift(&dirty_current, &[run_entry_with_git("bbbbbbbbbbbb", false)])
-            .expect("worktree drift");
-    assert_eq!(
-        worktree_drift.0,
-        kuzushi_core::incremental_index::WorkspaceChange::GitIndexChanged
-    );
+    for prior_dirty in [false, true] {
+        let history = [run_entry_with_git("bbbbbbbbbbbb", prior_dirty)];
+        assert!(returning_workspace_drift(&dirty_current, &history).is_none());
+        assert!(returning_source_unverified(&dirty_current, &history));
+    }
+    assert!(returning_source_unverified(
+        &clean_current,
+        &[run_entry_with_git("bbbbbbbbbbbb", true)]
+    ));
 }
 
 #[test]
@@ -63,6 +65,11 @@ fn returning_workspace_drift_stays_clear_for_the_same_clean_revision() {
     assert!(
         returning_workspace_drift(&current, &[run_entry_with_git("aaaaaaaaaaaa", false)]).is_none()
     );
+    assert!(!returning_source_unverified(
+        &current,
+        &[run_entry_with_git("aaaaaaaaaaaa", false)]
+    ));
+    assert!(!returning_source_unverified(&current, &[]));
 }
 
 #[derive(Debug, Default)]
@@ -214,6 +221,9 @@ pub(super) fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::ScanRecommendations(ScanRecommendationsState::Ready(Vec::new()))
         }
         ViewHydrationKey::TargetBase => ViewHydrationValue::TargetBase("target".to_string()),
+        ViewHydrationKey::ExecutableOptions { .. } => {
+            ViewHydrationValue::ExecutableOptions(Vec::new())
+        }
     }
 }
 

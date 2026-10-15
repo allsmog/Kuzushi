@@ -26,7 +26,14 @@ pub(crate) struct StudyContextGeneration {
     pub(crate) campaign_id: Option<String>,
     pub(crate) receipt: Option<ContextStudyReceipt>,
     pub(crate) generated: Option<ThreatModelRef>,
+    pub(crate) generated_preview:
+        Option<crate::ui_view_models::context_generation::GeneratedContextPreview>,
     pub(crate) generated_lesson: Option<kuzushi_core::findings::LessonRef>,
+    pub(crate) generated_answer:
+        Option<kuzushi_core::capabilities::campaign::ContextQuestionAnswer>,
+    pub(crate) generated_proposal:
+        Option<kuzushi_core::capabilities::campaign::WorkflowProposalResult>,
+    pub(crate) show_answer: bool,
     pub(crate) generated_scopes: Option<kuzushi_core::workspace::ScanScopeReview>,
     pub(crate) result_error: Option<String>,
     pub(crate) rejected_available: bool,
@@ -37,6 +44,8 @@ pub(crate) struct StudyContextGeneration {
     pub(crate) map_attempt_id: Option<String>,
     pub(crate) scroll: usize,
     pub(crate) show_options: bool,
+    pub(crate) show_plan: bool,
+    pub(crate) reader_offsets: [usize; 3],
     pub(crate) return_context_editor: bool,
     pub(crate) selected_text_label: Option<String>,
     pub(crate) guidance_editor: Option<crate::app::FieldEditor>,
@@ -51,17 +60,54 @@ impl StudyContextGeneration {
             || self.is_regeneration()
             || self.is_lesson()
             || self.is_scope_context()
+            || self.is_question()
+            || self.is_workflow_proposal()
     }
     pub(crate) fn is_scope_context(&self) -> bool {
         self.context_input.get("scanScopeRef").is_some()
     }
-    fn has_unsaved_guidance(&self) -> bool {
+    pub(super) fn has_unsaved_guidance(&self) -> bool {
         self.guidance_editor.as_ref().is_some_and(|editor| {
-            editor.text() != self.context_input["guidance"].as_str().unwrap_or("")
+            editor.text()
+                != self.context_input[self.editor_field()]
+                    .as_str()
+                    .unwrap_or("")
         })
     }
     pub(crate) fn is_regeneration(&self) -> bool {
         self.generation_tool.as_deref() == Some("threat-model:regenerate")
+    }
+    pub(crate) fn is_question(&self) -> bool {
+        self.generation_tool.as_deref() == Some("threat-model:ask")
+    }
+    pub(crate) fn is_workflow_proposal(&self) -> bool {
+        self.generation_tool.as_deref() == Some("planner:propose")
+    }
+    pub(crate) fn has_text_editor(&self) -> bool {
+        self.is_regeneration()
+            || self.is_lesson()
+            || self.is_question()
+            || self.is_workflow_proposal()
+    }
+    pub(crate) fn editor_field(&self) -> &'static str {
+        if self.is_workflow_proposal() {
+            return "goal";
+        }
+        if self.is_question() {
+            "question"
+        } else {
+            "guidance"
+        }
+    }
+    pub(crate) fn editor_limit(&self) -> usize {
+        if self.is_workflow_proposal() {
+            return 4096;
+        }
+        if self.is_question() {
+            8192
+        } else {
+            2048
+        }
     }
     pub(crate) fn is_scope_proposal(&self) -> bool {
         self.generation_tool.as_deref() == Some("pack:suggest-scopes")
@@ -80,12 +126,41 @@ impl StudyContextGeneration {
         self.generated.is_some()
             || self.generated_scopes.is_some()
             || self.generated_lesson.is_some()
+            || self.generated_answer.is_some()
+            || self.generated_proposal.is_some()
     }
     pub(crate) fn preparation_count(&self) -> usize {
         self.receipt
             .as_ref()
             .map(|r| r.preparation_jobs.len())
             .unwrap_or_else(|| self.preparation_jobs.as_array().map_or(0, Vec::len))
+    }
+
+    pub(crate) fn supports_result_overview(&self) -> bool {
+        self.supports_rejected_retention()
+            && !self.is_scope_context()
+            && (self.generated.is_some() || self.result_error.is_some())
+    }
+
+    pub(crate) fn shows_result_plan(&self) -> bool {
+        self.show_plan && !self.show_options
+    }
+
+    fn reader_index(&self) -> usize {
+        if self.show_options {
+            2
+        } else if self.show_plan {
+            1
+        } else {
+            0
+        }
+    }
+
+    fn select_reader(&mut self, show_plan: bool, show_options: bool) {
+        self.reader_offsets[self.reader_index()] = self.scroll;
+        self.show_plan = show_plan;
+        self.show_options = show_options;
+        self.scroll = self.reader_offsets[self.reader_index()];
     }
     pub(crate) fn record_receipt(&mut self, receipt: ContextStudyReceipt) {
         self.use_brief_guidance = receipt.brief_guidance.is_some();
@@ -98,6 +173,8 @@ impl StudyContextGeneration {
         self.receipt = Some(receipt);
         self.scroll = 0;
         self.show_options = false;
+        self.show_plan = false;
+        self.reader_offsets = [0; 3];
     }
     pub(crate) fn approved(&self, config: &BatchScanConfig) -> bool {
         let Some((receipt, allowance)) = self.receipt.as_ref().zip(config.study.allowance.as_ref())
@@ -141,6 +218,12 @@ impl StudyContextGeneration {
     }
 
     fn special_action(&self, config: &BatchScanConfig) -> Option<&'static str> {
+        if self.is_workflow_proposal() {
+            return Some(self.workflow_proposal_action(config));
+        }
+        if self.is_question() {
+            return Some(self.question_action(config));
+        }
         if self.is_scope_proposal() {
             return Some(self.scope_proposal_action(config));
         }
@@ -201,6 +284,18 @@ impl ShellApp {
     }
 
     pub(super) fn handle_context_generation_key(&mut self, code: KeyCode) -> InputUpdate {
+        if code == KeyCode::Esc && self.context_generation().is_some_and(|g| g.show_answer) {
+            self.router
+                .campaign_mut()
+                .batch_scan_config
+                .as_mut()
+                .unwrap()
+                .context_generation
+                .as_mut()
+                .unwrap()
+                .show_answer = false;
+            return InputUpdate::handled();
+        }
         if let Some(update) = self.context_brief_key(code) {
             return update;
         }
@@ -226,9 +321,19 @@ impl ShellApp {
                 self.open_model_picker()
             }
             KeyCode::Tab => self.toggle_context_options(),
+            KeyCode::Char('p')
+                if self
+                    .context_generation()
+                    .is_some_and(|g| g.supports_result_overview()) =>
+            {
+                self.toggle_context_result_plan()
+            }
             KeyCode::Char('G')
                 if self.context_generation().is_some_and(|generation| {
-                    generation.is_regeneration() || generation.is_lesson()
+                    generation.is_regeneration()
+                        || generation.is_lesson()
+                        || generation.is_question()
+                        || generation.is_workflow_proposal()
                 }) =>
             {
                 self.edit_regeneration_guidance()
@@ -254,8 +359,19 @@ impl ShellApp {
             .as_mut()
             .and_then(|config| config.context_generation.as_mut())
         {
-            generation.show_options = !generation.show_options;
-            generation.scroll = 0;
+            generation.select_reader(generation.show_plan, !generation.show_options);
+        }
+    }
+
+    fn toggle_context_result_plan(&mut self) {
+        if let Some(generation) = self
+            .router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .and_then(|config| config.context_generation.as_mut())
+        {
+            generation.select_reader(!generation.show_plan || generation.show_options, false);
         }
     }
 
@@ -268,6 +384,12 @@ impl ShellApp {
         };
         if generation.is_lesson() {
             return self.inspect_generated_lesson();
+        }
+        if generation.is_question() {
+            return self.inspect_question_answer();
+        }
+        if generation.is_workflow_proposal() {
+            return self.inspect_workflow_proposal();
         }
         if generation.is_scope_proposal() {
             return self.inspect_generated_scopes();
@@ -292,6 +414,25 @@ impl ShellApp {
     }
 
     fn close_context_generation(&mut self) {
+        if self.keep_model_study_choices() {
+            return;
+        }
+        if self
+            .context_generation()
+            .is_some_and(|g| g.is_workflow_proposal())
+        {
+            self.retain_workflow_proposal();
+            self.close_batch_config();
+            self.set_info_notice(
+                "plan",
+                "Proposal draft kept. /plan reopens it without making a request.",
+            );
+            return;
+        }
+        if self.context_generation().is_some_and(|g| g.is_question()) {
+            self.close_batch_config();
+            return;
+        }
         if self
             .context_generation()
             .is_some_and(|generation| generation.is_lesson())
@@ -348,6 +489,12 @@ impl ShellApp {
         config: &BatchScanConfig,
         generation: &StudyContextGeneration,
     ) -> InputUpdate {
+        if generation.generated_answer.is_some() {
+            return self.inspect_question_answer();
+        }
+        if generation.generated_proposal.is_some() {
+            return self.inspect_workflow_proposal();
+        }
         if generation.generated_lesson.is_some() {
             return self.inspect_generated_lesson();
         }
@@ -444,7 +591,7 @@ impl ShellApp {
             picker.selected = Some(reference);
             picker.preview = None;
             picker.detail_scroll = 0;
-            picker.raw = false;
+            picker.text_view = super::StudyContextTextView::Summary;
             picker.diagram = None;
             picker.diagram_visible = false;
         }
@@ -469,6 +616,9 @@ impl ShellApp {
         self.retain_lesson_study();
         self.router.campaign_mut().batch_scan_config = None;
         self.open_batch_results(&receipt.campaign_id);
+        self.router.answers_mut().focus = crate::app::AnswerFocus::Workspace;
+        self.set_input_mode(crate::app::InputMode::Navigate);
+        self.clear_notice();
         self.router.campaign_mut().notice = Some(notice);
         InputUpdate::handled()
     }

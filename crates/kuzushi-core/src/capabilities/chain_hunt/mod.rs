@@ -12,6 +12,7 @@
 mod chain_finding;
 mod hunt_prompt;
 mod hunt_result;
+mod inputs;
 mod validate;
 
 use anyhow::{Context, Result};
@@ -23,16 +24,48 @@ use crate::modules::ToolExecutionContext;
 use crate::runtime::AgentRuntime;
 use crate::structured_output::CostedStructuredJson;
 
-const DEFAULT_MAX_CHAINS: usize = 8;
-
 pub fn execute_triage_chain_hunt(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let runtime = runtime.context(
-        "triage:chain-hunt requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
+    ctx.ensure_active()?;
+    let (workspace, store) = relationship_handles(ctx)?;
+    let limits = inputs::ChainHuntLimits::from_input(&input)?;
+    let inputs = inputs::relationship_inputs(store, &limits)?;
+    let confirmed = &inputs.confirmed;
+    if confirmed.len() < 2 {
+        return Ok(hunt_result::empty_chain_hunt_result(confirmed.len()));
+    }
+    let runtime = runtime.context("triage:chain-hunt requires an agent runtime")?;
+    let model = resolve_chain_hunt_model(&input, ctx)?;
+    let request = hunt_prompt::chain_hunt_request(
+        &model,
+        workspace.root(),
+        confirmed,
+        &inputs.prior,
+        &limits,
     )?;
+    let by_fingerprint = fingerprint_index(confirmed);
+    let hunted =
+        hunt_prompt::query_chain_hunt(runtime, request, limits.max_chains, &by_fingerprint)?;
+    ctx.ensure_active()?;
+    inputs::ensure_members_still_confirmed(store, &hunted.value.chains)?;
+    let persisted = persist_chain_findings(&hunted, ctx, workspace)?;
+    Ok(hunt_result::chain_hunt_result(
+        &hunted,
+        persisted,
+        confirmed.len(),
+        &inputs.coverage,
+    ))
+}
+
+fn relationship_handles<'a>(
+    ctx: &'a ToolExecutionContext<'_>,
+) -> Result<(
+    &'a crate::WorkspaceTarget,
+    &'a crate::findings::FindingStore,
+)> {
     let workspace = ctx
         .workspace
         .context(crate::workspace::active_workspace_required_message(
@@ -41,22 +74,7 @@ pub fn execute_triage_chain_hunt(
     let store = ctx
         .findings_store
         .context("triage:chain-hunt requires the findings store")?;
-    let confirmed = super::chains::confirmed_findings(store)?;
-    if confirmed.len() < 2 {
-        return Ok(hunt_result::empty_chain_hunt_result(confirmed.len()));
-    }
-    let prior = prior_chain_findings(store)?;
-    let max_chains = max_chains_from_input(&input)?;
-    let model = resolve_chain_hunt_model(&input, ctx)?;
-    let request = hunt_prompt::chain_hunt_request(&model, workspace.root(), &confirmed, &prior);
-    let by_fingerprint = fingerprint_index(&confirmed);
-    let hunted = hunt_prompt::query_chain_hunt(runtime, request, max_chains, &by_fingerprint)?;
-    let persisted = persist_chain_findings(&hunted, ctx, workspace)?;
-    Ok(hunt_result::chain_hunt_result(
-        &hunted,
-        persisted,
-        confirmed.len(),
-    ))
+    Ok((workspace, store))
 }
 
 /// A member-resolved model proposal: every member resolved to a real
@@ -76,6 +94,8 @@ struct MemberRef {
     file_path: String,
     start_line: u32,
     severity: Severity,
+    finding_id: Option<i64>,
+    scan_id: Option<String>,
 }
 
 struct HuntedChains {
@@ -113,23 +133,4 @@ fn persist_chain_findings(
         .map(chain_finding::model_chain_finding)
         .collect();
     crate::findings::persist_tool_findings(ctx, workspace.root(), &findings)
-}
-
-fn prior_chain_findings(store: &crate::findings::FindingStore) -> Result<Vec<Finding>> {
-    Ok(store
-        .list_all_findings()?
-        .into_iter()
-        .filter(|finding| finding.tool.trim().eq_ignore_ascii_case("chains"))
-        .collect())
-}
-
-fn max_chains_from_input(input: &Value) -> Result<usize> {
-    let Some(value) = input.get("maxChains") else {
-        return Ok(DEFAULT_MAX_CHAINS);
-    };
-    let max = value
-        .as_u64()
-        .context("triage:chain-hunt: maxChains must be a positive integer")?;
-    anyhow::ensure!(max > 0, "triage:chain-hunt: maxChains must be positive");
-    Ok(max as usize)
 }

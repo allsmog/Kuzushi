@@ -1,6 +1,7 @@
 use super::bounded_fs as fs;
 use super::python_dependency::python_dependency_name;
 use super::toml_manifest::toml_value_at;
+use super::SbomInputs;
 use super::{relative_display, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -13,9 +14,9 @@ pub(super) fn is_pyproject_toml(path: &Path) -> bool {
         .is_some_and(|name| name == "pyproject.toml")
 }
 
-pub(super) fn pyproject_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn pyproject_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse pyproject.toml")?;
     let source = relative_display(target, path);
     Ok(python_dependency_names(&value)

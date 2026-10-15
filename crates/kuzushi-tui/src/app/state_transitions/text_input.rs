@@ -66,6 +66,7 @@ impl ShellApp {
             return update;
         }
         let normalised = normalise_paste_text(text);
+        self.leave_help_overlay_for_paste();
         self.leave_context_history_for_paste();
         self.close_logs_reader_for_paste();
         self.leave_setup_details_for_paste();
@@ -80,18 +81,27 @@ impl ShellApp {
     }
 
     fn paste_preflight(&self, text: &str) -> Option<InputUpdate> {
-        if self.editor().paste_inspection().is_some() {
+        if self.editor().paste_inspection().is_some() || self.budget_halt_owns_input() {
             return Some(InputUpdate::handled());
         }
         if text.is_empty() {
             return Some(InputUpdate::ignored());
         }
-        let confirmation = self.advisory().pending_confirm.is_some()
+        self.confirmation_owns_paste().then(InputUpdate::handled)
+    }
+
+    fn leave_help_overlay_for_paste(&mut self) {
+        if matches!(self.shell_view(), ShellView::Help | ShellView::Keymap) {
+            self.go_back();
+        }
+    }
+
+    fn confirmation_owns_paste(&self) -> bool {
+        self.advisory().pending_confirm.is_some()
             || matches!(
                 self.shell_view(),
                 ShellView::QuitConfirm | ShellView::ConfirmDialog
-            );
-        confirmation.then(InputUpdate::handled)
+            )
     }
 
     fn prepare_picker_for_paste(&mut self) -> bool {
@@ -109,6 +119,9 @@ impl ShellApp {
     }
 
     fn capture_modal_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.capture_primary_field_paste(text) {
+            return Some(InputUpdate::handled());
+        }
         if self.paste_lesson_field(text)
             || self.paste_relationship_note(text)
             || self.capture_existing_context_paste(text)
@@ -120,8 +133,13 @@ impl ShellApp {
         }
         self.capture_picker_editor_paste(text)
     }
+    fn capture_primary_field_paste(&mut self, text: &str) -> bool {
+        self.paste_browser_option(text) || self.insert_source_review_paste(text)
+    }
     fn capture_existing_context_paste(&mut self, text: &str) -> bool {
-        self.capture_brief_paste(text)
+        self.study_draft_recovery_open()
+            || self.capture_context_case_name_paste(text)
+            || self.capture_brief_paste(text)
             || self.capture_bound_brief_paste()
             || self.capture_regeneration_guidance_paste(text)
             || self.capture_context_edit_paste(text)

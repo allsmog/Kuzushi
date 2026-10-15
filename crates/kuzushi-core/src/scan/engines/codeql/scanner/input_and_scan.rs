@@ -14,7 +14,7 @@ impl CodeqlScanner {
         scanner.build_mode = optional_string_any(input, &["buildMode", "build_mode"])
             .map(|mode| crate::codeql_build_mode::normalize_codeql_build_mode(&mode))
             .transpose()?;
-        scanner.threads = positive_u32(input, "threads")?;
+        scanner.threads = positive_u32(input, "threads")?.or(scanner.threads);
         scanner.ram = positive_u32(input, "ram")?;
         scanner.command_timeout = crate::bounded_subprocess::timeout_from_input(
             input,

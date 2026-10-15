@@ -10,16 +10,22 @@ pub(crate) fn run_recon_import_httpx(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<ReconReport> {
+    check_import_cancellation(ctx)?;
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("recon:import"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "recon:import",
+        ))?;
     let (path, body) = read_jsonl_path(input, "recon:import httpx needs a `path` field")?;
     let mut context = ReconImportContext::open(workspace)?;
     let record_count = body.lines().filter(|line| !line.trim().is_empty()).count();
     for (lineno, line) in body.lines().enumerate() {
-        ingest_httpx_line(&mut context, line, lineno)?;
+        check_import_cancellation(ctx)
+            .and_then(|_| ingest_httpx_line(&mut context, line, lineno))
+            .map_err(|error| context.partial_import_error(error))?;
     }
-    append_httpx_import_summary(&mut context, &path, record_count)?;
+    append_httpx_import_summary(&mut context, &path, record_count)
+        .map_err(|error| context.partial_import_error(error))?;
     context.into_report(TOOL, path.display().to_string())
 }
 
@@ -152,14 +158,21 @@ fn httpx_note_payload(entry: &Value) -> Value {
 }
 
 fn default_port_for(entry: &Value) -> u16 {
-    if httpx_scheme(entry) == "https" { 443 } else { 80 }
+    if httpx_scheme(entry) == "https" {
+        443
+    } else {
+        80
+    }
 }
 
 fn httpx_scheme(entry: &Value) -> String {
     string_field(entry, "scheme")
         .or_else(|| {
-            string_field(entry, "url")
-                .and_then(|url| url::Url::parse(&url).ok().map(|parsed| parsed.scheme().to_string()))
+            string_field(entry, "url").and_then(|url| {
+                url::Url::parse(&url)
+                    .ok()
+                    .map(|parsed| parsed.scheme().to_string())
+            })
         })
         .unwrap_or_else(|| "http".to_string())
 }
@@ -222,9 +235,14 @@ mod port_tests {
     #[test]
     fn out_of_range_ports_are_dropped_not_clamped() {
         // Clamping 70000 would mint a real-looking port-65535 service.
-        assert_eq!(httpx_port(&json!({ "port": 70000, "url": "https://a.test" })), 443);
+        assert_eq!(
+            httpx_port(&json!({ "port": 70000, "url": "https://a.test" })),
+            443
+        );
         assert_eq!(httpx_port(&json!({ "port": 8443 })), 8443);
-        assert_eq!(httpx_port(&json!({ "port": "70000", "url": "http://a.test" })), 80);
+        assert_eq!(
+            httpx_port(&json!({ "port": "70000", "url": "http://a.test" })),
+            80
+        );
     }
 }
-

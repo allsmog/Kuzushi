@@ -6,6 +6,33 @@ use kuzushi_core::findings::{
 use kuzushi_core::{Finding, Severity, StaticProofState, TriageOutcome, TriageVerdict};
 
 #[test]
+fn repeated_runs_from_one_source_do_not_become_independent_corroboration() {
+    let mut candidate = Finding::new_tool(
+        "owned",
+        "repeat",
+        "note.md",
+        1,
+        None,
+        Severity::Low,
+        "Owned repeated observation",
+    );
+    candidate.corroboration_count = 1;
+    candidate.sources = ["first", "middle", "latest"]
+        .into_iter()
+        .map(|run| kuzushi_core::findings::FindingSource {
+            tool: "owned".into(),
+            vuln_source: None,
+            source_signature: "note.md:1".into(),
+            first_scan_id: run.into(),
+            last_scan_id: run.into(),
+            first_seen_at: "1000".into(),
+            last_seen_at: "1000".into(),
+        })
+        .collect();
+    assert_eq!(evidence_state_label(&candidate), "source-linked");
+}
+
+#[test]
 fn review_state_separates_terminal_decisions_from_needs_review() {
     let mut finding = Finding::new_tool(
         "semgrep",

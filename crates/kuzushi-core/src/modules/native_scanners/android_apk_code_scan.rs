@@ -76,6 +76,7 @@ struct CodeScanOutcome {
     rules_dir: PathBuf,
     ignore_path: Option<PathBuf>,
     findings: Vec<Finding>,
+    scan_errors: Vec<String>,
 }
 
 fn scan_with_android_rules(
@@ -87,16 +88,30 @@ fn scan_with_android_rules(
     let rules_dir = materialize_rules(workspace_root)?;
     let ignore_path = materialize_semgrepignore(workspace_root, &scan_root, input)?;
     let scanner = semgrep_with_rules(input, &rules_dir);
-    let mut findings = ctx
-        .with_cancellation(|cancel| scanner.scan_with_cancel(&scan_root, cancel))
+    let scanner = configured_android_scanner(input, scanner)?;
+    let scan = ctx
+        .with_cancellation(|cancel| scanner.scan_outcome_with_cancel(&scan_root, cancel))
         .map_err(|error| anyhow::anyhow!("semgrep failed: {error}"))?;
+    let mut findings = scan.findings;
     rebrand_findings(&mut findings);
     Ok(CodeScanOutcome {
         scan_root,
         rules_dir,
         ignore_path,
         findings,
+        scan_errors: scan.scan_errors,
     })
+}
+
+fn configured_android_scanner(
+    input: &Value,
+    scanner: SemgrepScanner,
+) -> Result<crate::scan::ConfiguredSemgrepScanner> {
+    let mut value = json!({"binary":scanner.binary,"config":scanner.config});
+    if let Some(timeout) = input.get("timeoutMs").or_else(|| input.get("timeout_ms")) {
+        value["timeoutMs"] = timeout.clone();
+    }
+    crate::scan::ConfiguredSemgrepScanner::from_tool_input(&value)
 }
 
 const DEFAULT_SEMGREPIGNORE: &str =
@@ -236,6 +251,7 @@ fn code_scan_output(outcome: &CodeScanOutcome, persisted: Option<GenericPersiste
     );
     json!({
         "ok": true,
+        "status":if outcome.scan_errors.is_empty(){"completed"}else{"partial"},
         "summary": summary,
         "output": summary,
         "data": {
@@ -244,10 +260,11 @@ fn code_scan_output(outcome: &CodeScanOutcome, persisted: Option<GenericPersiste
             "semgrepignorePath": outcome.ignore_path.as_ref().map(|p| p.display().to_string()),
             "rulePackFiles": ANDROID_RULE_FILES.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
             "findings": outcome.findings,
+            "scanErrors":outcome.scan_errors,
             "persisted": persisted,
         },
-        "warnings": [],
-        "errors": [],
+        "warnings": outcome.scan_errors,
+        "errors": outcome.scan_errors,
     })
 }
 

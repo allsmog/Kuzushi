@@ -1,4 +1,4 @@
-use super::collection::collect_entry_points;
+use super::collection::collect_entry_points_cancellable;
 use super::domain::*;
 use super::persistence::*;
 use super::source_identity::*;
@@ -8,18 +8,33 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
 pub(crate) fn refresh_entry_point_catalog(target: &Path) -> Result<(EntryPointCatalog, PathBuf)> {
+    refresh_entry_point_catalog_cancellable(target, &|| false, || Ok(()))
+}
+
+/// Refuse stale or cancelled work before replacing the previous catalog.
+pub(crate) fn refresh_entry_point_catalog_cancellable(
+    target: &Path,
+    canceled: &dyn Fn() -> bool,
+    before_publish: impl FnOnce() -> Result<()>,
+) -> Result<(EntryPointCatalog, PathBuf)> {
+    super::cancellation::ensure_active(canceled)?;
     let snapshot = read_context_snapshot(target)?.with_context(|| {
         format!(
-            "entry-points:extract requires {} — run `context:build` first",
+            "entry-points:extract requires {}; run `context:build` first",
             crate::context::context_snapshot_path(target).display()
         )
     })?;
-    validate_snapshot_for_current_target(target, &snapshot)?;
-    let catalog = catalog_from_snapshot(target, &snapshot)?;
-    validate_catalog(target, &catalog, &snapshot)?;
-    let path = write_entry_point_catalog(target, &catalog)?;
-    revalidate_snapshot_source(target, &snapshot.identity)?;
+    validate_snapshot_target(target, &snapshot.identity)?;
+    validate_current_source_identity_cancellable(target, &snapshot.identity, canceled)?;
+    let catalog = catalog_from_snapshot(target, &snapshot, canceled)?;
+    validate_catalog_cancellable(target, &catalog, &snapshot, canceled)?;
+    let path = write_entry_point_catalog_after_validation(target, &catalog, || {
+        before_publish()?;
+        revalidate_snapshot_source_cancellable(target, &snapshot.identity, canceled)?;
+        super::cancellation::ensure_active(canceled)
+    })?;
     Ok((catalog, path))
 }
 
@@ -46,10 +61,11 @@ pub(crate) fn ensure_current_entry_point_catalog(
             });
         }
     }
-    let catalog = catalog_from_snapshot(target, &snapshot)?;
+    let catalog = catalog_from_snapshot(target, &snapshot, &|| false)?;
     validate_catalog(target, &catalog, &snapshot)?;
-    write_entry_point_catalog(target, &catalog)?;
-    revalidate_snapshot_source(target, &snapshot.identity)?;
+    write_entry_point_catalog_after_validation(target, &catalog, || {
+        revalidate_snapshot_source(target, &snapshot.identity)
+    })?;
     Ok(EntryPointCatalogResolution {
         catalog: Some(catalog),
         status: "refreshed".to_string(),
@@ -150,6 +166,16 @@ pub(crate) fn validate_catalog(
     catalog: &EntryPointCatalog,
     snapshot: &ContextSnapshotDocument,
 ) -> Result<()> {
+    validate_catalog_cancellable(target, catalog, snapshot, &|| false)
+}
+
+fn validate_catalog_cancellable(
+    target: &Path,
+    catalog: &EntryPointCatalog,
+    snapshot: &ContextSnapshotDocument,
+    canceled: &dyn Fn() -> bool,
+) -> Result<()> {
+    super::cancellation::ensure_active(canceled)?;
     validate_catalog_shape(target, catalog)?;
     validate_catalog_snapshot_identity(catalog, &snapshot.identity)?;
     anyhow::ensure!(
@@ -157,7 +183,7 @@ pub(crate) fn validate_catalog(
         "{}",
         coverage_refusal(&catalog.snapshot_coverage)
     );
-    let expected = collect_entry_points(&snapshot.value)?;
+    let expected = collect_entry_points_cancellable(&snapshot.value, canceled)?;
     anyhow::ensure!(
         catalog.entry_points == expected,
         "entry-point catalog rows do not match the authenticated context snapshot"
@@ -249,8 +275,9 @@ fn validate_catalog_payload(catalog: &EntryPointCatalog) -> Result<()> {
 fn catalog_from_snapshot(
     target: &Path,
     snapshot: &ContextSnapshotDocument,
+    canceled: &dyn Fn() -> bool,
 ) -> Result<EntryPointCatalog> {
-    let entry_points = collect_entry_points(&snapshot.value)?;
+    let entry_points = collect_entry_points_cancellable(&snapshot.value, canceled)?;
     let built_at_ms = now_ms()?;
     let sha256 = entry_points_sha256(&entry_points)?;
     Ok(EntryPointCatalog {

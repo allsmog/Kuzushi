@@ -1,0 +1,177 @@
+name: Inspect and rename finite context cases before installed native execution
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | context-prepared
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Common policy context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | context-imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | fresh-study
+keys: Down Down Down Enter
+require-live-snap: 25 CHOOSE STUDY CONTEXT | common-picker
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | common-inspection
+keys: b
+require-live-snap: 25 CONTEXT CASES | baseline-case
+keys: n C-u
+type: Baseline policy
+keys: Escape n
+require-live-snap: 20 NAME CONTEXT CASE | retained-name
+expect: Baseline policy
+keys: Enter
+require-live-snap: 20 CONTEXT CASES | renamed-baseline
+expect: Baseline policy
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | selected-baseline-inspection
+keys: Escape
+require-live-snap: 20 CONTEXT CASES | inspection-return
+keys: a Enter
+require-live-snap: 25 CONTEXT SUMMARY | candidate-base
+keys: e Enter C-u
+paste-file: @ART/candidate-context.txt
+keys: C-s
+require-live-snap: 20 REVIEW CONTEXT CHANGES | candidate-diff
+keys: Enter
+require-live-snap: 25 Edited copy saved | inactive-copy
+keys: Enter
+require-live-snap: 25 Owner context for harmless | candidate-inspection
+keys: +
+require-live-snap: 20 2 cases | candidate-case
+keys: n C-u
+paste-file: @ART/invalid-name.txt
+keys: Enter
+require-live-snap: 20 cannot contain control | rejected-name
+keys: C-End C-u
+type: Owner context
+keys: Enter
+require-live-snap: 20 CONTEXT CASES | renamed-candidate
+expect: Owner context
+ask: Does the name field own typing and multiline paste, retain its unsaved draft on Back and refuse an invalid label without changing context, baseline or spending?
+keys: Enter
+require-live-snap: 25 Owner context for harmless | exact-candidate
+keys: Up Enter
+require-live-snap: 25 CONTEXT SUMMARY | duplicate-inspection
+keys: a
+require-live-snap: 20 already included | duplicate-refused
+keys: Escape
+require-live-snap: 20 CONTEXT CASES | candidate-kept
+expect: Owner context
+resize: 160x48
+require-live-snap: 15 CONTEXT CASES | cases-160x48
+resize: 96x89
+require-live-snap: 15 CONTEXT CASES | cases-96x89
+resize: 80x24
+require-live-snap: 15 CONTEXT CASES | cases-80x24
+resize: 60x20
+require-live-snap: 15 CONTEXT CASES | cases-60x20
+resize: 40x12
+require-live-snap: 15 CONTEXT CASES | cases-40x12
+keys: n
+require-live-snap: 15 NAME CONTEXT CASE | name-40x12
+expect: Owner context
+keys: Escape
+resize: 120x36
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | finite-workload
+expect: 2 contexts · 6 fixed jobs
+keys: Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | protected-review
+type: 1
+keys: Enter
+keys: Down Down Down Down Enter
+require-live-snap: 20 CONTEXT CASES | matrix-ready
+keys: L
+require-live-snap: 35 Matrix draft ready | frozen-matrix
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+expect: Baseline policy
+expect: Owner context
+expect: 60000 ms per job
+keys: End
+require-live-snap: 20 y approve | approval-tail
+expect: Protected review calls: 1
+ask: Does approval identify both named exact contexts, the baseline, six jobs and protected review, with no implicit extra permutations or later follow-up?
+keys: y
+require-live-snap: 25 Approval saved | approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 6 completed | completed
+keys: a Down Down Down Down Down Down Down Down Down Down Enter v
+require-live-snap: 25 observed 3 / 3 | matrix-results
+expect: Baseline policy
+keys: Down
+require-live-snap: 25 Owner context | candidate-results
+ask: Are case labels, per-case denominators and uncertainty readable after six actual installed-scanner jobs, without claiming context caused different findings?
+keys: b
+require-live-snap: 20 Choose Baseline policy pass | baseline-pass
+keys: Enter
+require-live-snap: 20 Baseline pass selected | baseline-selected
+keys: Enter Down Down
+require-live-snap: 20 Pass 3 | candidate-pass
+keys: Enter
+require-live-snap: 25 seen again | context-comparison
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 20 FULL SOURCE & CONTEXT REFERENCES | comparison-conditions
+keys: Escape
+require-live-snap: 20 Pass 3 | comparison-return
+keys: Escape
+require-live-snap: 20 CONTEXT CASES | comparison-case
+keys: R
+require-live-snap: 25 Context cases: 2 | matrix-report
+expect: 0 committed / 1 calls
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 6 completed | restored-jobs
+nav-mode:
+keys: a Down Down Down Down Down Down Down Down Down Down Enter
+require-live-snap: 25 ┌ CONTEXT CASES | restored-cases
+expect: Baseline policy
+expect: Owner context
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | restored-inspection
+keys: Escape
+require-live-snap: 20 CONTEXT CASES | restored-return
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve names, baseline, exact revisions and spending while case inspection starts no further job or model call?
+keys: C-c
+require-exit: 10

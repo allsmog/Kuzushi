@@ -2,9 +2,14 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn reduce_planner_start(&mut self, goal: &str) -> Vec<ShellEffect> {
-        self.prepare_planner_start(goal)
-            .map(|start| vec![ShellEffect::StartPlanner(start)])
-            .unwrap_or_default()
+        if goal.trim().is_empty() && self.resume_workflow_proposal() {
+            return Vec::new();
+        }
+        let Some(start) = self.prepare_planner_start(goal) else {
+            return Vec::new();
+        };
+        self.prepare_bounded_workflow_proposal(&start.goal, None);
+        Vec::new()
     }
 
     pub(crate) fn reduce_phase_intent(
@@ -28,7 +33,7 @@ impl ShellApp {
                 self.log(
                     "phase",
                     format!(
-                        "VIEW {} · REALITY {} — finish or explicitly skip the missing prerequisite before submitting {} work",
+                        "VIEW {} · REALITY {} · finish or explicitly skip the missing prerequisite before submitting {} work",
                         selected_phase.label(),
                         reality.label(),
                         selected_phase.label()
@@ -37,13 +42,17 @@ impl ShellApp {
                 return Vec::new();
             }
         }
-        let goal = self.phase_intent_planner_goal(selected_phase, text);
-        let Some(mut start) = self.prepare_planner_start(&goal) else {
+        let Some(start) = self.prepare_planner_start(text) else {
             return Vec::new();
         };
-        start.origin_phase = Some(selected_phase);
-        start.phase_intent = Some(selected_phase);
-        vec![ShellEffect::StartPlanner(start)]
+        self.prepare_bounded_workflow_proposal(&start.goal, Some(selected_phase));
+        Vec::new()
+    }
+
+    fn prepare_bounded_workflow_proposal(&mut self, goal: &str, phase: Option<WorkflowPhase>) {
+        if let Err(error) = self.plan_workflow_proposal(goal, phase) {
+            self.set_error_notice("plan", format!("Planning needs a reviewed job: {error:#}"));
+        }
     }
 
     fn phase_intent_has_unresolved_attempt(&mut self, phase: WorkflowPhase) -> bool {
@@ -63,70 +72,16 @@ impl ShellApp {
         }
     }
 
-    fn phase_intent_planner_goal(&self, phase: WorkflowPhase, text: &str) -> String {
-        let tools = self
-            .registry()
-            .discoverable_tools()
-            .filter(|tool| !tool.hidden)
-            .filter(|tool| kuzushi_core::modules::autonomy::tool_phase(&tool.name) == Some(phase))
-            .map(|tool| format!("{} — {}", tool.name, tool.description))
-            .collect::<Vec<_>>();
-        format!(
-            "PHASE INTENT: {}\nOperator intent: {}\nAllowed descriptor tools (choose only from this list):\n{}\nReturn a run_tool change with canonical JSON input. If prerequisites or required values are missing, call request_user_input and continue this same planning turn. Never choose another phase, model, runtime, or tool outside this list.",
-            phase.label(),
-            text.trim(),
-            tools.join("\n")
-        )
-    }
-
     pub(crate) fn dispatch_planner(&mut self, start: PlannerStart) {
-        if self.reject_runtime_launch_while_budget_halted(true, "planner") {
-            return;
-        }
-        let Some(ticket) = self.try_start_exclusive_job(JobKind::Plan, "planner") else {
-            return;
-        };
-        let generation = ticket.generation();
-        let cancel = ticket.cancel.clone();
-        let run_id = kuzushi_core::new_run_id("plan");
-        self.begin_run_cost_tracking(&run_id, true);
-        let session = ActivitySession::for_optional_phase(run_id.clone(), start.origin_phase);
-        self.set_activity(Some(self.capture_run_focus_origin(session)));
-        self.record_session_event(kuzushi_core::session_transcript::SessionEvent::RunStarted {
-            run_id: run_id.clone(),
-            tool_name: "planner:plan".to_string(),
-        });
-        self.set_plan_cancel(Some(cancel.clone()));
-        self.set_planner_running(true);
-        self.set_plan_abort_requested(false);
-        self.log("plan", format!("planning: {}", start.goal));
-        self.set_live_activity(LiveActivity::new(
-            LiveActivityPhase::CallingModel,
-            "plan",
-            "asking model for a structured proposal",
-        ));
-
-        let watchdog_cancel = cancel.clone();
-        let loaded_modules = self.registry().loaded_module_specifiers();
-        let metadata = ProposalRunMetadata {
-            run_id,
-            loaded_modules,
-        };
-        let handle = spawn_planner_job(start, metadata, ticket);
-        self.register_worker_handle_with_watchdog("planner", generation, handle, watchdog_cancel);
+        self.prepare_bounded_workflow_proposal(&start.goal, start.phase_intent);
     }
 
     fn prepare_planner_start(&mut self, goal: &str) -> Option<PlannerStart> {
         let goal = self.accept_planner_goal(goal)?;
-        let model = self.planner_model()?;
-        let cwd = self.planner_target()?;
+        self.planner_model()?;
+        self.planner_target()?;
         Some(PlannerStart {
-            config: self.config().clone(),
-            model,
-            thinking_level: self.session_thinking_level_owned(),
-            cwd,
             goal,
-            origin_phase: self.engagement.current_phase(),
             phase_intent: None,
         })
     }
@@ -136,7 +91,7 @@ impl ShellApp {
         if goal.is_empty() {
             self.log(
                 "error",
-                "/plan requires a goal. Next: /plan focus on SSRF in admin routes",
+                "/plan requires a goal when no draft is kept. Next: /plan prioritize repository context",
             );
             return None;
         }
@@ -184,33 +139,8 @@ impl ShellApp {
     }
 }
 
-fn spawn_planner_job(
-    start: PlannerStart,
-    metadata: ProposalRunMetadata,
-    ticket: JobTicket,
-) -> std::thread::JoinHandle<()> {
-    spawn_job_worker("planner", ticket, move |sink, cancel| {
-        planner_worker(
-            start.config,
-            start.model,
-            start.thinking_level,
-            start.cwd,
-            start.goal,
-            start.phase_intent,
-            metadata,
-            sink,
-            cancel,
-        )
-    })
-}
-
 pub(crate) struct PlannerStart {
-    config: V2Config,
-    model: String,
-    thinking_level: Option<String>,
-    cwd: PathBuf,
     goal: String,
-    origin_phase: Option<WorkflowPhase>,
     phase_intent: Option<WorkflowPhase>,
 }
 
@@ -231,18 +161,18 @@ mod tests {
     }
 
     #[test]
-    fn planner_start_captures_only_an_explicit_guided_phase() {
+    fn free_form_planner_never_implicitly_inherits_the_visible_phase() {
         let mut app = planner_app();
         let manual = app
             .prepare_planner_start("inspect the target")
             .expect("manual planner start");
-        assert_eq!(manual.origin_phase, None);
+        assert_eq!(manual.phase_intent, None);
 
-        app.engagement.set_phase(WorkflowPhase::Prove);
+        app.engagement.set_phase(WorkflowPhase::Review);
         let guided = app
-            .prepare_planner_start("verify the selected finding")
+            .prepare_planner_start("inspect the selected finding")
             .expect("guided planner start");
-        assert_eq!(guided.origin_phase, Some(WorkflowPhase::Prove));
+        assert_eq!(guided.phase_intent, None);
     }
 
     #[test]

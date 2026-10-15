@@ -1,6 +1,127 @@
 use super::*;
 
 #[test]
+fn shared_context_copy_retains_primary_discovery_and_adds_no_overlap() {
+    let mut auth = scope("auth", &["auth"]);
+    auth.rationale = "x".repeat(2048);
+    auth.open_questions = vec!["Which readers need this context?".into()];
+    let original = draft(vec![auth.clone(), scope("app", &["app"])]);
+    let inventory = inventory(&["auth/owned.rs", "app/source.rs"]);
+    let before = original.evaluate(&inventory).unwrap();
+    let (copied, coverage) = original
+        .edited(
+            ScanScopeEdit::CreateSharedContext {
+                scope_id: "auth".into(),
+                shared_scope_id: "common".into(),
+            },
+            &inventory,
+        )
+        .unwrap();
+    assert_eq!(copied.scopes, original.scopes);
+    assert_eq!(copied.shared_scope.as_ref().unwrap().paths, auth.paths);
+    assert_eq!(
+        copied.shared_scope.as_ref().unwrap().rationale,
+        auth.rationale
+    );
+    assert_eq!(
+        copied.shared_scope.as_ref().unwrap().open_questions,
+        auth.open_questions
+    );
+    assert!(!copied.shared_discovery);
+    assert_eq!(coverage.discovery_members, before.discovery_members);
+    assert_eq!(
+        coverage.context_members["common"].files,
+        vec!["auth/owned.rs"]
+    );
+    assert_eq!(
+        (coverage.overlaps.total, coverage.uncovered_files.total),
+        (0, 0)
+    );
+    assert!(original.shared_scope.is_none());
+    let (removed, after) = copied
+        .edited(ScanScopeEdit::RemoveSharedContext, &inventory)
+        .unwrap();
+    assert_eq!(removed, original);
+    assert_eq!(after, before);
+    assert!(copied.shared_scope.is_some());
+}
+
+#[test]
+fn shared_context_replacement_invalid_ids_and_dangling_removal_are_refused() {
+    let original = draft(vec![scope("auth", &["auth"]), scope("app", &["app"])]);
+    let inventory = inventory(&["auth/owned.rs", "app/source.rs"]);
+    for (source, id) in [
+        ("missing", "common"),
+        ("auth", "auth"),
+        ("auth", "../unsafe"),
+    ] {
+        assert!(original
+            .edited(
+                ScanScopeEdit::CreateSharedContext {
+                    scope_id: source.into(),
+                    shared_scope_id: id.into()
+                },
+                &inventory
+            )
+            .is_err());
+    }
+    assert!(original
+        .edited(ScanScopeEdit::RemoveSharedContext, &inventory)
+        .is_err());
+    let (mut copied, _) = original
+        .edited(
+            ScanScopeEdit::CreateSharedContext {
+                scope_id: "auth".into(),
+                shared_scope_id: "common".into(),
+            },
+            &inventory,
+        )
+        .unwrap();
+    assert!(copied
+        .edited(
+            ScanScopeEdit::CreateSharedContext {
+                scope_id: "app".into(),
+                shared_scope_id: "replacement".into()
+            },
+            &inventory
+        )
+        .is_err());
+    copied.scopes[1].shared_dependencies.push("common".into());
+    let before = copied.clone();
+    assert!(copied
+        .edited(ScanScopeEdit::RemoveSharedContext, &inventory)
+        .is_err());
+    assert_eq!(copied, before);
+}
+
+#[test]
+fn enabling_discovery_for_a_context_copy_requires_overlap_acknowledgement() {
+    let original = draft(vec![scope("auth", &["auth"])]);
+    let inventory = inventory(&["auth/owned.rs"]);
+    let (copied, _) = original
+        .edited(
+            ScanScopeEdit::CreateSharedContext {
+                scope_id: "auth".into(),
+                shared_scope_id: "common".into(),
+            },
+            &inventory,
+        )
+        .unwrap();
+    let (enabled, coverage) = copied
+        .edited(
+            ScanScopeEdit::SetSharedDiscovery { enabled: true },
+            &inventory,
+        )
+        .unwrap();
+    assert!(enabled.shared_discovery);
+    assert_eq!(coverage.overlaps.total, 1);
+    assert!(coverage
+        .ensure_acceptable(&ScopeCoverageApproval::default())
+        .is_err());
+    assert!(!copied.shared_discovery);
+}
+
+#[test]
 fn rename_changes_the_label_and_preserves_identity_and_membership() {
     let draft = draft(vec![scope("app", &["app"])]);
     let inventory = inventory(&["app/a.rs"]);

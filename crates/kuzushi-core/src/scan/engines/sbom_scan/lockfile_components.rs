@@ -20,11 +20,12 @@ use super::swift_resolved::{is_swift_resolved, swift_resolved_components};
 use super::uv_lock::{is_uv_lock, uv_lock_components};
 use super::yarn_lock::{is_yarn_lock, yarn_lock_components};
 use super::SbomComponent;
+use super::SbomInputs;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 type LockfileDetector = fn(&Path) -> bool;
-type LockfileComponentReader = fn(&Path, &Path) -> Result<Vec<SbomComponent>>;
+type LockfileComponentReader = fn(&SbomInputs, &Path) -> Result<Vec<SbomComponent>>;
 
 const LOCKFILE_COMPONENT_READERS: &[(LockfileDetector, LockfileComponentReader)] = &[
     (is_bun_lock, bun_lock_components),
@@ -51,7 +52,7 @@ const LOCKFILE_COMPONENT_READERS: &[(LockfileDetector, LockfileComponentReader)]
 ];
 
 pub(super) fn collect_lockfile_components(
-    target: &Path,
+    target: &SbomInputs,
     files: &[PathBuf],
 ) -> Result<Vec<SbomComponent>> {
     files.iter().try_fold(Vec::new(), |mut components, path| {
@@ -60,7 +61,7 @@ pub(super) fn collect_lockfile_components(
     })
 }
 
-fn lockfile_components_for_path(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
+fn lockfile_components_for_path(target: &SbomInputs, path: &Path) -> Result<Vec<SbomComponent>> {
     LOCKFILE_COMPONENT_READERS
         .iter()
         .find(|(matches, _)| matches(path))

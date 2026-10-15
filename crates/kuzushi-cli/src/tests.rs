@@ -898,7 +898,9 @@ mod tests {
         assert_eq!(summary.carry_forward, 1);
         assert_eq!(summary.conflicts, 0);
         let plain = runs_diff_output(diff, false).unwrap();
-        assert!(plain.contains("decisions: identities=1 stored=1 carry_forward=1 conflicts=0"));
+        assert!(plain.contains("Recorded decisions: 1 of 1 finding identities."));
+        assert!(!plain.contains("carry_forward="));
+        assert!(plain.contains("Check decision sources in Review before reusing a verdict."));
     }
 
     fn assert_latest_secret_scan_review(workspace: &WorkspaceTarget, identity: &str) {
@@ -1574,6 +1576,14 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("receipt"));
+        assert_eq!(json["observationCounts"]["notReassessed"], 1);
+        assert_eq!(json["observationSchemaVersion"], 1);
+        assert_eq!(json["legacyClassifications"]["fixEvidence"], false);
+        let plain = runs_diff_output(&diff, false).unwrap();
+        assert!(plain.contains("not_reassessed=1"), "{plain}");
+        assert!(!plain.contains("resolved="), "{plain}");
+        assert!(!plain.contains("Resolved:"), "{plain}");
+        assert!(plain.contains("Absence does not establish a fix."));
         assert_eq!(diff.stable_count(), 1);
         let changed = diff.changed();
         assert_eq!(changed.len(), 1);
@@ -1668,12 +1678,9 @@ mod tests {
             "no run evidence for engine semgrep in the compare scan"
         );
         let plain = runs_diff_output(&diff, false).unwrap();
+        assert!(plain.contains("Not reassessed:"), "{plain}");
         assert!(
-            plain.contains("Not rescanned (absence unproven):"),
-            "{plain}"
-        );
-        assert!(
-            plain.contains("no run evidence for engine semgrep in the compare scan"),
+            plain.contains("scan coverage receipt is unavailable"),
             "{plain}"
         );
     }
@@ -1846,7 +1853,9 @@ mod tests {
         assert_eq!(summary.carry_forward, 1);
         assert_eq!(summary.conflicts, 1);
         let plain = runs_diff_output(&diff, false).unwrap();
-        assert!(plain.contains("decisions: identities=2 stored=2 carry_forward=1 conflicts=1"));
+        assert!(plain.contains("Recorded decisions: 2 of 2 finding identities."));
+        assert!(plain.contains("Differing snapshot verdicts: 1"));
+        assert!(!plain.contains("carry_forward="));
     }
 
     #[test]
@@ -1929,7 +1938,8 @@ mod tests {
         assert_eq!(after_summary.carry_forward, 1);
         assert_eq!(after_summary.conflicts, 0);
         let plain = runs_diff_output(&after_review, false).unwrap();
-        assert!(plain.contains("decisions: identities=1 stored=1 carry_forward=1 conflicts=0"));
+        assert!(plain.contains("Recorded decisions: 1 of 1 finding identities."));
+        assert!(!plain.contains("carry_forward="));
 
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let compare_row = store
@@ -1981,7 +1991,7 @@ mod tests {
 
         let plain = runs_diff_output(&diff, false).unwrap();
         assert!(plain.contains("status: completed -> failed"), "{plain}");
-        assert!(plain.contains("compare run status is failed"), "{plain}");
+        assert!(plain.contains("later run did not complete"), "{plain}");
         assert!(!plain.contains("Fixed"), "{plain}");
     }
 

@@ -5,6 +5,7 @@ pub fn run_carlini_threat_hunt(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     let target = resolve_target(&input, ctx)?;
     crate::workspace::source_snapshot::run_source_bound_tool(
         ctx,
@@ -19,6 +20,7 @@ pub fn run_carlini_threat_hunt_report(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<CarliniThreatHuntReport> {
+    ctx.ensure_active()?;
     let run = prepare_carlini_threat_hunt_run(input, ctx, runtime)?;
     execute_carlini_threat_hunt_run(input, ctx, run)
 }
@@ -181,7 +183,11 @@ fn collect_threat_focused_inventory(
         if files.len() >= max_files {
             break;
         }
-        files.extend(read_threat_focused_snippet(target, &relative, max_bytes_per_file)?);
+        files.extend(read_threat_focused_snippet(
+            target,
+            &relative,
+            max_bytes_per_file,
+        )?);
     }
     Ok(files)
 }
@@ -190,8 +196,8 @@ fn collect_threat_focused_inventory(
 /// regular files stand in for it, in name order and confined to the target;
 /// the caller's file budget still bounds how many are read.
 fn expand_affected_path(target: &Path, relative: PathBuf) -> Vec<PathBuf> {
-    let is_dir = std::fs::symlink_metadata(target.join(&relative))
-        .is_ok_and(|metadata| metadata.is_dir());
+    let is_dir =
+        std::fs::symlink_metadata(target.join(&relative)).is_ok_and(|metadata| metadata.is_dir());
     if !is_dir {
         return vec![relative];
     }

@@ -30,12 +30,14 @@ fn build_source_bound_deterministic_model(
     flavor: BuildFlavor,
 ) -> Result<Value> {
     let target = resolve_target(&input, ctx)?;
-    crate::workspace::source_snapshot::run_source_bound_tool(
+    let snapshot = ResultSnapshot::capture(ctx, flavor.tool_name(), &target)?;
+    let result = snapshot.bind_result(build_deterministic_threat_model(
+        input,
         ctx,
-        flavor.tool_name(),
-        &target,
-        || build_deterministic_threat_model(input, ctx, flavor),
-    )
+        flavor,
+        snapshot.hashes().1,
+    ))?;
+    Ok(snapshot.finish(ctx, flavor.tool_name(), &target, result))
 }
 
 /// Threat modeling is model-backed. The runtime-free deterministic fold is an
@@ -61,19 +63,21 @@ fn build_agentic_threat_model(
     runtime: &dyn AgentRuntime,
     flavor: BuildFlavor,
 ) -> Result<Value> {
-    let input = parse_build_input(&input, ctx, flavor)?;
+    let mut input = parse_build_input(&input, ctx, flavor)?;
     preflight_agentic_build_lineage(&input)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
     let snapshot = register_result_snapshot(ctx, verb, input.workspace_root());
+    input.captured_source_tree_hash = snapshot.as_ref().map(|source| source.hashes().1.to_string());
+    let target = input.workspace_root().to_path_buf();
     let result = if input.is_refine() {
-        refine_threat_model(runtime, ctx, flavor, verb, input)?
+        refine_threat_model(runtime, ctx, flavor, verb, input)
     } else if input.is_staged() {
-        build_staged_threat_model(runtime, ctx, flavor, verb, input)?
+        build_staged_threat_model(runtime, ctx, flavor, verb, input)
     } else {
-        build_single_threat_model(runtime, ctx, flavor, verb, input)?
+        build_single_threat_model(runtime, ctx, flavor, verb, input)
     };
-    Ok(attach_result_snapshot(result, snapshot))
+    finish_result_snapshot(ctx, verb, &target, result, snapshot)
 }
 
 fn preflight_agentic_build_lineage(input: &BuildInput) -> Result<()> {
@@ -155,9 +159,18 @@ fn emit_snapshot_progress(ctx: &ToolExecutionContext<'_>, verb: &str, detail: St
     }
 }
 
-fn attach_result_snapshot(result: Value, snapshot: Option<ResultSnapshot>) -> Value {
+fn finish_result_snapshot(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    target: &Path,
+    result: Result<Value>,
+    snapshot: Option<ResultSnapshot>,
+) -> Result<Value> {
     match snapshot {
-        Some(snapshot) => snapshot.attach(result),
+        Some(snapshot) => {
+            let result = snapshot.bind_result(result)?;
+            Ok(snapshot.finish(ctx, verb, target, result))
+        }
         None => result,
     }
 }
@@ -516,6 +529,7 @@ fn seal_build_document(
         source_bundle.provenance_json(),
         !input.is_refine(),
     );
+    stamp_source_tree_hash(document, input.captured_source_tree_hash.as_deref());
     finalize_document_identity(document, input)?;
     require_complete_security_context_links(document)
 }

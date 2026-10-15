@@ -1,0 +1,63 @@
+name: Saved decisions retain exact observed-source receipts without claiming current-source review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/decision_receipts.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | observed-source-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 AWS Access Key | observed-source-detail
+submit: decision fp Owned public documentation example is intentional
+require-live-snap: 25 recorded observation revision-base-003 | source-bound-save
+expect-not: will carry forward
+require-shell: python3 -B @REPO/scripts/devex/fixtures/decision_receipts.py @TMP_TARGET @ART advance
+require-shell: python3 -B @REPO/scripts/devex/fixtures/decision_receipts.py @TMP_TARGET @ART cli
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | externally-recorded-decisions
+nav-mode:
+keys: Enter
+require-live-snap: 30 Owned receipt needs current-source review | recorded-source-review
+expect: revision-later
+expect: No later observation
+resize: 160x48
+live-snap: source-receipt-160x48
+resize: 96x89
+live-snap: source-receipt-96x89
+resize: 80x24
+live-snap: source-receipt-80x24
+resize: 60x20
+live-snap: source-receipt-60x20
+resize: 40x12
+live-snap: source-receipt-40x12
+keys: NPage
+live-snap: source-receipt-40x12-detail
+keys: NPage
+live-snap: source-receipt-40x12-next
+keys: NPage
+live-snap: source-receipt-40x12-source
+keys: NPage
+require-live-snap: 20 Decision commit | source-receipt-40x12-commit
+expect: revision-later
+keys: NPage
+require-live-snap: 20 SOURCE | source-receipt-40x12-excerpt
+ask: Does a saved decision name the observed source, preserve its historical basis on a dirty checkout, and avoid implying current-code assessment or automatic reuse?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/decision_receipts.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | recovered-source-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned receipt needs current-source review | recovered-source-detail
+expect: revision-later
+require-shell: python3 -B @REPO/scripts/devex/fixtures/decision_receipts.py @TMP_TARGET @ART verify
+ask: Does no-color restart retain four observations, three explicit human decisions and the original source references, with no provider work?
+keys: C-c
+require-exit: 10

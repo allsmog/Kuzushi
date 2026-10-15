@@ -750,10 +750,15 @@ mod model_preflight_tests {
 
     struct AuthenticationMissingRuntime {
         preflight_calls: AtomicUsize,
+        binding: Option<crate::allowance::AllowanceBinding>,
     }
 
     #[async_trait::async_trait]
     impl AgentRuntime for AuthenticationMissingRuntime {
+        fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+            self.binding.as_ref()
+        }
+
         fn preflight_model_blocking(&self, _model: &str) -> Result<()> {
             self.preflight_calls.fetch_add(1, Ordering::SeqCst);
             Err(anyhow::Error::new(RuntimeFailure::new(
@@ -769,6 +774,44 @@ mod model_preflight_tests {
         }
     }
 
+    fn authentication_fixture_allowance(
+        workspace: &crate::WorkspaceTarget,
+        model: &str,
+    ) -> crate::allowance::AllowanceBinding {
+        use crate::allowance::{
+            AllowanceApprovalV1, AllowanceBinding, AllowanceLimits, AllowanceWork,
+            InvestigationWork,
+        };
+        let ledger =
+            std::sync::Arc::new(crate::SpendLimiter::open(workspace.findings_db_path()).unwrap());
+        ledger
+            .approve_allowance(&AllowanceApprovalV1 {
+                schema_version: 1,
+                investigation_id: "authentication-fixture".into(),
+                expected_revision: 0,
+                model: model.into(),
+                limits: AllowanceLimits {
+                    max_provider_calls: 2,
+                    protected_review_calls: 1,
+                },
+                reason: "Explicit offline authentication fixture; no provider request".into(),
+                work_plan: None,
+            })
+            .unwrap();
+        AllowanceBinding::new(
+            ledger,
+            AllowanceWork {
+                investigation_id: "authentication-fixture".into(),
+                revision: 1,
+                work_id: "scan-one".into(),
+                run_id: "authentication-preflight".into(),
+                model: model.into(),
+                work: InvestigationWork::Discovery,
+            },
+        )
+        .unwrap()
+    }
+
     #[test]
     fn model_authentication_is_rejected_before_executor_start() {
         let target = tempfile::tempdir().unwrap();
@@ -777,6 +820,10 @@ mod model_preflight_tests {
         config.model = Some("openai:gpt-test".to_string());
         let runtime = AuthenticationMissingRuntime {
             preflight_calls: AtomicUsize::new(0),
+            binding: Some(authentication_fixture_allowance(
+                &workspace,
+                "openai:gpt-test",
+            )),
         };
         let ctx = ToolExecutionContext {
             config: &config,
@@ -814,6 +861,7 @@ mod model_preflight_tests {
         let store = crate::findings::FindingStore::open(workspace.findings_db_path()).unwrap();
         let runtime = AuthenticationMissingRuntime {
             preflight_calls: AtomicUsize::new(0),
+            binding: None,
         };
         let ctx = ToolExecutionContext {
             config: &config,
@@ -1603,7 +1651,8 @@ fn normalize_executable_path(tool_name: &str, option_name: &str, path: &str) -> 
     }
     if path.contains(std::path::MAIN_SEPARATOR) {
         let canonical = std::path::Path::new(path).canonicalize().with_context(|| {
-            format!("{tool_name} {option_name} executable path could not be resolved")
+            let filename = std::path::Path::new(path).file_name().unwrap_or_default();
+            format!("{tool_name} {option_name} executable path could not be resolved: {filename:?} ({path:?})")
         })?;
         return Ok(canonical.display().to_string());
     }

@@ -14,7 +14,7 @@ pub(in crate::modules) fn run_android_apk_scan(
         .run_id()
         .or_else(|| string_input_any(&input, &["runId", "run_id"]))
         .unwrap_or_else(|| crate::run_artifacts::new_run_id("scan"));
-    let plan = match ScanPlan::from_input(&input, &target, primary_run_id) {
+    let mut plan = match ScanPlan::from_input(&input, &target, primary_run_id) {
         Ok(plan) => plan,
         Err(error) => return Ok(failed_tool_output("android-apk:scan", &target, error)),
     };
@@ -28,7 +28,9 @@ pub(in crate::modules) fn run_android_apk_scan(
             started,
         ));
     }
-    let stage_results = run_scan_stages(&plan, ctx);
+    plan.input_receipt = prepare_outcome.value.pointer("/data/inputReceipt").cloned();
+    let mut stage_results = run_scan_stages(&plan, ctx);
+    append_input_recheck(&mut stage_results, &plan, ctx);
     let failed_stages = stage_results
         .iter()
         .filter(|stage| !stage_ok(stage))
@@ -47,6 +49,7 @@ struct ScanPlan {
     primary_run_id: String,
     apk_input: Value,
     workspace_input: Value,
+    input_receipt: Option<Value>,
     skip_native: bool,
     skip_code: bool,
     skip_hybrid: bool,
@@ -68,16 +71,13 @@ impl ScanPlan {
             .and_then(Value::as_str)
             .unwrap_or("both")
             .to_string();
-        let apk_input = json!({
-            "apk": apk,
-            "decompiler": decompiler,
-            "target": target.display().to_string(),
-        });
-        let workspace_input = json!({"target": target.display().to_string()});
+        let apk_input = preparation_input(input, apk, &decompiler, target);
+        let workspace_input = scan_input(input, target);
         Ok(Self {
             primary_run_id,
             apk_input,
             workspace_input,
+            input_receipt: None,
             skip_native: read_skip_flag(input, "skipNative"),
             skip_code: read_skip_flag(input, "skipCode") || read_skip_flag(input, "skipWebview"),
             skip_hybrid: read_skip_flag(input, "skipHybrid"),
@@ -89,6 +89,50 @@ impl ScanPlan {
             .into_iter()
             .filter(|skipped| *skipped)
             .count()
+    }
+}
+
+fn preparation_input(input: &Value, apk: &str, decompiler: &str, target: &Path) -> Value {
+    let mut value = json!({"apk":apk,"decompiler":decompiler,"target":target});
+    for key in [
+        "timeoutMs",
+        "jadxBin",
+        "apktoolBin",
+        "unzipBin",
+        "maxApkBytes",
+    ] {
+        if let Some(option) = input.get(key) {
+            value[key] = option.clone();
+        }
+    }
+    value
+}
+
+fn scan_input(input: &Value, target: &Path) -> Value {
+    let mut value = json!({"target":target});
+    for key in ["timeoutMs", "includeLibraries"] {
+        if let Some(option) = input.get(key) {
+            value[key] = option.clone();
+        }
+    }
+    if let Some(binary) = input.get("semgrepBin") {
+        value["binary"] = binary.clone();
+    }
+    value
+}
+
+fn append_input_recheck(
+    stages: &mut Vec<StageOutcome>,
+    plan: &ScanPlan,
+    ctx: &ToolExecutionContext<'_>,
+) {
+    let value = plan.input_receipt.as_ref().unwrap_or(&Value::Null);
+    let result =
+        super::android_apk_input_receipt::ApkInputReceipt::from_value(value).and_then(|receipt| {
+            ctx.with_cancellation(|cancel| receipt.require_unchanged(&plan.apk_input, cancel))
+        });
+    if let Err(error) = result {
+        stages.push(StageOutcome { name:"input-check",value:json!({"ok":false,"status":"partial","summary":"APK input recheck failed; retained observations require review","errors":[format!("{error:#}")]}) });
     }
 }
 
@@ -107,31 +151,23 @@ fn run_prepare_stage(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Result<
 fn run_scan_stages(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Vec<StageOutcome> {
     let mut stages = run_fixed_scan_stages(plan, ctx);
     push_optional_scan_stages(&mut stages, plan, ctx);
-    push_stage(
-        &mut stages,
-        "sast-handoff",
-        run_sast_handoff(plan.workspace_input.clone(), ctx),
-    );
+    push_stage(&mut stages, "sast-handoff", ctx, || {
+        run_sast_handoff(plan.workspace_input.clone(), ctx)
+    });
     stages
 }
 
 fn run_fixed_scan_stages(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Vec<StageOutcome> {
     let mut stages = Vec::new();
-    push_stage(
-        &mut stages,
-        "manifest-scan",
-        run_manifest_scan(plan.workspace_input.clone(), ctx),
-    );
-    push_stage(
-        &mut stages,
-        "network-security-config",
-        run_network_security_config_scan(plan.workspace_input.clone(), ctx),
-    );
-    push_stage(
-        &mut stages,
-        "fileprovider-scan",
-        run_fileprovider_scan(plan.workspace_input.clone(), ctx),
-    );
+    push_stage(&mut stages, "manifest-scan", ctx, || {
+        run_manifest_scan(plan.workspace_input.clone(), ctx)
+    });
+    push_stage(&mut stages, "network-security-config", ctx, || {
+        run_network_security_config_scan(plan.workspace_input.clone(), ctx)
+    });
+    push_stage(&mut stages, "fileprovider-scan", ctx, || {
+        run_fileprovider_scan(plan.workspace_input.clone(), ctx)
+    });
     stages
 }
 
@@ -141,29 +177,35 @@ fn push_optional_scan_stages(
     ctx: &ToolExecutionContext<'_>,
 ) {
     if !plan.skip_code {
-        push_stage(
-            stages,
-            "code-scan",
-            run_code_scan(plan.workspace_input.clone(), ctx),
-        );
+        push_stage(stages, "code-scan", ctx, || {
+            run_code_scan(plan.workspace_input.clone(), ctx)
+        });
     }
     if !plan.skip_native {
-        push_stage(
-            stages,
-            "native-libs",
-            run_native_libs_scan(plan.workspace_input.clone(), ctx),
-        );
+        push_stage(stages, "native-libs", ctx, || {
+            run_native_libs_scan(plan.workspace_input.clone(), ctx)
+        });
     }
     if !plan.skip_hybrid {
-        push_stage(
-            stages,
-            "hybrid-detect",
-            run_hybrid_detect(plan.workspace_input.clone(), ctx),
-        );
+        push_stage(stages, "hybrid-detect", ctx, || {
+            run_hybrid_detect(plan.workspace_input.clone(), ctx)
+        });
     }
 }
 
-fn push_stage(stages: &mut Vec<StageOutcome>, name: &'static str, result: Result<Value>) {
+fn push_stage(
+    stages: &mut Vec<StageOutcome>,
+    name: &'static str,
+    ctx: &ToolExecutionContext<'_>,
+    action: impl FnOnce() -> Result<Value>,
+) {
+    let result = ctx.with_cancellation(|cancel| {
+        anyhow::ensure!(
+            !cancel.is_cancelled(),
+            "APK stage {name} was not started after cancellation"
+        );
+        action()
+    });
     match result {
         Ok(value) => stages.push(StageOutcome { name, value }),
         Err(error) => stages.push(StageOutcome {
@@ -182,11 +224,12 @@ struct StageOutcome {
 }
 
 fn stage_ok(stage: &StageOutcome) -> bool {
-    stage
-        .value
-        .get("ok")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    stage.value.get("status").and_then(Value::as_str) != Some("partial")
+        && stage
+            .value
+            .get("ok")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &str) {
@@ -265,7 +308,7 @@ fn project_pipeline_output(
         .collect();
     let skipped = plan.skipped_stage_count();
     let summary = format!(
-        "android-apk:scan: {} stages, {} findings, {} failed, {} skipped, {}ms",
+        "Partial APK observations · {} stages · findings {} · incomplete {} · skipped {} · {}ms",
         stages_value.len(),
         totals.findings,
         totals.failures,
@@ -289,20 +332,21 @@ fn pipeline_output_json(
     stage_count: usize,
     output: PipelineOutputProjection,
 ) -> Value {
-    let status = if output.failures == 0 {
-        "completed"
-    } else {
-        "partial"
-    };
+    let text = pipeline_output_text(plan, &output);
+    let input_recheck = input_recheck_label(plan, &output);
     json!({
         "ok": true,
-        "status": status,
+        "status": "partial",
         "summary": output.summary,
-        "output": output.summary,
+        "output": text,
         "data": {
             "runId": plan.primary_run_id,
             "runIds": output.run_ids,
             "apk": plan.apk_input.get("apk"),
+            "inputReceipt": plan.input_receipt,
+            "inputRecheck": input_recheck,
+            "coverage": {"complete":false},
+            "sourceVerified":false,
             "stages": output.stages,
             "totals": {
                 "stagesRun": stage_count,
@@ -311,9 +355,47 @@ fn pipeline_output_json(
                 "findings": output.findings,
             },
         },
-        "warnings": output.warnings,
+        "warnings": output.warnings.into_iter().chain(std::iter::once(json!({"code":"partial-apk-coverage","message":"Decompilation and rule observations need independent review. Skipped or omitted code is not complete APK or repository coverage. No Scan checkpoint is created."}))).collect::<Vec<_>>(),
         "errors": output.errors,
     })
+}
+
+fn input_recheck_label(plan: &ScanPlan, output: &PipelineOutputProjection) -> &'static str {
+    if plan.input_receipt.is_none() {
+        return "missing";
+    }
+    if output
+        .stages
+        .iter()
+        .any(|stage| stage["name"] == "input-check")
+    {
+        return "failed";
+    }
+    "matched"
+}
+
+fn pipeline_output_text(plan: &ScanPlan, output: &PipelineOutputProjection) -> String {
+    let mut lines = vec![
+        output.summary.clone(),
+        "Coverage: partial decompiled observations; original-source accuracy requires review."
+            .into(),
+    ];
+    if let Some(receipt) = plan.input_receipt.as_ref() {
+        lines.push(format!(
+            "Archive digest: {} · {} bytes",
+            receipt["sha256"].as_str().unwrap_or("unavailable"),
+            receipt["bytes"]
+        ));
+    }
+    lines.extend(output.stages.iter().map(|stage| {
+        format!(
+            "{}: {} · finding observations: {}",
+            stage["name"].as_str().unwrap_or("unnamed stage"),
+            stage["status"].as_str().unwrap_or("unknown"),
+            stage["findings"]
+        )
+    }));
+    lines.join("\n")
 }
 
 fn stage_error_messages(stage: &StageOutcome) -> Vec<String> {
@@ -361,15 +443,20 @@ fn early_exit_output(
         .get("errors")
         .cloned()
         .unwrap_or_else(|| json!([format!("{failed_stage} failed")]));
+    let reason = errors
+        .as_array()
+        .and_then(|rows| rows.first())
+        .and_then(Value::as_str)
+        .unwrap_or("The stage did not complete; inspect the failure receipt");
     let _ = target;
     json!({
         "ok": false,
         "status": "failed",
         "summary": format!(
-            "android-apk:scan aborted at {failed_stage} ({}ms)",
+            "APK preparation stopped: {reason} ({}ms)",
             started.elapsed().as_millis()
         ),
-        "output": format!("android-apk:scan aborted at {failed_stage}"),
+        "output": format!("APK action stopped at {failed_stage}: {reason}\nInspect prior derived output and the failure receipt. Revise APK inputs before another attempt."),
         "data": {
             "runId": run_id,
             "runIds": [],
@@ -403,6 +490,7 @@ fn stage_to_json(stage: &StageOutcome) -> Value {
     json!({
         "name": stage.name,
         "ok": stage_ok(stage),
+        "status":stage.value.get("status").cloned().unwrap_or_else(||json!(if stage_ok(stage){"completed"}else{"failed"})),
         "summary": stage.value.get("summary").cloned().unwrap_or(Value::Null),
         "findings": stage_findings.len(),
         "findingItems": stage_findings,
@@ -489,6 +577,53 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_after_one_stage_never_invokes_the_next() {
+        let config = crate::V2Config::default();
+        let cancel = crate::scan::ScanCancellation::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: Some(&cancel),
+            authorization: Default::default(),
+        };
+        let mut stages = Vec::new();
+        push_stage(&mut stages, "first", &ctx, || {
+            cancel.cancel();
+            Ok(json!({"ok":true}))
+        });
+        let invoked = std::cell::Cell::new(false);
+        push_stage(&mut stages, "second", &ctx, || {
+            invoked.set(true);
+            Ok(json!({"ok":true}))
+        });
+        assert!(!invoked.get());
+        assert!(stage_ok(&stages[0]));
+        assert!(!stage_ok(&stages[1]));
+    }
+
+    #[test]
+    fn prepared_limits_and_binaries_reach_their_own_stages() {
+        let value = json!({"apk":"owned.apk","timeoutMs":50,"maxApkBytes":100,
+            "unzipBin":"owned-unzip","jadxBin":"owned-jadx","apktoolBin":"owned-apktool",
+            "semgrepBin":"owned-semgrep","includeLibraries":true});
+        let plan = ScanPlan::from_input(&value, Path::new("/tmp/owned"), "owned".into()).unwrap();
+        for key in [
+            "timeoutMs",
+            "maxApkBytes",
+            "unzipBin",
+            "jadxBin",
+            "apktoolBin",
+        ] {
+            assert_eq!(plan.apk_input[key], value[key]);
+        }
+        assert_eq!(plan.workspace_input["binary"], value["semgrepBin"]);
+        assert_eq!(plan.workspace_input["includeLibraries"], true);
+        assert_eq!(plan.workspace_input["timeoutMs"], 50);
+    }
+
+    #[test]
     fn stage_to_json_carries_summary_and_findings_count() {
         let outcome = stage("manifest-scan", true, 3);
         let payload = stage_to_json(&outcome);
@@ -549,7 +684,7 @@ mod tests {
             Instant::now(),
         );
 
-        assert_eq!(output["status"], "completed");
+        assert_eq!(output["status"], "partial");
         assert_eq!(output["data"]["totals"]["failed"], 0);
         assert_eq!(output["data"]["totals"]["skipped"], 3);
         assert!(output["errors"].as_array().unwrap().is_empty());

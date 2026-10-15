@@ -49,9 +49,7 @@ fn print_suppress_command_result(
         println!("{}", serde_json::to_string_pretty(&record)?);
     } else {
         println!("suppression recorded: {}", record.id);
-        println!(
-            "Review decision: suppressed (saved; will carry forward as decision #{decision_id})."
-        );
+        println!("Review decision: suppressed (saved as decision #{decision_id}).");
         println!(
             "Store: {}",
             whitebox_suppression_store_path(&workspace).display()

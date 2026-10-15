@@ -1,14 +1,13 @@
-use crate::app::{BatchScanConfig, ShellApp};
+use crate::app::BatchScanConfig;
 use crate::renderer::shared::text::{fit, fit_path, wrap_text};
 use kuzushi_core::findings::{ContextCaseOccurrenceReport, ContextMatrixOccurrenceReport};
 
 pub(super) fn recorded_matrix_lines(
-    app: &ShellApp,
+    config: &BatchScanConfig,
     report: &ContextMatrixOccurrenceReport,
     width: usize,
     rows: usize,
 ) -> Vec<String> {
-    let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
     if config.study.matrix.pass_selection.is_some() {
         return pass_lines(config, report, width, rows);
     }

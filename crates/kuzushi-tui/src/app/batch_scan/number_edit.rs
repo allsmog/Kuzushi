@@ -121,6 +121,15 @@ impl ShellApp {
     }
 
     pub(crate) fn handle_batch_config_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let update = self.handle_batch_config_input(key);
+        self.checkpoint_study_choices();
+        update
+    }
+
+    fn handle_batch_config_input(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if self.study_draft_recovery_open() && !batch_editor_yields_to_exit(key) {
+            return Some(self.study_recovery_input(key.code));
+        }
         if let Some(update) = self.handle_batch_number_key(key) {
             return Some(update);
         }
@@ -163,6 +172,7 @@ impl ShellApp {
             edit.field.insert(text);
             edit.error = None;
         }
+        self.checkpoint_study_choices();
         true
     }
 }

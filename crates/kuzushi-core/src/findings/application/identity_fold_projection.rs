@@ -125,7 +125,7 @@ fn merge_findings(previous: &Finding, next: Finding) -> Finding {
     representative.corroboration_count = merged_corroboration_count(
         previous.corroboration_count,
         next_count,
-        representative.sources.len(),
+        crate::findings::distinct_recorded_source_count(&representative.sources),
     );
     representative
 }

@@ -16,7 +16,7 @@ use response_artifacts::{
 
 /// Output of a single carlini actor query. `cost_usd` accumulates every
 /// LLM call we paid for to produce `value`: the initial response, any
-/// max-output-tokens retry, and any repair pass. Returning it explicitly
+/// same-limit truncation retry, and any repair pass. Returning it explicitly
 /// keeps the cost from being dropped on the floor at the report layer
 /// (previously hardcoded to 0.0).
 pub(crate) struct CarliniActorQuery {
@@ -112,7 +112,7 @@ fn prepare_carlini_actor_query(
 }
 
 /// Run the initial actor query and, when the model truncated its output, one
-/// higher-budget retry. Returns the chosen response plus the total cost paid
+/// same-limit retry. Returns the chosen response plus the total cost paid
 /// across both calls (the retry is dropped on error, keeping the initial).
 fn run_carlini_actor_with_retry(
     runtime: &dyn AgentRuntime,
@@ -129,7 +129,7 @@ fn run_carlini_actor_with_retry(
     if !initial.truncated {
         return Ok((initial, accumulated_cost));
     }
-    match retry_carlini_with_higher_output_budget(runtime, request) {
+    match retry_carlini_with_same_limits(runtime, request) {
         Ok(retry) => {
             write_carlini_actor_response_artifact(
                 debug_artifacts,
@@ -246,48 +246,40 @@ fn carlini_actor_request(
     input: &Value,
 ) -> Result<AgentQueryRequest> {
     let policy = crate::runtime::mcp_probe::bind_selected_threat_model_attachment(
-        try_whitebox_static_policy_for_target(target)?, input, target,
+        try_whitebox_static_policy_for_target(target)?,
+        input,
+        target,
     )?;
-    let request = AgentQueryRequest::new(
+    let mut request = AgentQueryRequest::new(
         model.to_string(),
         target.to_path_buf(),
         carlini_system_prompt(),
         prompt,
     )
-    .with_tool_policy(policy)
-    .with_thinking_level(agentic_hunter_thinking_level(input));
-
-    Ok(match max_output_tokens_from_input(input) {
-        Some(tokens) => request.with_max_output_tokens(tokens),
-        None => request,
-    })
+    .with_tool_policy(policy);
+    request.thinking_level = super::super::limits::actor_reasoning(input)?;
+    let tokens = super::super::limits::bounded_integer(
+        input,
+        &["maxOutputTokens", "max_output_tokens", "maxTokens"],
+        4096,
+        256..=32768,
+    )?;
+    let turns = super::super::limits::bounded_integer(
+        input,
+        &["maxModelTurns", "max_model_turns"],
+        4,
+        1..=16,
+    )?;
+    Ok(request
+        .with_max_output_tokens(tokens as u32)
+        .with_max_model_turns(Some(turns as u32)))
 }
 
-pub(in crate::capabilities::carlini_threat_hunt) fn max_output_tokens_from_input(
-    input: &Value,
-) -> Option<u32> {
-    ["maxOutputTokens", "max_output_tokens", "maxTokens"]
-        .iter()
-        .filter_map(|key| input.get(*key).and_then(Value::as_u64))
-        .find(|tokens| *tokens > 0 && *tokens <= u32::MAX as u64)
-        .map(|tokens| tokens as u32)
-}
-
-fn retry_carlini_with_higher_output_budget(
+fn retry_carlini_with_same_limits(
     runtime: &dyn AgentRuntime,
     request: &AgentQueryRequest,
 ) -> Result<AgentQueryResponse> {
-    const RETRY_FLOOR: u32 = 16_000;
-    const RETRY_CEILING: u32 = 65_535;
-    let next_budget = match request.max_output_tokens {
-        Some(cap) if cap >= RETRY_CEILING => cap,
-        Some(cap) => cap.saturating_mul(2).clamp(RETRY_FLOOR, RETRY_CEILING),
-        None => RETRY_FLOOR,
-    };
-    crate::runtime::query_blocking_checked(
-        runtime,
-        request.clone().with_max_output_tokens(next_budget),
-    )
+    crate::runtime::query_blocking_checked(runtime, request.clone())
 }
 
 pub(crate) fn record_unique_carlini_findings(
@@ -343,6 +335,7 @@ pub(crate) fn carlini_threat_hunt_report(
     cost_usd: f64,
     cost_usd_exact: bool,
 ) -> Result<CarliniThreatHuntReport> {
+    ctx.ensure_active()?;
     let persisted = persist_findings(&target, &findings, ctx)?;
     Ok(CarliniThreatHuntReport {
         target: target.display().to_string(),
@@ -374,18 +367,21 @@ mod cost_failure_tests {
 
     struct ScriptedRuntime {
         outcomes: Mutex<VecDeque<RuntimeOutcome>>,
+        requests: Mutex<Vec<AgentQueryRequest>>,
     }
 
     impl ScriptedRuntime {
         fn new(outcomes: impl IntoIterator<Item = RuntimeOutcome>) -> Self {
             Self {
                 outcomes: Mutex::new(outcomes.into_iter().collect()),
+                requests: Mutex::new(Vec::new()),
             }
         }
     }
 
     impl AgentRuntime for ScriptedRuntime {
-        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.requests.lock().unwrap().push(request);
             match self.outcomes.lock().unwrap().pop_front().unwrap() {
                 RuntimeOutcome::Response(response) => Ok(response),
                 RuntimeOutcome::Failure(message) => anyhow::bail!(message),
@@ -397,6 +393,31 @@ mod cost_failure_tests {
             _request: crate::runtime::TriageRequest,
         ) -> Result<crate::findings::TriageOutcome> {
             unreachable!("Carlini structured-output tests do not triage")
+        }
+    }
+
+    #[test]
+    fn truncation_retry_preserves_model_reasoning_output_and_turn_limits() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = ScriptedRuntime::new([
+            RuntimeOutcome::Response(response("{}", true, 0.2)),
+            RuntimeOutcome::Response(response("{}", false, 0.2)),
+        ]);
+        let request = AgentQueryRequest::new("owned:model", root.path(), "system", "prompt")
+            .with_max_output_tokens(4096)
+            .with_max_model_turns(Some(4))
+            .with_thinking_level("medium");
+        run_carlini_actor_with_retry(&runtime, &request, None, "owned").unwrap();
+        let requests = runtime.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        for actual in requests.iter() {
+            assert_eq!(actual.model, request.model);
+            assert_eq!(actual.thinking_level, request.thinking_level);
+            assert_eq!(actual.max_output_tokens, Some(4096));
+            assert_eq!(
+                actual.runtime_options.as_ref().unwrap().max_model_turns,
+                Some(4)
+            );
         }
     }
 

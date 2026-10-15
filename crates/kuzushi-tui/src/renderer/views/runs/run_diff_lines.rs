@@ -174,19 +174,26 @@ fn append_decision_summary(
     lines: &mut Vec<Line<'static>>,
     summary: Option<&RunDiffDecisionSummary>,
 ) {
-    let Some(summary) = summary else {
+    let Some(summary) = summary.filter(|summary| summary.identities > 0) else {
         return;
     };
     lines.push(Line::styled(
         format!(
-            "decisions: identities={} stored={} carry_forward={} conflicts={}",
-            summary.identities,
-            summary.with_stored_decision,
-            summary.carry_forward,
-            summary.conflicts
+            "Recorded decisions: {} of {} finding identities.",
+            summary.with_stored_decision, summary.identities,
         ),
         theme::muted(),
     ));
+    lines.push(Line::styled(
+        "Check decision sources in Review before reusing a verdict.",
+        theme::muted(),
+    ));
+    if summary.conflicts > 0 {
+        lines.push(Line::styled(
+            format!("Differing snapshot verdicts: {}", summary.conflicts),
+            theme::warn(),
+        ));
+    }
 }
 
 fn append_section(

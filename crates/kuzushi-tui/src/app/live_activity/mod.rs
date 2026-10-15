@@ -58,7 +58,7 @@ impl LiveActivityPhase {
             Self::Partial => "partial",
             Self::Skipped => "skipped",
             Self::Failed => "failed",
-            Self::Refused => "refused",
+            Self::Refused => "blocked",
             Self::Completed => "completed",
         }
     }
@@ -200,6 +200,33 @@ pub(crate) fn live_activity_for_tool(tool_name: &str, status: &str) -> LiveActiv
     )
 }
 
+pub(crate) fn prepared_tool_status(status: &str, runtime_backed: bool) -> &str {
+    if runtime_backed {
+        return "preparing model work";
+    }
+    if status == "asking model-backed tool" {
+        return "running tool";
+    }
+    status
+}
+
+pub(crate) fn live_activity_for_prepared_tool(
+    tool_name: &str,
+    status: &str,
+    runtime_backed: bool,
+) -> LiveActivity {
+    let phase = if runtime_backed {
+        LiveActivityPhase::RunningTool
+    } else {
+        runtime_free_activity_phase(tool_name)
+    };
+    LiveActivity::new(
+        phase,
+        tool_name,
+        prepared_tool_status(status, runtime_backed),
+    )
+}
+
 pub(crate) fn live_activity_for_prereq_step(step: &PrereqStep, final_tool: &str) -> LiveActivity {
     let writes = step
         .writes
@@ -218,6 +245,10 @@ fn live_activity_phase_for_tool(tool_name: &str) -> LiveActivityPhase {
     if model_backed_tool(tool_name) {
         return LiveActivityPhase::CallingModel;
     }
+    runtime_free_activity_phase(tool_name)
+}
+
+fn runtime_free_activity_phase(tool_name: &str) -> LiveActivityPhase {
     if reading_tool(tool_name) {
         return LiveActivityPhase::Reading;
     }

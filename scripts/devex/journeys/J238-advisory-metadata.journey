@@ -1,0 +1,75 @@
+name: Supplied advisory metadata stays unverified, bounded and outside Map progress
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/ndiff_metadata.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | ready
+submit: setg ui.auto_open_activity false
+submit: use ndiff
+submit: run .
+submit: logs
+require-live-snap: 20 Choose an exact tool | explicit-action-required
+require-shell: python3 -B @REPO/scripts/devex/fixtures/ndiff_metadata.py @TMP_TARGET @ART before
+paste-file: @ART/valid-command.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | explicit-metadata-consent
+keys: y
+require-live-snap: 25 Unverified supplied metadata | supplied-record
+require-shell: python3 -B @REPO/scripts/devex/fixtures/ndiff_metadata.py @TMP_TARGET @ART valid
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | metadata-receipt
+expect: Labeled owned metadata.
+ask: Does the metadata receipt distinguish supplied claims from verified source evidence, start no model or network work, and attach no Map continuation?
+resize: 160x48
+live-snap: metadata-160x48
+resize: 96x89
+live-snap: metadata-96x89
+resize: 80x24
+live-snap: metadata-80x24
+resize: 60x20
+live-snap: metadata-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · completed | metadata-40x12
+expect: Unverified
+keys: NPage
+live-snap: metadata-page-1-40x12
+expect-not: Stream: healthy
+keys: NPage
+live-snap: metadata-page-2-40x12
+keys: NPage
+live-snap: metadata-page-3-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/ndiff_metadata.py @TMP_TARGET @ART readability
+ask: Is the supplied-metadata result readable through paging at all six sizes, with support and evidence limits reachable?
+resize: 120x36
+paste-file: @ART/mismatch-command.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | explicit-mismatch-consent
+keys: y
+submit: logs
+require-live-snap: 25 does not match requested | identity-mismatch
+require-shell: python3 -B @REPO/scripts/devex/fixtures/ndiff_metadata.py @TMP_TARGET @ART mismatch
+paste-file: @ART/replay-command.txt
+keys: Enter
+keys: PPage PPage
+require-live-snap: 20 Outcome · completed | valid-metadata-retained
+ask: Does an identity mismatch remain an honest failed attempt while preserving the earlier supplied record, with no silent fallback fetch?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | restarted-setup
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | recovered-metadata
+require-shell: python3 -B @REPO/scripts/devex/fixtures/ndiff_metadata.py @TMP_TARGET @ART restart
+ask: Does no-color restart retain supplied metadata and the mismatch receipt in fresh Setup without another request or new phase progress?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

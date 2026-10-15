@@ -122,7 +122,7 @@ fn seed_indexed_map_run(target: &std::path::Path, run_id: &str) {
     crate::test_support::record_indexed_run(
         target,
         run_id,
-        "context:build",
+        "threat-model:build",
         serde_json::json!({
             "ok": true,
             "data": {"snapshot": {"filesIndexed": 1}}
@@ -139,8 +139,68 @@ fn map_result_control_hint(app: &ShellApp) -> String {
 }
 
 #[test]
+fn result_prompt_and_footer_follow_the_same_input_owner() {
+    let (_target, mut app) = unresolved_map_result_app(V2Config::default());
+    app.set_shell_view(ShellView::Workbench);
+    let footer = crate::ui_view_models::footer_keybindings(&app);
+    assert!(footer
+        .iter()
+        .any(|binding| binding.key == "Esc" && binding.label == "result actions"));
+    assert_eq!(
+        crate::ui_view_models::prompt_model(&app).placeholder,
+        Some(map_result_control_hint(&app))
+    );
+    app.set_input("saved operator draft");
+    assert!(crate::ui_view_models::prompt_model(&app)
+        .placeholder
+        .is_none());
+    let footer = crate::ui_view_models::footer_keybindings(&app);
+    assert!(footer
+        .iter()
+        .any(|binding| binding.label == "clear draft · Ctrl+_ restores"));
+    assert_eq!(app.input(), "saved operator draft");
+}
+
+#[test]
+fn result_navigation_keeps_priority_over_a_notice() {
+    let (_target, mut app) = unresolved_map_result_app(V2Config::default());
+    app.set_shell_view(ShellView::Workbench);
+    app.set_error_notice("fixture", "Inspect the blocked run.");
+    assert!(!app.notice_captures_escape());
+    assert_eq!(
+        crate::ui_view_models::prompt_model(&app).placeholder,
+        Some(map_result_control_hint(&app))
+    );
+    app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+#[test]
+fn another_phases_result_does_not_replace_the_current_prompt_hint() {
+    let (_target, mut app) = unresolved_map_result_app(V2Config::default());
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::WorkbenchPage::Review));
+    let footer = crate::ui_view_models::footer_keybindings(&app);
+    assert!(!footer
+        .iter()
+        .any(|binding| binding.label == "result actions"));
+    assert_eq!(
+        crate::ui_view_models::prompt_model(&app)
+            .placeholder
+            .as_deref(),
+        Some("describe what to review · Esc list keys")
+    );
+}
+
+#[test]
 fn phase_result_card_discloses_controls_for_the_active_input_mode() {
     let (_target, mut app) = unresolved_map_result_app(V2Config::default());
+    app.set_shell_view(ShellView::Workbench);
 
     assert_eq!(
         map_result_control_hint(&app),
@@ -160,6 +220,45 @@ fn phase_result_card_discloses_controls_for_the_active_input_mode() {
         !navigate_hint.contains("Navigate to resolve"),
         "{navigate_hint}"
     );
+}
+
+#[test]
+fn held_navigation_draft_discloses_why_result_controls_are_inactive() {
+    let (_target, mut app) = unresolved_map_result_app(V2Config::default());
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input("held draft");
+    app.set_input_mode(InputMode::Navigate);
+    assert_eq!(
+        map_result_control_hint(&app),
+        "Esc prompt to finish or clear the draft"
+    );
+    assert!(super::result_controls::result_keybindings(&app).is_none());
+}
+
+#[test]
+fn held_draft_hint_honors_remapped_and_unbound_prompt_focus() {
+    for (bindings, expected) in [
+        (
+            vec!["ctrl+x".to_string()],
+            "ctrl+x prompt to finish or clear the draft",
+        ),
+        (
+            Vec::new(),
+            "Prompt unbound · configure composer.prompt_mode",
+        ),
+    ] {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "composer".to_string(),
+            action: "prompt_mode".to_string(),
+            bindings,
+        }];
+        let (_target, mut app) = unresolved_map_result_app(config);
+        app.set_shell_view(ShellView::Workbench);
+        app.set_input("held draft");
+        app.set_input_mode(InputMode::Navigate);
+        assert_eq!(map_result_control_hint(&app), expected);
+    }
 }
 
 #[test]
@@ -273,7 +372,8 @@ fn map_model_projects_durable_state_and_keeps_session_budget_in_the_header() {
         panic!("expected map body");
     };
 
-    assert_eq!(model.header.cost_usd, 0.5);
+    assert_eq!(model.header.cost.observed_usd(), 0.5);
+    assert!(model.header.cost.is_complete());
     assert_eq!(model.header.budget_usd, Some(1.0));
     assert_eq!(map.context.state, "missing");
     assert!(map

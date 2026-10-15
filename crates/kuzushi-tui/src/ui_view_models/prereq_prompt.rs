@@ -2,6 +2,7 @@ use crate::{PendingPrereqPrompt, PrereqArtifactState, PrereqPlanStep, ShellApp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PrereqPromptModel {
+    pub(crate) input_blocked: bool,
     pub(crate) final_tool: String,
     pub(crate) recommended_action: String,
     pub(crate) steps: Vec<PrereqPromptStepModel>,
@@ -26,9 +27,11 @@ pub(crate) struct PlainPrereqPlanModel {
 }
 
 pub(crate) fn prereq_prompt_model(app: &ShellApp) -> Option<PrereqPromptModel> {
-    app.engagement
-        .pending_prereq_prompt()
-        .map(PrereqPromptModel::from_prompt)
+    app.engagement.pending_prereq_prompt().map(|prompt| {
+        let mut model = PrereqPromptModel::from_prompt(prompt);
+        model.input_blocked = !app.prereq_controls_are_available();
+        model
+    })
 }
 
 pub(crate) fn plain_prereq_plan_model(app: &ShellApp) -> Option<PlainPrereqPlanModel> {
@@ -38,6 +41,7 @@ pub(crate) fn plain_prereq_plan_model(app: &ShellApp) -> Option<PlainPrereqPlanM
 impl PrereqPromptModel {
     fn from_prompt(prompt: &PendingPrereqPrompt) -> Self {
         Self {
+            input_blocked: false,
             final_tool: prompt.final_tool.clone(),
             recommended_action: prompt.recommended_action.label().to_string(),
             steps: prompt
@@ -58,10 +62,16 @@ impl PlainPrereqPlanModel {
         for step in model.steps {
             rows.extend(plain_prereq_step_rows(step));
         }
-        rows.push(format!(
-            "actions: approve | reuse cached | regenerate | cancel (recommended: {})",
-            model.recommended_action
-        ));
+        if model.input_blocked {
+            rows.push(
+                "Finish or clear the command draft before choosing prerequisite work.".into(),
+            );
+        } else {
+            rows.push(format!(
+                "actions: approve | reuse cached | regenerate | cancel (recommended: {})",
+                model.recommended_action
+            ));
+        }
         Self {
             title: "PREREQUISITE PLAN",
             rows,

@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
+mod labels;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignSnapshot {
@@ -44,6 +45,8 @@ pub struct CampaignSnapshot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignJobSnapshot {
     pub job_id: String,
+    /// Human case and pass label from this recorded plan, never current scope names.
+    pub display_label: Option<String>,
     pub tool: Option<String>,
     pub shard: Option<String>,
     pub threat_id: Option<String>,
@@ -103,7 +106,7 @@ pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<Campaign
         .cloned()
         .unwrap_or_default();
     let jobs = plan_job_rows(&plan)
-        .map(|row| job_snapshot(root, row, &queue))
+        .map(|row| job_snapshot(root, &plan, row, &queue))
         .collect::<Vec<_>>();
     let total_cost_usd = jobs.iter().filter_map(|job| job.cost_usd).sum::<f64>() + 0.0;
     let provider_spend_unresolved = jobs.iter().any(|job| job.provider_spend_unresolved);
@@ -143,11 +146,17 @@ fn plan_job_rows(plan: &Value) -> impl Iterator<Item = &Value> {
         .flatten()
 }
 
-fn job_snapshot(root: &Path, row: &Value, queue: &Map<String, Value>) -> CampaignJobSnapshot {
+fn job_snapshot(
+    root: &Path,
+    plan: &Value,
+    row: &Value,
+    queue: &Map<String, Value>,
+) -> CampaignJobSnapshot {
     let job_id = string_field(row, "jobId").unwrap_or_default();
     let entry = queue.get(&job_id).cloned().unwrap_or(Value::Null);
     let run_id = string_field(&entry, "runId");
     CampaignJobSnapshot {
+        display_label: labels::job_label(plan, row),
         findings: run_finding_count(root, run_id.as_deref()),
         tool: string_field(row, "tool"),
         shard: string_field(row, "shard"),
@@ -172,7 +181,9 @@ fn job_snapshot(root: &Path, row: &Value, queue: &Map<String, Value>) -> Campaig
 }
 
 fn job_reason(root: &Path, row: &Value, entry: &Value) -> Option<String> {
-    string_field(entry, "reason").or_else(|| recorded_job_failure(root, row, entry))
+    string_field(entry, "reason")
+        .or_else(|| recorded_job_failure(root, row, entry))
+        .map(|reason| crate::run_artifacts::bounded_run_diagnostic_line(&reason))
 }
 
 fn recorded_job_failure(root: &Path, row: &Value, entry: &Value) -> Option<String> {

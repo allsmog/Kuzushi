@@ -45,6 +45,9 @@ pub struct WorkspaceFindingExportRecord {
     /// against, and whether the finding was seen on different source since.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_decision_basis: Option<super::WorkspaceReviewDecisionBasis>,
+    /// Explicit human selection of source, independent of the observed run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_source: Option<crate::findings::ReviewSourceCapture>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triage_verdict: Option<String>,
     pub suppressed: bool,
@@ -208,6 +211,9 @@ pub struct WorkspaceFindingProvenanceSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_signature: Option<String>,
     pub corroboration_count: u32,
+    /// Recorded source summaries; endpoints are not a complete observation log.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source_history: Vec<crate::findings::FindingSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

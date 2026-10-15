@@ -222,14 +222,31 @@ mod tests {
 
     #[test]
     fn tool_input_cannot_remove_the_file_size_ceiling() {
-        let options = IacScanOptions::from_tool_input(&serde_json::json!({
+        let error = IacScanOptions::from_tool_input(&serde_json::json!({
             "maxFileBytes": u64::MAX
         }))
-        .unwrap();
+        .unwrap_err();
+        assert!(error.to_string().contains("maxFileBytes must be between"));
+    }
 
-        assert_eq!(
-            options.max_file_bytes,
-            super::super::iac_scan_options::MAX_SUPPORTED_FILE_BYTES
-        );
+    #[test]
+    fn tool_input_rejects_invalid_inspection_limits() {
+        for (key, minimum, maximum) in [
+            ("maxFileBytes", 1024, 67_108_864),
+            ("maxEntries", 1, 100_000),
+            ("maxTotalBytes", 1024, 536_870_912),
+        ] {
+            for value in [
+                serde_json::json!(-1),
+                serde_json::json!(minimum - 1),
+                serde_json::json!(maximum + 1),
+                serde_json::json!("unknown"),
+            ] {
+                assert!(IacScanOptions::from_tool_input(&serde_json::json!({key:value})).is_err());
+            }
+            for value in [minimum, maximum] {
+                assert!(IacScanOptions::from_tool_input(&serde_json::json!({key:value})).is_ok());
+            }
+        }
     }
 }

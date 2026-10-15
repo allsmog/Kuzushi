@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::BTreeSet;
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -30,13 +31,13 @@ pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
             ),
             vec![tool_with_options(
                 "codeql:create-db",
-                "Create a CodeQL database for the active target. Returns an explicit skipped result \
-                 when the codeql CLI is missing; otherwise writes .kuzushi/v3/codeql-db/.",
+                "Experimental source-bound database preparation with explicit repository-execution consent. Can run build logic in an isolated checkout. Missing CodeQL is skipped; a prepared database does not complete Map or establish findings.",
                 codeql_create_db_options(),
-            )],
+            ).without_phase_result()],
         ),
         vec![dag("codeql:create-db", "codeql-db", &["context:build"])],
     )
+    .labs()
 }
 
 fn codeql_create_db_options() -> Vec<OptionSpec> {
@@ -72,6 +73,7 @@ fn codeql_create_db_options() -> Vec<OptionSpec> {
         )
         .aliases(&["timeout_ms"])
         .default(json!(DEFAULT_CODEQL_CREATE_TIMEOUT_MS))
+        .integer_range(1, MAX_CODEQL_CREATE_TIMEOUT_MS as i64)
         .advanced(),
         repository_source_commit_binding_option(),
         repository_target_scope_binding_option(),
@@ -154,7 +156,7 @@ fn execute_codeql_create(
     let execution = crate::codeql_repository_execution::CodeqlRepositoryExecution::prepare(
         crate::codeql_repository_execution::CodeqlRepositoryRequest {
             source_root: &target,
-            binding,
+            binding: binding.clone(),
             destination: &output_path,
             launcher,
             cancellation: ctx.cancellation,
@@ -165,16 +167,29 @@ fn execute_codeql_create(
     let (language, outcome) = execute_bound_codeql_create(&execution, input, ctx, &target)?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
     emit_done_step(ctx, &output_path, elapsed_ms);
-    let timestamp = now_ms()?;
-    Ok(codeql_db_response(
-        &target,
-        &output_path,
-        &bin,
-        &language,
-        &outcome,
-        elapsed_ms,
-        timestamp,
+    Ok(source_bound_db_response(
+        codeql_db_response(
+            &target,
+            &output_path,
+            &bin,
+            &language,
+            &outcome,
+            elapsed_ms,
+            now_ms()?,
+        ),
+        &binding,
     ))
+}
+
+fn source_bound_db_response(
+    mut response: Value,
+    binding: &crate::remediation::patch::RepositorySourceBinding,
+) -> Value {
+    let text = response["output"].as_str().unwrap_or_default();
+    response["output"] = json!(format!("{text}\nSource commit: {}\nTarget scope: {:?}\nDatabase preparation does not complete Map or establish findings.",binding.commit,binding.target_scope));
+    response["data"]["sourceCommit"] = json!(binding.commit);
+    response["data"]["targetScope"] = json!(binding.target_scope);
+    response
 }
 
 fn execute_bound_codeql_create(
@@ -184,7 +199,7 @@ fn execute_bound_codeql_create(
     target: &Path,
 ) -> Result<(String, CodeqlCreateOutcome)> {
     execution.with_bound_target(|bound_target| {
-        let language = resolve_language(input, bound_target)?;
+        let language = resolve_language_with_cancel(input, bound_target, ctx.cancellation)?;
         let build_modes = resolve_build_modes(input, &language)?;
         emit_step(
             ctx,
@@ -224,7 +239,16 @@ fn emit_done_step(ctx: &ToolExecutionContext<'_>, output_path: &Path, elapsed_ms
     emit_step(ctx, "done", "create-db", done_label);
 }
 
+#[cfg(test)]
 fn resolve_language(input: &Value, target: &Path) -> Result<String> {
+    resolve_language_with_cancel(input, target, None)
+}
+
+fn resolve_language_with_cancel(
+    input: &Value,
+    target: &Path,
+    cancel: Option<&crate::scan::ScanCancellation>,
+) -> Result<String> {
     let explicit = input
         .get("language")
         .and_then(Value::as_str)
@@ -232,12 +256,20 @@ fn resolve_language(input: &Value, target: &Path) -> Result<String> {
         .filter(|language| !language.is_empty());
     match explicit {
         Some(language) => Ok(language.to_lowercase()),
-        None => autodetect_language(target),
+        None => autodetect_language_with_cancel(target, cancel),
     }
 }
 
+#[cfg(test)]
 fn autodetect_language(target: &Path) -> Result<String> {
-    let languages = detected_codeql_languages(target)?;
+    autodetect_language_with_cancel(target, None)
+}
+
+fn autodetect_language_with_cancel(
+    target: &Path,
+    cancel: Option<&crate::scan::ScanCancellation>,
+) -> Result<String> {
+    let languages = detected_codeql_languages_with_cancel(target, cancel)?;
     match languages.len() {
         1 => languages
             .into_iter()
@@ -249,18 +281,37 @@ fn autodetect_language(target: &Path) -> Result<String> {
     }
 }
 
-fn detected_codeql_languages(target: &Path) -> Result<BTreeSet<&'static str>> {
+fn detected_codeql_languages_with_cancel(
+    target: &Path,
+    cancel: Option<&crate::scan::ScanCancellation>,
+) -> Result<BTreeSet<&'static str>> {
+    let inventory =
+        crate::workspace::build_repository_inventory_with_observer(target, &mut |_| {}, &|| {
+            cancel.is_some_and(crate::scan::ScanCancellation::is_cancelled)
+        })?;
     anyhow::ensure!(
-        target.is_dir(),
-        "codeql:create-db target is not a directory: {}",
-        target.display()
+        inventory.truncation.is_none(),
+        "CodeQL language inventory is partial; inspect its limits or supply an explicit language"
     );
-    let mut languages = root_manifest_languages(target);
-    collect_source_languages(target, &mut languages)?;
+    let inspection = inventory
+        .inspection
+        .context("CodeQL language inventory has no inspection receipt")?;
+    let mut languages = BTreeSet::new();
+    for path in &inspection.files {
+        let path = Path::new(path);
+        if path
+            .components()
+            .any(|component| ignored_language_dir(component.as_os_str()))
+        {
+            continue;
+        }
+        languages.extend(codeql_language_for_source(path));
+        languages.extend(root_manifest_language(path));
+    }
     Ok(languages)
 }
 
-fn root_manifest_languages(target: &Path) -> BTreeSet<&'static str> {
+fn root_manifest_language(path: &Path) -> Option<&'static str> {
     [
         ("Cargo.toml", "rust"),
         ("package.json", "javascript"),
@@ -273,34 +324,7 @@ fn root_manifest_languages(target: &Path) -> BTreeSet<&'static str> {
         ("Gemfile", "ruby"),
     ]
     .into_iter()
-    .filter_map(|(name, language)| target.join(name).is_file().then_some(language))
-    .collect()
-}
-
-fn collect_source_languages(dir: &Path, languages: &mut BTreeSet<&'static str>) -> Result<()> {
-    let entries = fs::read_dir(dir)
-        .with_context(|| format!("reading repository directory {}", dir.display()))?;
-    for entry in entries {
-        let entry = entry.with_context(|| format!("reading entry below {}", dir.display()))?;
-        collect_source_language_entry(&entry, languages)?;
-    }
-    Ok(())
-}
-
-fn collect_source_language_entry(
-    entry: &fs::DirEntry,
-    languages: &mut BTreeSet<&'static str>,
-) -> Result<()> {
-    let file_type = entry
-        .file_type()
-        .with_context(|| format!("inspecting {}", entry.path().display()))?;
-    if file_type.is_dir() && !ignored_language_dir(&entry.file_name()) {
-        return collect_source_languages(&entry.path(), languages);
-    }
-    if file_type.is_file() {
-        languages.extend(codeql_language_for_source(&entry.path()));
-    }
-    Ok(())
+    .find_map(|(name, language)| (path == Path::new(name)).then_some(language))
 }
 
 fn ignored_language_dir(name: &std::ffi::OsStr) -> bool {
@@ -458,7 +482,7 @@ fn codeql_failure_summary(output: &std::process::Output) -> String {
 }
 
 fn skipped_response(target: &Path) -> Value {
-    let output = "codeql:create-db skipped — the `codeql` CLI is not installed and no `codeqlBin` \
+    let output = "codeql:create-db skipped: the `codeql` CLI is not installed and no `codeqlBin` \
                   option was provided. Install CodeQL on PATH or pass codeqlBin to enable database creation."
         .to_string();
     crate::module_result::skipped_output_result(
@@ -545,6 +569,30 @@ mod tests {
 
         assert!(error.contains("cannot be authenticated"), "{error}");
         assert!(error.contains("without importPath"), "{error}");
+    }
+
+    #[test]
+    fn language_inventory_stops_on_cancellation_without_guessing_a_boundary() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("owned.py"), "# inert owned source\n").unwrap();
+        let cancel = crate::scan::ScanCancellation::default();
+        cancel.cancel();
+        let error = detected_codeql_languages_with_cancel(root.path(), Some(&cancel)).unwrap_err();
+        assert!(format!("{error:#}").contains("partial"));
+    }
+
+    #[test]
+    fn deep_language_inventory_is_iterative_and_retains_loose_root_files() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("owned.py"), "# inert owned source\n").unwrap();
+        let mut nested = root.path().to_path_buf();
+        for _ in 0..200 {
+            nested.push("d");
+            fs::create_dir(&nested).unwrap();
+        }
+        fs::write(nested.join("owned.rs"), "// inert owned source\n").unwrap();
+        let languages = detected_codeql_languages_with_cancel(root.path(), None).unwrap();
+        assert_eq!(languages, BTreeSet::from(["python", "rust"]));
     }
 
     #[test]

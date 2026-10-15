@@ -1,0 +1,82 @@
+name: Review planning retains spending and refuses stale default context across commits
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_source_revision.py @TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TARGET
+submit: campaign owned-sha-review-v2-20261010
+require-live-snap: 30 owned-sha-review-v2-20261010 | changed-review-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN FINDING REVIEW | inherited-review
+expect: Already committed: 4
+expect: last approved total: 11
+expect: explicitly omitted
+expect: 30baa1f1a56bae4cbb431ba0d453a59a8108a71b
+expect: f29dc288e0660ad20d074fc219c025f98ef7d155
+expect: Different commit
+ask: Does the new Review draft distinguish its current source and explicit context omission from earlier observations and unchanged investigation spending?
+resize: 160x48
+live-snap: review-source-160x48
+resize: 96x89
+live-snap: review-source-96x89
+resize: 80x24
+live-snap: review-source-80x24
+resize: 60x20
+live-snap: review-source-60x20
+resize: 40x12
+live-snap: review-source-40x12
+keys: NPage
+live-snap: compact-source-page-1
+keys: NPage
+live-snap: compact-source-page-2
+keys: NPage
+live-snap: compact-source-page-3
+keys: NPage
+live-snap: compact-source-page-4
+keys: NPage
+live-snap: compact-source-page-5
+keys: NPage
+live-snap: compact-source-page-6
+keys: NPage
+live-snap: compact-source-page-7
+keys: NPage
+live-snap: compact-source-page-8
+keys: NPage
+live-snap: compact-source-page-9
+keys: NPage
+live-snap: compact-source-page-10
+keys: NPage
+live-snap: compact-source-page-11
+keys: NPage
+live-snap: compact-source-page-12
+resize: 120x36
+keys: Escape
+require-live-snap: 20 owned-sha-review-v2-20261010 | returned-campaign
+expect-not: PLAN FINDING REVIEW
+submit: report
+require-live-snap: 30 Scope: study live-owned-scans-20261010 | historical-report
+expect: earlier source
+expect: 4 committed / 11 calls
+expect: 2 protected review remaining
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_source_revision.py @TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+submit: campaign owned-sha-review-v2-20261010
+require-live-snap: 25 owned-sha-review-v2-20261010 | recovered-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN FINDING REVIEW | recovered-review
+expect: Already committed: 4
+expect: explicitly omitted
+expect: f29dc288e0660ad20d074fc219c025f98ef7d155
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_source_revision.py @TARGET @ART verify
+keys: Escape
+require-live-snap: 20 owned-sha-review-v2-20261010 | recovered-back
+expect-not: PLAN FINDING REVIEW
+keys: C-c
+require-exit: 10

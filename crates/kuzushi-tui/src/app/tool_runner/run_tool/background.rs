@@ -10,6 +10,8 @@ mod dispatch;
 #[cfg(test)]
 mod phase_result_tests;
 mod preflight;
+#[cfg(test)]
+mod task_binding_tests;
 
 impl ShellApp {
     #[cfg(test)]
@@ -296,6 +298,17 @@ impl ShellApp {
         activity: Option<LiveActivity>,
         authorization: ExecutionAuthorization,
     ) {
+        let runtime_backed =
+            self.registry()
+                .tool_wants_runtime(&tool_name, input.value(), &dispatch.config);
+        let status = prepared_tool_status(status, runtime_backed);
+        let activity = activity.or_else(|| {
+            Some(live_activity_for_prepared_tool(
+                &tool_name,
+                status,
+                runtime_backed,
+            ))
+        });
         let model_override = active_model_override_from_input(input.value(), &dispatch.config);
         BackgroundToolWorkerLaunch::from_dispatch(
             dispatch,
@@ -478,28 +491,30 @@ impl ShellApp {
         }
         session = self.capture_run_focus_origin(session);
         session.seed_task_sequence(self.engagement.planning_tool_sequence());
-        self.bind_background_session_task(&mut session, run, tool_name);
+        self.bind_background_session_task(&mut session, run.task_id, tool_name);
         session
     }
 
     fn bind_background_session_task(
         &self,
         session: &mut ActivitySession,
-        run: &BackgroundToolRun,
+        task_id: kuzushi_core::run_lifecycle::RunTaskId,
         tool_name: &str,
     ) {
-        let Some(task) = self.engagement.running_planning_task() else {
-            // Chain, steer, and ad hoc launches can still match one seeded row.
-            session.alias_tool_to_unique_planned_row(tool_name);
-            if let Some(activity_task_id) = session.task_id_for_bound_tool(tool_name) {
-                session.bind_lifecycle_task(run.task_id, activity_task_id);
-            }
-            return;
+        let activity_task_id = match self.engagement.running_planning_task() {
+            Some(task) => task.activity_task_id(),
+            None => unplanned_activity_task_id(session, tool_name),
         };
-        let activity_task_id = task.activity_task_id();
         session.bind_tool_task(tool_name, activity_task_id.clone());
-        session.bind_lifecycle_task(run.task_id, activity_task_id);
+        session.bind_lifecycle_task(task_id, activity_task_id);
     }
+}
+
+fn unplanned_activity_task_id(session: &mut ActivitySession, tool_name: &str) -> String {
+    session.alias_tool_to_unique_planned_row(tool_name);
+    session
+        .task_id_for_bound_tool(tool_name)
+        .unwrap_or_else(|| tool_name.to_string())
 }
 
 fn background_tool_origin_phase(
@@ -524,6 +539,29 @@ fn background_tool_origin_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_planned_code_graph_cannot_publish_a_map_checkpoint() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        assert_eq!(
+            background_tool_origin_phase(
+                &registry,
+                "cpg:build",
+                Some(crate::app::WorkflowPhase::Map),
+                Some("cpg:build")
+            ),
+            None
+        );
+        assert_eq!(
+            background_tool_origin_phase(
+                &registry,
+                "threat-model:build",
+                Some(crate::app::WorkflowPhase::Map),
+                Some("threat-model:build")
+            ),
+            Some(crate::app::WorkflowPhase::Map)
+        );
+    }
 
     #[test]
     fn background_owned_plan_completion_keeps_setup_and_receipt() {

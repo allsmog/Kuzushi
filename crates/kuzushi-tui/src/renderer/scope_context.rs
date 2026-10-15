@@ -1,4 +1,5 @@
 use super::*;
+use crate::renderer::shared::text::fit_scope_row;
 use crate::ui_view_models::{scope_context, study_context::context_layout};
 use ratatui::widgets::{Block, Borders};
 
@@ -73,5 +74,24 @@ fn row_line(row: &str, selected: bool, width: usize) -> Line<'static> {
     } else {
         (" ", theme::primary())
     };
-    Line::styled(fit(&format!("{marker} {row}"), width), style)
+    Line::styled(
+        format!("{marker} {}", fit_scope_row(row, width.saturating_sub(2))),
+        style,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scope_context_row_keeps_binding_visible_when_a_name_is_long() {
+        let row = "Very long boundary name · inherits common";
+        for width in [34, 40, 60] {
+            let line = row_line(row, true, width);
+            assert!(line.width() <= width);
+            assert!(line.spans[0].content.contains("inherits common"));
+            assert!(line.spans[0].content.starts_with("▸ Very"));
+        }
+    }
 }

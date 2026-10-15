@@ -29,11 +29,15 @@ pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
 fn leading_footer_segments(app: &ShellApp) -> Vec<String> {
     let mut segments = Vec::new();
     segments.extend(autonomy_footer_segment(app));
+    segments.extend(workspace_stale_footer_segment(app));
     segments.push(routing_mode_segment(app));
     segments
 }
 
 fn compact_status_footer_left_segments(app: &ShellApp) -> Vec<String> {
+    if let Some(state) = compact_source_attention(app) {
+        return compact_source_footer_segments(app, state);
+    }
     let mut segments = leading_footer_segments(app);
     if let Some(attention) = attention_footer_segment(app) {
         segments.push(attention);
@@ -42,6 +46,27 @@ fn compact_status_footer_left_segments(app: &ShellApp) -> Vec<String> {
         segments.push(notify);
     }
     segments.push(view_status_segment(app));
+    segments
+}
+
+fn compact_source_attention(app: &ShellApp) -> Option<&'static str> {
+    if app.workspace_stale().is_some() {
+        return Some("stale");
+    }
+    app.domain()
+        .returning_source_unverified()
+        .then_some("source check")
+}
+
+fn compact_source_footer_segments(app: &ShellApp, state: &str) -> Vec<String> {
+    let mut policy = autonomy_footer_segment(app).unwrap_or_else(|| "source".to_string());
+    if !policy.ends_with('⚠') {
+        policy.push_str(" ⚠");
+    }
+    policy.push(' ');
+    policy.push_str(state);
+    let mut segments = vec![policy];
+    segments.extend(attention_footer_segment(app));
     segments
 }
 
@@ -83,7 +108,6 @@ fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
         notification_availability_footer_segment(app),
         journey_footer_segment(app),
         review_conflict_footer_segment(app),
-        workspace_stale_footer_segment(app),
     ]
     .into_iter()
     .flatten()
@@ -97,7 +121,6 @@ fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
         scope_footer_segment(app),
         project_scope_footer_segment(app),
         review_conflict_footer_segment(app),
-        workspace_stale_footer_segment(app),
     ]
     .into_iter()
     .flatten()
@@ -125,7 +148,12 @@ fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {
 }
 
 fn workspace_stale_footer_segment(app: &ShellApp) -> Option<String> {
-    app.workspace_stale().map(|stale| stale.chip())
+    if let Some(stale) = app.workspace_stale() {
+        return Some(stale.chip());
+    }
+    app.domain()
+        .returning_source_unverified()
+        .then(|| "history:check source".to_string())
 }
 
 fn review_conflict_footer_segment(app: &ShellApp) -> Option<String> {

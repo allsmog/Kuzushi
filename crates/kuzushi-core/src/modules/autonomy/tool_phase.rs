@@ -66,10 +66,18 @@ pub fn tool_mutates(tool_name: &str) -> bool {
         .is_some_and(|policy| policy.mutates)
 }
 
+/// Declared result ownership, independent of authorization classification.
+pub fn tool_has_phase_result(tool_name: &str) -> Option<bool> {
+    builtin_tool_policies()
+        .get(tool_name)
+        .map(|policy| policy.phase_result)
+}
+
 #[derive(Debug, Clone, Copy)]
 struct BuiltinToolPolicy {
     classification: Option<ToolClassification>,
     mutates: bool,
+    phase_result: bool,
 }
 
 /// The builtin descriptor set is process-static, but registry construction
@@ -87,6 +95,7 @@ fn builtin_tool_policies() -> &'static BTreeMap<String, BuiltinToolPolicy> {
                 let policy = BuiltinToolPolicy {
                     classification: classify_descriptor(tool),
                     mutates: tool.effect.needs_operator_approval(),
+                    phase_result: tool.phase_result,
                 };
                 (name.clone(), policy)
             })

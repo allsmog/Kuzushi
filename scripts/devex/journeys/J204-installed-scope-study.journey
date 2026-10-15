@@ -1,0 +1,190 @@
+name: Reviewed exact scopes and local context survive six installed-scanner jobs
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | prepared-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Owned common source context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | imported-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scopes
+require-live-snap: 25 Enter / c build inventory | empty-scopes
+keys: c
+require-live-snap: 30 DRAFT SCOPES | whole-repository
+ask: Is whole-repository inspection available before any explicit split, with inventory limits and no model or scan work?
+keys: Enter Down Enter
+require-live-snap: 20 First scope name | split-form
+type: Service
+keys: Tab
+type: service
+keys: Tab
+type: Root files
+keys: Tab
+type: loose.py
+keys: F2
+require-live-snap: 30 r2 | split-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART split
+expect: Root files
+ask: Does the split preserve the loose root file in an explicit residual boundary, with exact nonoverlapping membership and no automatic scan?
+keys: f
+require-live-snap: 20 Files 1..1 of 1 | service-members
+expect: service/notice.py
+keys: Escape Down f
+require-live-snap: 20 loose.py | root-members
+expect: loose.py
+keys: Escape Up a
+require-live-snap: 20 Accept exact boundaries | accept-boundaries
+keys: Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | accepted-scopes
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART accepted
+keys: Space Down Space
+require-live-snap: 20 2 boundaries marked | selected-scopes
+keys: p
+require-live-snap: 25 PLAN A STUDY | scope-study
+expect: 6 fixed discovery jobs
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | engine-choice
+expect: [x] semgrep
+keys: a Down Enter
+require-live-snap: 20 SCOPE CONTEXT | associations
+expect: inherits common
+keys: Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | service-picker
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | common-inspection
+keys: e Enter C-u
+paste-file: @ART/local-context.txt
+keys: C-s
+require-live-snap: 20 REVIEW CONTEXT CHANGES | context-diff
+expect: Service scope:
+keys: Enter
+require-live-snap: 30 Edited copy saved | inactive-copy
+keys: Enter
+require-live-snap: 25 Service scope: | copy-inspection
+keys: a
+require-live-snap: 20 Context selected for | service-override
+expect: exact override
+expect: inherits common
+ask: Can the operator edit an inactive context copy, inspect its diff and associate it with one boundary while the sibling inherits common context?
+resize: 160x48
+require-live-snap: 15 SCOPE CONTEXT | context-160x48
+resize: 96x89
+require-live-snap: 15 SCOPE CONTEXT | context-96x89
+resize: 80x24
+require-live-snap: 15 SCOPE CONTEXT | context-80x24
+resize: 60x20
+require-live-snap: 15 SCOPE CONTEXT | context-60x20
+resize: 40x12
+require-live-snap: 15 SCOPE CONTEXT | context-40x12
+keys: NPage
+live-snap: context-page-40x12
+resize: 120x36
+keys: Escape Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | protected-calls
+type: 1
+keys: Enter L
+require-live-snap: 35 Scope draft ready | frozen-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+expect: 6 fixed jobs
+expect: 60000 ms per job
+expect: Execution model: none
+keys: End
+require-live-snap: 15 y approve | approval-spending
+expect: Protected review calls: 1
+ask: Does approval show both three-pass scopes, their exact context revisions and a finite time/call allowance without approving later subdivisions?
+keys: y
+require-live-snap: 30 Approval saved | approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 30 dispatcher pid | running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 6 completed | completed
+submit: workbench
+require-live-snap: 30 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-service.txt
+keys: Enter
+require-live-snap: 25 Owned policy marker needs an owner decision | service-finding
+expect: service/notice.py
+submit: decision deferred Service owner policy review
+paste-file: @ART/open-root.txt
+keys: Enter
+require-live-snap: 25 Owned policy marker needs an owner decision | root-finding
+expect: loose.py
+submit: decision deferred Root file owner policy review
+submit: report
+require-live-snap: 25 Scope study: | scope-report
+expect: 0 committed / 1 calls
+expect: 1 protected review remaining
+resize: 160x48
+require-live-snap: 15 REPORT | report-160x48
+resize: 96x89
+require-live-snap: 15 REPORT | report-96x89
+resize: 80x24
+require-live-snap: 15 REPORT | report-80x24
+resize: 60x20
+require-live-snap: 15 REPORT | report-60x20
+resize: 40x12
+require-live-snap: 15 REPORT | report-40x12
+keys: NPage NPage NPage
+live-snap: report-page-40x12
+ask: Are per-scope recurrence and context provenance reachable while policy signals remain separate from confirmed vulnerabilities and fixed status?
+resize: 120x36
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 6 completed | restored-study
+nav-mode:
+keys: a Down Down Down Enter
+require-live-snap: 25 SCOPE CONTEXT | restored-contexts
+expect: Service · exact override
+expect: Root files · inherits common
+keys: Escape Escape
+submit: report
+require-live-snap: 25 Scope study: | restored-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/installed_scope_study.py @TMP_TARGET @ART restarted
+ask: Does restart retain accepted membership, the local override, inherited common context, six observations and two decisions without another job or model request?
+keys: C-c
+require-exit: 10

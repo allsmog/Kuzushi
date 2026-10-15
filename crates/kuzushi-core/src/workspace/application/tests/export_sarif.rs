@@ -1,6 +1,25 @@
 use super::*;
 use crate::findings::Severity;
 
+#[test]
+fn sarif_preserves_recorded_source_summary_endpoints() {
+    let mut record = located_record("note.md", 1, None);
+    record.provenance.source_history = vec![crate::findings::FindingSource {
+        tool: "owned".into(),
+        vuln_source: None,
+        source_signature: "note.md:1".into(),
+        first_scan_id: "first".into(),
+        last_scan_id: "latest".into(),
+        first_seen_at: "1000".into(),
+        last_seen_at: "2000".into(),
+    }];
+    let result = sarif_result(&record);
+    assert_eq!(
+        result["properties"]["kuzushiSourceHistory"],
+        serde_json::to_value(&record.provenance.source_history).unwrap()
+    );
+}
+
 fn located_record(
     file: &str,
     start_line: u32,

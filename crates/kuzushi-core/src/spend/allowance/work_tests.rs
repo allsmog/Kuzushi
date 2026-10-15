@@ -204,3 +204,41 @@ fn changed_input_configuration_or_dirty_source_does_not_consume_an_attempt() {
     assert!(ledger.claim_work_attempt(&attempt).is_err());
     claim(&ledger, &reference, "run").unwrap();
 }
+
+#[test]
+fn fixed_work_preflight_uses_approved_categories_without_reserving_calls() {
+    let ledger = SpendLimiter::open_in_memory().unwrap();
+    ledger.approve_allowance(&approval()).unwrap();
+    let mut snapshot = ledger.allowance_snapshot("study").unwrap();
+    snapshot.committed_calls = 6;
+    for tool in [
+        "sast:scan",
+        "context:build",
+        "threat-model:build",
+        "findings:lesson-generate",
+        "triage:run",
+    ] {
+        snapshot.work_plan.as_mut().unwrap().jobs[0].tool = tool.into();
+        assert_eq!(
+            snapshot
+                .require_work_call_capacity("batch:trial-001", tool)
+                .is_ok(),
+            tool == "triage:run",
+            "{tool}"
+        );
+    }
+    assert!(snapshot
+        .require_work_call_capacity("unknown", "triage:run")
+        .is_err());
+    assert!(snapshot
+        .require_work_call_capacity("batch:trial-001", "sast:scan")
+        .is_err());
+    snapshot.work_plan = None;
+    assert!(snapshot
+        .require_work_call_capacity("batch:trial-001", "triage:run")
+        .is_err());
+    assert_eq!(
+        ledger.allowance_snapshot("study").unwrap().committed_calls,
+        0
+    );
+}

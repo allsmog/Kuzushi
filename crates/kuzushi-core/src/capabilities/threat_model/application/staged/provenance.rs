@@ -90,6 +90,18 @@ fn provenance_object(document: &mut Value) -> Option<&mut Map<String, Value>> {
     root.get_mut("provenance")?.as_object_mut()
 }
 
+/// Replace model claims and inherited identities with this build's host stamp.
+/// A failed capture must leave the source unknown rather than reuse a hash.
+pub(crate) fn stamp_source_tree_hash(document: &mut Value, captured: Option<&str>) {
+    let Some(provenance) = provenance_object(document) else {
+        return;
+    };
+    provenance.remove("treeHash");
+    if let Some(hash) = captured {
+        provenance.insert("treeHash".to_string(), json!(hash));
+    }
+}
+
 fn epoch_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -100,6 +112,29 @@ fn epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_identity_replaces_model_claims_without_verifying_context_claims() {
+        let mut document = json!({"provenance":{"treeHash":"model-claim"}});
+        stamp_source_tree_hash(&mut document, Some("host-capture"));
+        assert_eq!(document["provenance"]["treeHash"], "host-capture");
+        assert!(document.get("verification").is_none());
+    }
+
+    #[test]
+    fn unavailable_source_identity_removes_inherited_and_model_claims() {
+        let mut document = json!({"provenance":{"treeHash":"previous-build","pipeline":"staged"}});
+        stamp_source_tree_hash(&mut document, None);
+        assert!(document["provenance"].get("treeHash").is_none());
+        assert_eq!(document["provenance"]["pipeline"], "staged");
+    }
+
+    #[test]
+    fn source_identity_creates_missing_provenance() {
+        let mut document = json!({"dfd":{}});
+        stamp_source_tree_hash(&mut document, Some("host-capture"));
+        assert_eq!(document["provenance"]["treeHash"], "host-capture");
+    }
 
     #[test]
     fn stamps_pipeline_and_built_at_and_merges_into_existing_provenance() {

@@ -1,8 +1,10 @@
 use super::*;
 
-const MAX_DIGEST_THREATS: usize = 12;
-const MAX_DIGEST_ENTRIES: usize = 12;
-const MAX_DIGEST_FIELD_CHARS: usize = 200;
+pub(crate) const MAX_DIGEST_THREATS: usize = 12;
+pub(crate) const MAX_DIGEST_ENTRIES: usize = 12;
+pub(crate) const MAX_DIGEST_FIELD_CHARS: usize = 200;
+pub(crate) const MAX_DIGEST_LESSONS: usize = 8;
+pub(crate) const MAX_DIGEST_LESSON_FIELD_CHARS: usize = 2048;
 
 mod map_digest;
 
@@ -188,9 +190,9 @@ pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {
 }
 
 fn reviewed_lesson_lines(document: &Value) -> Vec<String> {
-    document.get("reviewedLessons").and_then(Value::as_array).into_iter().flatten().take(8).map(|record| {
+    document.get("reviewedLessons").and_then(Value::as_array).into_iter().flatten().take(MAX_DIGEST_LESSONS).map(|record| {
         let content=&record["content"];
-        let text=|key|content[key].as_str().unwrap_or_default().chars().take(2048).collect::<String>();
+        let text=|key|content[key].as_str().unwrap_or_default().chars().take(MAX_DIGEST_LESSON_FIELD_CHARS).collect::<String>();
         format!("- {}: {}\n  Applies: {}\n  Limits: {}\n  Origin: {} revision {}. Historical guidance; assess current source independently.",text("title"),text("text"),text("applicability"),text("limitations"),record["id"].as_str().unwrap_or_default(),record["revision"])
     }).collect()
 }

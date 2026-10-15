@@ -59,7 +59,9 @@ impl ShellApp {
 
     fn dispatch_study_action(&mut self, tool: &str, input: Value) -> InputUpdate {
         self.clear_study_preparation_error();
-        self.set_batch_config_notice("Preparing the selected action. No scan jobs started.");
+        self.set_batch_config_notice(
+            "No scan jobs started. Review the action and its result before continuing.",
+        );
         InputUpdate::handled_with_effects(
             self.reduce_run_tool(Some(tool.into()), Some(input.to_string())),
         )

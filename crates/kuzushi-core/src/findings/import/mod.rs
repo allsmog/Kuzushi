@@ -41,9 +41,40 @@ pub use har::import_har;
 pub use ledger_jsonl::import_ledger_jsonl;
 pub use ledger_jsonl::is_ledger_import_run_id;
 
+/// Imported observations remain readable without proving local discovery work.
+pub fn is_imported_evidence_run_id(value: &str) -> bool {
+    if is_ledger_import_run_id(value) {
+        return true;
+    }
+    value
+        .strip_prefix("har-")
+        .or_else(|| value.strip_prefix("burp-"))
+        .is_some_and(|suffix| suffix.len() == 36 && uuid::Uuid::parse_str(suffix).is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::capture_skip_phrase;
+
+    #[test]
+    fn imported_evidence_namespaces_do_not_claim_local_discovery() {
+        for value in [
+            "ledger-0123456789abcdef",
+            "har-7c6a8cac-e38a-44f2-9dd2-cb1d9d881350",
+            "burp-7c6a8cac-e38a-44f2-9dd2-cb1d9d881350",
+        ] {
+            assert!(super::is_imported_evidence_run_id(value), "{value}");
+        }
+        for value in [
+            "har-operator-scan",
+            "burp-invalid",
+            "ledger-not-an-import",
+            "owned-sast-scan",
+            "",
+        ] {
+            assert!(!super::is_imported_evidence_run_id(value), "{value}");
+        }
+    }
 
     #[test]
     fn a_complete_import_has_nothing_to_disclose() {

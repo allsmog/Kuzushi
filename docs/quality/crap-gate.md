@@ -36,6 +36,16 @@ overlap the diff. Added and untracked files are scored in full, including the
 file-size limit. This keeps the gate focused on new or modified code without
 turning unrelated legacy functions in a touched file into a blocker.
 
+The pinned terminal dependency has a separate authenticated baseline. Its
+original crates.io archive checksum is fixed in
+`scripts/vendored-terminal-baseline.mjs`; untouched package files must match
+that archive. Identical upstream functions do not become local code merely
+because the package is copied into the repository. New and modified functions
+in the patched input files receive the same complexity, size and risk limits.
+Their combined local production lines receive the 300-line file limit too.
+The baseline tests reject archive replacement, unexpected upstream edits and
+branchy local additions. See [terminal dependency maintenance](../../third-party/README.md).
+
 ## Weights
 
 - `complexity`: one plus branch-like control-flow lines.

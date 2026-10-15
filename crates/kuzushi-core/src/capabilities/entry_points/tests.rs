@@ -1,6 +1,8 @@
 use super::*;
 use serde_json::json;
 
+mod cancellation;
+
 fn snapshot(target: &std::path::Path) -> serde_json::Value {
     let tree_hash = crate::incremental_index::current_workspace_tree_hash(target).unwrap();
     json!({

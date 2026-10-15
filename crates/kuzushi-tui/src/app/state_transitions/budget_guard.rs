@@ -12,12 +12,12 @@ impl ShellApp {
         self.log(
             "budget",
             format!(
-                "{label} blocked by the session cost halt; c reviews the cap, a aborts active work"
+                "{label} blocked by the session spending halt; inspect cost or report, or review the stop in setup"
             ),
         );
         self.set_error_notice(
             "cost",
-            "runtime-backed launch blocked until the budget cap is explicitly raised or reset",
+            "runtime-backed launch blocked by the session spending halt. Review accounting and the stop in setup before starting model work.",
         );
         true
     }
@@ -64,10 +64,18 @@ impl ShellApp {
     }
 
     fn set_budget_halt(&mut self, limit_usd: f64, spent_usd: f64) {
+        self.advisory_mut().budget_halt_acknowledged = false;
         self.advisory_mut().budget_halt = Some(BudgetHalt {
             limit_usd,
             spent_usd,
         });
+    }
+
+    pub(crate) fn budget_halt_owns_input(&self) -> bool {
+        self.is_budget_halted()
+            && !self.advisory().budget_halt_acknowledged
+            && !self.budget_editor_open()
+            && self.shell_view() != ShellView::QuitConfirm
     }
 
     pub(crate) fn continue_past_budget(&mut self) {

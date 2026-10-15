@@ -1,0 +1,63 @@
+name: Read actual scope rejection and retain spending without repeating work
+size: 120x36
+# Owned non-Git fixture. The helper authenticates all nine source files and receipts.
+require-shell: test -d @TARGET
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-monorepo-scope-20261014/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_failure.py @TARGET @ART inspect
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign live-scope-proposal-20261014
+require-live-snap: 25 1 failed | failed-proposal
+expect: work ended
+expect-not: L resume
+nav-mode:
+keys: L
+require-live-snap: 25 new approved plan | consumed-attempt-refusal
+keys: a
+require-live-snap: 25 Inspect scope proposal outcome | scope-outcome
+require-live-snap: 25 unknown shared dependency greeting | recorded-validation-cause
+expect: No automatic repair or rerun
+ask: Does the scope outcome lead with the actual validation cause and make inspection and separately approved replacement work clear?
+resize: 160x48
+require-live-snap: 15 proposal rejected | cause-160x48
+resize: 96x89
+require-live-snap: 15 proposal rejected | cause-96x89
+resize: 80x24
+require-live-snap: 15 proposal rejected | cause-80x24
+resize: 60x20
+require-live-snap: 15 proposal rejected | cause-60x20
+resize: 40x12
+require-live-snap: 15 proposal rejected | cause-40x12
+keys: NPage
+live-snap: failure-page-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+require-live-snap: 15 attempts remain recorded. | spending-last-40x12
+ask: Can the operator read the recorded failure, spending and no-rerun terms at every required size using visible paging controls?
+resize: 120x36
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES | original-inventory-draft
+expect: Whole repository
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_failure.py @TARGET @ART refused
+submit: logs
+submit: run campaign:allowance {"investigationId":"live-monorepo-scope-20261014"}
+require-live-snap: 25 Calls committed: 1/3 | shared-spending
+expect: Unresolved calls: 0
+expect: dollar ceiling: not enforced
+ask: Does reading the failed real request retain one consumed attempt and one request, disclose unknown dollars, and leave scope acceptance and scanning separate?
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-monorepo-scope-20261014/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: campaign live-scope-proposal-20261014
+require-live-snap: 25 1 failed | retained-failure
+nav-mode:
+keys: a
+require-live-snap: 25 unknown shared dependency greeting | retained-cause
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_scope_failure.py @TARGET @ART restarted
+ask: Does no-color restart preserve the real cause, unchanged source and receipts, original scope draft and all spending without a new request?
+keys: C-c
+require-exit: 10

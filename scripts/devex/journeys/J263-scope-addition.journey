@@ -1,0 +1,69 @@
+name: Add discovery membership to the real proposal's uncovered files without starting work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scopes
+require-live-snap: 25 DRAFT SCOPES | copied-model-boundaries
+keys: Enter End
+require-live-snap: 20 Add discovery scope | add-action
+keys: Enter
+require-live-snap: 20 ADD DISCOVERY SCOPE | new-boundary-name
+keys: C-Home C-k
+type: Greeting discovery
+keys: Tab
+require-live-snap: 20 crates/greeting/Cargo.toml | complete-gap-prefill
+keys: C-Home C-k
+type: ../outside
+keys: F2
+require-live-snap: 25 Action stopped | invalid-membership
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME invalid
+keys: Escape Enter End Enter
+require-live-snap: 20 ../outside | restored-private-draft
+ask: Does invalid membership retain the edited draft and cursor, with the saved proposal unchanged and no model request or scan?
+keys: C-Home C-k
+paste-file: @ART/greeting-members.txt
+keys: Tab C-Home C-k
+type: Inspect greeting implementation while retaining shared interface context.
+resize: 160x48
+require-live-snap: 15 ADD DISCOVERY SCOPE | add-160x48
+resize: 96x89
+require-live-snap: 15 ADD DISCOVERY SCOPE | add-96x89
+resize: 80x24
+require-live-snap: 15 ADD DISCOVERY SCOPE | add-80x24
+resize: 60x20
+require-live-snap: 15 ADD DISCOVERY SCOPE | add-60x20
+resize: 40x12
+require-live-snap: 15 ADD DISCOVERY SCOPE | add-40x12
+keys: F2
+require-live-snap: 25 r2 | saved-new-boundary-40x12
+expect: Greeting discovery
+resize: 120x36
+require-live-snap: 20 Greeting discovery | covered-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME added
+ask: Is the new discovery scope distinct from shared context, with zero uncovered files and acceptance still required?
+keys: a
+require-live-snap: 20 Accept exact boundaries | acceptance
+keys: Enter End Enter
+require-live-snap: 25 ACCEPTED SCOPES | separately-accepted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME prepare
+keys: Escape
+submit: campaign owned-added-scope-study
+require-live-snap: 25 12 | fixed-unapproved-plan
+ask: Does the prepared plan retain four explicit boundaries, three passes each and one worker, with job execution and spending approval still separate?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | recovered-boundaries
+expect: Greeting discovery
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_addition.py @TMP_TARGET @ART @TMP_HOME restarted
+ask: Does no-color restart recover accepted membership while preserving the original live proposal, all source files, zero provider calls and zero started jobs?
+keys: C-c
+require-exit: 10

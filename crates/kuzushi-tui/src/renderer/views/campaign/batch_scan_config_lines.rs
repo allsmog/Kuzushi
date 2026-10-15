@@ -56,7 +56,10 @@ pub(super) fn append_study_context(lines: &mut Vec<Line<'static>>, app: &ShellAp
     if append_context_subview(lines, app, area) {
         return;
     }
-    lines.push(divider("CHOOSE STUDY CONTEXT", area.width));
+    lines.push(divider(
+        crate::ui_view_models::study_context::context_header_title(app).trim(),
+        area.width,
+    ));
     lines.extend(
         context_catalog(app)
             .rows
@@ -68,6 +71,11 @@ pub(super) fn append_study_context(lines: &mut Vec<Line<'static>>, app: &ShellAp
             .into_iter()
             .map(|line| Line::styled(line, theme::primary())),
     );
+    if let Some(controls) = app.study_context_picker().and_then(|picker| {
+        crate::ui_view_models::study_context::context_text_controls(picker.text_view, area.width)
+    }) {
+        lines.push(Line::styled(controls, theme::muted()));
+    }
 }
 
 fn append_context_subview(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) -> bool {

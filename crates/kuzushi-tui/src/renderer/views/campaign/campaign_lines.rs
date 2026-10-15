@@ -189,6 +189,12 @@ fn append_campaign_detail(
     campaign: &CampaignSnapshot,
     area: Rect,
 ) {
+    if deck.job_detail {
+        if let Some(job) = campaign.jobs.get(deck.selected_job) {
+            super::fixed_jobs::append_selected_detail(lines, job, area.width as usize);
+        }
+        return;
+    }
     super::summary::append_campaign_summary(lines, deck, campaign, area.width as usize);
     lines.push(blank());
     append_campaign_jobs(lines, deck, campaign, area);
@@ -208,6 +214,10 @@ fn append_campaign_jobs(
 ) {
     if campaign.kind.as_deref() == Some("context-study") {
         super::context_study_lines::append_context_jobs(lines, deck, campaign, area.width as usize);
+        return;
+    }
+    if crate::app::is_fixed_study_snapshot(campaign) {
+        super::fixed_jobs::append_fixed_jobs(lines, deck, campaign, area.width as usize);
         return;
     }
     let widths = job_list_widths(area);
@@ -354,21 +364,10 @@ fn job_findings_label(job: &CampaignJobSnapshot) -> String {
 }
 
 pub(super) fn job_cost_label(job: &CampaignJobSnapshot) -> String {
-    if job.provider_spend_unresolved && job.cost_usd.is_some_and(|cost| cost <= 0.0) {
-        return "unknown".into();
-    }
-    job.cost_usd
-        .map(|cost| {
-            if job.provider_spend_unresolved {
-                format!("≥${cost:.2}")
-            } else {
-                format!("${cost:.2}")
-            }
-        })
-        .unwrap_or_else(|| "unknown".to_string())
+    crate::ui_view_models::campaign_job_cost_label(job)
 }
 
-fn job_state_style(state: &str) -> Style {
+pub(super) fn job_state_style(state: &str) -> Style {
     match state {
         "completed" => theme::success(),
         "running" => theme::accent(),
@@ -400,6 +399,9 @@ fn append_campaign_notice(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteSt
 }
 
 pub(super) fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+    if deck.job_detail {
+        return inspected_job_commands(deck);
+    }
     if deck.dispatcher_stop_requested {
         return &[
             "j/k",
@@ -436,8 +438,37 @@ pub(super) fn deck_commands(deck: &CampaignRouteState) -> &'static [&'static str
     }
 }
 
+fn inspected_job_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+    if deck.dispatcher_stop_requested {
+        return &[
+            "Stop requested",
+            "saving partial work",
+            "q jobs",
+            "r refresh",
+        ];
+    }
+    if deck.dispatcher_pid.is_some() {
+        return &[
+            "↑↓ jobs",
+            "K stop",
+            "q jobs",
+            "a plan/allowance",
+            "PgUp/Dn read",
+            "r refresh",
+        ];
+    }
+    &[
+        "↑↓ jobs",
+        "q jobs",
+        "a plan/allowance",
+        "PgUp/Dn read",
+        "r refresh",
+    ]
+}
+
 const PAUSED_FIXED_WORK_COMMANDS: &[&str] = &[
     "j/k",
+    "Enter inspect",
     "a plan/allowance",
     "work paused",
     "L resume after review",
@@ -456,6 +487,7 @@ fn fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
     if unfinished {
         &[
             "j/k",
+            "Enter inspect",
             "a plan/allowance",
             "jobs frozen",
             "workers frozen",
@@ -464,19 +496,41 @@ fn fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
             "r refresh",
             "q list",
         ]
-    } else if deck
+    } else {
+        settled_fixed_work_commands(deck)
+    }
+}
+
+fn settled_fixed_work_commands(deck: &CampaignRouteState) -> &'static [&'static str] {
+    if deck
+        .selected_campaign()
+        .is_some_and(|campaign| campaign.jobs.iter().any(|job| job.state == "parked"))
+    {
+        return PAUSED_FIXED_WORK_COMMANDS;
+    }
+    if deck
         .selected_campaign()
         .is_some_and(|campaign| campaign.jobs.iter().all(|job| job.state == "completed"))
     {
         &[
             "j/k",
+            "Enter inspect",
             "a plan/allowance",
             "work finished",
             "r refresh",
             "q list",
         ]
     } else {
-        PAUSED_FIXED_WORK_COMMANDS
+        &[
+            "j/k",
+            "Enter inspect",
+            "a plan/allowance",
+            "work ended",
+            "new work needs a new plan",
+            "workbench partial/report",
+            "r refresh",
+            "q list",
+        ]
     }
 }
 
@@ -696,6 +750,7 @@ mod tests {
     fn sample_job(job_id: &str, state: &str) -> CampaignJobSnapshot {
         CampaignJobSnapshot {
             job_id: job_id.to_string(),
+            display_label: None,
             tool: Some("sast:scan".to_string()),
             shard: Some("src/auth".to_string()),
             threat_id: Some("T1".to_string()),
@@ -756,7 +811,9 @@ mod tests {
         assert!(deck_commands(&deck).contains(&"a plan/allowance"));
         assert!(!deck_commands(&deck).contains(&"L launch"));
         assert!(!deck_commands(&deck).contains(&"K stop"));
-        assert!(deck_commands(&deck).contains(&"work paused"));
+        assert!(deck_commands(&deck).contains(&"work ended"));
+        assert!(!deck_commands(&deck).contains(&"L resume after review"));
+        assert!(deck_commands(&deck).contains(&"new work needs a new plan"));
         assert!(!deck_commands(&deck).contains(&"work finished"));
         for state in ["planned", "running"] {
             deck.campaigns[0].jobs[0].state = state.into();

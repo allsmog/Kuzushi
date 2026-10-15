@@ -108,6 +108,13 @@ mod agent_loop_outcome_serde_tests {
 
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
+    /// Host-approved accounting already bound to this runtime. Transparent
+    /// wrappers forward this receipt so nested dispatch can validate the same
+    /// work without creating or replacing an investigation allowance.
+    fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+        None
+    }
+
     /// Bind host-approved accounting to every underlying provider attempt.
     /// Adapters must explicitly implement this; an outer-query-only guard is
     /// insufficient when a request contains internal model turns or retries.
@@ -126,6 +133,16 @@ pub trait AgentRuntime: Send + Sync {
     fn semantic_cache_identity(
         &self,
         _request: &AgentQueryRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        None
+    }
+
+    /// Attest the response-affecting triage adapter contract, including its
+    /// effective defaults and request translation. Query attestation does not
+    /// imply triage attestation. None keeps triage live without cached replay.
+    fn triage_semantic_cache_identity(
+        &self,
+        _request: &TriageRequest,
     ) -> Option<crate::identity::Blake3Hash> {
         None
     }

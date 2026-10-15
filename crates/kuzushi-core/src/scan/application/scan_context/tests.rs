@@ -99,8 +99,10 @@ fn frozen_scan_context_refuses_missing_tampered_and_oversized_content() {
     let path = store.object_path(&reference.object.hash);
     std::fs::write(&path, b"tampered").unwrap();
     assert!(selected_scan_context(root.path(), &input).is_err());
+    assert!(inspect_scan_context(root.path(), &input).is_err());
     std::fs::remove_file(&path).unwrap();
     assert!(selected_scan_context(root.path(), &input).is_err());
+    assert!(inspect_scan_context(root.path(), &input).is_err());
     let mut invalid = input;
     invalid["scanContextRef"]["object"]["sizeBytes"] = json!(65537);
     assert!(selected_scan_context(root.path(), &invalid).is_err());

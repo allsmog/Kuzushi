@@ -6,6 +6,33 @@ use crate::findings::{
 use std::collections::HashMap;
 
 #[test]
+fn repeat_run_history_is_preserved_without_independent_corroboration() {
+    let mut finding = basic_finding(Severity::Low);
+    finding.sources = ["first", "middle", "latest"]
+        .into_iter()
+        .map(|run| crate::findings::FindingSource {
+            tool: "owned".into(),
+            vuln_source: None,
+            source_signature: "note.md:1".into(),
+            first_scan_id: run.into(),
+            last_scan_id: run.into(),
+            first_seen_at: "1000".into(),
+            last_seen_at: "1000".into(),
+        })
+        .collect();
+    finding.corroboration_count = 1;
+    let record = workspace_finding_export_records_with_reviews(&[finding.clone()], &[]).remove(0);
+    assert_eq!(record.evidence.source_count, 1);
+    assert_ne!(record.evidence.state, "corroborated");
+    let json = serde_json::to_value(&record).unwrap();
+    assert_eq!(
+        json["provenance"]["sourceHistory"],
+        serde_json::to_value(&finding.sources).unwrap()
+    );
+    assert!(record.confidence.is_none());
+}
+
+#[test]
 fn observation_gap_export_preserves_confirmation_and_comparison_provenance() {
     let mut finding = reviewed_source_linked_finding();
     finding.observation_gap = Some(crate::findings::FindingObservationGap {
@@ -135,7 +162,9 @@ fn export_record_does_not_serialize_raw_http_blobs() {
 #[test]
 fn export_record_labels_automated_reasoning_without_calling_it_observed_evidence() {
     let mut finding = basic_finding(Severity::High);
-    finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
+    finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::NeedsReview,
         confidence: 0.6,
         rationale: "automated review needs operator validation".to_string(),
@@ -298,7 +327,9 @@ fn export_record_uses_run_context_when_available() {
 fn reviewed_source_linked_finding() -> Finding {
     let mut finding = basic_finding(Severity::High);
     finding.scan_id = Some("run-1".to_string());
-    finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
+    finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.9,
         rationale: "operator reviewed source-linked evidence".to_string(),

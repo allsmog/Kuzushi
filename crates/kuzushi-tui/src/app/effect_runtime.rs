@@ -354,7 +354,8 @@ impl EffectRuntime {
                 app.persist_planning_option_override_effect(persist)
             }
             ShellEffect::PersistOptions(scope) => {
-                app.persist_option_store(scope);
+                let persisted = app.persist_option_store(scope);
+                app.complete_browser_option_save(scope, persisted);
             }
             _ => unreachable!("persistence effect dispatch"),
         }

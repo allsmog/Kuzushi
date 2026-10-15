@@ -1,0 +1,59 @@
+name: Entry-point source facts remain readable and stale catalog recovery is explicit
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: scene
+require-live-snap: 25 DATA-FLOW DIAGRAM | source-diagram
+expect: PARTIAL
+keys: Tab
+require-live-snap: 25 ENTRY POINTS | source-entry-points
+expect: Flask
+expect: /health
+keys: Down
+require-live-snap: 25 FastAPI | second-source-route
+resize: 160x48
+live-snap: entries-160x48
+resize: 96x89
+live-snap: entries-96x89
+resize: 80x24
+live-snap: entries-80x24
+resize: 60x20
+live-snap: entries-60x20
+resize: 40x12
+live-snap: entries-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+wait: 3
+live-snap: entries-tail-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART tail
+ask: Are source facts, provenance and navigation readable without claiming complete model validation across six sizes?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 KUZUSHI | restored-origin
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART drift
+submit: run entry-points:extract {}
+require-live-snap: 30 tree identity is stale | refused-stale-catalog
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART stale
+ask: Does failed extraction explain the stale source and preserve prior evidence without automatic rebuilding or provider work?
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 This Map attempt produced no threat-model context | rebuilt-context
+submit: run entry-points:extract {}
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART await-rebuilt
+require-live-snap: 35 RESULT READY | rebuilt-catalog
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART rebuilt
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: scene
+require-live-snap: 25 DATA-FLOW DIAGRAM | restored-map
+keys: Tab
+require-live-snap: 25 Flask | restored-catalog
+require-shell: python3 -B @REPO/scripts/devex/fixtures/entry_point_publication.py @TMP_TARGET @ART rebuilt
+ask: Does no-color restart show the rebuilt catalog and retain the prior Map's distinct source provenance without more work?
+keys: Escape
+keys: C-c
+require-exit: 10

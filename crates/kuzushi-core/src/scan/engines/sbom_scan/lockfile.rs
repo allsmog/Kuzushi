@@ -1,9 +1,10 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::*;
 use anyhow::Context;
 
 pub(super) fn collect_lockfiles(
-    target: &Path,
+    target: &SbomInputs,
     files: &[PathBuf],
 ) -> Result<Vec<SbomLockfile>> {
     files
@@ -46,8 +47,9 @@ fn is_lockfile(path: &Path) -> bool {
         })
 }
 
-fn lockfile_digest(target: &Path, path: &Path) -> Result<SbomLockfile> {
-    let bytes = fs::read(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+fn lockfile_digest(target: &SbomInputs, path: &Path) -> Result<SbomLockfile> {
+    let bytes =
+        fs::read(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     Ok(SbomLockfile {
         path: relative_display(target, path),
         sha256: format!(

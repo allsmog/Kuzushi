@@ -50,6 +50,233 @@ fn body(app: &ShellApp) -> Rect {
 }
 
 #[test]
+fn compact_saved_run_notice_preserves_the_first_failure_frame_and_draft() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let (_target, mut app) = failed_replay();
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
+    app.set_input("held 修正".to_string());
+    app.set_error_notice(
+        "tool",
+        "Owned incomplete receipt. The full failure remains available in logs.",
+    );
+    let original = app.advisory().notice.clone();
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    terminal
+        .draw(|frame| crate::renderer::render_app(frame, &app))
+        .unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Outcome · failed"), "{text}");
+    assert!(
+        text.contains("ERROR") && text.contains("Esc dismiss"),
+        "{text}"
+    );
+    assert!(text.contains("logs"), "{text}");
+    assert_eq!(app.input(), "held 修正");
+    assert_eq!(app.advisory().notice, original);
+    assert_eq!(app.shell_view(), ShellView::Replay);
+    assert_eq!(app.router.default_scroll().offset(), 0);
+}
+
+#[test]
+fn replay_reader_leads_with_the_typed_failure_before_metadata() {
+    let (_target, mut app) = failed_replay();
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        app.set_viewport(crate::app::TerminalViewport::new(width, height));
+        let area = body(&app);
+        let lines = replay_lines(&app, area, RUN);
+        let text: Vec<_> = lines.iter().map(|line| line.to_string()).collect();
+        let first_page = text
+            .iter()
+            .take(area.height as usize)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            first_page.contains("Outcome · failed"),
+            "{width}x{height}: {first_page}"
+        );
+        assert!(
+            first_page.contains("Restore"),
+            "{width}x{height}: {first_page}"
+        );
+        let full = text.join("\n");
+        assert_eq!(full.matches("Outcome · failed").count(), 1);
+        assert!(full.find("Outcome · failed").unwrap() < full.find("Stream:").unwrap());
+        assert!(full.contains(RUN));
+    }
+}
+
+fn model_with_supplied_metadata(app: &ShellApp) -> crate::ui_view_models::ReplayModel {
+    let mut model = replay_model(app, RUN);
+    model
+        .presentation
+        .as_mut()
+        .unwrap()
+        .summary
+        .push(RunPresentationSectionV1 {
+            kind: RunPresentationSectionKindV1::Evidence,
+            cells: vec![RunPresentationCellV1 {
+                key: RunCellKey {
+                    source: RunCellSourceV1::ArtifactDigest(SafeText::operator_visible(
+                        "owned-test-digest",
+                    )),
+                    role: RunCellRoleV1::ResultSummary,
+                    ordinal: 0,
+                },
+                importance: RunCellImportanceV1::Essential,
+                payload: RunPresentationPayloadV1::ResultSummary(ResultSummaryPresentationV1 {
+                    tool: SafeText::operator_visible("ndiff:fetch-cve"),
+                    status: SafeText::operator_visible("completed"),
+                    summary: SafeText::operator_visible("Unverified supplied metadata"),
+                    output_lines: vec![SafeText::operator_visible(
+                        "Owned source-only metadata. 資料/my  project",
+                    )],
+                    output_line_count: 1,
+                    warnings: vec![],
+                    warning_count: 0,
+                    errors: vec![],
+                    error_count: 0,
+                    artifacts: vec![],
+                    artifact_count: 0,
+                }),
+                disclosure: None,
+            }],
+        });
+    model
+}
+
+#[test]
+fn terminal_reader_places_result_content_before_run_diagnostics_at_every_width() {
+    let (_target, app) = failed_replay();
+    let model = model_with_supplied_metadata(&app);
+    let original = model.clone();
+    for width in [40, 60, 80, 96, 120, 160] {
+        let mut lines = vec![];
+        let key = append_replay_outcome(&mut lines, &model);
+        append_optional_presentation(&mut lines, &model, key.as_ref(), width);
+        let wrapped = wrap_document_lines(lines, width);
+        assert!(wrapped.iter().all(|line| line.width() <= width as usize));
+        let text = wrapped
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("");
+        assert!(
+            text.find("Owned source-only metadata").unwrap() < text.find("RUN DETAILS").unwrap()
+        );
+        assert!(text.find("RUN DETAILS").unwrap() < text.find("Stream:").unwrap());
+        assert!(text.contains("資料/my  project"));
+        assert_eq!(text.matches("Outcome · failed").count(), 1);
+    }
+    assert_eq!(model, original);
+}
+
+#[test]
+fn uncertain_reader_keeps_health_before_result_content() {
+    let (_target, app) = failed_replay();
+    let mut model = model_with_supplied_metadata(&app);
+    model.presentation.as_mut().unwrap().health.integrity = ProjectionHealth::Degraded {
+        valid_through_seq: 1,
+        reason: "Owned stream gap".into(),
+    };
+    let mut lines = vec![];
+    append_optional_presentation(&mut lines, &model, None, 80);
+    let text = lines
+        .iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.find("Owned stream gap").unwrap() < text.find("Owned source-only metadata").unwrap()
+    );
+    assert!(!text.contains("RUN DETAILS"));
+}
+
+#[test]
+fn recorded_error_precedes_cost_and_continuation_without_changing_outcome() {
+    let (_target, app) = failed_replay();
+    let mut model = replay_model(&app, RUN);
+    let original = model.presentation.clone();
+    model.issue = Some(crate::ui_view_models::ReplayIssueModel {
+        label: "Recorded error",
+        message: "Git inventory failed; prior context remains. 資料/my  project".into(),
+        tool: Some("Build project context".into()),
+    });
+    for width in [40, 60, 80, 96, 120, 160] {
+        let mut lines = vec![];
+        append_replay_outcome(&mut lines, &model).unwrap();
+        let lines = wrap_document_lines(lines, width);
+        assert!(lines.iter().all(|line| line.width() <= width as usize));
+        let text: String = lines.iter().map(|line| line.to_string()).collect();
+        assert!(text.find("Outcome · failed").unwrap() < text.find("Recorded error").unwrap());
+        assert!(text.find("Recorded error").unwrap() < text.find("Cost ·").unwrap());
+        assert!(text.find("Recorded error").unwrap() < text.find("NEXT ·").unwrap());
+        assert!(text.contains("資料/my  project"));
+        assert!(text.contains("Reported by Build project context"));
+    }
+    assert_eq!(model.presentation, original);
+}
+
+#[test]
+fn compact_partial_outcome_promotes_warning_before_a_long_summary_without_losing_it() {
+    let (_target, app) = failed_replay();
+    let mut model = replay_model(&app, RUN);
+    let summary = format!(
+        "Owned observations under /{}資料/my  project",
+        "directory/".repeat(30)
+    );
+    set_fixture_terminal_summary(&mut model, RunItemStatus::Partial, &summary);
+    model.issue = Some(crate::ui_view_models::ReplayIssueModel {
+        label: "Recorded warning",
+        message: "Coverage is incomplete; review required.".into(),
+        tool: Some("Owned query observations".into()),
+    });
+    let original = model.clone();
+    let mut lines = vec![];
+    append_replay_outcome(&mut lines, &model).unwrap();
+    let wrapped = wrap_document_lines(lines, 40);
+    let first: String = wrapped
+        .iter()
+        .take(3)
+        .map(|line| line.to_string())
+        .collect();
+    assert!(first.contains("Outcome · partial"));
+    assert!(first.contains("cost not recorded"));
+    assert!(first.contains("Recorded warning"));
+    assert!(!first.contains("directory/"));
+    let full: String = wrapped.iter().map(|line| line.to_string()).collect();
+    assert!(full.contains(&summary));
+    assert!(full.contains("cost not recorded"));
+    assert!(full.contains("NEXT ·"));
+    assert_eq!(model, original);
+}
+
+fn set_fixture_terminal_summary(
+    model: &mut crate::ui_view_models::ReplayModel,
+    status: RunItemStatus,
+    summary: &str,
+) {
+    let presentation = model.presentation.as_mut().unwrap();
+    presentation.terminal_status = Some(status);
+    for cell in presentation
+        .summary
+        .iter_mut()
+        .flat_map(|section| &mut section.cells)
+    {
+        if let RunPresentationPayloadV1::Terminal(value) = &mut cell.payload {
+            value.status = status;
+            value.summary = SafeText::operator_visible(summary);
+        }
+    }
+}
+
+#[test]
 fn replay_reader_wraps_complete_failure_messages_to_display_width() {
     let (_target, app) = failed_replay();
     for width in [40, 80] {
@@ -213,10 +440,13 @@ fn replay_reader_full_frame_paging_reaches_every_projected_row() {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         let mut seen = std::collections::BTreeSet::new();
         for _ in 0..lines.len().div_ceil(area.height as usize) + 2 {
-            terminal
+            let rendered = terminal
                 .draw(|frame| crate::renderer::render_app(frame, &app))
                 .unwrap();
-            seen.extend(visible_page(terminal.backend().buffer(), area));
+            // TestBackend retains hidden cells under prior wide glyphs. Once the
+            // glyph moves, those stale cells can reappear in its diff buffer.
+            // Inspect the complete rendered frame; native paging is audited too.
+            seen.extend(visible_page(rendered.buffer, area));
             press(&mut app, KeyCode::PageDown);
         }
         for line in lines {

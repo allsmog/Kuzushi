@@ -1,12 +1,19 @@
 use super::*;
 use crate::findings::ReviewConfirmation;
 
-pub(crate) fn build_variant_lift_prompt(finding: &Finding) -> String {
+pub(crate) fn build_variant_lift_prompt(
+    finding: &Finding,
+    confirmation: &ReviewConfirmation,
+) -> String {
     let finding_json = serde_json::to_string_pretty(finding).unwrap_or_else(|_| "{}".to_string());
+    let (heading, assessment) = confirmation_assessment(confirmation);
     [
         "Extract a portable semantic signature for this confirmed vulnerability.",
         "Identify the attacker-controlled source, dangerous sink, missing guard, affected languages, and grep-friendly keywords.",
         "Use repository source evidence; do not speculate.",
+        "Return a draft only. It is not an accepted lesson and must not start further discovery or change context.",
+        heading,
+        &assessment,
         "",
         "Finding JSON:",
         &finding_json,
@@ -91,25 +98,12 @@ pub(crate) fn build_variant_hunt_prompt(
 pub(crate) fn build_ndiff_fix_pattern_prompt(
     record: Option<&CveRecord>,
     patch_text: &str,
+    max_source_bytes: usize,
 ) -> String {
-    let advisory = record
-        .map(|record| {
-            format!(
-                "ID: {}\nCWEs: {}\n\n{}",
-                record.id,
-                if record.cwes.is_empty() {
-                    "(none listed)".to_string()
-                } else {
-                    record.cwes.join(", ")
-                },
-                record.description.trim()
-            )
-        })
-        .unwrap_or_else(|| {
-            "(No structured advisory record supplied; infer from the patch.)".to_string()
-        });
-    let trimmed = if patch_text.len() > 18_000 {
-        format!("{}\n... [truncated]", &patch_text[..18_000])
+    let advisory = ndiff_advisory_context(record);
+    let prefix = ndiff_diff_prefix(patch_text, max_source_bytes);
+    let trimmed = if prefix.len() < patch_text.len() {
+        format!("{prefix}\n... [truncated]")
     } else {
         patch_text.to_string()
     };
@@ -126,4 +120,31 @@ pub(crate) fn build_ndiff_fix_pattern_prompt(
         "```",
     ]
     .join("\n")
+}
+
+pub(crate) fn ndiff_diff_prefix(text: &str, limit: usize) -> &str {
+    let mut end = text.len().min(limit);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+fn ndiff_advisory_context(record: Option<&CveRecord>) -> String {
+    record
+        .map(|record| {
+            format!(
+                "ID: {}\nCWEs: {}\n\n{}",
+                record.id,
+                if record.cwes.is_empty() {
+                    "(none listed)".to_string()
+                } else {
+                    record.cwes.join(", ")
+                },
+                record.description.trim()
+            )
+        })
+        .unwrap_or_else(|| {
+            "(No structured advisory record supplied; infer from the patch.)".to_string()
+        })
 }

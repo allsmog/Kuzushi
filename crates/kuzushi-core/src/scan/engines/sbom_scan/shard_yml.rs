@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -34,9 +35,9 @@ pub(super) fn shard_components(
         .collect())
 }
 
-pub(super) fn shard_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn shard_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse shard.yml")?;
     let source = relative_display(target, path);
     Ok(dependencies(&value)

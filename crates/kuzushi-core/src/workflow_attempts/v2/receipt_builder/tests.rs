@@ -377,7 +377,7 @@ fn blocked_receipt_requires_a_blocked_final_run_and_offers_no_selection() {
     assert!(matches!(
         continuation,
         WorkflowContinuation::InspectRun { ref reason, .. }
-            if reason.as_str().contains("autonomy posture")
+            if reason.as_str().contains("address the stated requirement")
     ));
     assert!(offered_actions.iter().all(|action| !matches!(
         action,

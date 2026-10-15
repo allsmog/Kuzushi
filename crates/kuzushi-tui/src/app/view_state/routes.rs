@@ -1,7 +1,12 @@
 mod answers;
+#[path = "options_browser.rs"]
+mod options_browser;
 mod pickers;
 mod report;
+#[cfg(test)]
+mod run_artifact_tests;
 pub(crate) use answers::{AnswerFocus, AnswersRouteState};
+pub(crate) use options_browser::{OptionsBrowserState, ToolOptionEdit};
 pub(crate) use report::ReportOrigin;
 pub(crate) use report::ReportStudyRef;
 pub use report::{ReportReceipt, ReportRouteState};
@@ -38,6 +43,7 @@ pub struct RouterState {
     keymap_snapshot: Option<crate::app::KeymapSnapshot>,
     options_screen_snapshot: Option<crate::app::OptionsScreenSnapshot>,
     options: crate::app::OptionsView,
+    options_browser: OptionsBrowserState,
     interruption: InterruptionRouteState,
     quit_confirm_snapshot: Option<crate::app::QuitConfirmSnapshot>,
     quit_confirm_scroll: usize,
@@ -92,7 +98,19 @@ impl RouterState {
     }
 
     pub(crate) fn set_current(&mut self, view: crate::app::ShellView) {
+        self.reset_changed_run_scroll(view);
         self.current = view;
+    }
+
+    fn reset_changed_run_scroll(&mut self, view: crate::app::ShellView) {
+        let route = match view {
+            crate::app::ShellView::Replay => &mut self.replay,
+            crate::app::ShellView::Trace => &mut self.trace,
+            _ => return,
+        };
+        if std::mem::take(&mut route.scroll_reset_pending) {
+            self.default_scroll.reset();
+        }
     }
 
     pub(crate) fn overlay_origin(&self) -> Option<crate::app::ShellView> {
@@ -258,7 +276,28 @@ impl RouterState {
     }
 
     pub(crate) fn set_options(&mut self, options: crate::app::OptionsView) {
+        if self.options.tool_name != options.tool_name {
+            if let Some(edit) = self.options_browser.edit.take() {
+                self.options_browser
+                    .drafts
+                    .insert((edit.tool, edit.option), edit.field);
+            }
+            self.options_browser.selected = None;
+            self.options_browser.detail_scroll = 0;
+            self.options_browser.notice = None;
+        }
+        if self.options.filter != options.filter {
+            self.options_browser.detail_scroll = 0;
+        }
         self.options = options;
+    }
+
+    pub(crate) fn options_browser(&self) -> &OptionsBrowserState {
+        &self.options_browser
+    }
+
+    pub(crate) fn options_browser_mut(&mut self) -> &mut OptionsBrowserState {
+        &mut self.options_browser
     }
 
     pub(crate) fn quit_confirm_scroll(&self) -> usize {
@@ -620,6 +659,7 @@ pub struct WorkbenchRouteState {
     )>,
     chains_open: bool,
     trace_open: bool,
+    trace_origin_focus: Option<crate::ui_view_models::PhaseSurfaceId>,
 }
 
 impl Default for WorkbenchRouteState {
@@ -633,6 +673,7 @@ impl Default for WorkbenchRouteState {
             investigation: None,
             chains_open: false,
             trace_open: false,
+            trace_origin_focus: None,
         }
     }
 }
@@ -711,11 +752,19 @@ impl WorkbenchRouteState {
 
     pub(crate) fn close_prove_detail(&mut self) {
         self.investigation = None;
+        if self.trace_open {
+            self.focus = self.trace_origin_focus.take();
+        }
         self.trace_open = false;
     }
 
     pub(crate) fn toggle_trace_view(&mut self) -> bool {
         self.investigation = None;
+        if self.trace_open {
+            self.focus = self.trace_origin_focus.take();
+        } else {
+            self.trace_origin_focus = self.focus;
+        }
         self.trace_open = !self.trace_open;
         self.trace_open
     }
@@ -1779,10 +1828,16 @@ impl HelpRouteState {
 pub struct ToolsRouteState {
     scroll: usize,
     filter: Option<String>,
+    selected_support: Option<String>,
+    support_focused: bool,
 }
 
 impl ToolsRouteState {
     pub(crate) fn open(&mut self, filter: Option<String>) {
+        self.support_focused = true;
+        if self.filter != filter {
+            self.selected_support = None;
+        }
         self.scroll = 0;
         self.filter = filter;
     }
@@ -1797,6 +1852,22 @@ impl ToolsRouteState {
 
     pub(crate) fn filter(&self) -> Option<&str> {
         self.filter.as_deref()
+    }
+
+    pub(crate) fn selected_support(&self) -> Option<&str> {
+        self.selected_support.as_deref()
+    }
+
+    pub(crate) fn select_support(&mut self, tool: String) {
+        self.selected_support = Some(tool);
+    }
+
+    pub(crate) fn support_focused(&self) -> bool {
+        self.support_focused
+    }
+
+    pub(crate) fn release_support_focus(&mut self) {
+        self.support_focused = false;
     }
 }
 
@@ -2012,11 +2083,14 @@ impl RunDiffRouteState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RunArtifactRouteState {
     run_id: String,
+    scroll_reset_pending: bool,
 }
 
 impl RunArtifactRouteState {
     pub(crate) fn open(&mut self, run_id: impl Into<String>) {
-        self.run_id = run_id.into();
+        let run_id = run_id.into();
+        self.scroll_reset_pending |= self.run_id != run_id;
+        self.run_id = run_id;
     }
 
     pub(crate) fn run_id(&self) -> &str {

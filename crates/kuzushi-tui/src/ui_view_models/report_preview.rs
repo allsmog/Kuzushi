@@ -288,7 +288,7 @@ fn export_confidence_label(confidence: Option<f32>) -> String {
 }
 
 fn export_provenance_label(record: &WorkspaceFindingExportRecord) -> String {
-    let parts = [
+    let mut parts = [
         record
             .run_id
             .as_deref()
@@ -312,6 +312,13 @@ fn export_provenance_label(record: &WorkspaceFindingExportRecord) -> String {
     .into_iter()
     .flatten()
     .collect::<Vec<_>>();
+    if !record.provenance.source_history.is_empty() {
+        parts.push(format!(
+            "sources:{} history entries:{}",
+            record.evidence.source_count,
+            record.provenance.source_history.len()
+        ));
+    }
     if parts.is_empty() {
         "-".to_string()
     } else {

@@ -25,9 +25,11 @@ pub(crate) fn offense_review_module() -> BuiltinModule {
 fn threat_hunt_tool() -> ToolDescriptor {
     tool_with_options(
         "offense-review:threat-hunt",
-        "Run bounded offensive review agents over selected actors and threats from the active threat model.",
+        "Experimental actor-guided source observations from threat-model context. Snippet coverage, immutable discovery scope and useful outcomes remain unqualified; this action does not complete Scan.",
         carlini_threat_hunt_options(),
     )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
     .with_continuation(ContinuationSupport::Staged)
     .with_prompt(editable_prompt(
         "offensive review mission",

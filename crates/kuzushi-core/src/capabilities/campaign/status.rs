@@ -130,6 +130,7 @@ fn job_rows(root: &Path, snapshot: &CampaignSnapshot) -> Vec<Value> {
         .map(|job| {
             json!({
                 "jobId": job.job_id,
+                "displayLabel": job.display_label,
                 "shard": job.shard,
                 "threatId": job.threat_id,
                 "priority": job.priority,

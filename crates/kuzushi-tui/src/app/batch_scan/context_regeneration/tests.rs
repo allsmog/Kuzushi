@@ -95,6 +95,34 @@ fn regenerated_draft_does_not_dispatch_map_and_keeps_its_exact_selection() {
 }
 
 #[test]
+fn unsaved_regeneration_guidance_requires_discard_and_returns_to_the_same_context() {
+    let (_root, mut app, reference) = fixture();
+    key(&mut app, KeyCode::Char('g'));
+    app.edit_regeneration_guidance();
+    app.capture_regeneration_guidance_paste("Owned α\nKeep original fields.");
+    app.handle_regeneration_guidance_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    let generation = app.context_generation().unwrap().clone();
+    app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .draft_recovery,
+        super::super::StudyDraftRecovery::Discard
+    );
+    app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(app.context_generation(), Some(&generation));
+    app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.reduce_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    assert!(app.context_generation().is_none());
+    assert!(app.study_context_picker().unwrap().editor_visible);
+    assert_eq!(app.context_edit_draft().unwrap().reference, reference);
+    assert!(!app.has_running_work());
+}
+
+#[test]
 fn selected_field_plans_one_unstarted_regeneration_and_back_restores_editor_cursor() {
     let (root, mut app, reference) = fixture();
     key(&mut app, KeyCode::Down);
@@ -134,6 +162,59 @@ fn selected_field_plans_one_unstarted_regeneration_and_back_restores_editor_curs
     app.handle_context_generation_key(KeyCode::Esc);
     assert!(app.context_generation().is_none());
     assert_eq!(app.context_edit_draft().unwrap().cursor, 3);
+}
+
+#[test]
+fn public_regeneration_selection_freezes_one_exact_field_without_changing_active_context() {
+    let (root, mut app, reference) = fixture();
+    app.close_batch_config();
+    assert!(app.reduce_threat_regen().is_empty());
+    app.edit_context_picker(|config| {
+        config.context_picker.as_mut().unwrap().selected = Some(reference.clone());
+    });
+    let read = dispatch(
+        &app,
+        root.path(),
+        "threat-model:read",
+        json!({"threatModelRef":reference}),
+    );
+    app.cache_study_context_preview(&read["data"]);
+    app.handle_study_context_key(KeyCode::Char('g'));
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Char('g'));
+    let generation = app.context_generation().unwrap();
+    assert_eq!(generation.context_input["threatModelRef"], json!(reference));
+    assert_eq!(
+        generation.context_input["fields"],
+        json!(["/dfd/nodes/0/purpose"])
+    );
+    let update = app.handle_context_generation_key(KeyCode::Enter);
+    let [ShellEffect::PrepareRunTool(request)] = update.effects.as_slice() else {
+        panic!("Canonical context-study preparation required");
+    };
+    let result = dispatch(
+        &app,
+        root.path(),
+        &request.tool_name,
+        serde_json::from_str(request.input.as_ref().unwrap()).unwrap(),
+    );
+    app.cache_study_result("campaign:context-study", &result["data"]);
+    assert_eq!(
+        app.context_generation()
+            .unwrap()
+            .receipt
+            .as_ref()
+            .unwrap()
+            .job_count(),
+        1
+    );
+    assert!(!app.has_running_work());
+    assert!(
+        kuzushi_core::capabilities::threat_model::load_active_threat_model(root.path())
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

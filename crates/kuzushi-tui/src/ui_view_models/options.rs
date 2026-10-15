@@ -149,7 +149,36 @@ pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel 
     } else {
         OptionsBody::Table(options_table(rows))
     };
-    options_model_body(view, body)
+    options_model_with_support(app, tool, view, body)
+}
+
+fn options_model_with_support(
+    app: &ShellApp,
+    tool: &kuzushi_core::modules::ToolDescriptor,
+    view: &OptionsView,
+    body: OptionsBody,
+) -> OptionsModel {
+    let mut model = options_model_body(view, body);
+    model.summary_rows.extend(tool_support_row(app, tool));
+    model
+}
+
+fn tool_support_row(
+    app: &ShellApp,
+    tool: &kuzushi_core::modules::ToolDescriptor,
+) -> Option<OptionsSummaryRow> {
+    let (module_id, _) = tool.name.split_once(':')?;
+    let module = app
+        .registry()
+        .all_modules()
+        .find(|module| module.metadata().id == module_id)?;
+    use kuzushi_core::modules::ModuleMaturity;
+    let status = match tool.effective_maturity(module.maturity()) {
+        ModuleMaturity::Core => return None,
+        ModuleMaturity::Labs => "Experimental",
+        ModuleMaturity::Compatibility => "Compatibility",
+    };
+    Some(options_summary_row("support", status))
 }
 
 pub(crate) fn plain_options_model(app: &ShellApp, view: &OptionsView) -> PlainOptionsModel {
@@ -298,9 +327,8 @@ fn empty_options_body(filter: OptionsFilter) -> OptionsBody {
             plain_message: "No standard options. Next: show advanced",
         },
         OptionsFilter::Advanced => OptionsBody::Message {
-            message: "No editable advanced options. Workflow-supplied settings do not appear here.",
-            plain_message:
-                "No editable advanced options. Workflow-supplied settings do not appear here.",
+            message: "No advanced options for this tool.",
+            plain_message: "No advanced options for this tool.",
         },
         OptionsFilter::Missing => OptionsBody::Message {
             message: "No missing required options for this tool.",
@@ -310,9 +338,6 @@ fn empty_options_body(filter: OptionsFilter) -> OptionsBody {
 }
 
 fn option_visible(spec: &OptionSpec, filter: OptionsFilter, has_stored_value: bool) -> bool {
-    if !crate::app::option_is_operator_editable(spec) {
-        return false;
-    }
     match filter {
         OptionsFilter::Standard => !spec.advanced && !spec.evasion,
         OptionsFilter::Advanced => spec.advanced || spec.evasion,

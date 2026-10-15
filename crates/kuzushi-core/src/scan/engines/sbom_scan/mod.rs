@@ -1,7 +1,7 @@
-use crate::scan::ScanCancellation;
 use super::bounded_regular_files::{
     collect_regular_files, FileLimitBehavior, RegularFileWalkOptions,
 };
+use crate::scan::ScanCancellation;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -37,6 +37,8 @@ mod gradle_build;
 mod gradle_lock;
 mod haxelib_json;
 mod helm_lock;
+mod input_store;
+mod inspection;
 mod julia_project;
 mod lockfile;
 mod lockfile_components;
@@ -48,6 +50,7 @@ mod npm_lock;
 mod npm_package_json;
 mod nuget_lock;
 mod opam;
+mod options;
 mod pipfile_lock;
 mod pipfile_manifest;
 mod pnpm_lock;
@@ -73,33 +76,36 @@ mod uv_lock;
 mod vcpkg_json;
 mod yarn_lock;
 
+use input_store::SbomInputs;
+pub use inspection::{
+    InspectedSbomReport, SbomInputInspection, SbomInputReceipt, SbomInspectionError,
+};
+pub use options::{
+    SbomScanOptions, DEFAULT_SBOM_TOTAL_BYTES, MAX_SBOM_FILE_BYTES, MAX_SBOM_TOTAL_BYTES,
+};
+
 use dependency_graph::collect_dependency_edges;
 use lockfile::collect_lockfiles;
 use lockfile_components::collect_lockfile_components;
 
 mod bounded_fs {
+    use super::SbomInputs;
     use std::io;
     use std::path::Path;
 
-    const MAX_SBOM_INPUT_BYTES: usize = 64 * 1024 * 1024;
-
     pub(super) fn read_to_string(
-        target: &Path,
+        target: &SbomInputs,
         path: impl AsRef<Path>,
     ) -> io::Result<String> {
-        crate::bounded_file::read_utf8_text_within(
-            target,
-            path.as_ref(),
-            MAX_SBOM_INPUT_BYTES,
-        )
+        String::from_utf8(target.bytes(path.as_ref())?.as_ref().clone())
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
-    pub(super) fn read(target: &Path, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-        crate::bounded_file::read_regular_bytes_within(
-            target,
-            path.as_ref(),
-            MAX_SBOM_INPUT_BYTES,
-        )
+    pub(super) fn read(
+        target: &SbomInputs,
+        path: impl AsRef<Path>,
+    ) -> io::Result<std::sync::Arc<Vec<u8>>> {
+        target.bytes(path.as_ref())
     }
 }
 
@@ -141,7 +147,37 @@ pub struct SbomLockfile {
 }
 
 pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomScanReport> {
+    Ok(scan_sbom_with_options(target, cancellation, &SbomScanOptions::default())?.report)
+}
+
+pub fn scan_sbom_with_options(
+    target: &Path,
+    cancellation: &ScanCancellation,
+    options: &SbomScanOptions,
+) -> Result<InspectedSbomReport> {
+    options.validate()?;
     target::ensure_directory(target)?;
+    let inputs = SbomInputs::new(target, options.clone(), cancellation.clone())?;
+    let result = scan_captured_inputs(&inputs, cancellation).and_then(|mut report| {
+        inputs.verify_root()?;
+        report.target = target.display().to_string();
+        Ok(report)
+    });
+    let inspection = inputs.inspection();
+    match result {
+        Ok(report) => Ok(InspectedSbomReport { report, inspection }),
+        Err(error) => Err(SbomInspectionError {
+            message: format!("{error:#}"),
+            inspection,
+        }
+        .into()),
+    }
+}
+
+fn scan_captured_inputs(
+    target: &SbomInputs,
+    cancellation: &ScanCancellation,
+) -> Result<SbomScanReport> {
     let files = collect_regular_files(target, cancellation, sbom_walk_options())?.files;
     ensure_scan_active(cancellation)?;
     let manifests = collect_manifests(&files);

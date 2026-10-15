@@ -11,7 +11,7 @@ pub(super) fn confirmation(input: &serde_json::Value) -> PendingConfirm {
         tool: "campaign:approve-allowance".into(),
         target: format!("{id} · revision {current} → {}", current + 1),
         rationale: Some(format!(
-            "Model: {model}\nTotal provider calls: {}\nProtected review calls: {}\nIncludes internal turns and retries. Existing commitments remain.\nDollar ceiling: not enforced; charges may be unavailable.\nReason: {}\n\n{}",
+            "SPENDING LIMITS\nShared allowance model: {model}\nFrozen work lists its execution model separately.\nTotal provider calls: {}\nProtected review calls: {}\nIncludes internal turns and retries. Existing commitments remain.\nDollar ceiling: not enforced; charges may be unavailable.\nReason: {}\n\n{}",
             input["maxProviderCalls"], input["protectedReviewCalls"],
             input["reason"].as_str().unwrap_or("not provided"),
             work_terms(input),
@@ -33,30 +33,67 @@ pub(crate) fn with_accounting_terms(
     input: &serde_json::Value,
     mut confirm: PendingConfirm,
 ) -> PendingConfirm {
-    append_resource_terms(app, input, &mut confirm);
-    let Some(snapshot) = revised_snapshot(app, input) else {
-        return confirm;
-    };
-    let terms = format!("\n\nCalls already committed: {} · unresolved: {}.\nAvailable under these limits: {} context/scan calls · {} protected review calls.\nAll fixed jobs share these calls, including internal turns and retries.\nAt the limit, unfinished jobs remain partial. Finish and report or revise work explicitly.",
-        snapshot.committed_calls, snapshot.unresolved_calls, snapshot.remaining_discovery_calls(), snapshot.protected_review_remaining());
-    confirm
-        .rationale
-        .get_or_insert_with(String::new)
-        .push_str(&terms);
+    let work = work_summary(app, input, confirm.kind);
+    let sections = [
+        work.as_ref()
+            .map(|summary| summary.overview.join("\n"))
+            .unwrap_or_default(),
+        accounting_terms(app, input),
+        confirm
+            .rationale
+            .take()
+            .unwrap_or_else(|| "Terms unavailable".into()),
+        resource_terms(app, input),
+        work.map(|summary| work_details(summary.details))
+            .unwrap_or_default(),
+    ];
+    confirm.rationale = Some(
+        sections
+            .into_iter()
+            .filter(|section| !section.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+    );
     confirm
 }
 
-fn append_resource_terms(app: &ShellApp, input: &serde_json::Value, confirm: &mut PendingConfirm) {
+fn work_summary(
+    app: &ShellApp,
+    input: &serde_json::Value,
+    kind: ConfirmKind,
+) -> Option<crate::ui_view_models::AllowanceWorkSummary> {
+    if kind != ConfirmKind::InvestigationWork {
+        return None;
+    }
+    crate::ui_view_models::allowance_work_summary(app, input)
+}
+
+fn work_details(lines: Vec<String>) -> String {
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("PLAN DETAILS\n{}", lines.join("\n"))
+}
+
+fn accounting_terms(app: &ShellApp, input: &serde_json::Value) -> String {
+    let Some(snapshot) = revised_snapshot(app, input) else {
+        return String::new();
+    };
+    format!("CURRENT ACCOUNTING\nCalls already committed: {} · unresolved: {}.\nAvailable under these limits: {} context/scan calls · {} protected review calls.\nAll fixed jobs share these calls, including internal turns and retries.\nAt the limit, unfinished jobs remain partial. Finish and report or revise work explicitly.",
+        snapshot.committed_calls, snapshot.unresolved_calls, snapshot.remaining_discovery_calls(), snapshot.protected_review_remaining())
+}
+
+fn resource_terms(app: &ShellApp, input: &serde_json::Value) -> String {
     let Some(config) = app.router.campaign().batch_scan_config.as_ref() else {
-        return;
+        return String::new();
     };
     let Some((campaign_id, plan_sha256, _)) = config.study.plan_identity() else {
-        return;
+        return String::new();
     };
     if input["campaignId"].as_str() != Some(campaign_id)
         || input["campaignPlanSha256"].as_str() != Some(plan_sha256)
     {
-        return;
+        return String::new();
     }
     let mut projection = config.clone();
     projection.study.max_provider_calls = input["maxProviderCalls"]
@@ -70,10 +107,7 @@ fn append_resource_terms(app: &ShellApp, input: &serde_json::Value, confirm: &mu
         .and_then(|count| count.try_into().ok())
         .unwrap_or(0);
     let lines = crate::ui_view_models::study_config::study_resource_lines(&projection);
-    confirm
-        .rationale
-        .get_or_insert_with(String::new)
-        .push_str(&format!("\n\n{}", lines.join("\n")));
+    format!("RESOURCE ESTIMATE\n{}", lines.join("\n"))
 }
 
 fn revised_snapshot(
@@ -115,6 +149,7 @@ mod tests {
     use serde_json::json;
 
     const TEST_MODEL: &str = "openai-codex:gpt-5.5";
+    mod hierarchy;
 
     fn app_with_commitments(root: &std::path::Path) -> ShellApp {
         let mut app = ShellApp::new(Default::default(), None);

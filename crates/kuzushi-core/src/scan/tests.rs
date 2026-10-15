@@ -535,6 +535,8 @@ mod tests {
                 "auto",
                 "--config",
                 "p/security-audit",
+                "--jobs",
+                "1",
                 ".",
             ]
         );
@@ -1333,10 +1335,7 @@ printf '{"results":[]}'
             Some(6)
         );
         assert_eq!(positive_u32(&json!({}), "threads").unwrap(), None);
-        assert_eq!(
-            positive_u32(&json!({"threads": u64::MAX}), "threads").unwrap(),
-            Some(u32::MAX)
-        );
+        assert!(positive_u32(&json!({"threads": u64::MAX}), "threads").is_err());
         assert!(positive_u32(&json!({"threads": 0}), "threads").is_err());
         assert!(positive_u32(&json!({"threads": "nope"}), "threads").is_err());
     }
@@ -1777,9 +1776,6 @@ exit 2
         use std::time::Instant;
 
         let tmp = tempfile::tempdir().unwrap();
-        let db = tmp.path().join("db");
-        fs::create_dir_all(&db).unwrap();
-        fs::write(db.join("codeql-database.yml"), "name: test\n").unwrap();
         let binary = tmp.path().join("slow-codeql.sh");
         fs::write(
             &binary,
@@ -1789,6 +1785,8 @@ exit 2
         let mut permissions = fs::metadata(&binary).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
+        prepare_managed_codeql_database(tmp.path());
+        let db = crate::workspace::workspace_codeql_db_path(tmp.path());
 
         let scanner = CodeqlScanner {
             binary: Some(binary.display().to_string()),

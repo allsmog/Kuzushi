@@ -6,8 +6,10 @@ use kuzushi_core::capabilities::campaign::{
     ContextCaseInput, ContextMatrixReceipt, MAX_CONTEXT_CASES,
 };
 use serde_json::json;
+mod editing;
 #[cfg(test)]
 mod tests;
+pub(crate) use editing::ContextCaseNameEdit;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct StudyContextMatrix {
@@ -21,11 +23,26 @@ pub(crate) struct StudyContextMatrix {
     pub(crate) pass_cursor: usize,
     pub(crate) baseline_run_id: Option<String>,
     pub(crate) detail_scroll: usize,
+    pub(crate) name_edit: Option<ContextCaseNameEdit>,
 }
 
 impl StudyContextMatrix {
     pub(crate) fn planned_jobs(&self) -> usize {
         self.cases.iter().map(|case| case.passes).sum()
+    }
+
+    pub(crate) fn has_unsaved_changes(&self) -> bool {
+        (!self.cases.is_empty() && self.receipt.is_none()) || self.has_unsaved_name()
+    }
+
+    fn has_unsaved_name(&self) -> bool {
+        let Some(edit) = self.name_edit.as_ref() else {
+            return false;
+        };
+        self.cases
+            .iter()
+            .find(|case| case.id == edit.case_id)
+            .is_some_and(|case| edit.field.text() != case.label)
     }
 }
 
@@ -76,6 +93,11 @@ impl ShellApp {
 
     fn context_matrix_primary_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
         match code {
+            KeyCode::Enter => Some(self.inspect_selected_context_case()),
+            KeyCode::Char('n') => {
+                self.begin_context_case_name_edit();
+                Some(InputUpdate::handled())
+            }
             KeyCode::Char('a') => {
                 self.router
                     .campaign_mut()

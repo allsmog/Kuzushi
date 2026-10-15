@@ -68,6 +68,11 @@ pub(crate) struct BatchPriorRun {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BatchScanConfig {
+    pub(super) checkpoint_initial: Option<super::study_checkpoint::StudyCheckpointSnapshot>,
+    pub(super) checkpoint_error: Option<String>,
+    pub(crate) checkpoint_id: String,
+    pub(crate) checkpoint_origins: Vec<String>,
+    pub(crate) draft_recovery: super::StudyDraftRecovery,
     pub(crate) brief_open: bool,
     pub(crate) origin: Option<StudyNavigationOrigin>,
     pub(crate) target: std::path::PathBuf,
@@ -92,6 +97,7 @@ pub(crate) struct BatchScanConfig {
     pub(crate) engine_picker: Option<super::StudyEnginePicker>,
     pub(crate) resource_picker: Option<super::resource_picker::StudyResourcePicker>,
     pub(crate) context_generation: Option<super::context_generation::StudyContextGeneration>,
+    pub(crate) review_plan: Option<super::review_study::ReviewStudyDraft>,
     pub(crate) context_result_cursor: Option<usize>,
 }
 
@@ -105,6 +111,11 @@ impl BatchScanConfig {
     }
     pub(crate) fn load(target: &Path, requested_prior_run: Option<&str>) -> Self {
         Self {
+            checkpoint_initial: None,
+            checkpoint_error: None,
+            checkpoint_id: uuid::Uuid::new_v4().to_string(),
+            checkpoint_origins: Vec::new(),
+            draft_recovery: Default::default(),
             brief_open: false,
             origin: None,
             target: target.to_path_buf(),
@@ -132,6 +143,7 @@ impl BatchScanConfig {
             engine_picker: None,
             resource_picker: None,
             context_generation: None,
+            review_plan: None,
             context_result_cursor: None,
         }
     }
@@ -224,6 +236,7 @@ pub(crate) struct StudyNavigationOrigin {
     pub(crate) mode: crate::app::InputMode,
     pub(crate) workbench: crate::app::WorkbenchRouteState,
     pub(crate) scope_review: bool,
+    pub(crate) phase: Option<kuzushi_core::WorkflowPhase>,
 }
 
 fn prior_run_named<'a>(runs: &'a [BatchPriorRun], run_id: &str) -> Option<&'a BatchPriorRun> {

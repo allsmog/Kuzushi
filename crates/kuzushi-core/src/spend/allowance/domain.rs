@@ -1,5 +1,5 @@
 use crate::runtime::RuntimeCostReport;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const MAX_PROVIDER_CALLS: u32 = 1_000_000;
@@ -157,6 +157,17 @@ impl AllowanceSnapshot {
 
     /// A preflight hint, never authorization to send a provider request.
     /// Transport still needs a fresh atomic reservation after this check.
+    pub fn require_work_call_capacity(&self, work_id: &str, tool: &str) -> Result<()> {
+        let plan = self
+            .work_plan
+            .as_ref()
+            .context("approved fixed work plan is missing")?;
+        let job = plan.job(work_id)?;
+        anyhow::ensure!(job.tool == tool, "tool differs from the approved work item");
+        self.require_call_capacity(job.work_category()?)
+    }
+
+    /// Check a work category without approving or reserving a request.
     pub fn require_call_capacity(&self, work: InvestigationWork) -> Result<()> {
         let remaining = if work.is_review() {
             self.remaining_calls()

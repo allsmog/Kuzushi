@@ -86,7 +86,7 @@ fn write_x_ray_artifact(repo_root: &Path, file_name: &str, content: &str) -> Res
 
 pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
     format!(
-        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  Cost:         {}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
+        "x-ray:run complete for {} ({})\nExperimental report generation. Source coverage is unverified; reported claims do not accept Map or establish finding decisions.\n  Runtime:      {}\n  Reported tier: {}{}\n  Entry points: {}\n  Invariants:   {}\n  Cost:         {}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
         data.repo_name,
         data.target,
         data.runtime_mode,
@@ -111,8 +111,15 @@ fn x_ray_cost_label(data: &XRayReportData) -> String {
     match (data.cost_usd_exact, data.estimated_cost_usd) {
         (true, _) => format!("${:.4}", data.cost_usd),
         (false, Some(estimate)) => format!("~${estimate:.4} estimated (provider spend unresolved)"),
-        (false, None) => format!(">=${:.4} (provider spend unresolved)", data.cost_usd),
+        (false, None) => unresolved_cost_label(data.cost_usd),
     }
+}
+
+fn unresolved_cost_label(observed_usd: f64) -> String {
+    if observed_usd <= 0.0 {
+        return "unknown (provider spend unresolved)".into();
+    }
+    format!(">=${observed_usd:.4} (provider spend unresolved)")
 }
 
 pub(crate) fn render_x_ray_read_summary(data: &XRayReportData) -> String {

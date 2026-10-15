@@ -218,7 +218,7 @@ fn workbench_header_lines(
     if app.target().is_none() {
         return top_bar_lines(&chrome.top_bar, &chrome.command_bar_hints, width);
     }
-    if crate::ui_view_models::compact_review_reading(app, app.viewport().rows)
+    if crate::ui_view_models::compact_phase_reading(app, app.viewport().rows)
         && phase_header.result_card.is_none()
     {
         return super::phase_pages::compact_review_header_lines(phase_header, width);
@@ -255,7 +255,7 @@ fn phase_surface_zoom_label(surface: PhaseSurfaceId) -> &'static str {
         PhaseSurfaceId::ProveNextAction => "NEXT ACTION",
         PhaseSurfaceId::ProveInvestigation => "INVESTIGATION PLAN",
         PhaseSurfaceId::ProveResult => "PROVE RESULT",
-        PhaseSurfaceId::ProveTrace => "TRACE",
+        PhaseSurfaceId::ProveTrace | PhaseSurfaceId::ReviewTrace => "TRACE",
         PhaseSurfaceId::FixCandidate => "FIX STATUS",
         PhaseSurfaceId::FixAttackTree => "ATTACK TREE",
         PhaseSurfaceId::FixRemediation => "REMEDIATION",

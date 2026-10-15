@@ -15,6 +15,9 @@ pub(crate) const SCOPE_ACTIONS: &[&str] = &[
     "Plan selected scope",
     "Include an excluded file or directory",
     "Suggest scan scopes with AI",
+    "Use boundary as shared context",
+    "Remove shared context",
+    "Add discovery scope",
 ];
 
 impl ShellApp {
@@ -58,8 +61,31 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             12 => self.open_scope_ai_priorities(),
+            _ => self.apply_shared_context_menu(index),
+        }
+    }
+
+    fn apply_shared_context_menu(&mut self, index: usize) -> InputUpdate {
+        match index {
+            13 => self.create_selected_shared_context(),
+            14 => self.send_scope_edit(ScanScopeEdit::RemoveSharedContext),
+            15 => {
+                self.open_new_discovery_scope();
+                InputUpdate::handled()
+            }
             _ => InputUpdate::handled(),
         }
+    }
+
+    fn create_selected_shared_context(&mut self) -> InputUpdate {
+        let Some(scope) = self.scope_review().and_then(selected_scope) else {
+            self.scope_notice("Select a primary boundary to supply shared context.");
+            return InputUpdate::handled();
+        };
+        self.send_scope_edit(ScanScopeEdit::CreateSharedContext {
+            scope_id: scope.id.clone(),
+            shared_scope_id: kuzushi_core::new_run_id("shared"),
+        })
     }
 
     fn open_scope_inclusion(&mut self) {

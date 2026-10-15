@@ -35,7 +35,7 @@ fn persist_context_map(root: &std::path::Path) -> PhaseAttemptCompleted {
     crate::test_support::record_indexed_run(
         root,
         "context-source",
-        "context:build",
+        "threat-model:build",
         json!({"ok":true,"data":{"snapshot":{"filesIndexed":1}}}),
     );
     crate::test_support::append_typed_attempt(

@@ -70,6 +70,7 @@ mod scroll_navigation;
 mod setup_details;
 mod text_input;
 mod ticking;
+mod tools_support;
 mod view_hotkey_actions;
 mod view_keybinding_groups;
 mod view_keybinding_helpers;

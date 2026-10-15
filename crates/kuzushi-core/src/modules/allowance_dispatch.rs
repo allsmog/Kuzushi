@@ -17,8 +17,17 @@ pub(super) fn declare_allowance_option(mut tool: ToolDescriptor) -> ToolDescript
 }
 
 fn supports_allowance(tool: &ToolDescriptor) -> bool {
-    matches!(tool.effect, ToolEffect::Read | ToolEffect::WorkspaceWrite)
-        && descriptor_work(tool).is_some()
+    allowance_effect_supported(tool) && descriptor_work(tool).is_some()
+}
+
+fn allowance_effect_supported(tool: &ToolDescriptor) -> bool {
+    if matches!(tool.effect, ToolEffect::Read | ToolEffect::WorkspaceWrite) {
+        return true;
+    }
+    matches!(
+        tool.effect,
+        ToolEffect::TargetWrite | ToolEffect::ExternalAction
+    ) && tool.allowance_category.is_some()
 }
 
 fn phase_work(phase: ToolPhase) -> Option<InvestigationWork> {
@@ -74,6 +83,9 @@ pub(super) fn bind_runtime<'a>(
 }
 
 fn refused(error: anyhow::Error) -> anyhow::Error {
+    if crate::runtime::is_pre_execution_refusal(&error) {
+        return error;
+    }
     if crate::runtime::runtime_failure_metadata(&error).is_some() {
         return error;
     }
@@ -99,6 +111,7 @@ fn bind_selected_runtime<'a>(
     require_context_plan_reference(descriptor, input)?;
     require_model_ranking_reference(descriptor, input)?;
     let Some(reference) = reference(input)? else {
+        require_inherited_runtime_allowance(descriptor, input, ctx, runtime)?;
         return Ok(None);
     };
     anyhow::ensure!(
@@ -127,6 +140,55 @@ fn bind_selected_runtime<'a>(
     runtime.with_allowance_binding(binding).map(Some)
 }
 
+fn require_inherited_runtime_allowance(
+    descriptor: &ToolDescriptor,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
+    let Some(runtime) = runtime else {
+        return Ok(());
+    };
+    if !supports_allowance(descriptor) || !invocation_wants_runtime(descriptor, input, ctx) {
+        return Ok(());
+    }
+    let model = resolve_tool_model(&descriptor.name, input, ctx)?;
+    let inherited = runtime.allowance_binding().with_context(|| format!(
+        "{} needs an approved investigation allowance before model work. Prepare and approve the investigation plan first; no model request started.", descriptor.name))?;
+    let ledger = open_ledger(ctx)?;
+    let expected = AllowanceBinding::new(Arc::clone(&ledger), inherited.work().clone())?;
+    inherited.require_same_work(&expected)?;
+    require_declared_effect_category(descriptor, inherited)?;
+    inherited.validate_model(&model)?;
+    ledger
+        .allowance_snapshot(&inherited.work().investigation_id)?
+        .require_call_capacity(inherited.work().work)
+}
+
+fn require_declared_effect_category(
+    descriptor: &ToolDescriptor,
+    inherited: &AllowanceBinding,
+) -> Result<()> {
+    if !matches!(
+        descriptor.effect,
+        ToolEffect::TargetWrite | ToolEffect::ExternalAction
+    ) {
+        return Ok(());
+    }
+    anyhow::ensure!(descriptor_work(descriptor) == Some(inherited.work().work),
+        "This action requires its declared investigation category; it cannot borrow a parent Review allowance");
+    Ok(())
+}
+
+fn invocation_wants_runtime(
+    descriptor: &ToolDescriptor,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> bool {
+    descriptor.runtime_requirement == RuntimeRequirement::Always
+        || super::runtime_requirements::tool_wants_runtime(&descriptor.name, input, ctx.config)
+}
+
 fn require_model_ranking_reference(descriptor: &ToolDescriptor, input: &Value) -> Result<()> {
     if descriptor.name == "module-recommender:recommend"
         && crate::capabilities::module_recommender::model_ranking_enabled(input)
@@ -153,6 +215,15 @@ fn require_fixed_context_work(
     input: &Value,
     snapshot: &crate::allowance::AllowanceSnapshot,
 ) -> Result<()> {
+    if matches!(
+        descriptor.name.as_str(),
+        "threat-model:ask" | "planner:propose"
+    ) {
+        anyhow::ensure!(
+            snapshot.work_plan.is_some(),
+            "Context questions and workflow proposals require an approved fixed job"
+        );
+    }
     if requires_fixed_context_plan(descriptor, input) {
         anyhow::ensure!(
             snapshot.work_plan.is_some(),
@@ -168,7 +239,7 @@ fn require_selected_runtime_capacity(
     ctx: &ToolExecutionContext<'_>,
     snapshot: &crate::allowance::AllowanceSnapshot,
 ) -> Result<()> {
-    if !super::runtime_requirements::tool_wants_runtime(&descriptor.name, input, ctx.config) {
+    if !invocation_wants_runtime(descriptor, input, ctx) {
         return Ok(());
     }
     snapshot.require_call_capacity(
@@ -261,6 +332,10 @@ pub(super) fn attach_result_reference(input: &Value, output: &mut Value) -> Resu
     Ok(())
 }
 
+#[cfg(test)]
+mod refusal_tests;
+#[cfg(test)]
+mod runtime_admission_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

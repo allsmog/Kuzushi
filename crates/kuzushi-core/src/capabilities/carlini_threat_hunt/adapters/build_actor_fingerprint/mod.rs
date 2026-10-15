@@ -12,7 +12,7 @@ pub(in crate::capabilities::carlini_threat_hunt) use file_filters::{
     is_context_file, should_skip_path,
 };
 pub(in crate::capabilities::carlini_threat_hunt) use input_options::{
-    bool_input, optional_string, read_usize, resolve_prompt_override,
+    bool_input, optional_string, resolve_prompt_override,
 };
 pub(in crate::capabilities::carlini_threat_hunt) use json_fields::{
     object_string_array, object_string_value, read_object_string, read_object_string_array,

@@ -25,8 +25,12 @@ use super::*;
 
 mod activity_reader;
 mod compact_notice;
+mod compact_review_notice;
+pub(in crate::renderer) mod component_map;
 mod keymap_reader;
+mod options_browser;
 mod prove_detail_controls;
+mod review_navigation;
 
 fn apply_renderer_notice(session: &mut ActivitySession, message: &str) {
     use kuzushi_core::run_lifecycle::{
@@ -479,7 +483,7 @@ fn planning_picker_options_focus_marks_the_options_pane() {
 fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
     use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
 
-    for (width, height, expected_window) in [(80, 24, "TASKS 1-8/10"), (60, 20, "TASKS 1-6/10")] {
+    for (width, height, expected_window) in [(80, 24, "TASKS 1-8/11"), (60, 20, "TASKS 1-6/11")] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -514,7 +518,7 @@ fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
             "{width}x{height}: {rendered}"
         );
         assert!(
-            rendered.contains("Enter: run 5 new steps · skip 5 unchecked"),
+            rendered.contains("Enter: run 5 new steps · skip 6 unchecked"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -553,13 +557,20 @@ fn compact_planning_picker_scrolls_to_keep_the_focused_task_legible() {
     app.engagement
         .planning_picker_mut()
         .open(rows, Default::default());
-    app.engagement.planning_picker_mut().set_cursor(8);
+    let cursor = app
+        .engagement
+        .planning_picker()
+        .tasks()
+        .iter()
+        .position(|row| row.id == PlanningTaskId::ThreatIntelCves)
+        .unwrap();
+    app.engagement.planning_picker_mut().set_cursor(cursor);
     app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("TASKS 5-10/10"), "{rendered}");
+    assert!(rendered.contains("TASKS 6-11/11"), "{rendered}");
     assert!(
         rendered.contains("> SKIP     Inventory deps for CVE harvest"),
         "{rendered}"
@@ -1440,7 +1451,12 @@ fn threat_model_picker_has_tty_and_plain_content_parity() {
     let tty = format!("{:?}", terminal.backend().buffer());
     let plain = render_plain_app(&app, 132);
 
-    for text in ["Root PASTA", "pasta", "verified", "m next · M previous"] {
+    for text in [
+        "Root PASTA",
+        "pasta",
+        "verified",
+        "m next model · M previous model",
+    ] {
         assert!(tty.contains(text), "TTY missing {text:?}: {tty}");
         assert!(plain.contains(text), "plain missing {text:?}: {plain}");
     }
@@ -1693,8 +1709,8 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
         ("cargo-audit", "RustSec advisories", "tool-specific options"),
         (
             "govulncheck",
+            "experimental Go advisory scanner",
             "Go reachable vulnerabilities",
-            "tool-specific options",
         ),
         ("agentic-sast", "run agentic-sast:scan", "run scan"),
     ];
@@ -2454,66 +2470,53 @@ fn renders_options_table_readably_at_80_columns() {
 
     assert!(rendered.contains("OPTIONS"));
     assert!(rendered.contains("sast:scan"));
-    assert!(rendered.contains("tasks"));
-    assert!(rendered.contains("disabledTasks"));
-    assert!(rendered.contains("triage"));
+    assert!(rendered.contains("Triage"));
     assert!(rendered.contains("yes"));
-    assert!(rendered.contains("set <key> <value>"));
-    assert!(rendered.contains("lost on exit"));
+    assert!(rendered.contains("Value:"));
+    assert!(rendered.contains("session"));
     assert!(!rendered.contains("┌"));
 }
 
 #[test]
-fn narrow_options_viewport_uses_every_advertised_scroll_key() {
+fn narrow_options_viewport_selects_settings_and_pages_the_selected_detail() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    let backend = TestBackend::new(60, 20);
+    let backend = TestBackend::new(40, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_options_for_test(crate::app::OptionsView {
         tool_name: "sast:scan".to_string(),
         filter: crate::app::OptionsFilter::Standard,
     });
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
     app.set_input_mode(crate::InputMode::Navigate);
 
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
     );
-    assert_eq!(app.router.default_scroll().offset(), 1);
+    let second = app.selected_browser_option().unwrap();
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
     );
-    assert_eq!(app.router.default_scroll().offset(), 0);
-
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
-    );
-    assert_eq!(app.router.default_scroll().offset(), u16::MAX);
+    assert_ne!(app.selected_browser_option().as_ref(), Some(&second));
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let bottom = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+    let initial = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
     assert!(
-        bottom.contains("triage"),
-        "bottom options missing: {bottom}"
+        initial.contains("Value:"),
+        "selected option missing: {initial}"
     );
-
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
-    );
-    assert_eq!(app.router.default_scroll().offset(), 0);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
     );
-    assert!(app.router.default_scroll().offset() > 1);
+    assert!(app.router.options_browser().detail_scroll > 0);
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let paged = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
-    assert!(paged.contains("triage"), "paged options missing: {paged}");
+    assert!(paged.contains("OPTIONS"), "paged identity missing: {paged}");
     press_key(&mut app, KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-    assert_eq!(app.router.default_scroll().offset(), 0);
+    assert_eq!(app.router.options_browser().detail_scroll, 0);
 }
 
 #[test]
@@ -3370,8 +3373,8 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("Enter open detail"), "{rendered}");
-    assert!(rendered.contains("Ctrl+F filter ledger"), "{rendered}");
+    assert!(rendered.contains("Enter detail"), "{rendered}");
+    assert!(rendered.contains("Ctrl+F filter"), "{rendered}");
     assert!(rendered.contains("Shift+Tab phase→"), "{rendered}");
     assert!(rendered.contains("] pane"), "{rendered}");
     assert!(rendered.contains("Tab/[/] pane"), "{rendered}");
@@ -3698,7 +3701,7 @@ fn renders_all_ink_parity_shell_surfaces() {
     let cases = vec![
         (ShellView::Home, "HOME", None, None),
         (ShellView::Catalog, "CAPABILITIES", None, None),
-        (ShellView::Recommend, "RECOMMEND", None, None),
+        (ShellView::Recommend, "GENERATED SUGGESTIONS", None, None),
         (ShellView::Module, "MODULE DETAIL", None, None),
         (ShellView::ModuleRun, "TRANSCRIPT", None, None),
         (ShellView::Workbench, "FINDING", None, None),
@@ -4442,8 +4445,10 @@ fn run_diff_view_renders_new_and_not_seen_findings_and_revisions() {
     assert!(rendered.contains("rev:1234567"));
     assert!(rendered.contains("NEW IN RIGHT"));
     assert!(rendered.contains("new item"));
-    assert!(rendered.contains("decisions: identities=2"));
-    assert!(rendered.contains("conflicts=1"));
+    assert!(rendered.contains("Recorded decisions:"));
+    assert!(!rendered.contains("carry_forward="));
+    assert!(rendered.contains("Check decision sources in Review"));
+    assert!(rendered.contains("Differing snapshot verdicts: 1"));
     assert!(rendered.contains("CHANGED IN RIGHT"));
     assert!(rendered.contains("changed item"));
     app.router.default_scroll_mut().set(8);
@@ -5510,7 +5515,7 @@ fn cost_cap_halt_row_drops_bracket_chrome() {
     assert!(rendered.contains("COST CAP HALT"));
     assert!(rendered.contains("review cap"));
     assert!(!rendered.contains("continue past cap"));
-    assert!(rendered.contains("abort scan"));
+    assert!(rendered.contains("abort work"));
     assert!(
         !rendered.contains("[c]"),
         "stale bracket chrome: {rendered}"
@@ -5534,8 +5539,8 @@ fn cost_cap_halt_renders_compact_fallback_on_short_terminals() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("COST CAP: c=review cap"));
-    assert!(rendered.contains("a=abort"));
+    assert!(rendered.contains("COST CAP · Esc inspect"));
+    assert!(rendered.contains("a abort"));
 }
 
 #[test]
@@ -7216,6 +7221,7 @@ fn palette_over_onboarding_never_leaks_the_picker_title() {
 
 #[test]
 fn system_overlays_clear_origin_body_but_preserve_shell_chrome() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     for view in [
         ShellView::Keymap,
         ShellView::ThemePicker,
@@ -7228,21 +7234,30 @@ fn system_overlays_clear_origin_body_but_preserve_shell_chrome() {
             tool_name: "sast:scan".to_string(),
             filter: crate::app::OptionsFilter::Standard,
         });
+        app.set_viewport(crate::TerminalViewport::new(140, 40));
+        app.set_input("held operator draft");
+        app.set_cursor(4);
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let origin_header = rendered_buffer_rows(terminal.backend().buffer())[0].clone();
         app.set_shell_view(view);
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
 
-        assert!(rendered
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .contains("KUZUSHI"));
+        assert_eq!(
+            rendered.lines().next().unwrap_or_default(),
+            origin_header,
+            "{view:?}: {rendered}"
+        );
         assert!(!rendered.contains("disabledTasks"), "{view:?}: {rendered}");
         assert!(
             !rendered.contains("set <key> <value>"),
             "{view:?}: {rendered}"
         );
+        press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.shell_view(), ShellView::Options, "{view:?}");
+        assert_eq!(app.input(), "held operator draft", "{view:?}");
+        assert_eq!(app.cursor(), 4, "{view:?}");
     }
 }
 
@@ -7407,7 +7422,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
     assert!(rendered.contains("context build"), "{rendered}");
 }
 
-fn rendered_buffer_rows(buffer: &Buffer) -> Vec<String> {
+pub(in crate::renderer) fn rendered_buffer_rows(buffer: &Buffer) -> Vec<String> {
     (0..buffer.area.height)
         .map(|y| buffer_row_text(buffer, buffer.area.width, y))
         .collect()

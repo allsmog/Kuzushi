@@ -24,14 +24,14 @@ pub(crate) fn parse_joined_arg_command(
 
 /// `plan <phase>` opens that phase's planner explicitly; any other text is a
 /// goal for the natural-language planner.
-fn parse_plan_command(args: &[&str], rest: String, original: &str) -> ShellCommand {
+fn parse_plan_command(args: &[&str], rest: String, _original: &str) -> ShellCommand {
     let phase = match args {
         [word] => WorkflowPhase::parse(word),
         _ => None,
     };
     phase
         .map(ShellCommand::PhasePlanner)
-        .unwrap_or_else(|| required_joined_arg(rest, original, ShellCommand::Plan))
+        .unwrap_or_else(|| ShellCommand::Plan(rest))
 }
 
 /// Translate the `tools` argument into a `ToolQuery` string. A leading `--fav`

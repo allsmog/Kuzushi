@@ -113,6 +113,23 @@ pub(in crate::modules) fn persist_iac_findings(
     })))
 }
 
+pub(in crate::modules) fn persist_iac_findings_with_coverage(
+    findings: &[Finding],
+    ctx: &ToolExecutionContext<'_>,
+    gaps: &[String],
+) -> Result<Option<Value>> {
+    let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
+        return Ok(None);
+    };
+    workspace.ensure_state_dir()?;
+    let run_id = ctx.finding_run_id();
+    // These paths were already rebound to the workspace before persistence.
+    persist_findings_run_with_coverage(ctx, store, &run_id, workspace.root(), findings, gaps)?;
+    Ok(Some(
+        json!({"runId":run_id,"findingsDb":workspace.findings_db_path().display().to_string()}),
+    ))
+}
+
 /// Commit through the shared observed path so the dispatching run records a
 /// typed finding delta (receipts would otherwise show an unmeasured `+0`).
 fn persist_findings_run(

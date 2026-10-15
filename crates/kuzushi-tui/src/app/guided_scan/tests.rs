@@ -15,7 +15,7 @@ fn persist_adequate_map_result(target: &std::path::Path, run_id: &str) {
     crate::test_support::record_indexed_run(
         target,
         run_id,
-        "context:build",
+        "threat-model:build",
         serde_json::json!({
             "ok": true,
             "status": "completed",

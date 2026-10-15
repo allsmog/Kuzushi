@@ -2,10 +2,32 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn reduce_apply_pending_plan(&mut self) -> Vec<ShellEffect> {
+        if let Err(error) = self.validate_pending_workflow_proposal() {
+            self.set_error_notice(
+                "plan",
+                format!("Proposal actions blocked: {error:#}. The draft is kept for inspection."),
+            );
+            return Vec::new();
+        }
         let Some(plan) = self.take_pending_plan_for_apply() else {
             return Vec::new();
         };
         self.reduce_apply_plan(plan)
+    }
+
+    fn validate_pending_workflow_proposal(&self) -> anyhow::Result<()> {
+        let Some((target, receipt)) = self.engagement.pending_workflow_proposal() else {
+            return Ok(());
+        };
+        anyhow::ensure!(
+            self.target_owned().as_ref() == Some(target),
+            "Selected target differs from the proposal target"
+        );
+        anyhow::ensure!(
+            self.config().model.as_deref() == Some(&receipt.model),
+            "Selected model changed; prepare a new draft"
+        );
+        receipt.validate_workflow_proposal_actions(target, self.registry())
     }
 
     fn take_pending_plan_for_apply(&mut self) -> Option<PlanProposal> {

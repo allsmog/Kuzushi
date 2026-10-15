@@ -213,7 +213,7 @@ fn controlled_stop_request(
     if Instant::now() >= deadline {
         return Some(anyhow::anyhow!(
             "{label} exceeded its {} ms deadline and was killed",
-            timeout.as_millis()
+            timeout.as_nanos().div_ceil(1_000_000)
         ));
     }
     match io.failure() {

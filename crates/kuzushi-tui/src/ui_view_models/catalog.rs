@@ -151,8 +151,9 @@ pub(crate) fn capability_disposition(id: &str) -> Option<CapabilityDisposition> 
     let disposition = match id {
         "recon" | "threat-model" | "sast" | "findings" | "verify" | "patch" => Product,
         "bounty" | "campaign" | "config" | "context" | "coverage" | "engagement"
-        | "entry-points" | "fleet" | "module-recommender" | "pack" | "randori" | "report"
-        | "router" | "suppress" | "trace" | "triage" | "workspace" | "worklist" | "x-ray" => Folded,
+        | "entry-points" | "fleet" | "module-recommender" | "pack" | "planner" | "randori"
+        | "report" | "router" | "suppress" | "trace" | "triage" | "workspace" | "worklist"
+        | "x-ray" => Folded,
         "agentic-sast" | "cargo-audit" | "codeql" | "codeql-db" | "cpg" | "dep-hygiene"
         | "fuzz" | "govulncheck" | "iac-scan" | "license-scan" | "ndiff" | "offense-review"
         | "sbom-scan" | "secret-scan" | "semgrep" | "taint-iris-next" | "threat-intel"
@@ -644,7 +645,7 @@ const SCAN_EXPERT_ACTIONS: [CapabilityActionSpec; 16] = [
     action!(
         "govulncheck",
         "Govulncheck",
-        "Check reachable Go vulnerabilities",
+        "Inspect experimental Go advisory signals",
         "run govulncheck:scan",
         "EXPERT",
         tool = "govulncheck:scan"

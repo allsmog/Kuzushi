@@ -24,6 +24,9 @@ pub(in crate::modules) fn triage_summary(
     );
     append_by_design_summary(&mut summary, stats.by_design);
     append_degraded_operations(&mut summary, stats);
+    if let Some(notice) = unapplied_opinion_notice(stats.unapplied_opinions) {
+        summary.push_str(&format!("\n      {notice}"));
+    }
     append_classification_errors(&mut summary, stats);
     append_cost_summary(&mut summary, stats);
     append_cost_cap_summary(&mut summary, stats);
@@ -53,8 +56,12 @@ fn append_cost_summary(summary: &mut String, stats: &TriageRunStats) {
     let cost = stats.cost_report();
     if let Some(estimate) = cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
         summary.push_str(&format!(
-            "\n      estimated cost=~${estimate:.4} (tokens × list price; provider reported no charge)"
+            "\n      estimated cost=~${estimate:.4} (tokens × list price; provider cost unavailable)"
         ));
+        return;
+    }
+    if !cost.is_complete() && cost.observed_usd() == 0.0 {
+        summary.push_str("\n      provider cost unknown; no charge recorded");
         return;
     }
     let label = if cost.is_complete() {

@@ -8,7 +8,7 @@ pub(super) fn ensure_secure_child(parent: &Path, name: &str) -> Result<PathBuf> 
     Ok(child)
 }
 
-pub(super) fn ensure_secure_directory(path: &Path) -> Result<()> {
+pub(in crate::session_transcript) fn ensure_secure_directory(path: &Path) -> Result<()> {
     reject_kuzushi_symlink_ancestors(path)?;
     match fs::symlink_metadata(path) {
         Ok(_) => validate_secure_directory(path)?,
@@ -20,7 +20,7 @@ pub(super) fn ensure_secure_directory(path: &Path) -> Result<()> {
     set_private_directory_permissions(path)
 }
 
-pub(super) fn validate_secure_directory(path: &Path) -> Result<()> {
+pub(in crate::session_transcript) fn validate_secure_directory(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     anyhow::ensure!(
         !metadata.file_type().is_symlink(),
@@ -35,7 +35,7 @@ pub(super) fn validate_secure_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn reject_kuzushi_symlink_ancestors(path: &Path) -> Result<()> {
+pub(in crate::session_transcript) fn reject_kuzushi_symlink_ancestors(path: &Path) -> Result<()> {
     if !has_kuzushi_ancestor(path) {
         return Ok(());
     }

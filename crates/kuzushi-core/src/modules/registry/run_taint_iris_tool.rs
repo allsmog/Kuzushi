@@ -217,6 +217,7 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
         | "threat-model:revise"
         | "threat-model:reuse-lessons"
         | "threat-model:regenerate"
+        | "threat-model:ask"
         | "threat-model:models"
         | "threat-model:activate"
         | "threat-model:revisions"

@@ -46,8 +46,11 @@ fn budget_policy_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     ];
     if app.is_budget_halted() {
         policy.push(format!(
-            "Spent: ${:?} · work remains halted until approval",
-            app.session().session_cost_usd()
+            "Spend: {} · work remains halted until approval",
+            crate::ui_view_models::format_runtime_cost(
+                app.session().session_cost_report(),
+                app.session().cost_accounting_error()
+            )
         ));
     }
     policy

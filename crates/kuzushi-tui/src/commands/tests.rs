@@ -766,10 +766,7 @@ mod tests {
             parse_command("plan map authz drift"),
             ShellCommand::Plan("map authz drift".to_string())
         );
-        assert_eq!(
-            parse_command("plan"),
-            ShellCommand::Unknown("plan".to_string())
-        );
+        assert_eq!(parse_command("plan"), ShellCommand::Plan(String::new()));
     }
 
     #[test]

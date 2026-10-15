@@ -1,0 +1,60 @@
+name: Planning aliases preserve prerequisites, scope limits and explicit action choice
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_planning.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | ready
+submit: setg ui.auto_open_activity false
+submit: use taint-iris-next
+submit: run .
+submit: logs
+require-live-snap: 20 Choose an exact tool | explicit-action-required
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_planning.py @TMP_TARGET @ART before
+ask: Does selecting a module avoid launching its experimental primary or substituting a different scan or model action?
+paste-file: @ART/plan-command.txt
+keys: Enter
+require-live-snap: 25 needs usable Kuzushi context | plan-prerequisite
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_planning.py @TMP_TARGET @ART plan
+paste-file: @ART/alias-command.txt
+keys: Enter
+require-live-snap: 25 Missing context or source inventory | alias-prerequisite
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_planning.py @TMP_TARGET @ART alias
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · failed | recorded-prerequisite
+ask: Are the missing inventory/context and recovery guidance honest, with no finding or completed Scan claimed by either alias?
+resize: 160x48
+live-snap: prerequisite-160x48
+resize: 96x89
+live-snap: prerequisite-96x89
+resize: 80x24
+live-snap: prerequisite-80x24
+resize: 60x20
+live-snap: prerequisite-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · failed | prerequisite-40x12
+expect: Missing context or
+expect: source inventory
+keys: NPage NPage
+live-snap: prerequisite-detail-40x12
+ask: Are failed outcome, limitations and recovery controls readable through paging at each size?
+resize: 120x36
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | restarted-setup
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · failed | recovered-prerequisite
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_planning.py @TMP_TARGET @ART restart
+ask: Does no-color restart retain both prerequisite receipts and the earlier result bytes without creating work or leaving fresh Setup?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

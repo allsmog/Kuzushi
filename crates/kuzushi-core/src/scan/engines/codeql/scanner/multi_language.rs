@@ -8,7 +8,7 @@ impl CodeqlScanner {
         repo_name: &str,
         cancel: &ScanCancellation,
     ) -> Result<ScanEngineOutput> {
-        let languages = detect_all_codeql_languages(target, binary, cancel)?;
+        let languages = detect_all_codeql_languages(target, binary, cancel, self)?;
         let (output, tally) =
             self.collect_codeql_language_outputs(target, binary, repo_name, cancel, languages)?;
         codeql_multi_language_output(output, tally)
@@ -64,9 +64,8 @@ impl CodeqlScanner {
     ) -> Result<ScanEngineOutput> {
         let database = self.ensure_database(target, binary, cancel)?;
         let suite = resolve_codeql_suite(self.suite.as_deref(), &database.language)?;
-        let sarif = database.run_verified(|db_path| {
-            self.run_codeql_analysis(binary, db_path, &suite, cancel)
-        })?;
+        let sarif = database
+            .run_verified(|db_path| self.run_codeql_analysis(binary, db_path, &suite, cancel))?;
         let normalized = normalize_codeql_sarif_with_diagnostics(&sarif, repo_name)?;
         Ok(ScanEngineOutput {
             findings: normalized.findings,

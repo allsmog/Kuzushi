@@ -13,17 +13,44 @@ pub(super) fn parse_cve_list(input: &Value) -> Result<Vec<String>> {
     if items.is_empty() {
         anyhow::bail!("threat-intel:harvest `cves` is empty; pass at least one CVE id");
     }
-    items
-        .iter()
-        .enumerate()
-        .map(|(idx, item)| {
-            item.as_str()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .with_context(|| format!("cves[{idx}] must be a non-empty string"))
-        })
-        .collect()
+    anyhow::ensure!(
+        items.len() <= 32,
+        "Advisory draft accepts at most 32 supplied ID rows"
+    );
+    let limit = harvest_advisory_limit(input)?;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut ids = Vec::new();
+    for item in items {
+        let id = checked_advisory_id(item)?;
+        if seen.insert(id.to_ascii_uppercase()) {
+            ids.push(id.to_string());
+        }
+    }
+    anyhow::ensure!(ids.len() <= limit,"Advisory draft exceeds maxCves; revise the explicit list or approve a larger declared bound");
+    Ok(ids)
+}
+
+fn checked_advisory_id(value: &Value) -> Result<&str> {
+    let id = value.as_str().context("Advisory IDs must be text")?.trim();
+    anyhow::ensure!(
+        !id.is_empty() && id.len() <= 128,
+        "Advisory ID must contain 1 to 128 bytes"
+    );
+    anyhow::ensure!(
+        id.bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')),
+        "Advisory ID contains unsupported characters"
+    );
+    Ok(id)
+}
+
+fn harvest_advisory_limit(input: &Value) -> Result<usize> {
+    let Some(raw) = input.get("maxCves") else {
+        return Ok(8);
+    };
+    let value = raw.as_u64().context("maxCves must be an integer")?;
+    anyhow::ensure!((1..=32).contains(&value), "maxCves must be from 1 to 32");
+    Ok(value as usize)
 }
 
 pub(super) fn resolve_output_path(
@@ -43,9 +70,7 @@ pub(super) fn resolve_output_path(
             crate::workspace::active_workspace_required_message("threat-intel:harvest")
         )
     })?;
-    Ok(crate::capabilities::threat_intel::harvested_threat_intel_catalog_path(
-        workspace.root(),
-    ))
+    Ok(crate::capabilities::threat_intel::harvested_threat_intel_catalog_path(workspace.root()))
 }
 
 fn resolve_explicit_output_path(raw: &str, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
@@ -75,5 +100,23 @@ mod tests {
         let err = parse_cve_list(&serde_json::json!({})).unwrap_err();
         let chain = format!("{err:#}");
         assert!(chain.contains("`cves`"), "must name the field: {chain}");
+    }
+
+    #[test]
+    fn advisory_lists_are_finite_and_deduplicate_exact_case_aliases() {
+        assert_eq!(
+            parse_cve_list(&serde_json::json!({"cves":["OWNED-ONE","owned-one","OWNED-TWO"]}))
+                .unwrap(),
+            vec!["OWNED-ONE", "OWNED-TWO"]
+        );
+        for value in [
+            serde_json::json!({"cves":vec!["OWNED";33]}),
+            serde_json::json!({"cves":["../outside"]}),
+            serde_json::json!({"cves":["x".repeat(129)]}),
+            serde_json::json!({"cves":["ONE","TWO"],"maxCves":1}),
+            serde_json::json!({"cves":["ONE"],"maxCves":0}),
+        ] {
+            assert!(parse_cve_list(&value).is_err());
+        }
     }
 }

@@ -90,5 +90,5 @@ pub use reviewed_refutation::{
 };
 pub use scan_comparison::{
     compare_scan_runs, ComparedFinding, ScanComparisonClass, ScanFindingSignature,
-    ScanRunComparison, ScanUncertainMatch,
+    ScanObservationPresence, ScanRunComparison, ScanUncertainMatch,
 };

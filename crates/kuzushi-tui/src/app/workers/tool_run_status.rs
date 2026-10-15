@@ -1,10 +1,7 @@
 use super::*;
 
-#[path = "tool_run_status/planner_job.rs"]
-mod planner_job;
 #[cfg(test)]
 mod tests;
-use planner_job::PlannerWorkerJob;
 
 pub(crate) fn tool_run_status(tool_name: &str) -> &'static str {
     match tool_name {
@@ -187,7 +184,7 @@ fn run_read_only_agent_query(
         authorization.policy.clone(),
     );
     runtime
-        .preflight_model_blocking(&request.model)
+        .preflight_model_work_blocking(&request.model)
         .map_err(CostedWorkerError::before_call)?;
     mark_root_task_running(&observation).map_err(CostedWorkerError::before_call)?;
     execute_read_only_agent_query(
@@ -273,6 +270,16 @@ fn settle_auxiliary_query_failure(
         kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
         "read-only Ask failed",
     )
+}
+
+fn preflight_failure_status(error: &anyhow::Error) -> kuzushi_core::run_lifecycle::RunItemStatus {
+    if kuzushi_core::runtime::runtime_failure_metadata(error).is_some_and(|failure| {
+        failure.error_class == kuzushi_core::RuntimeFailureClass::AllowanceRefused
+    }) {
+        kuzushi_core::run_lifecycle::RunItemStatus::Blocked
+    } else {
+        kuzushi_core::run_lifecycle::RunItemStatus::Failed
+    }
 }
 
 fn read_only_query_status(
@@ -392,14 +399,6 @@ impl RootRunIntent {
             task_title: "Answer the operator request",
             terminalize_in_loop: true,
             task_already_running: false,
-        }
-    }
-
-    const fn planner_proposal() -> Self {
-        Self {
-            task_title: "Draft the requested workflow plan",
-            terminalize_in_loop: false,
-            task_already_running: true,
         }
     }
 }
@@ -619,10 +618,7 @@ fn settle_preflight_failure(
         observation,
         run_id,
         terminalize_in_loop,
-        terminal_status_after_cancellation(
-            cancel,
-            kuzushi_core::run_lifecycle::RunItemStatus::Failed,
-        ),
+        terminal_status_after_cancellation(cancel, preflight_failure_status(error)),
         kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
         &format!(
             "model runtime refused execution: {}",
@@ -1182,177 +1178,4 @@ fn checked_agent_loop_text(
         ));
     }
     Ok((text.to_string(), cost))
-}
-
-pub(crate) const PLAN_SYSTEM_PROMPT: &str = r#"You are Kuzushi's planning assistant.
-Translate the operator's natural-language goal into a strict JSON proposal.
-Output ONLY JSON, starting with '{'. No prose, no code fences.
-Schema:
-{
-  "summary": "one-sentence restatement of the goal",
-  "changes": [
-    {"kind": "run_tool", "tool": "<descriptor tool name>", "input": {}},
-    {"kind": "set_option", "tool": "<tool name or null>", "global": false, "name": "<key>", "value": "<value>"},
-    {"kind": "note", "text": "<short operator-facing note>"}
-
-  ],
-  "unsupported": ["<natural-language reason something cannot be encoded>"]
-}
-
-Rules:
-- Emit run_tool only when the prompt explicitly marks itself as a PHASE INTENT
-  and only from that prompt's allowed descriptor list.
-- If required operator choices are missing, call request_user_input and then
-  continue this same planning turn. Do not emit an ask change.
-- Never ask for credentials; direct credential work to Setup/Auth.
-- Only emit set_option changes you are confident map to existing tool options.
-- Otherwise add a string to "unsupported" instead.
-- Prefer at most 6 changes."#;
-
-pub(crate) fn planner_worker(
-    config: V2Config,
-    model: String,
-    thinking_level: Option<String>,
-    cwd: PathBuf,
-    goal: String,
-    phase_intent: Option<WorkflowPhase>,
-    metadata: ProposalRunMetadata,
-    sink: JobEventSink,
-    cancel: ScanCancellation,
-) {
-    PlannerWorkerJob {
-        config,
-        model,
-        thinking_level,
-        cwd,
-        goal,
-        phase_intent,
-        metadata,
-        cancel,
-    }
-    .run(sink);
-}
-
-fn settle_planner_result(
-    run: &ProposalRun<'_>,
-    lifecycle: ProposalRunLifecycle,
-    result: CostedWorkerResult<PlanProposal>,
-    audit: AgentCallAudit,
-    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
-) -> PlanEvent {
-    match result {
-        Ok((plan, cost)) => persisted_plan_event(run, lifecycle, plan, cost, audit),
-        Err(error) => failed_plan_event(run, lifecycle, error, audit, cancellation),
-    }
-}
-
-fn start_planner_lifecycle(
-    run: &ProposalRun<'_>,
-    input: &serde_json::Value,
-    model: String,
-    config: &V2Config,
-    loaded_modules: Vec<String>,
-    sink: &JobEventSink,
-) -> anyhow::Result<ProposalRunLifecycle> {
-    let observation = proposal_run_observation(
-        run.target,
-        run.run_id,
-        sink,
-        "Draft the requested workflow plan",
-    )?;
-    run.start_observed(input, model, config, loaded_modules, observation)
-}
-
-fn send_plan_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: AgentCallAudit) {
-    sink.send(ShellEvent::Plan(PlanEvent::Failed {
-        error: error.to_string(),
-        audit,
-    }));
-}
-
-fn persisted_plan_event(
-    run: &ProposalRun<'_>,
-    lifecycle: ProposalRunLifecycle,
-    plan: PlanProposal,
-    cost: kuzushi_core::runtime::RuntimeCostReport,
-    audit: AgentCallAudit,
-) -> PlanEvent {
-    match run.complete_observed(
-        "planner proposal ready",
-        planner_proposal_value(&plan),
-        cost,
-        lifecycle,
-    ) {
-        Ok(()) => PlanEvent::Proposed {
-            plan,
-            audit: audit.with_cost(cost),
-        },
-        Err(error) => PlanEvent::Failed {
-            error: terminal_persistence_error(run, error),
-            audit: audit.with_cost(cost),
-        },
-    }
-}
-
-fn failed_plan_event(
-    run: &ProposalRun<'_>,
-    lifecycle: ProposalRunLifecycle,
-    error: CostedWorkerError,
-    audit: AgentCallAudit,
-    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
-) -> PlanEvent {
-    let audit = audit
-        .with_outcome(error.cost, error.call_attempted)
-        .with_failure(&error.error);
-    let safe_message = audit.failure_summary("");
-    let persisted = run.fail_observed(&safe_message, cancellation, error.cost, lifecycle);
-    PlanEvent::Failed {
-        error: persistence_aware_failure(safe_message, persisted),
-        audit,
-    }
-}
-
-fn terminal_persistence_error(run: &ProposalRun<'_>, error: anyhow::Error) -> String {
-    let _ = run;
-    format!("planner result unavailable because persistence failed: {error:#}")
-}
-
-fn persistence_aware_failure(message: String, persisted: anyhow::Result<()>) -> String {
-    match persisted {
-        Ok(()) => message,
-        Err(_error) => format!("{message}; additionally, terminal run persistence failed"),
-    }
-}
-
-pub(crate) fn run_planner_worker(
-    config: V2Config,
-    model: String,
-    thinking_level: Option<String>,
-    cwd: PathBuf,
-    goal: &str,
-    phase_intent: Option<WorkflowPhase>,
-    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
-    run_id: String,
-    sink: JobEventSink,
-    cancel: ScanCancellation,
-) -> CostedWorkerResult<PlanProposal> {
-    let system_prompt = format!(
-        "{PLAN_SYSTEM_PROMPT}\n\nYou may call request_user_input when 1-3 concise operator choices materially affect the proposal. Ask at most three times."
-    );
-    let (body, cost) = run_root_shell_tool_loop(
-        config,
-        model,
-        thinking_level,
-        cwd,
-        system_prompt,
-        goal.to_string(),
-        Some(observation),
-        RootRunIntent::planner_proposal(),
-        run_id,
-        sink,
-        cancel,
-    )?;
-    let plan = parse_plan_json_for_phase(goal, &body, phase_intent)
-        .map_err(|error| CostedWorkerError::observed(error, cost))?;
-    Ok((plan, cost))
 }

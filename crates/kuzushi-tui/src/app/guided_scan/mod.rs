@@ -17,6 +17,8 @@ use seed_context::ScanSeedContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GuidedScanStage {
+    // Legacy entry remains covered by transition regression tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     MapRoute,
     ModuleSelection(WorkflowPhase),
     ContextPrerequisite,

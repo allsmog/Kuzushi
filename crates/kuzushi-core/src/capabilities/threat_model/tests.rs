@@ -1003,6 +1003,16 @@ pub fn accepts_scope(scope: &str) -> bool {
             )
             .unwrap();
         assert_eq!(degraded.get("ok").and_then(Value::as_bool), Some(true));
+        let reference: ThreatModelRef =
+            serde_json::from_value(degraded["data"]["modelRef"].clone()).unwrap();
+        let immutable = load_exact_threat_model(temp.path(), &reference).unwrap();
+        let source_hash =
+            crate::incremental_index::current_workspace_tree_hash(temp.path()).unwrap();
+        assert_eq!(immutable["provenance"]["treeHash"], source_hash);
+        assert_eq!(
+            immutable["provenance"]["treeHash"],
+            degraded["data"]["document"]["provenance"]["treeHash"]
+        );
         assert_eq!(
             degraded.get("status").and_then(Value::as_str),
             Some("partial")

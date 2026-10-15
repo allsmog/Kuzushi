@@ -6,6 +6,7 @@ mod harvest;
 mod osv;
 pub(crate) mod regression_gate;
 
+pub(crate) use apply::catalog_dispatch_requested;
 pub use apply::{apply_threat_intel_catalog, list_threat_intel_catalog};
 pub use catalog_path::resolve_catalog_path;
 pub use catalog_storage_paths::{

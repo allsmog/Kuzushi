@@ -322,11 +322,11 @@ fn summary_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
 }
 
 fn append_dfd_notice(lines: &mut Vec<Line<'static>>, width: usize, model: &DfdModel) {
-    let Some(notice) = model.evidence_notice() else {
-        return;
-    };
     lines.extend(
-        crate::renderer::shared::text::wrap_text(notice, width)
+        [model.evidence_notice(), model.topology_notice()]
+            .into_iter()
+            .flatten()
+            .flat_map(|notice| crate::renderer::shared::text::wrap_text(notice, width))
             .into_iter()
             .map(|line| Line::styled(line, theme::label())),
     );

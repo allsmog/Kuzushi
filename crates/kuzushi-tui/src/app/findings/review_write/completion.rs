@@ -24,7 +24,7 @@ impl ShellApp {
         unchanged: bool,
     ) -> Vec<ShellEffect> {
         match result {
-            Ok(id) => self.finish_saved_review_decision(&apply, id, unchanged),
+            Ok(receipt) => self.finish_saved_review_decision(&apply, receipt, unchanged),
             Err(ReviewWriteFailure::Workspace(error)) => {
                 self.set_error_notice(
                     "review",
@@ -41,7 +41,7 @@ impl ShellApp {
     fn finish_saved_review_decision(
         &mut self,
         apply: &ReviewDecisionApply,
-        id: i64,
+        receipt: kuzushi_core::workspace::WorkspaceReviewDecisionReceipt,
         unchanged: bool,
     ) -> Vec<ShellEffect> {
         if self.open_review_session_id(&apply.finding) == apply.review_session_id {
@@ -51,7 +51,16 @@ impl ShellApp {
             self.clear_review_decision_conflict();
         }
         let label = review_decision_finding_label(apply.alias.as_deref(), &apply.finding);
-        self.log_saved_review_decision(id, apply.decision.verdict, &label);
+        self.log_saved_review_decision(receipt.decision_id, apply.decision.verdict, &label);
+        self.log_review_decision_source(&receipt);
+        self.set_success_notice(
+            "review",
+            format!(
+                "Saved #{} for {label} · {}",
+                receipt.decision_id,
+                receipt.source_summary()
+            ),
+        );
         if unchanged {
             return self.review_decision_refresh_effects(&apply.finding);
         }
@@ -97,8 +106,17 @@ impl ShellApp {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "no target".into());
         match result {
-            Ok(id) => self.set_success_notice("review", format!("Decision #{id} saved for {label} in {target}")),
+            Ok(receipt) => self.set_success_notice("review", format!("Decision #{} saved for {label} in {target}", receipt.decision_id)),
             Err(error) => self.set_error_notice("review", format!("Decision save for {label} in {target} failed: {}. Inspect that ledger before retrying.", review_write_error_message(error))),
+        }
+    }
+
+    fn log_review_decision_source(
+        &mut self,
+        receipt: &kuzushi_core::workspace::WorkspaceReviewDecisionReceipt,
+    ) {
+        for line in receipt.source_lines() {
+            self.log("review", line);
         }
     }
 }

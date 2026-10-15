@@ -47,7 +47,7 @@ fn review_continuation_respects_an_earlier_unresolved_phase() {
     crate::test_support::record_indexed_run(
         fixture._temp.path(),
         "new-map",
-        "context:build",
+        "threat-model:build",
         serde_json::json!({"ok": true, "data": {"snapshot": {"filesIndexed": 1}}}),
     );
     crate::test_support::append_typed_attempt(
@@ -71,7 +71,7 @@ fn review_continuation_respects_an_earlier_unresolved_phase() {
 }
 
 fn review_continuation_fixture(actionable: bool) -> ResultCardFixture {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Review, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Review, "triage:run");
     for phase in [WorkflowPhase::Map, WorkflowPhase::Scan] {
         seed_selected_phase(fixture._temp.path(), phase);
     }
@@ -89,7 +89,11 @@ fn seed_selected_phase(target: &std::path::Path, phase: WorkflowPhase) {
     crate::test_support::record_indexed_run(
         target,
         &run_id,
-        "context:build",
+        match phase {
+            WorkflowPhase::Map => "threat-model:build",
+            WorkflowPhase::Scan => "secret-scan:scan",
+            _ => unreachable!(),
+        },
         serde_json::json!({"ok":true,"data":{"snapshot":{"filesIndexed":1}}}),
     );
     let completed = crate::test_support::append_typed_attempt(
@@ -192,7 +196,12 @@ impl ResultCardFixture {
     /// matching Workbench page, in Navigate mode — the state the card's
     /// single-key hints are printed in.
     fn open(phase: WorkflowPhase, tool: &str) -> Self {
-        Self::open_with_input(phase, tool, serde_json::json!({}))
+        let input = if tool == "threat-model:build" {
+            serde_json::json!({"pipeline":"deterministic","offline":true,"variantScan":false})
+        } else {
+            serde_json::json!({})
+        };
+        Self::open_with_input(phase, tool, input)
     }
 
     fn open_with_input(phase: WorkflowPhase, tool: &str, input: Value) -> Self {
@@ -291,7 +300,7 @@ fn action_took_effect(
 #[test]
 fn every_advertised_result_card_key_dispatches_its_action() {
     for (phase, tool) in [
-        (WorkflowPhase::Map, "context:build"),
+        (WorkflowPhase::Map, "threat-model:build"),
         (WorkflowPhase::Scan, "secret-scan:scan"),
         (WorkflowPhase::Review, "triage:run"),
     ] {
@@ -348,7 +357,7 @@ fn a_rerun_without_a_re_runnable_run_says_so_on_screen() {
 fn a_refused_selection_says_so_on_screen() {
     // A Fix attempt whose run carries no reviewable patch: selection is
     // refused, which is correct. What the operator must not get is silence.
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Fix, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Fix, "fixture:legacy-result");
 
     fixture.press('u');
 
@@ -367,7 +376,7 @@ fn a_refused_selection_says_so_on_screen() {
 
 #[test]
 fn prompt_mode_leaves_result_card_keys_to_the_composer() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "threat-model:build");
     fixture.app.set_input_mode(InputMode::Prompt);
 
     fixture.press('u');
@@ -394,7 +403,7 @@ fn an_unadvertised_default_key_leaves_the_card_alone() {
     // Prove withholds Discard: a proof set is discarded by rejecting its
     // findings, not by dropping the attempt. `d` is still a phase-result
     // default, so it must land as a no-op rather than a hidden disposition.
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Prove, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Prove, "fixture:legacy-result");
     assert!(!fixture
         .advertised_actions(WorkflowPhase::Prove)
         .contains(&PhaseResultAction::Discard));
@@ -509,7 +518,7 @@ fn phase_rerun_action_overrides_are_narrowly_scoped() {
 
 #[test]
 fn repeated_card_key_after_resolution_is_absorbed_not_typed() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "threat-model:build");
 
     for _ in 0..5 {
         assert!(fixture.press('u').handled);
@@ -528,7 +537,7 @@ fn repeated_card_key_after_resolution_is_absorbed_not_typed() {
 
 #[test]
 fn another_key_ends_the_resolved_key_echo_window() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "threat-model:build");
     fixture.press('u');
     assert_eq!(fixture.app.editor().resolved_result_key(), Some('u'));
 
@@ -541,29 +550,59 @@ fn another_key_ends_the_resolved_key_echo_window() {
 
 #[test]
 fn stray_card_letters_from_an_earlier_race_are_dropped_on_resolution() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Scan, "secret-scan:scan");
     fixture.app.editor_mut().set_input("uu");
 
-    fixture.press('u');
+    // Exercise settlement after an explicit disposition, independently of the draft-owning keyboard gate.
+    assert!(
+        fixture
+            .app
+            .apply_phase_result_command(PhaseResultCommand::Select)
+            .handled
+    );
+    fixture
+        .app
+        .settle_claimed_phase_result_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE));
 
-    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert!(
+        !fixture.attempt_is_unresolved(WorkflowPhase::Scan),
+        "notice={:?} mode={:?} actions={:?}",
+        fixture.notice_message(),
+        fixture.app.input_mode(),
+        fixture.advertised_actions(WorkflowPhase::Scan)
+    );
     assert_eq!(fixture.app.input(), "");
 }
 
 #[test]
 fn a_real_draft_survives_result_resolution() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Scan, "secret-scan:scan");
     fixture.app.editor_mut().set_input("scan src/");
 
-    fixture.press('u');
+    // Exercise settlement after an explicit disposition, independently of the draft-owning keyboard gate.
+    assert!(
+        fixture
+            .app
+            .apply_phase_result_command(PhaseResultCommand::Select)
+            .handled
+    );
+    fixture
+        .app
+        .settle_claimed_phase_result_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE));
 
-    assert!(!fixture.attempt_is_unresolved(WorkflowPhase::Map));
+    assert!(
+        !fixture.attempt_is_unresolved(WorkflowPhase::Scan),
+        "notice={:?} mode={:?} actions={:?}",
+        fixture.notice_message(),
+        fixture.app.input_mode(),
+        fixture.advertised_actions(WorkflowPhase::Scan)
+    );
     assert_eq!(fixture.app.input(), "scan src/");
 }
 
 #[test]
 fn card_key_off_the_workbench_reveals_the_card_without_applying_it() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "threat-model:build");
     fixture.app.set_shell_view(ShellView::Activity);
     fixture.app.set_input_mode(InputMode::Navigate);
 
@@ -593,7 +632,7 @@ fn card_key_off_the_workbench_reveals_the_card_without_applying_it() {
 
 #[test]
 fn footer_esc_names_notice_dismissal_while_a_warning_holds_escape() {
-    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "context:build");
+    let mut fixture = ResultCardFixture::open(WorkflowPhase::Map, "threat-model:build");
     fixture.press('u');
     fixture.app.set_warn_notice("run", "partial receipt");
 

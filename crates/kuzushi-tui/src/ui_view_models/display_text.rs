@@ -61,12 +61,19 @@ pub(crate) fn format_session_cost(usd: f64) -> String {
     if usd == 0.0 {
         "$0.00".to_string()
     } else if usd < 0.01 {
-        format!("${usd:.4}")
+        fractional_cost_text(usd)
     } else if usd < 100.0 {
         format!("${usd:.2}")
     } else {
         format!("${usd:.0}")
     }
+}
+
+fn fractional_cost_text(usd: f64) -> String {
+    if usd < 0.00005 {
+        return format!("${usd:.2e}");
+    }
+    format!("${usd:.4}")
 }
 
 pub(crate) fn format_runtime_cost(
@@ -90,11 +97,15 @@ fn recorded_cost_text(report: kuzushi_core::runtime::RuntimeCostReport) -> Strin
     }
     match report.estimated_total_usd() {
         Some(total) => format!("~{} (estimated)", format_session_cost(total)),
-        None => format!(
-            ">={} (metering incomplete)",
-            format_session_cost(report.observed_usd())
-        ),
+        None => unmetered_cost_text(report.observed_usd()),
     }
+}
+
+fn unmetered_cost_text(observed: f64) -> String {
+    if observed == 0.0 {
+        return "unknown (metering incomplete)".to_string();
+    }
+    format!(">={} (metering incomplete)", format_session_cost(observed))
 }
 
 /// Local stores record some times (review decisions, export receipts) as
@@ -131,6 +142,25 @@ mod runtime_cost_tests {
     use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
 
     #[test]
+    fn positive_subtotals_remain_visible_without_claiming_the_unknown_total() {
+        let subtotal = RuntimeCost::from_usd(0.000001, "owned receipt").unwrap();
+        let label = format_runtime_cost(RuntimeCostReport::incomplete(subtotal), None);
+        assert_eq!(label, ">=$1.00e-6 (metering incomplete)");
+        assert!(!label.contains("$0.00"));
+        assert_eq!(
+            format_runtime_cost(RuntimeCostReport::known(subtotal), None),
+            "$1.00e-6"
+        );
+    }
+
+    #[test]
+    fn estimates_remain_qualified_even_when_the_observed_subtotal_is_zero() {
+        let report = RuntimeCostReport::INCOMPLETE_ZERO
+            .with_unmetered_estimate(Some(RuntimeCost::from_usd(0.25, "owned estimate").unwrap()));
+        assert_eq!(format_runtime_cost(report, None), "~$0.25 (estimated)");
+    }
+
+    #[test]
     fn compact_cost_preserves_unknown_spend_without_inferring_call_counts() {
         assert_eq!(
             format_runtime_cost(RuntimeCostReport::known(RuntimeCost::ZERO), None),
@@ -138,7 +168,7 @@ mod runtime_cost_tests {
         );
         assert_eq!(
             format_runtime_cost(RuntimeCostReport::INCOMPLETE_ZERO, None),
-            ">=$0.00 (metering incomplete)"
+            "unknown (metering incomplete)"
         );
         assert_eq!(
             format_runtime_cost(RuntimeCostReport::UNAVAILABLE, None),

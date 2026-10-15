@@ -110,21 +110,10 @@ pub(crate) fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &Shel
     }
     let mut lines = vec![cost_cap_halt_header_line(&halt, area.width as usize)];
     if area.height > 1 {
-        // Mirror the unbracketed key style from `keybindings_line` /
-        // `design/mockups/_shared.jsx::footer` — accent key + muted hint
-        // separated by 3 spaces.  Matches the rest of the shell's
-        // muscle-memory rather than re-introducing `[k]` chrome.
-        let action_line = Line::from(vec![
-            Span::raw(" "),
-            Span::styled("c", theme::accent()),
-            Span::raw(" "),
-            Span::styled("review cap", theme::warn()),
-            Span::raw("   "),
-            Span::styled("a", theme::accent()),
-            Span::raw(" "),
-            Span::styled("abort scan", theme::warn()),
-        ]);
-        lines.push(action_line);
+        lines.push(Line::styled(
+            fit(halt.actions, area.width as usize),
+            theme::warn(),
+        ));
     }
     render_lines(frame, area, lines);
 }

@@ -233,28 +233,6 @@ pub(crate) fn osv_advisory_url(id: &str) -> String {
     format!("https://api.osv.dev/v1/vulns/{}", shell_escape_url(id))
 }
 
-pub(crate) fn record_from_input(id: &str, input: &Value) -> Result<Option<CveRecord>> {
-    if let Some(Value::Object(record)) = input.get("record") {
-        return Ok(Some(serde_json::from_value(Value::Object(record.clone()))?));
-    }
-    let Some(fixtures) = input.get("fixtures").and_then(Value::as_object) else {
-        return Ok(None);
-    };
-    let candidates = [
-        id.to_string(),
-        id.to_ascii_uppercase(),
-        id.to_ascii_lowercase(),
-    ];
-    for key in candidates {
-        if let Some(value) = fixtures.get(&key) {
-            return Ok(Some(serde_json::from_value(value.clone()).with_context(
-                || format!("Could not parse offline advisory fixture {key}"),
-            )?));
-        }
-    }
-    Ok(None)
-}
-
 pub(crate) fn input_is_offline(input: &Value) -> bool {
     input
         .get("offline")

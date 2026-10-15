@@ -14,7 +14,7 @@ fn completed_setup_map_accepts_the_displayed_attempt_after_refresh() {
     crate::test_support::record_indexed_run(
         target.path(),
         "newer-map",
-        "context:build",
+        "threat-model:build",
         serde_json::json!({"ok": true, "data": {"snapshot": {"filesIndexed": 1}}}),
     );
     let newer = crate::test_support::append_typed_attempt(

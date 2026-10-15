@@ -6,6 +6,7 @@ use kuzushi_core::capabilities::threat_model::{
     ThreatModelRevisionSource,
 };
 use kuzushi_core::{modules::ToolExecutionContext, ThreatModelRef, V2Config, WorkspaceTarget};
+mod checkpoints;
 
 fn commit(root: &std::path::Path, label: &str) -> ThreatModelRef {
     commit_threat_model_revision(root, &json!({"version":"1","methodology":"stride","systemContext":"Original overview","dfd":{"nodes":[{"id":"reader","name":"Reader","type":"process","trustZone":"internal"}],"flows":[],"trustBoundaries":[]},"threats":[],"summary":{},"openQuestions":["Who owns the input?"]}), ThreatModelCommit {model_id:None,new_model:true,label:label.into(),scope:ScopeRef::legacy_root(root,&format!("sha256:{}","1".repeat(64))),methodology:"stride".into(),source:ThreatModelRevisionSource::Import,source_revision_id:None,run_id:None,activate:Some(true),actor:"test".into()}).unwrap().model_ref
@@ -84,6 +85,33 @@ fn edited_overview(app: &mut ShellApp) {
     key(app, KeyCode::Char('u'), KeyModifiers::CONTROL);
     assert!(app.capture_context_edit_paste("Operator overview\nUnicode α"));
     key(app, KeyCode::Esc, KeyModifiers::NONE);
+}
+
+#[test]
+fn hidden_context_copy_warns_before_quit_and_stay_retains_its_draft() {
+    let (_root, mut app, _, _) = fixture();
+    assert!(!app.context_copies_not_checkpointed());
+    app.open_context_editor();
+    assert!(!app.context_copies_not_checkpointed());
+    edited_overview(&mut app);
+    app.close_context_editor();
+    assert!(app.context_copies_not_checkpointed());
+    let before = app.runtime_state.context_edit_drafts.clone();
+    let update = app.reduce_quit_chord_for_test();
+    assert!(update.effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::QuitConfirm);
+    let text = format!("{:?}", crate::ui_view_models::quit_confirm_model(&app));
+    assert!(text.contains("context copy"));
+    assert!(text.contains("return to review and save"));
+    assert!(!text.contains("Operator overview"));
+    app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert_eq!(app.runtime_state.context_edit_drafts, before);
+    app.open_context_editor();
+    assert_eq!(
+        app.context_edit_draft().unwrap().entries[1].text(),
+        "Operator overview\nUnicode α"
+    );
 }
 
 #[test]

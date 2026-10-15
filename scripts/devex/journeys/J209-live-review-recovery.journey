@@ -1,0 +1,79 @@
+name: Read failed actual Review and retain human authority without new requests
+size: 120x36
+require-env: KUZUSHI_DEVEX_TARGET
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/approved_live_review.py @TARGET @ART inspect
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: campaign live-owned-review-raw-20261010
+require-live-snap: 25 1 failed | historical-review
+expect: work ended
+expect-not: L resume
+nav-mode:
+keys: L
+require-live-snap: 25 new approved plan | consumed-attempt-refusal
+keys: Enter
+require-live-snap: 25 review-001 | failed-job-detail
+resize: 160x48
+require-live-snap: 25 1 failed | failed-job-160x48
+resize: 96x89
+require-live-snap: 25 1 failed | failed-job-96x89
+resize: 80x24
+require-live-snap: 25 1 failed | failed-job-80x24
+resize: 60x20
+require-live-snap: 25 1 failed | failed-job-60x20
+resize: 40x12
+require-live-snap: 25 1 failed | failed-job-40x12
+keys: NPage
+live-snap: failed-job-page-40x12
+ask: Does the retained real Review receipt remain visibly failed, with one consumed attempt and no automatic rerun or zero-dollar claim?
+resize: 120x36
+submit: open F-0001
+require-live-snap: 25 public-example.env | preserved-human-decision
+expect: Owned public documentation example
+resize: 160x48
+require-live-snap: 25 rejected_false_positive | review-160x48
+resize: 96x89
+require-live-snap: 25 rejected_false_positive | review-96x89
+resize: 80x24
+require-live-snap: 25 rejected_false_positive | review-80x24
+resize: 60x20
+require-live-snap: 25 rejected_false_positive | review-60x20
+resize: 40x12
+require-live-snap: 25 rejected_false_positive | review-40x12
+nav-mode:
+keys: NPage
+live-snap: review-page-40x12
+keys: NPage
+live-snap: review-decision-40x12
+keys: NPage
+live-snap: review-source-status-40x12
+keys: NPage
+live-snap: review-source-commit-40x12
+keys: NPage
+live-snap: review-source-code-40x12
+ask: Is the retained human FP decision and its source revision readable through the six-size Review surface and compact paging?
+resize: 120x36
+submit: report
+require-live-snap: 25 REPORT | shared-report
+require-live-snap: 25 5 committed / 6 calls | settled-shared-report
+expect: 1 protected review remaining
+require-shell: python3 -B @REPO/scripts/devex/fixtures/approved_live_review.py @TARGET @ART reported
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: open F-0001
+require-live-snap: 25 public-example.env | recovered-human-decision
+submit: report
+require-live-snap: 25 REPORT | recovered-report
+require-live-snap: 25 5 committed / 6 calls | settled-recovered-report
+expect: 1 protected review remaining
+require-shell: python3 -B @REPO/scripts/devex/fixtures/approved_live_review.py @TARGET @ART restarted
+ask: Does no-color restart retain the original failed Review, human decision, source context and five spent requests without launching further work?
+keys: C-c
+require-exit: 10

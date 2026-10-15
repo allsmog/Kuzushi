@@ -3,6 +3,10 @@ use crate::runtime::AgentQueryControl;
 
 #[async_trait]
 impl AgentRuntime for RoutedRuntime<'_> {
+    fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+        self.inner.allowance_binding()
+    }
+
     fn authorize_tool_policy_blocking(
         &self,
         authorization: &crate::runtime::AgentToolPolicyAuthorization,
@@ -21,6 +25,14 @@ impl AgentRuntime for RoutedRuntime<'_> {
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         validate_routed_request_model("preflight", model)?;
         self.inner.preflight_model_blocking(model)
+    }
+
+    fn triage_semantic_cache_identity(
+        &self,
+        request: &TriageRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        validate_routed_request_model("triage-cache", &request.model).ok()?;
+        self.inner.triage_semantic_cache_identity(request)
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {

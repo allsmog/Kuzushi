@@ -50,6 +50,7 @@ impl ReconHttpFingerprinter {
             None,
             cancel,
             "Install curl or pass {\"binary\":\"/path/to/curl\"}.",
+            self.timeout_seconds,
         )?;
         let stdout = String::from_utf8(output.stdout)
             .context("recon:http-fingerprint emitted non-UTF8 output")?;
@@ -65,5 +66,5 @@ fn http_fingerprint_binary(input: &Value) -> Result<String> {
 }
 
 fn http_fingerprint_timeout_seconds(input: &Value) -> Result<u64> {
-    Ok(optional_u64(input, &["timeoutSeconds", "timeout_seconds"])?.unwrap_or(10))
+    recon_timeout(input, 10)
 }

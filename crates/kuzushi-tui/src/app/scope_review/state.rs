@@ -15,6 +15,7 @@ pub(crate) struct ScopeReviewState {
     pub menu: Option<usize>,
     pub merge_target: Option<usize>,
     pub form: Option<ScopeEditForm>,
+    pub new_scope_draft: Option<ScopeEditForm>,
     pub accepting: bool,
     pub acknowledgements: ScopeCoverageApproval,
     pub acknowledgement_cursor: usize,
@@ -35,6 +36,7 @@ impl ScopeReviewState {
             menu: None,
             merge_target: None,
             form: None,
+            new_scope_draft: None,
             accepting: false,
             acknowledgements: Default::default(),
             acknowledgement_cursor: 0,
@@ -52,7 +54,7 @@ impl ScopeReviewState {
                 .get(id)
                 .is_some_and(|members| members.total > 0)
         });
-        let selected = self.selected_id().map(str::to_owned);
+        let selected = self.selection_for_saved_review();
         self.cursor = selected
             .and_then(|id| scope_ids(&review).position(|next| next == id))
             .unwrap_or(0);
@@ -104,6 +106,7 @@ pub(crate) struct ScopeFiles {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ScopeEditKind {
+    Add,
     AiPriorities,
     Rename,
     Split,

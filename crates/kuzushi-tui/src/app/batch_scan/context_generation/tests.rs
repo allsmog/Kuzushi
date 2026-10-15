@@ -6,8 +6,10 @@ use ratatui::{backend::TestBackend, Terminal};
 
 mod brief;
 mod diagnosis;
+mod missing_state;
 mod navigation;
 mod recovery;
+mod workflow_proposal;
 
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
@@ -102,7 +104,16 @@ fn context_generation_requires_limits_and_approval_before_opening_its_single_job
     app.cache_tool_snapshot(tool, &result);
     assert_eq!(app.context_generation().unwrap().scroll, 0);
     assert!(!app.context_generation().unwrap().show_options);
+    app.router.answers_mut().focus = crate::app::AnswerFocus::Reading;
+    app.set_input_mode(InputMode::Prompt);
+    app.set_input("preserved question draft");
     app.handle_context_generation_key(KeyCode::Enter);
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+    assert_eq!(
+        app.router.answers().focus,
+        crate::app::AnswerFocus::Workspace
+    );
+    assert_eq!(app.input(), "preserved question draft");
     assert!(app.router.campaign().batch_scan_config.is_none());
     assert!(app.router.campaign().dispatcher_pid.is_none());
     let campaign = app.router.campaign().selected_campaign().unwrap();

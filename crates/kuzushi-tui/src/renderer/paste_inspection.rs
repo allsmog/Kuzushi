@@ -30,7 +30,7 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(rows), sections[1]);
     frame.render_widget(Paragraph::new(
-        "↑/↓ lines · ←/→ columns · Home/End\nEnter/e expand · Delete remove · Esc cancel\nCtrl+_ undoes after closing · Controls shown escaped"
+        "↑/↓ lines · ←/→ cols · Home/End\nEnter expand · Del remove · Esc cancel\nCtrl+_ undo after close · escaped text"
     ).style(theme::subtle()), sections[2]);
     true
 }
@@ -72,8 +72,34 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let buffer = format!("{:?}", terminal.backend().buffer());
-        for expected in ["first", "last 👩‍💻", "expand", "remove", "cancel", "undoes"] {
+        for expected in ["first", "last 👩‍💻", "expand", "remove", "cancel", "undo"] {
             assert!(buffer.contains(expected), "{buffer}");
+        }
+    }
+
+    #[test]
+    fn compact_paste_inspector_keeps_its_controls_readable() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.editor_mut().insert_multiline_paste("first α\nlast β\n");
+        app.inspect_paste_at_cursor();
+        for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| render_app(frame, &app)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            for expected in [
+                "Enter", "expand", "Del", "remove", "Esc", "cancel", "Ctrl+_", "close",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{width}x{height}: missing {expected}: {text}"
+                );
+            }
         }
     }
 

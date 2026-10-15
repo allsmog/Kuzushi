@@ -221,23 +221,6 @@ fn operator_questions_are_available_to_non_anthropic_shell_models() {
         .contains("may call request_user_input"));
 }
 
-#[test]
-fn planner_questions_continue_the_same_turn_instead_of_serializing_ask_changes() {
-    assert!(PLAN_SYSTEM_PROMPT.contains("call request_user_input"));
-    assert!(PLAN_SYSTEM_PROMPT.contains("continue this same planning turn"));
-    assert!(PLAN_SYSTEM_PROMPT.contains("Do not emit an ask change"));
-    assert!(!PLAN_SYSTEM_PROMPT.contains(r#"{"kind": "ask"#));
-
-    let request = root_shell_agent_request(
-        "openai-codex:gpt-5.5".to_string(),
-        PathBuf::from("/target"),
-        PLAN_SYSTEM_PROMPT.to_string(),
-        "plan a scan".to_string(),
-    );
-    assert_eq!(request.max_steps, MAX_AGENT_STEPS);
-    assert_eq!(request.tools[0].name, REQUEST_USER_INPUT_TOOL);
-}
-
 fn operator_question_observation(
     target: &std::path::Path,
     run_id: &str,

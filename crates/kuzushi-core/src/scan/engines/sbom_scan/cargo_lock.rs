@@ -1,13 +1,17 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent};
 use anyhow::{Context, Result};
 use std::path::Path;
 
 pub(super) use super::dependency_graph::is_cargo_lock;
 
-pub(super) fn cargo_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn cargo_lock_components(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Cargo.lock")?;
     let source = relative_display(target, path);
     Ok(value

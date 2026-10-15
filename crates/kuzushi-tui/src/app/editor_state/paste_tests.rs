@@ -44,6 +44,55 @@ fn draft() -> EditorState {
 }
 
 #[test]
+fn paste_inspection_reaches_the_block_when_the_cursor_is_after_appended_text() {
+    let mut editor = EditorState::default();
+    editor.insert_multiline_paste("first α\nsecond β");
+    editor.insert_str_at_cursor(" trailing command text");
+    let before = editor.expanded_input();
+    let cursor = editor.cursor();
+    assert!(editor.inspect_paste_at_cursor());
+    assert_eq!(
+        editor.paste_inspection().unwrap().text(),
+        "first α\nsecond β"
+    );
+    assert_eq!(editor.expanded_input(), before);
+    assert_eq!(editor.cursor(), cursor);
+    editor.handle_paste_inspection_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(!editor.expand_paste_at_cursor());
+    assert_eq!(editor.expanded_input(), before);
+}
+
+#[test]
+fn paste_inspection_chooses_the_nearest_block_and_the_earlier_block_on_ties() {
+    for (offset, expected) in [
+        (1, "first\nblock"),
+        (3, "first\nblock"),
+        (5, "second\nblock"),
+    ] {
+        let mut editor = EditorState::default();
+        editor.insert_multiline_paste("first\nblock");
+        let gap_start = editor.cursor();
+        editor.insert_str_at_cursor(" gap  ");
+        editor.insert_multiline_paste("second\nblock");
+        editor.set_cursor(gap_start + offset);
+        let before = editor.expanded_input();
+        assert!(editor.inspect_paste_at_cursor());
+        assert_eq!(editor.paste_inspection().unwrap().text(), expected);
+        assert_eq!(editor.expanded_input(), before);
+        assert_eq!(editor.cursor(), gap_start + offset);
+    }
+}
+
+#[test]
+fn paste_inspection_without_blocks_leaves_plain_input_unchanged() {
+    let mut editor = EditorState::default();
+    editor.insert_str_at_cursor("plain α");
+    assert!(!editor.inspect_paste_at_cursor());
+    assert!(editor.paste_inspection().is_none());
+    assert_eq!(editor.expanded_input(), "plain α");
+}
+
+#[test]
 fn paste_interior_cursor_typing_and_deletion_are_atomic_and_undoable() {
     let mut editor = draft();
     let original = editor.expanded_input();

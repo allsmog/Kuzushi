@@ -4,11 +4,14 @@ cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
 launch: --target @TMP_TARGET
 require-live-snap: 30 READY THE MAP RUN | fresh-setup
 keys: Down Enter
 require-live-snap: 20 Build threat model | map-selection
-keys: Down Down Down Space Enter
+keys: Down Down
+require-live-snap: 20 OPTIONS · threat-model:build | model-task-focused
+keys: Space Enter
 require-live-snap: 20 READY THE MAP RUN | selected-map-work
 expect: APPROVAL NEXT
 ask: Does a fresh target show the selected deterministic preparation, model-backed context, real credential state and explicit allowance requirement before any work?
@@ -35,15 +38,45 @@ keys: L
 require-live-snap: 25 dispatcher pid | map-running
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-completed
 keys: r
-require-live-snap: 25 3 job(s) · 3 completed | map-completed
+require-live-snap: 25 Jobs: 3 · 3 completed | map-completed
 keys: a
 require-live-snap: 25 CONTEXT JOB RESULT | generated-context
+require-live-snap: 25 Owned greeting application | generated-context-summary
+expect: Calls: 1 / 5
+expect: Components: 3
+resize: 160x48
+live-snap: context-result-160x48
+resize: 96x89
+live-snap: context-result-96x89
+resize: 80x24
+live-snap: context-result-80x24
+resize: 60x20
+live-snap: context-result-60x20
+resize: 40x12
+require-live-snap: 20 Owned greeting application | context-result-40x12
+expect: p plan
+expect: Enter inspect
+keys: NPage NPage
+live-snap: context-result-paged-40x12
+ask: Does the completed context show its authenticated title, components, flows and questions, with usage and inspection controls available at all six sizes without repeating the preparation form?
+resize: 120x36
+keys: p
+require-live-snap: 20 FROZEN GENERATION PLAN | context-frozen-plan
+expect: 3 fixed jobs
+expect: p result
+keys: Tab
+require-live-snap: 20 EXACT GENERATION OPTIONS | context-generation-options
+keys: p
+require-live-snap: 20 FROZEN GENERATION PLAN | context-plan-from-options
+keys: p PPage
+require-live-snap: 20 Owned greeting application | context-result-returned
 keys: m
 require-live-snap: 30 RESULT READY | map-result-loading
 require-live-snap: 30 Rust greeting writer | pending-map
 ask: Does the executed producer chain reach a source-grounded Map for explicit acceptance, with no injected completed queue, finding or global context activation?
 keys: u
 require-live-snap: 25 Map ✓ | accepted-map
+expect-not: workspace:stale inventory
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART map-accepted
 submit: scan batch
 require-live-snap: 25 PLAN A STUDY | discovery-plan
@@ -58,7 +91,9 @@ ask: Does discovery inherit the exact accepted context and existing accounting w
 keys: L
 require-live-snap: 30 Draft ready | frozen-discovery
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART scan-draft
-keys: Down NPage NPage NPage NPage
+keys: Down
+require-live-snap: 25 frozen snapshot contains no supplemental text | frozen-context-overview
+keys: Tab Tab Tab NPage NPage NPage NPage
 require-live-snap: 25 Supporting context: no supplemental text | frozen-supporting-context
 ask: Can the operator read the supporting-context omission before approval, with the exact frozen scan options and no hidden live supplementation?
 keys: Up
@@ -78,6 +113,8 @@ require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py 
 keys: r
 require-live-snap: 25 2 completed | stopped-at-limit
 expect: 1 parked
+expect: Allowance reached
+expect-not: Review the recorded failure
 ask: Does the approved plan stop with two completed passes and one parked pass, preserving the two Review calls without cap doubling, new jobs or a completeness claim?
 keys: L
 require-live-snap: 20 allowance exhausted | refused-unapproved-resume
@@ -120,7 +157,7 @@ expect: 2 protected review remaining
 expect: 3 producer observations
 expect: 1 pending
 keys: Down Down Down
-require-live-snap: 25 json · all | partial-json-selection
+require-live-snap: 25 format json (4/6) · all | partial-json-selection
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | partial-export
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART partial-report
@@ -132,7 +169,9 @@ require-live-snap: 25 2 completed | existing-fixed-jobs
 nav-mode:
 keys: a
 require-live-snap: 25 APPROVED STUDY | retained-study
-keys: Down Down Down Down Enter
+keys: Down Down Down Down Down
+require-live-snap: 20 ▸ Total calls | allowance-row-focused
+keys: Enter
 require-live-snap: 20 Total calls | revise-specific-allowance
 type: 6
 keys: Enter L End
@@ -173,7 +212,10 @@ require-live-snap: 25 4 committed / 6 calls | final-report
 expect: 4 producer observations
 expect: 2 protected review remaining
 require-live-snap: 25 2 reviewed | final-reviewed-report
-require-live-snap: 25 json · all | final-json-selection
+require-live-snap: 25 Recent run cost records: | final-cost-records
+expect-not: missing metadata
+expect-not: unreadable/invalid
+require-live-snap: 25 format json (4/6) · all | final-json-selection
 keys: Enter
 require-live-snap: 25 json · 2 finding(s) | final-export
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART final-report
@@ -209,5 +251,22 @@ require-live-snap: 25 4 committed / 6 calls | recovered-report
 expect: 2 reviewed
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART restart
 ask: Does no-color restart recover the accepted context, completed original jobs, both human decisions and shared consumption without another request or new investigation?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART hide-context
+paste-file: @ART/context-command.txt
+keys: Enter
+require-live-snap: 25 Jobs: 3 | recorded-context-jobs-after-loss
+nav-mode:
+keys: a
+require-live-snap: 25 Context result unavailable | missing-context-result
+expect: no immutable context manifest
+expect: Enter outcome
+resize: 80x24
+live-snap: missing-context-result-80x24
+resize: 40x12
+require-live-snap: 20 Inspect context job outcome | missing-context-result-40x12
+expect: Enter outcome
+expect-not: Owned greeting application
+ask: Does a missing owned-fixture manifest produce an honest outcome view, retain inspection/back controls at 40x12, and avoid substituting another context or starting work?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_journey.py @TMP_TARGET @ART restore-context
 keys: C-c
 require-exit: 10

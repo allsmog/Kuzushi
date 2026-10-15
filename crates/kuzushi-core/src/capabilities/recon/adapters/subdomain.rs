@@ -43,7 +43,11 @@ pub(crate) struct SubdomainInput {
 impl SubdomainInput {
     pub(crate) fn from_tool_input(input: &Value) -> Result<Self> {
         Ok(Self {
-            domain: required_string(input, "domain", "recon:subdomain requires a domain.")?,
+            domain: checked_recon_domain(required_string(
+                input,
+                "domain",
+                "recon:subdomain requires a domain.",
+            )?)?,
             source: SubdomainSource::parse(
                 optional_string(input, &["source"])?
                     .unwrap_or_else(|| "both".to_string())
@@ -51,8 +55,7 @@ impl SubdomainInput {
             )?,
             binary: optional_string(input, &["binary", "curlBinary", "scannerBin"])?
                 .unwrap_or_else(|| "curl".to_string()),
-            timeout_seconds: optional_u64(input, &["timeoutSeconds", "timeout_seconds"])?
-                .unwrap_or(20),
+            timeout_seconds: recon_timeout(input, 20)?,
         })
     }
 }
@@ -112,6 +115,7 @@ impl ReconSubdomainEnumerator {
             None,
             cancel,
             "Install curl or pass {\"binary\":\"/path/to/curl\"}.",
+            self.timeout_seconds,
         )?;
         String::from_utf8(output.stdout).context("recon:subdomain source emitted non-UTF8 output")
     }

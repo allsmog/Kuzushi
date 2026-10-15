@@ -35,6 +35,10 @@ pub enum DecisionCommand {
         expected: Option<crate::findings::LessonRef>,
     },
     ReviewDecision(DecisionWrite),
+    ReviewDecisionOnSource {
+        decision: DecisionWrite,
+        source: crate::findings::ReviewSourceCapture,
+    },
     /// Ordered with decisions on purpose: a session and the verdict it
     /// precedes are one causal chain of operator review.
     ReviewSessionStarted(ReviewSessionWrite),

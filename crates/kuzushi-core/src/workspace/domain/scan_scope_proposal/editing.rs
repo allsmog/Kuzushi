@@ -1,5 +1,6 @@
 use super::*;
 mod merge;
+mod shared_context;
 mod split;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -10,6 +11,9 @@ mod split;
     deny_unknown_fields
 )]
 pub enum ScanScopeEdit {
+    AddScope {
+        scope: ProposedScanScope,
+    },
     Rename {
         scope_id: String,
         name: String,
@@ -42,6 +46,11 @@ pub enum ScanScopeEdit {
     SetSharedDiscovery {
         enabled: bool,
     },
+    CreateSharedContext {
+        scope_id: String,
+        shared_scope_id: String,
+    },
+    RemoveSharedContext,
     WholeRepository,
 }
 
@@ -61,6 +70,10 @@ impl ScanScopeDraft {
 
     fn apply_edit(&mut self, edit: ScanScopeEdit, inventory: &RepositoryInventory) -> Result<()> {
         match edit {
+            ScanScopeEdit::AddScope { scope } => {
+                self.scopes.push(scope);
+                Ok(())
+            }
             ScanScopeEdit::Merge {
                 from_scope,
                 into_scope,
@@ -68,6 +81,17 @@ impl ScanScopeDraft {
             ScanScopeEdit::Split { scope_id, children } => {
                 split::apply(self, &scope_id, children, inventory)
             }
+            other => self.apply_shared_context_edit(other),
+        }
+    }
+
+    fn apply_shared_context_edit(&mut self, edit: ScanScopeEdit) -> Result<()> {
+        match edit {
+            ScanScopeEdit::CreateSharedContext {
+                scope_id,
+                shared_scope_id,
+            } => shared_context::create(self, &scope_id, shared_scope_id),
+            ScanScopeEdit::RemoveSharedContext => shared_context::remove(self),
             other => self.apply_boundary_or_selection_edit(other),
         }
     }

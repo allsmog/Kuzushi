@@ -108,7 +108,7 @@ fn diagram_uses_inspected_revision_and_returns_to_the_exact_context_draft() {
     assert_eq!(picker.selected, previous.selected);
     assert_eq!(picker.detail_scroll, previous.detail_scroll);
     assert_eq!(picker.scan_input, previous.scan_input);
-    assert_eq!(picker.raw, previous.raw);
+    assert_eq!(picker.text_view, previous.text_view);
     key(&mut app, KeyCode::Char('v'));
     assert_eq!(
         app.study_context_picker()

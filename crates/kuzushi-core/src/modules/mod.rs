@@ -71,9 +71,10 @@ mod dynamic_loader;
 mod engagement_module;
 mod execution_context;
 mod findings_groups;
-mod findings_module;
 mod findings_lessons;
+mod findings_module;
 mod findings_relationships;
+mod findings_source_review;
 mod fleet_module;
 mod fuzz_module;
 mod input;
@@ -85,6 +86,7 @@ mod pack_module;
 mod patch_module;
 mod phase_results;
 mod pipeline;
+mod planner_module;
 pub use phase_results::phase_result_phase;
 mod plugin_adapters;
 mod plugin_resolution;
@@ -101,6 +103,7 @@ mod taint_iris_next;
 mod trace;
 mod trace_module;
 mod triage;
+pub(crate) use triage::freeze_triage_review_input;
 mod vendor_assessment;
 mod verification_mode;
 mod verify;
@@ -159,8 +162,8 @@ pub use dynamic_loader::{
     kwp_node_execution_available, revoke_dynamic_module, DynamicModuleInspection,
     DynamicModuleLoadOptions,
 };
-pub use options::{coerce_option_value, ensure_declared_tool_option};
-pub use registry::ModuleRegistry;
+pub use options::{coerce_option_text, coerce_option_value, ensure_declared_tool_option};
+pub use registry::{missing_executable_requirements, ExecutableRequirement, ModuleRegistry};
 pub use runtime_requirements::{
     agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace, tool_execution_model,
     tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime,

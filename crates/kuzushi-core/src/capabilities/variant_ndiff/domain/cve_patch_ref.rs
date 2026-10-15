@@ -22,7 +22,7 @@ Report only HIGH or MEDIUM confidence variants you verified in source."#;
 pub(crate) const NDIFF_FIX_PATTERN_SYSTEM_PROMPT: &str = r#"You are Kuzushi's N-day fix-pattern extractor.
 Return only JSON matching:
 {"fixShape":"what the patch added","vulnerableShape":"pre-patch vulnerable shape","cwe":["CWE-..."],"languages":["language"],"keywords":["grep keyword"],"detectionQuery":"ripgrep or AST-grep sketch","description":"portable pattern description","confidence":"HIGH|MEDIUM|LOW"}.
-Do not invent facts that are not supported by the patch."#;
+Analyze only the supplied existing diff and advisory metadata. Do not invent facts, generate a code patch or reproducer, execute source or begin follow-up discovery. The result is an unaccepted draft requiring human review."#;
 
 pub(crate) const NDIFF_HUNT_SYSTEM_PROMPT: &str = r#"You are Kuzushi's N-day variant hunter.
 Return only JSON matching:

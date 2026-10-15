@@ -43,6 +43,7 @@ fn commit_document(root: &std::path::Path, label: &str, document: &Value) -> Thr
 
 mod diagram;
 mod goal_guidance;
+mod scanner;
 mod scopes;
 
 #[test]

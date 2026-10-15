@@ -42,6 +42,50 @@ fn learning_category_overrides_review_phase_without_changing_legacy_descriptors(
     );
 }
 
+#[test]
+fn external_actions_opt_into_allowance_without_weakening_authorization() {
+    let registry = ModuleRegistry::with_v2_builtins();
+    let tool = registry.resolve_tool("ndiff:extract-fix-pattern").unwrap();
+    assert_eq!(tool.effect, ToolEffect::ExternalAction);
+    assert!(tool
+        .options
+        .iter()
+        .any(|option| option.name == "allowanceRef"));
+    assert_eq!(descriptor_work(&tool), Some(InvestigationWork::Learning));
+    let mut legacy = tool.clone();
+    legacy.allowance_category = None;
+    assert!(!supports_allowance(&legacy));
+    assert!(supports_allowance(&tool));
+    assert_eq!(tool.approval, legacy.approval);
+}
+
+#[test]
+fn categorized_external_actions_cannot_inherit_parent_review_capacity() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = V2Config {
+        model: Some(MODEL.into()),
+        ..Default::default()
+    };
+    let ctx = context(&workspace, &config);
+    let registry = ModuleRegistry::with_v2_builtins();
+    approve(&registry, &ctx, approval()).unwrap();
+    let mut work = AllowanceWork {
+        investigation_id: "study".into(),
+        revision: 1,
+        run_id: "owned-parent".into(),
+        work_id: "parent".into(),
+        model: MODEL.into(),
+        work: InvestigationWork::Review,
+    };
+    let binding = AllowanceBinding::new(open_ledger(&ctx).unwrap(), work.clone()).unwrap();
+    let tool = registry.resolve_tool("ndiff:extract-fix-pattern").unwrap();
+    assert!(require_declared_effect_category(&tool, &binding).is_err());
+    work.work = InvestigationWork::Learning;
+    let binding = AllowanceBinding::new(open_ledger(&ctx).unwrap(), work).unwrap();
+    require_declared_effect_category(&tool, &binding).unwrap();
+}
+
 pub(super) fn context<'a>(
     workspace: &'a WorkspaceTarget,
     config: &'a V2Config,

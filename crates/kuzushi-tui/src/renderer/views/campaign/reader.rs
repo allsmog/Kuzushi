@@ -42,10 +42,12 @@ pub(crate) fn campaign_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     let mut visible = chrome.notice;
     let start = app.router.campaign().read_scroll.min(reader.max_offset);
     let end = (start + reader.page_rows).min(lines.len());
-    visible.push(muted(&format!(
-        " rows {}-{end}/{} · PgUp/PgDn",
-        start + 1,
-        lines.len()
+    visible.push(muted(&super::progress::reader_heading(
+        app.router.campaign(),
+        start,
+        end,
+        lines.len(),
+        area.width as usize,
     )));
     visible.extend(lines.into_iter().skip(start).take(reader.page_rows));
     visible.extend(chrome.controls);
@@ -99,7 +101,9 @@ fn compact_navigation_controls(app: &ShellApp, width: u16) -> Vec<Line<'static>>
 }
 
 fn campaign_is_paged(app: &ShellApp, area: Rect, total: usize) -> bool {
-    total > usize::from(area.height) || compact_campaign_document(app, area)
+    total > usize::from(area.height)
+        || compact_campaign_document(app, area)
+        || app.router.campaign().job_detail
 }
 
 fn compact_campaign_document(app: &ShellApp, area: Rect) -> bool {
@@ -126,14 +130,35 @@ fn sticky_control_text(deck: &crate::app::CampaignRouteState) -> String {
 }
 
 fn active_control_text(deck: &crate::app::CampaignRouteState) -> String {
+    if deck.job_detail {
+        return job_detail_controls(deck);
+    }
     let commands = super::campaign_lines::deck_commands(deck);
     if deck.dispatcher_stop_requested {
         "Stop requested · saving partial work\nr refresh · PgUp/Dn · q list".into()
     } else if commands.contains(&"K stop") {
         "K stop · L launch · a plan/allowance\n↑↓ jobs · Enter inspect · r refresh · q list".into()
-    } else if commands.contains(&"work paused") {
+    } else {
+        settled_control_text(commands)
+    }
+}
+
+fn job_detail_controls(deck: &crate::app::CampaignRouteState) -> String {
+    if deck.dispatcher_stop_requested {
+        return "Stop requested · saving partial work\nq jobs · r refresh · PgUp/Dn read".into();
+    }
+    if deck.dispatcher_pid.is_some() {
+        return "K stop · q jobs · a plan/allowance\n↑↓ jobs · PgUp/Dn read · r refresh".into();
+    }
+    "q jobs · a plan/allowance · ↑↓ jobs\nPgUp/Dn read · r refresh".into()
+}
+
+fn settled_control_text(commands: &[&str]) -> String {
+    if commands.contains(&"work paused") {
         "work paused · L resume · a plan/allowance\n↑↓ jobs · Enter inspect · r refresh · q list"
             .into()
+    } else if commands.contains(&"work ended") {
+        "work ended · new work needs a new plan\na plan/allowance · workbench report · r refresh · q list".into()
     } else {
         commands.join(" · ")
     }

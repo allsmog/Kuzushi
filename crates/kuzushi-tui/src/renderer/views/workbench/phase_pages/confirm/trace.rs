@@ -6,19 +6,35 @@ pub(super) fn render(
     trace: &TraceEvidenceModel,
     state: PhaseRenderState,
 ) {
+    render_surface(frame, area, trace, state, PhaseSurfaceId::ProveTrace);
+}
+
+pub(in crate::renderer::views::workbench::phase_pages) fn render_surface(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    trace: &TraceEvidenceModel,
+    state: PhaseRenderState,
+    surface: PhaseSurfaceId,
+) {
     render_lines_pane(
         frame,
         area,
         format!("TRACE · {}", trace.reference),
         lines(trace),
-        PhaseSurfaceId::ProveTrace,
+        surface,
         state,
     );
 }
 
 /// Keep evidence intact; the shared paragraph owns wrapping and scroll extent.
-pub(super) fn lines(trace: &TraceEvidenceModel) -> Vec<Line<'static>> {
+pub(in crate::renderer::views::workbench::phase_pages) fn lines(
+    trace: &TraceEvidenceModel,
+) -> Vec<Line<'static>> {
     let mut lines = identity_lines(trace);
+    lines.extend(text_lines(
+        "Recorded source claims; data flow needs independent review.",
+        theme::warn(),
+    ));
     if let Some(outcome) = &trace.last_outcome {
         lines.extend(text_lines(outcome, theme::primary()));
     }
@@ -30,7 +46,7 @@ pub(super) fn lines(trace: &TraceEvidenceModel) -> Vec<Line<'static>> {
     );
     append_path(
         &mut lines,
-        "RECORDED EXPANSIONS · requested by operator",
+        "RECORDED EXPANSION CLAIMS · requested by operator",
         &trace.expanded,
         expansion_empty_hint(trace),
     );
@@ -45,7 +61,7 @@ pub(super) fn lines(trace: &TraceEvidenceModel) -> Vec<Line<'static>> {
 
 fn expansion_empty_hint(trace: &TraceEvidenceModel) -> &'static str {
     if trace.last_outcome.is_some() {
-        "no additional hops recorded — see the last expansion and its notes"
+        "no additional hops recorded; inspect this expansion and its notes"
     } else {
         "no operator-requested expansion recorded for this finding"
     }
@@ -84,7 +100,7 @@ fn hop_lines(hop: &TraceHopModel) -> Vec<Line<'static>> {
     } else {
         &hop.location
     };
-    let mut lines = text_lines(format!("  ▾ {} — {location}", hop.label), theme::primary());
+    let mut lines = text_lines(format!("  ▾ {} · {location}", hop.label), theme::primary());
     if !hop.annotation.is_empty() {
         lines.extend(text_lines(
             format!("      {}", hop.annotation),
@@ -101,7 +117,7 @@ fn follow_up_lines(trace: &TraceEvidenceModel) -> Vec<Line<'static>> {
         .flat_map(|question| text_lines(format!("  ? open: {question}"), theme::warn()))
         .collect();
     if !trace.evidence_deltas.is_empty() {
-        lines.push(Line::styled("NEW EVIDENCE", theme::label()));
+        lines.push(Line::styled("RECORDED NOTES", theme::label()));
         lines.extend(
             trace
                 .evidence_deltas

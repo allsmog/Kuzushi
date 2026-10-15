@@ -109,7 +109,7 @@ pub(crate) fn variant_module() -> BuiltinModule {
         "variant",
         "Variant Hunter",
         ModuleKind::Offense,
-        "Lift exploit patterns from confirmed findings and hunt sibling variants.",
+        "Draft source patterns from confirmed findings and search for related observations.",
         tools_with_policy(variant_policy(), variant_tools()),
         vec![dag("variant:hunt", "findings", &["variant:lift-pattern"])],
     )
@@ -127,14 +127,19 @@ fn variant_tools() -> Vec<ToolDescriptor> {
     vec![
         tool_with_options(
             "variant:hunt",
-            "Hunt variants of a confirmed finding.",
+            "Experimental source-only search for observations related to a currently confirmed finding. Search guidance does not establish enforced discovery scope or complete coverage. Results remain unverified and do not complete Scan. Approve this separate search and its allowance explicitly.",
             variant_hunt_options(),
-        ),
+        ).with_discovery_maturity(ModuleMaturity::Labs)
+            .without_phase_result(),
         tool_with_options(
             "variant:lift-pattern",
-            "Lift a reusable vulnerability pattern from a confirmed finding.",
-            vec![fingerprint_option(), model_option()],
-        ),
+            "Experimental source-pattern draft from a currently confirmed finding. Output remains unaccepted and does not change active context or start discovery. Use findings:lesson-generate for reviewed future context. Useful pattern quality and source-version isolation remain unqualified.",
+            vec![fingerprint_option(),
+                inherited_variant_reasoning_option(),
+                model_option()],
+        ).with_discovery_maturity(ModuleMaturity::Labs)
+            .with_allowance_category(AllowanceCategory::Learning)
+            .without_phase_result(),
     ]
 }
 
@@ -158,8 +163,20 @@ fn variant_hunt_options() -> Vec<OptionSpec> {
         )
         .aliases(&["vendor_paths"])
         .advanced(),
+        inherited_variant_reasoning_option(),
         model_option(),
     ]
+}
+
+pub(in crate::modules) fn inherited_variant_reasoning_option() -> OptionSpec {
+    opt(
+        "thinkingLevel",
+        OptionType::Enum,
+        "Reasoning effort; omit to inherit the selected runtime.",
+    )
+    .choices(&["low", "medium", "high", "xhigh"])
+    .aliases(&["thinking_level"])
+    .advanced()
 }
 
 pub(crate) fn ndiff_module() -> BuiltinModule {
@@ -175,6 +192,7 @@ pub(crate) fn ndiff_module() -> BuiltinModule {
             &["ndiff:extract-fix-pattern"],
         )],
     )
+    .labs()
 }
 
 fn ndiff_tools() -> Vec<ToolDescriptor> {
@@ -190,7 +208,7 @@ fn ndiff_tools() -> Vec<ToolDescriptor> {
             FindingStoreRequirement::Optional,
         )),
         ndiff_hunt_tool().with_policy(workspace_policy(
-            ToolPhase::Map,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
         )),
@@ -200,7 +218,7 @@ fn ndiff_tools() -> Vec<ToolDescriptor> {
 fn ndiff_fetch_tool() -> ToolDescriptor {
     tool_with_options(
         "ndiff:fetch-cve",
-        "Fetch CVE and patch metadata.",
+        "Experimental advisory metadata retrieval. Supplied records are unverified. Live retrieval, cancellation and source applicability remain unqualified. Does not complete Map.",
         vec![
             opt("id", OptionType::String, "CVE or advisory id to fetch.").required(),
             opt(
@@ -211,6 +229,8 @@ fn ndiff_fetch_tool() -> ToolDescriptor {
             .default(json!(false))
             .advanced(),
             opt("record", OptionType::Json, "Inline advisory record JSON.").advanced(),
+            opt("maxMetadataBytes", OptionType::Int, "Combined encoded byte limit for supplied record and fixtures, from 1 to 8388608 bytes.")
+                .integer_range(1, 8 * 1024 * 1024).default(json!(8 * 1024 * 1024)).advanced(),
             opt(
                 "fixtures",
                 OptionType::Json,
@@ -220,48 +240,105 @@ fn ndiff_fetch_tool() -> ToolDescriptor {
             binary_option("curl binary path."),
         ],
     )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
 }
 
 fn ndiff_extract_tool() -> ToolDescriptor {
     tool_with_options(
         "ndiff:extract-fix-pattern",
-        "Extract a vulnerability fix pattern from a patch.",
-        vec![
-            target_option(),
-            opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
-            opt("patchText", OptionType::String, "Patch text to analyze.")
-                .aliases(&["patch_text"])
-                .advanced(),
-            opt("patchPath", OptionType::Path, "Patch file to analyze.")
-                .aliases(&["patch_path"])
-                .workspace_read()
-                .advanced(),
-            opt("patchUrl", OptionType::String, "Patch URL to fetch.")
-                .aliases(&["patch_url"])
-                .advanced(),
-            opt(
-                "thinkingLevel",
-                OptionType::String,
-                "Runtime thinking-level hint.",
-            )
-            .aliases(&["thinking_level"])
-            .advanced(),
-            model_option(),
-        ],
+        "Experimental advisory-pattern draft from a supplied existing diff. Output remains unaccepted and does not change context, start discovery or generate a patch. Learning allowance and explicit external-action authorization are required. Live retrieval and useful pattern quality remain unqualified.",
+        ndiff_extract_options(),
     )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .with_allowance_category(AllowanceCategory::Learning)
+    .without_phase_result()
+}
+
+fn ndiff_extract_options() -> Vec<OptionSpec> {
+    let mut options = vec![
+        target_option(),
+        opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
+        opt("patchText", OptionType::String, "Patch text to analyze.")
+            .aliases(&["patch_text"])
+            .advanced(),
+        opt("patchPath", OptionType::Path, "Patch file to analyze.")
+            .aliases(&["patch_path"])
+            .workspace_read()
+            .advanced(),
+        opt("patchUrl", OptionType::String, "Patch URL to fetch.")
+            .aliases(&["patch_url"])
+            .advanced(),
+        inherited_variant_reasoning_option(),
+        model_option(),
+    ];
+    options.extend(ndiff_extract_source_options());
+    options.extend(ndiff_extract_limits());
+    options
+}
+
+pub(in crate::modules) fn ndiff_extract_source_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "id",
+            OptionType::String,
+            "Optional advisory id when diff content is absent.",
+        )
+        .aliases(&["advisoryId", "advisory_id", "cve"])
+        .advanced(),
+        opt(
+            "offline",
+            OptionType::Bool,
+            "Use supplied diff text or files and advisory fixtures without live retrieval.",
+        )
+        .default(json!(false))
+        .advanced(),
+        opt(
+            "fixtures",
+            OptionType::Json,
+            "Supplied advisory fixture JSON.",
+        )
+        .advanced(),
+        opt(
+            "patchFixtures",
+            OptionType::Json,
+            "Supplied URL-to-diff-text fixture JSON.",
+        )
+        .aliases(&["patch_fixtures"])
+        .advanced(),
+        binary_option("curl executable for explicit live retrieval."),
+    ]
+}
+
+pub(in crate::modules) fn ndiff_extract_limits() -> Vec<OptionSpec> {
+    vec![
+        opt("maxMetadataBytes", OptionType::Int, "Combined encoded limit for supplied advisory and diff fixtures.").integer_range(1, 8 * 1024 * 1024).default(json!(65536)).advanced(),
+        opt("maxPatchBytes", OptionType::Int, "Accepted existing diff bytes after resolution. Live transport limits are separate.").integer_range(1, 8 * 1024 * 1024).default(json!(256 * 1024)).advanced(),
+        opt("maxSourceBytes", OptionType::Int, "Maximum diff excerpt bytes supplied to the model; omitted material is disclosed.").integer_range(256, 128 * 1024).default(json!(18000)).advanced(),
+        opt("maxContextBytes", OptionType::Int, "Maximum complete metadata and excerpt prompt bytes before a request.").integer_range(1024, 512 * 1024).default(json!(65536)).advanced(),
+        opt("maxOutputTokens", OptionType::Int, "Requested response tokens per initial or repair query. Adapter support varies; use approved call limits for spending control.").aliases(&["max_output_tokens", "maxTokens"]).integer_range(256, 32768).default(json!(4096)).advanced(),
+        opt("maxModelTurns", OptionType::Int, "Maximum model turns per initial or repair query; this draft has no source tools.").aliases(&["max_model_turns"]).integer_range(1, 4).default(json!(1)).advanced(),
+    ]
 }
 
 fn ndiff_hunt_tool() -> ToolDescriptor {
     tool_with_options(
         "ndiff:hunt-variants",
-        "Hunt variants using an extracted n-day fix pattern.",
-        vec![
+        "Experimental source observations guided by an explicitly supplied advisory pattern. Results require independent review and do not establish complete coverage, enforced discovery scope or advisory applicability. Approve this separate search and its allowance.",
+        ndiff_hunt_options(),
+    )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
+}
+
+fn ndiff_hunt_options() -> Vec<OptionSpec> {
+    let mut options = vec![
             target_option(),
-            max_findings_option(25),
+            max_findings_option(25).integer_range(1, 100),
             opt("advisoryId", OptionType::String, "CVE or advisory id.")
                 .aliases(&["advisory_id", "cve"])
                 .advanced(),
-            opt("pattern", OptionType::Json, "Extracted fix pattern JSON.").advanced(),
+            opt("pattern", OptionType::Json, "Supplied advisory pattern JSON. Nonblank fixShape and vulnerableShape are required; this input does not accept a reusable lesson.").required().advanced(),
             opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
             opt(
                 "fixtures",
@@ -270,8 +347,21 @@ fn ndiff_hunt_tool() -> ToolDescriptor {
             )
             .advanced(),
             model_option(),
-        ],
-    )
+        ];
+    options.extend(ndiff_query_options());
+    options
+}
+
+fn ndiff_query_options() -> Vec<OptionSpec> {
+    vec![
+        inherited_variant_reasoning_option(),
+        opt("includeVendored", OptionType::Bool, "Search guidance for vendored paths. This does not enforce an exact file scope.")
+            .aliases(&["include_vendored"]).default(json!(true)).advanced(),
+        opt("maxOutputTokens", OptionType::Int, "Requested response tokens per initial or repair query. Adapter support varies; use approved call limits for spending control.")
+            .aliases(&["max_output_tokens", "maxTokens"]).integer_range(256, 32768).default(json!(4096)).advanced(),
+        opt("maxModelTurns", OptionType::Int, "Maximum model turns per initial or repair query.")
+            .aliases(&["max_model_turns"]).integer_range(1, 16).default(json!(4)).advanced(),
+    ]
 }
 
 pub(crate) fn randori_module() -> BuiltinModule {

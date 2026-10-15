@@ -90,30 +90,41 @@ fn binding_labels_are_the_runtime_dispatch_source() {
 }
 
 #[test]
-fn observation_comparison_can_be_remapped_or_unbound() {
-    for keys in [vec!["ctrl+s".to_string()], Vec::new()] {
-        let map = RuntimeKeymap::from_config(&[KeybindingOverrideConfig {
-            context: "workbench".into(),
-            action: "compare_observations".into(),
-            bindings: keys.clone(),
-        }]);
-        assert!(map.error().is_none());
-        assert_eq!(
-            map.binding_labels("workbench", "compare_observations", &["v"]),
-            keys
-        );
-        let bindings = map.apply_view_overrides(
-            ShellView::Workbench,
-            vec![ViewKeybinding {
-                trigger: HotkeyTrigger::Char('v'),
-                hint: "v".into(),
-                label: "compare scans".into(),
-                action: ViewHotkeyAction::WorkbenchCompareObservations,
-            }],
-        );
-        assert_eq!(bindings.len(), keys.len());
-        assert!(bindings
-            .iter()
-            .all(|binding| binding.action == ViewHotkeyAction::WorkbenchCompareObservations));
+fn source_review_and_observation_comparison_can_be_remapped_or_unbound() {
+    for (name, default_key, action) in [
+        (
+            "compare_observations",
+            'v',
+            ViewHotkeyAction::WorkbenchCompareObservations,
+        ),
+        (
+            "review_current_source",
+            'Y',
+            ViewHotkeyAction::WorkbenchReviewCurrentSource,
+        ),
+    ] {
+        for keys in [vec!["ctrl+s".to_string()], Vec::new()] {
+            let map = RuntimeKeymap::from_config(&[KeybindingOverrideConfig {
+                context: "workbench".into(),
+                action: name.into(),
+                bindings: keys.clone(),
+            }]);
+            assert!(map.error().is_none());
+            assert_eq!(
+                map.binding_labels("workbench", name, &[&default_key.to_string()]),
+                keys
+            );
+            let bindings = map.apply_view_overrides(
+                ShellView::Workbench,
+                vec![ViewKeybinding {
+                    trigger: HotkeyTrigger::Char(default_key),
+                    hint: default_key.to_string(),
+                    label: "compare scans".into(),
+                    action,
+                }],
+            );
+            assert_eq!(bindings.len(), keys.len());
+            assert!(bindings.iter().all(|binding| binding.action == action));
+        }
     }
 }

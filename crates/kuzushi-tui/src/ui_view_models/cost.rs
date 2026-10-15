@@ -1,5 +1,6 @@
 use super::{format_runtime_cost, format_session_cost};
 use crate::ShellApp;
+use kuzushi_core::runtime::RuntimeCostReport;
 
 const COST_BAR_WIDTH: usize = 30;
 
@@ -14,7 +15,7 @@ pub(crate) struct CostModel {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CostBudgetRow {
     pub(crate) tone: CostTone,
-    pub(crate) fill: usize,
+    pub(crate) fill: Option<usize>,
     pub(crate) empty: usize,
     pub(crate) cells: [String; 4],
 }
@@ -40,15 +41,17 @@ pub(crate) enum CostTone {
 pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
     let session = app.session();
     let budget = session.session_budget_usd();
-    let budget_spend = session.budget_spend_usd();
-    let session_cost = budget_spend.unwrap_or_else(|| session.session_cost_usd());
-    let last_tool = session.last_tool_cost_usd();
     let (session_text, last_tool_text) = cost_texts(app);
     let budget_text = budget_text(session.session_budget_usd());
     let hard_ceiling_text = hard_ceiling_text(app.config().operator.spend_hard_ceiling_usd);
     CostModel {
         budget_rows: budget.map_or_else(Vec::new, |cap| {
-            cost_budget_rows(session_cost, last_tool, cap, budget_spend.is_some())
+            cost_budget_rows(
+                session.session_cost_report(),
+                session.last_tool_cost_report(),
+                cap,
+                session.cost_accounting_error(),
+            )
         }),
         spend_rows: cost_spend_rows(
             session_text.clone(),
@@ -57,7 +60,11 @@ pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
             hard_ceiling_text,
         ),
         auth_spend_cells: [session_text, last_tool_text],
-        budget_status: budget_status(session_cost, budget, budget_spend.is_some()),
+        budget_status: budget_status(
+            session.session_cost_report(),
+            budget,
+            session.cost_accounting_error(),
+        ),
     }
 }
 
@@ -108,45 +115,56 @@ fn cost_spend_row(label: &str, value: String) -> CostSpendRow {
 }
 
 fn cost_budget_rows(
-    session: f64,
-    last_tool: Option<f64>,
+    session: RuntimeCostReport,
+    last_tool: Option<RuntimeCostReport>,
     cap: f64,
-    accounting_complete: bool,
+    accounting_error: Option<&str>,
 ) -> Vec<CostBudgetRow> {
     let mut rows = vec![cost_budget_row(
-        "this session    ",
+        "this session",
         session,
         cap,
-        !accounting_complete,
+        accounting_error,
     )];
     if let Some(last) = last_tool {
-        rows.push(cost_budget_row(
-            "last tool       ",
-            last,
-            cap,
-            !accounting_complete,
-        ));
+        rows.push(cost_budget_row("last tool", last, cap, accounting_error));
     }
     rows
 }
 
-fn cost_budget_row(label: &'static str, used: f64, cap: f64, force_halt: bool) -> CostBudgetRow {
-    let percent = if force_halt {
-        100
-    } else {
-        capped_percent(used, cap)
-    };
-    let fill = bar_fill(percent);
+fn cost_budget_row(
+    label: &str,
+    report: RuntimeCostReport,
+    cap: f64,
+    accounting_error: Option<&str>,
+) -> CostBudgetRow {
+    let percent = reliable_estimate(report, accounting_error).map(|used| capped_percent(used, cap));
+    let fill = percent.map(bar_fill);
     CostBudgetRow {
-        tone: cost_tone(percent),
+        tone: percent.map_or(CostTone::Danger, cost_tone),
         fill,
-        empty: COST_BAR_WIDTH.saturating_sub(fill),
+        empty: fill.map_or(0, |fill| COST_BAR_WIDTH.saturating_sub(fill)),
         cells: [
             label.to_string(),
-            format!("${used:>6.2}"),
-            format!("${cap:>6.2}"),
-            format!("{percent:>3}%"),
+            format_runtime_cost(report, accounting_error),
+            format!("${cap:.2}"),
+            percentage_label(percent, report.is_estimated()),
         ],
+    }
+}
+
+fn reliable_estimate(report: RuntimeCostReport, accounting_error: Option<&str>) -> Option<f64> {
+    accounting_error
+        .is_none()
+        .then(|| report.estimated_total_usd())
+        .flatten()
+}
+
+fn percentage_label(percent: Option<usize>, estimated: bool) -> String {
+    match (percent, estimated) {
+        (Some(percent), true) => format!("~{percent}%"),
+        (Some(percent), false) => format!("{percent:>3}%"),
+        (None, _) => "unknown".to_string(),
     }
 }
 
@@ -185,21 +203,21 @@ fn hard_ceiling_text(ceiling: Option<f64>) -> String {
 }
 
 fn budget_status(
-    session_cost: f64,
+    report: RuntimeCostReport,
     budget: Option<f64>,
-    accounting_complete: bool,
+    accounting_error: Option<&str>,
 ) -> Option<CostBudgetStatus> {
     let budget = budget?;
-    if !accounting_complete {
-        return Some(CostBudgetStatus {
-            tone: CostTone::Danger,
-            cells: [format!("${budget:.2}"), "halted".to_string()],
-        });
-    }
-    let percent = uncapped_percent(session_cost, budget);
+    let percent =
+        reliable_estimate(report, accounting_error).map(|used| uncapped_percent(used, budget));
     Some(CostBudgetStatus {
-        tone: cost_tone(percent),
-        cells: [format!("${budget:.2}"), format!("{percent}%")],
+        tone: percent.map_or(CostTone::Danger, cost_tone),
+        cells: [
+            format!("${budget:.2}"),
+            percentage_label(percent, report.is_estimated())
+                .trim()
+                .to_string(),
+        ],
     })
 }
 

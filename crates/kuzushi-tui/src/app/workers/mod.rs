@@ -47,5 +47,4 @@ pub(super) use parse_threat_patch_json::parse_threat_patch_json;
 pub(super) use parse_threat_patch_json::scan_worker;
 pub(super) use threat_regen_worker::threat_regen_worker;
 pub(super) use tool_run_status::agent_worker;
-pub(super) use tool_run_status::planner_worker;
 pub(super) use tool_run_status::tool_run_status;

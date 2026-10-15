@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -11,7 +12,7 @@ pub(super) fn is_deno_json(path: &Path) -> bool {
 }
 
 pub(super) fn deno_components(
-    target: &Path,
+    target: &SbomInputs,
     path: &Path,
     text: &str,
 ) -> Result<Vec<SbomComponent>> {
@@ -27,9 +28,9 @@ pub(super) fn deno_components(
     Ok(components)
 }
 
-pub(super) fn deno_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn deno_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = parse_import_map(&text)?;
     let mut edges = dependency_edges(target, path, &value);
     for import_map in referenced_import_maps(target, path, &value)? {
@@ -51,7 +52,7 @@ fn parse_import_map(text: &str) -> Result<Value> {
 }
 
 fn referenced_import_maps(
-    target: &Path,
+    target: &SbomInputs,
     config_path: &Path,
     value: &Value,
 ) -> Result<Vec<ReferencedImportMap>> {
@@ -61,8 +62,8 @@ fn referenced_import_maps(
     if !is_inside_target(target, &path)? {
         return Ok(Vec::new());
     }
-    let text =
-        fs::read_to_string(target, &path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let text = fs::read_to_string(target, &path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     Ok(vec![ReferencedImportMap {
         value: parse_import_map(&text)?,
         path,

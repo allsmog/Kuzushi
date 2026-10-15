@@ -1,18 +1,15 @@
 use super::*;
-use crate::ui_view_models::{replay_model, trace_model, RunArtifactDetail};
+use crate::ui_view_models::{
+    replay_can_lead_with_results, replay_model, replay_reading_rows, trace_model, RunArtifactDetail,
+};
 
 pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     let model = replay_model(app, run_id);
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("REPLAY", area.width));
-    lines.push(detail("run", &model.run_id));
-    let typed = append_optional_presentation(
-        &mut lines,
-        model.presentation.as_ref(),
-        model.projection_error.as_deref(),
-        area.width,
-    );
+    let outcome = append_replay_outcome(&mut lines, &model);
+    let typed = append_optional_presentation(&mut lines, &model, outcome.as_ref(), area.width);
     if !typed {
         append_run_artifacts(&mut lines, &model.artifacts, area.width);
     }
@@ -26,42 +23,144 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
     wrap_document_lines(lines, area.width)
 }
 
+fn append_replay_outcome(
+    lines: &mut Vec<Line<'static>>,
+    model: &crate::ui_view_models::ReplayModel,
+) -> Option<kuzushi_core::run_lifecycle::RunCellKey> {
+    let presentation = model.presentation.as_ref()?;
+    let (key, terminal) = replay_terminal(presentation)?;
+    let mut rows = presentation
+        .summary_text_rows()
+        .into_iter()
+        .filter(|row| &row.key == key);
+    lines.push(styled(
+        &format!(
+            "Outcome · {} · {}",
+            terminal.status.label(),
+            kuzushi_core::run_lifecycle::cost_label(terminal.cost)
+        ),
+        theme::primary(),
+    ));
+    rows.next();
+    append_replay_issue(lines, model.issue.as_ref());
+    if model.issue.is_none() {
+        lines.push(styled(&terminal.summary.to_string(), theme::primary()));
+    }
+    lines.extend(rows.map(presentation_row_line));
+    if let Some(issue) = model.issue.as_ref() {
+        lines.push(muted(&format!("Run summary · {}", terminal.summary)));
+        append_replay_issue_attribution(lines, issue);
+    }
+    Some(key.clone())
+}
+
+fn replay_terminal(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+) -> Option<(
+    &kuzushi_core::run_lifecycle::RunCellKey,
+    &kuzushi_core::run_lifecycle::TerminalPresentationV1,
+)> {
+    use kuzushi_core::run_lifecycle::RunPresentationPayloadV1;
+    presentation
+        .summary
+        .iter()
+        .flat_map(|section| &section.cells)
+        .rev()
+        .find_map(|cell| match &cell.payload {
+            RunPresentationPayloadV1::Terminal(terminal) => Some((&cell.key, terminal)),
+            _ => None,
+        })
+}
+
+fn append_replay_issue(
+    lines: &mut Vec<Line<'static>>,
+    issue: Option<&crate::ui_view_models::ReplayIssueModel>,
+) {
+    let Some(issue) = issue else {
+        return;
+    };
+    lines.push(styled(
+        &format!("{} · {}", issue.label, issue.message),
+        theme::primary(),
+    ));
+}
+
+fn append_replay_issue_attribution(
+    lines: &mut Vec<Line<'static>>,
+    issue: &crate::ui_view_models::ReplayIssueModel,
+) {
+    if let Some(tool) = &issue.tool {
+        lines.push(muted(&format!("Reported by {tool}; full receipt below.")));
+    }
+}
+
 fn append_optional_presentation(
     lines: &mut Vec<Line<'static>>,
-    presentation: Option<&kuzushi_core::run_lifecycle::RunPresentationV1>,
-    error: Option<&str>,
+    model: &crate::ui_view_models::ReplayModel,
+    leading_outcome: Option<&kuzushi_core::run_lifecycle::RunCellKey>,
     width: u16,
 ) -> bool {
-    let Some(presentation) = presentation else {
-        let message = error
+    let Some(presentation) = model.presentation.as_ref() else {
+        lines.push(detail("run", &model.run_id));
+        let message = model
+            .projection_error
+            .as_deref()
             .map(|error| format!("semantic replay unavailable: {error}"))
             .unwrap_or_else(|| "semantic replay loading…".to_string());
         lines.push(muted(&message));
         return false;
     };
-    append_run_presentation(lines, presentation, width);
+    append_run_presentation(lines, presentation, leading_outcome, width, &model.run_id);
     presentation.source == kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
 }
 
 fn append_run_presentation(
     lines: &mut Vec<Line<'static>>,
     presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    leading_outcome: Option<&kuzushi_core::run_lifecycle::RunCellKey>,
     width: u16,
+    run_id: &str,
 ) {
-    for overview in presentation.overview_lines().into_iter().skip(1) {
-        lines.push(muted(&overview));
+    let result_first = replay_can_lead_with_results(presentation);
+    if !result_first {
+        append_replay_run_details(lines, presentation, width, run_id, false);
     }
-    append_presentation_summary(lines, presentation, width);
+    append_presentation_summary(lines, presentation, leading_outcome, width);
+    if result_first {
+        append_replay_run_details(lines, presentation, width, run_id, true);
+    }
     append_presentation_timeline(lines, presentation, width);
+}
+
+fn append_replay_run_details(
+    lines: &mut Vec<Line<'static>>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    width: u16,
+    run_id: &str,
+    heading: bool,
+) {
+    if heading {
+        lines.push(blank());
+        lines.push(divider("RUN DETAILS", width));
+    }
+    lines.push(detail("run", run_id));
+    lines.extend(
+        presentation
+            .overview_lines()
+            .into_iter()
+            .skip(1)
+            .map(|line| muted(&line)),
+    );
 }
 
 fn append_presentation_summary(
     lines: &mut Vec<Line<'static>>,
     presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    leading_outcome: Option<&kuzushi_core::run_lifecycle::RunCellKey>,
     width: u16,
 ) {
     let mut active_section = None;
-    for row in presentation.summary_text_rows() {
+    for row in replay_reading_rows(presentation, leading_outcome) {
         if row.section != active_section {
             lines.push(blank());
             if let Some(section) = row.section.as_ref() {
@@ -212,7 +311,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("OUTCOME"), "{rendered}");
+        assert!(rendered.contains("Outcome · completed"), "{rendered}");
         assert!(rendered.contains("Recon import completed"), "{rendered}");
         assert!(!rendered.contains("RECON EVIDENCE"), "{rendered}");
         assert!(!rendered.contains("acme.example"), "{rendered}");

@@ -1,0 +1,131 @@
+name: Installed offline dependency audit through finite approval, triage and report
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+paste-file: @ART/missing-command.txt
+require-live-snap: 20 run cargo-audit:scan | missing-command-draft
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART missing
+submit: logs
+keys: End
+require-live-snap: 25 regular Cargo.lock | missing-prerequisite
+expect-not: u Accept result
+ask: Does the absent lockfile remain failed work with a clear prerequisite and no clean-scan claim?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART install
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | deterministic-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Owned dependency metadata
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | imported-context
+submit: map
+require-live-snap: 25 RESULT READY Map ready | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks cargo-audit
+paste-file: @ART/binary-setting.txt
+keys: Enter
+paste-file: @ART/database-setting.txt
+keys: Enter
+submit: set cargoAuditOffline true
+submit: set cargoAuditAllowStale true
+submit: set cargoAuditTimeoutMs 60000
+submit: set cargoAuditMaxLockfileBytes 1048576
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study-form
+keys: L
+require-live-snap: 35 Draft ready | fixed-plan
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | review-calls
+type: 1
+keys: Enter
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | allowance-start
+expect: 60000 ms per job
+expect: 1048576 bytes per lockfile
+expect: offline
+keys: End
+require-live-snap: 25 y approve | allowance-review
+expect: Execution model: none
+expect: Protected review calls: 1
+expect: 0 model-provider requests
+expect: scanner-service costs are not
+expect: estimated.
+expect-not: One job can make several requests
+ask: Does approval disclose three fixed jobs, one worker, captured-lockfile limits, offline advisory data and protected Review capacity?
+keys: y
+require-live-snap: 30 APPROVED STUDY | approved-study
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 30 dispatcher pid | started
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 30 completed 3 / planned 3 | completed-study
+submit: workbench
+require-live-snap: 30 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+submit: open F-0001
+require-live-snap: 25 RUSTSEC-2020-0071 | dependency-finding
+expect: signal-only
+submit: decision deferred Declared dependency needs owner review; runtime reachability unassessed
+require-live-snap: 25 deferred | operator-decision
+submit: report
+require-live-snap: 25 Enter export | report
+resize: 160x48
+require-live-snap: 15 REPORT | report-160x48
+resize: 96x89
+require-live-snap: 15 REPORT | report-96x89
+resize: 80x24
+require-live-snap: 15 REPORT | report-80x24
+resize: 60x20
+require-live-snap: 15 REPORT | report-60x20
+resize: 40x12
+require-live-snap: 15 REPORT | report-40x12
+keys: NPage NPage NPage
+live-snap: report-detail-40x12
+ask: Are recurrence, the owner decision, scope and database limitations readable without implying source reachability or a fix?
+resize: 120x36
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART exported
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 completed 3 / planned 3 | restored-study
+submit: open F-0001
+require-live-snap: 25 Viewing Review | restored-finding
+expect: RUSTSEC-2020-0071
+expect: review decisions are recorded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cargo_audit.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve three observations, the human decision, copied database and source without another job or provider request?
+keys: C-c
+require-exit: 10

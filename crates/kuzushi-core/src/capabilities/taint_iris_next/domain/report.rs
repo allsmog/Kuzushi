@@ -109,6 +109,9 @@ impl TaintIrisNextReport {
     }
 
     fn summary(&self) -> String {
+        if self.status == "missing-context" {
+            return "Missing context or source inventory".to_string();
+        }
         format!(
             "taint-iris-next: {} {} under {}",
             self.mode, self.status, self.target

@@ -1,0 +1,53 @@
+name: Direct session work stops before a request and keeps the question editable
+size: 120x36
+require-env: KUZUSHI_DEVEX_TARGET
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_session_allowance.py @TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/question-command.txt
+keys: Enter
+require-live-snap: 25 No provider request started | blocked-question
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_session_allowance.py @TARGET @ART blocked
+submit: answers
+require-live-snap: 25 Explain the owned greeting | editable-question
+keys: Enter End
+type:  kept α
+require-live-snap: 25 kept α | edited-question
+keys: C-z Escape
+require-live-snap: 25 Explain the owned greeting | retained-question
+resize: 160x48
+require-live-snap: 25 Explain the owned greeting | question-160x48
+resize: 96x89
+require-live-snap: 25 Explain the owned greeting | question-96x89
+resize: 80x24
+require-live-snap: 25 Explain the owned greeting | question-80x24
+resize: 60x20
+require-live-snap: 25 Explain the owned greeting | question-60x20
+resize: 40x12
+require-live-snap: 25 Explain the owned greeting | question-40x12
+ask: Is the unstarted budget refusal distinct from a provider failure, with the original question editable through every viewport?
+resize: 120x36
+submit: report
+require-live-snap: 25 6 committed / 6 calls | unchanged-report
+expect: 0 protected review remaining
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | unsent-question-exit
+keys: y
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: answers
+require-live-snap: 25 Explain the owned greeting | recovered-question
+submit: report
+require-live-snap: 25 6 committed / 6 calls | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_session_allowance.py @TARGET @ART restarted
+ask: Does no-color restart retain the blocked question, human decision and exhausted allowance without new requests or automatic work?
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | recovered-question-exit
+keys: y
+require-exit: 10

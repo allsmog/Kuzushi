@@ -179,6 +179,7 @@ impl ShellApp {
     /// one-key decisions), split from the unit-returning navigation arms.
     fn apply_workbench_draft_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
         let update = match action {
+            ViewHotkeyAction::WorkbenchReviewCurrentSource => self.draft_current_source_review(),
             ViewHotkeyAction::WorkbenchOpen => {
                 InputUpdate::handled_with_effects(self.workbench_open_focused())
             }
@@ -386,7 +387,9 @@ impl ShellApp {
             PhaseSurfaceId::ReviewNextPlan => self.draft_review_next_plan_command(),
             PhaseSurfaceId::ProveInvestigation => self.start_investigation_from_card(),
             PhaseSurfaceId::ReviewChains => self.open_chain_constituent(),
-            PhaseSurfaceId::ProveTrace => self.draft_trace_expansion_command(),
+            PhaseSurfaceId::ProveTrace | PhaseSurfaceId::ReviewTrace => {
+                self.draft_trace_expansion_command()
+            }
             focus if focus == page.findings_surface() => {
                 return self.open_workbench_finding_or_log()
             }
@@ -684,20 +687,22 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    /// Deterministic ledger-only counterpart to `draft_workbench_chain`:
-    /// folds already-confirmed findings into chain candidates without a
-    /// model call, so it is safe to run on every triage pass.
-    /// `C` toggles the Attack Chains screen: chain artifacts composed live
-    /// over the confirmed findings (same fold as `findings:chains`), plus
-    /// grounded chains from `exploit-chain:scan`.
+    /// Only a discoverable, qualified fold can open the live composition view.
+    /// Exact tool dispatch and stored scene artifacts remain available for Labs.
     fn draft_workbench_chain_fold(&mut self) -> InputUpdate {
+        if !self.registry().tool_is_discoverable("findings:chains")
+            && !self.router.workbench().chains_view_open()
+        {
+            self.log("chain", "Finding-chain composition is experimental. Use the exact findings:chains tool for an explicit run. Scene reads saved artifacts.");
+            return InputUpdate::handled();
+        }
         if self.router.workbench_mut().toggle_chains_view() {
             self.router
                 .workbench_mut()
                 .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewChains);
             self.log(
                 "chain",
-                "attack chains opened — Enter opens a constituent finding, C closes",
+                "attack chains opened · Enter opens a constituent finding, C closes",
             );
         } else {
             self.log("chain", "attack chains closed");
@@ -747,9 +752,13 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         if self.router.workbench_mut().toggle_trace_view() {
-            self.router
-                .workbench_mut()
-                .set_focus(crate::ui_view_models::PhaseSurfaceId::ProveTrace);
+            let surface =
+                if crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Review {
+                    crate::ui_view_models::PhaseSurfaceId::ReviewTrace
+                } else {
+                    crate::ui_view_models::PhaseSurfaceId::ProveTrace
+                };
+            self.router.workbench_mut().set_focus(surface);
             self.hydrate_selected_trace_expansion();
             self.log("trace", "trace opened");
         } else {
@@ -1325,9 +1334,10 @@ impl ShellApp {
         if self.apply_activity_hotkey(action) {
             return InputUpdate::handled();
         }
+        if let Some(update) = self.apply_catalog_hotkey(action) {
+            return update;
+        }
         match action {
-            ViewHotkeyAction::CatalogActivate => self.load_catalog_action(),
-            ViewHotkeyAction::CatalogToggleExpert => self.toggle_catalog_expert(),
             ViewHotkeyAction::ThreatView(view) => {
                 self.prepare_context_history_view(view);
                 self.router.threat_mut().open(view);
@@ -1359,6 +1369,21 @@ impl ShellApp {
             }
             _ => InputUpdate::ignored(),
         }
+    }
+
+    fn apply_catalog_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
+        let update = match action {
+            ViewHotkeyAction::CatalogActivate => self.load_catalog_action(),
+            ViewHotkeyAction::CatalogToggleExpert => self.toggle_catalog_expert(),
+            ViewHotkeyAction::CatalogRefreshDependencies => {
+                self.workbench_cache()
+                    .borrow_mut()
+                    .invalidate_executable_options();
+                InputUpdate::handled()
+            }
+            _ => return None,
+        };
+        Some(update)
     }
 
     fn load_catalog_action(&mut self) -> InputUpdate {
@@ -1545,7 +1570,8 @@ fn focused_workbench_visualization(
         | PhaseSurfaceId::ProveLadder
         | PhaseSurfaceId::ProveNextAction
         | PhaseSurfaceId::ProveInvestigation
-        | PhaseSurfaceId::ProveTrace => FocusedWorkbenchVisualization::Scene(VizPage::AttackPath),
+        | PhaseSurfaceId::ProveTrace
+        | PhaseSurfaceId::ReviewTrace => FocusedWorkbenchVisualization::Scene(VizPage::AttackPath),
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,
         PhaseSurfaceId::ProveResult => FocusedWorkbenchVisualization::PendingResult,
         PhaseSurfaceId::FixCandidate
@@ -1809,5 +1835,33 @@ mod navigate_announcement_tests {
             ViewHotkeyAction::WorkbenchBacklogDecide("confirmed")
         ));
         assert!(!is_movement_hotkey(ViewHotkeyAction::PauseScan));
+    }
+}
+
+#[cfg(test)]
+mod chain_fold_curation_tests {
+    use super::*;
+
+    #[test]
+    fn experimental_chain_shortcut_keeps_draft_and_starts_no_work() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_input("owned\noperator draft");
+        app.set_cursor(3);
+        let update = app.apply_view_hotkey(ViewHotkeyAction::WorkbenchChainFold);
+        assert!(update.handled);
+        assert!(update.effects.is_empty());
+        assert!(!app.router.workbench().chains_view_open());
+        assert!(!app.has_running_work());
+        assert_eq!(app.input(), "owned\noperator draft");
+        assert_eq!(app.cursor(), 3);
+    }
+
+    #[test]
+    fn experimental_chain_view_already_open_can_still_close() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        assert!(app.router.workbench_mut().toggle_chains_view());
+        let update = app.apply_view_hotkey(ViewHotkeyAction::WorkbenchChainFold);
+        assert!(update.effects.is_empty());
+        assert!(!app.router.workbench().chains_view_open());
     }
 }

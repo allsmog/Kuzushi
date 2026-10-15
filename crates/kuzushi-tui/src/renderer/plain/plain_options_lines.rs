@@ -11,11 +11,32 @@ pub(crate) fn plain_options_lines(
     if let Some(snapshot) = app.options_screen_snapshot() {
         return plain_options_snapshot_lines(snapshot.clone(), width);
     }
+    if let Some(edit) = app.router.options_browser().edit.as_ref() {
+        return plain_option_editor(edit, width);
+    }
 
     let model = plain_options_model(app, view);
     let mut lines = plain_context_strip(app, width);
     push_plain_options_summary(&mut lines, &model, width);
     push_plain_options_body(&mut lines, width, &model.body);
+    lines
+}
+
+fn plain_option_editor(edit: &crate::app::ToolOptionEdit, width: usize) -> Vec<String> {
+    let scope = if edit.global { "global" } else { "session" };
+    let mut lines = vec![format!("EDIT {}.{} · {scope}", edit.tool, edit.option)];
+    lines.extend(
+        crate::renderer::shared::field_editor_lines(&edit.field, width, usize::MAX)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect()
+            }),
+    );
+    lines.extend(edit.error.iter().cloned());
+    lines.push("Enter/Ctrl+S save · Ctrl+G global · Esc keeps draft".into());
     lines
 }
 

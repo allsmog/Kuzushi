@@ -1,0 +1,51 @@
+name: Curated architecture defaults and visible experimental support
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_curation.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_curation.py @TMP_TARGET @ART catalog
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use x-ray
+require-live-snap: 25 x-ray:read | core-reader
+expect-not: x-ray:run
+submit: options x-ray:run
+require-live-snap: 25 Experimental | experimental-options
+resize: 160x48
+require-live-snap: 20 Experimental | options-160x48
+resize: 96x89
+require-live-snap: 20 Experimental | options-96x89
+resize: 80x24
+require-live-snap: 20 Experimental | options-80x24
+resize: 60x20
+require-live-snap: 20 Experimental | options-60x20
+resize: 40x12
+require-live-snap: 20 Experimental | options-40x12
+ask: Does exact inspection disclose experimental support at every size while the default module list keeps the supported reader?
+resize: 120x36
+submit: run x-ray:read
+submit: logs
+keys: End
+require-live-snap: 25 Recorded report tier | stored-report
+expect: Source freshness: not assessed
+expect: unknown
+submit: setup
+require-live-snap: 25 SETUP | map-still-unaccepted
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_curation.py @TMP_TARGET @ART verify
+ask: Do stored claims remain unassessed, with no model requests or accepted Map work after the reader?
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: options x-ray:run
+require-live-snap: 25 Experimental | recovered-options
+require-shell: python3 -B @REPO/scripts/devex/fixtures/xray_curation.py @TMP_TARGET @ART verify
+ask: Does no-color restart retain the experimental disclosure without a model or source action?
+keys: C-c
+require-exit: 10

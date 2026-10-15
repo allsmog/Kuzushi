@@ -9,6 +9,18 @@ mod scan_receipt;
 mod scope;
 mod scopes;
 
+pub(crate) fn report_source_notice(app: &ShellApp) -> Option<&'static str> {
+    if app.router.report().workspace_history() {
+        return Some("History · current source unassessed");
+    }
+    if app.router.report().study().is_some() {
+        return Some("Recorded source · current unassessed");
+    }
+    app.report_scan_attempt()
+        .filter(|attempt| !attempt.current)
+        .map(|_| "Earlier source · reassess checkout")
+}
+
 pub(crate) fn report_investigation_lines(app: &ShellApp) -> Vec<String> {
     let mut lines = report_scope_lines(app);
     lines.push(lesson_export_note(app.router.report().format()).into());

@@ -35,39 +35,42 @@ fn load_trace_snapshot(
     root: &std::path::Path,
     fingerprint: &str,
 ) -> anyhow::Result<Option<TraceExpansionSnapshot>> {
+    if let Some(latest) = load_latest_trace_expansion(root, fingerprint)? {
+        return Ok(Some(recorded_trace_snapshot(latest)));
+    }
     let workspace = kuzushi_core::WorkspaceTarget::new(root)?;
     let store = kuzushi_core::static_evidence::StaticEvidenceStore::open(&workspace)?;
     let steps = kuzushi_core::capabilities::trace_expansion::list_operator_trace_steps(
         &store,
         fingerprint,
     )?;
-    let latest = load_latest_trace_expansion(root, fingerprint)?;
-    if steps.is_empty() && latest.is_none() {
+    if steps.is_empty() {
         return Ok(None);
     }
-    let mut snapshot = TraceExpansionSnapshot {
+    Ok(Some(TraceExpansionSnapshot {
         finding_fingerprint: fingerprint.to_string(),
         steps: steps.into_iter().map(trace_step).collect(),
         open_questions: Vec::new(),
-        evidence_deltas: Vec::new(),
+        evidence_deltas: vec!["Legacy expansion history has no per-run source binding.".to_string()],
         last_outcome: None,
-    };
-    if let Some(latest) = latest {
-        snapshot.last_outcome = Some(format!(
+    }))
+}
+
+fn recorded_trace_snapshot(
+    latest: kuzushi_core::capabilities::trace_expansion::RecordedTraceExpansion,
+) -> TraceExpansionSnapshot {
+    TraceExpansionSnapshot {
+        finding_fingerprint: latest.result.finding_fingerprint,
+        last_outcome: Some(format!(
             "Last expansion · {} new steps · run {} · {}",
             latest.result.steps.len(),
             latest.run_id,
             source_label(latest.source)
-        ));
-        for step in latest.result.steps.into_iter().map(trace_step) {
-            if !snapshot.steps.contains(&step) {
-                snapshot.steps.push(step);
-            }
-        }
-        snapshot.open_questions = latest.result.open_questions;
-        snapshot.evidence_deltas = latest.result.evidence_deltas;
+        )),
+        steps: latest.result.steps.into_iter().map(trace_step).collect(),
+        open_questions: latest.result.open_questions,
+        evidence_deltas: latest.result.evidence_deltas,
     }
-    Ok(Some(snapshot))
 }
 
 fn source_label(source: TraceExpansionSource) -> &'static str {

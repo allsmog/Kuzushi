@@ -12,8 +12,15 @@ impl ShellApp {
         if let Some(update) = self.handle_study_editor_key(key) {
             return update;
         }
+        self.handle_study_navigation_key(key)
+    }
+
+    fn handle_study_navigation_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
             return InputUpdate::handled();
+        }
+        if self.review_study_is_open() {
+            return self.handle_review_study_key(key.code);
         }
         if self.study_notice_captures_escape() {
             return self.handle_study_notice_key(key.code);
@@ -23,7 +30,8 @@ impl ShellApp {
     }
 
     fn handle_study_editor_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        self.handle_brief_key(key)
+        self.handle_context_case_name_key(key)
+            .or_else(|| self.handle_brief_key(key))
             .or_else(|| self.handle_regeneration_guidance_key(key))
             .or_else(|| self.handle_context_edit_key(key))
     }

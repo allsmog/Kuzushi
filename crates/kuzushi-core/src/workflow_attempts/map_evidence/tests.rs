@@ -3,6 +3,34 @@ use serde_json::json;
 use std::fs;
 
 #[test]
+fn recorded_single_component_can_display_without_satisfying_completion_evidence() {
+    let document = json!({"dfd":{"nodes":[{"id":"lock","name":"Declared lockfile","description":"Cargo.lock metadata"}],"flows":[]},"threats":[]});
+    assert!(threat_model_has_recorded_component(&document));
+    assert!(!threat_model_has_concrete_dfd(&document));
+    assert!(!threat_model_has_concrete_content(&document));
+    assert_eq!(
+        assess_map_evidence(&facts_from_documents(None, None, Some(&document))),
+        MapEvidenceAdequacy::Inadequate
+    );
+}
+
+#[test]
+fn recorded_component_display_rejects_scope_skeletons_and_unnamed_values() {
+    assert!(!threat_model_has_recorded_component(&scope_only_document()));
+    for node in [
+        json!(null),
+        json!({}),
+        json!({"id":"x"}),
+        json!({"id":"","name":"Unnamed"}),
+        json!({"id":"app","name":"Application","description":"Repository application boundary"}),
+    ] {
+        let document =
+            json!({"dfd":{"nodes":[node],"flows":[]},"threats":[{"title":"Stored claim"}]});
+        assert!(!threat_model_has_recorded_component(&document));
+    }
+}
+
+#[test]
 fn empty_repository_scope_is_inadequate() {
     let facts = facts_from_documents(
         Some(&json!({"filesIndexed": 0})),
@@ -186,7 +214,10 @@ fn message_names_the_empty_attempt_not_the_target_when_workspace_has_evidence() 
 
     let message = insufficient_map_evidence_message(target.path());
 
-    assert!(message.contains("This attempt carried no map evidence"), "{message}");
+    assert!(
+        message.contains("This attempt carried no map evidence"),
+        "{message}"
+    );
     assert!(message.contains("42 file(s) indexed"), "{message}");
     assert!(
         !message.contains("select another target"),
@@ -200,7 +231,10 @@ fn message_steers_toward_building_evidence_when_workspace_is_empty_too() {
 
     let message = insufficient_map_evidence_message(target.path());
 
-    assert!(message.contains("no durable map artifacts yet"), "{message}");
+    assert!(
+        message.contains("no durable map artifacts yet"),
+        "{message}"
+    );
     assert!(message.contains("context build"), "{message}");
     assert!(!message.contains("select another target"), "{message}");
 }

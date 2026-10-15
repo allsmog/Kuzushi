@@ -211,6 +211,16 @@ mod tests {
     }
 
     impl AgentRuntime for CountingRuntime {
+        fn triage_semantic_cache_identity(
+            &self,
+            _: &TriageRequest,
+        ) -> Option<crate::identity::Blake3Hash> {
+            Some(crate::identity::hash_parts(
+                "triage-runtime-test",
+                &[b"owned-counting-runtime-v1"],
+            ))
+        }
+
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
             *self.calls.lock().unwrap() += 1;
             Ok(true_positive_outcome())
@@ -525,7 +535,8 @@ mod tests {
         let config = TriageExecutionConfig::new(
             PathBuf::from("/repo-cache"),
             "openai-codex:gpt-5.4".to_string(),
-        );
+        )
+        .with_source_snapshot("owned-cache-snapshot".to_string());
 
         let first =
             run_triage_stage2(&store, &runtime, &input, &config, vec![finding.clone()]).unwrap();
@@ -549,11 +560,9 @@ mod tests {
         // Identity-wide fan-out is opt-in: without an identity-audit approval
         // receipt an omitted `identityReconcile` resolves to `off` (ADR 0003),
         // and the verdict would stay on the triaged row alone.
-        let input = TriageRunInput::from_tool_input(
-            &json!({"identityReconcile": "auto"}),
-            Path::new("."),
-        )
-        .unwrap();
+        let input =
+            TriageRunInput::from_tool_input(&json!({"identityReconcile": "auto"}), Path::new("."))
+                .unwrap();
 
         let (selected, missing) = select_triage_findings(&store, &input).unwrap();
         assert!(missing.is_empty());
@@ -881,6 +890,12 @@ mod tests {
         );
         assert!(triage_cost_cap_reached(Some(1.0), stats.cost_report()));
         assert!(!triage_cost_cap_reached(None, stats.cost_report()));
+        let output = response["output"].as_str().unwrap();
+        assert!(output.contains("provider cost unknown"), "{output}");
+        assert!(!output.contains("$0.0000"), "{output}");
+        assert!(response["warnings"]
+            .to_string()
+            .contains("Provider cost is unknown"));
     }
 
     #[test]
@@ -903,11 +918,22 @@ mod tests {
 
         let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
 
-        assert!(response.get("costUsd").is_none(), "an estimate is never billed spend");
+        assert!(
+            response.get("costUsd").is_none(),
+            "an estimate is never billed spend"
+        );
         assert_eq!(response["estimatedCostUsd"], json!(0.25));
         assert_eq!(response["providerSpendUnresolved"], json!(true));
         let warnings = response["warnings"].to_string();
         assert!(warnings.contains("estimated at ~$0.2500"), "{warnings}");
+        assert!(
+            warnings.contains("Provider cost is unavailable"),
+            "{warnings}"
+        );
+        assert!(!response["output"]
+            .as_str()
+            .unwrap()
+            .contains("reported no charge"));
         assert!(!triage_cost_cap_reached(Some(1.0), stats.cost_report()));
         assert!(triage_cost_cap_reached(Some(0.25), stats.cost_report()));
     }
@@ -1312,7 +1338,7 @@ mod tests {
     }
 
     #[test]
-    fn protected_human_triage_is_not_reported_as_a_persisted_success() {
+    fn protected_human_triage_retains_an_unapplied_model_opinion() {
         let store = store_with_scan_findings(&[(
             "scan-human-triage",
             finding_for_rule("rule-human", 10, "human triage"),
@@ -1335,6 +1361,10 @@ mod tests {
                 crate::findings::TriageAuthor::Human,
             )
             .unwrap();
+        let before =
+            serde_json::to_value(store.list_review_decisions(finding.id.unwrap()).unwrap())
+                .unwrap();
+        let finding_id = finding.id.unwrap();
 
         let stats = run_triage_stage2(
             &store,
@@ -1345,10 +1375,27 @@ mod tests {
         )
         .unwrap();
 
-        assert_triage_counts(&stats, 1, 0, 1);
-        assert_eq!(stats.persistence_failures, 1);
-        assert!(stats.results.is_empty());
-        assert_eq!(stats.failure_details[0]["stage"], json!("verdict-write"));
+        assert_triage_counts(&stats, 1, 1, 0);
+        assert_eq!(stats.persistence_failures, 0);
+        assert_eq!(stats.unapplied_opinions, 1);
+        assert_eq!(stats.results[0]["stage"], json!("model-opinion"));
+        assert_eq!(stats.results[0]["verdict"], json!("true_positive"));
+        assert_eq!(stats.results[0]["decisionApplied"], json!(false));
+        assert_eq!(stats.results[0]["applicationStatus"], json!("not_applied"));
+        assert!(stats.failure_details.is_empty());
+        assert_eq!(
+            serde_json::to_value(store.list_review_decisions(finding_id).unwrap()).unwrap(),
+            before
+        );
+        let stored = store
+            .list_findings_for_scan_id("scan-human-triage")
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            stored.triaged_by,
+            Some(crate::findings::TriageAuthor::Human)
+        );
+        assert_eq!(stored.triage.unwrap().verdict, TriageVerdict::FalsePositive);
         let response = triage_response(
             &retriage_input(),
             &triage_config("/repo-human-triage"),
@@ -1356,9 +1403,84 @@ mod tests {
             &stats,
             Vec::new(),
         );
-        assert!(response["warnings"][0].as_str().unwrap().contains(
-            "failed classifications=1, failed consensus votes=0, failed persistence writes=1"
-        ));
+        assert_eq!(response["status"], json!("completed"));
+        assert_eq!(response["data"]["unappliedOpinions"], json!(1));
+        assert!(response["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("without applying a review decision"));
+        assert!(response["output"]
+            .as_str()
+            .unwrap()
+            .contains("Existing decisions remain authoritative"));
+    }
+
+    #[test]
+    fn protected_opinions_cover_cached_local_identity_and_duplicate_paths() {
+        for policy in [IdentityReconcilePolicy::Off, IdentityReconcilePolicy::Auto] {
+            for cached in [false, true] {
+                let store = store_with_scan_findings(&[(
+                    "scan",
+                    finding_for_rule("rule-human", 10, "protected"),
+                )]);
+                let finding = store.list_findings_for_scan_id("scan").unwrap().remove(0);
+                let outcome = TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.99,
+                    ..true_positive_outcome()
+                };
+                store
+                    .record_triage_with_author(
+                        finding.id.unwrap(),
+                        &true_positive_outcome(),
+                        crate::findings::TriageAuthor::Human,
+                    )
+                    .unwrap();
+                let mut stats = TriageRunStats::default();
+                let mut classified = runtime_outcome(outcome.clone());
+                classified.cached = cached;
+                persist_triage_outcome(&store, &mut stats, finding.clone(), classified, policy)
+                    .unwrap();
+                propagate_duplicate_outcome(
+                    &store,
+                    &mut stats,
+                    finding.clone(),
+                    &outcome,
+                    "representative",
+                    policy,
+                );
+                assert_eq!(stats.unapplied_opinions, 2);
+                assert_eq!(stats.persistence_failures, 0);
+                assert_eq!(stats.duplicates_inherited, 0);
+                assert_eq!(stats.high_confidence_false_positive_count(), 0);
+                assert_eq!(stats.results[0]["cached"], json!(cached));
+                assert!(stats.results.iter().all(|r| r["decisionApplied"] == false));
+                assert_eq!(
+                    store
+                        .list_review_decisions(finding.id.unwrap())
+                        .unwrap()
+                        .len(),
+                    1
+                );
+                assert_eq!(
+                    stats.cost_report().observed_usd(),
+                    if cached { 0.0 } else { outcome.cost_usd }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_fp_drop_requires_an_applied_opinion_with_legacy_compatibility() {
+        let mut result = json!({"verdict":"false_positive", "confidence":0.99});
+        assert!(high_confidence_false_positive(&result));
+        result["decisionApplied"] = json!(true);
+        assert!(high_confidence_false_positive(&result));
+        result["decisionApplied"] = json!(false);
+        assert!(!high_confidence_false_positive(&result));
+        result["decisionApplied"] = json!(true);
+        result["confidence"] = json!(0.5);
+        assert!(!high_confidence_false_positive(&result));
     }
 
     #[test]

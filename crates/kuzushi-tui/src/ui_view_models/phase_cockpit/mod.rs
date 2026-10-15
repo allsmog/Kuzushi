@@ -187,8 +187,7 @@ pub(crate) struct EngagementHeaderModel {
     /// Map so it cannot be confused with the configured runtime model.
     pub(crate) threat_model: Option<String>,
     pub(crate) module: String,
-    pub(crate) cost_usd: f64,
-    pub(crate) cost_complete: bool,
+    pub(crate) cost: kuzushi_core::runtime::RuntimeCostReport,
     pub(crate) cost_invalid: bool,
     pub(crate) budget_usd: Option<f64>,
     pub(crate) liveness: super::WorkLiveness,
@@ -236,6 +235,7 @@ pub(crate) struct NextScanRow {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReviewPhaseModel {
+    pub(crate) trace: Option<TraceEvidenceModel>,
     pub(crate) comparison_control: Option<String>,
     pub(crate) review: ReviewQueueModel,
     pub(crate) finding: Option<FindingDetailModel>,
@@ -548,8 +548,7 @@ fn engagement_header_model(
             .then(|| super::threat_model_picker(app).header_chip())
             .flatten(),
         module: active_module_label(app),
-        cost_usd: app.session().session_cost_usd(),
-        cost_complete: app.session().cost_accounting_is_complete(),
+        cost: app.session().session_cost_report(),
         cost_invalid: app.session().cost_accounting_error().is_some(),
         budget_usd: app.session().session_budget_usd(),
         liveness: super::work_liveness(app),
@@ -799,13 +798,26 @@ fn phase_result_control_hint(
     outcome: &str,
     verified_remediation: bool,
 ) -> String {
-    if app.input_mode() == InputMode::Navigate {
+    if app.phase_result_keys_are_available() {
         return result_action_labels_for(app, actions, phase, outcome, verified_remediation);
+    }
+    if app.input_mode() == InputMode::Navigate && !app.input().is_empty() {
+        return navigation_draft_result_hint(app);
     }
     prompt_result_control_hint(app)
 }
 
-fn prompt_result_control_hint(app: &ShellApp) -> String {
+fn navigation_draft_result_hint(app: &ShellApp) -> String {
+    let bindings = app
+        .ui()
+        .keymap_binding_labels("composer", "prompt_mode", &["Esc"]);
+    if bindings.is_empty() {
+        return "Prompt unbound · configure composer.prompt_mode".to_string();
+    }
+    format!("{} prompt to finish or clear the draft", bindings.join("/"))
+}
+
+pub(super) fn prompt_result_control_hint(app: &ShellApp) -> String {
     let bindings = app
         .ui()
         .keymap_binding_labels("composer", "navigate_mode", &["Esc"]);

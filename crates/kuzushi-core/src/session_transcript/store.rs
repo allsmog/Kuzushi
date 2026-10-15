@@ -10,11 +10,12 @@ mod discovery;
 mod reader;
 mod secure_directory;
 
-use discovery::{
-    collect_session_files, filename_has_session_id, read_safe_session_file, validate_session_id,
-};
+pub(super) use discovery::validate_session_id;
+use discovery::{collect_session_files, filename_has_session_id, read_safe_session_file};
 use reader::{parse_records, read_matches_target, summarize};
-use secure_directory::{ensure_secure_child, ensure_secure_directory, validate_secure_directory};
+use secure_directory::ensure_secure_child;
+pub(super) use secure_directory::reject_kuzushi_symlink_ancestors;
+pub(super) use secure_directory::{ensure_secure_directory, validate_secure_directory};
 
 #[derive(Debug, Clone)]
 pub struct SessionTranscriptStore {

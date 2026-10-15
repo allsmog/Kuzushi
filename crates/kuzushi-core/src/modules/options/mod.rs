@@ -7,5 +7,7 @@ pub(in crate::modules) use json_summary::{json_summary, validate_tool_input_opti
 use serde_json::{Map, Value};
 mod coerce_int_option;
 mod json_summary;
+mod operator_text;
+pub use operator_text::coerce_option_text;
 #[cfg(test)]
 mod tests;

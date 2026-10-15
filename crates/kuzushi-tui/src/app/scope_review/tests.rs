@@ -3,7 +3,110 @@ use crate::app::{FieldEditor, ShellEffect, ShellView};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use ratatui::{backend::TestBackend, Terminal};
+mod additions;
+mod file_boundaries;
 mod suggestion;
+
+#[test]
+fn explicit_shared_context_copy_and_removal_use_prepared_dispatch_without_work() {
+    let (root, mut app) = fixture();
+    split(&mut app, root.path());
+    app.set_input("kept composer");
+    app.set_cursor(4);
+    let original = app.scope_review().unwrap().review.as_ref().unwrap().clone();
+    let update = app.apply_scope_menu(13);
+    finish(&mut app, root.path(), update).unwrap();
+    let copied = app.scope_review().unwrap().review.as_ref().unwrap();
+    assert_eq!(copied.record.draft.scopes, original.record.draft.scopes);
+    assert!(!copied.record.draft.shared_discovery);
+    assert!(copied.record.acceptance.is_none());
+    assert_eq!(
+        copied.coverage.discovery_members,
+        original.coverage.discovery_members
+    );
+    let shared = copied.record.draft.shared_scope.as_ref().unwrap();
+    assert_eq!(
+        copied.coverage.context_members[&shared.id].files,
+        vec!["auth/login.rs"]
+    );
+    assert_eq!(copied.reference.revision, original.reference.revision + 1);
+    assert_eq!((app.input(), app.cursor()), ("kept composer", 4));
+    let update = app.apply_scope_menu(14);
+    finish(&mut app, root.path(), update).unwrap();
+    let removed = app.scope_review().unwrap().review.as_ref().unwrap();
+    assert_eq!(removed.record.draft, original.record.draft);
+    assert!(app.findings().is_empty());
+    assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
+}
+
+#[test]
+fn shared_context_menu_actions_remain_reachable_at_all_viewports() {
+    let (_root, mut app) = fixture();
+    for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+        app.reduce_resize(width, height);
+        press(&mut app, KeyCode::Enter);
+        for _ in 0..13 {
+            press(&mut app, KeyCode::Down);
+        }
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::render_app(frame, &app))
+            .unwrap();
+        let screen = format!("{:?}", terminal.backend().buffer());
+        assert_eq!(app.scope_review().unwrap().menu, Some(13));
+        assert!(
+            screen.contains("shared context"),
+            "{width}x{height}: {screen}"
+        );
+        press(&mut app, KeyCode::Down);
+        terminal
+            .draw(|frame| crate::render_app(frame, &app))
+            .unwrap();
+        assert!(format!("{:?}", terminal.backend().buffer()).contains("Remove shared"));
+        press(&mut app, KeyCode::Esc);
+    }
+}
+
+#[test]
+fn shared_scope_mode_remains_visible_with_a_long_name_at_forty_columns() {
+    let (root, mut app) = fixture();
+    split(&mut app, root.path());
+    let update = app.apply_scope_menu(13);
+    finish(&mut app, root.path(), update).unwrap();
+    let shared = app
+        .scope_review()
+        .unwrap()
+        .review
+        .as_ref()
+        .unwrap()
+        .record
+        .draft
+        .shared_scope
+        .as_ref()
+        .unwrap()
+        .id
+        .clone();
+    let update = app.send_scope_edit(kuzushi_core::workspace::ScanScopeEdit::Rename {
+        scope_id: shared,
+        name: "Long operator selected shared boundary".into(),
+    });
+    finish(&mut app, root.path(), update).unwrap();
+    app.router.scope_review_mut().as_mut().unwrap().cursor = 2;
+    app.reduce_resize(40, 12);
+    let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+    terminal
+        .draw(|frame| crate::render_app(frame, &app))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let rows = (0..12)
+        .map(|y| (0..40).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>();
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("▸") && row.contains(" · context")),
+        "{rows:?}"
+    );
+}
 
 #[test]
 fn inclusion_form_preserves_literal_path_whitespace() {
@@ -95,6 +198,19 @@ fn fixture() -> (tempfile::TempDir, ShellApp) {
 fn press(app: &mut ShellApp, code: KeyCode) -> InputUpdate {
     app.handle_scope_review_key(KeyEvent::new(code, KeyModifiers::NONE))
         .unwrap()
+}
+
+fn discard_unprepared_study(app: &mut ShellApp) {
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .draft_recovery,
+        crate::app::StudyDraftRecovery::Discard
+    );
+    app.reduce_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
 }
 
 fn finish(
@@ -200,6 +316,7 @@ fn accepted_scope_study_binds_the_selected_revision_and_back_restores_reading_st
     );
     assert_eq!(input["tasks"], json!(["secret-scan"]));
     app.apply_batch_scan_hotkey(ViewHotkeyAction::CampaignBackToList);
+    discard_unprepared_study(&mut app);
     assert!(app.scope_review_is_visible());
     assert_eq!(app.scope_review().unwrap().scroll, 7);
     assert!(!root.path().join(".kuzushi/v3/campaigns").exists());
@@ -225,6 +342,7 @@ fn marked_boundaries_compile_one_six_job_draft_and_back_preserves_the_selection(
     assert_eq!(config.study.scope_draft.as_ref().unwrap().job_count(), 6);
     assert!(config.study.scope_receipt.is_none());
     app.apply_batch_scan_hotkey(ViewHotkeyAction::CampaignBackToList);
+    discard_unprepared_study(&mut app);
     assert!(app.scope_review_is_visible());
     assert_eq!(app.scope_review().unwrap().study_scope_ids.len(), 2);
     assert!(!root.path().join(".kuzushi/v3/campaigns").exists());

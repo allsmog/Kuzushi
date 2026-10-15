@@ -232,6 +232,9 @@ fn executive_summary_lines(model: &DfdModel, overview: &DfdOverview) -> Vec<Line
         Line::styled(component_shape(model), diagram_style(diagram_muted())),
         Line::styled(security_shape(model), diagram_style(diagram_muted())),
     ]);
+    if let Some(notice) = model.topology_notice() {
+        lines.push(Line::styled(notice, theme::label()));
+    }
     lines
 }
 

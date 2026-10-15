@@ -34,6 +34,44 @@ fn app() -> ShellApp {
 }
 
 #[test]
+fn scope_context_names_precede_identity_and_do_not_change_associations() {
+    let mut app = app();
+    let config = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    config.scope_context.labels = [
+        ("app".into(), "Service".into()),
+        ("other".into(), "Root files".into()),
+    ]
+    .into();
+    assert_eq!(
+        scope_context::rows(config),
+        vec![
+            "Common context",
+            "Service · inherits common",
+            "Root files · inherits common"
+        ]
+    );
+    app.handle_scope_context_key(KeyCode::Down);
+    app.handle_scope_context_key(KeyCode::Char('o'));
+    let config = app.scope_context_config().unwrap();
+    assert!(config
+        .notice
+        .as_deref()
+        .unwrap()
+        .contains("Context selected for Service"));
+    let detail = scope_context::detail(config, 120).join("\n");
+    assert!(detail.contains("Boundary: Service") && detail.contains("Boundary id: app"));
+    assert_eq!(
+        config.study.scope_draft.as_ref().unwrap().cases[1].threat_model_ref,
+        None
+    );
+}
+
+#[test]
 fn omission_and_inheritance_preserve_common_sibling_and_allowance() {
     let mut app = app();
     let before = app.scope_context_config().unwrap().study.clone();

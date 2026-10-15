@@ -1,5 +1,6 @@
 use super::bounded_fs as fs;
 use super::python_dependency::{python_component, python_dependency_name};
+use super::SbomInputs;
 use super::{relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -20,9 +21,12 @@ pub(super) fn requirements_components(
         .collect()
 }
 
-pub(super) fn requirements_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn requirements_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()

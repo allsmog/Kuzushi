@@ -1,0 +1,61 @@
+name: Bounded advisory catalog actions retain unaccepted claims and protect Review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_catalog.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_catalog.py before @TMP_TARGET @ART
+paste-file: @ART/research.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | research-consent
+keys: y
+require-live-snap: 30 Unaccepted advisory research | research-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_catalog.py research @TMP_TARGET @ART
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | research-receipt
+ask: Does offline research disclose candidate uncertainty and nested drafting without claiming a vulnerability, accepted context or completed Map?
+paste-file: @ART/harvest.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | harvest-consent
+keys: y
+require-live-snap: 30 Unaccepted catalog draft | harvest-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_catalog.py harvest @TMP_TARGET @ART
+paste-file: @ART/replay-harvest.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | partial-catalog
+expect: 1 deferred
+ask: Is the finite outcome clear: one retained unaccepted draft, one deferred advisory, and protected Review without another model request?
+resize: 160x48
+live-snap: catalog-160x48
+resize: 96x89
+live-snap: catalog-96x89
+resize: 80x24
+live-snap: catalog-80x24
+resize: 60x20
+live-snap: catalog-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | catalog-40x12
+keys: NPage
+live-snap: catalog-paged-40x12
+ask: Are draft authority, deferred work, unknown cost and paging understandable across six sizes?
+resize: 120x36
+submit: findings
+require-live-snap: 20 Viewing Review | existing-review
+expect: Labeled greeting observation
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | resumed
+paste-file: @ART/replay-harvest.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-catalog
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_catalog.py restart @TMP_TARGET @ART
+ask: Does no-color restart retain both receipts, exact human decisions and the deferred advisory without accepting lessons, starting hunts or expanding allowance?
+keys: C-c
+require-exit: 10

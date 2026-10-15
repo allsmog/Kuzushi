@@ -8,10 +8,12 @@ mod keys;
 mod state;
 #[cfg(test)]
 mod tests;
-pub(crate) use state::{ContextEditDraft, ContextEditEntry, ContextEditMode};
+pub(crate) use state::{ContextDraftRecovery, ContextEditDraft, ContextEditEntry, ContextEditMode};
 
 impl ShellApp {
-    fn context_edit_selection_key(&self) -> Option<(PathBuf, String)> {
+    pub(in crate::app::batch_scan) fn context_edit_selection_key(
+        &self,
+    ) -> Option<(PathBuf, String)> {
         let reference = self.study_context_picker()?.selected.as_ref()?;
         Some((self.target_owned()?, reference.revision_id.as_str().into()))
     }
@@ -38,11 +40,12 @@ impl ShellApp {
             Ok((key, reference, preview, label)) => {
                 self.runtime_state
                     .context_edit_drafts
-                    .entry(key)
+                    .entry(key.clone())
                     .or_insert_with(|| ContextEditDraft::new(reference, &preview.document, label));
                 self.edit_context_picker(|config| {
                     config.context_picker.as_mut().unwrap().editor_visible = true
                 });
+                self.start_context_draft_recovery(&key);
             }
             Err(error) => self.set_batch_config_notice(format!("{error:#}")),
         }

@@ -84,6 +84,26 @@ fn options_model_marks_unknown_tools() {
 }
 
 #[test]
+fn exact_experimental_options_and_plain_output_disclose_effective_support() {
+    let app = ShellApp::new(V2Config::default(), None);
+    for tool in ["x-ray:run", "x-ray:x-ray"] {
+        let view = options_view(tool, OptionsFilter::Standard);
+        let model = options_model(&app, &view);
+        assert!(model.summary_rows.contains(&OptionsSummaryRow {
+            cells: ["support".into(), "Experimental".into()]
+        }));
+        assert!(plain_options_model(&app, &view)
+            .summary_rows
+            .contains(&"support: Experimental".into()));
+    }
+    let reader = options_model(&app, &options_view("x-ray:read", OptionsFilter::Standard));
+    assert!(!reader
+        .summary_rows
+        .iter()
+        .any(|row| row.cells[0] == "support"));
+}
+
+#[test]
 fn threat_model_options_surface_source_controls_as_standard_options() {
     let app = ShellApp::new(V2Config::default(), None);
 
@@ -180,7 +200,7 @@ fn standard_filter_hides_escalation_model() {
 }
 
 #[test]
-fn options_views_hide_unstructured_workflow_inputs() {
+fn options_views_disclose_workflow_inputs_without_making_them_editable() {
     let app = ShellApp::new(V2Config::default(), None);
     let standard = options_model(
         &app,
@@ -190,7 +210,10 @@ fn options_views_hide_unstructured_workflow_inputs() {
         panic!("expected standard options");
     };
     assert!(standard.rows.iter().any(|row| row.cells[0] == "path"));
-    assert!(!standard.rows.iter().any(|row| row.cells[0] == "document"));
+    assert!(standard
+        .rows
+        .iter()
+        .any(|row| row.cells[0] == "document" && row.cells[4] == "workflow"));
 
     let advanced = options_model(
         &app,
@@ -200,7 +223,7 @@ fn options_views_hide_unstructured_workflow_inputs() {
         panic!("expected advanced options");
     };
     assert!(advanced.rows.iter().any(|row| row.cells[0] == "model"));
-    assert!(!advanced
+    assert!(advanced
         .rows
         .iter()
         .any(|row| row.cells[0] == "advisoryFixtures"));

@@ -2,6 +2,7 @@ use super::*;
 
 mod health;
 mod payload;
+mod result;
 
 pub use health::cost_label;
 

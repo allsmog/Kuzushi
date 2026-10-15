@@ -80,7 +80,7 @@ pub(crate) fn build_x_ray_prompt(input: &XRayRunInput) -> String {
          - invariantsMarkdown: Markdown for x-ray/invariants.md, using IDs such as G-1, I-1, X-1, and E-1 when applicable.\n\
          - architectureSvg: A complete SVG document for x-ray/architecture.svg.\n\n\
          {kb_block}\n\n\
-         Read the repository contents conceptually through the LangGraph runtime context and keep the output grounded in concrete files and entry points.",
+         Use the selected runtime's available context. Source coverage is not recorded by this executor. Keep claims tied to concrete evidence and identify missing coverage.",
         repo_name = input.repo_name,
         repo_path = input.target.display(),
         untrusted_policy = PROMPT_SPINE_UNTRUSTED_REPO,

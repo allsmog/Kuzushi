@@ -1,0 +1,77 @@
+name: Saved run outcomes stay visible with compact notices and the full message route
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+paste-file: @ART/merge-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Saved catalog cannot be merged | failure-recorded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART failed
+paste-file: @ART/failure-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · failed | failure-receipt
+resize: 40x12
+require-live-snap: 20 Outcome · failed | failure-first-frame-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_reader_notice.py @TMP_TARGET @ART failed
+ask: Is the first failed outcome visible with its error badge, dismissal and full-message route at 40x12 without paging or dismissing the notice?
+resize: 60x20
+live-snap: failure-60x20
+resize: 80x24
+live-snap: failure-80x24
+resize: 96x89
+live-snap: failure-96x89
+resize: 120x36
+live-snap: failure-120x36
+resize: 160x48
+live-snap: failure-160x48
+resize: 120x36
+keys: C-g
+type: logs
+keys: Enter
+require-live-snap: 20 LOGS | full-message-route
+paste-file: @ART/replace-command.txt
+keys: Enter
+require-live-snap: 25 Complete import is not claimed | partial-recorded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART partial
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | partial-receipt
+resize: 40x12
+require-live-snap: 20 Outcome · partial | partial-first-frame-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_reader_notice.py @TMP_TARGET @ART partial
+type: retained-note-42
+keys: Left Left Left
+require-live-snap: 20 retained-note-42 | retained-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_reader_notice.py @TMP_TARGET @ART before-route
+keys: C-g
+type: logs
+keys: Enter
+require-live-snap: 20 retained-note-42 | full-message-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_reader_notice.py @TMP_TARGET @ART after-route
+type: X
+require-live-snap: 20 retained-noteX-42 | retained-insertion-position
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_reader_notice.py @TMP_TARGET @ART insertion
+ask: Does the compact notice keep a usable route through the palette to Logs while preserving the typed draft and its cursor?
+keys: End C-u
+resize: 120x36
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | retained-partial
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART restarted
+ask: Does no-color restart preserve both original receipts without repeating work, with larger previews still readable?
+keys: C-c
+require-exit: 10

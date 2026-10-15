@@ -73,7 +73,11 @@ impl EditorState {
     }
 
     pub(crate) fn inspect_paste_at_cursor(&mut self) -> bool {
-        let Some(block) = self.paste_at_cursor().cloned() else {
+        let Some(block) = self
+            .paste_at_cursor()
+            .or_else(|| self.nearest_paste())
+            .cloned()
+        else {
             return false;
         };
         self.paste_inspection = Some(PasteInspection {
@@ -146,6 +150,14 @@ impl EditorState {
                     .iter()
                     .find(|block| block.range.end == self.cursor)
             })
+    }
+
+    fn nearest_paste(&self) -> Option<&PastedBlock> {
+        self.pasted_blocks.iter().min_by_key(|block| {
+            let distance = block.range.start.saturating_sub(self.cursor)
+                + self.cursor.saturating_sub(block.range.end);
+            (distance, block.range.start)
+        })
     }
 }
 

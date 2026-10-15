@@ -8,6 +8,10 @@ use crate::static_evidence::{
 };
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
+pub use engines::dep_hygiene::cargo_audit::config::{
+    DEFAULT_LOCKFILE_BYTES as DEFAULT_CARGO_AUDIT_LOCKFILE_BYTES,
+    DEFAULT_TIMEOUT_MS as DEFAULT_CARGO_AUDIT_JOB_TIMEOUT_MS,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -34,6 +38,10 @@ mod subprocess;
 /// Semgrep rejects its special `auto` selector when metrics are disabled. Kuzushi
 /// deliberately forces metrics off, so the default must name a concrete pack.
 pub(crate) const DEFAULT_SEMGREP_CONFIG: &str = "p/security-audit";
+
+pub const DEFAULT_SEMGREP_JOB_TIMEOUT_MS: u64 = 30 * 60 * 1000;
+pub const MAX_SEMGREP_JOB_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
+pub(crate) use engines::semgrep::ConfiguredSemgrepScanner;
 
 #[cfg(test)]
 mod tests;
@@ -80,10 +88,7 @@ pub use engines::sbom_scan::{
 };
 pub(in crate::scan) use engines::semgrep::*;
 pub(crate) use subprocess::configure_scanner_process_group;
-use subprocess::{
-    capture_scanner_process_pipes, configure_scanner_subprocess_env, join_scanner_process_readers,
-    wait_for_scanner_process, ProcessOutput, ScannerProcessOutput,
-};
+use subprocess::{configure_scanner_subprocess_env, ScannerProcessOutput};
 pub use subprocess::{
     CancellationDisposition, PreparedProcessGroup, RegisteredChild, ScanCancellation,
 };

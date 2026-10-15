@@ -64,6 +64,7 @@ fn append_view_hydration_keys(
 ) {
     match view {
         ShellView::Home => append_home_keys(app, keys),
+        ShellView::Catalog => append_catalog_executable_key(app, keys),
         ShellView::Recommend => append_recommendation_keys(app, keys),
         ShellView::Module => append_module_keys(app, keys),
         ShellView::Workbench => append_workbench_keys(app, workbench_page, keys),
@@ -92,6 +93,20 @@ fn append_view_hydration_keys(
             append_latest_run_keys(app, keys);
         }
         _ => {}
+    }
+}
+
+fn append_catalog_executable_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let Some(selected) = crate::ui_view_models::catalog_model(app).selected_action else {
+        return;
+    };
+    let requirements = selected.readiness.executables;
+    if !requirements.is_empty() {
+        keys.push(
+            app.workbench_cache()
+                .borrow()
+                .executable_options_key(requirements),
+        );
     }
 }
 

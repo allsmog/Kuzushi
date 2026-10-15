@@ -175,7 +175,7 @@ fn system_document_shell_view_lines(
             3,
         ),
         ShellView::Auth => auth_lines(app, area),
-        ShellView::Cost => cost_lines(app, area),
+        ShellView::Cost => default_scrolled_lines(app, area, cost_lines(app, area)),
         _ => return None,
     })
 }
@@ -283,6 +283,7 @@ mod tests {
             ShellView::Recommend,
             ShellView::Runs,
             ShellView::Context,
+            ShellView::Cost,
             ShellView::FailureHandoff,
             ShellView::ProjectModel,
             ShellView::StrategyQueue,

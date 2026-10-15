@@ -25,13 +25,22 @@ pub(in crate::modules) fn semgrep_module() -> BuiltinModule {
 fn semgrep_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
-        binary_option("Semgrep binary path."),
+        binary_option("Semgrep binary path.")
+            .default(json!(crate::scan::SemgrepScanner::default().binary)),
         scan_mode_option(),
         whitebox_static_option(),
         static_proof_state_option(),
         opt("config", OptionType::String, "Semgrep config name or path.")
             .aliases(&["configFlag", "config_flag"])
             .default(json!(crate::scan::DEFAULT_SEMGREP_CONFIG)),
+        opt("jobs", OptionType::Int, "Semgrep scan workers within this job. Additional supporting threads are outside this setting.")
+            .integer_range(1,256).default(json!(1)).advanced(),
+        opt("timeoutMs", OptionType::Int,
+            "Time allowance for Semgrep subprocess work across this job, in milliseconds. Deadline stops the process tree; unscanned work remains incomplete.")
+            .aliases(&["timeout_ms"])
+            .integer_range(1, crate::scan::MAX_SEMGREP_JOB_TIMEOUT_MS as i64)
+            .default(json!(crate::scan::DEFAULT_SEMGREP_JOB_TIMEOUT_MS))
+            .advanced(),
     ]
 }
 
@@ -49,12 +58,13 @@ pub(in crate::modules) fn codeql_module() -> BuiltinModule {
             ),
             vec![tool_with_options(
                 "codeql:scan",
-                "Run CodeQL and normalize semantic findings.",
+                "Experimental observations from an authenticated source-bound database and selected query suite. Raw database paths are refused. Coverage, locations and finding validity require review; this action does not complete Scan.",
                 codeql_options(),
-            )],
+            ).without_phase_result()],
         ),
         vec![dag("codeql:scan", "findings", &["context:build"])],
     )
+    .labs()
 }
 
 fn codeql_options() -> Vec<OptionSpec> {
@@ -64,7 +74,7 @@ fn codeql_options() -> Vec<OptionSpec> {
         scan_mode_option(),
         whitebox_static_option(),
         static_proof_state_option(),
-        opt("dbPath", OptionType::Path, "Existing CodeQL database path.")
+        opt("dbPath", OptionType::Path, "Authenticated managed database below the target's .kuzushi directory. Raw/unpromoted databases are refused; prepare with codeql:create-db.")
             .aliases(&["db_path"])
             .workspace_read()
             .advanced(),
@@ -78,8 +88,8 @@ fn codeql_options() -> Vec<OptionSpec> {
             .choices(&["default", "autobuild", "none"])
             .advanced(),
         opt("suite", OptionType::String, "CodeQL query suite.").advanced(),
-        opt("threads", OptionType::Int, "CodeQL worker thread count.").advanced(),
-        opt("ram", OptionType::Int, "CodeQL RAM budget in MB.").advanced(),
+        opt("threads", OptionType::Int, "Requested CodeQL threads, from 1 to 4294967295. Default one. This is separate from investigation worker count.").integer_range(1,u32::MAX as i64).default(json!(1)).advanced(),
+        opt("ram", OptionType::Int, "Requested CodeQL RAM in MB, from 1 to 4294967295. Unset uses the selected executable's allocation policy; no OS memory ceiling is enforced.").integer_range(1,u32::MAX as i64).advanced(),
         opt(
             "timeoutMs",
             OptionType::Int,
@@ -89,6 +99,7 @@ fn codeql_options() -> Vec<OptionSpec> {
         .default(json!(
             crate::scan::engines::codeql::DEFAULT_CODEQL_SCAN_TIMEOUT_MS
         ))
+        .integer_range(1,crate::scan::engines::codeql::MAX_CODEQL_SCAN_TIMEOUT_MS as i64)
         .advanced(),
     ];
     options.push(codeql_multi_language_option());
@@ -165,7 +176,7 @@ pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
             ),
             vec![tool_with_options(
                 "iac-scan:scan",
-                "Scan Terraform, Kubernetes, and related IaC manifests.",
+                "Read Dockerfiles, GitHub Actions and Terraform for configuration policy signals.",
                 iac_scan_options(),
             )],
         ),
@@ -176,26 +187,49 @@ pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
 fn iac_scan_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
-        opt("kind", OptionType::Enum, "IaC file family to scan.")
-            .choices(&[
-                "all",
-                "dockerfile",
-                "docker",
-                "github-actions",
-                "github_actions",
-                "actions",
-                "terraform",
-                "tf",
-            ])
-            .default(json!("all")),
+        iac_kind_option(),
         opt(
             "maxFileBytes",
             OptionType::Int,
             "Maximum file size to scan.",
         )
         .aliases(&["max_file_bytes"])
+        .integer_range(1024, 67_108_864)
         .default(json!(524288)),
+        opt(
+            "maxEntries",
+            OptionType::Int,
+            "Directory entry allowance for this inspection.",
+        )
+        .aliases(&["max_entries"])
+        .integer_range(1, 100_000)
+        .default(json!(100_000))
+        .advanced(),
+        opt(
+            "maxTotalBytes",
+            OptionType::Int,
+            "Maximum bytes read across selected IaC files, including truncation probes.",
+        )
+        .aliases(&["max_total_bytes"])
+        .integer_range(1024, 536_870_912)
+        .default(json!(536_870_912))
+        .advanced(),
     ]
+}
+
+fn iac_kind_option() -> OptionSpec {
+    opt("kind", OptionType::Enum, "IaC file family to scan.")
+        .choices(&[
+            "all",
+            "dockerfile",
+            "docker",
+            "github-actions",
+            "github_actions",
+            "actions",
+            "terraform",
+            "tf",
+        ])
+        .default(json!("all"))
 }
 
 pub(in crate::modules) fn cargo_audit_module() -> BuiltinModule {
@@ -212,8 +246,8 @@ pub(in crate::modules) fn cargo_audit_module() -> BuiltinModule {
             ),
             vec![tool_with_options(
                 "cargo-audit:scan",
-                "Run cargo audit and persist normalized findings.",
-                vec![target_option()],
+                "Inspect the selected directory Cargo.lock for dependency advisories. Nested lockfiles and source reachability are not inspected.",
+                cargo_audit_options(),
             )],
         ),
         vec![dag("cargo-audit:scan", "findings", &["context:build"])],
@@ -225,7 +259,7 @@ pub(in crate::modules) fn govulncheck_module() -> BuiltinModule {
         "govulncheck",
         "Govulncheck",
         ModuleKind::Defense,
-        "Run govulncheck against Go packages and persist reachable vulnerability findings.",
+        "Experimental Go advisory scanner. Source loading, network access and scope coverage remain unqualified.",
         tools_with_policy(
             workspace_policy(
                 ToolPhase::Scan,
@@ -234,9 +268,9 @@ pub(in crate::modules) fn govulncheck_module() -> BuiltinModule {
             ),
             vec![tool_with_options(
                 "govulncheck:scan",
-                "Run govulncheck and persist normalized Go vulnerability findings.",
+                "Experimental Go advisory scan. Module, package and symbol signals require owner review; runtime reachability is not established.",
                 vec![target_option()],
-            )],
+            ).with_discovery_maturity(ModuleMaturity::Labs)],
         ),
         vec![dag("govulncheck:scan", "findings", &["context:build"])],
     )
@@ -292,7 +326,7 @@ pub(in crate::modules) fn sbom_scan_module() -> BuiltinModule {
             vec![tool_with_options(
                 "sbom-scan:scan",
                 "Inventory declared and resolved dependencies. This produces no vulnerability findings or phase completion.",
-                vec![target_option()],
+                super::sbom::options(),
             ).without_phase_result()],
         ),
         vec![dag("sbom-scan:scan", "artifact", &["context:build"])],

@@ -1,5 +1,4 @@
 use super::*;
-use crate::bounded_file::read_source_text_prefix;
 
 pub(crate) fn generated_vendor_path(
     relative: &str,
@@ -80,11 +79,6 @@ pub(crate) fn generated_file(path: &str) -> bool {
         || path.ends_with(".g.rs")
         || path.contains("/generated/")
         || path.contains("/__generated__/")
-}
-
-pub(crate) fn read_text_prefix(path: &Path, max_bytes: usize) -> Result<Option<String>> {
-    read_source_text_prefix(path, max_bytes)
-        .with_context(|| format!("Could not read {}", path.display()))
 }
 
 pub(crate) fn repo_relative(root: &Path, path: &Path) -> String {

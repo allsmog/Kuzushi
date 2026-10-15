@@ -109,10 +109,21 @@ pub(crate) fn supporting_context_summary(input: &Value, text: Option<&str>) -> S
     if let Some(text) = text {
         return format!("Supplemental context: {} bytes recorded; JSON shows the exact text for the agentic adapter.", text.len());
     }
-    if input["scanContextRef"].is_null() {
+    frozen_context_omission(&input["scanContextRef"])
+}
+
+// Receipt loaders authenticate the referenced document before this projection.
+// A successful inspection with no text records an empty frozen snapshot.
+fn frozen_context_omission(reference: &Value) -> String {
+    if reference.is_null() {
         return "Supplemental context: explicitly omitted.".into();
     }
-    "Supplemental context: reference recorded, but exact text is unavailable.".into()
+    match serde_json::from_value::<kuzushi_core::scan::ScanContextRef>(reference.clone()) {
+        Ok(reference) if reference.schema_version == 1 => {
+            "Supplemental context: frozen snapshot contains no supplemental text.".into()
+        }
+        _ => "Supplemental context: reference recorded, but exact text is unavailable.".into(),
+    }
 }
 
 struct SourceCondition<'a> {

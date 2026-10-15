@@ -2,7 +2,7 @@
 import hashlib
 import json
 import os
-import sqlite3
+from secret_settings import ledger
 import subprocess
 import sys
 from pathlib import Path
@@ -88,7 +88,7 @@ def verify(root, evidence):
     path = root / ".kuzushi/v3/index.sqlite3"
     counts = {}
     if path.exists():
-        with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+        with ledger(root,evidence) as db:
             tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
             for name in ["finding_observations", "review_decisions", "investigation_call_reservations", "investigation_work_attempts"]:
                 counts[name] = db.execute("select count(*) from " + name).fetchone()[0] if name in tables else 0
@@ -97,13 +97,14 @@ def verify(root, evidence):
     save(evidence, "verified", {"counts":counts,"sourceUnchanged":True,"jobsStarted":0,"providerRequests":0,"activeThreatModelChanged":False})
 
 
-root, evidence = [Path(value).resolve() for value in sys.argv[1:3]]
-stage = sys.argv[3]
-if stage == "seed":
-    seed(root, evidence, Path(sys.argv[4]).resolve())
-elif stage == "first":
-    first(root, evidence)
-elif stage == "revised":
-    revised(root, evidence)
-else:
-    verify(root, evidence)
+if __name__ == "__main__":
+    root, evidence = [Path(value).resolve() for value in sys.argv[1:3]]
+    stage = sys.argv[3]
+    if stage == "seed":
+        seed(root, evidence, Path(sys.argv[4]).resolve())
+    elif stage == "first":
+        first(root, evidence)
+    elif stage == "revised":
+        revised(root, evidence)
+    else:
+        verify(root, evidence)

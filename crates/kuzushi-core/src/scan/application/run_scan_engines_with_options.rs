@@ -374,7 +374,7 @@ fn collect_scan_engine_output(
     index: usize,
 ) -> Result<()> {
     let result = scan_root_artifacts(root, scanner, cancellation).and_then(|mut result| {
-        rewrite_scoped_findings(root, &mut result.findings)?;
+        rewrite_scoped_findings(root, scanner, &mut result.findings)?;
         ensure_exact_observation_paths(root, &result.findings)?;
         Ok(result)
     });
@@ -509,9 +509,14 @@ fn bounded_scan_error_summary(scan_errors: &[String]) -> String {
     summaries.join("; ")
 }
 
-fn rewrite_scoped_findings(root: &ScanRoot, findings: &mut [Finding]) -> Result<()> {
+fn rewrite_scoped_findings(
+    root: &ScanRoot,
+    scanner: &dyn ScanEngine,
+    findings: &mut [Finding],
+) -> Result<()> {
     for finding in findings {
-        finding.file_path = prefixed_finding_path(root, &finding.file_path)?;
+        let file_path = prefixed_finding_path(root, &finding.file_path)?;
+        scanner.rebind_scoped_finding(finding, file_path);
     }
     Ok(())
 }

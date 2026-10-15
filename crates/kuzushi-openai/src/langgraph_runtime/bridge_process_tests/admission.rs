@@ -23,6 +23,76 @@ fn assert_allowance_refusal(error: anyhow::Error) {
 }
 
 #[test]
+fn unbound_native_query_stops_before_bridge_or_provider_work() {
+    let fixture = Fixture::new("loop", 3, 1);
+    assert_allowance_refusal(
+        fixture
+            .runtime
+            .query_blocking(fixture.request(false))
+            .unwrap_err(),
+    );
+    assert!(!fixture.root.path().join("bridge-starts").exists());
+    assert_eq!(fixture.provider_calls(), 0);
+    assert_eq!(
+        fixture
+            .ledger
+            .allowance_snapshot("offline-study")
+            .unwrap()
+            .committed_calls,
+        0
+    );
+}
+
+#[test]
+fn unbound_native_next_step_and_loop_preflight_start_no_bridge() {
+    let fixture = Fixture::new("loop", 3, 1);
+    let request = offline_loop_request(&fixture);
+    assert_allowance_refusal(
+        fixture
+            .runtime
+            .next_step_blocking(&request, &[])
+            .unwrap_err(),
+    );
+    assert_allowance_refusal(
+        fixture
+            .runtime
+            .preflight_tool_loop_blocking(&request)
+            .unwrap_err(),
+    );
+    assert!(!fixture.root.path().join("bridge-starts").exists());
+    assert_eq!(fixture.provider_calls(), 0);
+    assert_eq!(
+        fixture
+            .ledger
+            .allowance_snapshot("offline-study")
+            .unwrap()
+            .committed_calls,
+        0
+    );
+}
+
+#[test]
+fn credential_readiness_remains_available_without_a_model_allowance() {
+    let fixture = Fixture::new("loop", 3, 1);
+    fixture.runtime.preflight_model_blocking(MODEL).unwrap();
+    assert!(!fixture.root.path().join("bridge-starts").exists());
+    assert_eq!(fixture.provider_calls(), 0);
+}
+
+fn offline_loop_request(fixture: &Fixture) -> kuzushi_core::AgentToolLoopRequest {
+    kuzushi_core::AgentToolLoopRequest {
+        model: MODEL.into(),
+        cwd: fixture.root.path().into(),
+        system_prompt: "Offline accounting test".into(),
+        prompt: "Inspect source only".into(),
+        tools: vec![],
+        max_steps: 1,
+        temperature: None,
+        runtime_options: Default::default(),
+    }
+}
+
+#[test]
 fn admission_counts_internal_model_turns_and_preserves_review_calls() {
     let fixture = Fixture::new("loop", 3, 1);
     assert_allowance_refusal(fixture.query(true).unwrap_err());

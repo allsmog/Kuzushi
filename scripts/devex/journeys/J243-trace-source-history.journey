@@ -1,0 +1,66 @@
+name: A recorded expansion keeps its own source claims and preserves earlier history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NODE_OPTIONS NO_COLOR KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/trace_source_history.py seed @TMP_TARGET @ART
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+paste-file: @ART/open-trace-finding.txt
+keys: Enter
+require-live-snap: 20 FINDING · Esc then Y | selected-finding
+require-live-snap: 20 Viewing Review | review-reader
+nav-mode:
+keys: t
+require-live-snap: 20 CURRENT GREETING CLAIM | current-trace
+expect: data flow needs independent review
+expect: tool-current-trace
+expect: source unchanged
+expect-not: EARLIER GREETING CLAIM
+ask: Does Review clearly show only the authenticated last expansion, its source receipt and unverified claims, without upgrading the finding or starting work?
+resize: 160x48
+live-snap: trace-160x48
+resize: 96x89
+live-snap: trace-96x89
+resize: 80x24
+live-snap: trace-80x24
+resize: 60x20
+live-snap: trace-60x20
+resize: 40x12
+live-snap: trace-top-40x12
+keys: NPage
+live-snap: trace-page-1-40x12
+keys: NPage
+require-live-snap: 20 CURRENT GREETING CLAIM | current-claim-40x12
+expect-not: EARLIER GREETING CLAIM
+ask: Can the operator page through the source receipt and its claim warning at every size, with local reading and back controls intact?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 Viewing Review | back-to-reader
+keys: Escape
+paste-file: @ART/earlier-replay.txt
+require-live-snap: 20 replay tool-earlier-trace | replay-command
+keys: Enter
+require-live-snap: 20 EARLIER GREETING CLAIM | earlier-receipt
+expect: tool-earlier-trace
+require-shell: python3 -B @REPO/scripts/devex/fixtures/trace_source_history.py inspected @TMP_TARGET @ART
+ask: Is the earlier source receipt still independently readable in Replay without being merged into the latest trace?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/open-trace-finding.txt
+keys: Enter
+require-live-snap: 20 FINDING · Esc then Y | selected-after-restart
+require-live-snap: 20 Viewing Review | review-reader-restarted
+nav-mode:
+keys: t
+require-live-snap: 20 CURRENT GREETING CLAIM | recovered-trace
+expect: data flow needs independent review
+expect-not: EARLIER GREETING CLAIM
+require-shell: python3 -B @REPO/scripts/devex/fixtures/trace_source_history.py restart @TMP_TARGET @ART
+ask: Does no-color restart preserve the exact latest trace, earlier receipts, source, active context and human decision with zero requests?
+keys: C-c
+require-exit: 10

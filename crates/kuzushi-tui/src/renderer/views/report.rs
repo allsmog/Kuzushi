@@ -5,26 +5,44 @@ pub(crate) fn report_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if route.editing_path() {
         return report_path_editor_lines(route, area);
     }
-    let mut lines = vec![report_selection_line(route, area.width)];
+    let mut lines = report_reader_header(app, area.width);
     lines.extend(viewport_lines(
         report_document_lines(app, area),
-        area.height.saturating_sub(1),
+        report_reader_height(app, area.height),
         app.router.default_scroll().offset() as usize,
     ));
     lines
 }
 
+fn report_reader_header(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let route = app.router.report();
+    let mut lines = vec![
+        report_selection_line(route, width),
+        Line::styled(
+            fit_path(route.path_draft(), width as usize),
+            theme::accent(),
+        ),
+    ];
+    if let Some(notice) = crate::ui_view_models::report_source_notice(app) {
+        lines.push(Line::styled(fit(notice, width as usize), theme::warn()));
+    }
+    lines
+}
+
+fn report_reader_height(app: &ShellApp, height: u16) -> u16 {
+    let notice_rows = u16::from(crate::ui_view_models::report_source_notice(app).is_some());
+    height.saturating_sub(2 + notice_rows)
+}
+
 fn report_selection_line(route: &crate::app::ReportRouteState, width: u16) -> Line<'static> {
     let prefix = format!(
-        "{} · {} · ",
+        "format {} ({}/{}) · {}",
         route.format().as_str(),
+        route.format_index() + 1,
+        crate::app::ReportRouteState::FORMATS.len(),
         route.completeness().as_str()
     );
-    let path = fit_path(
-        route.path_draft(),
-        (width as usize).saturating_sub(prefix.chars().count()),
-    );
-    Line::styled(format!("{prefix}{path}"), theme::accent())
+    Line::styled(fit(&prefix, width as usize), theme::accent())
 }
 
 fn report_document_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -61,18 +79,24 @@ pub(crate) fn report_offset_after_page(app: &ShellApp, direction: isize) -> usiz
     let viewport = app.viewport();
     let area =
         crate::renderer::primary_body_area(app, Rect::new(0, 0, viewport.columns, viewport.rows));
+    let reader_height = report_reader_height(app, area.height);
     let maximum = report_document_lines(app, area)
         .len()
-        .saturating_sub(area.height.saturating_sub(1) as usize);
+        .saturating_sub(reader_height as usize);
     let start = (app.router.default_scroll().offset() as usize).min(maximum);
-    let step = area.height.saturating_sub(2).max(1) as isize;
+    let step = reader_height.saturating_sub(1).max(1) as isize;
     start.saturating_add_signed(direction * step).min(maximum)
 }
 
 fn report_header_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines = context_strip(app, area);
-    lines.push(blank());
-    lines.push(divider("REPORT", area.width));
+    let title = app
+        .target()
+        .and_then(std::path::Path::file_name)
+        .map_or_else(
+            || "REPORT".into(),
+            |name| format!("REPORT · {}", name.to_string_lossy()),
+        );
+    let mut lines = vec![divider(&title, area.width)];
     append_wrapped(
         &mut lines,
         &crate::ui_view_models::report_review_summary(app),
@@ -101,6 +125,11 @@ fn append_report_formats(
     append_wrapped(
         lines,
         "sarif · markdown-bundle · jsonl · json · csv · vuln-findings",
+        width,
+    );
+    append_wrapped(
+        lines,
+        crate::ui_view_models::report_source_history_coverage(route.format()),
         width,
     );
 }
@@ -224,8 +253,38 @@ fn report_actions(receipt: Option<&crate::app::ReportReceipt>) -> [&'static str;
 }
 
 #[cfg(test)]
+mod source_tests;
+
+#[cfg(test)]
 mod selection_tests {
     use super::*;
+
+    #[test]
+    fn every_format_retains_its_destination_at_every_width_and_scroll() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(crate::app::ShellView::Report);
+        for _ in crate::app::ReportRouteState::FORMATS {
+            for width in [40, 60, 80, 96, 120, 160] {
+                for offset in [0, 10, u16::MAX] {
+                    app.router.default_scroll_mut().set(offset);
+                    let lines = report_lines(&app, Rect::new(0, 0, width, 8));
+                    let route = app.router.report();
+                    let filename = std::path::Path::new(route.path_draft())
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy();
+                    assert!(lines[0].to_string().contains(route.format().as_str()));
+                    assert!(lines[1]
+                        .to_string()
+                        .trim_end_matches('/')
+                        .ends_with(filename.as_ref()));
+                    assert!(lines.len() <= 8);
+                    assert!(lines.iter().all(|line| line.width() <= width as usize));
+                }
+            }
+            app.router.report_mut().move_format(1);
+        }
+    }
 
     #[test]
     fn report_format_and_destination_remain_visible_while_paging_at_every_width() {
@@ -237,8 +296,11 @@ mod selection_tests {
                 app.router.default_scroll_mut().set(offset);
                 let lines = report_lines(&app, Rect::new(0, 0, width, 8));
                 let text = lines[0].to_string();
-                assert!(text.starts_with("json · all ·"), "{width}: {text}");
-                assert!(text.contains("findings.json"), "{width}: {text}");
+                assert!(
+                    text.starts_with("format json (4/6) · all"),
+                    "{width}: {text}"
+                );
+                assert!(lines[1].to_string().contains("findings.json"));
                 assert!(text.chars().count() <= width as usize);
             }
         }

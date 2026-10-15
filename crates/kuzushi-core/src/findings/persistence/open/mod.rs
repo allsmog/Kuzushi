@@ -23,6 +23,7 @@ mod refutation_reporting;
 mod relationships;
 mod rescan_reconciliation;
 mod review_decisions;
+mod review_source;
 pub use relationships::FindingRelationshipPage;
 mod run_lifecycle;
 mod static_proof_history;

@@ -41,6 +41,79 @@ fn reject(app: &mut ShellApp) -> Vec<ShellEffect> {
 }
 
 #[test]
+fn unstarted_allowance_refusal_retains_question_and_persists_blocked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = failing_app(tmp.path());
+    record_agent_run_started(
+        Some(tmp.path()),
+        "agent-recovery",
+        &serde_json::json!({}),
+        "openai:operator-selected".into(),
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+    let audit = AgentCallAudit::test().with_failure(&anyhow::Error::new(RuntimeFailure::new(
+        RuntimeFailureMetadata::new(Class::AllowanceRefused, None, None),
+    )));
+    let effects = app.apply_agent_event(AgentEvent::Failed {
+        error: "private ledger detail".into(),
+        audit,
+    });
+    assert_eq!(app.router.answers().draft.text(), "Explain the boundary");
+    assert_eq!(app.router.answers().focus, AnswerFocus::Reading);
+    assert!(app
+        .agent_chat()
+        .unwrap()
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("No provider request started"));
+    let [ShellEffect::RecordAgentRun(record)] = effects.as_slice() else {
+        panic!("one blocked record required")
+    };
+    assert!(matches!(
+        record.outcome,
+        crate::app::AgentRunOutcome::Blocked { .. }
+    ));
+    assert_eq!(record.audit.settlement_cost().exact_usd(), Some(0.0));
+    EffectRuntime::execute(&mut app, effects);
+    let summary = kuzushi_core::load_run_summary(tmp.path(), "agent-recovery").unwrap();
+    assert_eq!(summary.status, "blocked");
+    let read =
+        kuzushi_core::run_lifecycle::load_run_projection(tmp.path(), "agent-recovery").unwrap();
+    assert_eq!(
+        read.projection.terminal.unwrap().status,
+        kuzushi_core::run_lifecycle::RunItemStatus::Blocked
+    );
+}
+
+#[test]
+fn allowance_failure_after_attempted_work_retains_failure_and_uncertain_cost() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = failing_app(tmp.path());
+    let effects = app.apply_agent_event(AgentEvent::Failed {
+        error: "spent request followed by a refused retry".into(),
+        audit: failure_audit(Class::AllowanceRefused, 429),
+    });
+    let [ShellEffect::RecordAgentRun(record)] = effects.as_slice() else {
+        panic!("one failure record required")
+    };
+    assert!(matches!(
+        record.outcome,
+        crate::app::AgentRunOutcome::Failed { .. }
+    ));
+    assert!(!record.audit.settlement_cost().is_complete());
+    assert!(!app
+        .agent_chat()
+        .unwrap()
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("No provider request started"));
+}
+
+#[test]
 fn answers_failure_keeps_http_cause_draft_focus_model_and_cost_truth() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = failing_app(tmp.path());

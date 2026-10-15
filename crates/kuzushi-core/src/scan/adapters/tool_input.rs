@@ -7,8 +7,7 @@ impl SemgrepScanner {
             .get("binary")
             .or_else(|| input.get("scannerBin"))
             .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
+            .filter(|value| !value.trim().is_empty())
         {
             scanner.binary = binary.to_string();
         }
@@ -39,7 +38,22 @@ impl SemgrepScanner {
         target: &Path,
         cancel: &ScanCancellation,
     ) -> Result<SemgrepScanOutcome> {
-        let (output, status) = self.run_semgrep_process(target, cancel)?;
+        self.scan_outcome_with_timeout(
+            target,
+            cancel,
+            std::time::Duration::from_millis(DEFAULT_SEMGREP_JOB_TIMEOUT_MS),
+            1,
+        )
+    }
+
+    pub(in crate::scan) fn scan_outcome_with_timeout(
+        &self,
+        target: &Path,
+        cancel: &ScanCancellation,
+        timeout: std::time::Duration,
+        jobs: usize,
+    ) -> Result<SemgrepScanOutcome> {
+        let (output, status) = self.run_semgrep_process(target, cancel, timeout, jobs)?;
         self.parse_semgrep_outcome(output, status)
     }
 
@@ -63,50 +77,25 @@ impl SemgrepScanner {
         &self,
         target: &Path,
         cancel: &ScanCancellation,
+        timeout: std::time::Duration,
+        jobs: usize,
     ) -> Result<(ScannerProcessOutput, ExitStatus)> {
         if cancel.is_cancelled() {
             anyhow::bail!("semgrep scan cancelled");
         }
 
-        let mut command = self.semgrep_command(target);
-        self.run_semgrep_command(&mut command, cancel)
+        let mut command = self.semgrep_command_with_jobs(target, jobs);
+        self.run_semgrep_command_with_timeout(&mut command, cancel, timeout)
     }
 
-    pub(super) fn run_semgrep_command(
-        &self,
-        command: &mut Command,
-        cancel: &ScanCancellation,
-    ) -> Result<(ScannerProcessOutput, ExitStatus)> {
-        if cancel.is_cancelled() {
-            anyhow::bail!("semgrep scan cancelled");
-        }
-        let process_group = configure_scanner_process_group(command)?;
-
-        let mut child = command.spawn().map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                semgrep_missing_binary_error(&self.binary)
-            } else {
-                anyhow::anyhow!(
-                    "semgrep: could not start scanner {:?}: {error}",
-                    self.binary
-                )
-            }
-        })?;
-        let readers = capture_scanner_process_pipes(&mut child, "semgrep")?;
-        let child = cancel.register_prepared_child(child, process_group)?;
-        let status = wait_for_scanner_process(&child, cancel)?;
-        let output = join_scanner_process_readers(readers, "semgrep")?;
-
-        let Some(status) = status else {
-            anyhow::bail!("semgrep scan cancelled");
-        };
-
-        Ok((output, status))
-    }
-
+    #[cfg(test)]
     pub(in crate::scan) fn semgrep_command(&self, target: &Path) -> Command {
+        self.semgrep_command_with_jobs(target, 1)
+    }
+
+    fn semgrep_command_with_jobs(&self, target: &Path, jobs: usize) -> Command {
         let mut command = self.semgrep_base_command(target);
-        command.arg(".");
+        command.args(["--jobs", &jobs.to_string()]).arg(".");
         command
     }
 
@@ -120,6 +109,7 @@ impl SemgrepScanner {
         // and keep returned paths compatible with the findings ledger.
         command
             .current_dir(target)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         configure_scanner_subprocess_env(&mut command);

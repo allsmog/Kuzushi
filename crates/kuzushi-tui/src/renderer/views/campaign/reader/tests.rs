@@ -2,6 +2,8 @@ use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::V2Config;
 use ratatui::{backend::TestBackend, Terminal};
+mod job_detail;
+mod progress;
 
 fn reader(width: u16, height: u16) -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -121,6 +123,17 @@ fn large_fixed_job_controls_and_keyboard_selection_remain_visible() {
             draw(&app).contains("work paused"),
             "Paused guidance hidden at {width}x{height}"
         );
+        for job in &mut app.router.campaign_mut().campaigns[0].jobs {
+            job.state = "failed".into();
+            job.attempts = 1;
+        }
+        let screen = draw(&app);
+        assert!(screen.contains("work ended"), "{width}x{height}: {screen}");
+        assert!(
+            screen.contains("new work needs a new plan"),
+            "{width}x{height}: {screen}"
+        );
+        assert!(!screen.contains("L resume"), "{width}x{height}: {screen}");
     }
 }
 

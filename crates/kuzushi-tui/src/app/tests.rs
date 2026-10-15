@@ -1,5 +1,8 @@
 use super::*;
+mod agentic_dispatch;
+mod cargo_audit_dispatch;
 mod compact_map_summary;
+mod prepared_dispatch;
 mod prove_result_reading;
 use crate::ui_view_models::PhaseSurfaceId;
 
@@ -404,15 +407,13 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
 }
 
 #[test]
-fn taint_iris_next_run_dot_uses_split_public_default_tool() {
+fn taint_iris_next_module_requires_explicit_action_when_primary_is_experimental() {
     let mut app = ShellApp::new(V2Config::default(), None);
 
     run_command(&mut app, ShellCommand::Use("taint-iris-next".to_string()));
 
-    assert_eq!(
-        app.default_tool_for_focused_module().as_deref(),
-        Some("taint-iris-next:dataflow-plan")
-    );
+    assert_eq!(app.default_tool_for_focused_module(), None);
+    assert_eq!(app.default_tool_for_run_command(), None);
     assert!(app
         .registry()
         .resolve_tool("taint-iris-next:hunt")
@@ -446,6 +447,10 @@ fn prereq_plan_cancel_aborts_chain_before_dispatch() {
         app.engagement.has_pending_chain(),
         "c must not mean cancel here"
     );
+    assert_eq!(app.input(), "c");
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(app.engagement.has_pending_prereq_prompt());
+    assert!(app.input().is_empty());
 
     press_key(
         &mut app,
@@ -508,7 +513,12 @@ fn cached_prereq_reuse_skips_prereq_and_dispatches_final_tool() {
         KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.running_tool_name(), Some("findings:list"));
+    assert_eq!(
+        app.running_tool_name(),
+        Some("findings:list"),
+        "{:?}",
+        app.log_lines()
+    );
     assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "system" && line.body.contains("reusing cached context snapshot")
@@ -607,7 +617,7 @@ fn live_activity_phase_labels_cover_long_running_states() {
             "partial",
             "skipped",
             "failed",
-            "refused",
+            "blocked",
             "completed"
         ]
     );
@@ -668,6 +678,32 @@ fn background_tool_sets_structured_live_activity_and_transcript_line() {
     assert!(app
         .live_activity()
         .is_some_and(|activity| activity.phase == LiveActivityPhase::Completed));
+}
+
+#[test]
+fn deterministic_map_activity_does_not_claim_a_model_call() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("owned.txt"),
+        "Owned inert context fixture.\n",
+    )
+    .unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.start_background_tool(
+        "threat-model:build".to_string(),
+        serde_json::json!({"pipeline":"deterministic","offline":true,"variantScan":false}),
+        workspace,
+        tool_run_status("threat-model:build"),
+        None,
+    );
+    let activity = app.live_activity().unwrap();
+    assert_eq!(activity.phase, LiveActivityPhase::RunningTool);
+    assert_eq!(activity.detail, "running tool");
+    drain_tool(&mut app);
+    assert!(!app.log_lines().iter().any(|line| {
+        line.body.contains("calling model") || line.body.contains("asking model-backed tool")
+    }));
 }
 
 #[test]
@@ -809,7 +845,6 @@ fn terminal_tool_events_keep_the_activity_on_its_launch_phase() {
                 proof_backed: 0,
                 remediated: 0,
                 remediation_projection_complete: true,
-                durable_scan_evidence: false,
             });
         app.engagement.clear_phase();
 
@@ -856,6 +891,12 @@ fn first_map_run_chip_never_reads_scan_before_its_terminal_event() {
     app.set_active_tool_run_id_for_test("map-run-1");
     app.set_running_tool_for_test("context:build");
     app.set_shell_view(ShellView::Activity);
+
+    // A fresh target retains Setup ownership until Start Map commits its plan.
+    assert!(crate::ui_view_models::journey_footer_segment(&app).is_none());
+    app.engagement
+        .planning_picker_mut()
+        .set_return_to_setup(false);
 
     let mut chips = vec![crate::ui_view_models::journey_footer_segment(&app)];
 
@@ -1115,23 +1156,9 @@ OUT
 
 #[cfg(unix)]
 fn fake_triage_bridge(dir: &PathBuf) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("triage-bridge.sh");
-    fs::write(
-            &binary,
-            r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"verdict":"true_positive","confidence":0.91,"rationale":"mock shell bridge"}}
-JSON
-"#,
-        )
-        .unwrap();
-    let mut permissions = fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    prepared_dispatch::admitted_fixture_bridge(
+        dir, "triage", serde_json::from_str(r#"{"ok":true,"structured":{"verdict":"true_positive","confidence":0.91,"rationale":"mock shell bridge"}}"#).unwrap(),
+    )
 }
 
 #[cfg(unix)]
@@ -1167,27 +1194,6 @@ exit 0
 "#,
     )
     .unwrap();
-    let mut permissions = fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&binary, permissions).unwrap();
-    binary
-}
-
-#[cfg(unix)]
-fn fake_agentic_bridge(dir: &PathBuf) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("agentic-bridge.sh");
-    fs::write(
-            &binary,
-            r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"findings":[{"ruleId":"agentic/sql-injection","filePath":"src/db.ts","startLine":1,"severity":"ERROR","message":"User input reaches SQL query","confidence":"HIGH","evidence":"Source: req.query.q -> sink: db.query"}]}}
-JSON
-"#,
-        )
-        .unwrap();
     let mut permissions = fs::metadata(&binary).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&binary, permissions).unwrap();
@@ -1258,31 +1264,13 @@ fn seed_true_positive_finding(workspace: &WorkspaceTarget) -> String {
 
 #[cfg(unix)]
 fn fake_ndiff_bridge(dir: &PathBuf) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("ndiff-bridge.sh");
-    fs::write(
-            &binary,
-            r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"N-day variant hunter"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"variants":[{"filePath":"src/parser.c","startLine":7,"severity":"ERROR","message":"memcpy without bounds check","confidence":"HIGH","rationale":"length reaches memcpy","cwe":["CWE-787"]}]}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected ndiff request"}'
-    exit 1
-    ;;
-esac
-"#,
-        )
-        .unwrap();
-    let mut permissions = fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    prepared_dispatch::admitted_fixture_bridge(
+        dir,
+        "ndiff",
+        serde_json::json!({
+            "ok":true,"structured":{"variants":[{"filePath":"src/parser.c","startLine":7,"severity":"ERROR","message":"memcpy without bounds check","confidence":"HIGH","rationale":"length reaches memcpy","cwe":["CWE-787"]}]}
+        }),
+    )
 }
 
 #[cfg(unix)]
@@ -1595,23 +1583,9 @@ fn assert_git_repo_clean(dir: &PathBuf) {
 
 #[cfg(unix)]
 fn fake_threat_model_bridge(dir: &PathBuf) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("threat-model-bridge.sh");
-    fs::write(
-            &binary,
-            r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"document":{"version":"2.0","dfd":{"nodes":[{"id":"actor-user","type":"external-entity","name":"User","description":"External user","trustZone":"external"},{"id":"web","type":"process","name":"Web","description":"Web app","trustZone":"internal"}],"flows":[{"id":"flow-1","description":"request","sourceId":"actor-user","targetId":"web","trustBoundaryIds":["tb-1"]}],"trustBoundaries":[{"id":"tb-1","name":"edge","innerZone":"internal","outerZone":"external","crossingFlowIds":["flow-1"]}]},"threats":[{"id":"T-001","targetElementIds":["web"],"category":"spoofing","title":"Spoofed login","description":"stolen token","attackVector":"token theft","preconditions":[],"impact":"high","likelihood":"medium","existingMitigations":[],"missingMitigations":["bind sessions"],"relatedCwe":["CWE-287"],"affectedFiles":[{"filePath":"src/auth.ts","startLine":1}]}],"summary":{"total":1,"bySeverity":{"high":1},"byCategory":{"spoofing":1}}}}}
-JSON
-"#,
-        )
-        .unwrap();
-    let mut permissions = fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&binary, permissions).unwrap();
-    binary
+    prepared_dispatch::admitted_fixture_bridge(
+        dir, "threat_model", serde_json::from_str(r#"{"ok":true,"structured":{"document":{"version":"2.0","dfd":{"nodes":[{"id":"actor-user","type":"external-entity","name":"User","description":"External user","trustZone":"external"},{"id":"web","type":"process","name":"Web","description":"Web app","trustZone":"internal"}],"flows":[{"id":"flow-1","description":"request","sourceId":"actor-user","targetId":"web","trustBoundaryIds":["tb-1"]}],"trustBoundaries":[{"id":"tb-1","name":"edge","innerZone":"internal","outerZone":"external","crossingFlowIds":["flow-1"]}]},"threats":[{"id":"T-001","targetElementIds":["web"],"category":"spoofing","title":"Spoofed login","description":"stolen token","attackVector":"token theft","preconditions":[],"impact":"high","likelihood":"medium","existingMitigations":[],"missingMitigations":["bind sessions"],"relatedCwe":["CWE-287"],"affectedFiles":[{"filePath":"src/auth.ts","startLine":1}]}],"summary":{"total":1,"bySeverity":{"high":1},"byCategory":{"spoofing":1}}}}}"#).unwrap(),
+    )
 }
 
 #[cfg(unix)]
@@ -2264,9 +2238,9 @@ fn full_command_reducer_defers_guided_pipeline_open_to_effect_runtime() {
         app.target().and_then(|path| path.canonicalize().ok()),
         temp.path().canonicalize().ok()
     );
-    assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
-    assert!(app.guided_scan_question_is_open());
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.engagement.current_phase(), None);
+    assert!(!app.guided_scan_question_is_open());
     assert!(!app.jobs().is_running(JobKind::Run));
 }
 
@@ -2305,118 +2279,33 @@ fn scan_prepare_effect_returns_start_effect_without_spawning_worker() {
 }
 
 #[test]
-fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
-    let _env_lock = env_test_lock();
-    let _key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
+fn ask_reducer_prepares_one_question_without_spawning_worker() {
     let target = tempfile::tempdir().unwrap();
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-5.5".to_string());
-    let mut app = ShellApp::new(config, None);
-    app.set_target(Some(target.path().to_path_buf()));
+    crate::test_support::record_imported_test_map(target.path(), "accepted-map");
+    persist_selected_test_phase_attempt(target.path(), WorkflowPhase::Map, "accepted-map");
+    let mut app = ShellApp::new(
+        V2Config {
+            model: Some("openai:gpt-5.5".into()),
+            ..Default::default()
+        },
+        None,
+    );
+    app.set_target(Some(target.path().into()));
+    app.session_mut().mark_session_api_key_ready("openai");
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
 
     let effects = app.reduce_ask_agent(&AskRequest::screen("What should I run first?"));
 
-    assert_eq!(effects.len(), 1);
-    match effects.into_iter().next().unwrap() {
-        ShellEffect::DispatchAgent(_) => {}
-        ShellEffect::ApplyReviewedPatch(_)
-        | ShellEffect::ApplySastTaskOptions(_)
-        | ShellEffect::ApplyThreatPatch(_)
-        | ShellEffect::AuthLogin(_)
-        | ShellEffect::ActivateTarget(_)
-        | ShellEffect::AdvancePrereqChain(_)
-        | ShellEffect::AbortForBudget
-        | ShellEffect::CancelActiveJobs
-        | ShellEffect::CancelJob(_)
-        | ShellEffect::FinalizeJob(_)
-        | ShellEffect::ClearConversation
-        | ShellEffect::ContinuePastBudget
-        | ShellEffect::ShowKnowledgeBase(_)
-        | ShellEffect::AttachKnowledgeBaseSource(_)
-        | ShellEffect::DetachKnowledgeBaseSource(_)
-        | ShellEffect::ReparseKnowledgeBaseSource(_)
-        | ShellEffect::OpenActivity(_)
-        | ShellEffect::OpenFilePicker
-        | ShellEffect::OpenGuidedScan(_)
-        | ShellEffect::OpenPromptDocument(_)
-        | ShellEffect::PrepareScan(_)
-        | ShellEffect::PrepareRunTool(_)
-        | ShellEffect::DispatchRunTool(_)
-        | ShellEffect::DispatchNextPlanningTask(_)
-        | ShellEffect::RefreshDeterministicRecommendations(_)
-        | ShellEffect::DiffPromptOverride(_)
-        | ShellEffect::EditPromptOverride(_)
-        | ShellEffect::ListPromptOverrides(_)
-        | ShellEffect::LoadDynamicModule(_)
-        | ShellEffect::PauseActiveWork
-        | ShellEffect::PersistCommandHistory
-        | ShellEffect::PersistGlobalModelSelection(_)
-        | ShellEffect::PersistPlanningOptionOverride(_)
-        | ShellEffect::PersistOptions(_)
-        | ShellEffect::ResetPromptOverride(_)
-        | ShellEffect::ResumeCredentialContinuation
-        | ShellEffect::ResumeSession(_)
-        | ShellEffect::RequestExitAbort
-        | ShellEffect::RequestShellQuit
-        | ShellEffect::Quit
-        | ShellEffect::FinishShellQuit
-        | ShellEffect::RecordAgentRun(_)
-        | ShellEffect::RecordPromptMutation(_)
-        | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordToolRun(_)
-        | ShellEffect::RecordReviewDecision(_)
-        | ShellEffect::RecordReviewSessionStart(_)
-        | ShellEffect::ScoreReviewYieldQueue(_)
-        | ShellEffect::RecordProofDeferral(_)
-        | ShellEffect::RecordSuppression(_)
-        | ShellEffect::ResetHouseRules(_)
-        | ShellEffect::RefreshContextView
-        | ShellEffect::RefreshFindings(_)
-        | ShellEffect::RefreshHouseRules(_)
-        | ShellEffect::ReportFilteredFindingMovement(_)
-        | ShellEffect::FinalizeGuidedScanOpen
-        | ShellEffect::FinalizeWorkbenchOpen(_)
-        | ShellEffect::FinalizeOpenFinding(_)
-        | ShellEffect::FinalizeSastTaskCommand(_)
-        | ShellEffect::HydrateSceneSnapshots(_)
-        | ShellEffect::FinalizeScanCompletion(_)
-        | ShellEffect::RefreshPwnState
-        | ShellEffect::RefreshProgramScope
-        | ShellEffect::OpenFinding(_)
-        | ShellEffect::OpenRunArtifact(_)
-        | ShellEffect::SelectComponent(_)
-        | ShellEffect::BuildContext(_)
-        | ShellEffect::FireNextApprovedStrategy(_)
-        | ShellEffect::RecordStrategyCorrection(_)
-        | ShellEffect::UpdateStrategyProposalStatus(_)
-        | ShellEffect::SetSessionEnv(_)
-        | ShellEffect::ShowAuthStatus(_)
-        | ShellEffect::ShowContextStatus
-        | ShellEffect::ShowHouseRules(_)
-        | ShellEffect::ShowPromptOverride(_)
-        | ShellEffect::ShowWorkspaceStatus
-        | ShellEffect::StartOfflineDemoFixtureScan
-        | ShellEffect::StartPlanner(_)
-        | ShellEffect::StartScan(_)
-        | ShellEffect::StartThreat(_)
-        | ShellEffect::SwitchTargetRevision(_)
-        | ShellEffect::UpdatePromptMutationStatus(_)
-        | ShellEffect::WaitForAbortCleanup
-        | ShellEffect::ExportReport(_)
-        | ShellEffect::PersistReportChoices
-        | ShellEffect::RevealReportDestination
-        | ShellEffect::WorkspaceExportFindings(_)
-        | ShellEffect::WorkspaceReindex(_)
-        | ShellEffect::WorkspaceScopeInit(_)
-        | ShellEffect::WriteHouseRules(_)
-        | ShellEffect::WritePromptOverride(_) => {
-            panic!("expected agent dispatch effect")
-        }
-    }
-    assert!(app.agent_chat().is_none());
-    assert!(!app.jobs().is_running(JobKind::Agent));
+    assert!(effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    let plan = app.context_generation().expect("question plan");
+    assert!(plan.is_question());
+    assert_eq!(plan.context_input["question"], "What should I run first?");
+    assert!(plan.context_input["threatModelRef"].is_object());
+    assert!(plan.receipt.is_none());
+    assert!(!app.has_running_work());
     assert!(app.live_activity().is_none());
-    assert!(!app.log_lines().iter().any(|line| line.prefix == "agent"));
 }
 
 #[test]
@@ -2476,7 +2365,7 @@ fn ask_reducer_refuses_known_missing_credentials_before_dispatch() {
 }
 
 #[test]
-fn planner_reducer_returns_start_effect_without_spawning_worker() {
+fn planner_reducer_opens_an_unapproved_fixed_study_without_starting_model_work() {
     let target = tempfile::tempdir().unwrap();
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-5.5".to_string());
@@ -2485,314 +2374,46 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
 
     let effects = app.reduce_planner_start("tighten module option policy");
 
-    assert_eq!(effects.len(), 1);
-    match effects.into_iter().next().unwrap() {
-        ShellEffect::StartPlanner(_) => {}
-        ShellEffect::ApplyReviewedPatch(_)
-        | ShellEffect::ApplySastTaskOptions(_)
-        | ShellEffect::ApplyThreatPatch(_)
-        | ShellEffect::AuthLogin(_)
-        | ShellEffect::ActivateTarget(_)
-        | ShellEffect::AdvancePrereqChain(_)
-        | ShellEffect::AbortForBudget
-        | ShellEffect::CancelActiveJobs
-        | ShellEffect::CancelJob(_)
-        | ShellEffect::FinalizeJob(_)
-        | ShellEffect::ClearConversation
-        | ShellEffect::ContinuePastBudget
-        | ShellEffect::ShowKnowledgeBase(_)
-        | ShellEffect::AttachKnowledgeBaseSource(_)
-        | ShellEffect::DetachKnowledgeBaseSource(_)
-        | ShellEffect::ReparseKnowledgeBaseSource(_)
-        | ShellEffect::OpenActivity(_)
-        | ShellEffect::OpenFilePicker
-        | ShellEffect::OpenGuidedScan(_)
-        | ShellEffect::OpenPromptDocument(_)
-        | ShellEffect::DispatchAgent(_)
-        | ShellEffect::DispatchNextPlanningTask(_)
-        | ShellEffect::PrepareScan(_)
-        | ShellEffect::PrepareRunTool(_)
-        | ShellEffect::DispatchRunTool(_)
-        | ShellEffect::RefreshDeterministicRecommendations(_)
-        | ShellEffect::DiffPromptOverride(_)
-        | ShellEffect::EditPromptOverride(_)
-        | ShellEffect::ListPromptOverrides(_)
-        | ShellEffect::LoadDynamicModule(_)
-        | ShellEffect::PauseActiveWork
-        | ShellEffect::PersistCommandHistory
-        | ShellEffect::PersistGlobalModelSelection(_)
-        | ShellEffect::PersistPlanningOptionOverride(_)
-        | ShellEffect::PersistOptions(_)
-        | ShellEffect::ResetPromptOverride(_)
-        | ShellEffect::ResumeCredentialContinuation
-        | ShellEffect::ResumeSession(_)
-        | ShellEffect::RequestExitAbort
-        | ShellEffect::RequestShellQuit
-        | ShellEffect::Quit
-        | ShellEffect::FinishShellQuit
-        | ShellEffect::RecordAgentRun(_)
-        | ShellEffect::RecordPromptMutation(_)
-        | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordToolRun(_)
-        | ShellEffect::RecordReviewDecision(_)
-        | ShellEffect::RecordReviewSessionStart(_)
-        | ShellEffect::ScoreReviewYieldQueue(_)
-        | ShellEffect::RecordProofDeferral(_)
-        | ShellEffect::RecordSuppression(_)
-        | ShellEffect::ResetHouseRules(_)
-        | ShellEffect::RefreshContextView
-        | ShellEffect::RefreshFindings(_)
-        | ShellEffect::RefreshHouseRules(_)
-        | ShellEffect::ReportFilteredFindingMovement(_)
-        | ShellEffect::FinalizeGuidedScanOpen
-        | ShellEffect::FinalizeWorkbenchOpen(_)
-        | ShellEffect::FinalizeOpenFinding(_)
-        | ShellEffect::FinalizeSastTaskCommand(_)
-        | ShellEffect::HydrateSceneSnapshots(_)
-        | ShellEffect::FinalizeScanCompletion(_)
-        | ShellEffect::RefreshPwnState
-        | ShellEffect::RefreshProgramScope
-        | ShellEffect::OpenFinding(_)
-        | ShellEffect::OpenRunArtifact(_)
-        | ShellEffect::SelectComponent(_)
-        | ShellEffect::BuildContext(_)
-        | ShellEffect::FireNextApprovedStrategy(_)
-        | ShellEffect::RecordStrategyCorrection(_)
-        | ShellEffect::UpdateStrategyProposalStatus(_)
-        | ShellEffect::SetSessionEnv(_)
-        | ShellEffect::ShowAuthStatus(_)
-        | ShellEffect::ShowContextStatus
-        | ShellEffect::ShowHouseRules(_)
-        | ShellEffect::ShowPromptOverride(_)
-        | ShellEffect::ShowWorkspaceStatus
-        | ShellEffect::StartOfflineDemoFixtureScan
-        | ShellEffect::StartScan(_)
-        | ShellEffect::StartThreat(_)
-        | ShellEffect::SwitchTargetRevision(_)
-        | ShellEffect::UpdatePromptMutationStatus(_)
-        | ShellEffect::WaitForAbortCleanup
-        | ShellEffect::ExportReport(_)
-        | ShellEffect::PersistReportChoices
-        | ShellEffect::RevealReportDestination
-        | ShellEffect::WorkspaceExportFindings(_)
-        | ShellEffect::WorkspaceReindex(_)
-        | ShellEffect::WorkspaceScopeInit(_)
-        | ShellEffect::WriteHouseRules(_)
-        | ShellEffect::WritePromptOverride(_) => panic!("expected planner start effect"),
-    }
-    assert!(!app.planner_running());
-    assert!(app.live_activity().is_none());
+    assert!(effects.is_empty());
+    assert!(!app.has_running_work());
+    let generation = app.context_generation().expect("proposal study");
+    assert!(generation.is_workflow_proposal());
+    assert_eq!(
+        generation.context_input["goal"],
+        "tighten module option policy"
+    );
+    assert!(generation.context_input.get("phase").is_none());
+    assert!(generation.receipt.is_none());
+    assert!(app.engagement.pending_plan().is_none());
 }
 
 #[test]
-fn threat_regen_and_inline_ask_return_effects_without_spawning_workers() {
+fn threat_regen_opens_context_selection_and_inline_ask_requires_accepted_context() {
     let target = tempfile::tempdir().expect("threat target");
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-5.5".to_string());
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(target.path().to_path_buf()));
-
-    // The reducer requires a session credential before it emits a dispatch.
-    // No effect is executed, so this fixture performs no provider request.
     app.session_mut().mark_session_api_key_ready("openai");
 
     let regen_effects = app.reduce_threat_regen();
+    assert!(regen_effects.is_empty());
+    assert!(app.study_context_picker().unwrap().regeneration_entry);
     let ask_effects = app.reduce_ask_agent(&AskRequest::threat_model(
         "what changed in the threat model?",
         false,
     ));
 
-    assert_eq!(regen_effects.len(), 1);
-    assert_eq!(ask_effects.len(), 1);
-    match regen_effects.into_iter().next().unwrap() {
-        ShellEffect::StartThreat(_) => {}
-        ShellEffect::ApplyReviewedPatch(_)
-        | ShellEffect::ApplySastTaskOptions(_)
-        | ShellEffect::ApplyThreatPatch(_)
-        | ShellEffect::AuthLogin(_)
-        | ShellEffect::ActivateTarget(_)
-        | ShellEffect::AdvancePrereqChain(_)
-        | ShellEffect::AbortForBudget
-        | ShellEffect::CancelActiveJobs
-        | ShellEffect::CancelJob(_)
-        | ShellEffect::FinalizeJob(_)
-        | ShellEffect::ClearConversation
-        | ShellEffect::ContinuePastBudget
-        | ShellEffect::ShowKnowledgeBase(_)
-        | ShellEffect::AttachKnowledgeBaseSource(_)
-        | ShellEffect::DetachKnowledgeBaseSource(_)
-        | ShellEffect::ReparseKnowledgeBaseSource(_)
-        | ShellEffect::OpenActivity(_)
-        | ShellEffect::OpenFilePicker
-        | ShellEffect::OpenGuidedScan(_)
-        | ShellEffect::OpenPromptDocument(_)
-        | ShellEffect::DispatchAgent(_)
-        | ShellEffect::DispatchNextPlanningTask(_)
-        | ShellEffect::PrepareScan(_)
-        | ShellEffect::PrepareRunTool(_)
-        | ShellEffect::DispatchRunTool(_)
-        | ShellEffect::RefreshDeterministicRecommendations(_)
-        | ShellEffect::DiffPromptOverride(_)
-        | ShellEffect::EditPromptOverride(_)
-        | ShellEffect::ListPromptOverrides(_)
-        | ShellEffect::LoadDynamicModule(_)
-        | ShellEffect::PauseActiveWork
-        | ShellEffect::PersistCommandHistory
-        | ShellEffect::PersistGlobalModelSelection(_)
-        | ShellEffect::PersistPlanningOptionOverride(_)
-        | ShellEffect::PersistOptions(_)
-        | ShellEffect::ResetPromptOverride(_)
-        | ShellEffect::ResumeCredentialContinuation
-        | ShellEffect::ResumeSession(_)
-        | ShellEffect::RequestExitAbort
-        | ShellEffect::RequestShellQuit
-        | ShellEffect::Quit
-        | ShellEffect::FinishShellQuit
-        | ShellEffect::RecordAgentRun(_)
-        | ShellEffect::RecordPromptMutation(_)
-        | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordToolRun(_)
-        | ShellEffect::RecordReviewDecision(_)
-        | ShellEffect::RecordReviewSessionStart(_)
-        | ShellEffect::ScoreReviewYieldQueue(_)
-        | ShellEffect::RecordProofDeferral(_)
-        | ShellEffect::RecordSuppression(_)
-        | ShellEffect::ResetHouseRules(_)
-        | ShellEffect::RefreshContextView
-        | ShellEffect::RefreshFindings(_)
-        | ShellEffect::RefreshHouseRules(_)
-        | ShellEffect::ReportFilteredFindingMovement(_)
-        | ShellEffect::FinalizeGuidedScanOpen
-        | ShellEffect::FinalizeWorkbenchOpen(_)
-        | ShellEffect::FinalizeOpenFinding(_)
-        | ShellEffect::FinalizeSastTaskCommand(_)
-        | ShellEffect::HydrateSceneSnapshots(_)
-        | ShellEffect::FinalizeScanCompletion(_)
-        | ShellEffect::RefreshPwnState
-        | ShellEffect::RefreshProgramScope
-        | ShellEffect::OpenFinding(_)
-        | ShellEffect::OpenRunArtifact(_)
-        | ShellEffect::SelectComponent(_)
-        | ShellEffect::BuildContext(_)
-        | ShellEffect::FireNextApprovedStrategy(_)
-        | ShellEffect::RecordStrategyCorrection(_)
-        | ShellEffect::UpdateStrategyProposalStatus(_)
-        | ShellEffect::SetSessionEnv(_)
-        | ShellEffect::ShowAuthStatus(_)
-        | ShellEffect::ShowContextStatus
-        | ShellEffect::ShowHouseRules(_)
-        | ShellEffect::ShowPromptOverride(_)
-        | ShellEffect::ShowWorkspaceStatus
-        | ShellEffect::StartOfflineDemoFixtureScan
-        | ShellEffect::StartPlanner(_)
-        | ShellEffect::StartScan(_)
-        | ShellEffect::SwitchTargetRevision(_)
-        | ShellEffect::UpdatePromptMutationStatus(_)
-        | ShellEffect::WaitForAbortCleanup
-        | ShellEffect::ExportReport(_)
-        | ShellEffect::PersistReportChoices
-        | ShellEffect::RevealReportDestination
-        | ShellEffect::WorkspaceExportFindings(_)
-        | ShellEffect::WorkspaceReindex(_)
-        | ShellEffect::WorkspaceScopeInit(_)
-        | ShellEffect::WriteHouseRules(_)
-        | ShellEffect::WritePromptOverride(_) => panic!("expected threat start effect"),
-    }
-    match ask_effects.into_iter().next().unwrap() {
-        ShellEffect::DispatchAgent(_) => {}
-        ShellEffect::StartThreat(_)
-        | ShellEffect::ApplyReviewedPatch(_)
-        | ShellEffect::ApplySastTaskOptions(_)
-        | ShellEffect::ApplyThreatPatch(_)
-        | ShellEffect::AuthLogin(_)
-        | ShellEffect::ActivateTarget(_)
-        | ShellEffect::AdvancePrereqChain(_)
-        | ShellEffect::AbortForBudget
-        | ShellEffect::CancelActiveJobs
-        | ShellEffect::CancelJob(_)
-        | ShellEffect::FinalizeJob(_)
-        | ShellEffect::ClearConversation
-        | ShellEffect::ContinuePastBudget
-        | ShellEffect::ShowKnowledgeBase(_)
-        | ShellEffect::AttachKnowledgeBaseSource(_)
-        | ShellEffect::DetachKnowledgeBaseSource(_)
-        | ShellEffect::ReparseKnowledgeBaseSource(_)
-        | ShellEffect::OpenActivity(_)
-        | ShellEffect::OpenFilePicker
-        | ShellEffect::OpenGuidedScan(_)
-        | ShellEffect::OpenPromptDocument(_)
-        | ShellEffect::DispatchNextPlanningTask(_)
-        | ShellEffect::PrepareScan(_)
-        | ShellEffect::PrepareRunTool(_)
-        | ShellEffect::DispatchRunTool(_)
-        | ShellEffect::RefreshDeterministicRecommendations(_)
-        | ShellEffect::DiffPromptOverride(_)
-        | ShellEffect::EditPromptOverride(_)
-        | ShellEffect::ListPromptOverrides(_)
-        | ShellEffect::LoadDynamicModule(_)
-        | ShellEffect::PauseActiveWork
-        | ShellEffect::PersistCommandHistory
-        | ShellEffect::PersistGlobalModelSelection(_)
-        | ShellEffect::PersistPlanningOptionOverride(_)
-        | ShellEffect::PersistOptions(_)
-        | ShellEffect::ResetPromptOverride(_)
-        | ShellEffect::ResumeCredentialContinuation
-        | ShellEffect::ResumeSession(_)
-        | ShellEffect::RequestExitAbort
-        | ShellEffect::RequestShellQuit
-        | ShellEffect::Quit
-        | ShellEffect::FinishShellQuit
-        | ShellEffect::RecordAgentRun(_)
-        | ShellEffect::RecordPromptMutation(_)
-        | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordToolRun(_)
-        | ShellEffect::RecordReviewDecision(_)
-        | ShellEffect::RecordReviewSessionStart(_)
-        | ShellEffect::ScoreReviewYieldQueue(_)
-        | ShellEffect::RecordProofDeferral(_)
-        | ShellEffect::RecordSuppression(_)
-        | ShellEffect::ResetHouseRules(_)
-        | ShellEffect::RefreshContextView
-        | ShellEffect::RefreshFindings(_)
-        | ShellEffect::RefreshHouseRules(_)
-        | ShellEffect::ReportFilteredFindingMovement(_)
-        | ShellEffect::FinalizeGuidedScanOpen
-        | ShellEffect::FinalizeWorkbenchOpen(_)
-        | ShellEffect::FinalizeOpenFinding(_)
-        | ShellEffect::FinalizeSastTaskCommand(_)
-        | ShellEffect::HydrateSceneSnapshots(_)
-        | ShellEffect::FinalizeScanCompletion(_)
-        | ShellEffect::RefreshPwnState
-        | ShellEffect::RefreshProgramScope
-        | ShellEffect::OpenFinding(_)
-        | ShellEffect::OpenRunArtifact(_)
-        | ShellEffect::SelectComponent(_)
-        | ShellEffect::BuildContext(_)
-        | ShellEffect::FireNextApprovedStrategy(_)
-        | ShellEffect::RecordStrategyCorrection(_)
-        | ShellEffect::UpdateStrategyProposalStatus(_)
-        | ShellEffect::SetSessionEnv(_)
-        | ShellEffect::ShowAuthStatus(_)
-        | ShellEffect::ShowContextStatus
-        | ShellEffect::ShowHouseRules(_)
-        | ShellEffect::ShowPromptOverride(_)
-        | ShellEffect::ShowWorkspaceStatus
-        | ShellEffect::StartOfflineDemoFixtureScan
-        | ShellEffect::StartPlanner(_)
-        | ShellEffect::StartScan(_)
-        | ShellEffect::SwitchTargetRevision(_)
-        | ShellEffect::UpdatePromptMutationStatus(_)
-        | ShellEffect::WaitForAbortCleanup
-        | ShellEffect::ExportReport(_)
-        | ShellEffect::PersistReportChoices
-        | ShellEffect::RevealReportDestination
-        | ShellEffect::WorkspaceExportFindings(_)
-        | ShellEffect::WorkspaceReindex(_)
-        | ShellEffect::WorkspaceScopeInit(_)
-        | ShellEffect::WriteHouseRules(_)
-        | ShellEffect::WritePromptOverride(_) => panic!("expected inline agent dispatch effect"),
-    }
-    assert!(!app.threat_worker_running());
+    assert!(ask_effects.is_empty());
+    assert!(app.context_generation().is_none());
+    let answer = app.agent_chat().expect("visible question recovery");
+    assert_eq!(answer.question, "what changed in the threat model?");
+    assert!(answer
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("Accept a current Map context"));
+    assert!(!app.has_running_work());
     assert!(app.live_activity().is_none());
 }
 
@@ -2852,7 +2473,7 @@ fn command_effect_reducer_routes_existing_effectful_commands() {
     );
     assert_eq!(
         command_effect_kind(ShellCommand::Ask("What next?".to_string())),
-        Some(EffectKind::Agent)
+        None
     );
     assert_eq!(
         command_effect_kind(ShellCommand::Plan("map authz drift".to_string())),
@@ -2920,15 +2541,12 @@ fn command_effect_reducer_routes_existing_effectful_commands() {
         }),
         Some(EffectKind::PersistOptions)
     );
-    assert_eq!(
-        command_effect_kind(ShellCommand::ThreatRegen),
-        Some(EffectKind::Threat)
-    );
+    assert_eq!(command_effect_kind(ShellCommand::ThreatRegen), None);
     assert_eq!(
         command_effect_kind(ShellCommand::ThreatAsk(
             "what changed in the threat model?".to_string(),
         )),
-        Some(EffectKind::Agent)
+        None
     );
     assert_eq!(
         command_effect_kind(ShellCommand::Quit),
@@ -4873,16 +4491,7 @@ fn persist_selected_test_phase_attempt(target: &Path, phase: WorkflowPhase, run_
 }
 
 fn persist_adequate_test_map_result(target: &Path, run_id: &str) {
-    crate::test_support::record_indexed_run(
-        target,
-        run_id,
-        "context:build",
-        serde_json::json!({
-            "ok": true,
-            "status": "completed",
-            "data": { "snapshot": { "filesIndexed": 1 } }
-        }),
-    );
+    crate::test_support::record_imported_test_map(target, run_id);
 }
 
 #[cfg(unix)]
@@ -5980,9 +5589,7 @@ fn review_decision_command_rejects_stale_workbench_watermark() {
     let notice = app.advisory().notice.as_ref().expect("decision receipt");
     assert_eq!(notice.severity, crate::NoticeSeverity::Success);
     assert_eq!(notice.source, "review");
-    assert!(notice
-        .message
-        .contains("decision saved; will carry forward"));
+    assert!(notice.message.contains("Saved #"));
     let effects = app
         .reduce_command_effects(&ShellCommand::ReviewDecision(
             ReviewDecisionCommand::Record {
@@ -6182,7 +5789,9 @@ fn review_decision_command_rejects_empty_reason_without_write() {
     assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
     assert_eq!(notice.source, "review");
     assert!(!app.log_lines().iter().any(|line| {
-        line.prefix == "review" && line.body.contains("decision saved; will carry forward")
+        line.prefix == "review"
+            && line.body.contains("decision #")
+            && line.body.contains(" saved (")
     }));
 }
 
@@ -9416,96 +9025,30 @@ fn replay_latest_without_target_is_actionable() {
 
 #[cfg(unix)]
 #[test]
-fn ask_dispatches_agent_question_through_explicit_runtime() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
+fn ask_selected_runtime_prepares_one_question_without_launching_provider() {
     let tmp = tempfile::tempdir().unwrap();
     let bridge = fake_ask_bridge(&tmp.path().to_path_buf());
+    crate::test_support::record_imported_test_map(tmp.path(), "accepted-map");
+    persist_selected_test_phase_attempt(tmp.path(), WorkflowPhase::Map, "accepted-map");
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
+    config.runtime.langgraph_bridge_command = Some(vec![bridge.display().to_string()]);
     let mut app = ShellApp::new(config, None);
-    app.set_target(Some(tmp.path().to_path_buf()));
+    app.set_target(Some(tmp.path().into()));
+    app.session_mut().mark_session_api_key_ready("openai");
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
 
-    let origin_view = app.shell_view();
     run_command(&mut app, parse_command("?What should I run first?"));
 
-    assert_eq!(
-        app.shell_view(),
-        origin_view,
-        "ask is a fallthrough; dispatch must keep the operator's view"
-    );
-    let running_agent = app.agent_chat().unwrap();
-    assert_eq!(running_agent.question, "What should I run first?");
-    assert!(
-        running_agent.running,
-        "ask should enter the running chat state immediately; {}",
-        app.agent_chat_diagnostics_for_test()
-    );
-    assert_eq!(running_agent.answer, None);
-    assert_eq!(running_agent.error, None);
-
-    app.drain_next_agent_event_for_test(Duration::from_secs(30))
-        .unwrap_or_else(|message| panic!("{message}"));
-
-    let agent = app.agent_chat().unwrap();
-    assert!(
-        !agent.running,
-        "ask worker completed but AgentChat remained running; {}",
-        app.agent_chat_diagnostics_for_test()
-    );
-    assert!(
-        agent.error.is_none(),
-        "ask worker failed instead of answering: {}",
-        app.agent_chat_diagnostics_for_test()
-    );
-    assert_eq!(
-        agent.answer.as_deref(),
-        Some("Run context build, then next"),
-        "ask worker completed with wrong UI state; {}",
-        app.agent_chat_diagnostics_for_test()
-    );
-    let run_id = agent.run_id.as_deref().unwrap();
-    let summary = load_run_summary(tmp.path(), run_id).unwrap();
-    assert_eq!(
-        summary.status,
-        "completed",
-        "logs={:?}; notice={:?}",
-        app.log_lines(),
-        app.advisory().notice
-    );
-    let projection = kuzushi_core::run_lifecycle::load_run_projection(tmp.path(), run_id)
-        .unwrap()
-        .projection;
-    let model_calls = projection
-        .calls
-        .values()
-        .filter(|call| call.kind == kuzushi_core::run_lifecycle::CallKind::Model)
-        .collect::<Vec<_>>();
-    assert_eq!(model_calls.len(), 1);
-    assert_eq!(
-        model_calls[0].model.as_ref().map(|value| value.as_str()),
-        Some("openai:gpt-4.1")
-    );
-    assert_eq!(
-        model_calls[0].provider.as_ref().map(|value| value.as_str()),
-        Some("openai")
-    );
-    assert_eq!(model_calls[0].cost.exact_usd(), Some(0.034));
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "answer" && line.body.contains("Run context build") }));
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-4.1"));
+    let plan = app.context_generation().expect("question plan");
+    assert!(plan.is_question());
+    assert_eq!(plan.context_input["question"], "What should I run first?");
+    assert!(plan.receipt.is_none(), "approval must precede execution");
+    assert!(!app.has_running_work());
+    assert!(app.agent_chat().is_none_or(|chat| !chat.running));
 }
 
 #[cfg(unix)]
@@ -9716,35 +9259,6 @@ fn run_command_dispatches_iac_scan_through_registry_and_persists() {
 }
 
 #[test]
-fn run_command_dispatches_cargo_audit_through_registry() {
-    let tmp = tempfile::tempdir().unwrap();
-    fs::write(
-        tmp.path().join("Cargo.toml"),
-        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-    )
-    .unwrap();
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    run_command(&mut app, ShellCommand::Use("cargo-audit".to_string()));
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: None,
-            input: None,
-        },
-    );
-    drain_tool(&mut app);
-
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "result" && line.body.contains("cargo-audit: 0 advisory findings")
-    }));
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    assert!(store.list_findings(10).unwrap().is_empty());
-}
-
-#[test]
 fn run_command_dispatches_sast_scan_through_registry_and_persists() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(
@@ -9833,54 +9347,6 @@ fn run_dot_from_catalog_dispatches_sast_scan() {
 
 #[cfg(unix)]
 #[test]
-fn run_command_dispatches_agentic_sast_through_langgraph_runtime_bridge_and_persists() {
-    let _env_lock = env_test_lock();
-    let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
-    let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join("src")).unwrap();
-    fs::write(tmp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
-    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_agentic_bridge(&tmp.path().to_path_buf());
-    let mut config = V2Config::default();
-    config.model = Some("openai:gpt-4.1".to_string());
-    config.runtime = RuntimeConfig {
-        kind: RuntimeKind::LangGraph,
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        base_url: None,
-        thinking_level: None,
-        langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
-        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
-        bridge_retry_attempts: None,
-        bridge_retry_backoff_ms: None,
-        anthropic_oauth: None,
-    };
-
-    let mut app = ShellApp::new(config, Some(&workspace));
-    app.session_mut().set_trusted_workflow_auto_accept(true);
-    run_command(&mut app, ShellCommand::Use("agentic-sast".to_string()));
-    run_command(
-        &mut app,
-        ShellCommand::RunTool {
-            tool: None,
-            input: Some(r#"{"maxFindings":5}"#.to_string()),
-        },
-    );
-    drain_chain_with_auto_reuse(&mut app);
-
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "result" && line.body.contains("agentic-sast: 1 finding") }));
-
-    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    let findings = store.list_findings(10).unwrap();
-    assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "agentic");
-}
-
-#[cfg(unix)]
-#[test]
 fn run_command_dispatches_variant_hunt_through_langgraph_runtime_bridge_and_persists() {
     let _env_lock = env_test_lock();
     let _api_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
@@ -9955,21 +9421,32 @@ fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persis
         anthropic_oauth: None,
     };
 
+    let allowance = prepared_dispatch::approve_model_work(&config, &workspace);
     let mut app = ShellApp::new(config, Some(&workspace));
     run_command(&mut app, ShellCommand::Use("ndiff".to_string()));
     run_command(&mut app, ShellCommand::RunTool {
             tool: Some("hunt-variants".to_string()),
             input: Some(
-                r#"{"advisoryId":"CVE-2024-1234","pattern":{"fixShape":"adds a bounds check before memcpy","vulnerableShape":"memcpy uses attacker-controlled length without a bounds check","cwe":["CWE-787"],"languages":["c"],"keywords":["memcpy","len"],"detectionQuery":"rg 'memcpy\\('","description":"Search copies guarded by no length cap.","confidence":"HIGH"}}"#
-                    .to_string(),
+                serde_json::json!({"advisoryId":"CVE-2024-1234","pattern":{"fixShape":"adds a bounds check before memcpy","vulnerableShape":"memcpy uses attacker-controlled length without a bounds check","cwe":["CWE-787"],"languages":["c"],"keywords":["memcpy","len"],"description":"Search copies guarded by no length cap.","confidence":"HIGH"},"allowanceRef":allowance}).to_string(),
             ),
         });
     drain_tool(&mut app);
 
     assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "result" && line.body.contains("ndiff:hunt-variants complete")
-    }));
+    assert!(
+        app.log_lines().iter().any(|line| {
+            line.prefix == "tool"
+                && line
+                    .body
+                    .contains("ndiff:hunt-variants partial: Advisory-guided observations")
+        }),
+        "Owned dispatch logs: {:?}",
+        app.log_lines()
+    );
+    assert!(app.log_lines().iter().any(
+        |line| line.prefix == "result" && line.body.starts_with("Partial source observations.")
+    ));
+    prepared_dispatch::assert_settled_model_work(&workspace);
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let findings = store.list_findings(10).unwrap();
@@ -10567,7 +10044,8 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
         "SQL injection in search",
     );
     store.insert_finding("run-1", &finding).unwrap();
-    let bridge = fake_triage_bridge(&tmp.path().to_path_buf());
+    let bridge_root = tempfile::tempdir().unwrap();
+    let bridge = fake_triage_bridge(&bridge_root.path().to_path_buf());
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
@@ -10582,22 +10060,29 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
         anthropic_oauth: None,
     };
 
+    let allowance = prepared_dispatch::approve_model_work(&config, &workspace);
     let mut app = ShellApp::new(config, Some(&workspace));
     run_command(&mut app, ShellCommand::Use("triage".to_string()));
     run_command(
         &mut app,
         ShellCommand::RunTool {
             tool: None,
-            input: Some(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint)),
+            input: Some(
+                serde_json::json!({"fingerprint":finding.fingerprint,"allowanceRef":allowance})
+                    .to_string(),
+            ),
         },
     );
     drain_tool(&mut app);
 
     assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| line.prefix == "result" && line.body.contains("Triaged 1 of 1")));
+    assert!(
+        app.log_lines()
+            .iter()
+            .any(|line| line.prefix == "result" && line.body.contains("Triaged 1 of 1")),
+        "Review dispatch logs: {:?}",
+        app.log_lines()
+    );
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let stored = store
@@ -10608,6 +10093,7 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
         stored.triage.as_ref().map(|triage| triage.verdict),
         Some(TriageVerdict::TruePositive)
     );
+    prepared_dispatch::assert_settled_model_work(&workspace);
 }
 
 #[cfg(unix)]
@@ -10797,7 +10283,8 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     )
     .unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    let bridge = fake_threat_model_bridge(&tmp.path().to_path_buf());
+    let bridge_root = tempfile::tempdir().unwrap();
+    let bridge = fake_threat_model_bridge(&bridge_root.path().to_path_buf());
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
@@ -10812,13 +10299,16 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
         anthropic_oauth: None,
     };
 
+    let allowance = prepared_dispatch::approve_model_work(&config, &workspace);
     let mut app = ShellApp::new(config, Some(&workspace));
     run_command(&mut app, ShellCommand::Use("threat-model".to_string()));
     run_command(
         &mut app,
         ShellCommand::RunTool {
             tool: None,
-            input: Some(r#"{"outputDir":".kuzushi/tm"}"#.to_string()),
+            input: Some(
+                serde_json::json!({"outputDir":".kuzushi/tm","allowanceRef":allowance}).to_string(),
+            ),
         },
     );
     drain_chain_with_auto_reuse(&mut app);
@@ -10834,9 +10324,13 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     );
     assert!(app.run_background_maintenance());
     assert_eq!(app.shell_view(), ShellView::Tools);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "result" && line.body.contains("threat-model:build complete")
-    }));
+    assert!(
+        app.log_lines().iter().any(|line| {
+            line.prefix == "result" && line.body.contains("threat-model:build complete")
+        }),
+        "Map dispatch logs: {:?}",
+        app.log_lines()
+    );
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "scene"
             && line.body.contains("threat model ready")
@@ -10847,6 +10341,7 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
         .path()
         .join(".kuzushi/tm/normalized-threat-model.json")
         .exists());
+    prepared_dispatch::assert_settled_model_work(&workspace);
 }
 
 #[cfg(unix)]
@@ -11749,8 +11244,9 @@ fn command_palette_executes_the_zero_argument_scan_phase_command() {
         ShellView::CommandPalette,
         "palette closed"
     );
-    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::Campaign);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+    assert!(app.router.campaign().batch_scan_config.is_some());
     assert!(app.input().is_empty());
 }
 
@@ -11947,23 +11443,39 @@ fn next_command_opens_phase_picker_at_derived_phase() {
     run_command(&mut app, ShellCommand::Next);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
 
-    *app.findings_mut() = vec![make_finding(Severity::High, "fp-journey", "Unconfirmed")];
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("imported-findings", dir.path(), "running")
+        .unwrap();
+    store
+        .insert_finding(
+            "imported-findings",
+            &make_finding(Severity::High, "fp-journey", "Unconfirmed"),
+        )
+        .unwrap();
+    store
+        .record_run_finished("imported-findings", "completed", 1)
+        .unwrap();
+    crate::test_support::record_indexed_run(
+        dir.path(),
+        "imported-findings",
+        "findings:import",
+        serde_json::json!({"ok":true,"status":"completed","data":{"count":1}}),
+    );
     persist_selected_test_phase_attempt(dir.path(), WorkflowPhase::Scan, "imported-findings");
+    app.refresh_findings(false);
     app.refresh_phase_attempt_projection();
     app.engagement.clear_phase();
     run_command(&mut app, ShellCommand::Next);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Review));
 
-    app.findings_mut()[0].triage = Some(TriageOutcome {
-        first_link: None,
-        refute_reason: None,
-        verdict: TriageVerdict::TruePositive,
-        confidence: 0.9,
-        rationale: "confirmed".to_string(),
-        cost_usd: 0.0,
-        cost_usd_exact: true,
-        estimated_cost_usd: None,
-    });
+    run_command(&mut app, parse_command("open F-0001"));
+    run_command(
+        &mut app,
+        parse_command("decision deferred fixture review complete"),
+    );
+    app.refresh_findings(false);
     app.engagement.clear_phase();
     run_command(&mut app, ShellCommand::Next);
     assert_eq!(app.shell_view(), ShellView::Report);
@@ -12089,7 +11601,7 @@ fn report_escape_and_q_restore_the_exact_scan_origin() {
 }
 
 #[test]
-fn phase_command_opens_requested_phase_picker() {
+fn phase_command_opens_requested_phase_planner() {
     for &phase in WorkflowPhase::ORDER {
         let dir = tempfile::tempdir().expect("temp target");
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -12097,7 +11609,12 @@ fn phase_command_opens_requested_phase_picker() {
 
         run_command(&mut app, ShellCommand::Phase(phase));
 
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker, "{phase:?}");
+        let expected = if phase == WorkflowPhase::Scan {
+            ShellView::Campaign
+        } else {
+            ShellView::PlanningPicker
+        };
+        assert_eq!(app.shell_view(), expected, "{phase:?}");
         assert_eq!(app.engagement.current_phase(), Some(phase));
         assert!(app
             .engagement
@@ -12110,30 +11627,53 @@ fn phase_command_opens_requested_phase_picker() {
 }
 
 #[test]
-fn slash_map_and_scan_open_their_configuration_pickers() {
-    for (command, phase) in [("/map", WorkflowPhase::Map), ("/scan", WorkflowPhase::Scan)] {
-        let dir = tempfile::tempdir().expect("temp target");
-        let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_target(Some(dir.path().to_path_buf()));
+fn slash_map_opens_its_configuration_picker_without_work() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(dir.path().to_path_buf()));
 
-        run_command(&mut app, parse_command(command));
+    run_command(&mut app, parse_command("/map"));
 
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker, "{command}");
-        assert_eq!(app.engagement.current_phase(), Some(phase), "{command}");
-        assert!(app
-            .engagement
-            .planning_picker()
-            .tasks()
-            .iter()
-            .all(|row| row.id.phase() == phase));
-        press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-        assert_eq!(
-            app.engagement.planning_picker().focus(),
-            PickerFocus::OptionsPane,
-            "{command}"
-        );
-        assert!(!app.has_running_work(), "{command}");
-    }
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(app
+        .engagement
+        .planning_picker()
+        .tasks()
+        .iter()
+        .all(|row| row.id.phase() == WorkflowPhase::Map));
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::OptionsPane
+    );
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn slash_scan_opens_a_finite_unapproved_study_without_work() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(dir.path().to_path_buf()));
+
+    run_command(&mut app, parse_command("/scan"));
+
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+    let config = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .expect("study form");
+    assert!(config.context_generation.is_none());
+    assert_eq!(config.trials, 3);
+    assert_eq!(config.requested_workers, 1);
+    assert_eq!(config.study.max_job_attempts, 1);
+    assert!(config.study.receipt.is_none());
+    assert!(config.study.allowance.is_none());
+    assert!(!config.study.approved());
+    assert!(!app.has_running_work());
 }
 
 #[test]
@@ -12215,15 +11755,14 @@ fn phase_command_resumes_after_target_picker_activation() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::Campaign);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+    assert!(app.router.campaign().batch_scan_config.is_some());
     assert!(app.router.target_picker().pending_intent().is_none());
-    assert!(app
-        .engagement
-        .planning_picker()
-        .tasks()
-        .iter()
-        .all(|row| row.id.phase() == WorkflowPhase::Scan));
+    assert_eq!(
+        app.engagement.planning_picker().phase(),
+        Some(WorkflowPhase::Map)
+    );
 }
 
 #[test]
@@ -12240,7 +11779,7 @@ fn canceling_target_picker_clears_phase_continuation() {
 }
 
 #[test]
-fn full_command_resumes_guided_map_after_target_picker_activation() {
+fn full_command_resumes_setup_after_target_picker_activation() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, parse_command("full"));
@@ -12262,11 +11801,11 @@ fn full_command_resumes_guided_map_after_target_picker_activation() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.engagement.current_phase(), None);
     assert_eq!(
         app.engagement.guided_scan().map(GuidedScanFlow::stage),
-        Some(GuidedScanStage::MapRoute)
+        None
     );
     assert!(!app.has_running_work());
     assert!(app.router.target_picker().pending_intent().is_none());
@@ -12362,20 +11901,19 @@ fn planning_phase_navigation_starts_at_map_and_ends_at_report() {
 }
 
 #[test]
-fn planning_phase_navigation_moves_horizontally_without_running() {
+fn planning_phase_navigation_opens_scan_plan_and_restores_review() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
     app.open_phase_picker(WorkflowPhase::Review);
-    for (key, expected) in [
-        (KeyCode::Left, WorkflowPhase::Scan),
-        (KeyCode::Right, WorkflowPhase::Review),
-    ] {
-        press_key(&mut app, KeyEvent::new(key, KeyModifiers::NONE));
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
-        assert_eq!(app.engagement.current_phase(), Some(expected));
-        assert!(app.engagement.planning_queues_empty());
-    }
+    press_key(&mut app, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+    assert!(app.engagement.planning_queues_empty());
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Review));
+    assert!(!app.has_running_work());
 }
 
 #[test]
@@ -13223,6 +12761,7 @@ fn non_char_hotkey_code(trigger: HotkeyTrigger) -> KeyCode {
         (HotkeyTrigger::Esc, KeyCode::Esc),
         (HotkeyTrigger::PageUp, KeyCode::PageUp),
         (HotkeyTrigger::PageDown, KeyCode::PageDown),
+        (HotkeyTrigger::End, KeyCode::End),
         (HotkeyTrigger::Up, KeyCode::Up),
         (HotkeyTrigger::Down, KeyCode::Down),
     ];
@@ -13272,7 +12811,6 @@ fn app_with_findings_and_full_phase_access(count: usize) -> (tempfile::TempDir, 
             proof_backed: count,
             remediated: 0,
             remediation_projection_complete: true,
-            durable_scan_evidence: count > 0,
         });
     (target, app)
 }
@@ -15448,6 +14986,14 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     line.prefix == "verify" && line.body.contains("no finding selected")
                 }));
             }
+            ViewHotkeyAction::WorkbenchReviewCurrentSource => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(
+                    app.source_review_form().is_none(),
+                    "rows without a persisted observation cannot launch"
+                );
+                assert!(!app.has_running_work());
+            }
             ViewHotkeyAction::WorkbenchSuppress => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert!(app.input().starts_with("suppress F-"), "{}", app.input());
@@ -15473,7 +15019,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             }
             ViewHotkeyAction::WorkbenchChainFold => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert!(app.router.workbench().chains_view_open());
+                assert!(!app.router.workbench().chains_view_open());
                 assert!(!app.tool_is_running());
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert!(!app.router.workbench().chains_view_open());
@@ -15541,6 +15087,29 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             other => panic!("unexpected workbench hotkey action: {other:?}"),
         }
     }
+}
+
+#[test]
+fn review_groups_and_last_row_have_distinct_reachable_keys() {
+    let mut app = app_with_findings(3);
+    app.set_input_mode(crate::InputMode::Navigate);
+    let bindings = app.view_keybindings();
+    let groups: Vec<_> = bindings
+        .iter()
+        .filter(|binding| binding.matches(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE)))
+        .collect();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].action, ViewHotkeyAction::FindingGroupsOpen);
+    press_key(&mut app, KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    assert_eq!(app.router.findings().cursor(), 2);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
+    );
+    assert_eq!(app.shell_view(), ShellView::Relationships);
+    assert!(app.router.relationships.show_groups);
+    assert!(!app.has_running_work());
 }
 
 #[test]
@@ -20139,7 +19708,7 @@ fn unreached_phase_verb_and_plan_verb_keep_opening_the_planner() {
     assert!(!app.phase_verb_opens_page(WorkflowPhase::Scan));
 
     run_command(&mut app, parse_command("scan"));
-    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::Campaign);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
 
     app.set_shell_view(ShellView::Catalog);
@@ -22547,7 +22116,7 @@ fn phase_advance_does_not_steal_view_when_operator_navigated_away() {
 }
 
 #[test]
-fn phase_advance_opens_next_picker_while_operator_watches_activity() {
+fn phase_advance_opens_finite_scan_plan_while_operator_watches_activity() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
@@ -22556,7 +22125,7 @@ fn phase_advance_opens_next_picker_while_operator_watches_activity() {
 
     app.advance_to_next_phase();
 
-    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::Campaign);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
 }
 

@@ -35,6 +35,9 @@ impl StorageWriter {
                 self.record_finding_lesson(record, expected)
             }
             DecisionCommand::ReviewDecision(decision) => self.record_review_decision(decision),
+            DecisionCommand::ReviewDecisionOnSource { decision, source } => {
+                self.record_source_review_decision(decision, source)
+            }
             DecisionCommand::ReviewSessionStarted(session) => self.record_review_session(session),
             DecisionCommand::RecordVerification(verification) => {
                 self.record_verification(verification)

@@ -1,0 +1,62 @@
+name: Partial inventory retains history and excludes unsafe paths, with explicit recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: run context:build {"enrichment":false}
+submit: logs
+require-live-snap: 30 context:build indexed 1 file | context-produced
+submit: run pack:suggest-shards {}
+submit: logs
+require-live-snap: 30 never auto-installed | draft-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART capture
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART redirect
+submit: run context:build {"enrichment":false}
+require-live-snap: 30 context:build partial inventory | context-partial
+submit: run pack:suggest-shards {}
+require-live-snap: 30 PARTIAL inventory | draft-partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART partial
+paste-file: @ART/failed-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | retained-failure
+resize: 160x48
+live-snap: failure-160x48
+resize: 96x89
+live-snap: failure-96x89
+resize: 80x24
+live-snap: failure-80x24
+resize: 60x20
+live-snap: failure-60x20
+resize: 40x12
+live-snap: failure-40x12
+keys: NPage
+live-snap: failure-page-40x12
+keys: NPage
+live-snap: failure-page-two-40x12
+ask: Does the partial reader show the excluded path and retain its original evidence without implying complete coverage?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART restore
+submit: run context:build {"enrichment":false}
+submit: logs
+require-live-snap: 30 context:build indexed 1 file | rebuilt
+submit: context status
+require-live-snap: 30 Enumeration: Git tracked files | restored-context
+expect: Sample: 1 of 1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART partial-recovered
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/failed-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | historical-failure
+require-shell: python3 -B @REPO/scripts/devex/fixtures/inventory_containment.py @TMP_TARGET @ART partial-restarted
+ask: Does restart preserve the original partial receipt separately from the later explicit context rebuild?
+keys: C-c
+require-exit: 15

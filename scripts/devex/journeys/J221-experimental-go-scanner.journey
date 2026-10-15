@@ -1,0 +1,47 @@
+name: Go advisory scanner has honest experimental discovery and inspection
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART catalog
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: options govulncheck:scan
+require-live-snap: 20 Experimental | experimental-options
+expect: Target
+resize: 160x48
+require-live-snap: 20 Experimental | options-160x48
+resize: 96x89
+require-live-snap: 20 Experimental | options-96x89
+resize: 80x24
+require-live-snap: 20 Experimental | options-80x24
+resize: 60x20
+require-live-snap: 20 Experimental | options-60x20
+resize: 40x12
+require-live-snap: 20 Experimental | options-40x12
+expect: Value:
+ask: Is experimental support clear while the selected target setting remains readable at all six sizes, without launching scanner work?
+resize: 120x36
+submit: use govulncheck
+require-live-snap: 20 Outside supported defaults | curated-default
+expect: Experimental
+expect: options govulncheck:scan
+resize: 40x12
+require-live-snap: 20 Experimental | support-recovery-40x12
+expect: options govulncheck:scan
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART verify
+ask: Does default browsing explain experimental support and provide a readable settings action instead of treating the scanner as unknown?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: options govulncheck:scan
+require-live-snap: 20 Experimental | restored-options
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART verify
+ask: Does no-color restart retain honest support disclosure and unchanged source without scanner or model work?
+keys: C-c
+require-exit: 10

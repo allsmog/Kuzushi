@@ -17,6 +17,17 @@ belong in migration ledgers, not in this current operator contract.
 
 ## Shared Boundary
 
+`campaign:review-study` uses the shared boundary to freeze a finite Review job.
+The shell adds a Review form, explicit allowance review and named restart
+recovery; headless callers use the same draft and approval tools. A generic
+approval context may omit its findings handle: Review approval reads the
+workspace store for identical revalidation. Discovery scan mode does not add
+Review jobs automatically. Internal model calls still require the approved
+Review allowance. The shell's normal Review picker opens the draft before
+authentication, preserves other paused choices and returns to its form after
+runtime-free preparation. Complete real-adapter and guided-path qualification remains
+tracked in the bounded investigation plan.
+
 All registry-backed modes use the authorization-bound Rust module flow:
 
 - `ModuleRegistry::prepare_dispatch_input(...)`
@@ -79,7 +90,8 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Diagram-aware inline Ask | N/A | ✓ | N/A | Shell interaction over shared runtime policy. Scene context defaults to the smallest relevant model slice; `--whole-model` is explicit. Model text and history stay bounded inside untrusted-content fences, and history is keyed to the exact target/worktree/model/policy context. The only concurrent form is one Run plus one auxiliary Ask after a fail-closed read-only bridge acknowledgement; it never advances the scan steer queue or replaces Run Focus. |
 | Pack linter (`pack:lint`) | N/A | ✓ | ✓ | Deterministic read-only tool (workspace optional): validates a knowledge pack — pack.toml shape, shard manifests (path existence + >50-file scope warnings when a target is active), threat-model schema (severity values, CWE well-formedness, threats present for planning, including compound `threat-models/` directories), prompt fragment `<module>/<verb>.md` destinations. Result fails on any ERROR row, so `kuzushi run pack:lint` exits nonzero (run-mode tool-failed contract). Not a scan engine. |
 | Shard auto-suggest (`pack:suggest-shards`) | N/A | ✓ | ✓ | Deterministic workspace-write tool (no runtime): proposes trust-boundary shard candidates from directory file counts, language mix, entry-point identifier density, and test-vs-shipped heuristics; writes a commented draft to `.kuzushi/v3/reports/suggested-shards.toml` (never installs `.kuzushi/shards.toml`). Bounded walk (content-scan budget), stable density-then-path ordering. |
-| Threat-intel research (`threat-intel:research`) | N/A | ✓ | ✓ | Descriptor-backed external action over an explicit workspace: bounded target-local package discovery → OSV queries → persisted CVE candidates → existing catalog harvest. The invocation discloses network use, bounds package/CVE counts, and never scans outside the selected target. `threat-intel:discover` remains its deterministic offline inventory-only counterpart. |
+| Threat-intel research (`threat-intel:research`) | N/A | ✓ | ✓ | Descriptor-backed external action over a workspace, OSV queries and catalog harvest. This surface has not received end-to-end qualification in the bounded-investigation audit. Its shared legacy candidate collection can read enclosing Bazel manifests; target containment and aggregate resource limits must not be assumed. |
+| Dependency candidates and catalog reading | N/A | ✓ | ✓ | `threat-intel:discover` is an exact-dispatch Labs action with partial coverage disclosure and a `sbom-scan:scan` inventory route. `threat-intel:list` reads local catalog metadata without invoking entries. Both use shared preparation and remain auxiliary Map actions. Local fixture evidence and remaining limits are recorded in the [candidate audit](dependency-candidate-audit-2026-10-13.md). |
 | Proof deferral (`proof defer <ref> --reason <text>` shell verb; `kuzushi proof defer <ref> --target <repo> --reason <text>`) | N/A | ✓ | N/A | One shared application service (`workflow_attempts::record_proof_deferral`) owns resolution, the review-actionable gate, and the append to `.kuzushi/v3/workflow/phase-attempts.jsonl`; the shell reducer and the headless CLI verb both enter through it, so neither can record a decision the other cannot. Scan mode does not apply: a deferral is an operator decision, never a scan-engine output. The `ProofDeferralView` projection is disclosed identically on the Prove page STATUS/NEXT strip, its plain output, and `kuzushi finding` (plain and `--json`). A deferral never changes `ProofConfidence`, the proof ladder, or a verification verdict, and it is bound to one exact discovery generation, so a later observation of the same durable identity never inherits it. |
 | Pipeline gate (`kuzushi ci`) | N/A | N/A | N/A | Headless-only CLI verb (like `kuzushi campaign run`, not a registry tool): read-only fold over persisted findings + review decisions + campaign artifacts. Gates on NEW confirmed findings (latest-decision confirmed/to-fix, shared `latest_confirmed_finding_ids` fold) vs the committed `.kuzushi/ci-baseline.json`, prints a plain summary, writes `.kuzushi/v3/reports/ci-summary.json`, and exits 0 clean / 1 gate tripped at `--fail-on` / 2 error. `--update-baseline` accepts the current confirmed set. Distinct from `scan --fail-on` (exit 3), which gates a single scan run's raw findings regardless of review state. |
 | Review-yield corpus (`kuzushi review-yield census` / `kuzushi review-yield export --out <file>`) | N/A | N/A | N/A | Headless-only CLI verbs (like `kuzushi ci` and `kuzushi campaign run`, not registry tools): a fold over the recorded review decisions and finding observations of one explicit `--target` (the projection is opened read-write once so pending migrations run, then read through a read-only handle; the ledger is never rewritten). `census` counts every recorded decision and names every exclusion — automated/imported authors, policy outcomes, conflicting human reversals, no usable read cutoff, no pre-cutoff snapshot — and `--json` emits the same report machine-readably. `export` writes one JSONL row per durable identity plus a `<out>.manifest.json` sidecar carrying the label policy, frozen feature vocabulary, census, and a BLAKE3 digest over the manifest and every row; the destination must resolve inside the workspace root. The leakage firewall (`anchor <= cutoff < label` per row, whitelist feature deserialization, no raw identifiers, no exported workspace-root fingerprint) lives in `review_yield` core, so there is no shell/TUI surface to keep in parity and no scan-engine surface. |
@@ -96,6 +108,12 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
 `Inconclusive`. Export remediation fields are additive across every format.
 
 ## Intentional Asymmetries
+
+The shell's `threats regen` command opens saved-context selection and uses the
+shared `threat-model:regenerate` executor through an approved context study.
+It starts no worker or model request on entry. Headless callers keep the exact
+tool and descriptor options. Generated inactive copies are reviewed in the
+context reader; `threats apply` retains already-pending compatibility changes.
 
 - **Review-yield `within-band` and `learn` ordering is shell-only.** The `[review_yield]`
   section is ordinary global operator config that every mode loads, but only
@@ -366,6 +384,17 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
 
 ## Current Parity Risks
 
+Stored engine readers use shared prepared dispatch in run and shell. Their
+partial/error envelopes and external-verification labels are shared;
+`fuzz:status` and `fuzz:import` cannot produce a Scan phase result. They are
+history readers, not approved discovery jobs. Their retained Labs status does
+not imply qualification of any engine execution path.
+
+Replay and Trace reset their reading offset when a different run is opened.
+Reopening the same selected run preserves it. The shared router applies this
+to commands and contextual entry points while retaining navigation origin and
+composer state; this is a shell presentation rule over unchanged run artifacts.
+
 - Per-tool policy still has mode-specific call sites. Runtime requirements and
   findings-store requirements are centralized; cancellation/SIGINT behavior,
   explicit-target checks, and related policy should follow the same
@@ -399,3 +428,9 @@ session as synchronous callers. This is an interactive scheduling/presentation
 asymmetry. No public option, model/provider policy or journal format changes.
 Pending results do not create verdicts, retries or navigation. Shell suppression
 still executes synchronously and uses complete policy-aware aliases.
+### Auxiliary catalog imports
+
+Catalog metadata import (`taint-iris-next:import-sinks`) is a shell/run auxiliary
+action. Both use prepared dispatch, required external input, bounded IO and
+completed/partial/failed result normalization. Its legacy Scan label does not
+make it a scan engine or allow it to publish a Scan phase result.

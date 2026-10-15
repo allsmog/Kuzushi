@@ -9,7 +9,7 @@ mod import_shared;
 mod nmap;
 mod subdomain;
 
-pub(crate) use import_shared::{read_jsonl_path, ReconImportContext};
+pub(crate) use import_shared::{check_import_cancellation, read_jsonl_path, ReconImportContext};
 
 pub(crate) use http_fingerprint::run_recon_http_fingerprint;
 pub(crate) use import_amass::run_recon_import_amass;
@@ -33,3 +33,11 @@ use crate::scan::ScanCancellation;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+
+fn require_recon_active(cancel: &ScanCancellation) -> Result<()> {
+    anyhow::ensure!(
+        !cancel.is_cancelled(),
+        "Recon cancellation requested before observation storage"
+    );
+    Ok(())
+}

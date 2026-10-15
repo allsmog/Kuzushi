@@ -1,0 +1,78 @@
+name: External observations retain partial authority, explicit consent and process deadlines
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/external_recon.py seed @TMP_TARGET @ART
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+paste-file: @ART/nmap.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | host-consent
+keys: y
+require-live-snap: 30 External observations | host-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/external_recon.py nmap @TMP_TARGET @ART
+paste-file: @ART/nmap-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | host-receipt
+ask: Does the receipt make source accuracy and repository coverage limits clear without claiming Map completion or a vulnerability verdict?
+paste-file: @ART/passive.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | passive-consent
+keys: y
+require-live-snap: 30 External observations | passive-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/external_recon.py passive @TMP_TARGET @ART
+paste-file: @ART/passive-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | passive-receipt
+expect: liveness was not tested
+ask: Is it clear that historical names are context observations and establish no host liveness?
+paste-file: @ART/http.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | http-consent
+keys: y
+require-live-snap: 30 External observations | http-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/external_recon.py http @TMP_TARGET @ART
+paste-file: @ART/http-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | http-receipt
+resize: 160x48
+live-snap: observations-160x48
+resize: 96x89
+live-snap: observations-96x89
+resize: 80x24
+live-snap: observations-80x24
+resize: 60x20
+live-snap: observations-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | observations-40x12
+keys: NPage
+live-snap: observations-paged-40x12
+ask: Can an operator read the partial observation result, its limits and return controls across all six terminal sizes?
+resize: 120x36
+paste-file: @ART/missing.txt
+keys: Enter
+require-live-snap: 20 absent-program | missing-dependency
+paste-file: @ART/deadline.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | deadline-consent
+keys: y
+require-live-snap: 30 process deadline reached | deadline-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/external_recon.py failure @TMP_TARGET @ART
+submit: findings
+require-live-snap: 20 Viewing Review | existing-review
+expect: Labeled greeting observation
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | resumed
+paste-file: @ART/passive-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/external_recon.py restart @TMP_TARGET @ART
+ask: Does restart preserve the exact human decision and all receipts, including failed work, without starting probes, accepting context or advancing the phase?
+keys: C-c
+require-exit: 10

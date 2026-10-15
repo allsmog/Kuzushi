@@ -21,6 +21,9 @@ const INDEX_MAX_BYTES: usize = 64 * 1024 * 1024;
 const RUN_LEDGER_MAX_BYTES: usize = 64 * 1024 * 1024;
 pub const FUZZ_TOOL_LABEL: &str = "fuzz";
 
+#[cfg(test)]
+mod stored_ledger_tests;
+
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FuzzImportSummary {
@@ -196,7 +199,7 @@ fn run_crash_output(data_root: &Path, row: &FoldedFinding) -> Option<String> {
         .join("runs")
         .join(&row.recorded.run_id)
         .join("findings.jsonl");
-    let body = crate::bounded_file::read_utf8_text(&ledger, RUN_LEDGER_MAX_BYTES).ok()?;
+    let body = crate::bounded_file::read_utf8_text_within(data_root, &ledger, RUN_LEDGER_MAX_BYTES).ok()?;
     for line in body.lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;

@@ -5,22 +5,18 @@ pub(crate) fn run_taint_iris_next_report(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<TaintIrisNextReport> {
+    ensure_taint_discovery_active(ctx)?;
     let target = taint_iris_next_target(input, ctx)?;
     let options = TaintIrisNextInput::from_tool_input(input)?;
     let parent_step = emit_taint_iris_next_start(ctx, &target);
     let plan = traced_taint_iris_next_plan(ctx, parent_step, &target, options)?;
 
-    if !taint_iris_next_has_required_context(&plan) {
-        emit_taint_iris_next_child(
-            ctx,
-            parent_step,
-            "refused",
-            "missing context or threat-model artifact",
-        );
-        return Ok(taint_iris_next_missing_context_report(&plan));
+    if let Some(report) = missing_taint_context_response(ctx, parent_step, &plan) {
+        return Ok(report);
     }
 
     let evidence = traced_taint_iris_next_evidence(ctx, parent_step, &plan)?;
+    ensure_taint_discovery_active(ctx)?;
     emit_taint_iris_next_progress(ctx, parent_step, "agent · compose prompt");
     let agent_prompt = build_taint_iris_next_agent_prompt(&plan, &evidence);
 
@@ -43,6 +39,33 @@ pub(crate) fn run_taint_iris_next_report(
         &agent_prompt,
         parent_step,
     )
+}
+
+fn missing_taint_context_response(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
+    plan: &TaintIrisNextPlan,
+) -> Option<TaintIrisNextReport> {
+    if taint_iris_next_has_required_context(plan) {
+        return None;
+    }
+    emit_taint_iris_next_child(
+        ctx,
+        parent_step,
+        "refused",
+        "missing context or threat-model artifact",
+    );
+    Some(taint_iris_next_missing_context_report(plan))
+}
+
+pub(in crate::capabilities::taint_iris_next) fn ensure_taint_discovery_active(
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Taint candidate discovery canceled before further work or publication"
+    );
+    Ok(())
 }
 
 fn traced_taint_iris_next_plan(
@@ -188,7 +211,10 @@ fn apply_taint_iris_next_whitebox_profile(
     mark_whitebox_static_findings(&mut agent.findings, StaticProofState::SourceSinkLinked)
 }
 
-fn emit_taint_iris_next_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_taint_iris_next_start(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -341,7 +367,8 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_polic
         return Ok(policy);
     }
     let policy = policy.try_with_mcps_for_target(target)?;
-    let policy = crate::runtime::mcp_probe::bind_selected_threat_model_attachment(policy, input, target)?;
+    let policy =
+        crate::runtime::mcp_probe::bind_selected_threat_model_attachment(policy, input, target)?;
     ensure_required_mcps(&policy, target, required_mcps_for_backend(selected_backend))?;
     Ok(policy)
 }

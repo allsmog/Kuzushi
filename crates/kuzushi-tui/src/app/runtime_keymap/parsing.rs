@@ -162,6 +162,7 @@ fn workbench_action(id: &str) -> Option<ViewHotkeyAction> {
         "previous_pane" => ViewHotkeyAction::WorkbenchCyclePanePrev,
         "open" => ViewHotkeyAction::WorkbenchOpen,
         "compare_observations" => ViewHotkeyAction::WorkbenchCompareObservations,
+        "review_current_source" => ViewHotkeyAction::WorkbenchReviewCurrentSource,
         "map" => ViewHotkeyAction::WorkbenchPage(WorkbenchPage::Map),
         "scan" => ViewHotkeyAction::WorkbenchPage(WorkbenchPage::Scan),
         "review" => ViewHotkeyAction::WorkbenchPage(WorkbenchPage::Review),

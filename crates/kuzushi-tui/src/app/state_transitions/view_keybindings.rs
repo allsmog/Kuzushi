@@ -52,7 +52,7 @@ impl ShellApp {
     fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
         match view {
             ShellView::Relationships => relationship_keybindings(),
-            ShellView::Campaign => campaign_keybindings(),
+            ShellView::Campaign => self.campaign_view_keybindings(),
             ShellView::RunDiff => vec![
                 bind(
                     HotkeyTrigger::Tab,
@@ -92,6 +92,19 @@ impl ShellApp {
         }
         if self.can_resume_scan_hotkey() {
             bindings.extend(resume_scan_keybindings());
+        }
+        bindings
+    }
+
+    fn campaign_view_keybindings(&self) -> Vec<ViewKeybinding> {
+        let mut bindings = campaign_keybindings();
+        if self.selected_fixed_study_has_ended() {
+            if let Some(binding) = bindings
+                .iter_mut()
+                .find(|binding| binding.action == ViewHotkeyAction::CampaignLaunch)
+            {
+                binding.label = "new plan required".into();
+            }
         }
         bindings
     }
@@ -161,6 +174,17 @@ mod keymap_collision_tests {
     };
     use super::*;
     use kuzushi_core::V2Config;
+
+    #[test]
+    fn empty_campaign_keeps_the_existing_launch_binding() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let binding = app
+            .view_keybindings_for_view(ShellView::Campaign)
+            .into_iter()
+            .find(|binding| binding.action == ViewHotkeyAction::CampaignLaunch)
+            .unwrap();
+        assert_eq!(binding.label, "launch");
+    }
 
     /// Dispatch is first-match over the composed list, so a duplicate trigger
     /// silently shadows everything after it. Shadowing the shared scroll base

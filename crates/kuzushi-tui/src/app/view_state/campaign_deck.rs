@@ -19,6 +19,8 @@ pub struct CampaignRouteState {
     /// List mode shows every campaign; detail mode shows the selected
     /// campaign's job matrix.
     pub(crate) detail: bool,
+    /// Inspect one recorded job while retaining the job-list selection.
+    pub(crate) job_detail: bool,
     pub(crate) selected_job: usize,
     /// Reading position for job details and consolidated observations.
     pub(crate) read_scroll: usize,
@@ -42,6 +44,7 @@ pub struct CampaignRouteState {
     /// Draft owned by the batch configurator. While present the Campaign
     /// surface renders configuration instead of the campaign list.
     pub(crate) setup_context_study: Option<crate::app::BatchScanConfig>,
+    pub(crate) workflow_proposal_study: Option<crate::app::BatchScanConfig>,
     pub(crate) batch_scan_config: Option<crate::app::BatchScanConfig>,
     /// The batch whose occurrence report scopes Review. The id survives deck
     /// refreshes until the operator clears it or switches targets.
@@ -57,6 +60,7 @@ impl Default for CampaignRouteState {
             campaigns: Vec::new(),
             selected_campaign: 0,
             detail: false,
+            job_detail: false,
             selected_job: 0,
             read_scroll: 0,
             excluded: BTreeSet::new(),
@@ -69,6 +73,7 @@ impl Default for CampaignRouteState {
             trend_history: Vec::new(),
             batch_scan_config: None,
             setup_context_study: None,
+            workflow_proposal_study: None,
             active_batch_id: None,
             active_batch_report: None,
             active_batch_observation_fingerprints: BTreeSet::new(),

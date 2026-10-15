@@ -5,12 +5,8 @@ use crate::renderer::shared::text::wrap_text;
 pub(crate) use detail::scope_detail;
 
 pub(crate) fn scope_title(state: &ScopeReviewState) -> String {
-    if state
-        .form
-        .as_ref()
-        .is_some_and(|form| form.kind == crate::app::ScopeEditKind::AiPriorities)
-    {
-        return "AI SCOPE PRIORITIES".into();
+    if let Some(title) = state.form.as_ref().and_then(form_title) {
+        return title.into();
     }
     state.review.as_ref().map_or_else(
         || "SCAN SCOPES".into(),
@@ -26,6 +22,14 @@ pub(crate) fn scope_title(state: &ScopeReviewState) -> String {
             )
         },
     )
+}
+
+fn form_title(form: &crate::app::ScopeEditForm) -> Option<&'static str> {
+    match form.kind {
+        crate::app::ScopeEditKind::AiPriorities => Some("AI SCOPE PRIORITIES"),
+        crate::app::ScopeEditKind::Add => Some("ADD DISCOVERY SCOPE"),
+        _ => None,
+    }
 }
 
 fn scope_choice_rows(state: &ScopeReviewState) -> Option<(Vec<String>, usize)> {
@@ -102,14 +106,15 @@ fn scope_boundary_row(
     review: &kuzushi_core::workspace::ScanScopeReview,
     scope: &kuzushi_core::workspace::ProposedScanScope,
 ) -> String {
+    let count = review
+        .coverage
+        .discovery_members
+        .get(&scope.id)
+        .map_or(0, |files| files.total);
     format!(
-        "{} · {} files",
+        "{} · {count} {}",
         scope.name,
-        review
-            .coverage
-            .discovery_members
-            .get(&scope.id)
-            .map_or(0, |files| files.total)
+        if count == 1 { "file" } else { "files" }
     )
 }
 
@@ -171,7 +176,7 @@ fn scope_navigation_controls(state: &ScopeReviewState) -> [&'static str; 2] {
     if state.files.is_some() {
         return [
             "PgUp/Dn read · [ ] file pages",
-            "↑↓ scope · Esc close files",
+            "Home/End first/last · Esc back",
         ];
     }
     [

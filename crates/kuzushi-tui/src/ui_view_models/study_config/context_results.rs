@@ -18,7 +18,12 @@ pub(crate) fn context_result_jobs(app: &ShellApp) -> Vec<CampaignJobSnapshot> {
 }
 
 pub(crate) fn context_result_lines(app: &ShellApp, width: usize, rows: usize) -> Vec<String> {
-    let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
+    let Some(config) = app.router.campaign().batch_scan_config.as_ref() else {
+        return crate::renderer::shared::text::wrap_text(
+            "No study selected. Open a study from Campaigns to compare its passes.",
+            width.max(1),
+        );
+    };
     let selected = config.context_result_cursor.unwrap_or(0);
     let jobs = context_result_jobs(app);
     let mut lines = vec![

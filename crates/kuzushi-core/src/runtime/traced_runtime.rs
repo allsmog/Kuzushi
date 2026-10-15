@@ -407,6 +407,10 @@ fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelU
 
 #[async_trait]
 impl AgentRuntime for TracedRuntime<'_> {
+    fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+        self.inner.get().allowance_binding()
+    }
+
     fn authorize_tool_policy_blocking(
         &self,
         authorization: &crate::runtime::AgentToolPolicyAuthorization,
@@ -436,6 +440,13 @@ impl AgentRuntime for TracedRuntime<'_> {
 
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         self.inner.get().preflight_model_blocking(model)
+    }
+
+    fn triage_semantic_cache_identity(
+        &self,
+        request: &TriageRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner.get().triage_semantic_cache_identity(request)
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {

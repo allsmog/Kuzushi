@@ -10,14 +10,19 @@ pub(crate) fn run_recon_import_amass(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<ReconReport> {
+    check_import_cancellation(ctx)?;
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("recon:import"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "recon:import",
+        ))?;
     let (path, body) = read_jsonl_path(input, "recon:import amass needs a `path` field")?;
     let mut context = ReconImportContext::open(workspace)?;
     let record_count = body.lines().filter(|line| !line.trim().is_empty()).count();
     for (lineno, line) in body.lines().enumerate() {
-        ingest_amass_line(&mut context, line, lineno)?;
+        check_import_cancellation(ctx)
+            .and_then(|_| ingest_amass_line(&mut context, line, lineno))
+            .map_err(|error| context.partial_import_error(error))?;
     }
     let host_count = context.hosts.len();
     let skipped = context.skipped_out_of_scope;
@@ -92,7 +97,10 @@ mod tests {
 
     #[test]
     fn only_a_nonempty_amass_name_is_addressable() {
-        assert_eq!(amass_name(&json!({"name": " api.example.com "})), Some("api.example.com"));
+        assert_eq!(
+            amass_name(&json!({"name": " api.example.com "})),
+            Some("api.example.com")
+        );
         assert_eq!(amass_name(&json!({"name": ""})), None);
         assert_eq!(amass_name(&json!({"name": "   "})), None);
         assert_eq!(amass_name(&json!({"domain": "example.com"})), None);

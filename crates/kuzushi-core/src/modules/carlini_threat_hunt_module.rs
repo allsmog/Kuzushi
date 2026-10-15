@@ -29,6 +29,7 @@ fn carlini_threat_hunt_tool() -> ToolDescriptor {
         "Compatibility alias for offense-review:threat-hunt; runs scoped agents over the active threat model.",
         carlini_threat_hunt_options(),
     )
+    .without_phase_result()
     .with_continuation(ContinuationSupport::Staged)
     .with_prompt(editable_prompt(
         "offensive review mission",
@@ -43,11 +44,28 @@ pub(in crate::modules) fn carlini_threat_hunt_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         bound_threat_model_option(),
-        max_findings_option(20),
+        max_findings_option(20).integer_range(1, 500),
         carlini_max_actors_option(),
         carlini_runs_per_actor_option(),
         carlini_prompt_context_option(),
         carlini_debug_inline_threats_option(),
+        carlini_query_reasoning_option(),
+        carlini_query_limit(
+            "maxOutputTokens",
+            &["max_output_tokens", "maxTokens"],
+            "Requested response tokens per initial, retry or repair query. Adapter support varies; use approved call limits for spending control.",
+            4096,
+            256,
+            32768,
+        ),
+        carlini_query_limit(
+            "maxModelTurns",
+            &["max_model_turns"],
+            "Maximum model turns per initial, retry or repair query.",
+            4,
+            1,
+            16,
+        ),
         opt(
             "CARLINI_THREAT_HUNT_PROMPT",
             OptionType::String,
@@ -59,6 +77,32 @@ pub(in crate::modules) fn carlini_threat_hunt_options() -> Vec<OptionSpec> {
     ]
 }
 
+fn carlini_query_reasoning_option() -> OptionSpec {
+    opt(
+        "thinkingLevel",
+        OptionType::Enum,
+        "Optional reasoning override; omitted values inherit the selected runtime.",
+    )
+    .aliases(&["thinking_level", "reasoningEffort", "effort"])
+    .choices(&["minimal", "low", "medium", "high", "xhigh"])
+    .advanced()
+}
+
+fn carlini_query_limit(
+    name: &str,
+    aliases: &[&str],
+    description: &str,
+    default: i64,
+    min: i64,
+    max: i64,
+) -> OptionSpec {
+    opt(name, OptionType::Int, description)
+        .aliases(aliases)
+        .default(json!(default))
+        .integer_range(min, max)
+        .advanced()
+}
+
 fn carlini_max_actors_option() -> OptionSpec {
     opt(
         "maxActors",
@@ -67,6 +111,7 @@ fn carlini_max_actors_option() -> OptionSpec {
     )
     .aliases(&["max_actors"])
     .default(json!(5))
+    .integer_range(1, 8)
     .advanced()
 }
 
@@ -74,6 +119,7 @@ fn carlini_runs_per_actor_option() -> OptionSpec {
     opt("runsPerActor", OptionType::Int, "Runs per selected actor.")
         .aliases(&["runs_per_actor"])
         .default(json!(1))
+        .integer_range(1, 3)
         .advanced()
 }
 
@@ -256,23 +302,27 @@ fn taint_iris_next_hunt_tool() -> ToolDescriptor {
 fn taint_iris_next_dataflow_plan_tool() -> ToolDescriptor {
     tool_with_options(
         "taint-iris-next:dataflow-plan",
-        "Build a deterministic CWE and dataflow evidence plan without agent review.",
+        "Experimental deterministic dataflow planning. Produces supporting candidates without agent review or Scan completion. Scoped evidence, coverage disclosure and in-progress cancellation remain unqualified.",
         taint_iris_next_planning_options(),
     )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
 }
 
 fn taint_iris_next_source_sink_trace_tool() -> ToolDescriptor {
     tool_with_options(
         "taint-iris-next:source-sink-trace",
-        "Extract deterministic source/sink candidates and linked stories.",
+        "Compatibility alias for taint-iris-next:dataflow-plan. Uses the same planner, options and output. Produces no Scan completion.",
         taint_iris_next_planning_options(),
     )
+    .with_discovery_maturity(ModuleMaturity::Compatibility)
+    .without_phase_result()
 }
 
 fn taint_iris_next_finding_review_tool() -> ToolDescriptor {
     tool_with_options(
         "taint-iris-next:finding-review",
-        "Review deterministic source/sink evidence with one scoped agent session.",
+        "Experimental taint candidate discovery. Builds new source/sink evidence and observations rather than reviewing existing ledger decisions. Invalid output can require a second agent session. Scope isolation, in-progress cancellation and useful results remain unqualified. Does not complete Scan.",
         taint_iris_next_review_options(),
     )
     .with_prompt(editable_prompt(
@@ -282,6 +332,8 @@ fn taint_iris_next_finding_review_tool() -> ToolDescriptor {
         "TAINT_IRIS_NEXT_PROMPT",
         crate::capabilities::taint_iris_next::taint_iris_next_system_prompt(),
     ))
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
 }
 
 fn taint_iris_next_import_sinks_tool() -> ToolDescriptor {
@@ -296,6 +348,7 @@ fn taint_iris_next_import_sinks_tool() -> ToolDescriptor {
                 "JSONL sink inventory: one call-site row per line carrying `callee` (aliases `symbol`/`function`/`sink`) plus optional `tag`, `cwe`, and `language` fields.",
             )
             .external_read()
+            .required()
             .aliases(&["sinks_path", "sinksJsonl", "sinks_jsonl", "inventory"]),
             opt(
                 "merge",
@@ -311,6 +364,7 @@ fn taint_iris_next_import_sinks_tool() -> ToolDescriptor {
             .advanced(),
         ],
     )
+    .without_phase_result()
 }
 
 fn taint_iris_next_catalog_tool() -> ToolDescriptor {
@@ -617,8 +671,13 @@ fn systems_hunt_tools() -> Vec<ToolDescriptor> {
 
 fn systems_hunt_tool(name: &str, description: &str) -> ToolDescriptor {
     let mut options = systems_hunt_options();
-    if matches!(name, "systems-hunt:systems-hunt" | "systems-hunt:systems-invariant-extract"
-        | "systems-hunt:deep-semantic-cwe-select" | "systems-hunt:deep-semantic-hunt") {
+    if matches!(
+        name,
+        "systems-hunt:systems-hunt"
+            | "systems-hunt:systems-invariant-extract"
+            | "systems-hunt:deep-semantic-cwe-select"
+            | "systems-hunt:deep-semantic-hunt"
+    ) {
         options.push(bound_threat_model_option());
     }
     SYSTEMS_PROMPT_BINDINGS

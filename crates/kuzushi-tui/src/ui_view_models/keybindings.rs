@@ -7,6 +7,7 @@ mod system;
 mod workbench;
 mod workflow;
 mod workspace;
+pub(super) use workspace::options_browser_keybindings;
 
 use super::ShellApp;
 
@@ -49,6 +50,57 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     apply_operator_chrome_overrides(bindings, app)
 }
 
+pub(crate) fn review_queue_navigation_footer(app: &ShellApp) -> bool {
+    if app.has_running_work() || super::answers_own_input(app) {
+        return false;
+    }
+    idle_review_queue_navigation_footer(app)
+}
+
+fn idle_review_queue_navigation_footer(app: &ShellApp) -> bool {
+    use crate::{InputMode, ShellView, WorkbenchPage};
+    let page = super::active_workbench_page(app);
+    let surface = app.router.workbench().focus_for(page);
+    matches!(
+        (app.shell_view(), app.input_mode(), page, surface),
+        (
+            ShellView::Workbench,
+            InputMode::Navigate,
+            WorkbenchPage::Review,
+            super::PhaseSurfaceId::ReviewQueue
+        )
+    ) && !app.phase_result_keys_are_available()
+        && app.input().is_empty()
+}
+
+fn paste_composer_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    let owns_input = app.input_mode() == crate::InputMode::Prompt
+        && app.editor().has_pasted_blocks()
+        && app.completion_cycle().is_none();
+    owns_input.then(|| {
+        vec![
+            bind("Ctrl+Y", "inspect paste"),
+            bind(
+                "Esc",
+                if app.notice_captures_escape() {
+                    "dismiss"
+                } else {
+                    "clear"
+                },
+            ),
+            interrupt_binding(app),
+            bind("Ctrl+_", "undo"),
+        ]
+    })
+}
+
+fn composer_owned_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if view_owns_its_input_contract(app) {
+        return None;
+    }
+    paste_composer_bindings(app).map(|bindings| apply_operator_chrome_overrides(bindings, app))
+}
+
 fn push_paste_inspection_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     if app.input_mode() == crate::InputMode::Prompt && app.editor().has_pasted_blocks() {
         bindings.push(bind("Ctrl+Y", "inspect paste · Ctrl+_ undo"));
@@ -56,10 +108,13 @@ fn push_paste_inspection_binding(bindings: &mut Vec<FooterKeybinding>, app: &She
 }
 
 fn prioritize_reader_paging(bindings: &mut [FooterKeybinding], app: &ShellApp) {
-    if app.shell_view() != crate::ShellView::Workbench {
+    if !matches!(
+        app.shell_view(),
+        crate::ShellView::Cost | crate::ShellView::Workbench
+    ) {
         return;
     }
-    if !focused_reader_needs_paging(app) {
+    if app.shell_view() == crate::ShellView::Workbench && !focused_reader_needs_paging(app) {
         return;
     }
     bindings.sort_by_key(|binding| u8::from(binding.key != "PgUp/PgDn"));
@@ -75,6 +130,9 @@ fn focused_reader_needs_paging(app: &ShellApp) -> bool {
 }
 
 fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
+    if app.budget_halt_owns_input() {
+        return Some(system::budget_halt_keybindings(app));
+    }
     if app.advisory().pending_confirm.is_some() {
         return Some(system::pending_confirm_keybindings(app));
     }
@@ -85,6 +143,7 @@ fn owned_input_bindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         .or_else(|| super::answers_own_input(app).then(|| answer_bindings(app)))
         .or_else(|| workbench::prove_detail_bindings(app))
         .or_else(|| run_artifact::keybindings(app))
+        .or_else(|| composer_owned_bindings(app))
 }
 
 fn answer_bindings(app: &ShellApp) -> Vec<FooterKeybinding> {
@@ -199,6 +258,14 @@ fn chrome_override_applies(app: &ShellApp, context: &str, action: &str) -> bool 
 }
 
 fn view_owns_its_input_contract(app: &ShellApp) -> bool {
+    if app.shell_view() == crate::ShellView::Options
+        && app.input_mode() == crate::InputMode::Navigate
+    {
+        return true;
+    }
+    if app.tools_support_owns_input() {
+        return true;
+    }
     (app.is_picker_view() && !app.picker_prompt_focused())
         || matches!(
             app.shell_view(),
@@ -208,6 +275,7 @@ fn view_owns_its_input_contract(app: &ShellApp) -> bool {
                 | crate::ShellView::ConfirmDialog
                 | crate::ShellView::QuitConfirm
                 | crate::ShellView::Keymap
+                | crate::ShellView::ThemePicker
                 | crate::ShellView::Scene
         )
 }
@@ -265,6 +333,7 @@ fn looks_like_physical_key(key: &str) -> bool {
             "Tab"
                 | "Shift+Tab"
                 | "Enter"
+                | "End"
                 | "Esc"
                 | "Space"
                 | "Backspace"
@@ -300,8 +369,12 @@ fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp)
 /// keys out of the footer. Name the flow on the doorway itself so the footer
 /// still gives direction instead of a bare "nav mode".
 fn prompt_navigate_label(app: &ShellApp) -> String {
-    if let Some(label) = prompt_editor_escape_label(app) {
-        return label;
+    prompt_editor_escape_label(app).unwrap_or_else(|| view_navigate_label(app))
+}
+
+fn view_navigate_label(app: &ShellApp) -> String {
+    if app.phase_result_is_open() {
+        return "result actions".to_string();
     }
     if map_summary_navigation_available(app) {
         return "nav components · j/k move · Enter DFD".to_string();
@@ -316,7 +389,7 @@ fn prompt_navigate_label(app: &ShellApp) -> String {
     }
 }
 
-fn prompt_editor_escape_label(app: &ShellApp) -> Option<String> {
+pub(super) fn prompt_editor_escape_label(app: &ShellApp) -> Option<String> {
     if app.completion_cycle().is_some() {
         return Some("restore completion prefix".to_string());
     }

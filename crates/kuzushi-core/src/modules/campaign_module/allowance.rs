@@ -26,7 +26,7 @@ pub(super) fn context_study_tool() -> ToolDescriptor {
     tool_with_options("campaign:context-study", "Draft one bounded model action for approval: context, scan scopes or a lesson. Keeps context, scope and lesson acceptance unchanged. Makes no model requests.", vec![
         opt("campaignId", OptionType::String, "New campaign identifier; generated when omitted."),
         investigation_option(),
-        opt("generationTool", OptionType::Enum, "Model action for this fixed job. Scope proposals, selective context regeneration and lesson drafts permit no preparation jobs.").choices(&["threat-model:build","pack:suggest-scopes","threat-model:regenerate","findings:lesson-generate"]).default(json!("threat-model:build")),
+        opt("generationTool", OptionType::Enum, "Model action for this fixed job. Scope proposals, selective context regeneration, context questions, workflow proposals and lesson drafts permit no preparation jobs.").choices(&["threat-model:build","pack:suggest-scopes","threat-model:regenerate","threat-model:ask","planner:propose","findings:lesson-generate"]).default(json!("threat-model:build")),
         opt("preparationJobs", OptionType::Json, "Optional ordered context:build and entry-points:extract jobs. At most one of each; prepared and approved with the context job."),
         opt("contextInput", OptionType::Json, "Options for the selected generation tool, checked through shared dispatch. No activation, scan jobs, recursive delegation or automatic follow-up work.").required(),
         brief_option(),
@@ -42,6 +42,14 @@ pub(super) fn status_tool() -> ToolDescriptor {
         vec![investigation_option(), opt("runId", OptionType::String,
             "Optional admitted run whose provider-request counts to inspect. Missing legacy evidence remains unavailable; reading starts no work.").aliases(&["run_id"])],
     ).with_policy(read_policy(ToolPhase::Operate, WorkspaceRequirement::Required))
+}
+
+pub(super) fn review_study_tool() -> ToolDescriptor {
+    tool_with_options("campaign:review-study", "Draft one bounded review job over exact finding observations. Preserves the selected review strategy. Approval and execution are separate; no model requests or jobs start.", vec![
+        opt("campaignId", OptionType::String, "New campaign identifier; generated when omitted."),
+        investigation_option(),
+        opt("reviewInput", OptionType::Json, "Declared triage:run options. Freezes 1 to 100 selected observations, one worker and the effective review strategy. Internal calls and retries share the approved Review allowance.").required(),
+    ]).with_policy(workspace_policy(ToolPhase::Review, RuntimeRequirement::Never, FindingStoreRequirement::Required)).without_phase_result()
 }
 
 pub(super) fn context_map_tool() -> ToolDescriptor {

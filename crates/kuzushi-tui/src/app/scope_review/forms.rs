@@ -26,6 +26,14 @@ impl ScopeEditForm {
 
 fn scope_fields(kind: ScopeEditKind, scope: &ProposedScanScope) -> Vec<(&'static str, String)> {
     match kind {
+        ScopeEditKind::Add => vec![
+            ("Name", scope.name.clone()),
+            (
+                "Files or directories (one per line)",
+                scope.paths.join("\n"),
+            ),
+            ("Why this boundary", scope.rationale.clone()),
+        ],
         ScopeEditKind::AiPriorities => vec![(
             "Scope priorities (optional, at most 2048 bytes)",
             String::new(),
@@ -61,6 +69,7 @@ impl ScopeEditForm {
     pub(super) fn edit(&self, revision: u32) -> Result<ScanScopeEdit> {
         let id = self.template.id.clone();
         Ok(match self.kind {
+            ScopeEditKind::Add => self.new_discovery_scope()?,
             ScopeEditKind::AiPriorities => {
                 anyhow::bail!("scope priorities prepare a model plan, never a boundary edit")
             }
@@ -92,7 +101,7 @@ impl ScopeEditForm {
         })
     }
 
-    fn text(&self, index: usize) -> Result<String> {
+    pub(super) fn text(&self, index: usize) -> Result<String> {
         let text = self
             .fields
             .get(index)

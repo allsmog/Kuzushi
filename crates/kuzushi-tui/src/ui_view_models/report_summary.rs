@@ -2,6 +2,20 @@ use super::journey::journey_reality_projection;
 use crate::app::{RunSummaryEntriesState, ShellApp, ViewDataState};
 use kuzushi_core::{RunSummaryEntry, RunSummaryEntryState};
 
+pub(crate) fn report_source_history_coverage(
+    format: kuzushi_core::WorkspaceExportFormat,
+) -> &'static str {
+    let omitted = kuzushi_core::workspace::workspace_export_omitted_fields(format);
+    if omitted
+        .iter()
+        .any(|field| matches!(*field, "provenance" | "provenance.sourceHistory"))
+    {
+        "Recorded source summaries: omitted in this format."
+    } else {
+        "Recorded source summaries: included with dates and run endpoints."
+    }
+}
+
 pub(crate) fn report_review_summary(app: &ShellApp) -> String {
     if !app.router.report().workspace_history() {
         if let Some(summary) = study_review_summary(app) {
@@ -109,15 +123,24 @@ struct CostCoverage {
     complete: usize,
     incomplete: usize,
     unavailable: usize,
+    missing_metadata: usize,
     invalid: usize,
 }
 
 impl CostCoverage {
     fn label(&self) -> String {
-        format!(
-            "Recent run cost records: {} complete · {} incomplete · {} unavailable · {} unreadable/invalid",
-            self.complete, self.incomplete, self.unavailable, self.invalid,
-        )
+        let mut counts = vec![
+            format!("{} complete", self.complete),
+            format!("{} incomplete", self.incomplete),
+            format!("{} unavailable", self.unavailable),
+        ];
+        if self.missing_metadata > 0 {
+            counts.push(format!("{} missing metadata", self.missing_metadata));
+        }
+        if self.invalid > 0 {
+            counts.push(format!("{} unreadable/invalid", self.invalid));
+        }
+        format!("Recent run cost records: {}", counts.join(" · "))
     }
 }
 
@@ -126,6 +149,9 @@ fn cost_coverage(entries: &[RunSummaryEntry]) -> CostCoverage {
     for entry in entries {
         match &entry.state {
             RunSummaryEntryState::Ready(summary) => classify_cost(summary, &mut coverage),
+            RunSummaryEntryState::Issue(kuzushi_core::RunSummaryIssue::MissingMetadata) => {
+                coverage.missing_metadata += 1;
+            }
             RunSummaryEntryState::Issue(_) => coverage.invalid += 1,
         }
     }

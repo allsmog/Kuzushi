@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -10,9 +11,12 @@ pub(super) fn is_nuget_lock(path: &Path) -> bool {
         .is_some_and(|name| name == "packages.lock.json")
 }
 
-pub(super) fn nuget_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn nuget_lock_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
     let source = relative_display(target, path);
@@ -25,9 +29,12 @@ pub(super) fn nuget_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDep
         .collect())
 }
 
-pub(super) fn nuget_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn nuget_lock_components(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
     Ok(value

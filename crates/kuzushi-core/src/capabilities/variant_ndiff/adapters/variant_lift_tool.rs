@@ -1,22 +1,34 @@
 use super::*;
+use crate::findings::ReviewConfirmation;
 use crate::WorkspaceTarget;
+
+#[cfg(test)]
+mod review_gate_tests;
 
 pub fn run_variant_lift_pattern(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     let fingerprint = match variant_lift_fingerprint(&input) {
         Some(fingerprint) => fingerprint,
         None => return Ok(missing_variant_lift_fingerprint_response()),
     };
-    emit_variant_lift_step(ctx, "tool", format!("variant:lift-pattern start · fp={fingerprint}"));
-    let (workspace, finding) = match variant_lift_subject(ctx, &fingerprint)? {
+    emit_variant_lift_step(
+        ctx,
+        "tool",
+        format!("variant:lift-pattern start · fp={fingerprint}"),
+    );
+    let (workspace, finding, confirmation) = match variant_lift_subject(ctx, &fingerprint)? {
         VariantLiftSubject::Ready(subject) => subject,
         VariantLiftSubject::Rejected(response) => return Ok(response),
     };
-    let signature = query_variant_lift_signature(&input, ctx, runtime, workspace, &finding)?;
-    let object = signature.value
+    let signature =
+        query_variant_lift_signature(&input, ctx, runtime, workspace, &finding, &confirmation)?;
+    ctx.ensure_active()?;
+    let object = signature
+        .value
         .as_object()
         .context("variant:lift-pattern output parse failed: expected a JSON object")?;
     let output = variant_lift_output(&finding, object);
@@ -47,7 +59,7 @@ fn missing_variant_lift_fingerprint_response() -> Value {
 }
 
 enum VariantLiftSubject<'a> {
-    Ready((&'a WorkspaceTarget, Finding)),
+    Ready((&'a WorkspaceTarget, Finding, ReviewConfirmation)),
     Rejected(Value),
 }
 
@@ -55,19 +67,26 @@ fn variant_lift_subject<'a>(
     ctx: &'a ToolExecutionContext<'_>,
     fingerprint: &str,
 ) -> Result<VariantLiftSubject<'a>> {
-    let workspace = ctx.workspace.context(
-        crate::workspace::active_workspace_required_message("variant:lift-pattern"),
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "variant:lift-pattern",
+        ))?;
     let store = ctx
         .findings_store
         .context("variant:lift-pattern requires the active workspace findings store")?;
     let Some(finding) = store.get_finding_by_operator_reference(fingerprint)? else {
-        return Ok(VariantLiftSubject::Rejected(missing_variant_lift_finding_response(
-            workspace,
-            fingerprint,
-        )));
+        return Ok(VariantLiftSubject::Rejected(
+            missing_variant_lift_finding_response(workspace, fingerprint),
+        ));
     };
-    Ok(VariantLiftSubject::Ready((workspace, finding)))
+    let gate = crate::findings::load_finding_review_gate(store, &finding)?;
+    Ok(
+        match variant_confirmation("variant:lift-pattern", fingerprint, gate) {
+            Ok(confirmation) => VariantLiftSubject::Ready((workspace, finding, confirmation)),
+            Err(response) => VariantLiftSubject::Rejected(response),
+        },
+    )
 }
 
 fn missing_variant_lift_finding_response(workspace: &WorkspaceTarget, fingerprint: &str) -> Value {
@@ -89,17 +108,22 @@ fn query_variant_lift_signature(
     runtime: Option<&dyn AgentRuntime>,
     workspace: &WorkspaceTarget,
     finding: &Finding,
+    confirmation: &ReviewConfirmation,
 ) -> Result<CostedStructuredJson<Value>> {
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", input, ctx)?;
-    let thinking_level = agentic_hunter_thinking_level(input);
-    let prompt = build_variant_lift_prompt(finding);
+    let thinking_level = optional_variant_reasoning(input);
+    let prompt = build_variant_lift_prompt(finding, confirmation);
     let _llm_scope = begin_variant_lift_scope(ctx);
     query_required_structured_json_with_cost(
         runtime,
-        variant_lift_request(model, workspace, prompt, thinking_level)?,
-        StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
-        require_json_object,
+        variant_lift_request(model, workspace, prompt, thinking_level.as_deref())?,
+        StructuredJsonContract::new(
+            "variant:lift-pattern",
+            "VariantSignature",
+            variant_signature_schema(),
+        ),
+        validate_variant_signature,
     )
 }
 
@@ -107,16 +131,19 @@ fn variant_lift_request(
     model: String,
     workspace: &WorkspaceTarget,
     prompt: String,
-    thinking_level: String,
+    thinking_level: Option<&str>,
 ) -> Result<AgentQueryRequest> {
-    Ok(AgentQueryRequest::new(
+    let request = AgentQueryRequest::new(
         model,
         workspace.root().to_path_buf(),
         VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(try_whitebox_static_policy_for_target(workspace.root())?)
-    .with_thinking_level(thinking_level))
+    .with_tool_policy(try_whitebox_static_policy_for_target(workspace.root())?);
+    Ok(match thinking_level {
+        Some(level) => request.with_thinking_level(level),
+        None => request,
+    })
 }
 
 fn begin_variant_lift_scope(
@@ -132,6 +159,7 @@ fn begin_variant_lift_scope(
 
 fn variant_lift_output(finding: &Finding, object: &Map<String, Value>) -> String {
     [
+        "Unaccepted source-pattern draft. Inspect the signature before using reviewed lesson generation or approving separate discovery work.".to_string(),
         format!(
             "Variant signature for {} ({}:{}):",
             finding.rule_id, finding.file_path, finding.start_line
@@ -172,9 +200,12 @@ fn variant_lift_response(
         "fingerprint": fingerprint,
         "signature": signature,
         "finding": finding,
+        "draft": true,
+        "accepted": false,
+        "contextActivated": false,
     });
     let mut result = crate::module_result::completed_output_result(
-        "variant:lift-pattern completed",
+        "Unaccepted source-pattern draft",
         output,
         data,
     );
@@ -182,11 +213,7 @@ fn variant_lift_response(
     result
 }
 
-fn emit_variant_lift_step(
-    ctx: &ToolExecutionContext<'_>,
-    kind: &str,
-    label: impl Into<String>,
-) {
+fn emit_variant_lift_step(ctx: &ToolExecutionContext<'_>, kind: &str, label: impl Into<String>) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step(kind, "lift-pattern", label.into()).emit();
     }

@@ -2,6 +2,17 @@ use crate::modules::{ModuleMaturity, ModuleRegistry, RuntimeRequirement, ToolPha
 use crate::{ToolExecutionContext, V2Config, WorkspaceTarget};
 use serde_json::{json, Value};
 
+#[test]
+fn govulncheck_remains_exact_dispatch_experimental_with_honest_claims() {
+    let registry = ModuleRegistry::with_v2_builtins();
+    let descriptor = registry.resolve_tool("govulncheck:scan").unwrap();
+    assert_eq!(descriptor.discovery_maturity, Some(ModuleMaturity::Labs));
+    assert_eq!(descriptor.phase, ToolPhase::Scan);
+    assert!(descriptor
+        .description
+        .contains("runtime reachability is not established"));
+}
+
 fn dispatch(tool: &str, input: Value, workspace: Option<&WorkspaceTarget>) -> Value {
     let config = V2Config::default();
     let ctx = ToolExecutionContext {

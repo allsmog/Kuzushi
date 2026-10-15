@@ -157,7 +157,9 @@ fn threat_model_build_needs_runtime(input: &Value) -> bool {
 
 fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
     match tool_name {
-        "module-recommender:recommend" => Some(crate::capabilities::module_recommender::model_ranking_enabled(input)),
+        "module-recommender:recommend" => {
+            Some(crate::capabilities::module_recommender::model_ranking_enabled(input))
+        }
         "verify:finding" => Some(!super::verification_is_empirical(input)),
         "context:build" => Some(context_build_needs_runtime(input)),
         "offense:chain" => Some(
@@ -167,6 +169,9 @@ fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<
                 .is_some_and(|goal| !goal.trim().is_empty()),
         ),
         "full-mode:hunt" => Some(full_mode_hunt_needs_runtime(input)),
+        "threat-intel:apply" => {
+            Some(crate::capabilities::threat_intel::catalog_dispatch_requested(input))
+        }
         "threat-model:build" => Some(threat_model_build_needs_runtime(input)),
         "patch:reverify" => Some(patch_reverify_needs_runtime(input)),
         "sast:scan" => Some(wants_sast_runtime(input)),
@@ -432,7 +437,11 @@ mod tests {
             &config
         ));
 
-        assert!(tool_wants_runtime("module-recommender:recommend", &json!({"useModelRanking":true}), &config));
+        assert!(tool_wants_runtime(
+            "module-recommender:recommend",
+            &json!({"useModelRanking":true}),
+            &config
+        ));
         config.model = Some("openai:gpt-5.4".to_string());
         assert!(!tool_wants_runtime(
             "module-recommender:recommend",

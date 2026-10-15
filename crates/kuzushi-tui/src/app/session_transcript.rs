@@ -143,6 +143,14 @@ impl ShellSessionTranscript {
 
 impl ShellApp {
     pub(crate) fn attach_session_transcript(&mut self, recorder: SessionRecorder) {
+        if let Some(root) = recorder.path().ancestors().nth(4) {
+            self.runtime_state
+                .context_checkpoints
+                .configure(root.to_path_buf(), recorder.session_id().into());
+            self.runtime_state
+                .study_checkpoints
+                .configure(root.to_path_buf(), recorder.session_id().into());
+        }
         self.session
             .attach_transcript(ShellSessionTranscript::new(recorder));
     }

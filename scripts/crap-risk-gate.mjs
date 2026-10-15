@@ -3,6 +3,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { testCoversProductionFile } from "./crap-risk-test-mapping.mjs";
+import {
+  locallyChangedFunctions,
+  vendoredTerminalBaseline,
+} from "./vendored-terminal-baseline.mjs";
 
 const root = execGit(["rev-parse", "--show-toplevel"], process.cwd()).trim() || process.cwd();
 const threshold = Number(process.env.KUZUSHI_CRAP_RISK_THRESHOLD ?? "7");
@@ -21,7 +25,7 @@ for (const file of changed) {
     changedTests.some((test) => testCoversProductionFile(file, test.file, test.source)) ||
     hasChangedInlineTest(file, source);
   const blocks = scoredFunctionBlocks(file, production);
-  const logicalFileLines = logicalLines(production).length;
+  const logicalFileLines = localProductionLines(file, production, blocks);
   if (scoresWholeFile(file) && isProductionCode(file) && logicalFileLines > 300) {
     failures.push(`${file}: file has ${logicalFileLines} logical lines; limit is 300`);
   }
@@ -134,9 +138,23 @@ function functionBlocks(file, source) {
 }
 
 function scoredFunctionBlocks(file, source) {
+  const upstream = vendoredTerminalBaseline(root, file);
+  if (upstream !== null) {
+    return locallyChangedFunctions(
+      functionBlocks(file, source),
+      functionBlocks(file, productionSource(file, upstream)),
+    );
+  }
   if (scoresWholeFile(file)) return functionBlocks(file, source);
   const changedLines = changedLineRanges(file);
   return functionBlocks(file, source).filter((block) => overlapsRanges(block, changedLines));
+}
+
+function localProductionLines(file, source, blocks) {
+  if (vendoredTerminalBaseline(root, file) !== null) {
+    return logicalLines(blocks.map((block) => block.source).join("\n")).length;
+  }
+  return logicalLines(source).length;
 }
 
 function scoresWholeFile(file) {

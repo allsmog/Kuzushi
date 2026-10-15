@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -12,9 +13,12 @@ pub(super) fn is_composer_lock(path: &Path) -> bool {
         .is_some_and(|name| name == "composer.lock")
 }
 
-pub(super) fn composer_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn composer_lock_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse composer.lock")?;
     let source = relative_display(target, path);
     Ok(COMPOSER_PACKAGE_SECTIONS
@@ -23,9 +27,12 @@ pub(super) fn composer_lock_edges(target: &Path, path: &Path) -> Result<Vec<Sbom
         .collect())
 }
 
-pub(super) fn composer_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn composer_lock_components(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse composer.lock")?;
     Ok([
         ("packages", "composer.lock.packages"),

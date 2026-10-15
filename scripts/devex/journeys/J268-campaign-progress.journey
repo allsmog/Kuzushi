@@ -1,0 +1,62 @@
+name: Recorded campaign progress stays visible through reading input resize and restart
+size: 40x12
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_report.py @TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 Jobs: 24 · 24 completed | compact-progress
+expect: PgUp/PgDn
+type: kept scan draft
+require-live-snap: 15 kept scan draft | composer-draft
+expect: Jobs: 24 · 24 completed
+keys: NPage NPage
+require-live-snap: 15 Jobs: 24 · 24 completed | paged-with-draft
+expect: kept scan draft
+resize: 160x48
+require-live-snap: 15 Jobs: 24 · 24 completed | draft-160x48
+expect: kept scan draft
+resize: 120x36
+require-live-snap: 15 Jobs: 24 · 24 completed | draft-120x36
+expect: kept scan draft
+resize: 96x89
+require-live-snap: 15 Jobs: 24 · 24 completed | draft-96x89
+expect: kept scan draft
+resize: 80x24
+require-live-snap: 15 Jobs: 24 · 24 completed | draft-80x24
+expect: kept scan draft
+resize: 60x20
+require-live-snap: 15 Jobs: 24 · 24 completed | draft-60x20
+expect: kept scan draft
+resize: 40x12
+require-live-snap: 15 Jobs: 24 · 24 completed | draft-40x12
+expect: kept scan draft
+ask: Do the actual completed workload and paging controls stay readable while the composer draft survives paging and all six viewport sizes?
+keys: C-u
+keys: Escape
+require-live-snap: 15 Esc compose | compact-navigation
+keys: j Enter
+require-live-snap: 20 SELECTED JOB | selected-job
+expect: Jobs: 24 · 24 completed
+keys: NPage NPage
+require-live-snap: 15 Jobs: 24 · 24 completed | detail-paged
+keys: q
+require-live-snap: 15 Jobs: 24 · 24 completed | returned-jobs
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_report.py @TARGET @ART read
+ask: Does Enter still inspect the selected recorded job and q return to its list, with truthful counts and no new work?
+keys: C-c
+require-exit: 10
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 Jobs: 24 · 24 completed | recovered-compact-progress
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_report.py @TARGET @ART restarted
+ask: Does the forty-column no-color restart show the same exact completed workload immediately, with unchanged source plan queue observations decisions and allowance?
+keys: C-c
+require-exit: 10

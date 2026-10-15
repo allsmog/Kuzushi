@@ -20,8 +20,8 @@ pub(in crate::scan) fn positive_u32(input: &Value, key: &str) -> Result<Option<u
         _ => None,
     };
     match parsed {
-        Some(value) if value >= 1 => Ok(Some(value.min(u32::MAX as u64) as u32)),
-        _ => anyhow::bail!("codeql: {key} must be a positive integer"),
+        Some(value) if (1..=u32::MAX as u64).contains(&value) => Ok(Some(value as u32)),
+        _ => anyhow::bail!("codeql: {key} must be an integer from 1 to {}", u32::MAX),
     }
 }
 

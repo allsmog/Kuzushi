@@ -88,7 +88,7 @@ pub(crate) const PRIMARY_COMPLETION_PROVIDERS: &[PrimaryCompletionProvider] = &[
         values: tool_completion_values_for,
     },
     PrimaryCompletionProvider {
-        commands: &["set", "setg", "unset", "unsetg"],
+        commands: &["unset", "unsetg"],
         values: option_completion_values_for,
     },
     PrimaryCompletionProvider {

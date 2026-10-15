@@ -3,9 +3,11 @@ use kuzushi_core::try_load_persistent_threat_model;
 
 impl ShellApp {
     pub(crate) fn reduce_threat_regen(&mut self) -> Vec<ShellEffect> {
-        self.prepare_threat_regen_start()
-            .map(|start| vec![ShellEffect::StartThreat(start)])
-            .unwrap_or_default()
+        if let Err(error) = self.open_context_regeneration_entry() {
+            self.set_warn_notice("context", error.to_string());
+            self.log("context", error.to_string());
+        }
+        Vec::new()
     }
 
     pub(crate) fn dispatch_threat_worker(&mut self, start: ThreatWorkerStart) {
@@ -56,43 +58,7 @@ impl ShellApp {
         }
     }
 
-    fn prepare_threat_regen(&mut self) -> Option<String> {
-        self.reject_threat_regen_blockers()?;
-        self.require_valid_threat_model("/threats regen")
-    }
-
-    fn reject_threat_regen_blockers(&mut self) -> Option<()> {
-        if self.threat_worker_running() {
-            self.log("threats", "regen already running; wait for the proposal");
-            return None;
-        }
-        if self.engagement.has_pending_threat_patch() {
-            self.log(
-                "threats",
-                "discard the pending patch first with /threats reject",
-            );
-            return None;
-        }
-        Some(())
-    }
-
-    fn require_valid_threat_model(&mut self, command: &str) -> Option<String> {
-        let Some(model) = self.config().model.clone() else {
-            self.log(
-                "error",
-                format!("{command} requires an explicit model. Next: model"),
-            );
-            return None;
-        };
-        self.checked_threat_model(model)
-    }
-
-    fn prepare_threat_regen_start(&mut self) -> Option<ThreatWorkerStart> {
-        let cwd = self.require_threat_target("/threats regen")?;
-        let model = self.prepare_threat_regen()?;
-        Some(self.threat_worker_start(model, "regenerating threat-model patch", cwd))
-    }
-
+    #[cfg(test)]
     fn threat_worker_start(
         &self,
         model: String,
@@ -107,24 +73,6 @@ impl ShellApp {
             message: message.into(),
             origin_phase: self.engagement.current_phase(),
         }
-    }
-
-    fn require_threat_target(&mut self, command: &str) -> Option<PathBuf> {
-        self.target_owned().or_else(|| {
-            self.log(
-                "error",
-                format!("{command} requires an explicit target. Next: target <path> (or target .)"),
-            );
-            None
-        })
-    }
-
-    fn checked_threat_model(&mut self, model: String) -> Option<String> {
-        if let Err(message) = validate_shell_model_id(&model) {
-            self.log("error", message);
-            return None;
-        }
-        Some(model)
     }
 
     fn begin_threat_worker_state(&mut self, message: impl Into<String>, cancel: ScanCancellation) {

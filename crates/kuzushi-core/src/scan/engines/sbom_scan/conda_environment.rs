@@ -1,5 +1,6 @@
 use super::bounded_fs as fs;
 use super::python_dependency::python_dependency_name;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -31,11 +32,11 @@ pub(super) fn conda_environment_components(
 }
 
 pub(super) fn conda_environment_edges(
-    target: &Path,
+    target: &SbomInputs,
     path: &Path,
 ) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Conda environment")?;
     let source = relative_display(target, path);
     Ok(dependencies(&value)

@@ -1,5 +1,11 @@
 # Recorded Git source history, October 9, 2026
 
+The [October 13 rerun](tui-integration-recovery-2026-10-12.md#source-history-and-compact-phase-controls-october-13)
+verifies this owned history flow on the current binary, repairs compact phase
+control ownership and updates the journey's reader and ledger checks. It records
+42 machine passes and six open human judgments. The evidence below remains the
+original implementation checkpoint.
+
 Shared review reports now include nullable `sourceGit` in the decision basis
 and its later observation. The fields retain the recorded full SHA, branch and
 dirty state. They are read from bounded, target-matched run metadata, never

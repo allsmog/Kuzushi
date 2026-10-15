@@ -6,7 +6,10 @@ import path from "node:path";
 const root = process.cwd();
 const contracts = [
   ["crates/kuzushi-core/src/modules/context/attack_surface_routes.rs", "save_context_snapshot"],
-  ["crates/kuzushi-core/src/capabilities/entry_points/persistence.rs", "write_entry_point_catalog"],
+  [
+    "crates/kuzushi-core/src/capabilities/entry_points/persistence.rs",
+    "write_entry_point_catalog_after_validation",
+  ],
   ["crates/kuzushi-core/src/modules/threat_intel_module.rs", "write_candidates_payload"],
   ["crates/kuzushi-core/src/modules/pwn/mod.rs", "save_state"],
   ["crates/kuzushi-core/src/capabilities/scene_snapshots.rs", "write_scene_snapshot"],

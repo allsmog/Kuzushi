@@ -54,8 +54,15 @@ fn completed_planner_scan_opens_its_pending_result_without_running_again() {
     app.set_input("retained shell draft");
     assert!(app.finalize_run_focus_if_idle());
     assert_scan_pending(&app);
-    assert_eq!(app.input_mode(), InputMode::Navigate);
+    assert_eq!(app.input_mode(), InputMode::Prompt);
     assert_eq!(app.input(), "retained shell draft");
+    let update = app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('n'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert!(update.handled && update.effects.is_empty());
+    assert_eq!(app.input(), "retained shell draftn");
+    assert_scan_pending(&app);
 }
 
 #[test]

@@ -1,5 +1,65 @@
 use super::*;
 
+fn result_summary(
+    tool: &str,
+    status: &str,
+    summary: &str,
+) -> kuzushi_core::run_artifacts::RunResultSummary {
+    kuzushi_core::run_artifacts::RunResultSummary {
+        run_id: "owned-summary-fixture".into(),
+        tool: tool.into(),
+        status: status.into(),
+        summary: summary.into(),
+        output_lines: Vec::new(),
+        output_line_count: 0,
+        warnings: Vec::new(),
+        warning_count: 0,
+        errors: Vec::new(),
+        error_count: 0,
+        artifacts: Vec::new(),
+        artifact_count: 0,
+    }
+}
+
+#[test]
+fn a_single_auxiliary_receipt_leads_with_the_actual_tool_result() {
+    let mut app = app_with_terminal_run("completed");
+    assert!(app.finalize_run_focus_if_idle());
+    let mut receipt = app.activity().unwrap().run_focus_receipt.clone().unwrap();
+    receipt.result_summaries.push(result_summary(
+        "entry-points:extract",
+        "completed",
+        "3 source surfaces saved.",
+    ));
+    let text = run_receipt_notice(&receipt, Some("answer recorded"));
+    assert!(
+        text.starts_with("Extract entry points: 3 source surfaces saved."),
+        "{text}"
+    );
+    assert!(text.contains("run receipt · completed"));
+    assert!(text.ends_with("answer recorded"));
+    assert!(!text.contains("Map ready"));
+}
+
+#[test]
+fn compound_or_mismatched_results_keep_the_overall_outcome_primary() {
+    let mut app = app_with_terminal_run("failed");
+    assert!(app.finalize_run_focus_if_idle());
+    let mut receipt = app.activity().unwrap().run_focus_receipt.clone().unwrap();
+    receipt.result_summaries.push(result_summary(
+        "entry-points:extract",
+        "completed",
+        "3 source surfaces saved.",
+    ));
+    assert!(run_receipt_notice(&receipt, None).starts_with("run receipt · failed"));
+    receipt.result_summaries.push(result_summary(
+        "threat-model:build",
+        "failed",
+        "Context could not be built.",
+    ));
+    assert!(run_receipt_notice(&receipt, None).starts_with("run receipt · failed"));
+}
+
 fn app_with_terminal_run(outcome: &str) -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     let mut session = ActivitySession::new("receipt-notice-run");

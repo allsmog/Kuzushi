@@ -1,0 +1,182 @@
+name: Shared context and exact native batches preserve finite monorepo discovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | source-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Owned monorepo source
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | map-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scopes
+require-live-snap: 25 Enter / c build inventory | empty-scopes
+keys: c
+require-live-snap: 35 DRAFT SCOPES | repository-inventory
+keys: Enter Down Enter
+require-live-snap: 20 First scope name | split-root
+type: Services
+keys: Tab
+type: services
+keys: Tab
+type: Root files
+keys: Tab
+type: loose.py
+keys: F2
+require-live-snap: 25 r2 | root-preserved
+keys: Enter Down Enter
+require-live-snap: 20 First scope name | split-services
+type: Service A
+keys: Tab
+type: services/a
+keys: Tab
+type: Service B
+keys: Tab
+type: services/b
+keys: F2
+require-live-snap: 25 r3 | three-boundaries
+expect: Root files
+keys: Down Down Enter Down Down Down Down Down Down Down Down Down Down Down Down Down
+require-live-snap: 20 ▸ Use boundary as shared context | share-action
+keys: Enter
+require-live-snap: 25 r4 | shared-copy
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART shared
+expect: Shared context
+ask: Does copying Root files into shared context preserve 65/65/1 primary discovery memberships and add no duplicate work or new model request?
+keys: Down f
+require-live-snap: 20 Files 1..1 of 1 | shared-member
+expect: loose.py
+keys: Escape
+require-live-snap: 15 Enter menu | files-back
+keys: a
+require-live-snap: 20 Accept exact boundaries | acceptance
+keys: Enter End Enter
+require-live-snap: 25 ACCEPTED SCOPES | accepted-scopes
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART accepted
+keys: Space
+require-live-snap: 20 supplies context only | context-not-work
+keys: Up Space Up Space Up Space
+require-live-snap: 20 3 boundaries marked | selected-work
+resize: 160x48
+require-live-snap: 15 ACCEPTED SCOPES | scopes-160x48
+resize: 96x89
+require-live-snap: 15 ACCEPTED SCOPES | scopes-96x89
+resize: 80x24
+require-live-snap: 15 ACCEPTED SCOPES | scopes-80x24
+resize: 60x20
+require-live-snap: 15 ACCEPTED SCOPES | scopes-60x20
+resize: 40x12
+require-live-snap: 15 ACCEPTED SCOPES | scopes-40x12
+keys: Down Down Down
+require-live-snap: 15 · context | shared-context-40x12
+keys: Up Up Up
+keys: NPage
+live-snap: scope-detail-40x12
+ask: Are primary ownership, shared-context status, coverage limitations and selected workload reachable without assuming complete repository coverage?
+resize: 120x36
+keys: p
+require-live-snap: 25 PLAN A STUDY | finite-study
+expect: 9 fixed discovery jobs
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 Total calls | total-calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | protected-calls
+type: 1
+keys: Enter L
+require-live-snap: 35 Scope draft ready | fixed-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART draft
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+expect: 9 fixed jobs
+expect: Total provider calls: 1
+expect: Protected review calls: 1
+keys: NPage
+require-live-snap: 20 60000 ms per job | scan-resource-details
+expect: 60000 ms per job
+keys: End
+require-live-snap: 20 y approve | approval-tail
+keys: y
+require-live-snap: 25 Approval saved | approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | running
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART completed
+keys: r
+require-live-snap: 25 9 completed | completed
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-a.txt
+keys: Enter
+require-live-snap: 25 f064.py | service-a-finding
+submit: decision deferred Service A owner policy review
+paste-file: @ART/open-b.txt
+keys: Enter
+require-live-snap: 25 services/b | service-b-finding
+submit: decision deferred Service B owner policy review
+paste-file: @ART/open-root.txt
+keys: Enter
+require-live-snap: 25 loose.py | root-finding
+submit: decision deferred Root owner policy review
+submit: report
+require-live-snap: 25 Scope study: | report
+expect: 3 boundaries
+expect: 0 committed / 1 calls
+expect: 1 protected review remaining
+ask: Do the installed scanner's second batches produce one scoped policy signal per boundary, with separate recurrence and no discovery of shared files by a sibling?
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART exported
+submit: scopes
+require-live-snap: 25 ACCEPTED SCOPES | old-scope
+keys: Enter Down Down Down Down Down Down Down Down Down Down Down Down Down Down
+require-live-snap: 20 ▸ Remove shared context | remove-action
+keys: Enter
+require-live-snap: 25 DRAFT SCOPES · r6 | removed-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART removed
+keys: Escape
+submit: report
+require-live-snap: 25 Scope study: | original-report
+expect: 3 boundaries
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 9 completed | recovered-jobs
+submit: report
+require-live-snap: 25 Scope study: | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/shared_monorepo.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the original accepted scope study, nine observations and three decisions after a newer unaccepted scope edit, with no extra job or model request?
+keys: C-c
+require-exit: 10

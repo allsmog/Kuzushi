@@ -1,3 +1,4 @@
+use super::android_apk_input_receipt::ApkInputReceipt;
 use super::*;
 use crate::scan::{RegisteredChild, ScanCancellation};
 
@@ -10,7 +11,7 @@ const APK_MAGIC: [u8; 4] = [b'P', b'K', 0x03, 0x04];
 const MAX_ANDROID_OUTPUT_ENTRIES: usize = 1_000_000;
 const MAX_ANDROID_EXPANDED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub(in crate::modules) const DEFAULT_ANDROID_COMMAND_TIMEOUT_MS: u64 = 10 * 60 * 1_000;
-const MAX_ANDROID_COMMAND_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1_000;
+pub(in crate::modules) const MAX_ANDROID_COMMAND_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1_000;
 
 pub(in crate::modules) fn prepare_apk(
     input: &Value,
@@ -20,6 +21,7 @@ pub(in crate::modules) fn prepare_apk(
     let apk_path = resolve_apk_path(input)?;
     validate_apk_magic(&apk_path)?;
     let decompiler = read_decompiler_choice(input)?;
+    let input_receipt = ApkInputReceipt::capture(input, cancellation)?;
     let command_timeout = android_command_timeout(input)?;
     let tools = AndroidApkToolchain::from_tool_input(input);
     let workspace = AndroidApkWorkspace::create(target, command_timeout)?;
@@ -34,15 +36,17 @@ pub(in crate::modules) fn prepare_apk(
     if matches!(decompiler, Decompiler::Apktool | Decompiler::Both) {
         staged_workspace.run_apktool(&apk_path, &tools, cancellation)?;
     }
+    input_receipt.require_unchanged(input, cancellation)?;
     staged.publish(&workspace.root, &workspace.decompiled_root)?;
     Ok(PreparedApk {
         apk: apk_path,
         decompiler,
         workspace,
+        input_receipt,
     })
 }
 
-fn resolve_apk_path(input: &Value) -> Result<PathBuf> {
+pub(super) fn resolve_apk_path(input: &Value) -> Result<PathBuf> {
     let raw = read_apk_string(input)?;
     let expanded = expand_home(raw);
     let path = PathBuf::from(&expanded);
@@ -767,6 +771,7 @@ pub(in crate::modules) struct PreparedApk {
     apk: PathBuf,
     decompiler: Decompiler,
     workspace: AndroidApkWorkspace,
+    input_receipt: ApkInputReceipt,
 }
 
 impl PreparedApk {
@@ -784,6 +789,7 @@ impl PreparedApk {
             "output": summary,
             "data": {
                 "apk": self.apk.display().to_string(),
+                "inputReceipt": self.input_receipt,
                 "decompiler": self.decompiler.as_str(),
                 "workspaceRoot": self.workspace.root.display().to_string(),
                 "decompiledRoot": self.workspace.decompiled_root.display().to_string(),

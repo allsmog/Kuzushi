@@ -12,7 +12,7 @@ impl ReconReport {
                 self.target
             ),
             "recon:subdomain" => format!(
-                "recon:subdomain discovered {} subdomain{} for {}",
+                "recon:subdomain observed {} historical name{} for {}; liveness was not tested",
                 self.subdomains.len(),
                 plural(self.subdomains.len()),
                 self.target
@@ -136,6 +136,17 @@ impl ReconReport {
         if let (Some(object), Some(unusable)) = (data.as_object_mut(), self.skipped_unusable()) {
             object.insert("skippedUnusable".to_string(), json!(unusable));
         }
+        if matches!(
+            self.tool.as_str(),
+            "recon:nmap" | "recon:subdomain" | "recon:http-fingerprint"
+        ) {
+            data["coverage"] = json!({"complete":false});
+            data["sourceVerified"] = json!(false);
+            return crate::module_result::partial_output_result(
+                format!("External observations: {} host{}, {} service{}; source claims and coverage require review",self.hosts.len(),plural(self.hosts.len()),self.services.len(),plural(self.services.len())),
+                format!("External context observations. No repository coverage or source accuracy is established.\n{output}"),
+                vec![json!({"code":"external-observations","message":"Reported hosts/services/technologies remain context claims. Passive names do not establish liveness. This action does not complete repository Map or Scan."})],data);
+        }
         crate::module_result::completed_output_result(output.clone(), output, data)
     }
 }
@@ -180,10 +191,7 @@ pub fn execute_recon_tool(
 /// carries `{"tool": "amass|httpx|nuclei|nmap-xml|burp-xml|har", "path": "..."}`.
 /// Splitting by `tool` keeps the adapters focused (one parser per
 /// supported recon format) while presenting a single dispatch verb.
-fn dispatch_recon_import(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
+fn dispatch_recon_import(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let kind = input
         .get("tool")
         .and_then(Value::as_str)
@@ -223,13 +231,7 @@ fn import_bounty_capture(
     let workspace = ctx
         .workspace
         .context("recon:import requires an active workspace target")?;
-    let path = input
-        .get("path")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(std::path::PathBuf::from)
-        .context("recon:import needs a `path` field")?;
+    let path = super::required_path(input, "path", "recon:import needs a `path` field")?;
     if is_har {
         let summary = crate::findings::import::import_har(workspace, &path)?;
         let counts = CaptureImportCounts {
@@ -260,9 +262,10 @@ fn import_capture_output(
     counts: CaptureImportCounts,
     summary: impl serde::Serialize,
 ) -> Value {
-    let skipped = crate::findings::import::capture_skip_phrase(counts.out_of_scope, counts.unusable)
-        .map(|phrase| format!(" · {phrase}"))
-        .unwrap_or_default();
+    let skipped =
+        crate::findings::import::capture_skip_phrase(counts.out_of_scope, counts.unusable)
+            .map(|phrase| format!(" · {phrase}"))
+            .unwrap_or_default();
     let imported = counts.imported;
     let output = format!("recon:import {format} imported {imported} finding(s){skipped}");
     crate::module_result::completed_output_result(output.clone(), output, json!(summary))
@@ -272,11 +275,7 @@ fn import_capture_output(
 /// `.kuzushi/scope.toml`. Unknown verdicts are allowed only when the scope
 /// has no in-scope allow list; absence of a match in allow-list mode refuses.
 /// Absence of scope.toml is the no-op default.
-fn enforce_recon_scope(
-    name: &str,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<()> {
+fn enforce_recon_scope(name: &str, input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
     let Some(workspace) = ctx.workspace else {
         return Ok(());
     };
@@ -381,7 +380,7 @@ mod tests {
             skipped_out_of_scope: Some(1),
             subdomains: Vec::new(),
             fingerprint: BTreeMap::new(),
-                    redirects: None,
+            redirects: None,
         };
 
         let output = report.output();

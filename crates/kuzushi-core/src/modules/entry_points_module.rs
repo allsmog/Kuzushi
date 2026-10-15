@@ -18,7 +18,8 @@ pub(in crate::modules) fn entry_points_module() -> BuiltinModule {
                 "Extract entry points (routes, handlers, outbound clients) from the latest \
                  context snapshot. Writes .kuzushi/entry-points.json. Deterministic; no model cost.",
                 vec![target_option()],
-            )],
+            )
+            .without_phase_result()],
         ),
         vec![dag(
             "entry-points:extract",
@@ -40,8 +41,11 @@ pub(in crate::modules) fn run_entry_points_extract(
         &target,
     )?;
     let (catalog, output_path) =
-        crate::capabilities::entry_points::refresh_entry_point_catalog(&target)?;
-    snapshot.ensure_current(ctx, "entry-points:extract", &target)?;
+        crate::capabilities::entry_points::refresh_entry_point_catalog_cancellable(
+            &target,
+            &|| ctx.is_cancelled(),
+            || snapshot.ensure_current(ctx, "entry-points:extract", &target),
+        )?;
     emit_step(
         ctx,
         "done",
@@ -54,7 +58,12 @@ pub(in crate::modules) fn run_entry_points_extract(
             None => format!("entry-points wrote {} routes", catalog.total),
         },
     );
-    Ok(snapshot.attach(entry_points_response(&target, &output_path, &catalog)))
+    Ok(snapshot.finish(
+        ctx,
+        "entry-points:extract",
+        &target,
+        entry_points_response(&target, &output_path, &catalog),
+    ))
 }
 
 fn entry_points_response(

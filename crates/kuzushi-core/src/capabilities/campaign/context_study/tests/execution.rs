@@ -8,6 +8,8 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 
+mod source_identity;
+
 #[derive(Clone, Default)]
 pub(super) struct OfflineContextRuntime {
     binding: Option<AllowanceBinding>,
@@ -59,6 +61,7 @@ fn document(root: &Path) -> Result<Value> {
         })
         .collect::<Vec<_>>();
     Ok(json!({"version":"2.0","title":"Offline generated context",
+        "provenance":{"treeHash":"untrusted-provider-claim"},
         "dfd":{"nodes":[{"id":"app","type":"process","name":"Command line application","description":"Prints a greeting","trustZone":"internal","evidenceAnchors":[{"filePath":"main.rs","startLine":1}]},{"id":"terminal","type":"external-entity","name":"Terminal","description":"Receives standard output","trustZone":"external"}],"flows":[{"id":"stdout","sourceId":"app","targetId":"terminal","description":"Greeting on standard output","trustBoundaryIds":[]}],"trustBoundaries":[]},
         "threats":[],"deprioritized":deprioritized,"summary":{"total":0,"bySeverity":{},"byCategory":{}},"openQuestions":["Which callers supply the input?"]}))
 }
@@ -214,9 +217,20 @@ fn context_study_executes_real_generator_with_mock_provider_and_retains_spending
     assert_eq!(runtime.requests.lock().unwrap().len(), 1);
     let reference: crate::ThreatModelRef =
         serde_json::from_value(result["data"]["modelRef"].clone()).unwrap();
-    assert!(
-        crate::capabilities::threat_model::load_exact_threat_model(root.path(), &reference).is_ok()
-    );
+    let immutable =
+        crate::capabilities::threat_model::load_exact_threat_model(root.path(), &reference)
+            .unwrap();
+    let source_hash = crate::incremental_index::current_workspace_tree_hash(root.path()).unwrap();
+    assert_eq!(immutable["provenance"]["treeHash"], source_hash);
+    let inspected = registry
+        .execute_tool(
+            "threat-model:read",
+            json!({"threatModelRef":reference}),
+            &ctx,
+        )
+        .unwrap();
+    assert_eq!(inspected["data"]["sourceState"]["status"], "matches");
+    assert!(immutable.get("verification").is_none());
     assert!(
         crate::capabilities::threat_model::load_active_threat_model(root.path())
             .unwrap()

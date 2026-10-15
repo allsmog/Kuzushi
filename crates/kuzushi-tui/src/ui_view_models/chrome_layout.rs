@@ -3,17 +3,38 @@ use crate::{ShellApp, ShellView};
 
 /// Compact idle Review keeps its reading area ahead of passive session chrome.
 pub(crate) fn compact_review_reading(app: &ShellApp, height: u16) -> bool {
-    if height > 12 || app.shell_view() != ShellView::Workbench {
+    if !compact_idle_workbench(app, height) {
         return false;
     }
     if super::active_workbench_page(app) != crate::WorkbenchPage::Review {
         return false;
     }
-    review_navigation_is_idle(app) && !review_decision_owns_chrome(app)
+    true
 }
 
-fn review_navigation_is_idle(app: &ShellApp) -> bool {
-    if app.input_mode() != crate::InputMode::Navigate || !app.input().is_empty() {
+pub(crate) fn compact_map_reading(app: &ShellApp, height: u16) -> bool {
+    compact_idle_workbench(app, height) && idle_map_navigation(app)
+}
+
+fn idle_map_navigation(app: &ShellApp) -> bool {
+    app.input_mode() == crate::InputMode::Navigate
+        && super::active_workbench_page(app) == crate::WorkbenchPage::Map
+        && super::ready_map_gallery_is_primary(app)
+}
+
+fn compact_idle_workbench(app: &ShellApp, height: u16) -> bool {
+    height <= 12
+        && app.shell_view() == ShellView::Workbench
+        && workbench_reading_is_idle(app)
+        && !review_decision_owns_chrome(app)
+}
+
+pub(crate) fn compact_phase_reading(app: &ShellApp, height: u16) -> bool {
+    compact_review_reading(app, height) || compact_map_reading(app, height)
+}
+
+fn workbench_reading_is_idle(app: &ShellApp) -> bool {
+    if !app.input().is_empty() {
         return false;
     }
     !app.has_running_work() && !app.review_decision_write_pending()
@@ -75,12 +96,27 @@ pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> 
 }
 
 fn compact_reading_hides_transcript(app: &ShellApp, height: u16) -> bool {
-    compact_answers_supply_guidance(app, height)
-        || (app.shell_view() == ShellView::Scene && height < 20)
+    compact_review_reading(app, height) || compact_other_reading_hides_transcript(app, height)
 }
 
-pub(crate) fn compact_gallery_notice(app: &ShellApp, height: u16) -> bool {
-    app.shell_view() == ShellView::Scene && height <= 12
+fn compact_other_reading_hides_transcript(app: &ShellApp, height: u16) -> bool {
+    compact_answers_supply_guidance(app, height)
+        || (app.shell_view() == ShellView::Scene && height < 20)
+        || compact_saved_run_reading(app, height)
+}
+
+pub(crate) fn compact_document_notice(app: &ShellApp, height: u16) -> bool {
+    compact_review_reading(app, height)
+        || (app.shell_view() == ShellView::Scene && height <= 12)
+        || compact_saved_run_reading(app, height)
+}
+
+fn compact_saved_run_reading(app: &ShellApp, height: u16) -> bool {
+    height <= 12
+        && matches!(
+            app.shell_view(),
+            ShellView::Replay | ShellView::Trace | ShellView::FailureHandoff | ShellView::RunDiff
+        )
 }
 
 pub(crate) fn keybind_footer_chrome_height(
@@ -97,14 +133,26 @@ pub(crate) fn keybind_footer_chrome_height(
     {
         return 0;
     }
-    if terminal_width < 70 && terminal_height >= 9 {
+    reading_keybind_rows(app, terminal_height, terminal_width)
+}
+
+fn reading_keybind_rows(app: &ShellApp, height: u16, width: u16) -> u16 {
+    if compact_map_reading(app, height) {
+        return 1;
+    }
+    let wrap_width = if super::review_queue_navigation_footer(app) {
+        100
+    } else {
+        70
+    };
+    if width < wrap_width && height >= 9 {
         return 3;
     }
     2
 }
 
 pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
-    if compact_review_reading(app, terminal_height) {
+    if compact_phase_reading(app, terminal_height) {
         return 0;
     }
     if activity_supplies_own_chrome(app) || terminal_height < 6 {
@@ -178,17 +226,19 @@ mod tests {
     }
 
     #[test]
-    fn compact_review_chrome_returns_for_prompt_draft_and_taller_viewports() {
+    fn compact_review_chrome_keeps_empty_prompt_readable_and_returns_for_drafts() {
         let mut app = review_reader();
         assert!(compact_review_reading(&app, 12));
         assert_eq!(status_footer_chrome_height(&app, 12), 0);
         assert!(!compact_review_reading(&app, 20));
         app.set_input_mode(crate::InputMode::Prompt);
-        assert!(!compact_review_reading(&app, 12));
-        assert_eq!(status_footer_chrome_height(&app, 12), 1);
-        app.set_input_mode(crate::InputMode::Navigate);
+        assert!(compact_review_reading(&app, 12));
+        assert_eq!(status_footer_chrome_height(&app, 12), 0);
+        assert_eq!(transcript_chrome_height(&app, 12), 0);
         app.set_input("held operator draft");
         assert!(!compact_review_reading(&app, 12));
+        assert_eq!(status_footer_chrome_height(&app, 12), 1);
+        assert_eq!(app.input_mode(), crate::InputMode::Prompt);
     }
 
     #[test]

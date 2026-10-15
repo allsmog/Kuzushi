@@ -36,6 +36,7 @@ pub(crate) enum PhaseSurfaceId {
     ReviewChains,
     ReviewDetail,
     ReviewNextPlan,
+    ReviewTrace,
     ProveStatus,
     ProveEvidence,
     ProveLadder,
@@ -64,9 +65,11 @@ impl PhaseSurfaceId {
             Self::ScanEngines | Self::ScanReceipt | Self::ScanDelta | Self::ScanScope => {
                 WorkbenchPage::Scan
             }
-            Self::ReviewChains | Self::ReviewQueue | Self::ReviewDetail | Self::ReviewNextPlan => {
-                WorkbenchPage::Review
-            }
+            Self::ReviewChains
+            | Self::ReviewQueue
+            | Self::ReviewDetail
+            | Self::ReviewNextPlan
+            | Self::ReviewTrace => WorkbenchPage::Review,
             Self::ProveStatus
             | Self::ProveEvidence
             | Self::ProveLadder
@@ -97,6 +100,7 @@ impl PhaseSurfaceId {
             Self::ReviewChains => "Attack Chains",
             Self::ReviewDetail => "Selected Finding",
             Self::ReviewNextPlan => "Next Investigation Plan",
+            Self::ReviewTrace => "Trace",
             Self::ProveStatus => "Proof Status",
             Self::ProveEvidence => "Evidence",
             Self::ProveLadder => "Proof Ladder",
@@ -217,7 +221,7 @@ fn guided_phase_area(
     area: Rect,
     attention: AttentionMode,
 ) -> Rect {
-    if density != LayoutDensity::Guided || prove_reading_composition(body).is_some() {
+    if density != LayoutDensity::Guided || reader_composition(body).is_some() {
         return area;
     }
     if attention == AttentionMode::ResultReady
@@ -242,7 +246,7 @@ fn screen_composition(
 ) -> Composition {
     let columns = || Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
     if let Some(composition) =
-        prove_reading_composition(body).or_else(|| ready_map_composition(body, density))
+        reader_composition(body).or_else(|| ready_map_composition(body, density))
     {
         return composition;
     }
@@ -253,6 +257,13 @@ fn screen_composition(
         return columns();
     }
     rich_phase_composition(body, visible.len()).unwrap_or_else(columns)
+}
+
+fn reader_composition(body: &PhaseCockpitBody) -> Option<Composition> {
+    if matches!(body, PhaseCockpitBody::Review(model) if model.trace.is_some()) {
+        return Some(Composition::FullScreen(PhaseSurfaceId::ReviewTrace));
+    }
+    prove_reading_composition(body)
 }
 
 fn prove_reading_composition(body: &PhaseCockpitBody) -> Option<Composition> {

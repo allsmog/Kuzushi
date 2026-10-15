@@ -79,7 +79,7 @@ pub enum ShellCommand {
     ScanBatch {
         prior_run_id: Option<String>,
     },
-    /// Open the guided Map → Scan workflow, optionally selecting a target
+    /// Open Setup for the bounded investigation, optionally selecting a target
     /// first. Emitted by the public `full` and `pipeline` shell verbs.
     Full(Option<PathBuf>),
     /// Internal launch command. Chooses the initial terminal route without

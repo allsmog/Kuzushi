@@ -137,6 +137,34 @@ fn supplemental_context_distinguishes_omitted_legacy_missing_and_recorded_text()
 }
 
 #[test]
+fn authenticated_empty_snapshot_reports_omission_in_both_source_views() {
+    let (root, mut form) = planned_study();
+    let config = V2Config::default();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let input = json!({"campaignId":"empty-frozen-context", "scanInput":{"taskMode":"manual","tasks":["secret-scan"],"threatModelRef":null}});
+    execute_study_plan(&input, &ctx).unwrap();
+    let receipt = load_study_plan_receipt(root.path(), "empty-frozen-context").unwrap();
+    assert!(receipt.scan_input["scanContextRef"].is_object());
+    assert!(receipt.supporting_context.is_none());
+    form.study.record_receipt(receipt);
+    let overview = source_lines(&form).join("\n");
+    assert!(overview.contains("frozen snapshot contains no supplemental text"));
+    assert!(!overview.contains("exact text is unavailable"));
+    form.source_view.selected = StudySourceView::Options;
+    assert!(source_lines(&form)
+        .join("\n")
+        .contains("no supplemental text supplied"));
+}
+
+#[test]
 fn matrix_cases_keep_their_own_executable_facts_and_exact_options() {
     let (_root, mut config) = planned_study();
     let receipt = config.study.receipt.take().unwrap();

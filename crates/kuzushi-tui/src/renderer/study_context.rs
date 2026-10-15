@@ -26,7 +26,7 @@ pub(super) fn render_context_picker(frame: &mut Frame<'_>, app: &ShellApp, area:
         layout.detail,
         layout.controls,
         picker.detail_scroll,
-        picker.raw,
+        picker.text_view,
     );
     if let Some(selected) = picker.actions_selected {
         actions::render(frame, app, area, selected);
@@ -82,7 +82,7 @@ fn render_context_detail(
     area: Rect,
     controls: Rect,
     scroll: usize,
-    raw: bool,
+    text_view: crate::app::StudyContextTextView,
 ) {
     let lines = context_detail_lines(app, area.width as usize);
     let max = lines.len().saturating_sub(area.height as usize);
@@ -94,15 +94,19 @@ fn render_context_detail(
         .map(|line| Line::styled(line, theme::primary()))
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), area);
-    render_context_controls(frame, controls, offset, max, raw);
+    let regeneration = app
+        .study_context_picker()
+        .is_some_and(|p| p.regeneration_entry);
+    render_context_controls(frame, controls, offset, max, text_view, regeneration);
 }
 
 fn render_context_header(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
+    let title = crate::ui_view_models::study_context::context_header_title(app);
     frame.render_widget(
         Block::default()
             .borders(Borders::ALL)
             .border_style(theme::subtle())
-            .title(Span::styled(" CHOOSE STUDY CONTEXT ", theme::heading())),
+            .title(Span::styled(title, theme::heading())),
         area,
     );
     if let Some(config) = app.router.campaign().batch_scan_config.as_ref() {
@@ -124,11 +128,12 @@ fn render_context_controls(
     area: Rect,
     offset: usize,
     max: usize,
-    raw: bool,
+    text_view: crate::app::StudyContextTextView,
+    regeneration: bool,
 ) {
     let tab = if area.width < 50 {
         "view"
-    } else if raw {
+    } else if text_view == crate::app::StudyContextTextView::Document {
         "summary"
     } else {
         "JSON"
@@ -144,23 +149,33 @@ fn render_context_controls(
                 context_navigation_controls(area.width, nav, offset, max),
                 theme::muted(),
             ),
-            Line::styled(context_action_controls(area.width, tab), theme::accent()),
+            Line::styled(
+                crate::ui_view_models::study_context::context_text_controls(text_view, area.width)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| context_action_controls(area.width, tab, regeneration)),
+                theme::accent(),
+            ),
         ]),
         area,
     );
 }
 
-fn context_action_controls(width: u16, tab: &str) -> String {
+fn context_action_controls(width: u16, tab: &str, regeneration: bool) -> String {
+    if regeneration {
+        return "e choose text · Space actions".into();
+    }
     if width < 72 {
         "a use e edit c check Space actions".into()
+    } else if width < 96 {
+        format!("a use · Space actions · p scanner · Tab {tab} · Esc back")
     } else {
-        format!("a use · e edit · c check · Space actions · Tab {tab} · Esc back")
+        format!("a use · e edit · c check · Space actions · Tab {tab} · p scanner · Esc back")
     }
 }
 
 fn context_navigation_controls(width: u16, nav: &str, offset: usize, max: usize) -> String {
     if width < 72 {
-        return "↑↓ Enter · Tab · PgUp/Dn · Esc back".into();
+        return "↑↓ Enter PgUp/Dn Home/End Esc back".into();
     }
-    format!("{nav} · PgUp/Dn {}/{}", offset + 1, max + 1)
+    format!("{nav} · PgUp/Dn {}/{} · Home/End", offset + 1, max + 1)
 }

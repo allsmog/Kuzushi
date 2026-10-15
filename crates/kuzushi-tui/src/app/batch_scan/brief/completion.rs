@@ -24,6 +24,7 @@ impl ShellApp {
         if saved {
             self.bind_saved_brief(&target, brief);
         }
+        self.checkpoint_study_choices();
         true
     }
 
@@ -64,6 +65,7 @@ impl ShellApp {
             editor.mode = BriefMode::Review;
             editor.notice = Some(format!("Brief stopped: {error}. Your draft is kept. r reads the current base before another review."));
         }
+        self.checkpoint_study_choices();
     }
 }
 

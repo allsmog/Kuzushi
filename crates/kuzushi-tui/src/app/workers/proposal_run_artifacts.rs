@@ -1,7 +1,7 @@
-use super::{JobEventSink, PlanChange, PlanProposal, ThreatPatch};
+use super::{JobEventSink, ThreatPatch};
 use anyhow::{Context, Result};
 use kuzushi_core::run_artifacts::ToolRunRecord;
-use kuzushi_core::{V2Config, WorkflowPhase};
+use kuzushi_core::V2Config;
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -91,22 +91,6 @@ impl ProposalRun<'_> {
     }
 }
 
-pub(super) fn planner_input(goal: &str, phase: Option<WorkflowPhase>) -> Value {
-    json!({
-        "goal": goal,
-        "phaseIntent": phase,
-    })
-}
-
-pub(super) fn planner_proposal_value(plan: &PlanProposal) -> Value {
-    json!({
-        "goal": plan.goal,
-        "summary": plan.summary,
-        "changes": plan.changes.iter().map(plan_change_value).collect::<Vec<_>>(),
-        "unsupported": plan.unsupported,
-    })
-}
-
 pub(super) fn threat_regen_input(existing: &Value) -> Value {
     json!({
         "action": "regenerate",
@@ -121,33 +105,6 @@ pub(super) fn threat_patch_value(patch: &ThreatPatch) -> Value {
         "patch": patch.patch,
         "unsupported": patch.unsupported,
     })
-}
-
-fn plan_change_value(change: &PlanChange) -> Value {
-    match change {
-        PlanChange::RunTool { phase, tool, input } => json!({
-            "kind": "run_tool",
-            "phase": phase,
-            "tool": tool,
-            "input": input,
-        }),
-        PlanChange::SetOption {
-            phase,
-            global,
-            tool,
-            name,
-            value,
-        } => json!({
-            "kind": "set_option",
-            "phase": phase,
-            "global": global,
-            "tool": tool,
-            "name": name,
-            "value": value,
-        }),
-        PlanChange::Ask { question } => json!({ "kind": "ask", "question": question }),
-        PlanChange::Note { text } => json!({ "kind": "note", "text": text }),
-    }
 }
 
 fn completed_result(
@@ -184,7 +141,7 @@ mod tests {
             kind: "plan",
             tool: "planner:propose",
         };
-        let input = planner_input("scan auth", Some(WorkflowPhase::Scan));
+        let input = json!({"goal":"scan auth","phaseIntent":"scan"});
         run.start(
             &input,
             "openai:test".to_string(),

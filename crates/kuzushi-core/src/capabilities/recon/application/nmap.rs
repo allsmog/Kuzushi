@@ -7,6 +7,7 @@ pub(crate) fn run_recon_nmap(
 ) -> Result<ReconReport> {
     let run = prepare_recon_nmap(input, ctx)?;
     let parsed = scan_recon_nmap(&run.options, cancel)?;
+    require_recon_active(cancel)?;
     let persisted = persist_recon_nmap_result(&run, parsed)?;
     emit_recon_nmap_done(ctx, persisted.hosts.len(), persisted.services.len());
     Ok(recon_nmap_report(&run, persisted))
@@ -31,7 +32,9 @@ fn require_recon_nmap_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a crate::workspace::WorkspaceTarget> {
     ctx.workspace
-        .context(crate::workspace::active_workspace_required_message("recon:nmap"))
+        .context(crate::workspace::active_workspace_required_message(
+            "recon:nmap",
+        ))
 }
 
 fn scan_recon_nmap(options: &NmapInput, cancel: &ScanCancellation) -> Result<NmapParseResult> {

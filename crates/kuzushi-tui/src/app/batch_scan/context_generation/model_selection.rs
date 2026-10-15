@@ -30,6 +30,9 @@ impl StudyContextGeneration {
         self.generated = None;
         self.generated_scopes = None;
         self.generated_lesson = None;
+        self.generated_answer = None;
+        self.generated_proposal = None;
+        self.show_answer = false;
         self.map_attempt_id = None;
         self.result_error = None;
         self.scroll = 0;

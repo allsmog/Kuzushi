@@ -196,7 +196,7 @@ fn failed_or_partial_checks_preserve_context_and_disclose_recovery() {
 
 #[test]
 fn late_check_results_preserve_editor_menu_diagram_paging_and_raw_reading() {
-    for changed in 0..5 {
+    for changed in 0..6 {
         let (root, mut app, reference) = fixture();
         app.reduce_resize(40, 12);
         let input = prepared_check(&mut app);
@@ -212,8 +212,11 @@ fn late_check_results_preserve_editor_menu_diagram_paging_and_raw_reading() {
             3 => {
                 app.handle_study_context_key(KeyCode::PageDown);
             }
-            _ => {
+            4 => {
                 app.handle_study_context_key(KeyCode::Tab);
+            }
+            _ => {
+                app.handle_study_context_key(KeyCode::Char('p'));
             }
         }
         let before = app.study_context_picker().unwrap().clone();
@@ -231,7 +234,7 @@ fn late_check_results_preserve_editor_menu_diagram_paging_and_raw_reading() {
         assert_eq!(after.diagram_visible, before.diagram_visible);
         assert_eq!(after.actions_selected, before.actions_selected);
         assert_eq!(after.detail_scroll, before.detail_scroll);
-        assert_eq!(after.raw, before.raw);
+        assert_eq!(after.text_view, before.text_view);
         if changed == 0 {
             assert!(app.context_edit_draft().is_some());
         }

@@ -1,0 +1,75 @@
+name: Unapproved Review reports preparation and a durable refusal without a model request
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_dispatch_refusal.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: run triage:run {"strategy":"standard"}
+require-live-snap: 25 Result · Triage findings | blocked-review
+expect: blocked
+expect-not: correlated result status contradicts
+expect: More in Replay
+expect-not: ✗ triage:run
+expect: Esc result actions
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_dispatch_refusal.py @TMP_TARGET @ART blocked
+resize: 160x48
+require-live-snap: 25 RESULT blocked | result-160x48
+resize: 96x89
+require-live-snap: 25 RESULT blocked | result-96x89
+resize: 80x24
+require-live-snap: 25 RESULT blocked | result-80x24
+expect: Owned first observation
+resize: 60x20
+require-live-snap: 25 RESULT blocked | result-60x20
+expect: Owned first observation
+resize: 40x12
+require-live-snap: 25 RESULT blocked | result-40x12
+expect: blocked
+expect: Owned first observation
+ask: Does the result show the reason once, keep the next action readable, and make full details reachable at every size?
+nav-mode:
+keys: o
+require-live-snap: 25 ── REPLAY | compact-result-open
+expect: Outcome · blocked
+resize: 120x36
+submit: logs
+require-live-snap: 25 preparing model work | preparation-receipt
+expect-not: calling model
+expect: no model request started
+ask: Does the receipt distinguish preparation from an admitted model request and explain how to prepare and approve the plan?
+resize: 160x48
+require-live-snap: 25 LOGS | refusal-160x48
+resize: 96x89
+require-live-snap: 25 LOGS | refusal-96x89
+resize: 80x24
+require-live-snap: 25 LOGS | refusal-80x24
+resize: 60x20
+require-live-snap: 25 LOGS | refusal-60x20
+resize: 40x12
+require-live-snap: 25 LOGS | refusal-40x12
+nav-mode:
+keys: z PPage
+require-live-snap: 20 allowance | refusal-small-reader
+resize: 120x36
+submit: findings
+require-live-snap: 25 Owned first observation | observations-preserved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_dispatch_refusal.py @TMP_TARGET @ART returned
+ask: Can the operator read the refusal across sizes and return to the original observations without losing them or creating decisions?
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+nav-mode:
+keys: o
+require-live-snap: 25 ── REPLAY | recovered-refusal
+expect: ── REPLAY
+expect: blocked
+expect-not: correlated result status contradicts
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_dispatch_refusal.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the same refusal with zero requests, zero decisions and no repeated work?
+keys: C-c
+require-exit: 15

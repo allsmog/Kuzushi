@@ -81,14 +81,28 @@ fn append_workbench_commands(bindings: &mut Vec<FooterKeybinding>, app: &ShellAp
 }
 
 fn apply_map_gallery_controls(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
-    const REPLACED: [&str; 8] = ["Tab", "[", "]", "Z", "z", "j/k/↑/↓", "g/G", "Enter"];
+    const REPLACED: [&str; 9] = [
+        "Tab",
+        "[",
+        "]",
+        "Z",
+        "z",
+        "j/k/↑/↓",
+        "g/G",
+        "Enter",
+        "PgUp/PgDn",
+    ];
     bindings.retain(|binding| !REPLACED.contains(&binding.key.as_ref()));
     bindings.extend([
         bind("Tab", "map view"),
         bind("z", "zoom"),
         bind("PgUp/PgDn", map_page_detail_label(app)),
     ]);
-    match app.current_map_viz_page() {
+    append_map_page_controls(bindings, app.current_map_viz_page());
+}
+
+fn append_map_page_controls(bindings: &mut Vec<FooterKeybinding>, page: crate::scene3d::VizPage) {
+    match page {
         crate::scene3d::VizPage::Summary => {
             bindings.push(bind("j/k/↑/↓", "component"));
             bindings.push(bind("g/G", "ends"));
@@ -144,13 +158,16 @@ fn workbench_exit_label(app: &ShellApp) -> &'static str {
 }
 
 const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..3", "Tab", "[", "]", "Z", "z", "Enter"];
-const REVIEW_KEYS: [&str; 22] = [
+const REVIEW_KEYS: [&str; 25] = [
     "Ctrl+N/P",
     "Ctrl+N",
     "Ctrl+P",
     "Ctrl+F",
     "Enter",
     "j/k/↑/↓",
+    "End",
+    "G",
+    "g",
     "PgUp/PgDn",
     "q",
     "r",

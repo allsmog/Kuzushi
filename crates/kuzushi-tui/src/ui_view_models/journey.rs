@@ -71,9 +71,8 @@ pub enum ReportReason {
 impl ReportReason {
     fn label(self) -> &'static str {
         match self {
-            Self::ReviewComplete => "review decisions are recorded",
+            Self::ReviewComplete | Self::NoActionableAfterReview => "review decisions are recorded",
             Self::CleanScan => "accepted scan found no candidates",
-            Self::NoActionableAfterReview => "review left no actionable findings",
         }
     }
 }
@@ -423,12 +422,7 @@ fn legacy_checkpoints(app: &ShellApp) -> LegacyCheckpoints {
     if app.engagement.phase_attempt_projection_is_degraded() {
         return LegacyCheckpoints::default();
     }
-    let durable_finding_scan = app
-        .domain()
-        .finding_ledger_counts()
-        .is_some_and(|counts| counts.durable_scan_evidence);
-    let scan = legacy_inference_applies(app, WorkflowPhase::Scan)
-        && (legacy_completed_scan(app) || durable_finding_scan);
+    let scan = legacy_inference_applies(app, WorkflowPhase::Scan) && legacy_completed_scan(app);
     // Existing scan history retains its pre-ledger reading path. Map artifacts
     // alone prove production, never operator acceptance or partial acknowledgement.
     let map = legacy_inference_applies(app, WorkflowPhase::Map)
@@ -529,11 +523,21 @@ fn legacy_summary_is_accepted_scan(
         status.as_str(),
         "completed" | "complete" | "succeeded" | "success"
     );
-    let scan = summary.kind.eq_ignore_ascii_case("scan")
-        || summary.tool.as_deref().is_some_and(|tool| {
-            kuzushi_core::modules::tool_phase(tool) == Some(WorkflowPhase::Scan)
-        });
-    completed && scan && legacy_scan_is_fresh(summary, current)
+    completed && legacy_scan_summary_has_result(summary) && legacy_scan_is_fresh(summary, current)
+}
+
+fn legacy_scan_summary_has_result(summary: &RunSummary) -> bool {
+    let policy = summary.tool.as_deref().map(|tool| {
+        (
+            kuzushi_core::modules::autonomy::tool_has_phase_result(tool),
+            kuzushi_core::modules::tool_phase(tool),
+        )
+    });
+    match policy {
+        Some((Some(false), _)) => false,
+        Some((_, Some(WorkflowPhase::Scan))) => true,
+        _ => summary.kind.eq_ignore_ascii_case("scan"),
+    }
 }
 
 fn legacy_scan_is_fresh(
@@ -568,12 +572,6 @@ pub(crate) fn finding_ledger_counts(
         proof_backed: progress.proof_backed_findings,
         remediated: 0,
         remediation_projection_complete: false,
-        durable_scan_evidence: findings.iter().any(|finding| {
-            finding.scan_id.as_deref().is_some_and(|scan_id| {
-                !scan_id.trim().is_empty()
-                    && !kuzushi_core::findings::import::is_ledger_import_run_id(scan_id)
-            })
-        }),
     }
 }
 
@@ -1035,7 +1033,10 @@ pub(super) fn investigation_chrome_is_visible(app: &ShellApp) -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn imported_ledger_ids_do_not_establish_local_discovery_checkpoints() {
+    fn ledger_ids_do_not_establish_discovery_checkpoints() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = hydrated_app(&workspace, Vec::new());
         let mut finding = Finding::new_tool(
             "external-fixture",
             "owned-citation",
@@ -1045,11 +1046,55 @@ mod tests {
             Severity::Low,
             "Labeled external history",
         );
-        finding.scan_id = Some("ledger-0123456789abcdef".into());
-        let counts = finding_ledger_counts(&[finding.clone()], &[], 1);
-        assert!(!counts.durable_scan_evidence);
-        finding.scan_id = Some("legacy-source-scan".into());
-        assert!(finding_ledger_counts(&[finding], &[], 1).durable_scan_evidence);
+        for run_id in [
+            "ledger-0123456789abcdef",
+            "har-7c6a8cac-e38a-44f2-9dd2-cb1d9d881350",
+            "burp-7c6a8cac-e38a-44f2-9dd2-cb1d9d881350",
+            "legacy-source-scan",
+        ] {
+            finding.scan_id = Some(run_id.into());
+            let counts = finding_ledger_counts(&[finding.clone()], &[], 1);
+            assert_eq!(counts.total, 1);
+            app.set_findings(vec![finding.clone()]);
+            app.domain_mut().set_finding_ledger_counts(counts);
+            let journey = journey_model(&app).unwrap();
+            assert!(!journey.progress.map_checkpoint);
+            assert!(!journey.progress.scan_checkpoint);
+            assert!(!journey.progress.legacy_inferred);
+        }
+    }
+
+    #[test]
+    fn completed_import_summaries_cannot_infer_legacy_map_or_scan() {
+        for tool in ["recon:import", "bounty:import-har", "bounty:import-burp"] {
+            for kind in ["scan", "tool"] {
+                let summary =
+                    RunSummary::running("recorded-import", kind, Some(tool.to_string()), "/owned")
+                        .complete();
+                assert!(
+                    !legacy_summary_is_accepted_scan(&summary, None),
+                    "{tool}/{kind}"
+                );
+            }
+        }
+        let summary = completed_scan_summary(std::path::Path::new("/owned"), "local-scan");
+        assert!(legacy_summary_is_accepted_scan(&summary, None));
+    }
+
+    #[test]
+    fn unknown_historical_scan_kinds_retain_the_legacy_reading_path() {
+        let summary = RunSummary::running(
+            "legacy-scan",
+            "scan",
+            Some("unknown:legacy".to_string()),
+            "/owned",
+        )
+        .complete();
+        assert!(legacy_summary_is_accepted_scan(&summary, None));
+        assert!(!legacy_scan_summary_has_result(&RunSummary {
+            kind: "tool".into(),
+            ..summary
+        }));
     }
     use crate::ViewHydrationKey;
     use kuzushi_core::workflow_attempts::{
@@ -1150,7 +1195,6 @@ mod tests {
             proof_backed: 7,
             remediated: 5,
             remediation_projection_complete: true,
-            durable_scan_evidence: true,
         };
 
         let progress = journey_finding_progress(true, Some(counts), || {
@@ -1827,7 +1871,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_store_findings_infer_scan_from_unfiltered_durable_provenance() {
+    fn store_findings_without_completed_receipts_do_not_advance_reality() {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let finding = finding_with_scan_id("legacy-import");
@@ -1838,10 +1882,38 @@ mod tests {
 
         let journey = journey_model(&app).expect("journey");
 
-        assert!(journey.progress.map_checkpoint);
-        assert!(journey.progress.scan_checkpoint);
-        assert!(journey.progress.legacy_inferred);
-        assert_eq!(journey.current, WorkflowPhase::Review);
+        assert!(!journey.progress.map_checkpoint);
+        assert!(!journey.progress.scan_checkpoint);
+        assert!(!journey.progress.legacy_inferred);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+    }
+
+    #[test]
+    fn partial_or_auxiliary_scan_findings_cannot_infer_phase_completion() {
+        for (tool, status) in [
+            ("codeql:scan", "partial"),
+            ("codeql:scan", "completed"),
+            ("semgrep:scan", "partial"),
+        ] {
+            let target = tempfile::tempdir().unwrap();
+            let workspace = WorkspaceTarget::new(target.path()).unwrap();
+            let mut summary = completed_scan_summary(target.path(), "owned-observation");
+            summary.tool = Some(tool.into());
+            summary.status = status.into();
+            write_run_summary(target.path(), &summary).unwrap();
+            let mut app = hydrated_app(&workspace, vec![ViewHydrationKey::RunSummaryEntries]);
+            let finding = finding_with_scan_id("owned-observation");
+            let counts = finding_ledger_counts(std::slice::from_ref(&finding), &[], 1);
+            app.set_findings(vec![finding]);
+            app.domain_mut().set_finding_ledger_counts(counts);
+
+            let journey = journey_model(&app).unwrap();
+
+            assert_eq!(journey.progress.finding_total, 1);
+            assert!(!journey.progress.map_checkpoint, "{tool} {status}");
+            assert!(!journey.progress.scan_checkpoint, "{tool} {status}");
+            assert!(!journey.progress.legacy_inferred, "{tool} {status}");
+        }
     }
 
     #[test]
@@ -2166,12 +2238,12 @@ mod tests {
         crate::test_support::record_indexed_run(
             target.path(),
             "map-run-1",
-            "context:build",
+            "threat-model:build",
             serde_json::json!({
                 "ok": true,
                 "status": "completed",
-                "summary": "context snapshot built",
-                "data": {"filesIndexed": 1}
+                "summary": "repository context built",
+                "data": {}
             }),
         );
         let completed = crate::test_support::append_typed_attempt(

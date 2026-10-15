@@ -3,6 +3,11 @@ use kuzushi_core::{
     run_artifacts::canonical_run_artifact_spec, RunArtifactRead, RunArtifactTextRead,
 };
 
+mod replay_issue;
+mod replay_reading;
+pub(crate) use replay_issue::ReplayIssueModel;
+pub(crate) use replay_reading::{replay_can_lead_with_results, replay_reading_rows};
+
 const RUN_TRIAGE_FILE: &str = "triage.jsonl";
 const RUN_VERIFY_FILE: &str = "verify.jsonl";
 const RUN_PATCH_FILE: &str = "patch.jsonl";
@@ -28,6 +33,7 @@ pub(crate) struct ReplayModel {
     pub(crate) projection_error: Option<String>,
     pub(crate) artifacts: Vec<RunArtifactDetail>,
     pub(crate) metadata_missing: bool,
+    pub(crate) issue: Option<ReplayIssueModel>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,13 +71,16 @@ pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
     let result = run_artifact_detail(app, run_id, "result", RUN_RESULT_FILE);
     let triage = run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE);
     let metadata_missing = metadata.artifact_state() == RunArtifactState::Missing;
+    let presentation = projection
+        .as_ref()
+        .map(kuzushi_core::run_lifecycle::present_run);
+    let issue = presentation.as_ref().and_then(replay_issue::replay_issue);
     ReplayModel {
         run_id: run_id.to_string(),
-        presentation: projection
-            .as_ref()
-            .map(kuzushi_core::run_lifecycle::present_run),
+        presentation,
         projection_error,
         metadata_missing,
+        issue,
         artifacts: vec![
             metadata.into_display(),
             result.into_display(),

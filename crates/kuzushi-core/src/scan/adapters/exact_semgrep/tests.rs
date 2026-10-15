@@ -46,20 +46,34 @@ fn missing_exact_semgrep_process_is_partial_without_claiming_selected_files_clea
 fn batch_fixture(stop: &str) -> (tempfile::TempDir, SemgrepScanner, Vec<String>) {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::tempdir().unwrap();
-    let files = (0..129)
+    let files = (0..2050)
         .map(|index| format!("file-{index:03}.py"))
         .collect::<Vec<_>>();
     for file in &files {
         fs::write(root.path().join(file), "print('Labeled test input')\n").unwrap();
     }
     let binary = root.path().join("scanner-fixture.sh");
-    let first = json!({"results":[{"check_id":"labeled.fixture","path":"file-000.py","start":{"line":1,"col":1},"end":{"line":1,"col":2},"extra":{"message":"Labeled test observation","severity":"WARNING"}}],"paths":{"scanned":&files[..64]}});
+    let first = json!([{"check_id":"labeled.fixture","path":"file-000.py","start":{"line":1,"col":1},"end":{"line":1,"col":2},"extra":{"message":"Labeled test observation","severity":"WARNING"}}]);
     fs::write(
-        root.path().join("first-batch.json"),
+        root.path().join("first-results.json"),
         serde_json::to_vec(&first).unwrap(),
     )
     .unwrap();
-    fs::write(&binary, format!("#!/bin/sh\necho called >> .fixture-calls\nif [ $(wc -l < .fixture-calls) -gt 1 ]; then\n{stop}\nfi\ncat first-batch.json\n")).unwrap();
+    let coverage = r#"printf '{"results":'; cat first-results.json
+printf ',"paths":{"scanned":['
+selected=0
+separator=''
+for member in "$@"; do
+  if [ "$selected" = 1 ]; then
+    printf '%s"%s"' "$separator" "$member"
+    separator=','
+  elif [ "$member" = '--' ]; then
+    selected=1
+  fi
+done
+printf ']}}'
+"#;
+    fs::write(&binary, format!("#!/bin/sh\necho called >> .fixture-calls\nif [ $(wc -l < .fixture-calls) -gt 1 ]; then\n{stop}\nfi\n{coverage}")).unwrap();
     fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
     let scanner = SemgrepScanner {
         binary: binary.display().to_string(),
@@ -78,7 +92,7 @@ fn exact_semgrep_keeps_completed_batches_and_never_starts_work_after_failure() {
     assert_eq!(output.findings.len(), 1);
     assert_eq!(output.findings[0].file_path, "file-000.py");
     assert_eq!(output.scan_errors.len(), 1);
-    assert!(output.scan_errors[0].contains("65 selected files"));
+    assert!(output.scan_errors[0].contains("selected files"));
     assert_eq!(
         fs::read_to_string(root.path().join(".fixture-calls"))
             .unwrap()

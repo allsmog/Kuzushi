@@ -5,6 +5,7 @@
 
 use crate::ShellApp;
 mod answers;
+pub(crate) mod source_review;
 pub(crate) use answers::*;
 
 mod active_stage;
@@ -12,15 +13,19 @@ mod allowance_review;
 pub(crate) mod context_generation;
 pub(crate) mod context_goal;
 mod context_matrix;
+pub(crate) mod review_study;
 pub(crate) mod scope_review;
 pub(crate) mod study_config;
-pub(crate) use context_matrix::{context_matrix_conditions, context_matrix_lines};
+pub(crate) use context_matrix::{
+    case_name_notice, case_name_plain_lines, context_matrix_conditions, context_matrix_lines,
+};
 pub(crate) use context_matrix::{matrix_result_lines, matrix_result_state};
 pub(crate) mod scope_context;
 pub(crate) mod study_context;
 pub(crate) mod study_engines;
 pub(crate) use allowance_review::{
-    allowance_review_model, allowance_review_width, AllowanceReviewModel,
+    allowance_review_model, allowance_review_width, allowance_work_summary, AllowanceReviewModel,
+    AllowanceWorkSummary,
 };
 mod activity_dag_rows;
 mod activity_empty_state;
@@ -43,7 +48,9 @@ mod boot_splash;
 mod campaign_job;
 mod catalog;
 pub(crate) mod study_resource_picker;
-pub(crate) use campaign_job::campaign_job_scope_label;
+pub(crate) use campaign_job::{
+    campaign_job_cost_label, campaign_job_detail_lines, campaign_job_scope_label,
+};
 mod chrome_layout;
 mod command_palette;
 mod config;
@@ -58,6 +65,7 @@ mod display_text;
 mod failure_handoff;
 pub(crate) mod finding_review_source;
 mod finding_search;
+mod finding_source_history;
 mod finding_summary;
 mod findings;
 mod health;
@@ -67,9 +75,10 @@ mod jobs_registry;
 mod journey;
 mod report_investigation;
 mod report_summary;
-pub(crate) use report_investigation::report_investigation_lines;
+pub(crate) use report_investigation::{report_investigation_lines, report_source_notice};
 pub(crate) use report_summary::{
-    report_cost_coverage, report_export_campaign, report_investigation_state, report_review_summary,
+    report_cost_coverage, report_export_campaign, report_investigation_state,
+    report_review_summary, report_source_history_coverage,
 };
 mod keybindings;
 mod keymap;
@@ -166,9 +175,9 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
-    compact_gallery_notice, compact_review_reading, keybind_footer_chrome_height, rail_width,
-    status_footer_chrome_height, transcript_chrome_height, RAIL_AUTO_MIN_WIDTH,
-    RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
+    compact_document_notice, compact_map_reading, compact_phase_reading, compact_review_reading,
+    keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
+    transcript_chrome_height, RAIL_AUTO_MIN_WIDTH, RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
 };
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{
@@ -230,7 +239,7 @@ pub(crate) use journey::{
     CheckpointDrift, JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState,
     JourneyPhaseStatus, JourneyPhaseTone, JourneyRealityProjection, ReportReason,
 };
-pub(crate) use keybindings::footer_keybindings;
+pub(crate) use keybindings::{footer_keybindings, review_queue_navigation_footer};
 pub(crate) use keymap::{keymap_model, KeymapModel};
 pub(crate) use knowledge_base::{
     knowledge_base_model, plain_knowledge_base_model, KnowledgeBaseArtifactRow,
@@ -254,9 +263,9 @@ pub(crate) use module_run::{
     ModuleRunSummary,
 };
 pub(crate) use options::{
-    option_display_name, options_model, plain_options_model, OptionsBody, OptionsSummaryRow,
-    OptionsTable, OptionsTableRow, PlainOptionRow, PlainOptionsBody, PlainOptionsModel,
-    PlainOptionsTable,
+    option_display_name, options_model, plain_options_model, OptionsBody, OptionsModel,
+    OptionsSummaryRow, OptionsTable, OptionsTableRow, PlainOptionRow, PlainOptionsBody,
+    PlainOptionsModel, PlainOptionsTable,
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use permission_policy::{
@@ -343,8 +352,8 @@ pub(crate) use run_paths::{
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
 pub(crate) use run_trace::{
-    alias_reference_model, replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel,
-    TraceStep,
+    alias_reference_model, replay_can_lead_with_results, replay_model, replay_reading_rows,
+    trace_model, ReplayIssueModel, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
 };
 pub(crate) use sast_tasks::{
     plain_sast_tasks_model, sast_tasks_model, PlainSastTaskRow, PlainSastTasksModel, SastTasksModel,
@@ -394,7 +403,7 @@ pub(crate) use threat_stride::threat_stride_rollup_from_doc;
 pub(crate) use threat_stride::{
     threat_stride_rollup, ThreatStrideMember, ThreatStrideRow, ThreatStrideTone,
 };
-pub(crate) use tools::{tools_model, ToolGroup, ToolRow};
+pub(crate) use tools::{tools_model, ToolGroup, ToolRow, ToolsModel};
 pub(crate) use transcript::{
     logs_model, plain_command_result_model, transcript_model, transcript_model_from_log_index,
     LogsModel, PlainCommandResultModel,

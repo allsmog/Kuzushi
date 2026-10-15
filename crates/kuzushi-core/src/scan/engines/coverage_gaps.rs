@@ -8,7 +8,6 @@
 //! disclose it beside the counts.
 
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::io;
 use std::path::Path;
 
@@ -124,34 +123,6 @@ impl CoverageGaps {
     }
 }
 
-/// List `dir`, recording the failures a walk would otherwise swallow: the
-/// directory itself when it cannot be opened, and each entry the iterator
-/// cannot yield. `None` means the directory was never listed, so the caller
-/// has no entries to visit — not that it was empty.
-pub(crate) fn read_dir_entries(
-    root: &Path,
-    dir: &Path,
-    gaps: &mut CoverageGaps,
-) -> Option<Vec<fs::DirEntry>> {
-    let read_dir = match fs::read_dir(dir) {
-        Ok(read_dir) => read_dir,
-        Err(error) => {
-            gaps.record(root, dir, CoverageGapKind::Directory, &error);
-            return None;
-        }
-    };
-    let mut entries = Vec::new();
-    for entry in read_dir {
-        match entry {
-            Ok(entry) => entries.push(entry),
-            // The failing entry has no name to report, so the directory
-            // holding it is what the disclosure can honestly name.
-            Err(error) => gaps.record(root, dir, CoverageGapKind::Entry, &error),
-        }
-    }
-    Some(entries)
-}
-
 fn gap_line(gap: &CoverageGap) -> String {
     format!("    - {}", gap_description(gap))
 }
@@ -243,30 +214,6 @@ mod tests {
     #[test]
     fn a_complete_walk_reports_no_aggregate_scan_error() {
         assert!(CoverageGaps::default().scan_error_lines().is_empty());
-    }
-
-    #[test]
-    fn an_unlistable_directory_yields_no_entries_and_one_gap() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut gaps = CoverageGaps::default();
-
-        let entries = read_dir_entries(temp.path(), &temp.path().join("vanished"), &mut gaps);
-
-        assert!(entries.is_none());
-        assert_eq!(gaps.gaps[0].kind, CoverageGapKind::Directory);
-        assert_eq!(gaps.gaps[0].path, "vanished");
-    }
-
-    #[test]
-    fn a_listable_directory_records_nothing() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join("a.tf"), "").unwrap();
-        let mut gaps = CoverageGaps::default();
-
-        let entries = read_dir_entries(temp.path(), temp.path(), &mut gaps).unwrap();
-
-        assert_eq!(entries.len(), 1);
-        assert!(gaps.is_empty());
     }
 
     #[test]

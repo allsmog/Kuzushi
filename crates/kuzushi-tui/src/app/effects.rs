@@ -375,6 +375,7 @@ pub(crate) struct AgentRunRecord {
 
 pub(crate) enum AgentRunOutcome {
     Complete { answer_chars: usize },
+    Blocked { reason: String },
     Failed { error: String },
     Canceled { reason: String },
 }

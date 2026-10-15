@@ -1,8 +1,13 @@
 use super::study_config::{allowance_status_lines, study_config_area};
-use crate::app::ShellApp;
+use crate::app::{BatchScanConfig, ShellApp, StudyContextGeneration};
 use crate::renderer::shared::text::wrap_text;
 use ratatui::layout::Rect;
 mod diagnosis;
+mod proposal;
+mod question;
+mod result;
+mod scope;
+pub(crate) use result::{context_preview, GeneratedContextPreview};
 
 pub(crate) fn generation_body(columns: u16, rows: u16, regeneration: bool) -> Rect {
     let area = study_config_area(columns, rows);
@@ -24,17 +29,16 @@ pub(crate) fn generation_lines(app: &ShellApp, width: usize) -> Vec<String> {
     if let Some(lines) = generation_subview_lines(generation, width) {
         return lines;
     }
-    let mut lines = generation_summary(config, width);
+    let mut lines = generation_summary(config, generation, width);
     if generation.allows_model_choice() && generation.receipt.is_none() {
         let model = format!(
             "Selected model: {} · reasoning: {}. M chooses a model.",
             crate::app::display_model_selector(
                 app.config().model.as_deref().unwrap_or("select explicitly")
             ),
-            app.config()
-                .runtime
-                .thinking_level
-                .as_deref()
+            generation.context_input["thinkingLevel"]
+                .as_str()
+                .or(app.config().runtime.thinking_level.as_deref())
                 .unwrap_or("selected runtime default")
         );
         let mut header = wrap_text(&model, width.max(1));
@@ -58,6 +62,16 @@ fn remaining_generation_subview_lines(
     generation: &crate::app::StudyContextGeneration,
     width: usize,
 ) -> Option<Vec<String>> {
+    if generation.show_answer {
+        return Some(question::answer_lines(generation, width));
+    }
+    non_answer_subview_lines(generation, width)
+}
+
+fn non_answer_subview_lines(
+    generation: &crate::app::StudyContextGeneration,
+    width: usize,
+) -> Option<Vec<String>> {
     if generation.guidance_editing {
         return Some(guidance_lines(generation, width));
     }
@@ -71,24 +85,26 @@ fn remaining_generation_subview_lines(
 }
 
 fn guidance_lines(generation: &crate::app::StudyContextGeneration, width: usize) -> Vec<String> {
-    let mut lines = vec![if generation.is_lesson() {
+    let mut lines = vec![if generation.is_workflow_proposal() {
+        "PLANNING GOAL".into()
+    } else if generation.is_question() {
+        "QUESTION".into()
+    } else if generation.is_lesson() {
         "LESSON GUIDANCE".into()
     } else {
         "REGENERATION GUIDANCE".into()
     }];
     lines.extend(generation.guidance_notice.iter().cloned());
-    lines.extend(
-        generation
-            .guidance_editor
-            .as_ref()
-            .unwrap()
-            .text()
-            .lines()
-            .map(str::to_owned),
-    );
+    let Some(editor) = generation.guidance_editor.as_ref() else {
+        return wrap_text(GUIDANCE_EDITOR_UNAVAILABLE, width.max(1));
+    };
+    lines.extend(editor.text().lines().map(str::to_owned));
     lines.extend([
-        "Enter newline · Ctrl+S use guidance".into(),
-        "Esc back · draft kept · max 2048 B".into(),
+        "Enter newline · Ctrl+S use text".into(),
+        format!(
+            "Esc back · draft kept · max {} B",
+            generation.editor_limit()
+        ),
     ]);
     lines
         .into_iter()
@@ -96,35 +112,59 @@ fn guidance_lines(generation: &crate::app::StudyContextGeneration, width: usize)
         .collect()
 }
 
-fn generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let Some(generation) = config.context_generation.as_ref() else {
-        return Vec::new();
-    };
-    if generation.is_scope_proposal() {
-        return scope_generation_summary(config, width);
+pub(crate) const GUIDANCE_EDITOR_UNAVAILABLE: &str =
+    "Guidance editor unavailable. Esc returns to the plan; saved input is unchanged.";
+
+fn generation_summary(
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
+    if generation.is_workflow_proposal() {
+        return proposal::summary(config, generation, width);
     }
-    if generation.is_regeneration() {
-        return regeneration_summary(config, width);
+    if generation.is_question() {
+        return question::summary(config, generation, width);
     }
-    if generation.is_lesson() {
-        return lesson_generation_summary(config, width);
-    }
-    remaining_generation_summary(config, width)
+    non_question_generation_summary(config, generation, width)
 }
 
-fn remaining_generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    if config
-        .context_generation
-        .as_ref()
-        .is_some_and(|generation| generation.is_scope_context())
-    {
-        return file_group_summary(config, width);
+fn non_question_generation_summary(
+    config: &crate::app::BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
+    if generation.is_scope_proposal() {
+        return scope::summary(config, width);
+    }
+    if generation.is_regeneration() {
+        return regeneration_summary(config, generation, width);
+    }
+    if generation.is_lesson() {
+        return lesson_generation_summary(config, generation, width);
+    }
+    remaining_generation_summary(config, generation, width)
+}
+
+fn remaining_generation_summary(
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
+    if generation.is_scope_context() {
+        return file_group_summary(config, generation, width);
+    }
+    if generation.supports_result_overview() && !generation.show_plan {
+        return result::overview(config, generation, width);
     }
     context_generation_summary(config, width)
 }
 
-fn file_group_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn file_group_summary(
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
     let mut lines=vec![generation.action(config).into(),
         format!("Boundary: {}",generation.context_input.pointer("/scanScopeRef/scopeId").and_then(serde_json::Value::as_str).unwrap_or("unavailable")),
         "One file-group context job · one worker · one attempt".into(),
@@ -133,7 +173,7 @@ fn file_group_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         format!("Inherited context: {}",generation.context_input.pointer("/inheritedContextRef/revisionId").and_then(serde_json::Value::as_str).unwrap_or("explicitly omitted")),
         format!("Total calls: {}",limit(config.study.max_provider_calls)),format!("Protected review: {}",limit(config.study.protected_review_calls)),
         "Context generation and discovery share spending. A completed draft does not approve scans. Dollar estimate unavailable.".into()];
-    lines.extend(brief_guidance_lines(config));
+    lines.extend(brief_guidance_lines(config, generation));
     lines.extend(config.notice.iter().cloned());
     lines.extend(generation_plan_lines(config));
     lines.extend(allowance_status_lines(config));
@@ -143,8 +183,11 @@ fn file_group_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec
         .collect()
 }
 
-fn lesson_generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn lesson_generation_summary(
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
     let mut lines=vec![generation.action(config).into(),"One lesson job · one worker · one attempt".into(),
         format!("Origin: requested generation #{}. Preparation checks exact human confirmation.",generation.context_input["findingId"]),
         "One bounded synthesis request with tools disabled. Uses recorded observation and captured source only; source omissions remain visible. Output stays a draft for human review. No new findings, scans or Map completion.".into(),
@@ -166,8 +209,11 @@ fn lesson_generation_summary(config: &crate::app::BatchScanConfig, width: usize)
         .collect()
 }
 
-fn regeneration_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn regeneration_summary(
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+    width: usize,
+) -> Vec<String> {
     let mut lines=vec![generation.action(config).into(),"One selected-text job · one worker · one attempt".into(),
         "One synthesis request, with tools disabled. Original and unselected text are preserved. Output is an inactive draft; compare it before selecting it for work.".into(),
         regeneration_selection_line(generation),
@@ -202,8 +248,10 @@ fn bound_brief_lines(generation: &crate::app::StudyContextGeneration, width: usi
         .into_iter().flat_map(|line| wrap_text(&line, width.max(1))).collect()
 }
 
-fn brief_guidance_lines(config: &crate::app::BatchScanConfig) -> Vec<String> {
-    let generation = config.context_generation.as_ref().unwrap();
+fn brief_guidance_lines(
+    config: &BatchScanConfig,
+    generation: &StudyContextGeneration,
+) -> Vec<String> {
     if let Some(guidance) = generation
         .receipt
         .as_ref()
@@ -238,7 +286,8 @@ fn context_generation_summary(config: &crate::app::BatchScanConfig, width: usize
         return Vec::new();
     };
     let mut lines = context_result_lines(config);
-    lines.extend(brief_guidance_lines(config));
+    append_plan_heading(&mut lines, generation);
+    lines.extend(brief_guidance_lines(config, generation));
     lines.push(
         diagnosis::retention_label(generation.receipt.as_ref(), &generation.context_input).into(),
     );
@@ -263,6 +312,12 @@ fn context_generation_summary(config: &crate::app::BatchScanConfig, width: usize
         .into_iter()
         .flat_map(|line| wrap_text(&line, width.max(1)))
         .collect()
+}
+
+fn append_plan_heading(lines: &mut Vec<String>, generation: &StudyContextGeneration) {
+    if generation.show_plan {
+        lines.insert(0, "FROZEN GENERATION PLAN · p result".into());
+    }
 }
 
 fn regeneration_selection_line(generation: &crate::app::StudyContextGeneration) -> String {
@@ -336,6 +391,18 @@ fn generation_plan_lines(config: &crate::app::BatchScanConfig) -> Vec<String> {
 fn receipt_lines(
     receipt: &kuzushi_core::capabilities::campaign::ContextStudyReceipt,
 ) -> Vec<String> {
+    if receipt.generation_tool == "planner:propose" {
+        return proposal::receipt_lines(receipt);
+    }
+    if receipt.generation_tool == "threat-model:ask" {
+        return question::receipt_lines(receipt);
+    }
+    non_question_receipt_lines(receipt)
+}
+
+fn non_question_receipt_lines(
+    receipt: &kuzushi_core::capabilities::campaign::ContextStudyReceipt,
+) -> Vec<String> {
     if receipt.generation_tool == "findings:lesson-generate" {
         return lesson_receipt_lines(receipt);
     }
@@ -378,33 +445,6 @@ fn lesson_receipt_lines(
         format!("Recorded source excerpt: at most {} bytes. Missing captures are disclosed; current files are not substituted.", receipt.input["maxSourceBytes"]),
         "Tab shows every exact generation option.".into(),
     ]
-}
-
-fn scope_generation_summary(config: &crate::app::BatchScanConfig, width: usize) -> Vec<String> {
-    let Some(generation) = config.context_generation.as_ref() else {
-        return Vec::new();
-    };
-    let mut lines = vec![generation.action(config).into(),
-        "One scope proposal job · one worker · one attempt".into(),
-        "At most eight primary scopes and optional shared context. No tools, recursive subdivision, output repair or scan jobs.".into(),
-        "Enter reviews the fixed plan, then the shared allowance. A completed result opens scope review; boundary acceptance remains separate.".into(),
-        format!("Architecture context: {}", if generation.context_input["threatModelRef"].is_null() { "explicitly omitted" } else { "exact accepted Map revision" })];
-    if let Some(error) = &generation.result_error {
-        lines.push(format!("Scope outcome unavailable: {error}. Enter opens the recorded job; n prepares a separately approved replacement."));
-    }
-    if let Some(notice) = &config.notice {
-        lines.extend([String::new(), notice.clone()]);
-    }
-    lines.extend([format!("Total calls: {}",limit(config.study.max_provider_calls)),format!("Protected review: {}",limit(config.study.protected_review_calls)),
-        "Scope planning, context, scans and review share accounting. Internal turns and retries consume calls; existing commitments remain.".into(),
-        "Dollar estimate: unavailable. No dollar ceiling is enforced.".into()]);
-    lines.extend(generation_plan_lines(config));
-    lines.extend(allowance_status_lines(config));
-    lines.push("A new draft requires its own approval. Previous spending and consumed attempts remain recorded.".into());
-    lines
-        .into_iter()
-        .flat_map(|line| wrap_text(&line, width.max(1)))
-        .collect()
 }
 
 fn scope_receipt_lines(

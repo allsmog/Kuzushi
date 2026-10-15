@@ -62,19 +62,70 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
 }
 
 fn plain_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
-    if let Some(lines) = crate::renderer::allowance_review::allowance_review_plain_lines(app, width)
-    {
-        return Some(lines);
+    if let Some(form) = app.source_review_form() {
+        return Some(crate::ui_view_models::source_review::source_review_plain_lines(form));
     }
-    if let Some(lines) = super::super::scope_review::scope_review_plain_lines(app, width) {
-        return Some(lines);
-    }
-    if let Some(lines) = crate::ui_view_models::context_history::history_plain_lines(app, width) {
+    if let Some(lines) = primary_overlay_lines(app, width) {
         return Some(lines);
     }
     app.brief_editor()
-        .map(|editor| crate::ui_view_models::study_config::brief::plain_lines(editor, width))
+        .map(|editor| {
+            let mut lines = crate::ui_view_models::study_config::brief::plain_lines(editor, width);
+            if let Some(note) = app.study_checkpoint_note() {
+                lines.insert(1, note);
+            }
+            lines
+        })
         .or_else(|| context_edit_overlay_lines(app, width))
+}
+
+fn primary_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
+    crate::renderer::allowance_review::allowance_review_plain_lines(app, width)
+        .or_else(|| review_plain_overlay_lines(app, width))
+        .or_else(|| super::super::scope_review::scope_review_plain_lines(app, width))
+        .or_else(|| crate::ui_view_models::context_history::history_plain_lines(app, width))
+        .or_else(|| crate::ui_view_models::study_config::recovery::plain_lines(app, width))
+        .or_else(|| case_name_overlay_lines(app, width))
+}
+
+fn case_name_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
+    if !app.batch_config_open() || app.advisory().pending_confirm.is_some() {
+        return None;
+    }
+    let config = app.router.campaign().batch_scan_config.as_ref()?;
+    let mut lines = crate::ui_view_models::case_name_plain_lines(config, width)?;
+    if let Some(note) = app.study_checkpoint_note() {
+        lines.insert(1, note);
+    }
+    Some(lines)
+}
+
+fn review_plain_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
+    if !app.review_study_is_open() || app.advisory().pending_confirm.is_some() {
+        return None;
+    }
+    let config = crate::ui_view_models::study_config::study_projection(app)?;
+    let mut lines = crate::ui_view_models::review_study::review_study_lines(
+        &config,
+        app.config().model.as_deref(),
+        width,
+    );
+    if let Some(edit) = &config.number_edit {
+        lines.insert(
+            0,
+            format!(
+                "Editing {}: {} · Enter saves · Esc cancels",
+                edit.row.label(),
+                edit.field.text()
+            ),
+        );
+    }
+    lines.extend(
+        crate::ui_view_models::review_study::review_controls()
+            .lines()
+            .map(str::to_owned),
+    );
+    Some(lines)
 }
 
 fn context_edit_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String>> {
@@ -82,7 +133,13 @@ fn context_edit_overlay_lines(app: &ShellApp, width: usize) -> Option<Vec<String
         return None;
     }
     let draft = app.context_edit_draft()?;
-    Some(crate::ui_view_models::context_edit::context_edit_plain_lines(draft, width))
+    Some(
+        crate::ui_view_models::context_edit::context_edit_plain_lines(
+            draft,
+            width,
+            app.context_checkpoint_note(),
+        ),
+    )
 }
 
 fn interactive_only_plain_lines(

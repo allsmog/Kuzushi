@@ -56,6 +56,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn compact_stale_notice_survives_beside_the_longest_ceiling_and_finding_count() {
+        let left = vec!["⛭ autonomy:review ⚠ stale".into()];
+        let text = status_footer_text(&left, "0 findings".into(), 40);
+        assert!(text.contains("autonomy:review"));
+        assert!(text.contains("⚠ stale"));
+        assert!(text.contains("0 findings"));
+        assert!(display_width(&text) <= 40);
+    }
+
+    #[test]
     fn status_footer_preserves_operator_ceiling_and_finding_count_at_every_width() {
         let left = vec![
             "⛭ autonomy:review ⚠".to_string(),

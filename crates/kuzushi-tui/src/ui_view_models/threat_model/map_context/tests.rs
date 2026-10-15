@@ -91,6 +91,15 @@ fn accepted_map_and_reviewing_map_keep_exact_context_without_activation() {
                 "Map context awaiting review"
             }
         );
+        let project = crate::ui_view_models::project_model(&app);
+        let row = project
+            .rows
+            .iter()
+            .find(|row| row.section == "threat model")
+            .unwrap();
+        assert_eq!(row.state, "present");
+        assert_eq!(row.origin, crate::ui_view_models::ProjectModelOrigin::Local);
+        assert!(row.summary.contains("assumptions 0"));
         assert_eq!(
             load_active_threat_model(root.path())
                 .unwrap()
@@ -229,7 +238,7 @@ fn map_receipt_change_requests_a_new_context_without_focus_change() {
     record_indexed_run(
         root.path(),
         "different-map",
-        "context:build",
+        "threat-model:import",
         json!({"ok":true,"status":"completed","data":{"snapshot":{"filesIndexed":1}}}),
     );
     bind(&mut app, root.path(), "different-map", true);

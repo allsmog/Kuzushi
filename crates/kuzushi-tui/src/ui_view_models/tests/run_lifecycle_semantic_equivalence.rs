@@ -394,10 +394,10 @@ fn run_focus_header_cost_label(cost: RuntimeCostReport) -> String {
     if cost.is_complete() {
         return format!("cost ${:.4}", cost.observed_usd());
     }
-    match cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
-        Some(estimate) => format!("cost ~${estimate:.4} estimated"),
-        None => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
-    }
+    format!(
+        "cost {}",
+        crate::ui_view_models::format_runtime_cost(cost, None)
+    )
 }
 
 fn semantic_text_rows(

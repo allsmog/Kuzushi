@@ -1,0 +1,82 @@
+name: Actual Map and scan completions keep unsent drafts, paste blocks and printable keys
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+keys: Down Down Down Down Down Down Down
+require-live-snap: 15 Commit this Map plan | start-map
+keys: Enter
+paste-file: @ART/multiline.txt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART map-draft
+require-live-snap: 30 RESULT READY | map-draft
+expect: paste #1
+type: ud
+require-live-snap: 20 chars⟫ud | map-edited
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART draft map-edited ud
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART map-edited
+keys: Left Left C-y
+require-live-snap: 20 first owned α | paste-inspection
+expect: second owned β
+keys: Escape
+require-live-snap: 20 chars⟫ud | inspection-return
+keys: End
+require-live-snap: 20 chars⟫ud | cursor-end
+resize: 160x48
+require-live-snap: 20 chars⟫ud | draft-160x48
+resize: 96x89
+require-live-snap: 20 chars⟫ud | draft-96x89
+resize: 80x24
+require-live-snap: 20 chars⟫ud | draft-80x24
+resize: 60x20
+require-live-snap: 20 chars⟫ud | draft-60x20
+resize: 40x12
+require-live-snap: 20 chars⟫ud | draft-40x12
+ask: Does the completed Map remain an explicit decision while the collapsed paste and ud keystrokes stay in the composer, with readable input controls at all six sizes?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 describe what to map | draft-cleared
+keys: C-_
+require-live-snap: 20 chars⟫ud | map-restored
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART draft map-restored ud
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART map-restored
+keys: Escape
+nav-mode:
+keys: u
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART map-selected
+paste-file: @ART/scan-command.txt
+keys: Enter
+paste-file: @ART/scan-draft.txt
+require-live-snap: 30 Finish or clear the command draft | held-prerequisite
+type: r
+require-live-snap: 20 operator α r | prerequisite-typed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART draft prerequisite-typed "operator α r"
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART prereq-draft
+keys: Escape
+require-live-snap: 20 r reuse cached | prerequisite-cleared
+keys: r
+paste-file: @ART/scan-draft.txt
+require-live-snap: 30 operator α | scan-new-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART scan-draft
+require-live-snap: 30 ○ idle | scan-settled
+keys: Left
+type: X
+require-live-snap: 20 operator αX | scan-typed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART draft scan-typed "operator αX"
+ask: After the actual manifest scan completes, does X edit the draft at its retained cursor without selecting a result, submitting work or starting another job?
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: open F-0001
+require-live-snap: 30 owned-example | restarted-source
+expect: signal-only
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the actual Map selection and single policy observation without another model request or automatic scan?
+keys: C-c
+require-exit: 10

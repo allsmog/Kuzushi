@@ -243,6 +243,9 @@ impl ShellApp {
         step: PlanningRunStep,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
+        if let Some(effects) = self.intercept_review_planning_step(&step) {
+            return effects;
+        }
         if let Some((model, error)) = self.planning_step_credential_blocker(&step) {
             return self.pause_preflight_step_for_credentials(step, workspace, model, error);
         }
@@ -272,6 +275,19 @@ impl ShellApp {
             authorization,
         );
         Vec::new()
+    }
+
+    fn intercept_review_planning_step(
+        &mut self,
+        step: &PlanningRunStep,
+    ) -> Option<Vec<ShellEffect>> {
+        if step.tool_name != "triage:run" || step.input.get("allowanceRef").is_some() {
+            return None;
+        }
+        Some(match self.plan_review_step(step.clone()) {
+            Ok(()) => Vec::new(),
+            Err(error) => self.fail_planning_task("triage:run", &format!("{error:#}")),
+        })
     }
 
     fn pause_preflight_step_for_credentials(
@@ -683,7 +699,7 @@ impl ShellApp {
         self.engagement.pause_planning_queue();
         self.log(
             "planning",
-            format!("plan paused after {tool_name} failed; resume explicitly after review"),
+            format!("plan paused after {tool_name}; review its outcome before resuming"),
         );
     }
 
@@ -849,7 +865,7 @@ impl ShellApp {
 
     fn open_or_announce_next_phase(&mut self, next: WorkflowPhase) {
         if self.should_auto_open_next_phase() {
-            self.open_phase_picker(next);
+            self.open_guided_phase_planner(next);
             return;
         }
         // `open_phase_picker` gates on `phases.stop_after`; announcing must

@@ -11,14 +11,24 @@ pub(crate) fn selected_case(config: &BatchScanConfig) -> Option<&ScopeStudyCaseI
 pub(crate) fn rows(config: &BatchScanConfig) -> Vec<String> {
     let mut rows = vec!["Common context".into()];
     if let Some(draft) = &config.study.scope_draft {
-        rows.extend(
-            draft
-                .cases
-                .iter()
-                .map(|case| format!("{} · {}", case.scope_id, binding_label(case))),
-        );
+        rows.extend(draft.cases.iter().map(|case| {
+            format!(
+                "{} · {}",
+                case_label(config, &case.scope_id),
+                binding_label(case)
+            )
+        }));
     }
     rows
+}
+
+pub(crate) fn case_label<'a>(config: &'a BatchScanConfig, scope_id: &'a str) -> &'a str {
+    config
+        .scope_context
+        .labels
+        .get(scope_id)
+        .map(String::as_str)
+        .unwrap_or(scope_id)
 }
 
 pub(crate) fn binding_label(case: &ScopeStudyCaseInput) -> &'static str {
@@ -45,11 +55,12 @@ fn selection_detail(config: &BatchScanConfig) -> Vec<String> {
         return common_detail(config);
     };
     let mut lines = vec![
-        format!("Boundary: {} · {} passes", case.scope_id, case.passes),
+        format!("Boundary: {} · {} passes", case_label(config, &case.scope_id), case.passes),
         format!("Context association: {}", binding_label(case)),
         "Enter inspects or chooses an exact revision for this boundary. i inherits common; o explicitly omits context.".into(),
         "Selection does not activate a global context or change sibling overrides. Changes require a new plan approval; spending remains.".into(),
     ];
+    lines.push(format!("Boundary id: {}", case.scope_id));
     append_reference(
         &mut lines,
         "Draft effective context",

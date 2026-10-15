@@ -94,8 +94,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         }
     }
 
@@ -348,7 +348,10 @@ authorization: Default::default(),
     }
 
     fn assert_completed_x_ray_envelope(output: &Value, summary_prefix: &str) {
-        assert_eq!(output.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            output.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(output
             .get("summary")
             .and_then(Value::as_str)
@@ -384,12 +387,24 @@ authorization: Default::default(),
             }))
             .unwrap()
         };
-        assert!(super::super::application::render_x_ray_run_summary(&data(true)).contains("Cost:         $0.2500\n"));
-        assert!(super::super::application::render_x_ray_run_summary(&data(false))
-            .contains("Cost:         >=$0.2500 (provider spend unresolved)"));
+        assert!(
+            super::super::application::render_x_ray_run_summary(&data(true))
+                .contains("Cost:         $0.2500\n")
+        );
+        assert!(
+            super::super::application::render_x_ray_run_summary(&data(false))
+                .contains("Cost:         >=$0.2500 (provider spend unresolved)")
+        );
         let mut estimated = data(false);
+        estimated.cost_usd = 0.0;
+        assert!(
+            super::super::application::render_x_ray_run_summary(&estimated)
+                .contains("Cost:         unknown (provider spend unresolved)")
+        );
         estimated.estimated_cost_usd = Some(0.4);
-        assert!(super::super::application::render_x_ray_run_summary(&estimated)
-            .contains("Cost:         ~$0.4000 estimated (provider spend unresolved)"));
+        assert!(
+            super::super::application::render_x_ray_run_summary(&estimated)
+                .contains("Cost:         ~$0.4000 estimated (provider spend unresolved)")
+        );
     }
 }

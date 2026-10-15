@@ -219,7 +219,7 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         command: "threats regen",
         aliases: &["/threats regen"],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "Haiku-driven threat-model patch; review then /threats apply",
+        description: "choose context text for an approved, budgeted inactive copy",
     },
     ShellCommandSpec {
         command: "threats ask [--whole-model] <question>",

@@ -56,12 +56,16 @@ impl ShellApp {
         if let Some(update) = self.reduce_modal_key(key) {
             return Some(update);
         }
+        if let Some(update) = self.handle_tool_option_editor_key(key) {
+            return Some(update);
+        }
         None
     }
 
     fn reduce_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         let update = self
-            .handle_lesson_key(key)
+            .handle_source_review_key(key)
+            .or_else(|| self.handle_lesson_key(key))
             .or_else(|| self.handle_relationship_key(key))
             .unwrap_or_else(|| self.handle_modal_key(key));
         if update.handled {
@@ -84,6 +88,13 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> Option<InputUpdate> {
+        if let Some(update) = self.handle_tools_support_key(key) {
+            return Some(update);
+        }
+        let option_update = self.handle_option_browser_key(key);
+        if option_update.handled {
+            return Some(option_update);
+        }
         if let Some(update) = self.reduce_pending_result_reading_key(key) {
             return Some(update);
         }
@@ -198,10 +209,7 @@ impl ShellApp {
     }
 
     fn handle_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if self.input_mode() != InputMode::Navigate
-            || !self.phase_result_is_open()
-            || !key.modifiers.is_empty()
-        {
+        if !self.phase_result_keys_are_available() || !key.modifiers.is_empty() {
             return None;
         }
         let command = PhaseResultCommand::from_default_key(key.code)?;
@@ -219,7 +227,7 @@ impl ShellApp {
     }
 
     fn handle_configured_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if self.input_mode() != InputMode::Navigate || !self.phase_result_is_open() {
+        if !self.phase_result_keys_are_available() {
             return None;
         }
         let result =
@@ -248,19 +256,21 @@ impl ShellApp {
         })
     }
 
-    fn phase_result_is_open(&self) -> bool {
+    pub(crate) fn phase_result_keys_are_available(&self) -> bool {
+        self.input_mode() == InputMode::Navigate
+            && self.input().is_empty()
+            && self.phase_result_is_open()
+    }
+
+    pub(crate) fn phase_result_is_open(&self) -> bool {
         if self.shell_view() != ShellView::Workbench {
             return false;
         }
         self.phase_result_target_phase().is_some()
     }
 
-    /// Phase whose unresolved RESULT READY attempt the result-card keys act
-    /// on. Prefer the page in view; when reality derivation has moved the
-    /// page away from the phase that actually finished (e.g. a Map result
-    /// while prior findings derive Review), fall back to the earliest phase
-    /// with an unresolved attempt — advertised keys must work where
-    /// advertised.
+    /// Result controls belong to the explicitly selected page. A derived
+    /// page may recover the earliest unresolved investigation result.
     pub(crate) fn phase_result_target_phase(&self) -> Option<WorkflowPhase> {
         if self.prove_detail_owns_controls() {
             return None;
@@ -272,6 +282,9 @@ impl ShellApp {
             .is_some()
         {
             return Some(page_phase);
+        }
+        if self.router.workbench().page().is_some() {
+            return None;
         }
         WorkflowPhase::INVESTIGATION_ORDER
             .iter()
@@ -627,7 +640,7 @@ impl ShellApp {
             JourneyPhaseEntry::Workbench => {
                 self.set_workbench_page(WorkbenchPage::from_phase(phase));
             }
-            JourneyPhaseEntry::Planner => self.open_phase_picker(phase),
+            JourneyPhaseEntry::Planner => self.open_guided_phase_planner(phase),
         }
     }
 
@@ -1399,9 +1412,14 @@ impl ShellApp {
             return false;
         }
         if key.code == KeyCode::Esc {
-            return self.collapse_dfd_focus_or_restore_contextual_origin();
+            return self.dismiss_notice_or_leave_contextual_surface(key);
         }
         self.handle_catalog_picker_key(key)
+    }
+
+    fn dismiss_notice_or_leave_contextual_surface(&mut self, key: KeyEvent) -> bool {
+        self.handle_notice_dismiss_key(key)
+            || self.collapse_dfd_focus_or_restore_contextual_origin()
     }
 
     fn contextual_navigation_owns_keys(&self) -> bool {
@@ -1475,8 +1493,10 @@ impl ShellApp {
 
     /// A capture opened over a contextual surface owns its keys until it
     /// closes: Ctrl+R search and a pending plan question both answer Enter.
-    fn input_capture_is_active(&self) -> bool {
-        self.history_search().is_some() || self.engagement.has_pending_plan()
+    pub(super) fn input_capture_is_active(&self) -> bool {
+        self.history_search().is_some()
+            || self.engagement.has_pending_plan()
+            || self.engagement.has_pending_prereq_prompt()
     }
 
     /// Command palette and Ctrl+R reverse search both fully capture input while
@@ -1611,8 +1631,17 @@ impl ShellApp {
         match self.shell_view() {
             ShellView::QuitConfirm => self.handle_quit_confirm_key(key),
             ShellView::Keymap | ShellView::Help => self.handle_keymap_overlay_key(key),
+            ShellView::ThemePicker => self.handle_theme_overlay_key(key),
             _ => InputUpdate::ignored(),
         }
+    }
+
+    fn handle_theme_overlay_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if key.code != KeyCode::Esc || !KeyModifierState::new(key).no_modifiers {
+            return InputUpdate::ignored();
+        }
+        self.go_back();
+        InputUpdate::handled()
     }
 
     fn handle_keymap_overlay_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -1695,7 +1724,7 @@ impl ShellApp {
     }
 
     pub(crate) fn notice_captures_escape(&self) -> bool {
-        if self.phase_result_is_open() {
+        if self.phase_result_is_open() || self.budget_halt_owns_input() {
             return false;
         }
         self.advisory().notice.as_ref().is_some_and(|notice| {
@@ -1773,8 +1802,16 @@ impl ShellApp {
     }
 
     pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if !self.is_budget_halted() || self.budget_editor_open() {
+        if !self.budget_halt_owns_input() || is_quit_chord(key) {
             return InputUpdate::ignored();
+        }
+        self.handle_budget_halt_choice(key)
+    }
+
+    fn handle_budget_halt_choice(&mut self, key: KeyEvent) -> InputUpdate {
+        if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+            self.advisory_mut().budget_halt_acknowledged = true;
+            return InputUpdate::handled();
         }
         let effect = match (key.code, key.modifiers.is_empty()) {
             (KeyCode::Char(ch), true) if ch.eq_ignore_ascii_case(&'c') => {
@@ -1870,9 +1907,12 @@ impl ShellApp {
     }
 
     pub(crate) fn prove_detail_owns_controls(&self) -> bool {
-        self.shell_view() == ShellView::Workbench
-            && crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Prove
-            && self.router.workbench().prove_detail_is_open()
+        let owns = match crate::ui_view_models::active_workbench_page(self) {
+            WorkbenchPage::Prove => self.router.workbench().prove_detail_is_open(),
+            WorkbenchPage::Review => self.router.workbench().trace_view_open(),
+            _ => false,
+        };
+        self.shell_view() == ShellView::Workbench && owns
     }
 
     fn dismiss_prove_detail(&mut self) -> bool {
@@ -2389,7 +2429,7 @@ mod tests {
         crate::test_support::record_indexed_run_with_input(
             target,
             run_id,
-            "context:build",
+            "threat-model:build",
             input,
             serde_json::json!({
                 "ok": true,
@@ -3124,6 +3164,32 @@ mod tests {
     }
 
     #[test]
+    fn remapped_result_key_cannot_select_over_a_held_draft() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "phase_result".to_string(),
+            action: "select".to_string(),
+            bindings: vec!["x".to_string()],
+        }];
+        let (_target, mut app, attempt) = app_with_unresolved_map_result(config);
+        app.set_input("held draft");
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+        let update = app.reduce_key(plain_key(KeyCode::Char('x')));
+        assert!(update.effects.is_empty());
+        assert_eq!(
+            app.engagement
+                .unresolved_phase_attempt(WorkflowPhase::Map)
+                .map(|record| record.completed.attempt_id.as_str()),
+            Some(attempt.as_str())
+        );
+        assert!(app
+            .engagement
+            .selected_phase_attempt(WorkflowPhase::Map)
+            .is_none());
+        assert!(!app.has_running_work());
+    }
+
+    #[test]
     fn remapped_phase_result_key_replaces_the_default_in_dispatch() {
         let mut config = V2Config::default();
         config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
@@ -3175,6 +3241,28 @@ mod tests {
             WorkbenchPage::Map,
             "Use stays on the inferred result page; Continue owns progression"
         );
+    }
+
+    #[test]
+    fn explicit_review_keeps_navigation_when_map_has_an_unresolved_result() {
+        let (_target, mut app, _) = app_with_unresolved_map_result(V2Config::default());
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Review));
+
+        assert_eq!(app.phase_result_target_phase(), None);
+        let bindings = crate::ui_view_models::footer_keybindings(&app);
+        assert!(
+            bindings.iter().any(|binding| binding.key == "G"),
+            "{bindings:?}"
+        );
+        assert!(!bindings.iter().any(|binding| binding.label == "Discard"));
+        assert!(app.reduce_key(plain_key(KeyCode::Char('G'))).handled);
+        assert!(app
+            .engagement
+            .unresolved_phase_attempt(WorkflowPhase::Map)
+            .is_some());
+        assert!(!app.has_running_work());
     }
 
     #[test]
@@ -3323,6 +3411,12 @@ mod tests {
         assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
         // Losing the target is the plainest way a launch stops being possible
         // after the review opened.
+        let prepared = app
+            .engagement
+            .pending_phase_rerun()
+            .unwrap()
+            .prepared_input
+            .clone();
         app.set_target(None);
 
         let update = app.reduce_key(plain_key(KeyCode::Enter));
@@ -3336,7 +3430,8 @@ mod tests {
             .engagement
             .pending_phase_rerun()
             .expect("a refused dispatch must leave the reviewed draft open");
-        assert_eq!(review.prepared_input, input);
+        assert_eq!(review.original_input, input);
+        assert_eq!(review.prepared_input, prepared);
         assert_eq!(
             review.dispatch_error.as_deref(),
             Some("rerun requires an active target")
@@ -3351,10 +3446,10 @@ mod tests {
 
     fn rerun_review_input() -> serde_json::Value {
         serde_json::json!({
-            "sampleLimit": 12,
-            "discovery": "auto",
-            "enrichment": false,
-            "scope": "all"
+            "contextLimit": 12,
+            "pipeline": "deterministic",
+            "offline": true,
+            "variantScan": false
         })
     }
 
@@ -3363,17 +3458,19 @@ mod tests {
             .engagement
             .pending_phase_rerun()
             .expect("human rerun review");
-        assert_eq!(review.tool, "context:build");
-        assert_eq!(review.changed_options.len(), 1);
-        assert_eq!(review.changed_options[0].label, "sampleLimit");
-        assert!(review.changed_options[0]
-            .description
-            .contains("Maximum source files"));
+        assert_eq!(review.tool, "threat-model:build");
+        assert_eq!(review.changed_options.len(), 5);
+        let limit = review
+            .changed_options
+            .iter()
+            .find(|option| option.label == "contextLimit")
+            .unwrap();
+        assert!(limit.description.contains("Threat-model generation limit"));
         let card = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Map)
             .header
             .result_card
             .unwrap();
-        assert!(card.detail.contains("sampleLimit = 12"), "{}", card.detail);
+        assert!(card.detail.contains("contextLimit = 12"), "{}", card.detail);
         assert!(
             !card.detail.contains("{"),
             "raw JSON leaked: {}",
@@ -3382,12 +3479,15 @@ mod tests {
     }
 
     fn assert_exact_saved_input_dispatch(app: &mut ShellApp, input: &serde_json::Value) {
+        let review = app.engagement.pending_phase_rerun().unwrap();
+        assert_eq!(&review.original_input, input);
+        let prepared = review.prepared_input.clone();
         let update = app.reduce_key(plain_key(KeyCode::Enter));
         let [ShellEffect::DispatchRunTool(launch)] = update.effects.as_slice() else {
             panic!("expected exact rerun dispatch");
         };
-        assert_eq!(launch.tool_name, "context:build");
-        assert_eq!(launch.input.value(), input);
+        assert_eq!(launch.tool_name, "threat-model:build");
+        assert_eq!(launch.input.value(), &prepared);
     }
 
     #[test]
@@ -3398,14 +3498,14 @@ mod tests {
         assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
 
         assert!(app.reduce_key(plain_key(KeyCode::Char('e'))).handled);
+        select_rerun_option(&mut app, "contextLimit");
         assert!(app.reduce_key(plain_key(KeyCode::Enter)).handled);
         assert!(app.reduce_key(plain_key(KeyCode::Backspace)).handled);
         assert!(app.reduce_key(plain_key(KeyCode::Backspace)).handled);
         assert!(app.reduce_key(plain_key(KeyCode::Char('2'))).handled);
         assert!(app.reduce_key(plain_key(KeyCode::Char('5'))).handled);
         assert!(app.reduce_key(plain_key(KeyCode::Enter)).handled);
-        assert!(app.reduce_key(plain_key(KeyCode::Char('j'))).handled);
-        assert!(app.reduce_key(plain_key(KeyCode::Char('j'))).handled);
+        select_rerun_option(&mut app, "preserveUserEdits");
         assert!(app.reduce_key(plain_key(KeyCode::Char(' '))).handled);
 
         assert_ne!(app.shell_view(), ShellView::Options);
@@ -3415,16 +3515,16 @@ mod tests {
         assert_eq!(
             review
                 .prepared_input
-                .get("sampleLimit")
+                .get("contextLimit")
                 .and_then(serde_json::Value::as_u64),
             Some(25)
         );
         assert_eq!(
             review
                 .prepared_input
-                .get("enrichment")
+                .get("preserveUserEdits")
                 .and_then(serde_json::Value::as_bool),
-            Some(true)
+            Some(false)
         );
         assert!(review.draft_modified);
 
@@ -3437,7 +3537,7 @@ mod tests {
             launch
                 .input
                 .value()
-                .get("sampleLimit")
+                .get("contextLimit")
                 .and_then(serde_json::Value::as_u64),
             Some(25)
         );
@@ -3445,10 +3545,22 @@ mod tests {
             launch
                 .input
                 .value()
-                .get("enrichment")
+                .get("preserveUserEdits")
                 .and_then(serde_json::Value::as_bool),
-            Some(true)
+            Some(false)
         );
+    }
+
+    fn select_rerun_option(app: &mut ShellApp, name: &str) {
+        let index = app
+            .phase_rerun_editable_options()
+            .iter()
+            .position(|option| option.name == name)
+            .unwrap();
+        app.engagement
+            .pending_phase_rerun_mut()
+            .unwrap()
+            .option_cursor = index;
     }
 
     #[test]

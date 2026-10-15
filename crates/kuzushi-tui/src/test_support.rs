@@ -279,6 +279,34 @@ pub(crate) fn record_fixture_context_run(target: &Path, run_id: &str) {
     );
 }
 
+pub(crate) fn record_imported_test_map(target: &Path, run_id: &str) {
+    let workspace = WorkspaceTarget::new(target).expect("test workspace");
+    let config = kuzushi_core::V2Config::default();
+    let context = kuzushi_core::modules::ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    let output = kuzushi_core::modules::ModuleRegistry::with_v2_builtins()
+        .execute_tool(
+            "threat-model:import",
+            serde_json::json!({
+                "document": {
+                    "version": "1", "methodology": "stride",
+                    "dfd": {"nodes": [{"id": "fixture", "label": "Owned test repository"}],
+                        "flows": [], "trustBoundaries": []},
+                    "threats": [], "summary": {}
+                }
+            }),
+            &context,
+        )
+        .expect("import test Map");
+    record_indexed_run(target, run_id, "threat-model:import", output);
+}
+
 pub(crate) fn seed_fira_shaped_completed_map_attempt(target: &Path) {
     record_fixture_context_run(target, "map-context");
     record_indexed_run(

@@ -13,6 +13,16 @@ struct RecordingContextRuntime {
 }
 
 impl AgentRuntime for RecordingContextRuntime {
+    fn with_allowance_binding(
+        &self,
+        binding: crate::allowance::AllowanceBinding,
+    ) -> Result<Box<dyn AgentRuntime + '_>> {
+        Ok(Box::new(AccountedContextRuntime {
+            inner: self,
+            binding,
+        }))
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         self.max_model_turns.lock().unwrap().push(
             request
@@ -39,6 +49,31 @@ impl AgentRuntime for RecordingContextRuntime {
 
     fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
         panic!("discovery context test must not invoke triage")
+    }
+}
+
+struct AccountedContextRuntime<'a> {
+    inner: &'a RecordingContextRuntime,
+    binding: crate::allowance::AllowanceBinding,
+}
+
+impl AgentRuntime for AccountedContextRuntime<'_> {
+    fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+        Some(&self.binding)
+    }
+
+    fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        let reservation = self.binding.reserve(&request.model)?;
+        let response = self.inner.query_blocking(request)?;
+        self.binding.settle(
+            reservation,
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        )?;
+        Ok(response)
+    }
+
+    fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
+        panic!("discovery context fixture must not invoke triage")
     }
 }
 
@@ -155,10 +190,26 @@ impl ContextFixture {
         }
     }
 
-    fn run(&self, input: Value, runtime: &RecordingContextRuntime) -> Value {
+    fn run(&self, mut input: Value, runtime: &RecordingContextRuntime) -> Value {
+        input["allowanceRef"] = self.approved_allowance();
         self.registry
             .execute_tool_with_runtime("sast:scan", input, &self.ctx(), Some(runtime))
             .unwrap()
+    }
+
+    fn approved_allowance(&self) -> Value {
+        let ledger = crate::SpendLimiter::open(self.workspace.findings_db_path()).unwrap();
+        if ledger.allowance_snapshot("context-fixture").is_err() {
+            let prepared = self.registry.prepare_dispatch_input("campaign:approve-allowance", json!({
+                "investigationId":"context-fixture","expectedRevision":0,"model":self.config.model,
+                "maxProviderCalls":8,"protectedReviewCalls":2,
+                "reason":"Explicit synthetic context fixture; no real provider requests"
+            }), &self.ctx(), None).unwrap().authorize_explicit_headless();
+            self.registry
+                .dispatch_prepared_input_with_runtime(prepared, &self.ctx(), None)
+                .unwrap();
+        }
+        json!({"schemaVersion":1,"investigationId":"context-fixture","revision":1,"workId":"discovery"})
     }
 
     fn equivalence(&self, input: &Value) -> crate::capabilities::campaign::BatchEquivalenceKey {

@@ -8,7 +8,34 @@ use serde_json::Value;
 use std::time::{Duration, SystemTime};
 
 pub(crate) mod diagram;
-pub(crate) const CONTEXT_ACTIONS: [(crossterm::event::KeyCode, &str); 10] = [
+mod scanner;
+
+pub(crate) fn context_header_title(app: &ShellApp) -> &'static str {
+    let picker = app.study_context_picker();
+    if picker.is_some_and(|picker| picker.text_view == crate::app::StudyContextTextView::Scanner) {
+        return " SCANNER CONTEXT PREVIEW ";
+    }
+    if picker.is_some_and(|picker| picker.regeneration_entry) {
+        return " CHOOSE CONTEXT TO REGENERATE ";
+    }
+    " CHOOSE STUDY CONTEXT "
+}
+
+pub(crate) fn context_text_controls(
+    view: crate::app::StudyContextTextView,
+    width: u16,
+) -> Option<&'static str> {
+    if view != crate::app::StudyContextTextView::Scanner {
+        return None;
+    }
+    Some(if width < 72 {
+        "p summary Tab full Space actions"
+    } else {
+        "p summary · Tab complete document · Space actions · Esc back"
+    })
+}
+
+pub(crate) const CONTEXT_ACTIONS: [(crossterm::event::KeyCode, &str); 11] = [
     (
         crossterm::event::KeyCode::Char('a'),
         "a Use inspected revision for study",
@@ -43,17 +70,47 @@ pub(crate) const CONTEXT_ACTIONS: [(crossterm::event::KeyCode, &str); 10] = [
         crossterm::event::KeyCode::Char('b'),
         "b Set matrix baseline",
     ),
+    (
+        crossterm::event::KeyCode::Char('p'),
+        "p Inspect scanner context",
+    ),
 ];
 
 pub(crate) fn context_actions(app: &ShellApp) -> Vec<(crossterm::event::KeyCode, &'static str)> {
     CONTEXT_ACTIONS
         .into_iter()
         .filter(|(key, _)| action_available(app, *key))
+        .map(|(key, label)| (key, context_action_label(app, key, label)))
         .collect()
 }
 
-fn action_available(app: &ShellApp, key: crossterm::event::KeyCode) -> bool {
+fn context_action_label(
+    app: &ShellApp,
+    key: crossterm::event::KeyCode,
+    label: &'static str,
+) -> &'static str {
+    let Some(picker) = app.study_context_picker() else {
+        return label;
+    };
+    match key {
+        crossterm::event::KeyCode::Char('g') if picker.regeneration_entry => {
+            "g Choose text to regenerate"
+        }
+        crossterm::event::KeyCode::Char('a') if picker.matrix_case_id.is_some() => {
+            "a Replace selected case context"
+        }
+        _ => label,
+    }
+}
+
+pub(crate) fn action_available(app: &ShellApp, key: crossterm::event::KeyCode) -> bool {
     use crossterm::event::KeyCode;
+    if app
+        .study_context_picker()
+        .is_some_and(|picker| picker.regeneration_entry)
+    {
+        return !matches!(key, KeyCode::Char('a' | 'm' | '+' | 'b'));
+    }
     match key {
         KeyCode::Char('+') | KeyCode::Char('b') => !app
             .router
@@ -160,7 +217,7 @@ pub(crate) struct ContextRow {
 
 pub(crate) fn context_catalog(app: &ShellApp) -> ContextCatalog {
     let mut catalog = ContextCatalog {
-        rows: vec![omission_row()],
+        rows: vec![initial_context_row(app)],
         status: String::new(),
         membership_known: false,
     };
@@ -180,7 +237,32 @@ pub(crate) fn context_catalog(app: &ShellApp) -> ContextCatalog {
                 .into(),
         _ => catalog.status = "Loading context revisions…".into(),
     }
+    explain_regeneration_catalog(app, &mut catalog);
     catalog
+}
+
+fn explain_regeneration_catalog(app: &ShellApp, catalog: &mut ContextCatalog) {
+    if catalog.membership_known
+        && app
+            .study_context_picker()
+            .is_some_and(|p| p.regeneration_entry)
+    {
+        catalog.status = format!(
+            "{} saved revisions. Choose the parent for an inactive copy.",
+            catalog.rows.len().saturating_sub(1)
+        );
+    }
+}
+
+fn initial_context_row(app: &ShellApp) -> ContextRow {
+    if app
+        .study_context_picker()
+        .is_some_and(|picker| picker.regeneration_entry)
+    {
+        return ContextRow { reference: None, label: "Choose a saved revision".into(), copy_label: None,
+            details: vec!["Select a revision, press Enter to inspect it, then e to choose text for regeneration. Planning, allowance approval and execution are separate. No request has started.".into()] };
+    }
+    omission_row()
 }
 
 fn omission_row() -> ContextRow {
@@ -239,16 +321,28 @@ fn context_age(recorded: &str) -> String {
 
 pub(crate) fn context_detail_lines(app: &ShellApp, width: usize) -> Vec<String> {
     if let Some(draft) = app.context_edit_draft() {
-        return super::context_edit::context_edit_plain_lines(draft, width);
+        return super::context_edit::context_edit_plain_lines(
+            draft,
+            width,
+            app.context_checkpoint_note(),
+        );
     }
     let Some(picker) = app.study_context_picker() else {
         return Vec::new();
     };
+    context_picker_lines(app, picker)
+        .into_iter()
+        .flat_map(|line| context_wrap(&line, width.max(1)))
+        .collect()
+}
+
+fn context_picker_lines(app: &ShellApp, picker: &crate::app::StudyContextPicker) -> Vec<String> {
+    if picker.text_view == crate::app::StudyContextTextView::Scanner {
+        return scanner::picker_lines(picker);
+    }
     let catalog = context_catalog(app);
     let mut text = vec![catalog.status, String::new()];
-    if let Some(id) = &picker.scope_id {
-        text.insert(0, format!("Selection applies only to boundary {id}. a saves an exact override; Esc returns without changing its association."));
-    }
+    text.splice(0..0, context_binding_lines(app, picker));
     if let Some(notice) =
         super::study_config::study_projection(app).and_then(|config| config.notice)
     {
@@ -259,9 +353,24 @@ pub(crate) fn context_detail_lines(app: &ShellApp, width: usize) -> Vec<String> 
         .iter()
         .find(|row| row.reference == picker.selected);
     append_selected_context(&mut text, selected, picker, catalog.membership_known);
-    text.into_iter()
-        .flat_map(|line| context_wrap(&line, width.max(1)))
-        .collect()
+    text
+}
+
+fn context_binding_lines(app: &ShellApp, picker: &crate::app::StudyContextPicker) -> Vec<String> {
+    if let Some(id) = &picker.scope_id {
+        return vec![format!("Selection applies only to boundary {id}. a saves an exact override; Esc returns without changing its association.")];
+    }
+    let Some(id) = picker.matrix_case_id.as_deref() else {
+        return Vec::new();
+    };
+    let name = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .and_then(|config| config.study.matrix.cases.iter().find(|case| case.id == id))
+        .map_or(id, |case| case.label.as_str());
+    vec![format!("Selection applies only to case {name}. a replaces its exact revision; Esc returns without changing the case.")]
 }
 
 fn append_selected_context(
@@ -284,16 +393,28 @@ fn append_selected_context(
     if let Some(row) = selected {
         text.extend(row.details.iter().skip(4).cloned());
     }
-    if picker.preview.is_some() {
-        text.push("c checks citations, links, source identity and bounded coverage. No model request. Source drift stops the check; the active context stays unchanged.".into());
-        text.push(
-            "a uses this exact revision. A new study plan must be approved before scanning.".into(),
-        );
-        text.push(
-            "m reviews its producing run as Map for separate acceptance. No model request is made."
-                .into(),
-        );
+    append_inspected_context_actions(text, picker);
+}
+
+fn append_inspected_context_actions(
+    text: &mut Vec<String>,
+    picker: &crate::app::StudyContextPicker,
+) {
+    if picker.preview.is_none() {
+        return;
     }
+    text.push("c checks citations, links, source identity and bounded coverage. No model request. Source drift stops the check; the active context stays unchanged.".into());
+    if picker.regeneration_entry {
+        text.push("e opens the text fields; g then plans regeneration of the selected field. Review its model, guidance and allowance before execution. The original stays unchanged.".into());
+        return;
+    }
+    text.push(
+        "a uses this exact revision. A new study plan must be approved before scanning.".into(),
+    );
+    text.push(
+        "m reviews its producing run as Map for separate acceptance. No model request is made."
+            .into(),
+    );
 }
 
 fn missing_catalog_membership(known: bool) -> String {
@@ -324,7 +445,7 @@ fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
     let Some(preview) = &picker.preview else {
         return vec![String::new(), "Enter inspects this exact revision before it can be used. Reading makes no model requests.".into(), "Historical context may not cover the current source. Review its assumptions and boundaries.".into()];
     };
-    if picker.raw {
+    if picker.text_view == crate::app::StudyContextTextView::Document {
         let mut lines = super::context_goal::context_goal_lines(&preview.goal_state);
         lines.push("Complete selected context document:".into());
         lines.extend(preview.raw.clone());
@@ -332,7 +453,7 @@ fn preview_lines(picker: &crate::app::StudyContextPicker) -> Vec<String> {
     }
     let mut lines = vec![
         String::new(),
-        "CONTEXT SUMMARY · v diagram · Tab complete document".into(),
+        "CONTEXT SUMMARY · v diagram · Tab complete document · p scanner context".into(),
     ];
     if let Some(notice) = preview.dfd.evidence_notice() {
         lines.push(notice.into());

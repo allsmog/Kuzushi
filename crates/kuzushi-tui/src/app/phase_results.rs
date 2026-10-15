@@ -945,7 +945,7 @@ fn typed_run_result_details(
 /// keep the terminal outcome, hydrated result summaries (error + artifacts
 /// by label), finding deltas, and operator questions/decisions. The work
 /// ledger (plan/task/call rows), artifact digests, duplicate receipt rows,
-/// and nominal stream-health lines stay behind the disclosure rows —
+/// and nominal stream-health lines stay behind one Replay disclosure.
 /// replay/trace own that depth. `include_overview` re-admits the run-id and
 /// stream-health lines when the projection itself is degraded.
 fn phase_card_run_rows(
@@ -977,30 +977,27 @@ fn phase_card_run_rows(
             }));
         }
     }
-    if !folded_keys.is_empty() {
-        rows.push(PhaseResultDetailRow::disclosure(
-            format!(
-                "{} run ledger cell(s) omitted from the result card · inspect replay",
-                folded_keys.len()
-            ),
-            folded_keys,
-        ));
-    }
-    if !presentation.timeline.is_empty() {
-        let disclosed_keys = presentation
-            .timeline
-            .iter()
-            .map(|cell| cell.key.clone())
-            .collect();
-        rows.push(PhaseResultDetailRow::disclosure(
-            format!(
-                "{} timeline cell(s) omitted from the result card · inspect replay",
-                presentation.timeline.len()
-            ),
-            disclosed_keys,
-        ));
-    }
+    append_replay_disclosure(&mut rows, folded_keys, &presentation.timeline);
     rows
+}
+
+fn append_replay_disclosure(
+    rows: &mut Vec<PhaseResultDetailRow>,
+    mut folded_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
+    timeline: &[kuzushi_core::run_lifecycle::RunPresentationCellV1],
+) {
+    let records = folded_keys.len();
+    folded_keys.extend(timeline.iter().map(|cell| cell.key.clone()));
+    if folded_keys.is_empty() {
+        return;
+    }
+    rows.push(PhaseResultDetailRow::disclosure(
+        format!(
+            "More in Replay · {records} run records · {} timeline entries",
+            timeline.len()
+        ),
+        folded_keys,
+    ));
 }
 
 /// The Terminal cell restates what the card already shows elsewhere: its
@@ -1184,7 +1181,7 @@ fn continuation_action(routes_to_report: bool) -> PhaseResultAction {
 fn failed_result_recommendation(outcome: PhaseAttemptOutcome) -> &'static str {
     match outcome {
         PhaseAttemptOutcome::Blocked => {
-            "open the blocked run, adjust the autonomy posture or input, then run it again"
+            "open the blocked run, address the stated requirement, then run it again"
         }
         PhaseAttemptOutcome::Canceled => "open the canceled run or run it again",
         _ => "open the failed run, adjust its input, or run it again",
@@ -2047,8 +2044,7 @@ mod tests {
             .expect("typed phase-result card");
         assert_eq!(card.semantic_keys, presentation.semantic_keys);
         assert!(
-            card.detail
-                .contains("timeline cell(s) omitted from the result card · inspect replay"),
+            card.detail.contains("timeline entries"),
             "phase card must explicitly disclose its bounded timeline"
         );
     }
@@ -2086,7 +2082,7 @@ mod tests {
              the card's next: footer: {detail}"
         );
         assert!(
-            detail.contains("run ledger cell(s) omitted from the result card"),
+            detail.contains("More in Replay") && detail.contains("run records"),
             "missing work-ledger disclosure: {detail}"
         );
     }
@@ -2129,6 +2125,13 @@ mod tests {
     }
 
     #[test]
+    fn empty_run_details_do_not_offer_an_empty_replay_disclosure() {
+        let mut rows = Vec::new();
+        append_replay_disclosure(&mut rows, Default::default(), &[]);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
     fn typed_phase_result_card_covers_every_terminal_status_without_losing_keys() {
         for status in terminal_statuses() {
             assert_terminal_status_card(status);
@@ -2149,10 +2152,8 @@ mod tests {
             status.label(),
             card.detail
         );
-        let disclosure = format!(
-            "{} timeline cell(s) omitted from the result card · inspect replay",
-            canonical.timeline.len()
-        );
+        let disclosure = format!("{} timeline entries", canonical.timeline.len());
+        assert_eq!(card.detail.matches("More in Replay").count(), 1);
         assert!(
             card.detail.contains(&disclosure),
             "{} card did not disclose bounded timeline",
@@ -2162,7 +2163,7 @@ mod tests {
             assert_eq!(card.outcome, "blocked");
             assert!(!card.actions.contains(&PhaseResultAction::Select));
             assert!(!card.actions.contains(&PhaseResultAction::SelectAndContinue));
-            assert!(card.recommended.contains("autonomy posture"));
+            assert!(card.recommended.contains("address the stated requirement"));
         }
     }
 

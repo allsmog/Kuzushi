@@ -47,6 +47,8 @@ mod since_filter;
 mod status;
 
 pub use changed_scan_scope::{changed_scan_input, ChangedScanScope};
+mod review_decision_receipt;
+mod review_source_capture;
 pub use export_decision_basis::{
     read_finding_review_source, WorkspaceObservedSource, WorkspaceReviewDecisionBasis,
     WorkspaceReviewSourceComparison,
@@ -89,6 +91,18 @@ pub use record_review_decision::{
     record_user_review_decision_for_finding_with_session,
 };
 pub use record_review_session::record_review_session_started;
+pub use review_decision_receipt::{
+    read_review_decision_receipt, record_user_review_decision_with_receipt,
+    WorkspaceReviewDecisionReceipt,
+};
+pub use review_source_capture::execute_source_review_action;
+pub use review_source_capture::{
+    capture_review_source, decide_on_review_source, read_decision_reviewed_source,
+    read_review_source_capture, WorkspaceReviewSourceCapture,
+};
+pub use review_source_capture::{
+    capture_review_source_with_limit, read_captured_review_code, MAX_REVIEW_SOURCE_BYTES,
+};
 pub use scan_scope_proposal::{
     accept_scan_scope_proposal, create_scan_scope_proposal, edit_scan_scope_proposal,
     load_accepted_scan_scope_proposal, load_scan_scope_proposal,

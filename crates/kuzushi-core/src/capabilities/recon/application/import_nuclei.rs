@@ -11,13 +11,18 @@ pub(crate) fn run_recon_import_nuclei(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<ReconReport> {
+    check_import_cancellation(ctx)?;
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("recon:import"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "recon:import",
+        ))?;
     let (path, body) = read_jsonl_path(input, "recon:import nuclei needs a `path` field")?;
     let mut context = ReconImportContext::open(workspace)?;
     for (lineno, line) in body.lines().enumerate() {
-        ingest_nuclei_line(&mut context, line, lineno)?;
+        check_import_cancellation(ctx)
+            .and_then(|_| ingest_nuclei_line(&mut context, line, lineno))
+            .map_err(|error| context.partial_import_error(error))?;
     }
     context.into_report(TOOL_PREFIX, path.display().to_string())
 }

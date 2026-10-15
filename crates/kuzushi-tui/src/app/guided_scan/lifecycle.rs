@@ -1,6 +1,7 @@
 use super::*;
 
 impl ShellApp {
+    #[cfg(test)]
     pub(crate) fn begin_guided_scan_questions(&mut self) {
         if !self.prepare_phase_picker_state(WorkflowPhase::Map, false) {
             return;

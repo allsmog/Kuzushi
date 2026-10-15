@@ -1,0 +1,97 @@
+name: Experimental settings can be opened and left through visible keys
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART seed @TMP_HOME
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART catalog
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: use govulncheck
+require-live-snap: 20 Enter settings | support-selected
+expect: Experimental
+keys: Enter
+require-live-snap: 20 OPTIONS | settings-opened
+expect: Experimental
+expect: Esc tools
+keys: C-g
+type: keys
+require-live-snap: 20 COMMAND PALETTE | options-command-palette
+keys: Enter Enter
+require-live-snap: 20 VIEW · Options | option-keymap
+expect: option
+expect: Enter
+expect: edit
+expect: details
+expect: standard/advanced/missing
+keys: Escape
+require-live-snap: 20 OPTIONS | options-after-keymap
+submit: logs
+require-live-snap: 20 view:logs | theme-origin-logs
+submit: theme
+require-live-snap: 20 reads system pref | theme-reader
+type: held theme command draft
+require-live-snap: 20 held theme command draft | theme-held-draft
+expect: Esc close
+keys: Escape
+require-live-snap: 20 view:logs | theme-restored-origin
+expect: held theme command draft
+ask: Do Options list the real selection and edit keys, and does Escape from Theme return to Logs with the composer draft intact?
+keys: C-u
+submit: use govulncheck
+require-live-snap: 20 Enter settings | support-after-theme
+keys: Enter
+require-live-snap: 20 Esc tools | settings-after-theme
+keys: Enter C-u
+type: Operator α draft path
+require-live-snap: 20 Operator α draft path | field-draft
+expect: Esc keeps draft
+keys: Escape
+require-live-snap: 20 Value: not set | kept-field-draft
+keys: Escape
+require-live-snap: 20 Enter settings | returned-selection
+expect: govulncheck:scan
+resize: 160x48
+require-live-snap: 20 Enter settings | support-160x48
+resize: 96x89
+require-live-snap: 20 Enter settings | support-96x89
+resize: 80x24
+require-live-snap: 20 Enter settings | support-80x24
+resize: 60x20
+require-live-snap: 20 Enter settings | support-60x20
+resize: 40x12
+require-live-snap: 20 Enter settings | support-40x12
+expect: Experimental
+keys: Down Up Enter
+require-live-snap: 20 OPTIONS | settings-40x12
+expect: Esc tools
+ask: Are selection, Enter settings and Escape back visible and usable at every size, without starting work?
+resize: 120x36
+keys: Enter
+require-live-snap: 20 Operator α draft path | reopened-draft
+expect: Esc keeps draft
+keys: Escape Escape
+require-live-snap: 20 Enter settings | restored-origin
+keys: Escape
+type: typed command draft
+require-live-snap: 20 typed command draft | composer-owner
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART verify
+ask: Does field cancellation preserve its draft while Escape from support gives typing back to the composer and keeps source unchanged?
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | draft-exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: use govulncheck
+require-live-snap: 20 Enter settings | recovered-support
+keys: Enter
+require-live-snap: 20 OPTIONS | recovered-settings
+expect: Experimental
+expect: Esc tools
+require-shell: python3 -B @REPO/scripts/devex/fixtures/govulncheck_curation.py @TMP_TARGET @ART verify
+ask: Does no-color restart keep the supported browsing contract without dispatching work or treating an unsaved field as persisted?
+keys: C-c
+require-exit: 10

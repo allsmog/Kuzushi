@@ -1,6 +1,30 @@
 use super::*;
 use crate::ui_view_models::{cost_model, CostBudgetRow, CostModel, CostTone};
 
+pub(crate) fn cost_page_rows(app: &ShellApp) -> Option<usize> {
+    cost_reader_area(app).map(|area| usize::from(area.height).max(1))
+}
+
+pub(crate) fn cost_max_scroll(app: &ShellApp) -> Option<u16> {
+    let area = cost_reader_area(app)?;
+    let total = cost_lines(app, area).len();
+    Some(
+        total
+            .saturating_sub(usize::from(area.height))
+            .min(u16::MAX as usize) as u16,
+    )
+}
+
+fn cost_reader_area(app: &ShellApp) -> Option<Rect> {
+    if app.shell_view() != ShellView::Cost {
+        return None;
+    }
+    let viewport = app.viewport();
+    let primary =
+        crate::renderer::primary_body_area(app, Rect::new(0, 0, viewport.columns, viewport.rows));
+    Some(crate::ui_view_models::answers_layout(app, primary).workspace)
+}
+
 pub(crate) fn cost_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     if let Some(snapshot) = app.cost_screen_snapshot() {
         return cost_snapshot_lines(snapshot.clone(), area.width as usize);
@@ -70,7 +94,15 @@ fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, a
         lines.push(detail("this session", "not enforced"));
     } else {
         for row in &model.budget_rows {
-            lines.push(cost_budget_bar(row));
+            if area.width < 100 || row.fill.is_none() {
+                lines.extend(detail_wrapped(
+                    &row.cells[0],
+                    &format!("{} / cap {} · {}", row.cells[1], row.cells[2], row.cells[3]),
+                    area.width,
+                ));
+            } else {
+                lines.push(cost_budget_bar(row));
+            }
         }
     }
     lines.push(blank());
@@ -79,19 +111,24 @@ fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, a
 fn push_cost_spend_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
     lines.push(divider("SPEND", area.width));
     for row in &model.spend_rows {
-        lines.push(detail(&row.cells[0], &row.cells[1]));
+        lines.extend(detail_wrapped(&row.cells[0], &row.cells[1], area.width));
     }
     lines.push(blank());
 }
 
 fn push_cost_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
-    lines.push(command_list_line(
-        &["model <provider:id>", "config", "back"],
+    lines.extend(command_list_lines(
+        &["report", "replay <run-id>", "config", "back"],
         area.width as usize,
     ));
-    lines.push(muted(
-        "Per-tool spend ledger appears once Rust tools report `costUsd` (scanner-only work may stay $0).",
-    ));
+    lines.extend(
+        wrap_text(
+            "Saved run costs appear in report and replay. Missing cost telemetry stays unknown.",
+            area.width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
 }
 
 fn raw(value: impl Into<String>) -> Line<'static> {
@@ -104,7 +141,7 @@ pub(crate) fn cost_budget_bar(row: &CostBudgetRow) -> Line<'static> {
         Span::raw(" "),
         Span::styled(format!("{:18}", row.cells[0]), theme::primary()),
         Span::styled(" [", theme::subtle()),
-        Span::styled("█".repeat(row.fill), style),
+        Span::styled("█".repeat(row.fill.unwrap_or(0)), style),
         Span::styled("░".repeat(row.empty), theme::subtle()),
         Span::styled("] ", theme::subtle()),
         Span::styled(row.cells[1].clone(), theme::primary()),
@@ -122,3 +159,6 @@ fn cost_tone_style(tone: CostTone) -> ratatui::style::Style {
         CostTone::Danger => theme::danger(),
     }
 }
+
+#[cfg(test)]
+mod tests;

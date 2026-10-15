@@ -49,7 +49,7 @@
     "test:coverage:rust": "bash scripts/run-rust-coverage.sh",
     "test:coverage": "pnpm test:coverage:node && pnpm test:coverage:rust",
     "test:mutations": "bash scripts/run-rust-mutations.sh",
-    "quality:crap-risk": "node --test scripts/crap-risk-test-mapping.test.mjs scripts/crap-risk-gate.test.mjs && node scripts/crap-risk-gate.mjs",
+    "quality:crap-risk": "node --test scripts/crap-risk-test-mapping.test.mjs scripts/crap-risk-gate.test.mjs scripts/vendored-terminal-baseline.test.mjs && node scripts/crap-risk-gate.mjs",
     "quality:identity": "node scripts/check-public-identity.mjs",
     "quality:architecture": "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-run-lifecycle-boundary.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs && node scripts/check-format-hook-coverage.mjs",
     "check:workspace-state-writes": "node scripts/check-workspace-state-writes.mjs",

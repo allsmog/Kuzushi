@@ -1,0 +1,84 @@
+name: Experimental source graphs preserve partial artifacts and never replace accepted Map context
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cpg_module.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup-before-graph
+expect-not: Map ✓
+submit: run cpg:build {"languages":"go","subdir":"first","maxSourceFiles":2}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Source scope: first | scoped-graph-receipt
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | graph-reader
+resize: 160x48
+live-snap: graph-160x48
+resize: 96x89
+live-snap: graph-96x89
+resize: 80x24
+live-snap: graph-80x24
+resize: 60x20
+live-snap: graph-60x20
+resize: 40x12
+keys: End
+live-snap: graph-40x12-tail
+keys: PPage
+live-snap: graph-40x12-page-1
+keys: PPage
+live-snap: graph-40x12-page-2
+keys: PPage
+live-snap: graph-40x12-page-3
+keys: PPage
+live-snap: graph-40x12-page-4
+ask: Are the selected first-directory scope, actual parsed counts, graph path, auxiliary Map role and unbounded collection limitations readable at all six sizes?
+keys: q
+resize: 120x36
+submit: run cpg:build {"languages":"go,python","maxSourceFiles":2}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 cpg:build partial | retained-first-language
+expect: python
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cpg_module.py @TMP_TARGET @ART partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cpg_module.py @TMP_TARGET @ART changed
+submit: run cpg:build {"languages":"go","maxSourceFiles":1}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 cap of 1 | refused-stale-build
+submit: run cpg:build {"languages":"go","maxSourceFiles":2}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Source scope: . | explicit-rebuild
+submit: setup
+require-live-snap: 25 SETUP · READY THE MAP RUN | setup-after-graphs
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cpg_module.py @TMP_TARGET @ART verified
+ask: Does a later language failure retain the earlier graph in a partial receipt, with explicit file-cap refusal/rebuild and Map still awaiting context acceptance?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | restarted-setup
+expect-not: Map ✓
+submit: run cpg:build {"languages":"go","subdir":"first","maxSourceFiles":2}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Source scope: first | restarted-graph
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cpg_module.py @TMP_TARGET @ART recovered
+ask: Does no-color restart preserve graph artifacts and the partial failure without provider requests, findings, decisions or an accepted Map checkpoint?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

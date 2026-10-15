@@ -1,0 +1,60 @@
+name: Unapproved Scan keeps its refusal readable and preserves existing observations
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_scan_refusal.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: run agentic-sast:scan {"maxFindings":1}
+require-live-snap: 25 PREREQUISITE PLAN | cached-context
+expect: recommended reuse
+keys: r
+require-live-snap: 25 RECORDED ENGINE OUTCOMES | blocked-scan
+expect: RESULT blocked
+expect: Agentic SAST hunt
+expect-not: correlated result status contradicts
+expect: details · replay
+expect: Esc result actions
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_scan_refusal.py @TMP_TARGET @ART blocked
+resize: 160x48
+require-live-snap: 25 RESULT blocked | result-160x48
+resize: 96x89
+require-live-snap: 25 RESULT blocked | result-96x89
+resize: 80x24
+require-live-snap: 25 RESULT blocked | result-80x24
+resize: 60x20
+require-live-snap: 25 RESULT blocked | result-60x20
+resize: 40x12
+require-live-snap: 25 RESULT blocked | result-40x12
+ask: Does the blocked Scan show a readable outcome at each size and make its allowance guidance reachable without suggesting a completed scan?
+nav-mode:
+keys: o
+require-live-snap: 25 ── REPLAY | compact-result-open
+expect: Outcome · blocked
+keys: NPage
+require-live-snap: 25 no model request started | compact-refusal-guidance
+resize: 120x36
+submit: logs
+require-live-snap: 25 preparing model work | preparation-receipt
+expect-not: calling model
+expect: no model request started
+submit: findings
+require-live-snap: 25 Owned first observation | observations-preserved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_scan_refusal.py @TMP_TARGET @ART returned
+ask: Can the operator distinguish preparation from a request, read the full refusal and return to existing observations without a new decision or automatic work?
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+nav-mode:
+keys: o
+require-live-snap: 25 ── REPLAY | recovered-refusal
+expect: Outcome · blocked
+expect-not: correlated result status contradicts
+require-shell: python3 -B @REPO/scripts/devex/fixtures/prepared_scan_refusal.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the same refused job with zero requests, unchanged source and all three original observations?
+keys: C-c
+require-exit: 15

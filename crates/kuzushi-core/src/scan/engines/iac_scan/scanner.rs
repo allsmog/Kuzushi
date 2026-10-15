@@ -27,8 +27,14 @@ impl ScanEngine for IacScanScanner {
         "iac-scan"
     }
 
+    fn rebind_scoped_finding(&self, finding: &mut Finding, file_path: String) {
+        super::output::rebind_core_finding(finding, file_path);
+    }
+
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        Ok(iac_scan_engine_output(target, &self.options, cancellation)?.findings)
+        let output = iac_scan_engine_output(target, &self.options, cancellation)?;
+        output.ensure_empty_result_is_complete()?;
+        Ok(output.findings)
     }
 
     /// The aggregate scan learns about unread paths only through
@@ -49,7 +55,11 @@ fn iac_scan_engine_output(
     cancellation: &ScanCancellation,
 ) -> Result<ScanEngineOutput> {
     let report = scan_iac(target, options, cancellation)?;
-    Ok(ScanEngineOutput {
+    Ok(report_engine_output(report))
+}
+
+pub(super) fn report_engine_output(report: IacScanReport) -> ScanEngineOutput {
+    ScanEngineOutput {
         findings: report
             .findings
             .iter()
@@ -57,7 +67,7 @@ fn iac_scan_engine_output(
             .collect(),
         codeql_sarif_documents: Vec::new(),
         scan_errors: report.coverage_gaps.scan_error_lines(),
-    })
+    }
 }
 
 pub fn scan_iac(
@@ -65,12 +75,28 @@ pub fn scan_iac(
     options: &IacScanOptions,
     cancellation: &ScanCancellation,
 ) -> Result<IacScanReport> {
+    options.check_limits()?;
     let target = canonical_directory(target)?;
     let mut scan = IacScanAccumulator::default();
-    let files = sorted_iac_files(&target, options, &mut scan.coverage_gaps)?;
+    scan.inspection = IacInspection {
+        max_entries: options.max_entries,
+        max_total_bytes: options.max_total_bytes,
+        max_file_bytes: options.max_file_bytes,
+        max_depth: super::collect_iac_files::MAX_IAC_DEPTH,
+        ..IacInspection::default()
+    };
+    let files = sorted_iac_files(&target, options, cancellation, &mut scan)?;
 
     for file in files {
-        scan.scan_file(&target, &file, options, cancellation)?;
+        if let Err(error) = scan.scan_file(&target, &file, options, cancellation) {
+            scan.coverage_gaps.record(
+                &target,
+                &file,
+                CoverageGapKind::File,
+                &std::io::Error::other(error.to_string()),
+            );
+            break;
+        }
     }
 
     Ok(IacScanReport {
@@ -80,16 +106,25 @@ pub fn scan_iac(
         files_scanned: scan.files_scanned,
         files_skipped: scan.files_skipped,
         coverage_gaps: scan.coverage_gaps,
+        inspection: scan.inspection,
     })
 }
 
 fn sorted_iac_files(
     target: &Path,
     options: &IacScanOptions,
-    gaps: &mut CoverageGaps,
+    cancellation: &ScanCancellation,
+    scan: &mut IacScanAccumulator,
 ) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
-    collect_iac_files(target, target, options, &mut files, gaps)?;
+    collect_iac_files_bounded(
+        target,
+        options,
+        cancellation,
+        &mut files,
+        &mut scan.coverage_gaps,
+        &mut scan.inspection,
+    )?;
     files.sort();
     Ok(files)
 }

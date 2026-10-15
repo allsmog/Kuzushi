@@ -12,7 +12,10 @@ pub(in crate::modules) fn build_context_snapshot(
             tool_name,
         ))?;
     let options = context_build_options(tool_name, &input)?;
-    anyhow::ensure!(!ctx.is_cancelled(), "Context preparation canceled before repository inspection");
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Context preparation canceled before repository inspection"
+    );
     emit_context_build_start(ctx, workspace.root());
     let starting = trace_snapshot_provenance(workspace, ctx, ContextBuildStage::BuildInventory)?;
     let mut artifact = build_context_artifact(workspace.root(), &options, ctx)?;
@@ -395,7 +398,8 @@ fn build_context_snapshot_value_for_root_with_options(
 ) -> Result<Value> {
     let starting_tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
         .context("context snapshot requires a content tree identity")?;
-    let (_, mut snapshot) = context_snapshot_value_with_progress(root, options, |_, _| {}, &|| false)?;
+    let (_, mut snapshot) =
+        context_snapshot_value_with_progress(root, options, |_, _| {}, &|| false)?;
     let tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
         .context("context snapshot requires a content tree identity")?;
     require_unchanged_context_tree(&starting_tree_hash, &tree_hash)?;
@@ -429,14 +433,16 @@ fn context_build_options(tool_name: &str, input: &Value) -> Result<ContextBuildO
 }
 
 fn read_sample_limit(input: &Value) -> Result<usize> {
-    let Some(value) = input
-        .get("sampleLimit")
-        .or_else(|| input.get("limit"))
-    else {
+    let Some(value) = input.get("sampleLimit").or_else(|| input.get("limit")) else {
         return Ok(200);
     };
-    let limit = value.as_u64().context("sampleLimit must be an integer from 1 to 2000")?;
-    anyhow::ensure!((1..=MAX_CONTEXT_SAMPLE_FILES as u64).contains(&limit), "sampleLimit must be an integer from 1 to 2000");
+    let limit = value
+        .as_u64()
+        .context("sampleLimit must be an integer from 1 to 2000")?;
+    anyhow::ensure!(
+        (1..=MAX_CONTEXT_SAMPLE_FILES as u64).contains(&limit),
+        "sampleLimit must be an integer from 1 to 2000"
+    );
     Ok(limit as usize)
 }
 
@@ -490,10 +496,16 @@ fn context_snapshot_value_with_progress(
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<(ContextFileSample, Value)> {
     let repository_inventory = build_context_inventory(root, &mut progress, should_cancel)?;
-    anyhow::ensure!(!should_cancel(), "Context preparation canceled after bounded inventory; prior snapshot was not replaced");
+    anyhow::ensure!(
+        !should_cancel(),
+        "Context preparation canceled after bounded inventory; prior snapshot was not replaced"
+    );
     progress(ContextBuildStage::ScanFiles, None);
     let file_sample = inventory_file_sample(&repository_inventory, options.sample_limit)?;
-    progress(ContextBuildStage::InferRepository, Some(format!("{} files enumerated", file_sample.files_indexed)));
+    progress(
+        ContextBuildStage::InferRepository,
+        Some(format!("{} files enumerated", file_sample.files_indexed)),
+    );
     let mut repo_context = infer_repo_context(root, &file_sample.files_sample)?;
     apply_inventory_repo_context(&mut repo_context, &repository_inventory);
     progress(ContextBuildStage::MapAttackSurface, None);
@@ -737,15 +749,16 @@ fn emit_context_build_stage(
 
 fn emit_context_build_done(ctx: &ToolExecutionContext<'_>, files_indexed: usize, partial: bool) {
     if let Some(trace) = ctx.trace {
-        let coverage = if partial { " (partial coverage)" } else { "" };
+        let state = if partial {
+            "partial inventory"
+        } else {
+            "complete"
+        };
         let _ = trace
             .step(
                 "done",
                 "build",
-                format!(
-                    "context:build complete · {} files indexed{}",
-                    files_indexed, coverage
-                ),
+                format!("context:build {state} · {files_indexed} files indexed"),
             )
             .emit();
     }
@@ -761,6 +774,10 @@ fn context_build_response(
     provenance: Option<SnapshotProvenance>,
 ) -> Value {
     let enrichment_claims = context_enrichment_claim_count(&snapshot);
+    let limitation = snapshot
+        .pointer("/repositoryInventory/truncation/reason")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
     let mut output = context_build_output(root, snapshot_path, files_indexed, partial);
     if enrichment_claims > 0 {
         output.push_str(&format!(
@@ -785,6 +802,27 @@ fn context_build_response(
     // Summary must stay one line: result cards escape control characters,
     // so a multi-line summary renders literal `\n` sequences. The full
     // multi-line detail belongs to `output` only.
+    context_snapshot_result(output, data, partial, limitation.as_deref())
+}
+
+fn context_snapshot_result(
+    output: String,
+    data: Value,
+    partial: bool,
+    limitation: Option<&str>,
+) -> Value {
+    if partial {
+        let reason = limitation.unwrap_or(
+            "Repository enumeration is incomplete; inspect the recorded coverage limits",
+        );
+        let summary = format!("context:build partial inventory · {reason}");
+        return crate::module_result::partial_output_result(
+            summary,
+            output,
+            vec![json!(reason)],
+            data,
+        );
+    }
     let summary = output.lines().next().unwrap_or_default().to_string();
     crate::module_result::completed_output_result(summary, output, data)
 }
@@ -853,8 +891,8 @@ fn context_build_output(
     );
     if partial {
         output.push_str(
-            "\n  Coverage: PARTIAL. An inspection cap was reached and the snapshot is marked truncated; \
-             scope the target (or audit via shards) for full coverage",
+            "\n  Coverage: PARTIAL. Repository enumeration or inspection is incomplete. \
+             Read the recorded limits and omissions before planning discovery.",
         );
     }
     output
@@ -873,15 +911,84 @@ mod stage_tests {
     use super::*;
 
     #[test]
+    fn incomplete_inventory_keeps_its_actual_cause_and_partial_status() {
+        let data = json!({"partialCoverage":true,"snapshot":{"owned":"retained"}});
+        let result = context_snapshot_result(
+            "context:build indexed 1 file\nSnapshot retained".into(),
+            data.clone(),
+            true,
+            Some("unsafe tracked parent at component/source.rs"),
+        );
+        assert_eq!(result["status"], "partial");
+        assert_eq!(result["data"], data);
+        assert_eq!(
+            result["warnings"][0],
+            "unsafe tracked parent at component/source.rs"
+        );
+        assert!(!result["output"]
+            .as_str()
+            .unwrap()
+            .contains("inspection cap was reached"));
+        assert!(!result["summary"].as_str().unwrap().contains('\n'));
+    }
+
+    #[test]
+    fn legacy_incomplete_enumeration_gets_an_honest_generic_cause() {
+        let result =
+            context_snapshot_result("context:build indexed 1 file".into(), json!({}), true, None);
+        assert_eq!(result["status"], "partial");
+        assert!(result["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("enumeration is incomplete"));
+    }
+
+    #[test]
+    fn complete_inventory_preserves_its_existing_result_contract() {
+        let result = context_snapshot_result(
+            "context:build indexed 2 files\nSnapshot retained".into(),
+            json!({"partialCoverage":false}),
+            false,
+            None,
+        );
+        assert_eq!(result["status"], "completed");
+        assert_eq!(result["summary"], "context:build indexed 2 files");
+        assert_eq!(
+            result["output"],
+            "context:build indexed 2 files\nSnapshot retained"
+        );
+    }
+
+    #[test]
     fn inventory_cancellation_stops_before_inference_and_publication() {
         let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("owned.rs"), "// Owned cancellation fixture.\n").unwrap();
-        let options = ContextBuildOptions { sample_limit:2, discovery:"auto".into(), enrichment:false, scope:"all".into() };
+        fs::write(
+            root.path().join("owned.rs"),
+            "// Owned cancellation fixture.\n",
+        )
+        .unwrap();
+        let options = ContextBuildOptions {
+            sample_limit: 2,
+            discovery: "auto".into(),
+            enrichment: false,
+            scope: "all".into(),
+        };
         let checks = std::cell::Cell::new(0);
-        let cancel = || { checks.set(checks.get()+1); checks.get()>1 };
+        let cancel = || {
+            checks.set(checks.get() + 1);
+            checks.get() > 1
+        };
         let mut stages = Vec::new();
-        let error = context_snapshot_value_with_progress(root.path(), &options, |stage,_| stages.push(stage), &cancel).unwrap_err();
-        assert!(error.to_string().contains("canceled after bounded inventory"));
+        let error = context_snapshot_value_with_progress(
+            root.path(),
+            &options,
+            |stage, _| stages.push(stage),
+            &cancel,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("canceled after bounded inventory"));
         assert_eq!(stages, [ContextBuildStage::BuildInventory]);
         assert!(!crate::context::context_snapshot_path(root.path()).exists());
     }

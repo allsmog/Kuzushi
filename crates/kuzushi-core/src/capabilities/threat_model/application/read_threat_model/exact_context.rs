@@ -1,5 +1,6 @@
 use super::*;
 mod goal_state;
+mod scanner_preview;
 mod source_state;
 pub(crate) use goal_state::inspect as inspect_goal_guidance;
 
@@ -38,9 +39,6 @@ fn exact_context_result(
     let lesson_state = document
         .as_ref()
         .map(|document| inspect_lesson_state(&target, document));
-    let goal_state = document
-        .as_ref()
-        .map(|document| goal_state::inspect(&target, document));
     let summary = if reference.is_some() {
         "Loaded exact scanner context without changing the active threat model."
     } else {
@@ -64,7 +62,8 @@ fn exact_context_result(
             "resolvedFrom": "exact-context",
             "sourceState": source_state,
             "lessonState":lesson_state,
-            "goalState":goal_state,
+            "goalState":document.as_ref().map(|document| goal_state::inspect(&target, document)),
+            "scannerContextPreview":document.as_ref().map(scanner_preview::build),
         }),
     ))
 }
@@ -122,6 +121,10 @@ mod tests {
             load_exact_threat_model(root.path(), &first).unwrap()
         );
         assert_eq!(result["data"]["modelRef"], json!(first));
+        assert_eq!(
+            result["data"]["scannerContextPreview"],
+            scanner_preview::build(&result["data"]["document"])
+        );
         assert_eq!(
             load_active_threat_model(root.path())
                 .unwrap()

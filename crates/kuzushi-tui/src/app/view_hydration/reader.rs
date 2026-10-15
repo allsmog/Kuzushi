@@ -371,6 +371,11 @@ fn read_workspace_file_value(target: &Path, key: &ViewHydrationKey) -> Option<Vi
 }
 
 fn read_environment_value(key: &ViewHydrationKey) -> ViewHydrationValue {
+    if let ViewHydrationKey::ExecutableOptions { requirements, .. } = key {
+        return ViewHydrationValue::ExecutableOptions(
+            kuzushi_core::modules::missing_executable_requirements(requirements),
+        );
+    }
     let ViewHydrationKey::HealthChecks { credential_env } = key else {
         unreachable!("view hydration key was not assigned to a reader boundary")
     };

@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+mod dispatch;
 
 fn failure(root: &Path, tool: &str, status: &str, error: &str) {
     let mut run = crate::run_artifacts::RunSummary::running(
@@ -16,6 +17,7 @@ fn failure(root: &Path, tool: &str, status: &str, error: &str) {
 fn snapshot(root: &Path, entry: Value) -> CampaignJobSnapshot {
     job_snapshot(
         root,
+        &Value::Null,
         &json!({"jobId":"context-001", "tool":"threat-model:build"}),
         &Map::from_iter([("context-001".into(), entry)]),
     )
@@ -126,4 +128,16 @@ fn escaped_run_reference_cannot_supply_a_finding_count() {
     let row = snapshot(root.path(), json!({"state":"failed", "runId":"../outside"}));
     assert_eq!(row.findings, None);
     assert_eq!(row.reason, None);
+}
+
+#[test]
+fn explicit_queue_diagnostics_are_bounded_without_rewriting_the_queue() {
+    let root = tempfile::tempdir().unwrap();
+    let entry = json!({"state":"parked","reason":format!("\u{1b}[2J\n{}", "x".repeat(1000))});
+    let before = entry.clone();
+    let row = snapshot(root.path(), entry.clone());
+    let reason = row.reason.unwrap();
+    assert!(reason.chars().count() <= 500);
+    assert!(!reason.chars().any(char::is_control));
+    assert_eq!(entry,before);
 }

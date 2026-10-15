@@ -1,0 +1,61 @@
+name: Catalog preview reads metadata without model setup or Map completion
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_preview.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+paste-file: @ART/preview-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 planned 1 of 2 | preview-completed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_preview.py @TMP_TARGET @ART planned
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | preview-receipt
+ask: Does the receipt distinguish catalog planning from execution, retain unsupported entries, and avoid asking for a model or completing Map?
+resize: 160x48
+live-snap: preview-160x48
+resize: 96x89
+live-snap: preview-96x89
+resize: 80x24
+live-snap: preview-80x24
+resize: 60x20
+live-snap: preview-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · completed | preview-40x12
+keys: NPage NPage
+live-snap: preview-detail-40x12
+ask: Can the planning-only outcome and its limits be understood at each size with predictable paging?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_preview.py @TMP_TARGET @ART break-catalog
+paste-file: @ART/preview-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 invalid TOML | invalid-catalog
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_preview.py @TMP_TARGET @ART failed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_preview.py @TMP_TARGET @ART restore-catalog
+paste-file: @ART/replay-command.txt
+keys: Enter
+keys: PPage PPage
+require-live-snap: 20 Outcome · completed | earlier-preview-retained
+ask: Does a malformed catalog produce a useful failure while leaving the earlier plan and ordinary investigation state intact?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 SETUP | restarted-setup
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | recovered-preview
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_preview.py @TMP_TARGET @ART restart
+ask: Does no-color restart retain the same preview and failed attempt, remain in Setup, and start no model or child work?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | explicit-restart-quit
+keys: y
+require-exit: 10

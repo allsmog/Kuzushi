@@ -2,6 +2,64 @@ use super::*;
 use kuzushi_core::V2Config;
 
 #[test]
+fn unacknowledged_halt_keeps_the_draft_and_cursor_when_text_is_pasted() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input("held 東京 draft");
+    press(&mut app, KeyCode::Left);
+    let cursor = app.cursor();
+    app.session_mut().set_session_budget_usd(Some(1.0));
+    app.record_cost_report(kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+    let update = app.reduce_paste("unexpected\ncommand");
+    assert!(update.handled && update.effects.is_empty());
+    assert_eq!(app.input(), "held 東京 draft");
+    assert_eq!(app.cursor(), cursor);
+    assert_eq!(app.shell_view(), ShellView::Logs);
+    press(&mut app, KeyCode::Esc);
+    app.reduce_paste("X");
+    assert_eq!(app.input(), "held 東京 drafXt");
+    assert!(app.is_budget_halted());
+}
+
+#[test]
+fn escaping_a_halt_preserves_the_guard_and_draft_but_restores_reading() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input("held operator draft");
+    app.session_mut().set_session_budget_usd(Some(1.0));
+    app.record_cost_report(kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+    assert!(app.budget_halt_owns_input());
+    press(&mut app, KeyCode::Esc);
+    assert!(!app.budget_halt_owns_input());
+    assert!(app.is_budget_halted());
+    assert_eq!(app.session().session_budget_usd(), Some(1.0));
+    assert_eq!(app.input(), "held operator draft");
+    assert_eq!(app.shell_view(), ShellView::Logs);
+    assert!(app.reject_runtime_launch_while_budget_halted(true, "fixture"));
+    assert!(!app.reject_runtime_launch_while_budget_halted(false, "reader"));
+}
+
+#[test]
+fn idle_exit_keys_are_not_swallowed_by_a_spending_halt() {
+    for code in [KeyCode::Char('c'), KeyCode::Char('d')] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.session_mut().set_session_budget_usd(Some(1.0));
+        app.record_cost(2.0);
+        let key = KeyEvent::new(code, KeyModifiers::CONTROL);
+        assert!(!app.handle_budget_key(key).handled);
+        let update = app.reduce_key(key);
+        assert!(update.handled);
+        assert_eq!(app.shell_view(), ShellView::QuitConfirm);
+        let confirmed = app.reduce_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert!(
+            !confirmed.effects.is_empty(),
+            "Exit confirmation must retain input"
+        );
+        assert!(app.is_budget_halted());
+    }
+}
+
+#[test]
 fn cap_review_requires_a_specific_amount_and_restores_the_origin() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Activity);

@@ -31,6 +31,7 @@ use super::sbt_build::sbt_components;
 use super::shard_yml::{is_shard_yml, shard_components};
 use super::toml_manifest::{toml_dependency_scopes, toml_value_at, toml_version};
 use super::vcpkg_json::vcpkg_components;
+use super::SbomInputs;
 use super::{component, SbomComponent};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -75,15 +76,52 @@ pub(super) fn is_dependency_manifest(path: &Path) -> bool {
         })
 }
 
-pub(super) fn manifest_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn manifest_components(target: &SbomInputs, path: &Path) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let name = path.file_name().and_then(|name| name.to_str());
+    if super::deno_json::is_deno_json(path) {
+        return deno_components(target, path, &text);
+    }
     if let Some(components) = named_manifest_components(target, path, &text, name)? {
         return Ok(components);
     }
     pattern_manifest_components(target, path, &text, name)
 }
+
+type NamedManifestReader = fn(&Path, &Path, &str) -> Result<Vec<SbomComponent>>;
+
+const NAMED_MANIFEST_READERS: &[(&str, NamedManifestReader)] = &[
+    ("package.json", package_components),
+    ("Cargo.toml", |target, path, text| {
+        toml_components(target, path, text, "cargo")
+    }),
+    ("pyproject.toml", |target, path, text| {
+        toml_components(target, path, text, "python")
+    }),
+    ("go.mod", |target, path, text| {
+        Ok(go_mod_components(target, path, text))
+    }),
+    ("composer.json", composer_components),
+    ("Gemfile", |target, path, text| {
+        Ok(gemfile_components(target, path, text))
+    }),
+    ("gleam.toml", gleam_components),
+    ("pom.xml", maven_pom_components),
+    ("mix.exs", |target, path, text| {
+        Ok(mix_components(target, path, text))
+    }),
+    ("build.sbt", |target, path, text| {
+        Ok(sbt_components(target, path, text))
+    }),
+    ("pubspec.yaml", pubspec_components),
+    ("bower.json", bower_components),
+    ("conanfile.txt", |target, path, text| {
+        Ok(conanfile_components(target, path, text))
+    }),
+    ("haxelib.json", haxelib_components),
+    ("vcpkg.json", vcpkg_components),
+];
 
 fn named_manifest_components(
     target: &Path,
@@ -91,27 +129,11 @@ fn named_manifest_components(
     text: &str,
     name: Option<&str>,
 ) -> Result<Option<Vec<SbomComponent>>> {
-    let components = match name {
-        Some("package.json") => package_components(target, path, &text),
-        Some("Cargo.toml") => toml_components(target, path, &text, "cargo"),
-        Some("pyproject.toml") => toml_components(target, path, &text, "python"),
-        Some("go.mod") => Ok(go_mod_components(target, path, &text)),
-        Some("composer.json") => composer_components(target, path, &text),
-        Some("Gemfile") => Ok(gemfile_components(target, path, &text)),
-        Some("gleam.toml") => gleam_components(target, path, &text),
-        Some("pom.xml") => maven_pom_components(target, path, &text),
-        Some("mix.exs") => Ok(mix_components(target, path, &text)),
-        Some("build.sbt") => Ok(sbt_components(target, path, &text)),
-        Some("pubspec.yaml") => pubspec_components(target, path, &text),
-        Some("bower.json") => bower_components(target, path, &text),
-        Some("conanfile.txt") => Ok(conanfile_components(target, path, &text)),
-        Some("haxelib.json") => haxelib_components(target, path, &text),
-        Some("vcpkg.json") => vcpkg_components(target, path, &text),
-        Some("deno.json") => deno_components(target, path, &text),
-        Some("import_map.json") => deno_components(target, path, &text),
-        _ => return Ok(None),
-    }?;
-    Ok(Some(components))
+    NAMED_MANIFEST_READERS
+        .iter()
+        .find(|(candidate, _)| Some(*candidate) == name)
+        .map(|(_, read)| read(target, path, text))
+        .transpose()
 }
 
 fn pattern_manifest_components(

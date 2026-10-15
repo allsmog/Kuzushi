@@ -74,8 +74,10 @@ require-exit: 10
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
 launch: --target @TMP_TARGET
 submit: scan batch
+require-live-snap: 30 RECOVER STUDY DRAFT | restored-choice
+keys: Enter
 require-live-snap: 30 PLAN A STUDY | restarted-study
-keys: Down Down Down Down Enter
+keys: Enter
 require-live-snap: 30 Shown revision: 2 | restarted-brief
 expect: Second revision
 keys: Escape
@@ -89,4 +91,6 @@ require-live-snap: 25 revision 1 | frozen-first-read
 require-shell: python3 -B @REPO/scripts/devex/fixtures/investigation_brief.py @TMP_TARGET @ART revised
 ask: Does restart retain both immutable revisions and the original plan's approved brief, with zero jobs, provider calls or finding decisions?
 keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | restart-exit-review
+keys: y
 require-exit: 10

@@ -11,6 +11,7 @@ use std::process::ChildStdin;
 pub(super) struct BridgeObservation {
     pub(super) text: Option<ResponseTextObserver>,
     pub(super) allowance: Option<AllowanceBinding>,
+    requires_allowance: bool,
 }
 
 pub(super) struct BridgeStream {
@@ -26,6 +27,7 @@ impl BridgeObservation {
         Self {
             text: text.cloned(),
             allowance: allowance.cloned(),
+            requires_allowance: true,
         }
     }
 
@@ -37,6 +39,9 @@ impl BridgeObservation {
     }
 
     fn prepare_admission(&self, value: &mut Value) -> Result<()> {
+        if self.requires_allowance {
+            require_model_allowance(self.allowance.as_ref())?;
+        }
         let Some(allowance) = &self.allowance else {
             return Ok(());
         };
@@ -62,5 +67,30 @@ impl BridgeObservation {
             stdin,
             cancellation.cloned(),
         )))
+    }
+}
+
+pub(super) fn require_model_allowance(
+    allowance: Option<&AllowanceBinding>,
+) -> Result<&AllowanceBinding> {
+    allowance.ok_or_else(|| {
+        anyhow::Error::new(kuzushi_core::RuntimeFailure::new(
+            kuzushi_core::RuntimeFailureMetadata::new(
+                kuzushi_core::RuntimeFailureClass::AllowanceRefused,
+                None,
+                None,
+            ),
+        ))
+        .context("Model work requires an approved investigation allowance. Prepare and approve a finite plan first; no provider request started.")
+    })
+}
+
+#[cfg(test)]
+pub(super) fn transport_test_observation(
+    observer: Option<&ResponseTextObserver>,
+) -> BridgeObservation {
+    BridgeObservation {
+        text: observer.cloned(),
+        ..Default::default()
     }
 }

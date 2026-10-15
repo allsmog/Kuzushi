@@ -3,7 +3,7 @@ use super::*;
 impl ShellApp {
     pub(crate) fn reduce_threat_apply(&mut self) -> Vec<ShellEffect> {
         let Some(patch) = self.engagement.pending_threat_patch().cloned() else {
-            self.log("threats", "no pending patch; run /threats regen first");
+            self.log("threats", "No context changes are pending. Regenerated copies are inspected and selected in the context reader.");
             return Vec::new();
         };
         let Some(target) = self.target_owned() else {

@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -18,9 +19,9 @@ pub(super) fn elm_components(target: &Path, path: &Path, text: &str) -> Result<V
         .collect())
 }
 
-pub(super) fn elm_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn elm_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse elm.json")?;
     let source = relative_display(target, path);
     Ok(elm_direct_dependency_names(&value)

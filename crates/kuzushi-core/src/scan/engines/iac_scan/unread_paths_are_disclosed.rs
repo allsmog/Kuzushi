@@ -28,7 +28,11 @@ fn an_unlistable_directory_is_recorded_rather_than_read_as_empty() {
 #[test]
 fn a_fully_read_tree_discloses_no_gap() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("Dockerfile"), "FROM node:latest\nUSER root\n").unwrap();
+    fs::write(
+        temp.path().join("Dockerfile"),
+        "FROM node:latest\nUSER root\n",
+    )
+    .unwrap();
 
     let report = scan_iac(
         temp.path(),
@@ -62,6 +66,7 @@ fn a_gap_reaches_both_the_output_and_the_tool_json() {
         files_scanned: 0,
         files_skipped: 0,
         coverage_gaps,
+        inspection: IacInspection::default(),
     };
 
     let output = report.output();
@@ -82,7 +87,11 @@ fn a_gap_reaches_both_the_output_and_the_tool_json() {
 #[test]
 fn the_scan_engine_forwards_gaps_as_aggregate_scan_errors() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("Dockerfile"), "FROM node:latest\nUSER root\n").unwrap();
+    fs::write(
+        temp.path().join("Dockerfile"),
+        "FROM node:latest\nUSER root\n",
+    )
+    .unwrap();
 
     let output = IacScanScanner::default()
         .scan_artifacts(temp.path(), &ScanCancellation::default())

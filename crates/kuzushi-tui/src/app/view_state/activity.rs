@@ -488,7 +488,7 @@ impl ActivitySession {
                 } else if report.is_complete() {
                     format!("${:.4}", report.observed_usd())
                 } else {
-                    format!(">=${:.4} (metering incomplete)", report.observed_usd())
+                    crate::ui_view_models::format_runtime_cost(report, None)
                 }
             },
         )
@@ -1408,7 +1408,10 @@ fn typed_cost_meta(cost: RuntimeCostReport) -> String {
     if cost.is_complete() {
         return format!(" · ${:.4}", cost.observed_usd());
     }
-    format!(" · >=${:.4} (metering incomplete)", cost.observed_usd())
+    format!(
+        " · {}",
+        crate::ui_view_models::format_runtime_cost(cost, None)
+    )
 }
 
 fn typed_task_state(status: kuzushi_core::run_lifecycle::RunItemStatus) -> DagTaskState {

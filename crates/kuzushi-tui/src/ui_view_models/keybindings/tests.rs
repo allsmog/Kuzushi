@@ -6,6 +6,50 @@ use crate::{ScanPanelState, ShellView};
 use kuzushi_core::V2Config;
 use std::path::PathBuf;
 
+#[test]
+fn halt_footer_matches_the_keys_that_own_input_before_and_after_acknowledgement() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Cost);
+    app.session_mut().set_session_budget_usd(Some(1.0));
+    app.record_cost_report(kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+    assert_eq!(
+        footer_keybindings(&app),
+        vec![
+            bind("Esc", "inspect"),
+            bind("Ctrl+C", "exit"),
+            bind("c", "review cap"),
+            bind("a", "abort work")
+        ]
+    );
+    app.set_scan_panel(Some(scan_state(true, false)));
+    assert!(footer_keybindings(&app).contains(&bind("Ctrl+C", "request abort")));
+    app.set_scan_panel(Some(scan_state(true, true)));
+    assert!(footer_keybindings(&app).contains(&bind("Ctrl+C", "wait cleanup")));
+    app.set_scan_panel(None);
+    app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(footer_keybindings(&app).contains(&bind("PgUp/PgDn", "scroll")));
+    assert!(!footer_keybindings(&app).contains(&bind("c", "review cap")));
+    assert!(app.is_budget_halted());
+}
+
+#[test]
+fn theme_picker_advertises_close_instead_of_clearing_the_held_draft() {
+    for mode in [crate::InputMode::Prompt, crate::InputMode::Navigate] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Options);
+        app.set_input("held theme command");
+        app.set_input_mode(mode);
+        app.set_shell_view(ShellView::ThemePicker);
+        let bindings = footer_keybindings(&app);
+        assert!(bindings.contains(&bind("Esc", "close")), "{bindings:?}");
+        assert!(!bindings
+            .iter()
+            .any(|binding| binding.label.contains("clear draft")));
+        assert!(!bindings.contains(&bind("Esc", "prompt")));
+    }
+}
+
 fn pending_confirm(kind: crate::app::ConfirmKind) -> crate::app::PendingConfirm {
     crate::app::PendingConfirm {
         kind,
@@ -16,6 +60,18 @@ fn pending_confirm(kind: crate::app::ConfirmKind) -> crate::app::PendingConfirm 
         actor: None,
         remembered: false,
     }
+}
+
+#[test]
+fn end_is_a_navigation_key_instead_of_a_typed_command() {
+    assert_eq!(
+        binding_for_mode(bind("End", "last"), crate::InputMode::Navigate),
+        Some(bind("End", "last"))
+    );
+    assert_eq!(
+        binding_for_mode(bind("End", "last"), crate::InputMode::Prompt),
+        None
+    );
 }
 
 #[test]
@@ -688,6 +744,51 @@ fn populated_summary_footer_restores_component_navigation() {
         !bindings.contains(&bind("Enter", "generate DFD")),
         "{bindings:?}"
     );
+}
+
+#[test]
+fn populated_map_footer_names_each_paging_binding_once() {
+    for (page, label) in [(VizPage::Summary, "scroll"), (VizPage::Dfd, "detail")] {
+        let target = tempfile::tempdir().unwrap();
+        let mut app = app_with_populated_dfd(&target, page);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Map));
+        app.set_viewport(crate::TerminalViewport::new(120, 36));
+        assert!(super::workbench::map_gallery_is_visible(&app));
+        app.set_input_mode(crate::InputMode::Prompt);
+        let paging = footer_keybindings(&app)
+            .into_iter()
+            .filter(|binding| binding.key == "PgUp/PgDn")
+            .collect::<Vec<_>>();
+        assert_eq!(paging, vec![bind("PgUp/PgDn", label)]);
+    }
+}
+
+#[test]
+fn context_only_map_footer_names_paging_once_over_a_held_draft() {
+    let target = tempfile::tempdir().unwrap();
+    crate::test_support::record_indexed_run(
+        target.path(),
+        "context-map",
+        "context:build",
+        serde_json::json!({"ok":true,"data":{"snapshot":{"filesIndexed":65}}}),
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Map));
+    app.set_viewport(crate::TerminalViewport::new(120, 36));
+    app.set_input("operator α ");
+    let paging = footer_keybindings(&app)
+        .into_iter()
+        .filter(|binding| binding.key == "PgUp/PgDn")
+        .collect::<Vec<_>>();
+    assert_eq!(paging, vec![bind("PgUp/PgDn", "scroll")]);
 }
 
 /// The same both-halves guarantee for the DFD: an empty page advertises only

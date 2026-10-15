@@ -8,6 +8,12 @@ pub trait ScanEngine: Send + Sync {
         Vec::new()
     }
 
+    /// Preserve producer-owned identity when discovery paths become workspace paths.
+    /// The default retains the historical path-only behavior for existing engines.
+    fn rebind_scoped_finding(&self, finding: &mut Finding, file_path: String) {
+        finding.file_path = file_path;
+    }
+
     fn preflight(&self) -> Result<()> {
         Ok(())
     }
@@ -98,13 +104,5 @@ impl Default for SemgrepScanner {
 }
 
 pub(crate) fn scanner_binary_available(binary: &str) -> bool {
-    let trimmed = binary.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let path = Path::new(trimmed);
-    if path.components().count() > 1 {
-        return path.is_file();
-    }
-    crate::process_lookup::executable_on_path(trimmed).is_some()
+    crate::process_lookup::executable_available(binary)
 }

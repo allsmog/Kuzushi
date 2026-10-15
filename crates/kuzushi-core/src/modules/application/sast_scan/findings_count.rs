@@ -49,7 +49,9 @@ pub(in crate::modules) fn prepare_sast_task_selection(input: &Value) -> Result<S
     let request = parse_sast_tasks(input)?;
     let mut selected = SastTaskSelection::from_tasks(request.tasks, request.source)?;
     selected.configure_semgrep(input)?;
+    selected.configure_cargo_audit(input)?;
     selected.configure_secret_scan(input)?;
+    selected.configure_iac_scan(input)?;
     super::agentic_settings::validate_turn_limit(input, &selected)?;
     Ok(selected)
 }

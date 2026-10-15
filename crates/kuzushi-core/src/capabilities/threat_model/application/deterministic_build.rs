@@ -15,12 +15,14 @@ pub(crate) fn build_deterministic_threat_model(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     flavor: BuildFlavor,
+    source_tree_hash: &str,
 ) -> Result<Value> {
     let use_entry_point_catalog = deterministic_catalog_enabled(&input);
     let input = parse_deterministic_build_input(&input, ctx, flavor)?;
     preflight_deterministic_build_lineage(&input)?;
     let surfaces = scoped_attack_surfaces(&input)?;
-    let document = prepare_deterministic_document(&input, &surfaces, use_entry_point_catalog)?;
+    let mut document = prepare_deterministic_document(&input, &surfaces, use_entry_point_catalog)?;
+    document["provenance"]["treeHash"] = json!(source_tree_hash);
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&document);
     let (normalized_artifact, markdown_artifact) =

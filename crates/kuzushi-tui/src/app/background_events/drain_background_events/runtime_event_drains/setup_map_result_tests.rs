@@ -15,7 +15,7 @@ fn map_fixture(indexed: bool) -> (tempfile::TempDir, ShellApp) {
         crate::test_support::record_indexed_run(
             &target,
             RUN_ID,
-            "context:build",
+            "threat-model:build",
             serde_json::json!({"ok":true,"data":{"snapshot":{"filesIndexed":1}}}),
         );
     } else {
@@ -36,8 +36,12 @@ fn map_fixture(indexed: bool) -> (tempfile::TempDir, ShellApp) {
 }
 
 fn record_context_result(target: &std::path::Path) {
-    let record =
-        kuzushi_core::run_artifacts::ToolRunRecord::new(target, RUN_ID, "tool", "context:build");
+    let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+        target,
+        RUN_ID,
+        "tool",
+        "threat-model:build",
+    );
     kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
         record,
         &serde_json::json!({}),
@@ -64,7 +68,7 @@ fn completed_setup_map_presents_its_result_without_selecting_it() {
         crate::ui_view_models::active_workbench_page(&app),
         WorkbenchPage::Map
     );
-    assert_eq!(app.input_mode(), InputMode::Navigate);
+    assert_eq!(app.input_mode(), InputMode::Prompt);
     assert_eq!(app.input(), "retained shell draft");
     let attempt = app
         .engagement

@@ -69,19 +69,11 @@ impl ShellApp {
     }
 
     pub(crate) fn show_cost_status(&mut self) {
-        // `/cost` lands on the dedicated Cost surface
-        // (`design/mockups/cost.jsx`) — budget bars + by-tool spend.
         self.set_shell_view(ShellView::Cost);
-        let message = if let Some(last) = self.session().last_tool_cost_usd() {
-            format!(
-                "session estimate ${:.4}; last tool ${:.4}. Scanner-only work may report no LLM cost.",
-                self.session().session_cost_usd(),
-                last
-            )
-        } else {
-            "cost unavailable until a Rust tool reports costUsd; scanner-only work may report no LLM cost. Next: run <tool>"
-                .to_string()
-        };
-        self.log("cost", message);
+        let [session, last] = crate::ui_view_models::cost_model(self).auth_spend_cells;
+        self.log(
+            "cost",
+            format!("session {session}; last tool {last}. Use report for saved-run consumption."),
+        );
     }
 }

@@ -1,7 +1,7 @@
 use super::*;
 use crate::config::V2Config;
 use crate::findings::test_support::ReviewedFindingFixture;
-use crate::findings::{ReviewDecisionVerdict, TriageAuthor};
+use crate::findings::{ReviewDecision, ReviewDecisionVerdict, TriageAuthor};
 
 /// Run `variant:hunt` without a runtime: a finding the review gate admits
 /// reaches the runtime requirement, one it refuses returns a refusal.

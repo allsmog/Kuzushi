@@ -7,7 +7,7 @@ use ratatui::layout::{Constraint, Direction, Layout};
 
 mod pending_result;
 mod proof;
-mod trace;
+pub(super) mod trace;
 
 use proof::{
     compact_proof_lines, finding_header_lines, proof_ladder_lines, proof_lines, proof_title,
@@ -1136,18 +1136,22 @@ mod trace_screen_tests {
             "{body}"
         );
         assert!(body.contains("RECORDED PATH"), "{body}");
-        assert!(body.contains("▾ source — src/input.rs:4"), "{body}");
+        assert!(body.contains("▾ source · src/input.rs:4"), "{body}");
         assert!(
-            body.contains("RECORDED EXPANSIONS · requested by operator"),
+            body.contains("RECORDED EXPANSION CLAIMS · requested by operator"),
             "{body}"
         );
-        assert!(body.contains("▾ parse_header — src/parse.rs:32"), "{body}");
+        assert!(body.contains("▾ parse_header · src/parse.rs:32"), "{body}");
         assert!(body.contains("length copied without bound"), "{body}");
         assert!(
             body.contains("? open: is the header attacker-controlled over TLS?"),
             "{body}"
         );
-        assert!(body.contains("NEW EVIDENCE"), "{body}");
+        assert!(body.contains("RECORDED NOTES"), "{body}");
+        assert!(
+            body.contains("data flow needs independent review"),
+            "{body}"
+        );
         assert!(body.contains("+ length reaches memcpy unchecked"), "{body}");
         assert!(body.contains("NEXT · resolve the open questions"), "{body}");
         assert!(body.contains("run trace:expand {"), "{body}");
@@ -1167,6 +1171,6 @@ mod trace_screen_tests {
             "{body}"
         );
         assert!(body.contains("no operator-requested hops yet"), "{body}");
-        assert!(!body.contains("NEW EVIDENCE"), "{body}");
+        assert!(!body.contains("RECORDED NOTES"), "{body}");
     }
 }

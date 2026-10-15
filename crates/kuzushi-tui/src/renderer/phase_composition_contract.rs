@@ -98,6 +98,7 @@ fn deterministic_reference_fixture_contains_every_required_real_projection() {
 #[test]
 fn reference_header_matches_hydrated_journey_reality() {
     let fixture = PhaseReferenceFixture::new(WorkbenchPage::Map, 120, 36);
+    assert!(crate::ui_view_models::autonomy_footer_segment(&fixture.app).is_some());
     let journey = crate::ui_view_models::journey_model(&fixture.app).expect("fixture journey");
     let cockpit = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Map);
 
@@ -238,6 +239,21 @@ fn plain_phase_contract_covers_all_five_phases_at_all_six_widths() {
         }
     }
     assert_eq!(count, 30);
+}
+
+#[test]
+fn investigation_reference_has_18_canonical_buffer_snapshots() {
+    let mut count = 0;
+    for contract in CONTRACTS.into_iter().filter(|contract| {
+        kuzushi_core::WorkflowPhase::INVESTIGATION_ORDER.contains(&contract.phase)
+    }) {
+        for (width, height) in SIZES {
+            let (_, text) = render_phase(contract, width, height, TerminalProfile::TrueColor);
+            snapshots::assert_phase_snapshot(contract, width, height, &text);
+            count += 1;
+        }
+    }
+    assert_eq!(count, 18);
 }
 
 #[test]

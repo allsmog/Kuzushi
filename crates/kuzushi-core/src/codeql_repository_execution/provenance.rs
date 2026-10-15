@@ -133,6 +133,25 @@ pub(crate) fn resolve_managed_codeql_database(
     resolve_existing_managed_database(target, path).map(Some)
 }
 
+pub(crate) fn resolve_managed_codeql_database_at(
+    target: &Path,
+    configured: &Path,
+) -> Result<ValidatedManagedCodeqlDatabase> {
+    let target = target
+        .canonicalize()
+        .context("Could not resolve CodeQL source root")?;
+    let path = configured
+        .canonicalize()
+        .context("Configured CodeQL database is unavailable")?;
+    let relative = path
+        .strip_prefix(&target)
+        .context("CodeQL database must stay within its source target")?;
+    anyhow::ensure!(relative.starts_with(crate::workspace::KUZUSHI_STATE_DIR),
+        "CodeQL database must be an authenticated managed database below .kuzushi; run codeql:create-db");
+    let path = crate::workspace::validated_workspace_descendant(&target, relative)?;
+    resolve_existing_managed_database(&target, path)
+}
+
 fn resolve_existing_managed_database(
     target: &Path,
     path: PathBuf,
@@ -162,7 +181,7 @@ fn ensure_database_shape(path: &Path) -> Result<()> {
 fn read_trusted_provenance(path: &Path) -> Result<CodeqlDatabaseProvenance> {
     read_codeql_database_provenance(path).with_context(|| {
         format!(
-            "managed CodeQL database at {} has no trusted provenance; run `codeql:create-db` again",
+            "CodeQL database has no trusted provenance; run `codeql:create-db` again. Database: {}",
             path.display()
         )
     })

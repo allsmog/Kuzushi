@@ -63,12 +63,7 @@ fn selected_parent_counts_its_engine_findings_and_excludes_unrelated_history() {
         finding.fingerprint = run.into();
         store.insert_finding(run, &finding).unwrap();
     }
-    crate::test_support::record_indexed_run(
-        target.path(),
-        "map-parent",
-        "context:build",
-        serde_json::json!({"ok":true,"data":{}}),
-    );
+    crate::test_support::record_imported_test_map(target.path(), "map-parent");
     select_attempt(target.path(), WorkflowPhase::Map, "map-parent");
     crate::test_support::record_indexed_run(
         target.path(),

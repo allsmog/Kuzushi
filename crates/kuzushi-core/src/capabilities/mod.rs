@@ -15,6 +15,7 @@ pub mod fuzz_engine;
 pub mod module_recommender;
 pub mod pack_lint;
 pub(crate) mod patch_reverification;
+pub(crate) mod planner;
 pub mod plugin_adapters;
 pub mod prompt_armor;
 pub mod recon;

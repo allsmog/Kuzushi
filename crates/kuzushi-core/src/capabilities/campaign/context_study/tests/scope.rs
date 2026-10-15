@@ -1,4 +1,5 @@
 use super::*;
+mod failure;
 
 fn scope_target() -> (
     tempfile::TempDir,

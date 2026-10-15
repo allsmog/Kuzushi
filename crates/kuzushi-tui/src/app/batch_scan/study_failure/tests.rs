@@ -83,7 +83,11 @@ fn explicit_retry_clears_retained_error_and_only_prepares_a_new_dispatch() {
     assert_eq!(request.tool_name, "campaign:study");
     let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
     assert!(config.study.preparation_error.is_none());
-    assert!(config.notice.as_ref().unwrap().starts_with("Preparing"));
+    assert!(config
+        .notice
+        .as_ref()
+        .unwrap()
+        .contains("No scan jobs started"));
     assert!(!target.path().join(".kuzushi/v3/campaigns").exists());
 }
 

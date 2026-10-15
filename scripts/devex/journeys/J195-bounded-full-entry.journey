@@ -1,0 +1,88 @@
+name: Full and pipeline enter shared Setup with finite unapproved Map and Scan drafts
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: full
+require-live-snap: 25 READY THE MAP RUN | full-setup
+expect: Start Map
+expect-not: MAP · ROUTE
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART verify
+keys: Down Enter
+require-live-snap: 20 Build threat model | map-choices
+keys: Down Down Space Enter
+require-live-snap: 20 READY THE MAP RUN | selected-model-map
+expect: APPROVAL NEXT
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 GENERATE STUDY CONTEXT | bounded-map
+expect: 3 fixed jobs
+keys: t
+type: 5
+keys: Enter r
+type: 2
+keys: Enter Enter
+require-live-snap: 30 Draft ready | frozen-map
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART map
+keys: Enter
+require-live-snap: 20 REVIEW PLAN & ALLOWANCE | map-approval
+expect: Context: 3 fixed jobs
+resize: 160x48
+live-snap: map-approval-160x48
+resize: 96x89
+live-snap: map-approval-96x89
+resize: 80x24
+live-snap: map-approval-80x24
+resize: 60x20
+live-snap: map-approval-60x20
+resize: 40x12
+live-snap: map-approval-40x12
+keys: End
+require-live-snap: 20 y approve | map-final-terms-40x12
+ask: Does full show shared Setup and a finite Map draft, with workload and spending readable at every size before approval?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 GENERATE STUDY CONTEXT | cancelled-map-approval
+keys: Escape
+require-live-snap: 20 READY THE MAP RUN | returned-setup
+expect: APPROVAL NEXT
+type: plan scan
+require-live-snap: 10 plan scan | setup-command-draft
+keys: Enter
+require-live-snap: 25 PLAN A STUDY | finite-scan
+expect: Discovery passes
+expect: Workers
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | engine-choice
+keys: Down Down Down Down Down Down Down Down Down Space
+require-live-snap: 20 [x] agentic | selected-engine
+keys: a
+require-live-snap: 20 Engine choices updated | applied-engine
+keys: Down Enter
+require-live-snap: 20 Omit threat-model context | context-choice
+keys: a
+require-live-snap: 20 Context selected for this study | explicit-omission
+keys: L
+require-live-snap: 30 Draft ready | frozen-scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART both
+keys: Escape
+require-live-snap: 20 READY THE MAP RUN | setup-after-scan
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | preserved-map-selection
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: pipeline
+require-live-snap: 25 READY THE MAP RUN | pipeline-restart
+expect: Start Map
+expect-not: MAP · ROUTE
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART both
+ask: Does cancellation return to Setup with the Map selection and both unapproved drafts retained, and does pipeline restart without work or a legacy wizard?
+keys: Escape
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | restart-plan-choice-exit
+keys: y
+require-exit: 10

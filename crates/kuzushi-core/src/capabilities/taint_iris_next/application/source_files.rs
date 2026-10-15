@@ -1,6 +1,9 @@
 use super::*;
 use crate::bounded_file::read_source_text_prefix;
 
+#[cfg(test)]
+mod traversal_tests;
+
 const MAX_TAINT_SOURCE_FILES: usize = 20_000;
 const MAX_TAINT_WALK_ENTRIES: usize = 100_000;
 const MAX_TAINT_SOURCE_BYTES: usize = 512 * 1024 * 1024;
@@ -72,7 +75,7 @@ fn collect_taint_iris_next_source_paths_with_limits(
         entries_seen: 0,
         source_truncated: false,
     };
-    collect_taint_iris_next_source_paths_inner(root, root, &mut state, &mut paths)?;
+    walk_taint_source_paths(root, &mut state, &mut paths)?;
     anyhow::ensure!(
         max_files.is_some() || !state.source_truncated,
         "Taint source inventory exceeded the {}-file coverage limit",
@@ -81,15 +84,39 @@ fn collect_taint_iris_next_source_paths_with_limits(
     Ok(paths)
 }
 
-fn collect_taint_iris_next_source_paths_inner(
+fn walk_taint_source_paths(
     root: &Path,
-    dir: &Path,
     state: &mut SourceWalkState,
     paths: &mut Vec<TaintIrisNextSourcePath>,
 ) -> Result<()> {
-    if state.source_truncated {
-        return Ok(());
+    let mut directories = vec![taint_directory_entries(root, state)?];
+    while !state.source_truncated {
+        let Some(entry) = next_taint_source_entry(&mut directories) else {
+            break;
+        };
+        if let Some(directory) = collect_source_path_entry(root, entry, state, paths)? {
+            directories.push(taint_directory_entries(&directory, state)?);
+        }
     }
+    Ok(())
+}
+
+fn next_taint_source_entry(
+    directories: &mut Vec<std::vec::IntoIter<fs::DirEntry>>,
+) -> Option<fs::DirEntry> {
+    loop {
+        let directory = directories.last_mut()?;
+        if let Some(entry) = directory.next() {
+            return Some(entry);
+        }
+        directories.pop();
+    }
+}
+
+fn taint_directory_entries(
+    dir: &Path,
+    state: &mut SourceWalkState,
+) -> Result<std::vec::IntoIter<fs::DirEntry>> {
     let read_dir = fs::read_dir(dir)
         .with_context(|| format!("Could not read taint source directory {}", dir.display()))?;
     let remaining = state.entry_cap.saturating_sub(state.entries_seen);
@@ -103,13 +130,7 @@ fn collect_taint_iris_next_source_paths_inner(
     );
     state.entries_seen += entries.len();
     entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
-        if state.source_truncated {
-            break;
-        }
-        collect_source_path_entry(root, entry, state, paths)?;
-    }
-    Ok(())
+    Ok(entries.into_iter())
 }
 
 fn collect_source_path_entry(
@@ -117,19 +138,19 @@ fn collect_source_path_entry(
     entry: fs::DirEntry,
     state: &mut SourceWalkState,
     paths: &mut Vec<TaintIrisNextSourcePath>,
-) -> Result<()> {
+) -> Result<Option<PathBuf>> {
     let path = entry.path();
     if should_skip_path(&entry.file_name().to_string_lossy()) {
-        return Ok(());
+        return Ok(None);
     }
     let file_type = entry.file_type()?;
     if file_type.is_dir() {
-        return collect_taint_iris_next_source_paths_inner(root, &path, state, paths);
+        return Ok(Some(path));
     }
     if collectable_source_file(&file_type, &path) {
         record_source_path(root, path, state, paths);
     }
-    Ok(())
+    Ok(None)
 }
 
 fn record_source_path(
@@ -146,7 +167,9 @@ fn record_source_path(
 }
 
 fn collectable_source_file(file_type: &fs::FileType, path: &Path) -> bool {
-    file_type.is_file() && is_agentic_context_file(path)
+    file_type.is_file()
+        && (is_agentic_context_file(path)
+            || path.extension().is_some_and(|extension| extension == "cxx"))
 }
 
 fn source_path_record(root: &Path, path: PathBuf) -> TaintIrisNextSourcePath {
@@ -212,12 +235,7 @@ pub(crate) fn read_taint_iris_next_source_paths(
     max_files: Option<usize>,
     max_bytes_per_file: usize,
 ) -> Result<Vec<TaintIrisNextSourceFile>> {
-    read_taint_source_paths(
-        paths,
-        max_files,
-        max_bytes_per_file,
-        MAX_TAINT_SOURCE_BYTES,
-    )
+    read_taint_source_paths(paths, max_files, max_bytes_per_file, MAX_TAINT_SOURCE_BYTES)
 }
 
 pub(crate) fn detect_taint_iris_next_languages(root: &Path) -> Result<Vec<String>> {

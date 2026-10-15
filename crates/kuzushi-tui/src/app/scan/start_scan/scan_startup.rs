@@ -26,7 +26,12 @@ impl ShellApp {
             );
             return;
         }
-        self.begin_guided_scan_questions();
+        self.engagement.clear_guided_scan();
+        self.open_setup();
+        self.log(
+            "full",
+            "review Setup, then approve Map and a finite Scan plan before work starts",
+        );
     }
 
     fn guided_scan_target_effects(&mut self, target: Option<PathBuf>) -> Option<Vec<ShellEffect>> {

@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -25,9 +26,9 @@ pub(super) fn conanfile_components(target: &Path, path: &Path, text: &str) -> Ve
         .collect()
 }
 
-pub(super) fn conanfile_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn conanfile_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(requirements(&text)
         .into_iter()

@@ -1,0 +1,56 @@
+name: Catalog import preserves existing metadata and reports partial work honestly
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+paste-file: @ART/merge-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 Saved catalog cannot be merged | merge-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART failed
+ask: Does the failure explain that the prior catalog was preserved and name explicit replacement as a separate choice?
+paste-file: @ART/replace-command.txt
+keys: Enter
+require-live-snap: 25 Complete import is not claimed | partial-import
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART partial
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | partial-receipt
+ask: Does the receipt keep the partial outcome, skipped-row warning and metadata-only boundary without claiming a completed Scan?
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+require-live-snap: 20 partial | partial-40x12
+keys: NPage NPage
+live-snap: partial-detail-40x12
+keys: Escape
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART warning
+require-live-snap: 20 Complete import | partial-warning-40x12
+ask: Are partial status and the warning reachable by paging across the six sizes, with readable recovery controls?
+resize: 120x36
+paste-file: @ART/failure-replay.txt
+keys: Enter
+require-live-snap: 20 Saved catalog cannot be merged | earlier-failure
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sink_import.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain the partial import and earlier failure without another request, finding or Scan attempt?
+keys: C-c
+require-exit: 10

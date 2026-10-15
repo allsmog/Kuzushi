@@ -81,7 +81,7 @@ fn component_stack_from_facts(facts: &TargetCandidateFacts) -> ComponentStack {
         return ComponentStack {
             target: target_label(facts),
             empty_hint: Some(format!(
-                "Component inventory failed: {detail}. Run `run sbom-scan:scan` for a full receipt."
+                "Component inventory failed: {detail}. Review `options sbom-scan:scan`, then run `run sbom-scan:scan` for a full receipt."
             )),
             ..Default::default()
         };

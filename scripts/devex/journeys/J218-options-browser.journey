@@ -1,0 +1,100 @@
+name: Selectable settings, inline editing, drafts and explicit persistence
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/options_browser.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: options context:build
+require-live-snap: 20 Sample limit | selected-setting
+expect: Value: 200
+keys: Enter C-u
+type: invalid
+keys: Enter
+require-live-snap: 20 EDIT Sample limit | invalid-value
+expect: invalid
+expect: save session
+ask: Does validation keep the invalid draft in the field and make the correction controls clear?
+keys: C-u
+type: 7
+keys: Enter
+require-live-snap: 20 Value: 7 | session-saved
+expect: session
+require-shell: python3 -B @REPO/scripts/devex/fixtures/options_browser.py @TMP_TARGET @ART session
+keys: Enter C-u
+type: 9
+keys: C-g
+require-live-snap: 20 Saved globally. | globally-saved
+expect: Value: 7
+expect: session override still applies
+require-shell: python3 -B @REPO/scripts/devex/fixtures/options_browser.py @TMP_TARGET @ART global
+submit: unset sampleLimit
+require-live-snap: 20 Value: 9 | global-effective
+expect: global
+expect-not: session override still applies
+nav-mode:
+keys: a Down Enter C-u
+paste-file: @ART/multiline.txt
+require-live-snap: 20 Keep this draft. | multiline-editor
+resize: 160x48
+require-live-snap: 20 Keep this draft. | editor-160x48
+resize: 96x89
+require-live-snap: 20 Keep this draft. | editor-96x89
+resize: 80x24
+require-live-snap: 20 Keep this draft. | editor-80x24
+resize: 60x20
+require-live-snap: 20 Keep this draft. | editor-60x20
+resize: 40x12
+require-live-snap: 20 Keep this draft. | editor-40x12
+expect: save session
+ask: Are the field, cursor and save controls usable across the six sizes, including multiline Unicode text?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 Context prompt | kept-draft
+keys: Enter
+require-live-snap: 20 Operator α | reopened-draft
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | draft-exit-disclosure
+expect: tool option drafts
+expect-not: Operator α
+keys: Escape
+require-live-snap: 20 Keep this draft. | stayed-editor
+keys: Escape
+require-live-snap: 20 Context prompt | returned-browser
+submit: show missing threat-model:ask
+require-live-snap: 20 Threat model ref | workflow-reference
+keys: Enter
+live-snap: reference-not-editable
+expect: supplied by the workflow
+expect-not: EDIT
+submit: options x-ray:run
+require-live-snap: 20 Experimental | support-120x36
+resize: 160x48
+require-live-snap: 20 Value: | support-160x48
+resize: 96x89
+require-live-snap: 20 Value: | support-96x89
+resize: 80x24
+require-live-snap: 20 Value: | support-80x24
+resize: 60x20
+require-live-snap: 20 Value: | support-60x20
+resize: 40x12
+require-live-snap: 20 Value: | support-40x12
+expect: Experimental
+ask: Can the operator inspect an experimental tool's actual selected setting at every size without starting work?
+resize: 120x36
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | kept-draft-exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: options context:build
+require-live-snap: 20 Value: 9 | recovered-global
+expect: global
+require-shell: python3 -B @REPO/scripts/devex/fixtures/options_browser.py @TMP_TARGET @ART restart
+ask: Does no-color restart recover only the explicitly global value, with unchanged source and no dispatched jobs?
+keys: C-c
+require-exit: 10

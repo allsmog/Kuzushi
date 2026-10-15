@@ -899,6 +899,9 @@ fn unresolved_input_message(tool: &str, error: &str) -> String {
 }
 
 fn model_readiness_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
+    if row.id == crate::app::PlanningTaskId::TriageFindings {
+        return Some("plan review; no calls yet".into());
+    }
     let model = app.planning_task_model(row.id);
     let auth_ready = model
         .as_deref()
@@ -1603,6 +1606,14 @@ fn enter_summary_line(app: &ShellApp, width: usize) -> Line<'static> {
             ),
             theme::success().add_modifier(Modifier::BOLD),
         );
+    }
+    if app
+        .engagement
+        .planning_picker()
+        .selected()
+        .contains(&crate::app::PlanningTaskId::TriageFindings)
+    {
+        return styled(&fit(" Enter prepares bounded Review · other selected work stays paused · no model work starts",width),theme::accent());
     }
     let plan = enter_plan(
         app.engagement.planning_picker().tasks(),

@@ -5,10 +5,10 @@ pub(crate) fn trace_module() -> BuiltinModule {
         "trace",
         "Trace",
         ModuleKind::Offense,
-        "Operator-requested data-flow trace expansion that appends static evidence around a finding.",
+        "Experimental source-flow claims around a finding, requiring independent review.",
         vec![tool_with_options(
             "trace:expand",
-            "Read source to expand a finding's recorded data flow and save supporting evidence.",
+            "Draft and save unverified source-flow claims. Source references, scoped coverage and useful tracing remain unqualified.",
             trace_expand_options(),
         )
         .with_policy(workspace_policy(
@@ -16,6 +16,8 @@ pub(crate) fn trace_module() -> BuiltinModule {
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
         ))
+        .with_discovery_maturity(ModuleMaturity::Labs)
+        .with_allowance_category(AllowanceCategory::Discovery)
         .without_phase_result()],
         vec![],
     )

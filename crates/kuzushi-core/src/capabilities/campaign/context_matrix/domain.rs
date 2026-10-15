@@ -112,7 +112,7 @@ fn cases_with_default_passes(cases: &Value, input: &Value) -> Result<Value> {
 }
 
 impl ContextCaseInput {
-    fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(
             (1..=40).contains(&self.id.len()),
             "Context case id needs 1 to 40 characters"

@@ -2,11 +2,12 @@
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from secret_settings import ledger
 
 
 def save(evidence, name, value):
@@ -63,9 +64,8 @@ def scan_plan(root):
     return plan
 
 
-def ledger_counts(root):
-    path = root / ".kuzushi/v3/index.sqlite3"
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+def ledger_counts(root, evidence):
+    with ledger(root, evidence) as db:
         tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
         counts = {name:db.execute("select count(*) from " + name).fetchone()[0] if name in tables else 0 for name in
                   ["finding_observations", "investigation_call_reservations", "investigation_work_attempts", "review_decisions"]}
@@ -73,9 +73,8 @@ def ledger_counts(root):
     return counts
 
 
-def verify_allowance(root, plan):
-    path = root / ".kuzushi/v3/index.sqlite3"
-    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as db:
+def verify_allowance(root, plan, evidence):
+    with ledger(root, evidence) as db:
         row = db.execute("select approval_json from investigation_allowance_revisions order by revision desc limit 1").fetchone()
     approval = json.loads(row[0])
     assert approval["limits"] == {"maxProviderCalls":1,"protectedReviewCalls":1}
@@ -126,12 +125,12 @@ def verify(root, evidence, stage):
     plan = scan_plan(root)
     campaign = root / ".kuzushi/v3/campaigns" / plan["campaignId"]
     (evidence / "resume-command.txt").write_text("batch " + plan["campaignId"])
-    counts = ledger_counts(root)
+    counts = ledger_counts(root, evidence)
     if stage == "draft":
         assert not (campaign / "queue.json").exists()
         assert counts["finding_observations"] == counts["investigation_work_attempts"] == 0
     else:
-        verify_allowance(root, plan)
+        verify_allowance(root, plan, evidence)
         queue = json.loads((campaign / "queue.json").read_text())
         assert len(queue["jobs"]) == 3
         assert all(job["state"] == "completed" and job["attempts"] == 1 for job in queue["jobs"].values())
@@ -164,7 +163,7 @@ def drift(root, evidence):
 
 
 def restore(root, evidence):
-    counts = ledger_counts(root)
+    counts = ledger_counts(root, evidence)
     assert counts["finding_observations"] == counts["investigation_work_attempts"] == 0, counts
     plan = scan_plan(root)
     queue_path = root / ".kuzushi/v3/campaigns" / plan["campaignId"] / "queue.json"

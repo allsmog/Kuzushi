@@ -104,6 +104,41 @@ fn missing_context_has_a_concrete_prerequisite_and_no_catalogue() {
 }
 
 #[test]
+fn prepared_cancellation_preserves_catalog_and_source_bytes() {
+    let root = fixture();
+    dispatch(root.path(), "context:build", json!({"enrichment":false})).unwrap();
+    dispatch(root.path(), "entry-points:extract", json!({})).unwrap();
+    let catalog = root.path().join(".kuzushi/entry-points.json");
+    let before = std::fs::read(&catalog).unwrap();
+    let workspace = WorkspaceTarget::new(root.path()).unwrap();
+    let config = V2Config::default();
+    let cancellation = kuzushi_core::scan::ScanCancellation::default();
+    cancellation.cancel();
+    let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+        cancellation: Some(&cancellation),
+        authorization: Default::default(),
+    };
+    let prepared = registry
+        .prepare_dispatch_input("entry-points:extract", json!({}), &ctx, None)
+        .unwrap()
+        .authorize_explicit_headless();
+    let error = registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("cancel"), "{error:#}");
+    assert_eq!(std::fs::read(catalog).unwrap(), before);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("app.py")).unwrap(),
+        SOURCE
+    );
+}
+
+#[test]
 fn legacy_python_snapshot_is_not_reused_or_silently_repaired() {
     let root = fixture();
     dispatch(root.path(), "context:build", json!({"enrichment":false})).unwrap();

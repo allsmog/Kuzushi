@@ -20,6 +20,7 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
         ],
         vec![],
     )
+    .labs()
 }
 
 fn native_libs_tool() -> ToolDescriptor {
@@ -41,14 +42,21 @@ fn native_libs_tool() -> ToolDescriptor {
 }
 
 fn scan_tool() -> ToolDescriptor {
+    let mut options = apk_prepare_options();
+    options.push(semgrep_binary_option());
+    options.push(include_libraries_option());
+    options.extend(apk_scan_options());
     tool_with_options(
         "android-apk:scan",
-        "Umbrella: validates the APK, decompiles it, then runs every android-apk:* scanner (manifest, network-security-config, fileprovider, webview, native-libs, hybrid-detect) and the sast-handoff bridge in one pass. Returns a per-stage summary so you can drill into individual results.",
-        vec![
-            apk_option(),
-            decompiler_option(),
-            apk_timeout_option(),
-            target_option(),
+        "Experimental APK preparation and configuration/code observations. Requires explicit write consent. Decompilation accuracy and complete APK or repository coverage remain unqualified; results require review and do not complete Scan.",
+        options,
+    )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
+}
+
+fn apk_scan_options() -> Vec<OptionSpec> {
+    vec![
             opt(
                 "runId",
                 OptionType::String,
@@ -75,8 +83,7 @@ fn scan_tool() -> ToolDescriptor {
                 "Skip hybrid-app framework detection.",
             )
             .advanced(),
-        ],
-    )
+        ]
 }
 
 fn hybrid_detect_tool() -> ToolDescriptor {
@@ -111,13 +118,9 @@ fn code_scan_tool() -> ToolDescriptor {
             .aliases(&["jadx_dir"])
             .workspace_read()
             .advanced(),
-            opt(
-                "includeLibraries",
-                OptionType::Bool,
-                "Set true to scan well-known library packages (gms, androidx, kotlin, okhttp, retrofit, react-native, dagger, etc.) in addition to first-party code. Default is to exclude them via .semgrepignore so the report focuses on the app's own surface.",
-            )
-            .advanced(),
+            include_libraries_option(),
             binary_option("Semgrep binary path."),
+            apk_timeout_option(),
         ],
     )
 }
@@ -199,23 +202,53 @@ fn prepare_tool() -> ToolDescriptor {
     hidden_tool_with_options(
         "android-apk:prepare",
         "Validate an APK file, unzip resources, and decompile to Java source under <workspace>/android-decompiled/.",
-        vec![
-            apk_option(),
-            decompiler_option(),
-            jadx_bin_option(),
-            apktool_bin_option(),
-            unzip_bin_option(),
-            apk_timeout_option(),
-            target_option(),
-        ],
+        apk_prepare_options(),
     )
+}
+
+fn apk_prepare_options() -> Vec<OptionSpec> {
+    vec![
+        apk_option(),
+        decompiler_option(),
+        jadx_bin_option(),
+        apktool_bin_option(),
+        unzip_bin_option(),
+        apk_timeout_option(),
+        max_apk_bytes_option(),
+        target_option(),
+    ]
+}
+
+fn include_libraries_option() -> OptionSpec {
+    opt("includeLibraries", OptionType::Bool, "Include library packages in bundled code-rule scanning. Otherwise .semgrepignore excludes common libraries; omitted material is not complete APK coverage.")
+        .default(json!(false))
+        .advanced()
+}
+
+fn max_apk_bytes_option() -> OptionSpec {
+    opt("maxApkBytes", OptionType::Int, "Maximum archive bytes inspected for input provenance. Default 512 MiB, maximum 4 GiB; oversized input is refused before extraction.")
+        .aliases(&["max_apk_bytes"])
+        .integer_range(1, android_apk_input_receipt::MAX_APK_BYTES as i64)
+        .default(json!(android_apk_input_receipt::DEFAULT_APK_BYTES))
+        .advanced()
+}
+
+fn semgrep_binary_option() -> OptionSpec {
+    opt(
+        "semgrepBin",
+        OptionType::Path,
+        "Executable for the bundled Android code rules.",
+    )
+    .aliases(&["semgrep_bin"])
+    .executable()
+    .advanced()
 }
 
 fn apk_option() -> OptionSpec {
     opt(
         "apk",
         OptionType::Path,
-        "Path to the .apk file to analyze. Operator is responsible for acquiring it (Play Store, APKMirror, sideload) within their HackerOne program's scope.",
+        "Path to the APK archive. The content digest identifies supplied bytes; decompiled locations still require independent review.",
     )
     .aliases(&["apkPath", "apk_path", "file"])
     .external_read()
@@ -236,10 +269,11 @@ fn apk_timeout_option() -> OptionSpec {
     opt(
         "timeoutMs",
         OptionType::Int,
-        "Per-decompiler subprocess deadline in milliseconds. A deadline kills and reaps the complete process tree.",
+        "Per unzip/decompiler/code-scan process deadline in milliseconds, from 1 to 86400000. Several processes can run in an APK action; this is not a whole-operation deadline.",
     )
     .aliases(&["timeout_ms"])
     .default(json!(DEFAULT_ANDROID_COMMAND_TIMEOUT_MS))
+    .integer_range(1, MAX_ANDROID_COMMAND_TIMEOUT_MS as i64)
     .advanced()
 }
 

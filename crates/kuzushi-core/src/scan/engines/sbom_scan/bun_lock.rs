@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -17,7 +18,7 @@ pub(super) fn is_bun_lock(path: &Path) -> bool {
         .is_some_and(|name| name == "bun.lock")
 }
 
-pub(super) fn bun_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+pub(super) fn bun_lock_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text = fs::read_to_string(target, path)
         .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
@@ -28,7 +29,7 @@ pub(super) fn bun_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepen
     Ok(edges)
 }
 
-pub(super) fn bun_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
+pub(super) fn bun_lock_components(target: &SbomInputs, path: &Path) -> Result<Vec<SbomComponent>> {
     let text = fs::read_to_string(target, path)
         .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =

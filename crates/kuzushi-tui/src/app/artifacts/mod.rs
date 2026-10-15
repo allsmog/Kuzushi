@@ -134,6 +134,20 @@ pub fn record_agent_run_canceled(
     update_recorded_run_cost(target, run_id, audit.settlement_cost())
 }
 
+pub(crate) fn record_agent_run_blocked(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    reason: &str,
+    audit: &AgentCallAudit,
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
+    kuzushi_core::run_artifacts::try_record_tool_run_refused(
+        agent_run_record(target, run_id),
+        reason,
+    )?;
+    update_recorded_run_cost(target, run_id, audit.settlement_cost())
+}
+
 fn agent_run_record<'a>(
     target: &'a std::path::Path,
     run_id: &'a str,

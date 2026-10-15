@@ -23,6 +23,16 @@ mod tests {
     }
 
     #[test]
+    fn quoted_path_text_does_not_store_delimiters_or_strip_filename_spaces() {
+        assert_eq!(
+            coerce_raw_option_value(&option_spec(OptionType::Path), r#""/owned scanner ""#)
+                .unwrap(),
+            json!("/owned scanner ")
+        );
+        assert!(coerce_raw_option_value(&option_spec(OptionType::Path), "\"unfinished").is_err());
+    }
+
+    #[test]
     fn coerce_raw_option_value_covers_supported_shell_value_types() {
         assert_eq!(
             coerce_raw_option_value(&option_spec(OptionType::String), " text ").unwrap(),

@@ -470,7 +470,14 @@ fn scripted_replay_hydrates_artifacts_before_plain_rendering() {
 
     let report = execute_plain_scripted_session(&mut app, &[&format!("replay {run_id}")], 180);
 
-    assert!(report.output.contains("OUTCOME"), "{}", report.output);
+    assert!(
+        report.output.contains("Outcome · completed"),
+        "{}",
+        report.output
+    );
+    assert!(
+        report.output.find("Outcome · completed").unwrap() < report.output.find("Stream:").unwrap()
+    );
     assert!(
         report.output.contains("Replay fixture completed"),
         "{}",

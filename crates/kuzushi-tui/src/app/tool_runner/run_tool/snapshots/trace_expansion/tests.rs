@@ -4,6 +4,8 @@ use kuzushi_core::run_artifacts::{
 };
 use serde_json::json;
 
+mod source_history;
+
 #[test]
 fn trace_reopens_zero_step_result_with_question_notes_and_run_reference() {
     let target = tempfile::tempdir().unwrap();

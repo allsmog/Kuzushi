@@ -40,12 +40,12 @@ fn triage_run_tool() -> ToolDescriptor {
 fn triage_chain_hunt_tool() -> ToolDescriptor {
     tool_with_options(
         "triage:chain-hunt",
-        "Compose confirmed findings into attack chains (two or more findings where one \
-         enables or escalates another) with an ordered attack path, cumulative impact, and \
-         detection-difficulty narrative; each member-resolved chain persists as an open finding \
-         (tool `chains`, rule `chains/model`) for the next triage pass.",
+        "Experimental relationship hypotheses from current confirmed finding metadata. Uses a separate Discovery allowance, creates only unreviewed observations and does not complete Review. No source tools or follow-up jobs are started. Useful relationships and source-revision isolation remain unqualified.",
         chain_hunt_options(),
     )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .with_allowance_category(AllowanceCategory::Discovery)
+    .without_phase_result()
 }
 
 fn triage_dedupe_tool() -> ToolDescriptor {
@@ -94,15 +94,57 @@ fn dedupe_options() -> Vec<OptionSpec> {
 }
 
 fn chain_hunt_options() -> Vec<OptionSpec> {
+    let mut options = vec![opt(
+        "maxChains",
+        OptionType::Int,
+        "Maximum relationship hypotheses to retain, from 1 to 32.",
+    )
+    .aliases(&["max_chains"])
+    .default(json!(8))
+    .integer_range(1, 32)];
+    options.extend(chain_hunt_input_limits());
+    options.push(model_option());
+    options
+}
+
+fn chain_hunt_input_limits() -> Vec<OptionSpec> {
     vec![
         opt(
-            "maxChains",
+            "maxCandidates",
             OptionType::Int,
-            "Maximum member-resolved chains to persist per hunt.",
+            "Maximum confirmed base findings supplied to the model, from 2 to 200.",
         )
-        .aliases(&["max_chains"])
-        .default(json!(8)),
-        model_option(),
+        .aliases(&["max_candidates"])
+        .default(json!(100))
+        .integer_range(2, 200)
+        .advanced(),
+        opt(
+            "maxPriorChains",
+            OptionType::Int,
+            "Maximum prior hypotheses supplied as metadata, from 0 to 64.",
+        )
+        .aliases(&["max_prior_chains"])
+        .default(json!(32))
+        .integer_range(0, 64)
+        .advanced(),
+        opt(
+            "maxContextBytes",
+            OptionType::Int,
+            "Maximum encoded metadata prompt size, from 1024 to 524288 bytes.",
+        )
+        .aliases(&["max_context_bytes"])
+        .default(json!(65536))
+        .integer_range(1024, 524288)
+        .advanced(),
+        opt(
+            "maxOutputTokens",
+            OptionType::Int,
+            "Maximum response tokens per initial or repair request, from 256 to 16384.",
+        )
+        .aliases(&["max_output_tokens"])
+        .default(json!(4096))
+        .integer_range(256, 16384)
+        .advanced(),
     ]
 }
 

@@ -13,6 +13,7 @@ pub(in crate::modules) struct TriageRunStats {
     pub(in crate::modules) failed: usize,
     pub(in crate::modules) vote_failures: usize,
     pub(in crate::modules) persistence_failures: usize,
+    pub(in crate::modules) unapplied_opinions: usize,
     pub(in crate::modules) error_summaries: Vec<String>,
     pub(in crate::modules) failure_details: Vec<Value>,
     pub(in crate::modules) failure_details_omitted: usize,
@@ -36,6 +37,7 @@ impl Default for TriageRunStats {
             failed: 0,
             vote_failures: 0,
             persistence_failures: 0,
+            unapplied_opinions: 0,
             error_summaries: Vec::new(),
             failure_details: Vec::new(),
             failure_details_omitted: 0,
@@ -181,6 +183,7 @@ impl TriageRunStats {
             "confidence": outcome.confidence,
             "rationale": "finding lacked SQLite id; verdict not persisted",
         });
+        self.record_application_status(&mut result, false);
         crate::module_result::apply_runtime_cost_report(&mut result, cost);
         self.results.push(result);
         Ok(())
@@ -191,17 +194,42 @@ impl TriageRunStats {
         finding: Finding,
         outcome: TriageOutcome,
     ) -> Result<()> {
-        let cost = crate::runtime::triage_cost_report(&outcome)?;
+        self.record_classified_outcome(finding, outcome, false, true)
+    }
+
+    pub(in crate::modules) fn record_policy_kept_outcome(
+        &mut self,
+        finding: Finding,
+        outcome: TriageOutcome,
+        cached: bool,
+    ) -> Result<()> {
+        self.record_classified_outcome(finding, outcome, cached, false)
+    }
+
+    fn record_classified_outcome(
+        &mut self,
+        finding: Finding,
+        outcome: TriageOutcome,
+        cached: bool,
+        decision_applied: bool,
+    ) -> Result<()> {
+        let cost = if cached {
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO)
+        } else {
+            crate::runtime::triage_cost_report(&outcome)?
+        };
         self.record_provider_cost(cost)?;
         self.record_verdict(outcome.verdict);
         self.record_successful_classification();
         let mut result = json!({
             "fingerprint": finding.fingerprint,
-            "stage": "haiku",
+            "stage": if decision_applied { "haiku" } else { "model-opinion" },
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
+            "cached": cached,
         });
+        self.record_application_status(&mut result, decision_applied);
         crate::module_result::apply_runtime_cost_report(&mut result, cost);
         self.results.push(result);
         Ok(())
@@ -212,8 +240,9 @@ impl TriageRunStats {
         finding: Finding,
         outcome: TriageOutcome,
         representative_fingerprint: &str,
+        decision_applied: bool,
     ) {
-        self.duplicates_inherited += 1;
+        self.duplicates_inherited += usize::from(decision_applied);
         self.record_verdict(outcome.verdict);
         let mut result = json!({
             "fingerprint": finding.fingerprint,
@@ -223,6 +252,7 @@ impl TriageRunStats {
             "rationale": outcome.rationale,
             "duplicateOf": representative_fingerprint,
         });
+        self.record_application_status(&mut result, decision_applied);
         crate::module_result::apply_runtime_cost_report(
             &mut result,
             crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
@@ -273,22 +303,18 @@ impl TriageRunStats {
         &mut self,
         finding: Finding,
         outcome: TriageOutcome,
-    ) {
-        self.record_verdict(outcome.verdict);
-        self.record_successful_classification();
-        let mut result = json!({
-            "fingerprint": finding.fingerprint,
-            "stage": "haiku",
-            "verdict": outcome.verdict.as_str(),
-            "confidence": outcome.confidence,
-            "rationale": outcome.rationale,
-            "cached": true,
+    ) -> Result<()> {
+        self.record_classified_outcome(finding, outcome, true, true)
+    }
+
+    fn record_application_status(&mut self, result: &mut Value, decision_applied: bool) {
+        self.unapplied_opinions += usize::from(!decision_applied);
+        result["decisionApplied"] = json!(decision_applied);
+        result["applicationStatus"] = json!(if decision_applied {
+            "applied"
+        } else {
+            "not_applied"
         });
-        crate::module_result::apply_runtime_cost_report(
-            &mut result,
-            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
-        );
-        self.results.push(result);
     }
 
     fn record_provider_cost(&mut self, cost: crate::runtime::RuntimeCostReport) -> Result<()> {
@@ -448,12 +474,14 @@ mod reviewed_refutation_prior_tests {
     #[test]
     fn deep_triage_carries_the_selected_context_into_every_audit_pass() {
         let root = tempfile::tempdir().unwrap();
-        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        let first =
+            crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
         crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
         let raw = json!({"threatModelRef": first, "votes": 3});
         let mut input = TriageRunInput::from_tool_input(&raw, root.path()).unwrap();
         apply_threat_model_triage_context(&mut input, root.path(), &raw).unwrap();
-        let execution = TriageExecutionConfig::new(root.path().to_path_buf(), "openai:gpt-5.5".to_string());
+        let execution =
+            TriageExecutionConfig::new(root.path().to_path_buf(), "openai:gpt-5.5".to_string());
         let config = deep_triage_config(&execution, &input, &finding("candidate", "fixture"));
         assert_eq!(config.passes, 3);
         let digest = config.threat_model_context.unwrap();

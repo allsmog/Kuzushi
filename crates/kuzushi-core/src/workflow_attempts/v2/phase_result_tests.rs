@@ -195,6 +195,89 @@ fn unknown_historical_tool_is_not_silently_removed() {
 }
 
 #[test]
+fn auxiliary_map_history_preserves_primary_attempt_and_all_recorded_events() {
+    let target = tempfile::tempdir().unwrap();
+    let mut mapping = completed_tool(target.path(), "primary-map", "threat-model:build");
+    mapping.phase = WorkflowPhase::Map;
+    save_historical_attempt(target.path(), mapping.clone());
+    let preparation = record_preparation_history(target.path());
+    let path = phase_attempt_v2_ledger_path(target.path());
+    let before = std::fs::read(&path).unwrap();
+    let recovered = load_phase_attempt_ledger_recovering(target.path()).unwrap();
+    let pending = recovered
+        .ledger
+        .unresolved_for(
+            WorkflowPhase::Map,
+            &PhaseTargetSnapshot::capture(target.path()),
+        )
+        .unwrap();
+    assert_eq!(pending.completed.attempt_id, mapping.attempt_id);
+    for attempt in preparation {
+        assert!(recovered.ledger.attempt(&attempt.attempt_id).is_none());
+        let disposition = PhaseAttemptDispositionRecorded::new(
+            attempt.attempt_id,
+            PhaseAttemptDisposition::Selected {
+                acknowledged_partial: false,
+            },
+        );
+        assert!(
+            append_phase_attempt_disposition_v2_if_present(target.path(), &disposition).is_err()
+        );
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(
+        load_phase_attempt_ledger_v2(target.path())
+            .unwrap()
+            .attempts
+            .len(),
+        4
+    );
+}
+
+fn record_preparation_history(target: &Path) -> Vec<PhaseAttemptCompleted> {
+    let mut preparation = Vec::new();
+    for (index, tool) in [
+        "context:build",
+        "context-lite:index",
+        "entry-points:extract",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut attempt = completed_tool(target, &format!("preparation-{index}"), tool);
+        attempt.phase = WorkflowPhase::Map;
+        save_historical_attempt(target, attempt.clone());
+        preparation.push(attempt);
+    }
+    preparation
+}
+
+#[test]
+fn auxiliary_map_tools_cannot_create_a_selectable_attempt() {
+    let target = tempfile::tempdir().unwrap();
+    for (index, tool) in [
+        "context:build",
+        "context-lite:index",
+        "entry-points:extract",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut attempt = completed_tool(target.path(), &format!("preparation-{index}"), tool);
+        attempt.phase = WorkflowPhase::Map;
+        let error =
+            crate::workflow_attempts::append_phase_attempt_completed(target.path(), attempt)
+                .unwrap_err();
+        assert!(
+            error.to_string().contains("supporting evidence"),
+            "{error:#}"
+        );
+    }
+    assert!(!phase_attempt_v2_ledger_path(target.path()).exists());
+    assert!(!phase_attempt_ledger_path(target.path()).exists());
+}
+
+#[test]
 fn legacy_only_recovery_preserves_verification_and_rejects_trace_selection() {
     let target = tempfile::tempdir().unwrap();
     let verification = completed_tool(target.path(), "legacy-verify", "verify:finding");

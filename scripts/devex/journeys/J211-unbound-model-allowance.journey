@@ -1,0 +1,62 @@
+name: Direct model work requires an allowance while deterministic context remains available
+size: 120x36
+require-env: KUZUSHI_DEVEX_TARGET
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_model_allowance.py @TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: logs
+paste-file: @ART/unbound-command.txt
+keys: Enter
+require-live-snap: 25 approved investigation allowance | unbound-refusal
+expect: blocked before execution
+expect: run receipt · blocked
+expect: Prepare and approve
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_model_allowance.py @TARGET @ART refused
+resize: 160x48
+require-live-snap: 25 approved investigation allowance | refusal-160x48
+resize: 96x89
+require-live-snap: 25 approved investigation allowance | refusal-96x89
+resize: 80x24
+require-live-snap: 25 approved investigation allowance | refusal-80x24
+resize: 60x20
+require-live-snap: 25 approved investigation allowance | refusal-60x20
+resize: 40x12
+live-snap: refusal-40x12
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | refusal-reader-40x12
+keys: End PPage PPage
+live-snap: refusal-page-40x12
+keys: NPage
+require-live-snap: 20 request started | refusal-guidance-40x12
+expect: no model
+expect: Prepare and
+expect: approve the investigation plan
+ask: Does direct model work refuse before any request, preserve existing context and explain that an approved investigation allowance is required?
+resize: 120x36
+keys: q
+submit: logs
+paste-file: @ART/deterministic-command.txt
+keys: Enter
+require-live-snap: 25 context:build indexed 4 files | deterministic-context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_model_allowance.py @TARGET @ART deterministic
+submit: open F-0001
+require-live-snap: 25 Owned public documentation example | human-decision
+submit: report
+require-live-snap: 25 committed / 6 calls | settled-report
+expect: protected review remaining
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: report
+require-live-snap: 25 committed / 6 calls | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/unbound_model_allowance.py @TARGET @ART restarted
+ask: Does no-color restart retain the settled request count, human decision and source revision without treating the refusal or deterministic context as new model work?
+keys: C-c
+require-exit: 10

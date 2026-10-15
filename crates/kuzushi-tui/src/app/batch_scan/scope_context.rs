@@ -10,6 +10,7 @@ pub(crate) struct ScopeContextState {
     pub(crate) open: bool,
     pub(crate) cursor: usize,
     pub(crate) scroll: usize,
+    pub(crate) labels: std::collections::BTreeMap<String, String>,
 }
 
 impl ShellApp {
@@ -169,7 +170,8 @@ fn bind_context(
     if changed {
         config.study.invalidate_plan();
     }
-    config.notice = Some(format!("Context selected for {scope_id}. Prepare and approve the revised plan; existing spending is retained."));
+    let label = crate::ui_view_models::scope_context::case_label(config, scope_id);
+    config.notice = Some(format!("Context selected for {label}. Prepare and approve the revised plan; existing spending is retained."));
     Ok(())
 }
 

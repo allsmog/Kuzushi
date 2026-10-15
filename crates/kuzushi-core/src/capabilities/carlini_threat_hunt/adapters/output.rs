@@ -9,10 +9,17 @@ impl CarliniThreatHuntReport {
     }
 
     pub(crate) fn to_tool_json(&self) -> Value {
-        let mut output = crate::module_result::completed_output_result(
+        let mut data = json!(self);
+        data["coverage"] =
+            json!({"complete":false,"promptSourceFiles":self.prompt_inventory_files});
+        data["observationsVerified"] = json!(false);
+        let mut output = crate::module_result::partial_output_result(
             self.summary(),
             self.output(),
-            json!(self),
+            vec![
+                json!({"code":"partial-actor-observations","message":"Actor context and bounded snippets do not establish complete discovery coverage. Observations require independent review; an empty response does not resolve findings."}),
+            ],
+            data,
         );
         let observed = RuntimeCost::from_usd(self.cost_usd, "Carlini report cost")
             .expect("Carlini validates runtime cost before report construction");
@@ -27,16 +34,16 @@ impl CarliniThreatHuntReport {
 
     fn summary(&self) -> String {
         format!(
-            "carlini-threat-hunt: {} finding{}, {} rejected by finding schema under {}",
+            "Actor-guided observations: {} finding{}, {} rejected; partial coverage, independent review required.",
             self.count,
             if self.count == 1 { "" } else { "s" },
             self.rejected_count,
-            self.target
         )
     }
 
     fn output_header_lines(&self) -> Vec<String> {
         vec![
+            "Partial source coverage. Actor context and snippets do not establish complete discovery coverage.".to_string(),
             format!(
                 "carlini-threat-hunt: {} finding{} from {} actor{} under {}",
                 self.count,
@@ -114,14 +121,25 @@ impl CarliniInput {
         let kb_context = carlini_context_for_input(ctx, target, input)?;
         Ok(Self {
             model: optional_string(input, &["model"])?.or_else(|| ctx.config.model.clone()),
-            max_findings: read_usize(input, &["maxFindings", "max_findings"], 50, 1).min(500),
-            max_actors: read_usize(input, &["maxActors", "max_actors"], 5, 1).min(100),
-            runs_per_actor: read_usize(input, &["runsPerActor", "runs_per_actor"], 1, 1).min(5),
-            prompt_context: optional_string(input, &["promptContext", "prompt_context"])?
-                .filter(|value| {
-                    matches!(value.as_str(), "actor-flows" | "actor-flows-threat-titles")
-                })
-                .unwrap_or_else(|| "actor-flows".to_string()),
+            max_findings: super::super::limits::bounded_integer(
+                input,
+                &["maxFindings", "max_findings"],
+                50,
+                1..=500,
+            )?,
+            max_actors: super::super::limits::bounded_integer(
+                input,
+                &["maxActors", "max_actors"],
+                5,
+                1..=8,
+            )?,
+            runs_per_actor: super::super::limits::bounded_integer(
+                input,
+                &["runsPerActor", "runs_per_actor"],
+                1,
+                1..=3,
+            )?,
+            prompt_context: actor_prompt_context(input)?,
             debug_inline_threats: bool_input(
                 input,
                 &["debugInlineThreats", "debug_inline_threats"],
@@ -134,19 +152,37 @@ impl CarliniInput {
     }
 }
 
+fn actor_prompt_context(input: &Value) -> Result<String> {
+    let selected = optional_string(input, &["promptContext", "prompt_context"])?;
+    let value = selected.unwrap_or_else(|| "actor-flows".to_string());
+    anyhow::ensure!(
+        matches!(value.as_str(), "actor-flows" | "actor-flows-threat-titles"),
+        "Actor discovery promptContext is unsupported"
+    );
+    Ok(value)
+}
+
 fn carlini_context_for_input(
-    ctx: &ToolExecutionContext<'_>, target: &Path, input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    input: &Value,
 ) -> Result<ArtifactKnowledgePromptContext> {
     use crate::capabilities::threat_model::{load_selected_threat_model, ThreatModelSelection};
     let selection = ThreatModelSelection::from_input(input)?;
     let mut context = carlini_artifact_context(ctx, target);
-    if !selection.is_bound() { return Ok(context); }
+    if !selection.is_bound() {
+        return Ok(context);
+    }
     let document = load_selected_threat_model(target, &selection)?;
     let previous_count = context.snippets.len();
-    context.snippets.retain(|snippet| !is_mutable_model_context(snippet));
+    context
+        .snippets
+        .retain(|snippet| !is_mutable_model_context(snippet));
     let omitted = previous_count - context.snippets.len();
     if let Some(document) = document {
-        context.snippets.insert(0, selected_model_snippet(&selection, &document)?);
+        context
+            .snippets
+            .insert(0, selected_model_snippet(&selection, &document)?);
     }
     context.status = format!("selected immutable threat-model context; {omitted} mutable model/lead snippet(s) replaced or omitted; other artifact context retains its recorded sources");
     Ok(context)
@@ -159,18 +195,25 @@ fn is_mutable_model_context(snippet: &ArtifactKnowledgeSnippet) -> bool {
 }
 
 fn selected_model_snippet(
-    selection: &crate::capabilities::threat_model::ThreatModelSelection, document: &Value,
+    selection: &crate::capabilities::threat_model::ThreatModelSelection,
+    document: &Value,
 ) -> Result<ArtifactKnowledgeSnippet> {
-    let crate::capabilities::threat_model::ThreatModelSelection::Revision(reference) = selection else {
+    let crate::capabilities::threat_model::ThreatModelSelection::Revision(reference) = selection
+    else {
         anyhow::bail!("selected model document requires a revision reference");
     };
     let body = serde_json::to_string(document)?;
     Ok(ArtifactKnowledgeSnippet {
-        source_path: format!("threat-model:{}@{} ({})", reference.model_id, reference.revision_id, reference.sha256),
-        module_id: "threat-model".to_string(), run_id: None,
+        source_path: format!(
+            "threat-model:{}@{} ({})",
+            reference.model_id, reference.revision_id, reference.sha256
+        ),
+        module_id: "threat-model".to_string(),
+        run_id: None,
         title: "Selected threat-model revision".to_string(),
         summary: "The immutable revision explicitly supplied to this run.".to_string(),
-        snippet: compact_carlini_context_text(&body, 1200), refs: Vec::new(),
+        snippet: compact_carlini_context_text(&body, 1200),
+        refs: Vec::new(),
     })
 }
 
@@ -415,13 +458,24 @@ mod tests {
     #[test]
     fn bound_context_replaces_active_model_and_unbound_lead_snippets() {
         let root = tempfile::tempdir().unwrap();
-        let first = crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
+        let first =
+            crate::capabilities::threat_model::commit_test_model(root.path(), "ACCEPTED_ALPHA");
         crate::capabilities::threat_model::commit_test_model(root.path(), "ACTIVE_BETA");
-        fs::write(root.path().join(".kuzushi/threat-leads.md"), "ACTIVE_BETA_LEAD").unwrap();
+        fs::write(
+            root.path().join(".kuzushi/threat-leads.md"),
+            "ACTIVE_BETA_LEAD",
+        )
+        .unwrap();
         let workspace = crate::WorkspaceTarget::new(root.path()).unwrap();
         let config = crate::config::V2Config::default();
-        let ctx = ToolExecutionContext { config: &config, workspace: Some(&workspace), findings_store: None,
-            trace: None, cancellation: None, authorization: Default::default() };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
         let input = json!({"threatModelRef": first});
         let document = resolve_threat_model_document(&input, root.path()).unwrap();
         assert_eq!(document["title"], "ACCEPTED_ALPHA");

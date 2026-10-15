@@ -11,6 +11,7 @@ pub(crate) fn findings_module() -> BuiltinModule {
     tools.push(super::findings_groups::groups_tool());
     tools.extend(super::findings_lessons::lesson_tools());
     tools.push(super::findings_lessons::generation_tool());
+    tools.push(super::findings_source_review::tool());
     builtin_module(
         "findings",
         "Findings",
@@ -70,9 +71,10 @@ fn findings_ground_tool() -> ToolDescriptor {
 fn findings_chains_tool() -> ToolDescriptor {
     tool_with_options(
         "findings:chains",
-        "Deterministically fold confirmed findings into ranked \
-         entry→pivot→impact chain candidates per code surface. \
-         Advisory leads only; no model calls.",
+        "Experimental advisory relationships over recorded confirmed findings. \
+         Output limits do not bound pair enumeration; large histories and \
+         in-progress cancellation remain unqualified. No model calls. \
+         Does not complete Review.",
         findings_chains_options(),
     )
     .with_policy(workspace_policy(
@@ -80,6 +82,8 @@ fn findings_chains_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Required,
     ))
+    .without_phase_result()
+    .with_discovery_maturity(ModuleMaturity::Labs)
 }
 
 fn findings_ground_options() -> Vec<OptionSpec> {

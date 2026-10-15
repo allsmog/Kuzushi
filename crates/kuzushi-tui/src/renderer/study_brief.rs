@@ -12,17 +12,18 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) -> bool 
         .title(brief::title(editor.mode));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let (body, footer) = body_and_footer(inner);
+    let checkpoint = app.study_checkpoint_note();
+    let notices = brief::notice_lines(editor, checkpoint.as_deref());
+    let height = (notices.len() as u16).min(2).min(inner.height);
+    let (body, footer) = body_and_footer(inner, height);
+    let lines = notices
+        .into_iter()
+        .map(|line| fit(&line, inner.width as usize))
+        .collect::<Vec<_>>()
+        .join("\n");
     frame.render_widget(
-        Paragraph::new(fit(
-            editor
-                .notice
-                .as_deref()
-                .unwrap_or("Goal and priorities · no work approval"),
-            inner.width as usize,
-        ))
-        .style(theme::muted()),
-        Rect::new(inner.x, inner.y, inner.width, inner.height.min(1)),
+        Paragraph::new(lines).style(theme::muted()),
+        Rect::new(inner.x, inner.y, inner.width, height),
     );
     render_body(frame, editor, body);
     let controls = super::shared::text::wrap_text(
@@ -54,7 +55,7 @@ fn reading_controls(editor: &BriefEditor, body: Rect, mut controls: Vec<String>)
     controls
 }
 
-fn body_and_footer(inner: Rect) -> (Rect, Rect) {
+fn body_and_footer(inner: Rect, notice_height: u16) -> (Rect, Rect) {
     let footer_height = inner.height.min(2);
     let footer = Rect::new(
         inner.x,
@@ -64,9 +65,9 @@ fn body_and_footer(inner: Rect) -> (Rect, Rect) {
     );
     let body = Rect::new(
         inner.x,
-        inner.y.saturating_add(1),
+        inner.y.saturating_add(notice_height),
         inner.width,
-        inner.height.saturating_sub(footer_height + 1),
+        inner.height.saturating_sub(footer_height + notice_height),
     );
     (body, footer)
 }

@@ -32,6 +32,11 @@ pub(crate) enum ToolEvent {
         error: String,
         completion: kuzushi_core::PendingToolCallCompletion,
     },
+    ObservedRefused {
+        tool_name: String,
+        error: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
     AuthenticationFailed {
         tool_name: String,
         error: String,
@@ -229,19 +234,41 @@ fn tool_result_event(
                 result,
                 completion: outcome.completion,
             },
-            Err(error) if is_authentication_failure(&error) => ToolEvent::AuthenticationFailed {
-                tool_name,
-                error: format!("{error:#}"),
-                completion: Some(outcome.completion),
-            },
-            Err(error) => ToolEvent::ObservedFailed {
-                tool_name,
-                error: format!("{error:#}"),
-                completion: outcome.completion,
-            },
+            Err(error) => observed_failure_event(tool_name, error, outcome.completion),
         },
         Err(error) => failed_tool_event(tool_name, error),
     }
+}
+
+fn observed_failure_event(
+    tool_name: String,
+    error: anyhow::Error,
+    completion: kuzushi_core::PendingToolCallCompletion,
+) -> ToolEvent {
+    if is_authentication_failure(&error) {
+        return ToolEvent::AuthenticationFailed {
+            tool_name,
+            error: format!("{error:#}"),
+            completion: Some(completion),
+        };
+    }
+    if rejected_before_execution(&completion) {
+        return ToolEvent::ObservedRefused {
+            tool_name,
+            error: format!("{error:#}"),
+            completion,
+        };
+    }
+    ToolEvent::ObservedFailed {
+        tool_name,
+        error: format!("{error:#}"),
+        completion,
+    }
+}
+
+fn rejected_before_execution(completion: &kuzushi_core::PendingToolCallCompletion) -> bool {
+    completion.terminal_status() == kuzushi_core::run_lifecycle::RunItemStatus::Blocked
+        && !completion.execution_may_have_occurred()
 }
 
 fn failed_tool_event(tool_name: String, error: anyhow::Error) -> ToolEvent {
@@ -278,4 +305,101 @@ fn is_authentication_failure(error: &anyhow::Error) -> bool {
     kuzushi_core::runtime::runtime_failure_metadata(error).is_some_and(|metadata| {
         metadata.error_class == kuzushi_core::runtime::RuntimeFailureClass::Authentication
     })
+}
+
+#[cfg(test)]
+pub(crate) mod admission_event_tests {
+    use super::*;
+    use kuzushi_core::{ToolExecutionContext, WorkspaceTarget};
+
+    pub(crate) struct RuntimeMustNotRun;
+    impl kuzushi_core::AgentRuntime for RuntimeMustNotRun {
+        fn triage_finding_blocking(
+            &self,
+            _: kuzushi_core::TriageRequest,
+        ) -> Result<kuzushi_core::TriageOutcome> {
+            panic!("admission must refuse before any model request")
+        }
+    }
+
+    pub(crate) fn dispatch(
+        target: &std::path::Path,
+        tool: &str,
+        input: serde_json::Value,
+        runtime: Option<&dyn kuzushi_core::AgentRuntime>,
+    ) -> kuzushi_core::ObservedDispatchOutcome {
+        let workspace = WorkspaceTarget::new(target).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-5.5".into()),
+            ..Default::default()
+        };
+        let observation =
+            kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, "event-fixture")
+                .unwrap();
+        let trace = observation.trace_handle();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = ModuleRegistry::with_v2_builtins();
+        let prepared = registry
+            .prepare_dispatch_input(tool, input, &ctx, None)
+            .unwrap()
+            .authorize_explicit_headless();
+        registry
+            .dispatch_prepared_input_observed_with_runtime(prepared, &ctx, runtime)
+            .unwrap()
+    }
+
+    #[test]
+    fn refused_model_admission_is_a_terminal_blocked_event() {
+        let root = tempfile::tempdir().unwrap();
+        let outcome = dispatch(
+            root.path(),
+            "context:build",
+            serde_json::json!({"enrichment":true}),
+            Some(&RuntimeMustNotRun),
+        );
+        let event = tool_result_event("context:build".into(), Ok(outcome));
+        let ToolEvent::ObservedRefused {
+            error, completion, ..
+        } = event
+        else {
+            panic!("blocked event required")
+        };
+        assert!(error.contains("approved investigation allowance"));
+        assert_eq!(
+            completion.terminal_status(),
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked
+        );
+        assert!(!completion.execution_may_have_occurred());
+        completion.finish(None).unwrap();
+        assert!(!root.path().join(".kuzushi/context-snapshot.json").exists());
+    }
+
+    #[test]
+    fn an_executor_error_keeps_failure_and_possible_work_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".kuzushi/runs/old")).unwrap();
+        let outcome = dispatch(
+            root.path(),
+            "threat-model:read",
+            serde_json::json!({"scope":"id:api","outputDir":".kuzushi/runs/old"}),
+            None,
+        );
+        let event = tool_result_event("threat-model:read".into(), Ok(outcome));
+        let ToolEvent::ObservedFailed { completion, .. } = event else {
+            panic!("executor failure required")
+        };
+        assert!(completion.execution_may_have_occurred());
+        assert_eq!(
+            completion.terminal_status(),
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        );
+        completion.finish(None).unwrap();
+    }
 }

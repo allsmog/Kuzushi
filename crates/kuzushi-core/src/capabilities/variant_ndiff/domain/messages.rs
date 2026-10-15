@@ -33,13 +33,14 @@ pub(crate) fn render_variant_hunt_output(
     cost: crate::runtime::RuntimeCostReport,
 ) -> String {
     let mut lines = vec![
+        "Related source observations. Coverage and source revision remain unverified; each observation needs independent review.".to_string(),
         format!(
-            "variant:hunt complete for {} ({}:{})",
+            "Search based on {} ({}:{})",
             original.rule_id, original.file_path, original.start_line
         ),
-        format!("  Variants found: {count}"),
+        format!("  Observations:   {count}"),
         format!(
-            "  Scope:          {}",
+            "  Scope guidance: {}",
             if include_vendored {
                 "repo + vendored"
             } else {
@@ -50,7 +51,7 @@ pub(crate) fn render_variant_hunt_output(
     ];
     if !findings.is_empty() {
         lines.push(String::new());
-        lines.push("Top variants:".to_string());
+        lines.push("Related observations:".to_string());
         for finding in findings.iter().take(5) {
             lines.push(format!(
                 "  - {}:{} ({}) - {}",
@@ -72,10 +73,11 @@ pub(crate) fn render_ndiff_hunt_output(
     cost: crate::runtime::RuntimeCostReport,
 ) -> String {
     let mut lines = vec![
-        format!("ndiff:hunt-variants complete ({advisory_id})"),
+        "Partial source observations. Advisory applicability, reported locations and findings require independent review.".to_string(),
+        format!("Advisory context: {advisory_id}"),
         format!("  Variants:   {count}"),
         format!(
-            "  Scope:      {}",
+            "  Guidance:   {}",
             if include_vendored {
                 "repo + vendored"
             } else {

@@ -6,6 +6,7 @@ const MODEL: &str = "openai-codex:gpt-5.5";
 mod diagnosis;
 mod execution;
 mod map_handoff;
+mod planner;
 mod recovery;
 mod scope;
 

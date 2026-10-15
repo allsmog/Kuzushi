@@ -242,6 +242,32 @@ impl ShellApp {
         self.try_open_phase_picker_with_freshness(phase, false)
     }
 
+    pub(crate) fn open_guided_phase_planner(&mut self, phase: crate::app::WorkflowPhase) {
+        self.try_open_guided_phase_planner(phase);
+    }
+
+    pub(crate) fn try_open_guided_phase_planner(
+        &mut self,
+        phase: crate::app::WorkflowPhase,
+    ) -> bool {
+        if phase != crate::app::WorkflowPhase::Scan {
+            return self.try_open_phase_picker(phase);
+        }
+        if self.phase_blocked_by_config(phase) {
+            return false;
+        }
+        if self.target().is_none() {
+            self.log(
+                "error",
+                "planning requires an explicit target. Next: target <path> (or target .)",
+            );
+            return false;
+        }
+        self.open_batch_scan_config(None);
+        self.engagement.set_phase(phase);
+        true
+    }
+
     fn try_open_phase_picker_with_freshness(
         &mut self,
         phase: crate::app::WorkflowPhase,
@@ -635,6 +661,10 @@ impl ShellApp {
     }
 }
 
+#[cfg(test)]
+#[path = "onboarding_open/guided_scan_tests.rs"]
+mod guided_scan_tests;
+
 fn workspace_has_persisted_findings_for_startup(target: &std::path::Path) -> bool {
     let Ok(workspace) = kuzushi_core::WorkspaceTarget::new(target) else {
         return false;
@@ -743,6 +773,23 @@ mod tests {
             "read-only-status",
             "tool",
             Some("workspace:status".into()),
+            workspace.root().display().to_string(),
+        )
+        .complete();
+        kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+        kuzushi_core::list_recent_run_summary_entries(workspace.root(), 1).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        assert!(app.workspace_is_fresh_for_auto_planner());
+    }
+
+    #[test]
+    fn auxiliary_catalog_preview_does_not_bypass_fresh_target_setup() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(root.path()).unwrap();
+        let summary = kuzushi_core::RunSummary::running(
+            "catalog-preview",
+            "tool",
+            Some("threat-intel:apply".into()),
             workspace.root().display().to_string(),
         )
         .complete();
@@ -867,6 +914,17 @@ mod tests {
             .registry()
             .resolve_tool("systems-hunt:systems-hunt")
             .is_some());
+        let mut apk_profile = c_target_profile();
+        apk_profile.kind = kuzushi_core::TargetKind::AndroidApk;
+        let (rows, selected) = app.phase_picker_input(
+            crate::app::WorkflowPhase::Map,
+            apk_profile,
+            target.path(),
+            true,
+        );
+        assert!(!rows.iter().any(|row| row.id == PlanningTaskId::BuildXRay));
+        assert!(!selected.contains(&PlanningTaskId::BuildXRay));
+        assert!(app.registry().resolve_tool("x-ray:run").is_some());
     }
 
     #[test]

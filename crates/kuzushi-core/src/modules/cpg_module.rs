@@ -9,21 +9,20 @@ pub(in crate::modules) fn cpg_module() -> BuiltinModule {
         "cpg",
         "Code Property Graph",
         ModuleKind::Intel,
-        "Build in-process cpg-rs Code Property Graphs (.kuzushi/cpg-rs/<lang>.cpg, one per \
-         detected language) for downstream taint analyses. Deterministic, no external \
-         engine or JVM required.",
+        "Build experimental in-process source graphs for structural inspection. Source \
+         collection still needs aggregate read limits and cooperative cancellation.",
         vec![cpg_build_tool()],
         vec![dag("cpg:build", "cpg", &["context:build"])],
     )
+    .labs()
 }
 
 fn cpg_build_tool() -> ToolDescriptor {
     tool_with_options(
         "cpg:build",
-        "Build the cpg-rs Code Property Graphs for the active target — one graph per \
-         detected supported language (c, cpp, go, java, javascript, python, ruby, rust, \
-         scala, typescript), written below .kuzushi/cpg-rs/. Graphs are reused when \
-         fresh and rebuilt when sources changed or the engine shape version moved.",
+        "Build and reuse experimental source graphs below .kuzushi/cpg-rs/. Prefer a \
+         small explicit subdir. The file cap covers frontend construction; source \
+         reads and enumeration lack aggregate limits. Graphs are auxiliary Map evidence.",
         cpg_build_options(),
     )
     .with_policy(workspace_policy(
@@ -31,6 +30,7 @@ fn cpg_build_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Optional,
     ))
+    .without_phase_result()
 }
 
 fn cpg_build_options() -> Vec<OptionSpec> {
@@ -71,8 +71,7 @@ fn cpg_build_subdir_option() -> OptionSpec {
         "subdir",
         OptionType::Path,
         "Relative subdirectory under the target to build graphs from. The graph still \
-         lands under the target root's .kuzushi/cpg-rs/scoped/<key>/ — a scoped build \
-         never writes inside the scanned subtree.",
+         lands under the target root's .kuzushi/cpg-rs/scoped/<key>/.",
     )
     .workspace_read()
     .aliases(&["targetSubdir", "target_subdir"])
@@ -90,6 +89,7 @@ pub(in crate::modules) fn run_cpg_build(
     ctx.ensure_active()?;
     let target = resolve_tool_target(input, ctx)?;
     if let Some(import_path) = resolve_cpg_import_path(input) {
+        validate_import_options(input)?;
         return run_cpg_import(ctx, &target, &import_path);
     }
     let scope = resolve_cpg_scope(input, &target)?;
@@ -100,10 +100,18 @@ pub(in crate::modules) fn run_cpg_build(
     }
     announce_cpg_phase(ctx, "tool", "cpg:build start");
     let started = Instant::now();
-    let reports = build_language_graphs(ctx, &target, &scope, &limits, &languages)?;
+    let outcome = build_language_graphs(ctx, &target, &scope, &limits, &languages)?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    announce_cpg_phase(ctx, "done", &cpg_complete_label(&reports, elapsed_ms));
-    cpg_build_response(&target, &reports, elapsed_ms, now_ms()?)
+    announce_cpg_outcome(ctx, &outcome, elapsed_ms);
+    cpg_build_response(&target, &scope.scan_root(), &outcome, elapsed_ms, now_ms()?)
+}
+
+fn validate_import_options(input: &Value) -> Result<()> {
+    for key in ["languages", "subdir", "maxSourceFiles"] {
+        anyhow::ensure!(input.get(key).is_none(),
+            "cpg:build importPath cannot be combined with build option {key}; remove it before importing");
+    }
+    Ok(())
 }
 
 /// Build scope from the optional `subdir` input: sources come from the
@@ -147,43 +155,108 @@ fn resolve_cpg_limits(input: &Value) -> Result<kuzushi_cpg::BuildLimits> {
     })
 }
 
+struct CpgBuildOutcome {
+    reports: Vec<kuzushi_cpg::CpgBuildReport>,
+    stop_reason: Option<String>,
+}
+
 fn build_language_graphs(
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
     scope: &kuzushi_cpg::BuildScope,
     limits: &kuzushi_cpg::BuildLimits,
     languages: &[&'static str],
-) -> Result<Vec<kuzushi_cpg::CpgBuildReport>> {
+) -> Result<CpgBuildOutcome> {
     let mut reports = Vec::new();
     for lang in languages {
-        ctx.ensure_active()?;
-        prepare_cpg_artifact_path(target, &scope.artifact_path(lang))?;
-        announce_cpg_phase(ctx, "tool-progress", &format!("building {lang} graph"));
-        let (_, report) = kuzushi_cpg::ensure_project_in(scope, lang, limits)
-            .map_err(|error| anyhow::anyhow!("cpg:build {lang} failed: {error}"))?;
-        announce_cpg_phase(ctx, "tool-progress", &language_report_label(&report));
-        reports.push(report);
+        match build_language_graph(ctx, target, scope, limits, lang) {
+            Ok(report) => reports.push(report),
+            Err(error) => return stopped_graph_outcome(reports, error),
+        }
     }
-    Ok(reports)
+    Ok(CpgBuildOutcome {
+        reports,
+        stop_reason: None,
+    })
+}
+
+fn build_language_graph(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    scope: &kuzushi_cpg::BuildScope,
+    limits: &kuzushi_cpg::BuildLimits,
+    lang: &str,
+) -> Result<kuzushi_cpg::CpgBuildReport> {
+    ctx.ensure_active()?;
+    prepare_cpg_artifact_path(target, &scope.artifact_path(lang))?;
+    announce_cpg_phase(ctx, "tool-progress", &format!("building {lang} graph"));
+    let (_, report) = kuzushi_cpg::ensure_project_in(scope, lang, limits)
+        .map_err(|error| anyhow::anyhow!("cpg:build {lang} failed: {error}"))?;
+    announce_cpg_phase(ctx, "tool-progress", &language_report_label(&report));
+    Ok(report)
+}
+
+fn stopped_graph_outcome(
+    reports: Vec<kuzushi_cpg::CpgBuildReport>,
+    error: anyhow::Error,
+) -> Result<CpgBuildOutcome> {
+    if reports.is_empty() {
+        return Err(error);
+    }
+    Ok(CpgBuildOutcome {
+        reports,
+        stop_reason: Some(format!("{error:#}")),
+    })
+}
+
+fn announce_cpg_outcome(
+    ctx: &ToolExecutionContext<'_>,
+    outcome: &CpgBuildOutcome,
+    elapsed_ms: u64,
+) {
+    if let Some(reason) = &outcome.stop_reason {
+        announce_cpg_phase(ctx, "warning", reason);
+        return;
+    }
+    announce_cpg_phase(
+        ctx,
+        "done",
+        &cpg_complete_label(&outcome.reports, elapsed_ms),
+    );
 }
 
 fn language_report_label(report: &kuzushi_cpg::CpgBuildReport) -> String {
-    let action = if report.reused_cache { "reused" } else { "built" };
+    let action = if report.reused_cache {
+        "reused"
+    } else {
+        "built"
+    };
     format!(
-        "{} {} graph · {} source files · {} methods, {} calls · {} ms",
+        "{} {} graph · {} source file{} · {} method{}, {} call{} · {} ms",
         action,
         report.language,
         report.source_files,
+        plural_suffix(report.source_files),
         report.methods,
+        plural_suffix(report.methods),
         report.calls,
+        plural_suffix(report.calls),
         report.duration_ms
     )
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
 }
 
 fn cpg_complete_label(reports: &[kuzushi_cpg::CpgBuildReport], elapsed_ms: u64) -> String {
     let langs: Vec<&str> = reports.iter().map(|r| r.language.as_str()).collect();
     format!(
-        "cpg:build complete · {} graph(s): {} in {} ms · ready for taint analysis",
+        "cpg:build complete · {} graph(s): {} in {} ms · auxiliary Map evidence",
         reports.len(),
         langs.join(", "),
         elapsed_ms
@@ -250,7 +323,10 @@ fn run_cpg_import(
     announce_cpg_phase(
         ctx,
         "tool",
-        &format!("cpg:build import {lang} graph from {}", import_path.display()),
+        &format!(
+            "cpg:build import {lang} graph from {}",
+            import_path.display()
+        ),
     );
     let started = Instant::now();
     let bytes = install_cpg_import(source, &output_path)?;
@@ -312,9 +388,9 @@ fn open_cpg_import_source(import_path: &Path) -> Result<CpgImportSource> {
             import_path.display()
         )
     })?;
-    let metadata = file.metadata().with_context(|| {
-        format!("Could not inspect prebuilt CPG {}", import_path.display())
-    })?;
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("Could not inspect prebuilt CPG {}", import_path.display()))?;
     anyhow::ensure!(
         metadata.is_file(),
         "prebuilt CPG {} is not a regular file",
@@ -341,7 +417,11 @@ fn install_cpg_import(mut source: CpgImportSource, output_path: &Path) -> Result
     staged.as_file().sync_all()?;
     kuzushi_cpg::validate_graph_artifact(staged.path()).map_err(anyhow::Error::msg)?;
     staged.persist(output_path).map_err(|error| {
-        anyhow::anyhow!("Could not publish imported CPG {}: {}", output_path.display(), error.error)
+        anyhow::anyhow!(
+            "Could not publish imported CPG {}: {}",
+            output_path.display(),
+            error.error
+        )
     })?;
     Ok(copied)
 }
@@ -385,30 +465,86 @@ fn no_supported_language_response(target: &Path) -> Value {
 
 fn cpg_build_response(
     target: &Path,
-    reports: &[kuzushi_cpg::CpgBuildReport],
+    source_root: &Path,
+    outcome: &CpgBuildOutcome,
     elapsed_ms: u64,
     timestamp: u64,
 ) -> Result<Value> {
-    let graphs: Vec<Value> = reports.iter().map(report_json).collect();
-    let output = format!(
-        "cpg:build wrote {} graph(s) below {} in {} ms",
-        reports.len(),
-        kuzushi_cpg::artifact_dir(target).display(),
-        elapsed_ms
-    );
+    let output = graph_outcome_text(target, source_root, outcome, elapsed_ms);
+    let data = json!({
+        "target": target.display().to_string(),
+        "engine": "cpg-rs",
+        "graphShapeVersion": kuzushi_cpg::GRAPH_SHAPE_VERSION,
+        "artifactDir": kuzushi_cpg::artifact_dir(target).display().to_string(),
+        "sourceRoot": source_root.display().to_string(),
+        "graphs": outcome.reports.iter().map(report_json).collect::<Vec<_>>(),
+        "stopReason": outcome.stop_reason,
+        "elapsedMs": elapsed_ms,
+        "timestamp": timestamp,
+    });
+    if let Some(reason) = &outcome.stop_reason {
+        return Ok(crate::module_result::partial_output_result(
+            output.clone(),
+            output,
+            vec![json!(reason)],
+            data,
+        ));
+    }
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({
-            "target": target.display().to_string(),
-            "engine": "cpg-rs",
-            "graphShapeVersion": kuzushi_cpg::GRAPH_SHAPE_VERSION,
-            "artifactDir": kuzushi_cpg::artifact_dir(target).display().to_string(),
-            "graphs": graphs,
-            "elapsedMs": elapsed_ms,
-            "timestamp": timestamp,
-        }),
+        data,
     ))
+}
+
+fn graph_outcome_text(
+    target: &Path,
+    source_root: &Path,
+    outcome: &CpgBuildOutcome,
+    elapsed_ms: u64,
+) -> String {
+    let scope = source_root.strip_prefix(target).unwrap_or(source_root);
+    let scope = if scope.as_os_str().is_empty() {
+        ".".into()
+    } else {
+        scope.display().to_string()
+    };
+    let status = if outcome.stop_reason.is_some() {
+        "partial"
+    } else {
+        "saved"
+    };
+    let mut lines = vec![
+        format!(
+            "cpg:build {status} · {} graph(s) saved in {elapsed_ms} ms",
+            outcome.reports.len()
+        ),
+        format!("Source scope: {scope}"),
+    ];
+    append_graph_locations(&mut lines, target, &outcome.reports);
+    lines.push("Auxiliary Map evidence; context requires review and acceptance.".into());
+    lines.push(
+        "Inspection: source reads and enumeration are not bounded by the build file cap.".into(),
+    );
+    if let Some(reason) = &outcome.stop_reason {
+        lines.push(format!("Stopped: {reason}"));
+    }
+    lines.join("\n")
+}
+
+fn append_graph_locations(
+    lines: &mut Vec<String>,
+    target: &Path,
+    reports: &[kuzushi_cpg::CpgBuildReport],
+) {
+    for report in reports {
+        lines.push(language_report_label(report));
+        let path = report
+            .cpg_path
+            .strip_prefix(target)
+            .unwrap_or(&report.cpg_path);
+        lines.push(format!("Graph: {}", path.display()));
+    }
 }
 
 fn report_json(report: &kuzushi_cpg::CpgBuildReport) -> Value {
@@ -434,7 +570,9 @@ fn cpg_import_response(
     timestamp: u64,
 ) -> Value {
     let output = format!(
-        "cpg:build imported {} bytes ({} graph) from {} to {} in {} ms",
+        "cpg:build imported {} bytes ({} graph) from {} to {} in {} ms\n\
+         Source applicability: not assessed against this checkout.\n\
+         Auxiliary Map evidence; context requires review and acceptance.",
         bytes,
         lang,
         import_path.display(),
@@ -450,6 +588,7 @@ fn cpg_import_response(
             "language": lang,
             "cpgPath": output_path.display().to_string(),
             "importedFrom": import_path.display().to_string(),
+            "currentCheckoutApplicability": "not_assessed",
             "bytes": bytes,
             "elapsedMs": elapsed_ms,
             "timestamp": timestamp,
@@ -483,7 +622,10 @@ mod cpg_build_tests {
         );
         assert_eq!(parse_language_csv("go,go").unwrap(), vec!["go"]);
         let error = parse_language_csv("kotlin").unwrap_err().to_string();
-        assert!(error.contains("does not support language `kotlin`"), "{error}");
+        assert!(
+            error.contains("does not support language `kotlin`"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -506,12 +648,17 @@ mod cpg_build_tests {
         );
         // Engine workspace-cache naming (`<key>.<lang>.v<N>.cpg`) parses too.
         assert_eq!(
-            import_language(Path::new(&format!("/x/home_repo_src.python.v{version}.cpg")))
-                .unwrap(),
+            import_language(Path::new(&format!(
+                "/x/home_repo_src.python.v{version}.cpg"
+            )))
+            .unwrap(),
             "python"
         );
         assert!(import_language(Path::new("/x/graph.cpg")).is_err());
-        assert!(import_language(Path::new("/x/go.v1.cpg")).is_err(), "stale shape");
+        assert!(
+            import_language(Path::new("/x/go.v1.cpg")).is_err(),
+            "stale shape"
+        );
         assert!(import_language(Path::new("/x/kotlin.v11.cpg")).is_err());
     }
 
@@ -532,20 +679,20 @@ mod cpg_build_tests {
         let wrong = temp.path().join("wrong.cpg");
         std::fs::write(&wrong, b"CPG\0payload").unwrap();
         assert!(open_cpg_import_source(&wrong).is_err());
-
     }
 
     #[test]
     fn import_validation_accepts_an_engine_produced_graph() {
         let target = tempfile::tempdir().unwrap();
-        std::fs::write(target.path().join("main.go"), "package main\nfunc main() {}\n").unwrap();
-        let scope = kuzushi_cpg::BuildScope::whole(target.path());
-        let (_, report) = kuzushi_cpg::ensure_project_in(
-            &scope,
-            "go",
-            &kuzushi_cpg::BuildLimits::default(),
+        std::fs::write(
+            target.path().join("main.go"),
+            "package main\nfunc main() {}\n",
         )
         .unwrap();
+        let scope = kuzushi_cpg::BuildScope::whole(target.path());
+        let (_, report) =
+            kuzushi_cpg::ensure_project_in(&scope, "go", &kuzushi_cpg::BuildLimits::default())
+                .unwrap();
 
         let expected = std::fs::metadata(&report.cpg_path).unwrap().len();
         let source = open_cpg_import_source(&report.cpg_path).unwrap();

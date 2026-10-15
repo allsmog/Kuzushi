@@ -36,6 +36,10 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 
 #[async_trait]
 impl AgentRuntime for LangGraphRuntime {
+    fn allowance_binding(&self) -> Option<&kuzushi_core::allowance::AllowanceBinding> {
+        self.allowance.as_ref()
+    }
+
     fn with_allowance_binding(
         &self,
         allowance: kuzushi_core::allowance::AllowanceBinding,
@@ -268,6 +272,8 @@ mod tool_policy_receipt_tests {
             ..kuzushi_core::RuntimeConfig::default()
         };
         let runtime = LangGraphRuntime::from_runtime_config(&config, target.path()).unwrap();
+        let (_allowance_root, runtime) =
+            crate::test_bridge::approved(runtime, "openai:gpt-test", 2);
         let request =
             AgentQueryRequest::new("openai:gpt-test", target.path(), "system", "question")
                 .with_tool_policy(authorization.policy.clone());
@@ -310,6 +316,8 @@ mod tool_policy_receipt_tests {
                 ..Default::default()
             };
             let runtime = LangGraphRuntime::from_runtime_config(&config, target.path()).unwrap();
+            let (_allowance_root, runtime) =
+                crate::test_bridge::approved(runtime, "openai:gpt-test", 2);
             let request =
                 AgentQueryRequest::new("openai:gpt-test", target.path(), "system", "question")
                     .with_tool_policy(authorization.policy.clone());

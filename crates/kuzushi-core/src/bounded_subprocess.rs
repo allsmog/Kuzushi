@@ -189,6 +189,23 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn positive_submillisecond_deadline_never_reports_a_zero_allowance() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 60"]).stdin(Stdio::null());
+        let error = output_with_control(
+            &mut command,
+            "tiny deadline fixture",
+            None,
+            Duration::from_nanos(500_000),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("1 ms deadline"), "{error}");
+        assert!(!error.contains("0 ms deadline"));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn controlled_output_honors_explicit_capture_limits() {
         let mut command = Command::new("sh");
         command.args(["-c", "printf '123456789'"]);

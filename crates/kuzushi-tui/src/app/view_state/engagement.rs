@@ -59,6 +59,10 @@ pub struct EngagementState {
     confirm_allowlist: BTreeSet<String>,
     confirm_denylist: BTreeSet<String>,
     pending_plan: Option<PlanProposal>,
+    pending_workflow_proposal: Option<(
+        PathBuf,
+        kuzushi_core::capabilities::campaign::ContextStudyReceipt,
+    )>,
     plan_cursor: usize,
     plan_skipped: BTreeSet<usize>,
     workflow_phase: Option<WorkflowPhase>,
@@ -896,15 +900,35 @@ impl EngagementState {
     }
 
     pub(crate) fn set_pending_plan(&mut self, plan: PlanProposal) {
+        self.pending_workflow_proposal = None;
         self.reset_plan_review_state();
         self.pending_plan = Some(plan);
     }
 
     pub(crate) fn take_pending_plan(&mut self) -> Option<PlanProposal> {
+        self.pending_workflow_proposal = None;
         self.pending_plan.take()
     }
 
+    pub(crate) fn bind_pending_workflow_proposal(
+        &mut self,
+        target: PathBuf,
+        receipt: kuzushi_core::capabilities::campaign::ContextStudyReceipt,
+    ) {
+        self.pending_workflow_proposal = Some((target, receipt));
+    }
+
+    pub(crate) fn pending_workflow_proposal(
+        &self,
+    ) -> Option<&(
+        PathBuf,
+        kuzushi_core::capabilities::campaign::ContextStudyReceipt,
+    )> {
+        self.pending_workflow_proposal.as_ref()
+    }
+
     pub(crate) fn discard_pending_plan(&mut self) -> bool {
+        self.pending_workflow_proposal = None;
         let had_plan = self.pending_plan.take().is_some();
         if had_plan {
             self.reset_plan_review_state();

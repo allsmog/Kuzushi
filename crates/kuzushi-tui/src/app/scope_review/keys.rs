@@ -41,7 +41,18 @@ impl ShellApp {
             return update;
         }
         self.scope_choice_key(key.code)
+            .or_else(|| self.scope_file_boundary_key(key.code))
             .unwrap_or_else(|| self.scope_list_key(key.code))
+    }
+
+    fn scope_file_boundary_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
+        let files = self.scope_review()?.files.as_ref()?;
+        let offset = match code {
+            KeyCode::Home => 0,
+            KeyCode::End => files.page.total.saturating_sub(1) / 32 * 32,
+            _ => return None,
+        };
+        Some(self.request_scope_files(offset))
     }
 
     fn scope_reading_key(&mut self, code: KeyCode) -> Option<InputUpdate> {
@@ -262,7 +273,8 @@ fn move_index(index: &mut usize, code: KeyCode, count: usize) {
 }
 
 fn cancel_scope_editor(state: &mut ScopeReviewState) -> bool {
-    if state.form.take().is_some() {
+    if let Some(form) = state.form.take() {
+        super::new_scope::retain_draft(state, form);
         return true;
     }
     if state.menu.take().is_some() {

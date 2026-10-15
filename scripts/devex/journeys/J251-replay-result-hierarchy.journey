@@ -1,0 +1,65 @@
+name: Partial saved results lead with warnings before long paths, retain full details and survive restart
+size: 120x36
+cwd: @TARGET
+require-env: KUZUSHI_DEVEX_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/replay_hierarchy.py seed @TARGET @ART
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: run codeql:scan {"threads":0}
+require-live-snap: 20 threads | rejected-option
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Recorded warning | partial-warning
+expect: Outcome · partial
+ask: Does the saved result clearly separate its partial status, recorded warning, unknown cost and original summary without inventing a new verdict or recommendation?
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+require-live-snap: 20 Recorded warning | warning-first-40x12
+expect: Outcome · partial
+expect: ERROR
+expect: cost not recorded
+keys: NPage
+live-snap: warning-next-page-40x12
+keys: Home
+live-snap: warning-home-40x12
+ask: Is the limitation visible in the first compact frame, with working paging/back controls and the retained alert still present?
+keys: End
+live-snap: complete-receipt-tail-40x12
+resize: 120x36
+keys: Home
+type: held draft
+keys: C-b C-b C-b
+resize: 40x12
+keys: NPage PPage
+resize: 120x36
+type: X
+require-live-snap: 20 held drXaft | cursor-preserved
+keys: End C-u
+require-shell: python3 -B @REPO/scripts/devex/fixtures/replay_hierarchy.py preserved @TARGET @ART
+ask: Does full receipt access and resize preserve the exact draft/cursor without rerunning analysis or changing source, findings or earlier receipts?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Recorded warning | recovered-warning
+resize: 40x12
+require-live-snap: 20 Recorded warning | recovered-40x12
+expect: Outcome · partial
+expect: cost not recorded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/replay_hierarchy.py restart @TARGET @ART
+ask: Does no-color restart restore the partial result and warning while preserving exact historical data and avoiding phase completion or new work?
+keys: C-c
+require-exit: 10

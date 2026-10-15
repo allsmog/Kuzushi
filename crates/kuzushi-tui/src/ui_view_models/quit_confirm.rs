@@ -43,7 +43,7 @@ fn default_quit_confirm_model(app: &ShellApp) -> QuitConfirmModel {
         timestamp: "--:--:--".to_string(),
         warning_title: "CONFIRM SESSION EXIT".to_string(),
         warning_body: default_warning(active_count, !volatile_rows.is_empty()),
-        sections: default_sections(active_count, volatile_rows),
+        sections: context_draft_sections(app, default_sections(active_count, volatile_rows)),
         default_line: "default · n/N/Esc · stay".to_string(),
         footer: default_footer(app, active_count),
     }
@@ -108,9 +108,19 @@ fn volatile_session_rows(app: &ShellApp) -> Vec<String> {
         session_budget_row(app),
         budget_draft_row(app),
         planning_option_draft_row(app),
+        tool_option_draft_row(app),
         report_path_draft_row(app),
         map_text_draft_row(app),
         batch_number_draft_row(app),
+        context_cases_draft_row(app),
+        model_study_draft_row(app),
+        scope_draft_row(app),
+        goal_draft_row(app),
+        context_copy_draft_row(app),
+        context_checkpoint_pending_row(app),
+        context_checkpoint_cleanup_row(app),
+        study_checkpoint_pending_row(app),
+        study_checkpoint_cleanup_row(app),
         answer_draft_row(app),
         setup_plan_row(app),
         prompt_draft_row(app),
@@ -120,6 +130,20 @@ fn volatile_session_rows(app: &ShellApp) -> Vec<String> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+fn scope_draft_row(app: &ShellApp) -> Option<String> {
+    let state = app.router.scope_review().as_ref()?;
+    (state.form.is_some() || state.new_scope_draft.is_some()).then(|| {
+        "    !   scope draft   session-only edits will be discarded; content hidden".into()
+    })
+}
+
+fn tool_option_draft_row(app: &ShellApp) -> Option<String> {
+    let state = app.router.options_browser();
+    (state.edit.is_some() || !state.drafts.is_empty()).then(|| {
+        "    !   tool option drafts   unsaved values will be discarded; content hidden".to_string()
+    })
 }
 
 fn answer_draft_row(app: &ShellApp) -> Option<String> {
@@ -174,6 +198,9 @@ fn map_text_draft_row(app: &ShellApp) -> Option<String> {
 }
 
 fn batch_number_draft_row(app: &ShellApp) -> Option<String> {
+    if app.study_choices_checkpointed() {
+        return None;
+    }
     app.router
         .campaign()
         .batch_scan_config
@@ -182,6 +209,64 @@ fn batch_number_draft_row(app: &ShellApp) -> Option<String> {
         .as_ref()
         .filter(|edit| !edit.field.text().is_empty())
         .map(|_| "    !   batch number draft   unsaved value will be discarded".to_string())
+}
+
+fn context_cases_draft_row(app: &ShellApp) -> Option<String> {
+    app.study_choices_not_checkpointed()
+        .then(|| "    !   study choices   uncheckpointed settings or goal edits will be discarded; content hidden".into())
+}
+
+fn goal_draft_row(app: &ShellApp) -> Option<String> {
+    app.uncheckpointed_goal_drafts().then(|| {
+        "    !   goal draft   uncheckpointed text will be discarded; content hidden".into()
+    })
+}
+
+fn model_study_draft_row(app: &ShellApp) -> Option<String> {
+    app.has_session_only_model_study_choices().then(|| {
+        "    !   model study draft   session-only inputs or limits will be discarded; content hidden".into()
+    })
+}
+
+fn study_checkpoint_pending_row(app: &ShellApp) -> Option<String> {
+    app.study_checkpoint_pending().then(|| "    !   study draft write   latest choices are not yet durable; stay for the save result".into())
+}
+
+fn study_checkpoint_cleanup_row(app: &ShellApp) -> Option<String> {
+    app.study_checkpoint_cleanup_failed().then(|| "    !   study draft cleanup   failed; an older draft may recover; inspect saved plans before preparing another".into())
+}
+
+fn context_copy_draft_row(app: &ShellApp) -> Option<String> {
+    app.context_copies_not_checkpointed().then(|| {
+        "    !   context copy   unsaved edits will be discarded; return to review and save; content hidden".into()
+    })
+}
+
+fn context_checkpoint_pending_row(app: &ShellApp) -> Option<String> {
+    app.context_checkpoints_pending().then(|| "    !   local draft write   latest edits or discard are not yet durable; stay for the save result".into())
+}
+
+fn context_checkpoint_cleanup_row(app: &ShellApp) -> Option<String> {
+    app.context_checkpoint_cleanup_failed().then(|| "    !   local draft cleanup   failed; an older checkpoint may recover; inspect the context catalog before saving another copy".into())
+}
+
+fn context_draft_sections(
+    app: &ShellApp,
+    mut sections: Vec<QuitConfirmSection>,
+) -> Vec<QuitConfirmSection> {
+    let rows = recoverable_draft_rows(app);
+    if !rows.is_empty() {
+        let index = sections.len().saturating_sub(1);
+        sections.insert(index, QuitConfirmSection::new("RECOVERABLE DRAFTS", rows));
+    }
+    sections
+}
+
+fn recoverable_draft_rows(app: &ShellApp) -> Vec<String> {
+    [
+        app.study_choices_checkpointed().then(|| "study choices · local checkpoint saved; reopen scan batch to recover; work needs approval".into()),
+        app.context_copies_checkpointed().then(|| "context copy · local checkpoint saved; inspect the same context to recover it".into()),
+    ].into_iter().flatten().collect()
 }
 
 fn prompt_draft_row(app: &ShellApp) -> Option<String> {

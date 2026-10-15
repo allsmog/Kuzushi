@@ -121,6 +121,9 @@ impl StudyContextGeneration {
     }
 
     pub(super) fn result_label(&self) -> &'static str {
+        if self.is_workflow_proposal() {
+            return "workflow proposal";
+        }
         if self.is_lesson() {
             return "lesson";
         }

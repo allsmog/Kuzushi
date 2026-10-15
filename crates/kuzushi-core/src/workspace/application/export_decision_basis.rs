@@ -62,6 +62,11 @@ pub(super) fn attach_review_decision_basis(
             continue;
         };
         record.review_decision_basis = decision_basis(store, finding, *review)?;
+        record.reviewed_source = review
+            .and_then(|review| review.decision_id)
+            .map(|id| store.reviewed_source_for_decision(id))
+            .transpose()?
+            .flatten();
         if let Some(basis) = record.review_decision_basis.as_mut() {
             reader.attach_recorded_source(basis);
         }

@@ -216,6 +216,23 @@ impl FindingStore {
             .context("Could not load latest review decision")
     }
 
+    pub(crate) fn review_decision_by_id(
+        &self,
+        decision_id: i64,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        self.conn
+            .query_row(
+                "select id, finding_id, identity_id, decision_verdict, triage_verdict,
+                    confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                    decision_event_seq, decision_event_hash, decision_read_watermark
+               from review_decisions where id = ?1",
+                params![decision_id],
+                review_decision_record_from_row,
+            )
+            .optional()
+            .context("Could not read the recorded review decision")
+    }
+
     pub fn latest_review_decision_for_identity(
         &self,
         identity_id: &str,
@@ -612,12 +629,18 @@ mod tests {
                     );
                     ids.push(store.insert_finding("run-decisions", &finding)?);
                 }
-                store.append_user_review_decision(ids[0], &decision(ReviewDecisionVerdict::Confirmed))?;
+                store.append_user_review_decision(
+                    ids[0],
+                    &decision(ReviewDecisionVerdict::Confirmed),
+                )?;
                 store.append_user_review_decision(
                     ids[0],
                     &decision(ReviewDecisionVerdict::RejectedFalsePositive),
                 )?;
-                store.append_user_review_decision(ids[2], &decision(ReviewDecisionVerdict::Deferred))?;
+                store.append_user_review_decision(
+                    ids[2],
+                    &decision(ReviewDecisionVerdict::Deferred),
+                )?;
                 Ok(((), 3usize))
             })
             .unwrap();

@@ -15,6 +15,7 @@ pub fn execute_threat_model_tool(
         "threat-model:revise" => revise_context_adapter(input, ctx),
         "threat-model:reuse-lessons" => reuse_lessons_adapter(input, ctx),
         "threat-model:regenerate" => regenerate_context_adapter(input, ctx, runtime),
+        "threat-model:ask" => answer_context_question(input, ctx, runtime),
         "threat-model:models" => list_threat_models_adapter(ctx),
         "threat-model:activate" => activate_threat_model_adapter(input, ctx),
         "threat-model:revisions" => list_threat_model_revisions_adapter(input, ctx),

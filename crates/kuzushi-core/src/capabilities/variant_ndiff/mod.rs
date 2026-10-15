@@ -5,10 +5,7 @@ use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{
     query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
 };
-use crate::whitebox_static::{
-    agentic_hunter_thinking_level,
-    try_whitebox_static_policy_for_target,
-};
+use crate::whitebox_static::try_whitebox_static_policy_for_target;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -21,6 +18,8 @@ mod adapters;
 mod application;
 mod domain;
 mod persistence;
+#[cfg(test)]
+mod registry_dispatch_fixture;
 #[cfg(test)]
 mod tests;
 

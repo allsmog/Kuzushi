@@ -132,6 +132,7 @@ impl ShellApp {
             })
             .or_else(|| crate::renderer::coverage_page_rows(self))
             .or_else(|| crate::renderer::context_page_rows(self))
+            .or_else(|| crate::renderer::cost_page_rows(self))
             .or_else(|| crate::renderer::scene_page_rows(self))
             .unwrap_or(VIEWPORT_PAGE_LINES)
     }
@@ -242,6 +243,7 @@ const SCROLLABLE_SHELL_VIEWS: &[ShellView] = &[
     ShellView::Quickstart,
     ShellView::Logs,
     ShellView::Config,
+    ShellView::Cost,
     ShellView::Permissions,
     ShellView::Health,
     ShellView::Keymap,

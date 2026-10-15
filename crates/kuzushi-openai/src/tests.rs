@@ -204,6 +204,7 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-5.5", 4);
 
         let observed = bridge
             .query_observed_blocking(AgentQueryRequest::new(
@@ -241,6 +242,7 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
             anthropic_oauth: None,
         };
         let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+        let (_allowance_root, runtime) = crate::test_bridge::approved(runtime, "openai:gpt-5.5", 4);
 
         let observed = runtime
             .query_observed_blocking(AgentQueryRequest::new(
@@ -283,6 +285,7 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
             anthropic_oauth: None,
         };
         let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+        let (_allowance_root, runtime) = crate::test_bridge::approved(runtime, "openai:gpt-5.5", 4);
 
         let observed = runtime
             .query_observed_blocking(AgentQueryRequest::new(
@@ -362,6 +365,7 @@ printf '%s' '{response}'
             anthropic_oauth: None,
         };
         let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+        let (_allowance_root, runtime) = crate::test_bridge::approved(runtime, "openai:gpt-5.5", 4);
 
         let error = runtime
             .query_blocking(AgentQueryRequest::new(
@@ -416,6 +420,7 @@ while :; do sleep 1; done
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".")
             .unwrap()
             .with_cancellation(cancel.clone());
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-5.5", 4);
         let handle = std::thread::spawn(move || {
             bridge
                 .query_blocking(AgentQueryRequest::new(
@@ -472,6 +477,7 @@ while :; do sleep 1; done
             anthropic_oauth: None,
         };
         let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+        let (_allowance_root, runtime) = crate::test_bridge::approved(runtime, "openai:gpt-5.5", 4);
         let started_at = Instant::now();
         let error = runtime
             .query_blocking_controlled(
@@ -526,6 +532,7 @@ while :; do sleep 1; done
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".")
             .unwrap()
             .with_cancellation(cancel.clone());
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-5.5", 4);
         let handle = std::thread::spawn(move || {
             bridge
                 .query_blocking(AgentQueryRequest::new(
@@ -594,6 +601,7 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-5.5", 4);
 
         let outcome = bridge
             .triage_finding_blocking(TriageRequest {
@@ -647,6 +655,7 @@ printf '%s' '{"ok":true,"text":"needs review because the model did not return JS
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-5.5", 4);
 
         let err = bridge
             .triage_finding_blocking(TriageRequest {
@@ -712,6 +721,8 @@ fi
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) =
+            crate::test_bridge::approved(bridge, "anthropic:claude-sonnet-4-6", 4);
         assert!(bridge.supports_tools());
 
         let req = AgentToolLoopRequest {
@@ -783,6 +794,8 @@ fi
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) =
+            crate::test_bridge::approved(bridge, "anthropic:claude-sonnet-4-6", 4);
         let req = AgentToolLoopRequest {
             model: "anthropic:claude-sonnet-4-6".to_string(),
             cwd: ".".into(),
@@ -831,6 +844,8 @@ fi
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) =
+            crate::test_bridge::approved(bridge, "anthropic:claude-sonnet-4-6", 4);
         let req = AgentToolLoopRequest {
             model: "anthropic:claude-sonnet-4-6".to_string(),
             cwd: ".".into(),
@@ -893,6 +908,8 @@ fi
             }),
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) =
+            crate::test_bridge::approved(bridge, "openai-codex:gpt-5.5", 4);
         let req = AgentToolLoopRequest {
             model: "openai-codex:gpt-5.5".to_string(),
             cwd: ".".into(),
@@ -943,6 +960,7 @@ fi
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-4.1", 4);
         let err = bridge
             .triage_finding_blocking(TriageRequest {
                 model: "openai:gpt-4.1".to_string(),
@@ -989,6 +1007,8 @@ fi
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) =
+            crate::test_bridge::approved(bridge, "openai-codex:gpt-5.5", 4);
 
         let err = bridge
             .query_blocking(AgentQueryRequest::new(
@@ -1053,6 +1073,8 @@ fi
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) =
+            crate::test_bridge::approved(bridge, "openai-codex:gpt-5.5", 4);
         let response = bridge
             .query_blocking(AgentQueryRequest::new(
                 "openai-codex:gpt-5.5",
@@ -1105,6 +1127,7 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             }),
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let (_allowance_root, bridge) = crate::test_bridge::approved(bridge, "openai:gpt-4.1", 4);
         let mut mcp_environment = BTreeMap::new();
         mcp_environment.insert(
             "KUZUSHI_CODEQL_CACHE_DIR".to_string(),

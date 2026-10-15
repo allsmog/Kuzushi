@@ -1,6 +1,6 @@
 use crate::capabilities::threat_intel::application::{
-    apply_threat_intel_catalog, harvest_threat_intel_catalog, list_threat_intel_catalog,
-    resolve_catalog_path,
+    apply_threat_intel_catalog, catalog_dispatch_requested, harvest_threat_intel_catalog,
+    list_threat_intel_catalog, resolve_catalog_path,
 };
 use crate::modules::ToolExecutionContext;
 use crate::runtime::AgentRuntime;
@@ -29,8 +29,13 @@ pub fn execute_threat_intel_tool(
             // `dryRun` defaults to true: planning is cheap and safe;
             // operators explicitly opt into the live dispatch path
             // because each dispatched entry may spend agent budget.
-            let dry_run = input.get("dryRun").and_then(Value::as_bool).unwrap_or(true);
-            apply_threat_intel_catalog(&catalog_path, ctx, runtime, !dry_run, &mut dispatch_tool)
+            apply_threat_intel_catalog(
+                &catalog_path,
+                ctx,
+                runtime,
+                catalog_dispatch_requested(&input),
+                &mut dispatch_tool,
+            )
         }
         "threat-intel:harvest" => {
             harvest_threat_intel_catalog(&input, ctx, runtime, &mut dispatch_tool)

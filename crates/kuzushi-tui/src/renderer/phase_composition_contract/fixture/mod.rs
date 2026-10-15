@@ -104,6 +104,9 @@ fn reference_app(
     app.set_viewport(TerminalViewport::new(width, height));
     app.set_input_mode(InputMode::Navigate);
     app.set_shell_view(ShellView::Workbench);
+    app.engagement
+        .planning_picker_mut()
+        .set_return_to_setup(false);
     app.router.workbench_mut().set_page(Some(page));
     app.router.workbench_mut().set_focus(page.primary_surface());
     app

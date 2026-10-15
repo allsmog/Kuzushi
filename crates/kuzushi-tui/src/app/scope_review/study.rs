@@ -27,7 +27,10 @@ impl ShellApp {
                 if !state.study_scope_ids.remove(&id) {
                     state.study_scope_ids.insert(id);
                 }
-                state.notice = Some(format!("{} boundaries marked for planning. p reviews their finite workload; no jobs start.", state.study_scope_ids.len()));
+                state.notice = Some(format!(
+                    "{} boundaries marked. No jobs started.",
+                    state.study_scope_ids.len()
+                ));
             }
             Err(error) => self.scope_notice(format!("Selection unavailable: {error:#}")),
         }

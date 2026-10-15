@@ -23,16 +23,29 @@ pub struct AllowanceBinding {
 
 impl fmt::Debug for AllowanceBinding {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("AllowanceBinding").field("work", &self.work).finish()
+        formatter
+            .debug_struct("AllowanceBinding")
+            .field("work", &self.work)
+            .finish()
     }
 }
 
 impl AllowanceBinding {
+    pub fn work(&self) -> &AllowanceWork {
+        &self.work
+    }
+
     /// Nested dispatch may reuse its parent accounting, never replace it.
     pub fn require_same_work(&self, other: &Self) -> Result<()> {
         let ledger_id = self.ledger.lock().ledger_id.clone();
-        anyhow::ensure!(ledger_id == other.ledger.lock().ledger_id, "cannot replace an inherited allowance ledger");
-        anyhow::ensure!(self.work == other.work, "cannot replace inherited investigation work");
+        anyhow::ensure!(
+            ledger_id == other.ledger.lock().ledger_id,
+            "cannot replace an inherited allowance ledger"
+        );
+        anyhow::ensure!(
+            self.work == other.work,
+            "cannot replace inherited investigation work"
+        );
         Ok(())
     }
 
@@ -47,7 +60,9 @@ impl AllowanceBinding {
         if model != self.work.model {
             return Err(AllowanceError::ModelMismatch.into());
         }
-        let snapshot = self.ledger.allowance_snapshot(&self.work.investigation_id)?;
+        let snapshot = self
+            .ledger
+            .allowance_snapshot(&self.work.investigation_id)?;
         super::persistence::require_revision(self.work.revision, snapshot.revision)?;
         anyhow::ensure!(snapshot.model == model, AllowanceError::ModelMismatch);
         Ok(())
@@ -56,6 +71,15 @@ impl AllowanceBinding {
     pub fn reserve(&self, model: &str) -> Result<AllowanceReservation> {
         anyhow::ensure!(model == self.work.model, AllowanceError::ModelMismatch);
         self.ledger.reserve_provider_call(&self.call())
+    }
+
+    /// Check before nonbillable preparation. Reservation remains atomic at
+    /// the provider boundary, including when another worker consumes capacity.
+    pub fn require_available_call(&self) -> Result<()> {
+        self.validate_model(&self.work.model)?;
+        self.ledger
+            .allowance_snapshot(&self.work.investigation_id)?
+            .require_call_capacity(self.work.work)
     }
 
     pub fn settle(&self, reservation: AllowanceReservation, cost: RuntimeCostReport) -> Result<()> {

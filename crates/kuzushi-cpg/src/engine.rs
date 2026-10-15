@@ -202,12 +202,12 @@ fn build_and_save(
 ) -> Result<Project, String> {
     if census.sources.len() > limits.max_source_files {
         return Err(format!(
-            "refusing to build the {lang} graph: {} source files under {} exceed the build \
-             cap of {} — scope the build to a subtree (targetSubdir / subdir) or raise \
-             maxSourceFiles explicitly",
+            "refusing to build the {lang} graph: {} source files exceed the build cap of {}.\n\
+             Scope: {}.\n\
+             Choose a subtree (targetSubdir / subdir) or raise maxSourceFiles explicitly.",
             census.sources.len(),
-            scan_root.display(),
-            limits.max_source_files
+            limits.max_source_files,
+            scan_root.display()
         ));
     }
     let project = build_project_quietly(lang, census)?;
@@ -361,6 +361,14 @@ mod tests {
             .err()
             .expect("2 files over a 1-file cap must refuse");
         assert!(error.contains("build cap"), "{error}");
+        assert!(
+            error
+                .lines()
+                .next()
+                .unwrap()
+                .contains("2 source files exceed the build cap of 1"),
+            "{error}"
+        );
         assert!(error.contains("targetSubdir"), "{error}");
         // The refusal must not leave a partial artifact behind.
         assert!(!BuildScope::whole(temp.path()).artifact_path("go").exists());

@@ -1,18 +1,9 @@
 use super::*;
 
-pub(crate) fn require_json_object(value: Value) -> Result<Value> {
-    if value.is_object() {
-        Ok(value)
-    } else {
-        anyhow::bail!("variant/ndiff structured output must be a JSON object")
-    }
-}
-
-pub(crate) fn object_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": true
-    })
+pub(crate) fn optional_variant_reasoning(input: &Value) -> Option<String> {
+    read_object_value(input.as_object()?, &["thinkingLevel", "thinking_level"])
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
 }
 
 pub(crate) fn findings_schema() -> Value {

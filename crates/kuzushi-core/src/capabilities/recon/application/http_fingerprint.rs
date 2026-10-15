@@ -13,20 +13,22 @@ pub(crate) fn run_recon_http_fingerprint(
     ctx: &ToolExecutionContext<'_>,
     cancel: &ScanCancellation,
 ) -> Result<ReconReport> {
-    let workspace = ctx.workspace.context(
-        crate::workspace::active_workspace_required_message("recon:http-fingerprint"),
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "recon:http-fingerprint",
+        ))?;
     let options = HttpFingerprintInput::from_tool_input(input)?;
     emit_http_fingerprint_start(ctx, &options);
-    let scope = crate::workspace::load_program_scope(workspace).context(
-        "Could not load scope.toml",
-    )?;
+    let scope =
+        crate::workspace::load_program_scope(workspace).context("Could not load scope.toml")?;
     let walk = walk_http_fingerprint(
         &ReconHttpFingerprinter::from_input(&options),
         http_target_url(&options.target)?,
         scope.as_ref(),
         cancel,
     )?;
+    require_recon_active(cancel)?;
     let endpoint = endpoint_from_url(walk.answered())?;
     let mut store = ReconWorkspaceStore::open(workspace)?;
     let persisted_entities =

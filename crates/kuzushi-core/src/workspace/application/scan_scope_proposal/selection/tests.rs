@@ -43,6 +43,67 @@ fn ctx<'a>(
 }
 
 #[test]
+fn edited_shared_context_copy_is_inherited_but_cannot_be_selected_for_discovery() {
+    let (_root, workspace, config) = fixture();
+    let context = ctx(&workspace, &config);
+    let initial = create_scan_scope_proposal(
+        &context,
+        Some(ScanScopeDraft {
+            schema_version: 1,
+            scopes: vec![
+                scope("app", &["app"]),
+                scope("common-source", &["shared"]),
+                scope("docs", &["README.md"]),
+            ],
+            shared_scope: None,
+            shared_discovery: false,
+            exclusions: vec![],
+        }),
+    )
+    .unwrap();
+    let edited = edit_scan_scope_proposal(
+        &context,
+        &initial.reference,
+        ScanScopeEdit::CreateSharedContext {
+            scope_id: "common-source".into(),
+            shared_scope_id: "common-context".into(),
+        },
+    )
+    .unwrap();
+    let accepted = accept_scan_scope_proposal(
+        &context,
+        &edited.reference,
+        ScopeCoverageApproval {
+            inventory_limitations: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let reference = ScanScopeRef {
+        proposal: accepted.reference.clone(),
+        scope_id: "app".into(),
+    };
+    let selected = resolve_accepted_scan_scope_selection(&context, &reference).unwrap();
+    assert_eq!(
+        selected.discovery_files,
+        vec!["app/[route]/reader.rs", "app/excluded.rs"]
+    );
+    assert_eq!(selected.context_files, vec!["shared/context.rs"]);
+    let context_only = ScanScopeRef {
+        scope_id: "common-context".into(),
+        ..reference
+    };
+    assert!(resolve_accepted_scan_scope_selection(&context, &context_only).is_err());
+    assert!(load_scan_scope_proposal(&workspace, &initial.reference)
+        .unwrap()
+        .record
+        .draft
+        .shared_scope
+        .is_none());
+    assert!(!workspace.state_dir().join("campaigns").exists());
+}
+
+#[test]
 fn exact_membership_preserves_literal_files_exclusions_and_shared_context_without_recursion() {
     let (_root, workspace, config) = fixture();
     let draft = ScanScopeDraft {

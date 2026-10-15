@@ -1,0 +1,175 @@
+name: Eight reviewed scopes over 4105 files reach bounded native discovery, triage and report
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 45 Build project context: | bounded-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Owned wide source policy
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | manual-source-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+paste-file: @ART/binary-setting.txt
+keys: Enter
+submit: set semgrepJobs 1
+submit: set semgrepTimeoutMs 60000
+submit: scopes
+require-live-snap: 30 DRAFT SCOPES | eight-scopes
+expect: 513 files
+keys: f
+require-live-snap: 25 Files 1..32 of 513 | first-members
+keys: End
+require-live-snap: 25 Files 513..513 of 513 | final-member
+expect: z-owner-policy.py
+resize: 160x48
+require-live-snap: 15 Home/End first/last | files-160x48
+resize: 96x89
+require-live-snap: 15 Home/End first/last | files-96x89
+resize: 80x24
+require-live-snap: 15 Home/End first/last | files-80x24
+resize: 60x20
+require-live-snap: 15 Home/End first/last | files-60x20
+resize: 40x12
+require-live-snap: 15 z-owner-policy.py | files-40x12
+keys: Home
+require-live-snap: 25 Files 1..32 of 513 | first-members-40x12
+ask: Can an operator reach the first and final exact members of a 513-file boundary at all sizes, with source limits disclosed and no scan started?
+resize: 120x36
+keys: Escape
+require-live-snap: 15 Enter menu | file-reader-closed
+keys: a
+require-live-snap: 20 Accept exact boundaries | coverage-review
+keys: Enter End Enter
+require-live-snap: 30 ACCEPTED SCOPES | accepted-boundaries
+keys: Space Down Space Down Space Down Space Down Space Down Space Down Space Down Space
+require-live-snap: 20 8 boundaries marked | selected-boundaries
+keys: p
+require-live-snap: 25 PLAN A STUDY | finite-work
+expect: 24 fixed discovery jobs
+keys: Down Down Down Down Down Enter
+require-live-snap: 20 Total calls | calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | protected-review
+type: 1
+keys: Enter L
+require-live-snap: 45 Scope draft ready | frozen-work
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME prepared
+keys: L Home
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | review-allowance
+expect: 24 fixed jobs
+keys: NPage
+require-live-snap: 20 Scan workers within each job: 1 | scanner-resource-choice
+keys: End
+require-live-snap: 20 y approve | approval-tail
+keys: y
+require-live-snap: 25 Approval saved | approved
+keys: L
+require-live-snap: 25 L starts its fixed jobs | fixed-jobs
+keys: L
+require-live-snap: 25 dispatcher pid | running
+submit: logs
+require-live-snap: 15 LOGS | active-composer
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME probe
+live-snap: after-active-typing
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME progress-8
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME progress-16
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME progress-24
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME completed
+ask: During actual source authentication and scanner activity, do typing and resize preserve Logs focus and the finite plan, with one scan worker per job and no provider request?
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 24 completed | completed-work
+submit: workbench
+require-live-snap: 25 Viewing Scan | scan-result
+nav-mode:
+keys: n
+require-live-snap: 25 Viewing Review | accepted-scan
+paste-file: @ART/open-a-0.txt
+keys: Enter
+submit: decision deferred Owned Service A policy review
+paste-file: @ART/open-b-0.txt
+keys: Enter
+submit: decision deferred Owned Service B policy review
+paste-file: @ART/open-c-0.txt
+keys: Enter
+submit: decision deferred Owned Service C policy review
+paste-file: @ART/open-d-0.txt
+keys: Enter
+submit: decision deferred Owned Service D policy review
+paste-file: @ART/open-e-0.txt
+keys: Enter
+submit: decision deferred Owned Service E policy review
+paste-file: @ART/open-f-0.txt
+keys: Enter
+submit: decision deferred Owned Service F policy review
+paste-file: @ART/open-g-0.txt
+keys: Enter
+submit: decision deferred Owned Service G policy review
+paste-file: @ART/open-h-0.txt
+keys: Enter
+submit: decision deferred Owned H integration policy review
+paste-file: @ART/open-h-1.txt
+keys: Enter
+submit: decision deferred Owned H second policy review
+submit: report
+require-live-snap: 25 9 findings · 9 reviewed | consolidated-report
+expect: 8 boundaries
+expect: 1 protected review remaining
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+resize: 160x48
+require-live-snap: 15 format json (4/6) | report-160x48
+resize: 96x89
+require-live-snap: 15 format json (4/6) | report-96x89
+resize: 80x24
+require-live-snap: 15 format json (4/6) | report-80x24
+resize: 60x20
+require-live-snap: 15 format json (4/6) | report-60x20
+resize: 40x12
+require-live-snap: 15 format json (4/6) | report-40x12
+expect: findings.json
+keys: PageDown
+require-live-snap: 15 format json (4/6) | report-paged-40x12
+expect: findings.json
+keys: PageUp
+resize: 120x36
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME exported
+ask: Does Report retain 27 raw observations, nine owner deferrals, per-scope three-pass recurrence, shared-context separation and resource evidence without a vulnerability or complete-coverage claim?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 24 completed | recovered-work
+submit: report
+require-live-snap: 25 9 findings · 9 reviewed | recovered-report
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_semgrep.py @TMP_TARGET @ART @TMP_HOME restarted
+ask: Does no-color restart preserve the same 24 jobs, 27 observations, nine decisions and unchanged 4105 source files, with no extra work or provider request?
+keys: C-c
+require-exit: 10

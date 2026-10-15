@@ -1481,9 +1481,9 @@ mod tests {
         // `proof_confidence` column (between static_proof_state and
         // verification) reads `unverified`.
         assert!(body.contains("not_recorded,unverified,not attempted"));
-        assert!(body.contains(
-            "all,2,2,cwe;reviewDecisionReason;snoozedUntil;evidence.sourceCount;evidence.rawHttpBlobPresent"
-        ));
+        let omitted = workspace_export_omitted_fields(WorkspaceExportFormat::Csv);
+        assert!(omitted.contains(&"provenance.sourceHistory"));
+        assert!(body.contains(&format!("all,2,2,{}", omitted.join(";"))));
         assert!(body.contains("fixture/rule-0"));
         assert!(body.contains("fixture/rule-1"));
     }
@@ -2159,6 +2159,7 @@ mod tests {
             review_decision_conflict: Some("sentinel-review-decision-conflict".to_string()),
             review_decision_reason: Some("sentinel-review-decision-reason".to_string()),
             review_decision_author: Some("sentinel-review-decision-author".to_string()),
+            reviewed_source: None,
             review_decision_basis: Some(crate::workspace::WorkspaceReviewDecisionBasis {
                 run_id: "sentinel-decision-basis-run".to_string(),
                 snapshot_hash: "sentinel-decision-basis-snapshot".to_string(),
@@ -2241,6 +2242,7 @@ mod tests {
                 vuln_source: "sentinel-provenance-vuln-source".to_string(),
                 source_signature: Some("sentinel-provenance-source-signature".to_string()),
                 corroboration_count: 6,
+                source_history: Vec::new(),
                 run_id: Some("sentinel-provenance-run-id".to_string()),
                 run_status: Some("sentinel-provenance-run-status".to_string()),
                 kuzushi_version: Some("sentinel-provenance-kuzushi-version".to_string()),

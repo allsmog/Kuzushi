@@ -1,5 +1,6 @@
 use super::*;
 mod editing;
+mod additions;
 
 #[test]
 fn loose_root_files_and_prefix_collisions_remain_uncovered() {

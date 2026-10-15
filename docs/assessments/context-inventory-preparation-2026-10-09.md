@@ -15,10 +15,15 @@ The default remains 200. Samples sort by path depth, then path, preserving loose
 root files before deeper candidates. Counts and sample membership come from the
 recorded inventory rather than an independently traversed tree.
 
-The existing inventory supplies the 100,000-entry, 512 MiB inspection and
-256 KiB per-file inspection caps, iterative filesystem traversal, symlink
-exclusion, containment, progress, cancellation and partial receipts. Git
-enumeration includes tracked and staged files but excludes untracked source.
+Inventory processing supplies the 100,000-entry, 512 MiB inspection and
+256 KiB per-file inspection caps, iterative filesystem traversal, progress,
+cancellation and partial receipts. Git enumeration includes tracked and staged
+files but excludes untracked source. The October 13 follow-up bounded the
+preceding Git path-list acquisition with output limits, a deadline and
+cancellation. Acquisition failures preserve prior artifacts without changing
+to filesystem membership. Source-content containment now uses
+the shared repository-bound reader, including ancestor-component checks; see
+the [follow-up assessment](inventory-containment-2026-10-13.md).
 Ignored and generated paths can remain outside filesystem enumeration.
 Cancellation observed before or immediately after inventory preserves the prior
 snapshot and does not proceed to inference or publication.

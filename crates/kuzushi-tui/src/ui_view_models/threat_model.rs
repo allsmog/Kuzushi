@@ -359,6 +359,7 @@ pub(crate) fn threat_model_absence_hint(app: &ShellApp) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreatSummaryReview {
+    pub(crate) document_available: bool,
     pub(crate) status: String,
     pub(crate) summary: String,
     pub(crate) threats: String,
@@ -407,6 +408,7 @@ impl ThreatSummaryReview {
             return Self::unknown(patch);
         };
         Self {
+            document_available: true,
             status: "current persisted model".to_string(),
             summary: doc_summary(doc),
             threats: count_label(array_len(doc.get("threats")), "threat"),
@@ -437,6 +439,7 @@ impl ThreatSummaryReview {
 
     fn unknown(patch: Option<&ThreatPatch>) -> Self {
         Self {
+            document_available: false,
             status: "no threat model artifact".to_string(),
             summary: THREAT_MODEL_EMPTY_HINT.to_string(),
             threats: "—".to_string(),
@@ -456,6 +459,7 @@ impl ThreatSummaryReview {
 
     fn targetless(patch: Option<&ThreatPatch>) -> Self {
         Self {
+            document_available: false,
             status: "no target selected".to_string(),
             summary: THREAT_MODEL_TARGETLESS_HINT.to_string(),
             threats: "—".to_string(),
@@ -473,6 +477,7 @@ impl ThreatSummaryReview {
 
     fn malformed(patch: Option<&ThreatPatch>) -> Self {
         Self {
+            document_available: false,
             status: "malformed".to_string(),
             summary: format!("malformed {}", threat_model_relative_path()),
             threats: "unknown".to_string(),
@@ -503,6 +508,7 @@ impl ThreatSummaryReview {
 
     fn non_file(patch: Option<&ThreatPatch>) -> Self {
         Self {
+            document_available: false,
             status: "malformed".to_string(),
             summary: format!("{} is not a file", threat_model_relative_path()),
             threats: "unknown".to_string(),

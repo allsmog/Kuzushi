@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -9,16 +10,22 @@ pub(super) fn is_gemfile_lock(path: &Path) -> bool {
         .is_some_and(|name| name == "Gemfile.lock")
 }
 
-pub(super) fn gemfile_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn gemfile_lock_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(GemfileLockParser::new(&source).parse(&text))
 }
 
-pub(super) fn gemfile_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn gemfile_lock_components(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     Ok(text
         .lines()
         .filter_map(|line| spec_component(target, path, line))

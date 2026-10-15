@@ -92,6 +92,43 @@ fn historical_selection_is_not_rebound_when_the_same_finding_is_observed_again()
     assert_current_observation_recovery(&app);
 }
 
+#[test]
+fn explicit_generation_open_does_not_require_a_folded_page_anchor() {
+    let (root, mut app) = fixture();
+    app.set_active_findings_filter(None);
+    app.refresh_findings_preserving_active_filter(false);
+    let before = crate::ui_view_models::visible_finding_at_cursor(&app)
+        .unwrap()
+        .1;
+    replace_cursored_generation(root.path(), &app);
+    app.refresh_findings_preserving_active_filter(false);
+    let offset = app.domain().findings_page().unwrap().offset;
+    let reference = format!("generation:{}", before.id.unwrap());
+    let effects = app.resolve_open_finding_effect(OpenFindingReference {
+        reference: reference.clone(),
+    });
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, ShellEffect::RefreshFindings(_))),
+        "An exact generation is a pinned reader, not a canonical-page query"
+    );
+    EffectRuntime::execute(&mut app, effects);
+    assert_eq!(app.selected_finding().as_ref().unwrap().id, before.id);
+    assert_eq!(
+        crate::ui_view_models::current_finding_for_detail(&app)
+            .unwrap()
+            .1
+            .id,
+        before.id
+    );
+    assert_eq!(app.domain().findings_page().unwrap().offset, offset);
+    assert_eq!(
+        app.selected_finding_reference(app.selected_finding().as_ref().unwrap()),
+        Some(reference)
+    );
+}
+
 fn assert_current_observation_recovery(app: &ShellApp) {
     let crate::ui_view_models::PhaseCockpitBody::Review(review) =
         crate::ui_view_models::phase_cockpit_model_for_phase(

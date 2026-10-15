@@ -50,6 +50,28 @@ fn quit_full_shell_keeps_a_readable_body_and_actions_at_40_by_12() {
 }
 
 #[test]
+fn short_quit_frame_prioritizes_disclosures_over_a_previous_run_notice() {
+    let mut app = app_with_disclosures();
+    app.router.set_overlay_origin(Some(ShellView::Campaign));
+    app.set_warn_notice("run", "Old run notice should return after Stay");
+    let text = render(&mut app, 60, 20);
+    for required in [
+        "CONFIRM SESSION EXIT",
+        "NOT SAVED",
+        "draft 0",
+        "draft 1",
+        "y/Y exit",
+        "n/N/Esc stay",
+    ] {
+        assert!(text.contains(required), "{text}");
+    }
+    assert!(!text.contains("Old run notice"), "{text}");
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert!(render(&mut app, 60, 20).contains("Old run notice"));
+}
+
+#[test]
 fn quit_full_shell_pages_without_skips_or_end_debt() {
     for (width, height) in [(40, 12), (80, 24), (120, 36)] {
         for origin in [None, Some(ShellView::Home)] {

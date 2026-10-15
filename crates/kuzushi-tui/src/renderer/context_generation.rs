@@ -14,9 +14,7 @@ pub(super) fn render_context_generation(frame: &mut Frame<'_>, app: &ShellApp, a
     let body = generation_body(
         viewport.width,
         viewport.height,
-        generation.is_regeneration()
-            || generation.is_lesson()
-            || generation.supports_brief_guidance(),
+        generation.has_text_editor() || generation.supports_brief_guidance(),
     );
     let (offset, max) = render_generation_document(frame, app, body, generation.scroll);
     render_generation_border(
@@ -40,10 +38,7 @@ fn generation_controls_area(
     body: Rect,
     generation: &crate::app::StudyContextGeneration,
 ) -> Rect {
-    let height = if generation.is_regeneration()
-        || generation.is_lesson()
-        || generation.supports_brief_guidance()
-    {
+    let height = if generation.has_text_editor() || generation.supports_brief_guidance() {
         3
     } else {
         2
@@ -62,9 +57,14 @@ fn render_generation_state_controls(
     generation: &crate::app::StudyContextGeneration,
     position: (usize, usize),
 ) {
-    if render_generation_reader_controls(frame, controls, generation)
-        || render_generation_editor_controls(frame, controls, generation)
-    {
+    if render_generation_reader_controls(frame, controls, generation) {
+        return;
+    }
+    if generation.supports_result_overview() {
+        render_context_result_controls(frame, controls, generation, position);
+        return;
+    }
+    if render_generation_editor_controls(frame, controls, generation) {
         return;
     }
     render_generation_controls(
@@ -77,6 +77,46 @@ fn render_generation_state_controls(
         generation.rejected_available,
         generation.receipt.is_none(),
     );
+}
+
+fn render_context_result_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    generation: &crate::app::StudyContextGeneration,
+    position: (usize, usize),
+) {
+    let navigation = context_result_navigation(generation);
+    let action = if generation.generated.is_some() {
+        "Enter inspect · n new · Esc back"
+    } else {
+        "Enter outcome · n new · Esc back"
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::styled(navigation, theme::muted()),
+            Line::styled(
+                format!("b goal · PgUp/Dn {}/{}", position.0 + 1, position.1 + 1),
+                theme::muted(),
+            ),
+            Line::styled(action, theme::accent()),
+        ]),
+        area,
+    );
+}
+
+fn context_result_navigation(generation: &crate::app::StudyContextGeneration) -> String {
+    let panel = if generation.shows_result_plan() {
+        "p result"
+    } else {
+        "p plan"
+    };
+    if generation.generated.is_some() {
+        return format!("m Map · {panel} · Tab options");
+    }
+    if generation.rejected_available {
+        return format!("{panel} · Tab options · d output");
+    }
+    format!("{panel} · Tab options")
 }
 
 fn render_generation_reader_controls(
@@ -100,6 +140,30 @@ fn render_generation_editor_controls(
     area: Rect,
     generation: &crate::app::StudyContextGeneration,
 ) -> bool {
+    if generation.is_question() {
+        render_question_controls(frame, area, generation);
+        return true;
+    }
+    render_other_generation_editor_controls(frame, area, generation)
+}
+
+fn render_other_generation_editor_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    generation: &crate::app::StudyContextGeneration,
+) -> bool {
+    if generation.is_workflow_proposal() {
+        frame.render_widget(Paragraph::new("Enter next · G goal · M model\nt calls · r review · n new draft\nTab options · Esc back · PgUp/PgDn read"), area);
+        return true;
+    }
+    render_remaining_generation_editor_controls(frame, area, generation)
+}
+
+fn render_remaining_generation_editor_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    generation: &crate::app::StudyContextGeneration,
+) -> bool {
     if generation.supports_brief_guidance() {
         render_goal_generation_controls(frame, area, generation);
         return true;
@@ -113,6 +177,33 @@ fn render_generation_editor_controls(
         return true;
     }
     false
+}
+
+fn render_question_controls(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    generation: &crate::app::StudyContextGeneration,
+) {
+    if generation.show_answer {
+        frame.render_widget(
+            Paragraph::new("Esc plan · PgUp/PgDn read\nn new question"),
+            area,
+        );
+        return;
+    }
+    let primary = if generation.receipt.is_some() {
+        "Enter continue · Tab options"
+    } else {
+        "Enter continue · G edit question · M model"
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(primary),
+            Line::from("t total calls · r protected Review"),
+            Line::from("n new question · Tab options · Esc back"),
+        ]),
+        area,
+    );
 }
 
 fn render_goal_generation_controls(
@@ -150,6 +241,22 @@ fn render_goal_generation_controls(
 fn generation_title_override(
     generation: &crate::app::StudyContextGeneration,
 ) -> Option<&'static str> {
+    if generation.is_workflow_proposal() {
+        return Some(" WORKFLOW PROPOSAL PLAN ");
+    }
+    remaining_generation_title_override(generation)
+}
+
+fn remaining_generation_title_override(
+    generation: &crate::app::StudyContextGeneration,
+) -> Option<&'static str> {
+    if generation.is_question() {
+        return Some(if generation.show_answer {
+            " CONTEXT ANSWER "
+        } else {
+            " ASK ABOUT CONTEXT "
+        });
+    }
     if generation.is_scope_context() {
         return Some(if generation.has_result() {
             " FILE-GROUP CONTEXT DRAFT "
@@ -192,7 +299,28 @@ fn render_regeneration_guidance(
     generation: &crate::app::StudyContextGeneration,
     area: Rect,
 ) {
-    let editor = generation.guidance_editor.as_ref().unwrap();
+    let Some(editor) = generation.guidance_editor.as_ref() else {
+        frame.render_widget(
+            Paragraph::new(crate::ui_view_models::context_generation::GUIDANCE_EDITOR_UNAVAILABLE)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(guidance_title(generation)),
+                ),
+            area,
+        );
+        return;
+    };
+    render_guidance_editor(frame, generation, editor, area);
+}
+
+fn render_guidance_editor(
+    frame: &mut Frame<'_>,
+    generation: &crate::app::StudyContextGeneration,
+    editor: &crate::app::FieldEditor,
+    area: Rect,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(guidance_title(generation));
@@ -224,22 +352,28 @@ fn render_regeneration_guidance(
             height: 2,
             ..inner
         },
+        generation.editor_limit(),
     );
 }
 
 fn guidance_title(generation: &crate::app::StudyContextGeneration) -> &'static str {
-    if generation.is_lesson() {
+    if generation.is_workflow_proposal() {
+        return " PLANNING GOAL ";
+    }
+    if generation.is_question() {
+        " QUESTION "
+    } else if generation.is_lesson() {
         " LESSON GUIDANCE "
     } else {
         " REGENERATION GUIDANCE "
     }
 }
 
-fn render_guidance_controls(frame: &mut Frame<'_>, area: Rect) {
+fn render_guidance_controls(frame: &mut Frame<'_>, area: Rect, limit: usize) {
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from("Enter newline · Ctrl+S use guidance"),
-            Line::from("Esc back · draft kept · max 2048 B"),
+            Line::from("Enter newline · Ctrl+S use text"),
+            Line::from(format!("Esc back · draft kept · max {limit} B")),
         ]),
         area,
     );

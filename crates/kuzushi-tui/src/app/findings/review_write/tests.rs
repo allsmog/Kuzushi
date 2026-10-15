@@ -262,6 +262,47 @@ fn pending_identity_and_previous_verdict_fit_all_viewports() {
 #[derive(Debug)]
 struct FailedWriter;
 
+#[derive(Debug)]
+struct UnreadableSourceReceiptWriter;
+
+impl ReviewDecisionWriter for UnreadableSourceReceiptWriter {
+    fn write(&self, apply: &ReviewDecisionApply) -> ReviewWriteResult {
+        let mut receipt = LedgerReviewDecisionWriter.write(apply)?;
+        receipt.source_basis = None;
+        receipt.source_read_error = Some("Synthetic source receipt read failure".into());
+        Ok(receipt)
+    }
+}
+
+#[test]
+fn a_committed_decision_with_an_unreadable_source_is_saved_once() {
+    let (root, mut app, _writer) = fixture();
+    app.runtime_state.review_write.writer = Arc::new(UnreadableSourceReceiptWriter);
+    app.record_review_decision_effect(request(&app));
+    wait_for_result(&mut app);
+    assert_eq!(decisions(root.path()).len(), 1);
+    assert_eq!(app.router.workbench().review().session_decided, 1);
+    assert!(!app.runtime_state.review_write.is_pending());
+    assert!(app
+        .advisory()
+        .notice
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("Saved #"));
+    assert!(app
+        .advisory()
+        .notice
+        .as_ref()
+        .unwrap()
+        .message
+        .contains("source receipt unavailable"));
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| line.body.contains("Synthetic source receipt read failure")));
+}
+
 impl ReviewDecisionWriter for FailedWriter {
     fn write(&self, _apply: &ReviewDecisionApply) -> ReviewWriteResult {
         Err(ReviewWriteFailure::Commit(anyhow::anyhow!(

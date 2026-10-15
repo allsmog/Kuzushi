@@ -2,6 +2,14 @@ use super::*;
 
 pub(crate) const NESTED_COMPLETION_PROVIDERS: &[NestedCompletionProvider] = &[
     NestedCompletionProvider {
+        command: "set",
+        candidates: ShellApp::option_setting_completion_candidates,
+    },
+    NestedCompletionProvider {
+        command: "setg",
+        candidates: ShellApp::option_setting_completion_candidates,
+    },
+    NestedCompletionProvider {
         command: "task",
         candidates: ShellApp::task_completion_candidates,
     },

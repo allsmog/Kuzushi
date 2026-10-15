@@ -164,6 +164,9 @@ fn menu_detail(state: &ScopeReviewState) -> Vec<String> {
         10 => "Plan discovery for the selected accepted boundary. The study keeps your engine choices and defaults to three passes and one worker. Other scopes remain unplanned. Draft preparation rechecks source and engine support; allowance approval and starting jobs are separate actions.",
         11 => "Remove one exact recorded exclusion rule. The form starts with its path. Other exclusions stay in force, coverage is recomputed, and the new revision needs acceptance before scanning. No work starts.",
         12 => "Request one bounded scope proposal after reviewing its model and shared allowance. No recursive subdivision or automatic follow-up requests are approved here.",
+        13 => "Copy the selected primary boundary into shared context. Its original discovery membership stays unchanged. Every selected scan boundary may receive these files as context, with no additional discovery job. The new revision needs acceptance and a new study approval.",
+        14 => "Remove the shared context selection while retaining primary discovery boundaries. Referencing dependencies must be edited first. Earlier accepted revisions and study plans stay unchanged. No work starts.",
+        15 => "Add one named discovery boundary using exact files or directory prefixes. Complete uncovered lists of at most 32 files are prefilled; larger or partial lists require explicit paths. Coverage and overlap are recomputed. Acceptance, job planning and spending approval remain separate.",
         _ => "Create a separate inventory draft for the current source. Earlier immutable revisions remain available. No model requests are made.",
     };
     let mut lines = vec![description.into()];

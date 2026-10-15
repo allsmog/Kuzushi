@@ -1,0 +1,68 @@
+name: A separate bounded source search produces only independently reviewed observations with explicit coverage limits
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/variant_observations.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+require-shell: python3 -B @REPO/scripts/devex/fixtures/variant_observations.py before @TMP_TARGET @ART
+paste-file: @ART/command.txt
+keys: Enter
+require-live-snap: 30 coverage unverified | related-observation
+require-shell: python3 -B @REPO/scripts/devex/fixtures/variant_observations.py result @TMP_TARGET @ART
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | partial-receipt
+expect: coverage unverified
+ask: Does the result distinguish related observations from confirmed findings and clearly disclose unverified coverage, source revision and separate review?
+resize: 160x48
+live-snap: receipt-160x48
+resize: 96x89
+live-snap: receipt-96x89
+resize: 80x24
+live-snap: receipt-80x24
+resize: 60x20
+live-snap: receipt-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | receipt-40x12
+keys: NPage
+live-snap: receipt-page-1-40x12
+keys: NPage
+live-snap: receipt-page-2-40x12
+ask: Are the partial outcome, coverage limitation, source observations and paging controls readable at each size without implying a clean scan or fixed finding?
+resize: 120x36
+paste-file: @ART/open-related.txt
+require-live-snap: 20 kz> open | related-command
+keys: Enter
+require-live-snap: 20 FINDING · Esc then Y | independent-review
+expect: related.txt:1
+expect: unverified scanner assertion
+expect: cost unknown
+expect-not: cost >=$0.00
+resize: 40x12
+require-live-snap: 20 cost unknown | review-cost-40x12
+expect-not: $0.00
+expect: F-0001
+expect: Labeled synthetic related
+expect: Esc dismiss
+expect: logs
+keys: Escape
+require-live-snap: 20 Labeled synthetic related | review-notice-dismissed-40x12
+expect: cost unknown
+resize: 120x36
+ask: Does the new observation require independent review while retaining the original confirmation and avoiding automatic recursion or resolution?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | resumed
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered
+require-shell: python3 -B @REPO/scripts/devex/fixtures/variant_observations.py restart @TMP_TARGET @ART
+ask: Does restart preserve the same partial receipt, source/context and allowance history without another request or job?
+keys: C-c
+require-exit: 10

@@ -1,0 +1,69 @@
+name: Experimental dependency candidates disclose coverage and preserve Map readiness
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_candidates.py @TMP_TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: logs
+submit: run threat-intel:discover
+require-live-snap: 30 Coverage is incomplete | partial-candidates
+expect: sbom-scan:scan
+expect-not: Map ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_candidates.py @TMP_TARGET @ART partial
+submit: replay latest
+require-live-snap: 25 Outcome · partial | replay-loaded
+keys: Escape
+live-snap: partial-replay
+expect: Outcome · partial
+resize: 160x48
+live-snap: candidates-160x48
+resize: 96x89
+live-snap: candidates-96x89
+resize: 80x24
+live-snap: candidates-80x24
+resize: 60x20
+live-snap: candidates-60x20
+resize: 40x12
+live-snap: candidates-40x12
+keys: NPage
+live-snap: candidates-page-1-40x12
+keys: NPage
+live-snap: candidates-page-2-40x12
+keys: NPage
+live-snap: candidates-page-3-40x12
+keys: NPage
+live-snap: candidates-page-4-40x12
+keys: NPage
+live-snap: candidates-page-5-40x12
+keys: NPage
+live-snap: candidates-page-6-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_candidates.py @TMP_TARGET @ART pages
+ask: Is the partial outcome clear, with the complete coverage warning and inventory action reachable through paging at every size?
+resize: 120x36
+submit: logs
+submit: run threat-intel:list
+require-live-snap: 25 threat-intel:list loaded 1 entry | catalog-read
+expect-not: Map ✓
+submit: run sbom-scan:scan
+require-live-snap: 30 sbom-scan: 2 components | full-fixture-inventory
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 no map artifacts yet | restarted-without-map
+expect-not: Map ✓
+submit: logs
+require-live-snap: 25 LOGS | recovered-history
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | recovered-partial-receipt
+expect: Coverage is incomplete
+expect: sbom-scan:scan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_candidates.py @TMP_TARGET @ART restarted
+ask: Does restart preserve the receipts while leaving Map unaccepted, with no findings, requests or source changes?
+keys: C-c
+require-exit: 15

@@ -7,9 +7,7 @@ mod harvest_render;
 #[path = "harvest_result.rs"]
 mod harvest_result;
 
-use self::harvest_entry::{
-    harvest_one, HarvestedCatalogEntry, HarvestedEntry,
-};
+use self::harvest_entry::{harvest_one, HarvestedCatalogEntry, HarvestedEntry};
 use self::harvest_input::{parse_cve_list, resolve_output_path};
 use self::harvest_render::{render_catalog_toml, write_catalog_with_append};
 use self::harvest_result::{harvest_result, HarvestGateConfig, HarvestStats};
@@ -41,18 +39,32 @@ pub fn harvest_threat_intel_catalog(
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     let cves = parse_cve_list(input)?;
+    crate::capabilities::variant_ndiff::validate_metadata_input(input)?;
     let output_path = resolve_output_path(input, ctx)?;
     let parent_step = emit_threat_intel_harvest_start(ctx, &output_path, cves.len());
     let gate = harvest_gate_config(input, ctx);
     let harvest = harvest_cves_into_catalog(
         &cves,
+        input,
         ctx,
         runtime,
         dispatch_tool,
         &gate,
         parent_step,
     );
+    publish_harvest(ctx, &output_path, cves.len(), harvest, &gate, parent_step)
+}
+
+fn publish_harvest(
+    ctx: &ToolExecutionContext<'_>,
+    output_path: &Path,
+    total_cves: usize,
+    harvest: HarvestedCatalog,
+    gate: &HarvestGateConfig,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
+) -> Result<Value> {
     emit_threat_intel_harvest_progress(
         ctx,
         parent_step,
@@ -64,7 +76,7 @@ pub fn harvest_threat_intel_catalog(
     Ok(harvest_result(
         &output_path,
         harvest.per_cve,
-        cves.len(),
+        total_cves,
         &harvest.stats,
         &gate,
     ))
@@ -92,6 +104,7 @@ struct HarvestedCatalog {
 
 fn harvest_cves_into_catalog(
     cves: &[String],
+    input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     mut dispatch_tool: impl FnMut(
@@ -109,10 +122,15 @@ fn harvest_cves_into_catalog(
         stats: HarvestStats::default(),
     };
     let _dispatch_scope = begin_threat_intel_harvest_scope(ctx, parent_step);
-    for cve in cves {
+    for (index, cve) in cves.iter().enumerate() {
+        if let Some(reason) = harvest_stop_reason(ctx, runtime) {
+            record_deferred_cves(&cves[index..], &reason, &mut harvest);
+            break;
+        }
         emit_threat_intel_harvest_progress(ctx, parent_step, format!("cve · harvest {cve}"));
         harvest_cve_into_catalog(
             cve,
+            input,
             ctx,
             runtime,
             &mut dispatch_tool,
@@ -123,6 +141,29 @@ fn harvest_cves_into_catalog(
         );
     }
     harvest
+}
+
+fn harvest_stop_reason(
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Option<String> {
+    if ctx.is_cancelled() {
+        return Some("Cancellation requested; no further advisory work started".into());
+    }
+    runtime?
+        .allowance_binding()?
+        .require_available_call()
+        .err()
+        .map(|error| format!("Allowance unavailable; no further advisory work started: {error}"))
+}
+
+fn record_deferred_cves(cves: &[String], reason: &str, harvest: &mut HarvestedCatalog) {
+    harvest.stats.deferred += cves.len() as u32;
+    for cve in cves {
+        harvest
+            .per_cve
+            .push(json!({"cve":cve,"status":"deferred","reason":reason}));
+    }
 }
 
 fn emit_threat_intel_harvest_start(
@@ -203,6 +244,7 @@ fn harvest_gate_config(input: &Value, ctx: &ToolExecutionContext<'_>) -> Harvest
 
 fn harvest_cve_into_catalog(
     cve: &str,
+    input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     dispatch_tool: &mut impl FnMut(
@@ -216,7 +258,7 @@ fn harvest_cve_into_catalog(
     per_cve: &mut Vec<Value>,
     new_entries: &mut Vec<HarvestedCatalogEntry>,
 ) {
-    match harvest_one(cve, ctx, runtime, dispatch_tool) {
+    match harvest_one(cve, input, ctx, runtime, dispatch_tool) {
         Ok(HarvestedEntry::Entry(entry)) => {
             record_harvested_entry(cve, entry, gate, stats, per_cve, new_entries);
         }
@@ -330,6 +372,9 @@ fn harvested_entry_row(
         "hunt": entry.hunt.as_str(),
         "cwe": entry.cwe,
         "gate": gate_outcome,
+        "draft": true,
+        "accepted": false,
+        "extractionReceipt": entry.extraction_receipt,
     })
 }
 

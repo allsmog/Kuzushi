@@ -7,6 +7,14 @@
 use super::*;
 use crate::workspace::{load_program_scope, ProgramScope, WorkspaceTarget};
 
+pub(crate) fn check_import_cancellation(ctx: &ToolExecutionContext<'_>) -> Result<()> {
+    anyhow::ensure!(
+        !ctx.is_cancelled(),
+        "Import cancelled. No further input records are processed."
+    );
+    Ok(())
+}
+
 /// Per-call recon-import state passed to every per-entry persistence
 /// helper. Carries the store, workspace id, optional scope, and the
 /// running output vectors so the call sites stay small.
@@ -23,6 +31,10 @@ pub(crate) struct ReconImportContext<'a> {
 }
 
 impl<'a> ReconImportContext<'a> {
+    pub(crate) fn partial_import_error(&self, error: anyhow::Error) -> anyhow::Error {
+        error.context("Import stopped. Earlier saved evidence may remain. Complete import is not claimed. Inspect persisted hosts, services and notes before retrying.")
+    }
+
     pub(crate) fn open(workspace: &'a WorkspaceTarget) -> Result<Self> {
         let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
         let mut store = ReconWorkspaceStore::open(workspace)?;
@@ -79,12 +91,15 @@ impl<'a> ReconImportContext<'a> {
             skipped_out_of_scope: Some(self.skipped_out_of_scope),
             subdomains: Vec::new(),
             fingerprint: BTreeMap::new(),
-        redirects: None,
+            redirects: None,
         })
     }
 }
 
-pub(crate) fn read_jsonl_path(input: &Value, message: &str) -> Result<(std::path::PathBuf, String)> {
+pub(crate) fn read_jsonl_path(
+    input: &Value,
+    message: &str,
+) -> Result<(std::path::PathBuf, String)> {
     let path = required_path(input, "path", message)?;
     let body = crate::bounded_file::read_utf8_text(&path, 64 * 1024 * 1024)
         .with_context(|| format!("Could not read {}", path.display()))?;

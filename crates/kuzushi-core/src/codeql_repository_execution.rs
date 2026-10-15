@@ -20,7 +20,10 @@ pub(crate) use promotion::codeql_database_is_valid;
 use promotion::{inspect_destination, promote_database, DestinationState};
 #[cfg(test)]
 pub(crate) use provenance::write_test_codeql_database_provenance;
-pub(crate) use provenance::{resolve_managed_codeql_database, ValidatedManagedCodeqlDatabase};
+pub(crate) use provenance::{
+    resolve_managed_codeql_database, resolve_managed_codeql_database_at,
+    ValidatedManagedCodeqlDatabase,
+};
 
 pub(crate) const DEFAULT_CODEQL_REPOSITORY_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 pub(crate) const MAX_CODEQL_REPOSITORY_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;

@@ -11,6 +11,10 @@ use ratatui::{backend::TestBackend, Terminal};
 use serde_json::json;
 
 fn fixture() -> (tempfile::TempDir, BatchScanConfig) {
+    fixture_with_engine("agentic")
+}
+
+fn fixture_with_engine(engine: &str) -> (tempfile::TempDir, BatchScanConfig) {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("source.rs"), "fn main() {}\n").unwrap();
     let workspace = WorkspaceTarget::new(root.path()).unwrap();
@@ -26,7 +30,7 @@ fn fixture() -> (tempfile::TempDir, BatchScanConfig) {
         cancellation: None,
         authorization: Default::default(),
     };
-    let output = execute_study_plan(&json!({"campaignId":"usage-draft","investigationId":"usage-study","scanInput":{"taskMode":"manual","tasks":["agentic"],"threatModelRef":null}}), &ctx).unwrap();
+    let output = execute_study_plan(&json!({"campaignId":"usage-draft","investigationId":"usage-study","scanInput":{"taskMode":"manual","tasks":[engine],"threatModelRef":null}}), &ctx).unwrap();
     let receipt: StudyPlanReceipt = serde_json::from_value(output["data"].clone()).unwrap();
     let usage = ProviderRunUsage {
         run_id: "labeled-observed-scan".into(),
@@ -70,6 +74,49 @@ fn fixture() -> (tempfile::TempDir, BatchScanConfig) {
         work_plan: None,
     });
     (root, draft)
+}
+
+#[test]
+fn frozen_native_jobs_need_no_model_requests_but_other_costs_stay_unknown() {
+    let (_root, mut config) = fixture_with_engine("license-scan");
+    config.prior_runs.clear();
+    config.prior_run_id = None;
+    config.trials = 9;
+    config.study.scan_input = Some(json!({"tasks":["agentic"]}));
+    let text = crate::ui_view_models::study_config::study_resource_lines(&config).join("\n");
+    assert!(
+        text.contains("3 native jobs · 0 model-provider requests"),
+        "{text}"
+    );
+    assert!(text.contains("Local compute and scanner-service costs are not estimated"));
+    assert!(text.contains("Protected Review capacity remains reserved"));
+    assert!(!text.contains("One job can make several requests"));
+    let accounting = config.study.allowance.as_ref().unwrap();
+    assert_eq!(accounting.committed_calls, 4);
+    assert_eq!(accounting.limits.protected_review_calls, 2);
+    assert_eq!(accounting.cost, RuntimeCostReport::UNAVAILABLE);
+}
+
+#[test]
+fn absent_model_or_unfrozen_work_never_implies_zero_requests() {
+    let (_root, mut config) = fixture();
+    config.prior_runs.clear();
+    config.prior_run_id = None;
+    config
+        .study
+        .receipt
+        .as_mut()
+        .unwrap()
+        .equivalence
+        .components
+        .model = None;
+    let text = crate::ui_view_models::study_config::study_resource_lines(&config).join("\n");
+    assert!(text.contains("Provider requests: not estimated"));
+    assert!(!text.contains("0 model-provider requests"));
+    config.study.invalidate_plan();
+    let text = crate::ui_view_models::study_config::study_resource_lines(&config).join("\n");
+    assert!(text.contains("Provider requests: not estimated"));
+    assert!(!text.contains("0 model-provider requests"));
 }
 
 #[test]

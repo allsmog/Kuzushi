@@ -1,0 +1,78 @@
+name: Recorded SHA transitions and dirty scope comparisons preserve the human decision
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_transition.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | base-observations
+nav-mode:
+keys: Enter
+require-live-snap: 25 AWS Access Key | base-policy-signal
+submit: decision fp Owned public documentation example is intentional
+require-live-snap: 25 Owned public documentation example is intentional | base-human-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_transition.py @TMP_TARGET @ART advance
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | later-recorded-ledger
+nav-mode:
+keys: Enter
+require-live-snap: 30 Reassess this verdict | historical-decision
+submit: runs diff revision-base-003 revision-later
+require-live-snap: 30 SEEN AGAIN | seen-at-later-sha
+expect: Absence does not establish a fix.
+expect: Recorded decisions: 1 of 1
+expect: Check decision sources in Review
+expect-not: carry_forward=
+keys: Tab
+require-live-snap: 25 f29dc288e0660ad20d074fc219c025f98ef7d155 | first-committed-source
+expect: 30baa1f1a56bae4cbb431ba0d453a59a8108a71b
+submit: runs diff revision-later revision-absent
+require-live-snap: 30 NOT OBSERVED IN COVERED WORK | covered-absence
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 25 dirty | same-sha-different-content
+expect: clean
+expect-not: content:unknown
+submit: runs diff revision-base-003 revision-narrow
+require-live-snap: 30 NOT REASSESSED IN RIGHT | narrower-coverage
+expect: outside the recorded scan scope
+resize: 160x48
+live-snap: narrow-comparison-160x48
+resize: 96x89
+live-snap: narrow-comparison-96x89
+resize: 80x24
+live-snap: narrow-comparison-80x24
+resize: 60x20
+live-snap: narrow-comparison-60x20
+resize: 40x12
+live-snap: narrow-comparison-40x12
+keys: NPage NPage NPage NPage NPage NPage
+require-live-snap: 20 scan scope | narrow-reason-40x12
+keys: Tab
+live-snap: narrow-source-40x12
+keys: NPage NPage
+live-snap: narrow-source-40x12-details
+ask: Can the operator distinguish observations across two real SHAs, clean and dirty content at the same SHA, covered absence and unassessed scope without inferring a fix?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_transition.py @TMP_TARGET @ART verify
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | retained-false-positive
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned public documentation example is intentional | retained-human-reason
+expect: Reassess this verdict
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: runs diff revision-later revision-absent
+require-live-snap: 30 NOT OBSERVED IN COVERED WORK | restarted-covered-absence
+expect: Absence does not establish a fix.
+keys: Tab
+require-live-snap: 25 dirty | restarted-exact-source
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_transition.py @TMP_TARGET @ART verify
+ask: Does restart preserve the historical human decision, four raw observations, all six source-bound run receipts and zero provider work, with neutral CLI and TUI comparisons?
+keys: C-c
+require-exit: 10

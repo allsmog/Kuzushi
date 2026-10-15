@@ -131,6 +131,8 @@ pub(crate) struct OperatorVulnRow {
 #[derive(Debug, Default)]
 pub(crate) struct BuildInput {
     pub(crate) roots: ThreatModelBuildRoots,
+    /// Host-captured source identity before model work, never a tool option.
+    pub(crate) captured_source_tree_hash: Option<String>,
     pub(crate) repo_name: String,
     pub(crate) methodology: String,
     pub(crate) sources: Vec<String>,

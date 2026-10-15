@@ -14,7 +14,9 @@ impl ShellApp {
             config.notice=Some("Guidance is frozen in this plan. n opens a separately approved draft to change it.".into());
             return;
         }
-        let text = generation.context_input["guidance"].as_str().unwrap_or("");
+        let text = generation.context_input[generation.editor_field()]
+            .as_str()
+            .unwrap_or("");
         generation
             .guidance_editor
             .get_or_insert_with(|| FieldEditor::new(text));
@@ -40,9 +42,7 @@ impl ShellApp {
             return Some(InputUpdate::handled());
         }
         if key == KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL) {
-            generation.context_input["guidance"] =
-                json!(generation.guidance_editor.as_ref().unwrap().text());
-            generation.guidance_editing = false;
+            save_guidance(generation);
             return Some(InputUpdate::handled());
         }
         edit_guidance(generation, key);
@@ -66,26 +66,50 @@ impl ShellApp {
 }
 
 fn edit_guidance(generation: &mut StudyContextGeneration, key: KeyEvent) {
-    if key.code == KeyCode::Enter {
-        insert_guidance(generation, "\n");
+    if let Some(text) = guidance_inserted_text(key) {
+        insert_guidance(generation, &text);
         return;
     }
-    if let KeyCode::Char(ch) = key.code {
-        if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
-            insert_guidance(generation, &ch.to_string());
-            return;
-        }
+    if let Some(editor) = generation.guidance_editor.as_mut() {
+        editor.handle_key(key);
     }
-    generation.guidance_editor.as_mut().unwrap().handle_key(key);
+}
+
+fn guidance_inserted_text(key: KeyEvent) -> Option<String> {
+    match (key.code, key.modifiers) {
+        (KeyCode::Enter, _) => Some("\n".into()),
+        (KeyCode::Char(ch), KeyModifiers::NONE | KeyModifiers::SHIFT) => Some(ch.to_string()),
+        _ => None,
+    }
 }
 
 fn insert_guidance(generation: &mut StudyContextGeneration, text: &str) {
-    let editor = generation.guidance_editor.as_mut().unwrap();
-    if text.contains('\0') || editor.text().len() + text.len() > 2048 {
-        generation.guidance_notice =
-            Some("Keep guidance within 2048 bytes; your draft is unchanged.".into());
+    let limit = generation.editor_limit();
+    let Some(editor) = generation.guidance_editor.as_mut() else {
+        report_missing_editor(generation);
+        return;
+    };
+    if text.contains('\0') || editor.text().len() + text.len() > limit {
+        generation.guidance_notice = Some(format!(
+            "Keep text within {limit} bytes; your draft is unchanged."
+        ));
         return;
     }
     editor.insert(text);
     generation.guidance_notice = None;
+}
+
+fn save_guidance(generation: &mut StudyContextGeneration) {
+    let field = generation.editor_field();
+    let Some(editor) = generation.guidance_editor.as_ref() else {
+        report_missing_editor(generation);
+        return;
+    };
+    generation.context_input[field] = json!(editor.text());
+    generation.guidance_editing = false;
+}
+
+fn report_missing_editor(generation: &mut StudyContextGeneration) {
+    generation.guidance_notice =
+        Some("Guidance editor unavailable. Press Esc to return; saved input is unchanged.".into());
 }

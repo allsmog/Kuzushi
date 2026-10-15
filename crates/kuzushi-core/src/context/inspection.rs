@@ -5,6 +5,7 @@ use serde_json::Value;
 pub enum ContextEnumeration {
     GitIndex,
     Filesystem,
+    Interrupted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,11 +25,7 @@ pub struct ContextSnapshotInspection {
 
 pub fn context_snapshot_inspection(snapshot: &Value) -> Option<ContextSnapshotInspection> {
     let value = snapshot.pointer("/repositoryInventory/inspection")?;
-    let enumeration = match value["enumeration"].as_str()? {
-        "git-index" => ContextEnumeration::GitIndex,
-        "filesystem" => ContextEnumeration::Filesystem,
-        _ => return None,
-    };
+    let enumeration = read_enumeration(value["enumeration"].as_str()?)?;
     Some(ContextSnapshotInspection {
         enumeration,
         entries: value["entries"].as_u64()?,
@@ -40,8 +37,19 @@ pub fn context_snapshot_inspection(snapshot: &Value) -> Option<ContextSnapshotIn
         sampled_files: snapshot["filesSample"].as_array()?.len(),
         omitted_paths: value["omitted_paths"].as_array()?.len(),
         truncated_files: value["truncated_files"].as_array()?.len(),
-        truncated: snapshot.pointer("/repositoryInventory/truncation").is_some_and(|v| !v.is_null()),
+        truncated: snapshot
+            .pointer("/repositoryInventory/truncation")
+            .is_some_and(|v| !v.is_null()),
     })
+}
+
+fn read_enumeration(value: &str) -> Option<ContextEnumeration> {
+    match value {
+        "git-index" => Some(ContextEnumeration::GitIndex),
+        "filesystem" => Some(ContextEnumeration::Filesystem),
+        "interrupted" => Some(ContextEnumeration::Interrupted),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

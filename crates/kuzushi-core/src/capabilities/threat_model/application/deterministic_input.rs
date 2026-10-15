@@ -31,7 +31,6 @@ pub(crate) fn parse_deterministic_build_input(
     flavor: BuildFlavor,
 ) -> Result<DeterministicBuildInput> {
     let target = resolve_target(input, ctx)?;
-    let run_id = Uuid::new_v4().to_string();
     let methodology = read_methodology(input, flavor.default_methodology());
     Ok(DeterministicBuildInput {
         roots: read_build_roots(input, &target)?,
@@ -39,8 +38,7 @@ pub(crate) fn parse_deterministic_build_input(
         stages: read_stages(input, flavor.tool_name(), &methodology)?,
         methodology,
         slice: read_slice(input),
-        output_dir: read_string(input, &["outputDir", "output_dir"])
-            .unwrap_or_else(|| flavor.default_output_dir(&target, &run_id)),
+        output_dir: resolve_build_output_dir(input, ctx, flavor, &target),
         max_threats: read_usize(input, &["maxThreats", "max_threats"], 30, 1),
         preserve_user_edits: read_bool(input, &["preserveUserEdits", "preserve_user_edits"], true),
         model_id: read_string(input, &["modelId", "model_id"])

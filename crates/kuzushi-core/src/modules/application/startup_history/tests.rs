@@ -39,13 +39,31 @@ fn empty_target_and_current_operational_history_still_require_setup() {
 
 #[test]
 fn genuine_or_unclassified_history_preserves_resume_without_granting_completion() {
-    for tool in ["context:build", "external:old-tool"] {
+    for tool in ["threat-model:build", "external:old-tool"] {
         let root = tempfile::tempdir().unwrap();
         write_history(root.path(), &["workspace:status", tool]);
         assert!(ModuleRegistry::with_v2_builtins()
             .investigation_history_requires_resume(root.path())
             .unwrap());
     }
+}
+
+#[test]
+fn auxiliary_receipts_without_source_artifacts_still_require_setup() {
+    let root = tempfile::tempdir().unwrap();
+    write_history(
+        root.path(),
+        &[
+            "context:build",
+            "threat-intel:apply",
+            "threat-intel:list",
+            "findings:chains",
+            "taint-iris-next:import-sinks",
+        ],
+    );
+    assert!(!ModuleRegistry::with_v2_builtins()
+        .investigation_history_requires_resume(root.path())
+        .unwrap());
 }
 
 #[test]

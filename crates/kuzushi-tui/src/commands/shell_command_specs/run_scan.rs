@@ -23,7 +23,7 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         ],
         category: ShellCommandCategory::RunScan,
         description:
-            "guide Map → Scan, then hand off to Review or Report; `full .` explicitly selects cwd",
+            "open Setup for approved Map and finite Scan work; `full .` explicitly selects cwd",
     },
     ShellCommandSpec {
         command: "run <tool> [key=value ...]",

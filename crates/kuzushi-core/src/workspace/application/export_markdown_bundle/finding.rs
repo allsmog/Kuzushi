@@ -105,6 +105,7 @@ fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
         markdown_code_span(&record.fingerprint)
     ));
     push_bundle_run_provenance(out, record);
+    push_bundle_source_history(out, record);
     push_bundle_remediation(out, record);
     out.push_str(&format!(
         "- **Location:** {}\n\n",
@@ -253,6 +254,81 @@ fn push_bundle_run_provenance(out: &mut String, record: &WorkspaceFindingExportR
         out.push_str(&format!(" model {}", markdown_code_span(model)));
     }
     out.push('\n');
+}
+
+fn push_bundle_source_history(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    let history = &record.provenance.source_history;
+    if history.is_empty() {
+        return;
+    }
+    out.push_str("\n### Recorded source summaries\n\nThese are recorded source summaries, not a complete observation log.\n\n");
+    for source in history.iter().take(8) {
+        out.push_str(&format!(
+            "- **Source:** {} · {}\n",
+            markdown_inline_text(&source.tool),
+            markdown_code_span(&source.source_signature)
+        ));
+        out.push_str(&format!(
+            "  - First observation: {} · {}\n",
+            markdown_code_span(&source.first_scan_id),
+            source_date(&source.first_seen_at)
+        ));
+        out.push_str(&format!(
+            "  - Latest observation: {} · {}\n",
+            markdown_code_span(&source.last_scan_id),
+            source_date(&source.last_seen_at)
+        ));
+    }
+    if history.len() > 8 {
+        out.push_str(&format!(
+            "\n{} more source summaries are preserved in the bundle manifest.\n",
+            history.len() - 8
+        ));
+    }
+}
+
+fn source_date(recorded: &str) -> String {
+    let label = recorded
+        .parse::<u64>()
+        .map(crate::session_transcript::utc_timestamp_from_unix_seconds)
+        .unwrap_or_else(|_| recorded.to_string());
+    markdown_inline_text(&label)
+}
+
+#[cfg(test)]
+mod source_history_tests {
+    use super::*;
+
+    #[test]
+    fn markdown_source_summaries_are_bounded_and_capture_text_cannot_add_lines() {
+        let mut record = WorkspaceFindingExportRecord::default();
+        let source = crate::findings::FindingSource {
+            tool: "owned\n# forged".into(),
+            vuln_source: None,
+            source_signature: "note.md:1".into(),
+            first_scan_id: "first".into(),
+            last_scan_id: "latest".into(),
+            first_seen_at: "1000".into(),
+            last_seen_at: "unknown".into(),
+        };
+        record.provenance.source_history = vec![source; 9];
+        let mut text = String::new();
+        push_bundle_source_history(&mut text, &record);
+        assert_eq!(text.matches("**Source:**").count(), 8);
+        assert!(text.contains("First observation: `first`"));
+        assert!(text.contains("Latest observation: `latest`"));
+        assert!(text.contains("1970-01-01"));
+        assert!(text.contains("1 more source summaries"));
+        assert!(!text.contains("\n# forged"));
+        assert_eq!(record.provenance.source_history.len(), 9);
+    }
+
+    #[test]
+    fn absent_source_history_does_not_invent_entries() {
+        let mut text = String::new();
+        push_bundle_source_history(&mut text, &WorkspaceFindingExportRecord::default());
+        assert!(text.is_empty());
+    }
 }
 
 fn push_bundle_message(out: &mut String, finding: &Finding) {

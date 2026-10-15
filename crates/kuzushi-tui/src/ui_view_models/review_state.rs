@@ -105,7 +105,9 @@ pub(crate) fn evidence_state_label(finding: &Finding) -> String {
     if !finding.evidence.is_empty() {
         return format!("evidence:{}", finding.evidence.len());
     }
-    if finding.corroboration_count > 1 || finding.sources.len() > 1 {
+    if finding.corroboration_count > 1
+        || kuzushi_core::findings::distinct_recorded_source_count(&finding.sources) > 1
+    {
         return "multiple observations".to_string();
     }
     if !finding.sources.is_empty() || finding.source_signature.is_some() {

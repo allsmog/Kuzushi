@@ -8,16 +8,20 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 mod diagram;
+mod text_view;
 pub(crate) use diagram::StudyContextDiagram;
+pub(crate) use text_view::StudyContextTextView;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct StudyContextPicker {
+    pub(crate) regeneration_entry: bool,
     pub(crate) scope_id: Option<String>,
+    pub(crate) matrix_case_id: Option<String>,
     pub(crate) scan_input: Value,
     pub(crate) selected: Option<ThreatModelRef>,
     pub(crate) preview: Option<Arc<StudyContextPreview>>,
     pub(crate) detail_scroll: usize,
-    pub(crate) raw: bool,
+    pub(crate) text_view: StudyContextTextView,
     pub(crate) diagram: Option<StudyContextDiagram>,
     pub(crate) diagram_visible: bool,
     pub(crate) editor_visible: bool,
@@ -37,6 +41,7 @@ pub(crate) struct StudyContextPreview {
     pub(crate) source_state: String,
     pub(crate) lesson_usable: bool,
     pub(crate) goal_state: Value,
+    pub(crate) scanner_context: Value,
 }
 
 fn context_preview(
@@ -58,6 +63,7 @@ fn context_preview(
         dfd: crate::ui_view_models::study_context::context_diagram_model(document, target),
         source_state: context_read_state(data),
         goal_state: data["goalState"].clone(),
+        scanner_context: data["scannerContextPreview"].clone(),
     }))
 }
 
@@ -153,15 +159,26 @@ impl ShellApp {
         if self.handle_study_diagram_key(code) || self.scope_context_action_unavailable(code) {
             return Some(InputUpdate::handled());
         }
-        None
+        self.handle_regeneration_context_selection_key(code)
     }
 
     fn close_study_context_picker(&mut self) {
+        if self
+            .study_context_picker()
+            .is_some_and(|picker| picker.regeneration_entry)
+        {
+            self.close_batch_config();
+            return;
+        }
         self.edit_context_picker(|config| {
-            let generation = config
-                .context_picker
-                .take()
-                .and_then(|picker| picker.return_generation);
+            let picker = config.context_picker.take();
+            if picker
+                .as_ref()
+                .is_some_and(|picker| picker.matrix_case_id.is_some())
+            {
+                config.study.matrix.open = true;
+            }
+            let generation = picker.and_then(|picker| picker.return_generation);
             if let Some(generation) = generation {
                 config.context_generation = Some(*generation);
             }
@@ -192,7 +209,7 @@ impl ShellApp {
                 picker.selected = selected;
                 picker.preview = None;
                 picker.detail_scroll = 0;
-                picker.raw = false;
+                picker.text_view = StudyContextTextView::Summary;
                 picker.diagram = None;
                 picker.diagram_visible = false;
                 picker.map_attempt_id = None;
@@ -288,8 +305,7 @@ impl ShellApp {
             self.set_batch_config_notice(reason);
             return;
         }
-        if let Some(scope_id) = picker.scope_id.as_deref() {
-            self.apply_scope_context(scope_id, Some(json!(picker.selected)));
+        if self.accept_bound_context(&picker) {
             return;
         }
         self.edit_context_picker(|config| {
@@ -305,22 +321,37 @@ impl ShellApp {
         });
     }
 
+    fn accept_bound_context(&mut self, picker: &StudyContextPicker) -> bool {
+        if let Some(scope_id) = picker.scope_id.as_deref() {
+            self.apply_scope_context(scope_id, Some(json!(picker.selected)));
+            return true;
+        }
+        if let Some(case_id) = picker.matrix_case_id.as_deref() {
+            self.replace_context_case(case_id, json!(picker.selected));
+            return true;
+        }
+        false
+    }
+
     fn handle_context_detail_key(&mut self, code: KeyCode) {
-        if code == KeyCode::Tab {
+        if let Some(requested) = requested_text_view(code) {
             self.edit_context_picker(|config| {
                 if let Some(picker) = config.context_picker.as_mut() {
-                    picker.raw = !picker.raw;
+                    picker.text_view = picker.text_view.toggled(requested);
                     picker.detail_scroll = 0;
                 }
             });
             return;
         }
-        if matches!(code, KeyCode::PageUp | KeyCode::PageDown) {
-            self.page_study_context(code == KeyCode::PageUp);
+        if matches!(
+            code,
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
+        ) {
+            self.scroll_study_context(code);
         }
     }
 
-    fn page_study_context(&mut self, previous: bool) {
+    fn scroll_study_context(&mut self, code: KeyCode) {
         let viewport = self.viewport();
         let area = context_layout(
             study_config_area(viewport.columns, viewport.rows),
@@ -330,17 +361,30 @@ impl ShellApp {
         let max = context_detail_lines(self, area.width as usize)
             .len()
             .saturating_sub(area.height as usize);
+        let step = if matches!(code, KeyCode::Home | KeyCode::End) {
+            usize::MAX
+        } else {
+            area.height as usize
+        };
         self.edit_context_picker(|config| {
             let Some(picker) = config.context_picker.as_mut() else {
                 return;
             };
             let offset = picker.detail_scroll.min(max);
-            picker.detail_scroll = if previous {
-                offset.saturating_sub(area.height as usize)
+            picker.detail_scroll = if matches!(code, KeyCode::PageUp | KeyCode::Home) {
+                offset.saturating_sub(step)
             } else {
-                offset.saturating_add(area.height as usize).min(max)
+                offset.saturating_add(step).min(max)
             };
         });
+    }
+}
+
+fn requested_text_view(code: KeyCode) -> Option<StudyContextTextView> {
+    match code {
+        KeyCode::Tab => Some(StudyContextTextView::Document),
+        KeyCode::Char('p') => Some(StudyContextTextView::Scanner),
+        _ => None,
     }
 }
 

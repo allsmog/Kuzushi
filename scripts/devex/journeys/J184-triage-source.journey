@@ -1,0 +1,67 @@
+name: Source-bound triage outcomes retain automated authority through Review and Report
+size: 120x36
+cwd: @TMP_TARGET
+require-env: KUZUSHI_TRIAGE_TEST_BIN
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/triage_source.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+paste-file: @ART/open-second.txt
+keys: Enter
+require-live-snap: 30 Second source revision | current-review
+expect: synthetic review
+ask: Does the second observation show the newly produced automated review, with uncertainty and labeled synthetic evidence rather than a verified vulnerability claim?
+resize: 160x48
+require-live-snap: 20 Review | review-160x48
+resize: 96x89
+require-live-snap: 20 Review | review-96x89
+resize: 80x24
+require-live-snap: 20 Review | review-80x24
+resize: 60x20
+require-live-snap: 20 Review | review-60x20
+resize: 40x12
+require-live-snap: 20 Review | review-40x12
+keys: NPage
+live-snap: compact-page-1
+keys: NPage
+live-snap: compact-page-2
+keys: NPage
+live-snap: compact-page-3
+keys: NPage
+live-snap: compact-page-4
+keys: NPage
+live-snap: compact-page-5
+keys: NPage
+live-snap: compact-page-6
+keys: NPage
+live-snap: compact-page-7
+keys: NPage
+live-snap: compact-page-8
+ask: Can the operator read the automated verdict, its rationale and provenance at compact sizes using visible paging controls?
+resize: 120x36
+paste-file: @ART/open-first.txt
+keys: Enter
+require-live-snap: 30 First source revision | earlier-review
+paste-file: @ART/open-second.txt
+keys: Enter
+require-live-snap: 30 Second source revision | returned-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/triage_source.py @TMP_TARGET @ART read
+submit: decision deferred Owned review remains uncertain
+require-live-snap: 25 Owned review remains uncertain | deferred
+submit: report
+require-live-snap: 25 Enter export | report
+keys: Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/triage_source.py @TMP_TARGET @ART exported
+ask: Does the report preserve the observations and scripted human deferral without promoting synthetic automated review to proof or starting more model work?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+paste-file: @ART/open-second.txt
+keys: Enter
+require-live-snap: 30 Owned review remains uncertain | restarted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/triage_source.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

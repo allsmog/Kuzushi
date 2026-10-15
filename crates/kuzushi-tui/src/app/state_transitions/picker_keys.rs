@@ -1030,7 +1030,7 @@ impl ShellApp {
         };
         let page = WorkbenchPage::from_phase(current);
         match page.investigation_neighbor(delta < 0) {
-            Some(next) => self.open_phase_picker(next.phase()),
+            Some(next) => self.open_guided_phase_planner(next.phase()),
             None if delta > 0 => self.open_report_from_current_origin(),
             None => self.log("phase", format!("already at {}", current.label())),
         }
@@ -1125,6 +1125,9 @@ impl ShellApp {
             return Some(InputUpdate::handled());
         }
         if let Some(update) = self.review_model_backed_map(plan) {
+            return Some(update);
+        }
+        if let Some(update) = self.review_selected_triage_plan(plan) {
             return Some(update);
         }
         self.open_credentials_for_planning_plan(plan)

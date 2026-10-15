@@ -6,6 +6,8 @@ mod batch_scan_config_lines;
 mod campaign_lines;
 mod context_study_lines;
 mod coverage_lines;
+mod fixed_jobs;
+mod progress;
 mod reader;
 mod summary;
 pub(crate) use campaign_lines::campaign_lines;

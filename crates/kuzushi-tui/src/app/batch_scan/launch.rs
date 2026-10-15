@@ -119,7 +119,10 @@ fn bind_presented_catalog_context(app: &ShellApp, input: &mut serde_json::Value)
     Ok(())
 }
 
-fn bind_presented_map_context(app: &ShellApp, input: &mut serde_json::Value) -> Result<()> {
+pub(super) fn bind_presented_map_context(
+    app: &ShellApp,
+    input: &mut serde_json::Value,
+) -> Result<()> {
     if input.get("threatModelRef").is_some() {
         return Ok(());
     }
@@ -231,14 +234,7 @@ mod tests {
         input["threatModelRef"] = serde_json::Value::Null;
         bind_presented_map_context(&app, &mut input).unwrap();
         assert!(input["threatModelRef"].is_null());
-        record_indexed_run(
-            target.path(),
-            "pending-map",
-            "context:build",
-            serde_json::json!({
-                "ok": true, "status": "completed", "data": {"snapshot": {"filesIndexed": 1}}
-            }),
-        );
+        record_indexed_run(target.path(), "pending-map", "threat-model:import", beta);
         append_typed_attempt(
             target.path(),
             kuzushi_core::WorkflowPhase::Map,

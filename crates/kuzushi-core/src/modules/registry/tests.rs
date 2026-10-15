@@ -3377,6 +3377,11 @@ process.stdin.on("end", () => {
     #[test]
     fn builtin_dispatch_policy_inventory_is_reviewed_as_one_contract() {
         let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        assert_eq!(
+            registry.tools.len(),
+            185,
+            "reviewed built-in policy tuple count"
+        );
         let rows = registry
             .tools
             .values()
@@ -3385,9 +3390,27 @@ process.stdin.on("end", () => {
             .join("\n");
         let fingerprint = blake3::hash(rows.as_bytes()).to_hex().to_string();
 
+        let prior_rows = registry
+            .tools
+            .values()
+            .filter(|tool| {
+                !matches!(
+                    tool.name.as_str(),
+                    "campaign:review-study" | "findings:review-source" | "threat-model:ask" | "planner:propose"
+                )
+            })
+            .map(builtin_policy_row_before_catalog_preview)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            blake3::hash(prior_rows.as_bytes()).to_hex().as_str(),
+            "7dc0c5debb19e4bdf769ea334c10b02c8572886e47bdef83f1b2dc5b4f140519",
+            "Existing policy tuples must remain unchanged apart from the reviewed catalog-preview runtime and advisory-search phase declarations"
+        );
+
         assert_eq!(
             fingerprint,
-            "7dc0c5debb19e4bdf769ea334c10b02c8572886e47bdef83f1b2dc5b4f140519",
+            "edc056ee9db6d16651892b852558e857baced59124bcaed7bb58f5c939cb7c14",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }
@@ -3455,5 +3478,18 @@ process.stdin.on("end", () => {
             "findingStore": tool.finding_store_requirement,
         }))
         .unwrap()
+    }
+
+    fn builtin_policy_row_before_catalog_preview(tool: &ToolDescriptor) -> String {
+        let mut prior = tool.clone();
+        if prior.name == "threat-intel:apply" {
+            assert_eq!(prior.runtime_requirement, RuntimeRequirement::InputAware);
+            prior.runtime_requirement = RuntimeRequirement::Always;
+        }
+        if prior.name == "ndiff:hunt-variants" {
+            assert_eq!(prior.phase, ToolPhase::Scan);
+            prior.phase = ToolPhase::Map;
+        }
+        builtin_policy_row(&prior)
     }
 }

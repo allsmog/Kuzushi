@@ -40,6 +40,18 @@ pub(crate) fn fit(value: &str, max_chars: usize) -> String {
     fit_with_ellipsis(value, max_chars)
 }
 
+pub(in crate::renderer) fn fit_scope_row(row: &str, width: usize) -> String {
+    let Some((name, binding)) = row.rsplit_once(" · ") else {
+        return fit(row, width);
+    };
+    let suffix = format!(" · {binding}");
+    let name_width = width.saturating_sub(UnicodeWidthStr::width(suffix.as_str()));
+    if name_width < 4 {
+        return fit(row, width);
+    }
+    format!("{}{suffix}", fit(name, name_width))
+}
+
 /// Fit a path-like string by truncating from the LEFT, so the most useful tail
 /// (`…/dir/file.rs:42`) stays visible instead of the repo-root prefix.
 pub(crate) fn fit_path(value: &str, max_chars: usize) -> String {

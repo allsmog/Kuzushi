@@ -45,6 +45,7 @@ mod audit_dataflow;
 mod cache_entries;
 mod completion_values;
 mod cpg_artifacts_cache;
+mod executable_options;
 mod finding_alias_cache;
 mod groups;
 mod hydrated_reads;
@@ -130,6 +131,8 @@ pub(crate) struct WorkbenchCache {
     scan_recommendations: Option<ScanRecommendationsCache>,
     prompt_overrides: PromptOverrideCache,
     health_checks: BTreeMap<String, ViewHealthChecks>,
+    executable_options: BTreeMap<(PathBuf, ViewHydrationKey), Vec<String>>,
+    executable_generation: u64,
     finding_aliases: FindingAliasCache,
     finding_patch_truth: FindingPatchTruthCache,
     finding_audit_dataflow: FindingAuditDataflowCache,
@@ -493,6 +496,7 @@ impl WorkbenchCache {
         self.scan_recommendations = None;
         self.prompt_overrides.invalidate();
         self.health_checks.clear();
+        self.invalidate_executable_options();
         self.clear_view_hydration_loading();
     }
 

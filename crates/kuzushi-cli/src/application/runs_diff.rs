@@ -1,9 +1,8 @@
 //! `kz runs diff` — scan-to-scan comparison over the durable finding history.
 //!
 //! Presentation over `kuzushi_core::findings::compare_scan_runs`, which
-//! classifies by durable identity and refuses to call a finding `resolved`
-//! unless the compare run provably re-examined it. Findings the compare run
-//! cannot honestly retire surface as `not_rescanned` with the missing proof.
+//! reports recorded presence and coverage without inferring a fix. Legacy JSON
+//! classifications remain available for compatibility and are labeled explicitly.
 
 use anyhow::{Context, Result};
 use kuzushi_core::findings::{
@@ -16,6 +15,7 @@ use kuzushi_core::{
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+mod observation_output;
 
 pub(crate) fn runs_diff_command(
     target: PathBuf,
@@ -267,16 +267,13 @@ fn runs_diff_json(diff: &RunsDiff) -> Value {
         "contextComparison": diff.base_context.comparison_label(&diff.compare_context),
         "baseStatus": diff.base_status(),
         "compareStatus": diff.compare_status(),
-        "counts": {
-            "new": diff.keys_of(ScanComparisonClass::New).len(),
-            "reopened": diff.keys_of(ScanComparisonClass::Reopened).len(),
-            "persisting": diff.keys_of(ScanComparisonClass::Persisting).len(),
-            "resolved": diff.keys_of(ScanComparisonClass::Resolved).len(),
-            "notRescanned": diff.keys_of(ScanComparisonClass::NotRescanned).len(),
-            "uncertainMatches": diff.comparison.uncertain.len(),
-            "changed": changed.len(),
-            "stable": diff.stable_count(),
-        },
+        "observationSchemaVersion": 1,
+        "counts": legacy_counts_json(diff),
+        "observationCounts": observation_output::counts_json(&diff.comparison),
+        "observationPresence": observation_output::presence_json(&diff.comparison),
+        "legacyClassifications": {"fixEvidence": false,
+            "fields": ["new", "reopened", "persisting", "resolved", "notRescanned"],
+            "note": "Compatibility classifications describe recorded presence. Use observationPresence for coverage; no field establishes a fix."},
         "warnings": diff.warnings,
         "decisionSummary": diff.decision_summary.as_ref().map(decision_summary_json),
         "new": diff.keys_of(ScanComparisonClass::New),
@@ -291,14 +288,32 @@ fn runs_diff_json(diff: &RunsDiff) -> Value {
     })
 }
 
+fn legacy_counts_json(diff: &RunsDiff) -> Value {
+    serde_json::json!({
+            "new": diff.keys_of(ScanComparisonClass::New).len(),
+            "reopened": diff.keys_of(ScanComparisonClass::Reopened).len(),
+            "persisting": diff.keys_of(ScanComparisonClass::Persisting).len(),
+            "resolved": diff.keys_of(ScanComparisonClass::Resolved).len(),
+            "notRescanned": diff.keys_of(ScanComparisonClass::NotRescanned).len(),
+            "uncertainMatches": diff.comparison.uncertain.len(),
+            "changed": diff.changed().len(),
+            "stable": diff.stable_count(),
+    })
+}
+
 fn absence_coverage_json(comparison: &ScanRunComparison) -> Vec<Value> {
-    comparison.findings.iter().filter(|row| row.after.is_none()).map(|row| {
-        serde_json::json!({
-            "findingKey": row.stable_key,
-            "status": if row.reassessment_block.is_some() { "not_reassessed" } else { "not_observed" },
-            "reason": row.reassessment_block,
+    comparison
+        .findings
+        .iter()
+        .filter(|row| row.after.is_none())
+        .map(|row| {
+            serde_json::json!({
+                "findingKey": row.stable_key,
+                "status": row.observation_presence().as_str(),
+                "reason": row.reassessment_block,
+            })
         })
-    }).collect()
+        .collect()
 }
 
 fn decision_summary_json(summary: &RunsDiffDecisionSummary) -> Value {
@@ -307,6 +322,8 @@ fn decision_summary_json(summary: &RunsDiffDecisionSummary) -> Value {
         "withStoredDecision": summary.with_stored_decision,
         "carryForward": summary.carry_forward,
         "conflicts": summary.conflicts,
+        "sourceApplicability": "not_assessed",
+        "carryForwardIsSourceApproval": false,
     })
 }
 
@@ -337,7 +354,12 @@ fn signature_json(signature: &ScanFindingSignature) -> Value {
 }
 
 fn runs_diff_plain(diff: &RunsDiff) -> String {
-    let mut lines = vec![diff_title(diff), diff_status(diff), diff_counts(diff)];
+    let mut lines = vec![
+        diff_title(diff),
+        diff_status(diff),
+        diff_counts(diff),
+        "Absence does not establish a fix.".into(),
+    ];
     lines.push(format!("Base source: {}", diff.base_source.label()));
     lines.push(format!("Later source: {}", diff.compare_source.label()));
     lines.push(format!(
@@ -349,34 +371,12 @@ fn runs_diff_plain(diff: &RunsDiff) -> String {
         "Later threat model: {}",
         diff.compare_context.label()
     ));
-    append_absence_coverage(&mut lines, &diff.comparison);
     append_warnings(&mut lines, &diff.warnings);
     append_decision_summary(&mut lines, diff.decision_summary.as_ref());
-    append_named_ids(&mut lines, "New", &diff.keys_of(ScanComparisonClass::New));
-    append_named_ids(
-        &mut lines,
-        "Reopened",
-        &diff.keys_of(ScanComparisonClass::Reopened),
-    );
+    observation_output::append_presence(&mut lines, &diff.comparison);
     append_uncertain_rows(&mut lines, &diff.comparison.uncertain);
-    append_named_ids(
-        &mut lines,
-        "Resolved",
-        &diff.keys_of(ScanComparisonClass::Resolved),
-    );
-    append_not_rescanned(&mut lines, &diff.not_rescanned());
     append_change_rows(&mut lines, &diff.changed());
     format!("{}\n", lines.join("\n"))
-}
-
-fn append_absence_coverage(lines: &mut Vec<String>, comparison: &ScanRunComparison) {
-    for row in comparison.findings.iter().filter(|row| row.after.is_none()) {
-        let assessment = row
-            .reassessment_block
-            .as_deref()
-            .unwrap_or("covered but not observed; absence alone is not a fix");
-        lines.push(format!("Reassessment {}: {assessment}", row.stable_key));
-    }
 }
 
 fn diff_title(diff: &RunsDiff) -> String {
@@ -388,12 +388,8 @@ fn diff_title(diff: &RunsDiff) -> String {
 
 fn diff_counts(diff: &RunsDiff) -> String {
     format!(
-        "new={} reopened={} persisting={} resolved={} not_rescanned={} uncertain={} changed={} stable={}",
-        diff.keys_of(ScanComparisonClass::New).len(),
-        diff.keys_of(ScanComparisonClass::Reopened).len(),
-        diff.keys_of(ScanComparisonClass::Persisting).len(),
-        diff.keys_of(ScanComparisonClass::Resolved).len(),
-        diff.keys_of(ScanComparisonClass::NotRescanned).len(),
+        "{} uncertain={} changed={} stable={}",
+        observation_output::counts_label(&diff.comparison),
         diff.comparison.uncertain.len(),
         diff.changed().len(),
         diff.stable_count(),
@@ -413,35 +409,20 @@ fn append_warnings(lines: &mut Vec<String>, warnings: &[String]) {
 }
 
 fn append_decision_summary(lines: &mut Vec<String>, summary: Option<&RunsDiffDecisionSummary>) {
-    let Some(summary) = summary else {
+    let Some(summary) = summary.filter(|summary| summary.identities > 0) else {
         return;
     };
     lines.push(format!(
-        "decisions: identities={} stored={} carry_forward={} conflicts={}",
-        summary.identities, summary.with_stored_decision, summary.carry_forward, summary.conflicts
+        "Recorded decisions: {} of {} finding identities.",
+        summary.with_stored_decision, summary.identities
     ));
-}
-
-fn append_named_ids(lines: &mut Vec<String>, label: &str, finding_keys: &[&str]) {
-    if !finding_keys.is_empty() {
-        lines.push(format!("{label}:"));
-        lines.extend(
-            finding_keys
-                .iter()
-                .map(|finding_key| format!("  {finding_key}")),
-        );
+    lines.push("Check decision sources in Review before reusing a verdict.".into());
+    if summary.conflicts > 0 {
+        lines.push(format!(
+            "Differing snapshot verdicts: {}",
+            summary.conflicts
+        ));
     }
-}
-
-fn append_not_rescanned(lines: &mut Vec<String>, rows: &[(&str, &str)]) {
-    if rows.is_empty() {
-        return;
-    }
-    lines.push("Not rescanned (absence unproven):".to_string());
-    lines.extend(
-        rows.iter()
-            .map(|(finding_key, reason)| format!("  {finding_key} — {reason}")),
-    );
 }
 
 fn append_uncertain_rows(lines: &mut Vec<String>, rows: &[ScanUncertainMatch]) {

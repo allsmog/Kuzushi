@@ -31,24 +31,42 @@ impl ShellApp {
         let Some(model) = self.agent_model_for_question(&prior, &operator_question) else {
             return Vec::new();
         };
-        let dispatch = match self.build_agent_dispatch(
+        let current_target = self.target_owned();
+        self.router.answers_mut().restore_failed_question(
+            Some(target.clone()),
+            current_target,
+            &operator_question,
+        );
+        match self.prepare_question_plan(
             prior.clone(),
             operator_question.clone(),
             model,
             target,
             request.attachment,
         ) {
-            Ok(dispatch) => dispatch,
+            Ok(()) => Vec::new(),
             Err(error) => {
                 self.show_agent_question_error(
                     &prior,
                     &operator_question,
-                    format!("ask could not bind conversation context: {error}"),
+                    format!("Question needs a reviewed plan: {error}"),
                 );
-                return Vec::new();
+                Vec::new()
             }
-        };
-        vec![ShellEffect::DispatchAgent(dispatch)]
+        }
+    }
+
+    fn prepare_question_plan(
+        &mut self,
+        prior: AgentChatView,
+        question: String,
+        model: String,
+        target: PathBuf,
+        attachment: AskAttachment,
+    ) -> anyhow::Result<()> {
+        let dispatch =
+            self.build_agent_dispatch(prior, question.clone(), model, target, attachment)?;
+        self.plan_context_question(&question, &dispatch.agent_prompt)
     }
 
     fn present_submitted_agent_question(&mut self, question: &str) {

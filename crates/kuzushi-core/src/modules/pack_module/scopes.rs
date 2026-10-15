@@ -8,7 +8,7 @@ pub(super) fn descriptor() -> ToolDescriptor {
                 .choices(&["create", "latest", "read", "edit", "accept", "files"]).default(json!("create")),
             opt("draft", OptionType::Json, "Scope draft for create. Omit to keep the whole repository together."),
             opt("proposalRef", OptionType::Json, "Exact saved scope revision. Required for read, edit, accept, and files."),
-            opt("edit", OptionType::Json, "One explicit rename, merge, split, exclusion, boundary edit, shared-discovery choice, or whole-repository edit."),
+            opt("edit", OptionType::Json, "One explicit scope addition, rename, merge, split, exclusion, boundary edit, shared-context creation/removal, shared-discovery choice, or whole-repository edit."),
             opt("acknowledgements", OptionType::Json, "Acceptance acknowledgements for inventory limitations, overlapping discovery, and exclusions. Required for accept."),
             opt("fileFilter", OptionType::Json, "Membership, uncovered, excluded, overlap, or conflicting-exclusion file filter. Required for files."),
             opt("offset", OptionType::Int, "File page offset.").integer_range(0, 100000).default(json!(0)),

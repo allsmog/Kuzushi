@@ -58,15 +58,57 @@ fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(St
         .into_iter()
         .map(|binding| (binding.key, binding.label))
         .collect();
+    if crate::ui_view_models::review_queue_navigation_footer(app)
+        && has_review_queue_bindings(&bindings)
+    {
+        return review_navigation_rows(bindings);
+    }
     bindings.sort_by_key(|binding| wrapped_binding_priority((&binding.0, &binding.1)));
     distribute_wrapped_bindings(bindings)
 }
 
+fn has_review_queue_bindings(bindings: &[(String, String)]) -> bool {
+    if bindings
+        .iter()
+        .any(|(key, _)| matches!(key.as_str(), "Ctrl+N" | "Ctrl+P" | "Ctrl+N/P"))
+    {
+        return false;
+    }
+    ["End", "G"]
+        .iter()
+        .all(|expected| bindings.iter().any(|(key, _)| key == expected))
+}
+
+fn review_navigation_rows(
+    bindings: Vec<(String, String)>,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    const READER_KEYS: [&str; 3] = ["Esc", "Enter", "End"];
+    let (mut reader, mut actions): (Vec<_>, Vec<_>) = bindings
+        .into_iter()
+        .partition(|(key, _)| READER_KEYS.contains(&key.as_str()));
+    reader.sort_by_key(|(key, _)| READER_KEYS.iter().position(|candidate| candidate == key));
+    let reader = reader.into_iter().map(compact_reader_binding).collect();
+    actions.sort_by_key(|(key, _)| match key.as_str() {
+        "Ctrl+F" => 0,
+        "G" => 1,
+        _ => 2,
+    });
+    (reader, actions)
+}
+
+fn compact_reader_binding((key, label): (String, String)) -> (String, String) {
+    let label = match (key.as_str(), label.as_str()) {
+        ("Enter", "open detail") => "detail".to_string(),
+        _ => label,
+    };
+    (key, label)
+}
+
 fn wrapped_binding_priority(binding: (&str, &str)) -> u8 {
     match binding {
-        ("j/k", "select") | ("↑/↓", "action") | ("Ctrl+F", "filter ledger") => 0,
+        ("j/k", "select") | ("↑/↓", "action") | ("Ctrl+F", "filter") => 0,
         ("Ctrl+N" | "Ctrl+P" | "Ctrl+N/P", _) => 0,
-        ("Ctrl+C" | "Ctrl+G" | "Esc" | "Esc/q" | "q" | "PgUp/PgDn", _) => 0,
+        ("Ctrl+C" | "Ctrl+G" | "Ctrl+Y" | "Esc" | "Esc/q" | "q" | "PgUp/PgDn", _) => 0,
         ("Enter" | "Tab" | "Shift+Tab", _) => 1,
         (key, _) if looks_like_typed_command(key) => 3,
         _ => 2,
@@ -287,6 +329,40 @@ fn looks_like_physical_key(key: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn compact_paste_footer_keeps_inspection_clear_undo_and_interrupt_visible() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Workbench);
+        app.set_input_mode(crate::InputMode::Prompt);
+        app.editor_mut()
+            .insert_multiline_paste("first α\nsecond β\n");
+        for active in [false, true] {
+            if active {
+                app.set_running_tool_for_test("context:build");
+            }
+            let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
+            terminal
+                .draw(|frame| super::render_keybind_footer(frame, Rect::new(0, 0, 40, 3), &app))
+                .unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            for control in [
+                "Ctrl+Y", "inspect", "Esc", "clear", "Ctrl+_", "undo", "Ctrl+C",
+            ] {
+                assert!(
+                    text.contains(control),
+                    "{active}: missing {control}: {text}"
+                );
+            }
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -403,7 +479,7 @@ mod tests {
     fn wrapped_footer_keeps_global_ledger_filter_at_40_columns() {
         let mut bindings = vec![
             ("Esc", "prompt"),
-            ("Ctrl+F", "filter ledger"),
+            ("Ctrl+F", "filter"),
             ("Ctrl+C", "exit"),
             ("r", "Report"),
             ("Ctrl+G", "palette"),
@@ -415,7 +491,7 @@ mod tests {
         let (bottom, _) =
             keybindings_line_for_wrapped_row(bottom, 40, OverflowHint::ShowIf(overflow));
         let text = [line_text(&top), line_text(&bottom)].join("\n");
-        assert!(text.contains("Ctrl+F filter ledger"), "{text}");
+        assert!(text.contains("Ctrl+F filter"), "{text}");
         assert!(text.contains("Esc prompt"), "{text}");
     }
 

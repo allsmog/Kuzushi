@@ -144,19 +144,30 @@ fn append_comparison(lines: &mut Vec<String>, data: Option<&Value>) {
         lines.push("Comparing exact saved revisions…".into());
         return;
     };
-    if let Some(changes) = data["contextText"].as_array() {
-        for change in changes {
-            append_text_change(lines, change);
-        }
-        if changes.is_empty() {
-            lines
-                .push("No editable text differs. Other document sections may have changed.".into());
-        }
-    }
-    let mut structural = data.clone();
-    structural.as_object_mut().unwrap().remove("contextText");
+    let Some(fields) = data.as_object() else {
+        lines.push(
+            "Comparison result is invalid. Refresh the saved revisions before comparing.".into(),
+        );
+        lines.extend(pretty_lines(data));
+        return;
+    };
+    append_text_changes(lines, fields.get("contextText"));
+    let mut structural = fields.clone();
+    structural.remove("contextText");
     lines.extend([String::new(), "STRUCTURE AND COMPARISON COVERAGE".into()]);
-    lines.extend(pretty_lines(&structural));
+    lines.extend(pretty_lines(&Value::Object(structural)));
+}
+
+fn append_text_changes(lines: &mut Vec<String>, changes: Option<&Value>) {
+    let Some(changes) = changes.and_then(Value::as_array) else {
+        return;
+    };
+    for change in changes {
+        append_text_change(lines, change);
+    }
+    if changes.is_empty() {
+        lines.push("No editable text differs. Other document sections may have changed.".into());
+    }
 }
 
 fn append_text_change(lines: &mut Vec<String>, change: &Value) {

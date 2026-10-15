@@ -202,11 +202,9 @@ mod tests {
     #[test]
     fn every_registered_tool_rejects_an_unknown_option_key() {
         for tool in every_registered_descriptor() {
-            let error = validate_tool_input_options(
-                &tool,
-                json!({"kzq_definitely_unknown_option": true}),
-            )
-            .expect_err(&format!("{} accepted an unknown option key", tool.name));
+            let error =
+                validate_tool_input_options(&tool, json!({"kzq_definitely_unknown_option": true}))
+                    .expect_err(&format!("{} accepted an unknown option key", tool.name));
             let error = format!("{error:#}");
             assert!(
                 error.contains("unknown option"),
@@ -282,9 +280,7 @@ mod tests {
                     .chain(spec.aliases.iter().map(String::as_str))
                     .chain(spec.deprecated_aliases.iter().map(String::as_str))
                 {
-                    if let Some(owner) =
-                        seen.insert(key.to_ascii_lowercase(), spec.name.clone())
-                    {
+                    if let Some(owner) = seen.insert(key.to_ascii_lowercase(), spec.name.clone()) {
                         assert_eq!(
                             owner, spec.name,
                             "{}: input key {key:?} is claimed by both {owner:?} and {:?}",
@@ -305,7 +301,8 @@ mod tests {
                 assert!(
                     !(spec.required && spec.default.is_some()),
                     "{} option {} is required but declares an unreachable default",
-                    tool.name, spec.name
+                    tool.name,
+                    spec.name
                 );
             }
         }
@@ -324,6 +321,12 @@ mod tests {
                 .filter(char::is_ascii_alphanumeric)
                 .collect::<String>()
                 .to_ascii_lowercase();
+            // Scanner limits describe workload, while names such as
+            // secretScanMaxApiKey still retain their credential-shaped suffix.
+            let normalized = normalized
+                .strip_prefix("secretscan")
+                .filter(|suffix| suffix.starts_with("max"))
+                .unwrap_or(&normalized);
             // "token" alone would flag LLM token-count knobs like
             // maxTokensPerChunk; only auth-token shapes count.
             let credential_token = normalized.ends_with("token")
@@ -344,6 +347,10 @@ mod tests {
                 .iter()
                 .any(|needle| normalized.contains(needle))
         };
+        assert!(!secret_shaped("secretScanMaxFileBytes"));
+        assert!(!secret_shaped("secret_scan_max_entries"));
+        assert!(secret_shaped("secretScanMaxApiKey"));
+        assert!(secret_shaped("secretScanPassword"));
         for tool in every_registered_descriptor() {
             for option in &tool.options {
                 let mut names = vec![option.name.clone()];

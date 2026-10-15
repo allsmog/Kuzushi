@@ -241,8 +241,39 @@ target project. See [Durable shell session transcripts](architecture/session-tra
 The Rust shell uses the same descriptors:
 
 - `show options [tool]` lists accepted names, aliases, types, and values.
+  The interactive browser selects one setting with arrows or `j/k`; wide
+  terminals show list and detail together. `PgUp/PgDn` pages the selected
+  detail, and `s/a/m` switches Standard, Advanced and Missing views.
+  Enter opens an editable setting. Enter or Ctrl+S saves for this session;
+  Ctrl+G explicitly saves globally. Role model options retain their existing
+  global scope, which the editor names before saving. Escape keeps the field
+  draft and cursor for reopening. Shift+Enter inserts a newline; multiline
+  paste stays in the field. Validation preserves invalid drafts and stored
+  values. Page keys reveal long validation errors. Exit discloses unsaved
+  option drafts without echoing their contents. Drafts are process-local.
+  Workflow-supplied structured references remain visible and read-only in
+  this browser; their approved plan or context picker owns edits. Stored
+  defaults never mutate the frozen inputs of an already approved run.
+  A global save keeps any higher-priority session or workspace override and
+  discloses that effective scope. Failed persistence is reported as a value
+  changed in memory, with a retry action, rather than a saved setting.
 - `set <key> <value>` writes a session option for the focused tool.
 - `unset <key>` clears a session option.
+
+Cargo audit supports `binary`, `advisoryDb`, `offline`, `allowStale`,
+`timeoutMs` and `maxLockfileBytes`. Its SAST equivalents are
+`cargoAuditBinary`, `cargoAuditAdvisoryDb`, `cargoAuditOffline`,
+`cargoAuditAllowStale`, `cargoAuditTimeoutMs` and `cargoAuditMaxLockfileBytes`.
+They require the Cargo audit task and use shared descriptor validation.
+Default network mode permits database updates and yanked-package checks;
+select offline explicitly to disable both. Stale-data consent is separate.
+Approval shows the frozen settings. The default job time allowance is 600000
+ms across lockfile captures and roots; the maximum is 86400000 ms. Each capture
+defaults to 16 MiB with a 64 MiB maximum. Source authentication is separate.
+The selected directory must contain a regular Cargo.lock. Source reachability
+and nested lockfiles are not inspected, and an exact-file scope is refused.
+Captured lockfile hashes appear in the run receipt. The source SHA does not
+establish advisory database freshness or actual dependency deployment.
 - `setg <key> <value>` writes a global option.
 - `unsetg <key>` clears a global option.
 - `scan` prepares `sast:scan` input from the option store before dispatch.
@@ -1106,3 +1137,31 @@ revision can resume the original unstarted jobs; it does not add jobs or repeat
 completed ones. Unstarted parked work appears as pending in occurrence reports.
 Runtime-free work can continue without provider capacity. Cancellation and
 unresolved reservations never return committed calls to the allowance.
+
+### Component maps with unknown relationships
+
+An accepted Map can show recorded components before data flows are known.
+Summary states the source description and the unknown relationships; DFD shows
+the recorded node and its linked context without inventing connections. A
+component map does not establish complete architecture coverage. Generated
+repository-scope placeholders still require source or design context.
+
+At 12 rows or fewer, idle Map navigation keeps the document visible.
+`PgUp/PgDn` reads Summary, `Enter` opens its selected DFD component, and a second
+`Enter` opens linked context. `Enter` returns to topology. `Esc` returns input to
+the command prompt. Active work, input drafts and pending decisions retain their
+normal controls. Accepted Map context remains tied to its exact revision even
+when another context is active.
+
+### Inspecting tools outside supported defaults
+
+When a filter has only Experimental or Compatibility matches, arrows select a
+tool and Enter opens its settings. Settings Escape returns to the same filter
+and selected tool. During field editing, Escape keeps that field's draft first;
+the next Escape returns to tools. Support Escape gives input to the composer.
+
+Inspection starts no work and leaves supported defaults unchanged. Every match
+is reachable, including lists larger than five tools. Drafts and cursor position
+survive navigation; a warning takes Escape before back-navigation. Plain output
+shows the same selection and support information. Mixed supported and
+experimental matches retain the existing tools projection.

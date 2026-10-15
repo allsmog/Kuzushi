@@ -157,7 +157,9 @@ fn sast_scan_options() -> Vec<OptionSpec> {
     options.extend(sast_selection_options());
     options.extend(agentic_inventory_options());
     options.extend(sast_semgrep_options());
+    options.extend(crate::modules::native_scanners::cargo_audit_study_options());
     options.extend(sast_secret_scan_options());
+    options.extend(sast_iac_scan_options());
     options.extend(sast_whitebox_options());
     options.extend(sast_post_processing_options());
     options.extend(sast_patch_options());
@@ -177,6 +179,13 @@ fn sast_semgrep_options() -> Vec<OptionSpec> {
             "Rule files or selectors for the selected Semgrep task. Local files allow offline scans.").advanced(),
         opt("semgrepBinary", OptionType::String,
             "Executable for the selected Semgrep task.").advanced(),
+        opt("semgrepJobs", OptionType::Int,
+            "Semgrep scan workers within each selected job. Default one; separate from investigation concurrency.")
+            .integer_range(1,256).advanced(),
+        opt("semgrepTimeoutMs", OptionType::Int,
+            "Semgrep subprocess time allowance across this job's roots and file batches. Default is 1800000 ms; source authentication is separate.")
+            .aliases(&["semgrep_timeout_ms"])
+            .integer_range(1, crate::scan::MAX_SEMGREP_JOB_TIMEOUT_MS as i64).advanced(),
     ]
 }
 
@@ -190,6 +199,17 @@ fn sast_secret_scan_options() -> Vec<OptionSpec> {
             .aliases(&["secret_scan_max_entries"]).integer_range(1, 100_000).advanced(),
         opt("secretScanMaxTotalBytes", OptionType::Int, "Secret content read allowance across this scan job. Default and ceiling are 512 MiB.")
             .aliases(&["secret_scan_max_total_bytes"]).integer_range(1024, 536_870_912).advanced(),
+    ]
+}
+
+fn sast_iac_scan_options() -> Vec<OptionSpec> {
+    vec![
+        opt("iacScanMaxFileBytes", OptionType::Int, "IaC maximum bytes per file; default is 512 KiB.")
+            .aliases(&["iac_scan_max_file_bytes"]).integer_range(1024, 67_108_864).advanced(),
+        opt("iacScanMaxEntries", OptionType::Int, "IaC directory entry allowance; default and ceiling are 100000.")
+            .aliases(&["iac_scan_max_entries"]).integer_range(1, 100_000).advanced(),
+        opt("iacScanMaxTotalBytes", OptionType::Int, "IaC total read allowance, including truncation probes; default and ceiling are 512 MiB.")
+            .aliases(&["iac_scan_max_total_bytes"]).integer_range(1024, 536_870_912).advanced(),
     ]
 }
 

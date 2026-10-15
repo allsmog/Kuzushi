@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -13,9 +14,9 @@ const IMPORTER_DEPENDENCY_BLOCKS: &[&str] =
 const PACKAGE_DEPENDENCY_BLOCKS: &[&str] =
     &["dependencies", "optionalDependencies", "peerDependencies"];
 
-pub(super) fn pnpm_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn pnpm_lock_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
     let source = relative_display(target, path);
     let mut edges = importer_edges(&value, &source);
@@ -23,9 +24,9 @@ pub(super) fn pnpm_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepe
     Ok(edges)
 }
 
-pub(super) fn pnpm_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn pnpm_lock_components(target: &SbomInputs, path: &Path) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
     let source = relative_display(target, path);
     let mut components = importer_components(target, path, &value, &source);

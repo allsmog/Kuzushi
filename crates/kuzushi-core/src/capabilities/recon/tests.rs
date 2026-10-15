@@ -129,12 +129,12 @@ OUT
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result.get("status").and_then(Value::as_str),
-            Some("completed")
+            Some("partial")
         );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
-            .is_some_and(|summary| summary.starts_with("recon:nmap discovered")));
+            .is_some_and(|summary| summary.starts_with("External observations")));
         assert_eq!(
             result
                 .pointer("/data/hosts/0/address")
@@ -451,7 +451,7 @@ HTTP
         let output = result["output"].as_str().unwrap();
         assert_eq!(
             output,
-            "recon:http-fingerprint registered https://www.example.com as https:443"
+            "External context observations. No repository coverage or source accuracy is established.\nrecon:http-fingerprint registered https://www.example.com as https:443"
         );
     }
 
@@ -543,6 +543,7 @@ authorization: Default::default(),
             target: "192.0.2.10".to_string(),
             ports: "80".to_string(),
             binary: binary.display().to_string(),
+            timeout_seconds: 60,
         };
         let cancellation = ScanCancellation::default();
         let worker_cancellation = cancellation.clone();

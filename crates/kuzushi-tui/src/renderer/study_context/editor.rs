@@ -2,7 +2,7 @@ use super::*;
 use crate::app::{ContextEditDraft, ContextEditMode};
 use crate::renderer::shared::{field_editor_lines, text::wrap_text};
 use crate::ui_view_models::context_edit::{
-    context_edit_controls, context_edit_review_lines, context_edit_title,
+    context_draft_controls, context_edit_review_lines, context_edit_title,
 };
 
 pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
@@ -33,8 +33,16 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &ShellApp, area: Rect) {
     render_edit_notice(frame, draft, body);
     body.y += 1;
     body.height = body.height.saturating_sub(1);
+    if let Some(note) = app.context_checkpoint_note() {
+        frame.render_widget(
+            Paragraph::new(fit(&note, body.width as usize)).style(theme::muted()),
+            Rect::new(body.x, body.y, body.width, 1),
+        );
+        body.y += 1;
+        body.height = body.height.saturating_sub(1);
+    }
     render_editor_body(frame, draft, body);
-    render_edit_controls(frame, draft.mode, footer);
+    render_edit_controls(frame, draft, footer);
 }
 
 fn render_edit_notice(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {
@@ -48,10 +56,10 @@ fn render_edit_notice(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rec
     );
 }
 
-fn render_edit_controls(frame: &mut Frame<'_>, mode: ContextEditMode, area: Rect) {
+fn render_edit_controls(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {
     frame.render_widget(
         Paragraph::new(
-            context_edit_controls(mode)
+            context_draft_controls(draft)
                 .into_iter()
                 .map(|line| Line::styled(line, theme::accent()))
                 .collect::<Vec<_>>(),
@@ -61,6 +69,18 @@ fn render_edit_controls(frame: &mut Frame<'_>, mode: ContextEditMode, area: Rect
 }
 
 fn render_editor_body(frame: &mut Frame<'_>, draft: &ContextEditDraft, area: Rect) {
+    if draft.mode == ContextEditMode::Recovery {
+        let lines = crate::ui_view_models::context_edit::context_recovery_lines(
+            draft,
+            area.width as usize,
+            area.height as usize,
+        );
+        frame.render_widget(
+            Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()),
+            area,
+        );
+        return;
+    }
     if draft.mode == ContextEditMode::Writing {
         render_text_field(frame, draft, area);
         return;

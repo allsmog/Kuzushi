@@ -118,21 +118,12 @@ pub(crate) fn codeql_multi_language_output(
 
 #[derive(Debug)]
 pub(crate) struct CodeqlDatabase {
-    pub(crate) db_path: PathBuf,
     pub(crate) language: String,
-    pub(crate) managed: Option<
-        crate::codeql_repository_execution::ValidatedManagedCodeqlDatabase,
-    >,
+    pub(crate) managed: crate::codeql_repository_execution::ValidatedManagedCodeqlDatabase,
 }
 
 impl CodeqlDatabase {
-    pub(crate) fn run_verified<T>(
-        &self,
-        operation: impl FnOnce(&Path) -> Result<T>,
-    ) -> Result<T> {
-        match &self.managed {
-            Some(database) => database.run_verified(operation),
-            None => operation(&self.db_path),
-        }
+    pub(crate) fn run_verified<T>(&self, operation: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
+        self.managed.run_verified(operation)
     }
 }

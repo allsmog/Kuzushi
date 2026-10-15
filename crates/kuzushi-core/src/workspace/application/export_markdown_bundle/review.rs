@@ -4,6 +4,7 @@ use super::*;
 /// Names the observation a decision was made against, so a later run on
 /// different source never silently inherits the verdict.
 pub(super) fn push_bundle_decision_basis(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    push_reviewed_source(out, record.reviewed_source.as_ref());
     let Some(basis) = record.review_decision_basis.as_ref() else {
         return;
     };
@@ -28,6 +29,20 @@ pub(super) fn push_bundle_decision_basis(out: &mut String, record: &WorkspaceFin
         bundle_source_comparison_label(basis.source_comparison)
     ));
     push_bundle_recorded_git(out, "Later observation", later.source_git.as_ref());
+}
+
+fn push_reviewed_source(out: &mut String, capture: Option<&crate::findings::ReviewSourceCapture>) {
+    let Some(capture) = capture else {
+        return;
+    };
+    out.push_str(&format!(
+        "- **Explicitly reviewed source:** captured {} · snapshot {} · content {}\n",
+        markdown_code_span(&capture.captured_at),
+        markdown_code_span(&capture.snapshot_hash),
+        markdown_code_span(&capture.tree_hash)
+    ));
+    push_bundle_recorded_git(out, "Reviewed", capture.source_git.as_ref());
+    out.push_str("- **Review limit:** human decision at the captured source; this export does not recheck the current checkout or establish a fix\n");
 }
 
 fn push_bundle_recorded_git(

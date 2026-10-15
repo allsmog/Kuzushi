@@ -6,6 +6,13 @@ use kuzushi_core::runtime::{
 const PERSISTENCE_FAILURE: &str = "; additionally, terminal run persistence failed";
 
 impl AgentCallAudit {
+    pub(crate) fn refused_before_provider_request(&self) -> bool {
+        !self.call_attempted
+            && self.failure.as_ref().is_some_and(|failure| {
+                failure.error_class == kuzushi_core::RuntimeFailureClass::AllowanceRefused
+            })
+    }
+
     pub(crate) fn with_failure(mut self, error: &anyhow::Error) -> Self {
         self.failure = Some(model_failure_metadata(error));
         self

@@ -15,13 +15,64 @@ use kuzushi_core::{PatchLifecycleRecord, PatchLifecycleState, WorkspaceExportFor
 pub(super) fn review_phase_model(app: &ShellApp) -> ReviewPhaseModel {
     let finding = selected_finding_detail_model(app);
     ReviewPhaseModel {
-        comparison_control: review_comparison_control(app),
+        trace: review_trace_model(app, finding.as_ref()),
+        comparison_control: review_source_controls(app),
         review: review_queue_model(app, active_review_queue_mode(app)),
         finding,
         selection_disclosure: review_selection_disclosure(app),
         next_plan: super::map::next_scans_state(app),
         chains: super::chain_artifacts::chain_artifacts_model(app),
     }
+}
+
+fn review_trace_model(
+    app: &ShellApp,
+    detail: Option<&super::FindingDetailModel>,
+) -> Option<super::TraceEvidenceModel> {
+    if !app.router.workbench().trace_view_open() {
+        return None;
+    }
+    let selected = current_finding_for_detail(app);
+    let path = crate::ui_view_models::taint_flow_path_for_finding(
+        app,
+        selected.as_ref().map(|(_, finding)| finding),
+    );
+    super::trace_evidence::trace_evidence_model(app, selected.as_ref(), detail, &path)
+}
+
+fn review_source_controls(app: &ShellApp) -> Option<String> {
+    let mut controls = current_source_control(app).into_iter().collect::<Vec<_>>();
+    controls.extend(review_comparison_control(app));
+    controls.extend(source_trace_control(app));
+    (!controls.is_empty()).then(|| controls.join(" · "))
+}
+
+fn source_trace_control(app: &ShellApp) -> Option<String> {
+    if !app.input().is_empty() || current_finding_for_detail(app).is_none() {
+        return None;
+    }
+    let keys = app.ui().keymap_binding_labels("workbench", "trace", &["t"]);
+    (!keys.is_empty()).then(|| format!("{} · source trace", review_comparison_keys(app, keys)))
+}
+
+fn current_source_control(app: &ShellApp) -> Option<String> {
+    if !app.input().is_empty() || app.target().is_none() {
+        return None;
+    }
+    let (_, finding) = crate::ui_view_models::visible_finding_at_cursor(app)?;
+    finding.id?;
+    let keys = app
+        .ui()
+        .keymap_binding_labels("workbench", "review_current_source", &["Y"]);
+    if keys.is_empty() {
+        return None;
+    }
+    let label = if app.viewport().columns < 80 {
+        "source review"
+    } else {
+        "review current source"
+    };
+    Some(format!("{} · {label}", review_comparison_keys(app, keys)))
 }
 
 fn review_comparison_control(app: &ShellApp) -> Option<String> {

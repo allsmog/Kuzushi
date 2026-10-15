@@ -39,6 +39,7 @@ fn context_build_tool() -> ToolDescriptor {
         RuntimeRequirement::InputAware,
         FindingStoreRequirement::Optional,
     ))
+    .without_phase_result()
 }
 
 fn context_options() -> Vec<OptionSpec> {
@@ -90,7 +91,8 @@ pub(in crate::modules) fn context_lite_module() -> BuiltinModule {
             ToolPhase::Map,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
-        ))],
+        ))
+        .without_phase_result()],
         vec![dag("context-lite:index", "context", &["context:build"])],
     )
 }

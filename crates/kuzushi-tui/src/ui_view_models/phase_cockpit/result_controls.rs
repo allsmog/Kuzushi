@@ -3,7 +3,7 @@ use crate::{PhaseResultCommand, ShellApp};
 use kuzushi_core::WorkflowPhase;
 
 pub(crate) fn result_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    if app.input_mode() != crate::InputMode::Navigate {
+    if !app.phase_result_keys_are_available() {
         return None;
     }
     let phase = app.phase_result_target_phase()?;

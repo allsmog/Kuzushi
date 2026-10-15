@@ -106,6 +106,9 @@ fn scan_scope_state(model: &ScanPhaseModel) -> SurfaceState {
 }
 
 fn review_specs(model: &ReviewPhaseModel) -> Vec<PhaseSurfaceSpec> {
+    if model.trace.is_some() {
+        return vec![scrollable(PhaseSurfaceId::ReviewTrace)];
+    }
     let queue = if model.review.total_count == 0 {
         spec(
             PhaseSurfaceId::ReviewQueue,

@@ -57,7 +57,14 @@ impl ShellApp {
     }
 
     fn scroll_brief(&mut self, code: KeyCode) {
-        let page = self.viewport().rows.saturating_sub(5).max(1) as usize;
+        let checkpoint = self.study_checkpoint_note();
+        let notices = crate::ui_view_models::study_config::brief::notice_lines(
+            self.brief_editor().unwrap(),
+            checkpoint.as_deref(),
+        )
+        .len()
+        .min(2) as u16;
+        let page = self.viewport().rows.saturating_sub(4 + notices).max(1) as usize;
         let editor = self.brief_editor_mut().unwrap();
         match code {
             KeyCode::Up => editor.scroll = editor.scroll.saturating_sub(1),
@@ -76,6 +83,7 @@ impl ShellApp {
         if mode == BriefMode::Writing {
             self.insert_brief_text(text);
         }
+        self.checkpoint_study_choices();
         true
     }
 

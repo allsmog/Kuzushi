@@ -43,6 +43,52 @@ fn failed_dispatcher_survives_refresh_without_changing_focus_or_draft() {
 }
 
 #[test]
+fn recorded_allowance_stop_explains_remaining_work_without_calling_it_a_failure() {
+    let (root, mut app) = deck_app();
+    park_for_allowance(root.path());
+    app.open_campaign_view(Some("camp1".into()));
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: campaign camp1: 1 completed, 1 parked\n"),
+    );
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.clone().unwrap();
+    assert!(notice.contains("Allowance reached: 1 completed, 1 parked"));
+    assert!(notice.contains("Finish and report partial work"));
+    assert!(notice.contains("press a"));
+    assert!(!notice.contains("failure"));
+    app.refresh_campaign_deck();
+    assert_eq!(app.router.campaign().notice, Some(notice));
+}
+
+#[test]
+fn old_allowance_park_does_not_mask_a_new_dispatcher_failure() {
+    let (root, mut app) = deck_app();
+    park_for_allowance(root.path());
+    app.open_campaign_view(Some("camp1".into()));
+    failed_dispatcher(
+        &mut app,
+        root.path(),
+        Some("Error: prepared on different source\n"),
+    );
+    assert!(app.poll_campaign_completion());
+    let notice = app.router.campaign().notice.as_deref().unwrap();
+    assert!(notice.contains("different source"));
+    assert!(notice.contains("Review the recorded failure"));
+    assert!(!notice.contains("Allowance reached"));
+}
+
+fn park_for_allowance(root: &Path) {
+    let path = kuzushi_core::capabilities::campaign::campaign_queue_path(root, "camp1");
+    let mut queue: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    queue["jobs"]["j2"] =
+        serde_json::json!({"state":"parked","reason":"allowance-exhausted","attempts":0});
+    std::fs::write(path, serde_json::to_vec(&queue).unwrap()).unwrap();
+}
+
+#[test]
 fn a_failure_notice_follows_its_campaign_and_target_only() {
     let (root, mut app) = deck_app();
     app.open_campaign_view(Some("camp1".into()));

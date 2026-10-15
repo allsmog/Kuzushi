@@ -305,7 +305,7 @@ mod tests {
         let response: Value =
             serde_json::from_str(include_str!("fixtures/audit1_item12_actor_response.json"))
                 .unwrap();
-        let runtime = StructuredCarliniRuntime { response };
+        let runtime = StructuredCarliniRuntime { response, binding:None };
         let (workspace, store, config) = carlini_alias_test_context(temp.path());
         let trace = crate::run_artifacts::TraceHandle::jsonl(temp.path(), "carlini-source-delta");
         let ctx = ToolExecutionContext {
@@ -317,10 +317,11 @@ mod tests {
             authorization: Default::default(),
         };
 
+        approve_carlini_fixture(&ctx);
         let result = ModuleRegistry::with_v2_builtins()
             .execute_tool_with_runtime(
                 "offense-review:threat-hunt",
-                json!({"maxActors": 1, "runsPerActor": 1}),
+                carlini_fixture_input(&ctx, json!({"maxActors": 1, "runsPerActor": 1})),
                 &ctx,
                 Some(&runtime),
             )
@@ -366,6 +367,7 @@ mod tests {
         );
         let empty = StructuredCarliniRuntime {
             response: json!({"findings": []}),
+            binding:None,
         };
         check_repeated_carlini_delta(
             &workspace,
@@ -397,7 +399,7 @@ mod tests {
         ModuleRegistry::with_v2_builtins()
             .execute_tool_with_runtime(
                 "offense-review:threat-hunt",
-                json!({"maxActors":1,"runsPerActor":1}),
+                carlini_fixture_input(&ctx, json!({"maxActors":1,"runsPerActor":1})),
                 &ctx,
                 Some(runtime),
             )
@@ -424,6 +426,7 @@ mod tests {
             .collect();
         let runtime = StructuredCarliniRuntime {
             response: json!({"findings": rejected}),
+            binding:None,
         };
         let (workspace, store, config) = carlini_alias_test_context(temp.path());
         let trace = crate::run_artifacts::TraceHandle::jsonl(temp.path(), "carlini-rejections");
@@ -436,10 +439,11 @@ mod tests {
             authorization: Default::default(),
         };
 
+        approve_carlini_fixture(&ctx);
         let result = ModuleRegistry::with_v2_builtins()
             .execute_tool_with_runtime(
                 "offense-review:threat-hunt",
-                json!({"maxActors": 1, "maxFindings": 1}),
+                carlini_fixture_input(&ctx, json!({"maxActors": 1, "maxFindings": 1})),
                 &ctx,
                 Some(&runtime),
             )
@@ -472,15 +476,39 @@ mod tests {
         assert!(!trace_text.contains("defender-critic"));
     }
 
+    fn carlini_fixture_input(ctx: &ToolExecutionContext<'_>, mut input: Value) -> Value {
+        let work_id = ctx.trace.and_then(|trace|trace.run_artifact_location()).unwrap().1;
+        input["allowanceRef"] = json!({"schemaVersion":1,"investigationId":"owned-actor","revision":1,"workId":work_id});
+        input
+    }
+
+    fn approve_carlini_fixture(ctx: &ToolExecutionContext<'_>) {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let prepared=registry.prepare_dispatch_input("campaign:approve-allowance",json!({"investigationId":"owned-actor",
+            "expectedRevision":0,"model":ctx.config.model,"maxProviderCalls":4,"protectedReviewCalls":1,
+            "reason":"Owned actor observation regression"}),ctx,None).unwrap().authorize_explicit_headless();
+        registry.dispatch_prepared_input_with_runtime(prepared,ctx,None).unwrap();
+    }
+
+    #[derive(Clone)]
     struct StructuredCarliniRuntime {
         response: Value,
+        binding:Option<crate::allowance::AllowanceBinding>,
     }
 
     impl AgentRuntime for StructuredCarliniRuntime {
+        fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> { self.binding.as_ref() }
+        fn with_allowance_binding(&self,binding:crate::allowance::AllowanceBinding)->Result<Box<dyn AgentRuntime+'_>> {
+            Ok(Box::new(Self {binding:Some(binding),..self.clone()}))
+        }
         fn query_blocking(
             &self,
-            _request: AgentQueryRequest,
+            request: AgentQueryRequest,
         ) -> anyhow::Result<AgentQueryResponse> {
+            let binding=self.binding.as_ref().unwrap();
+            let reservation=binding.reserve(&request.model)?;
+            assert_eq!(binding.work().work,crate::allowance::InvestigationWork::Discovery);
+            binding.settle(reservation,RuntimeCostReport::incomplete(RuntimeCost::ZERO))?;
             Ok(AgentQueryResponse {
                 structured: Some(self.response.clone()),
                 ..AgentQueryResponse::default()

@@ -1,5 +1,8 @@
 use super::*;
 
+mod partition_inventory;
+use partition_inventory::count_partition_sources;
+
 pub(crate) fn build_taint_iris_next_plan(
     target: &Path,
     options: TaintIrisNextInput,
@@ -21,8 +24,9 @@ pub(crate) fn build_taint_iris_next_plan(
     let catalog = catalog_selection.catalog;
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
-    let backend =
-        configure_taint_iris_next_backend(&roots.repo_root, &options, &planning.languages)?;
+    let backend = configure_taint_iris_next_backend(
+        &roots.repo_root, &options, &planning.languages, &source_inventories.repo,
+    )?;
     Ok(finalize_taint_iris_next_plan(
         target,
         roots,
@@ -340,17 +344,17 @@ fn configure_taint_iris_next_backend(
     repo_root: &Path,
     options: &TaintIrisNextInput,
     languages: &[String],
+    source_paths: &[TaintIrisNextSourcePath],
 ) -> Result<TaintIrisNextBackendChoice> {
     let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root, languages)?;
     validate_explicit_taint_iris_next_backend(&backend)?;
     if options.target_subdir.is_none() {
-        let c_file_count = count_c_files_under(repo_root);
+        let c_file_count = count_partition_sources(source_paths);
         if should_recommend_partitioning(repo_root, c_file_count) {
             let parts = postgres_partitions_for(repo_root);
             backend.warnings.push(format!(
-                "target looks postgres-shaped with {c_file_count} .c files; consider partitioned \
-                 hunts in parallel with `targetSubdir` for each \
-                 subdir: {}",
+                "Repository inventory has {c_file_count} C-family sources and PostgreSQL-style boundaries. \
+                 Review scopes and workload before approving more work. Candidate directories: {}",
                 parts
                     .iter()
                     .take(8)
@@ -388,65 +392,6 @@ fn validate_explicit_taint_iris_next_backend(backend: &TaintIrisNextBackendChoic
             )
         });
     anyhow::bail!("{reason}")
-}
-
-/// Cheap .c-file count under a directory. Stops walking after
-/// `cap` to keep the partition heuristic from O(tree) scanning a
-/// 20GB monorepo just to decide whether to recommend partitioning.
-/// Returns the count saturated at `cap`.
-fn count_c_files_under(root: &Path) -> usize {
-    const CAP: usize = 2000;
-    let mut count = 0usize;
-    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if file_count_reached_cap(count, CAP) {
-            return count;
-        }
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if file_count_reached_cap(count, CAP) {
-                return count;
-            }
-            count_c_file_entry(entry, &mut stack, &mut count);
-        }
-    }
-    count
-}
-
-fn file_count_reached_cap(count: usize, cap: usize) -> bool {
-    count >= cap
-}
-
-fn count_c_file_entry(entry: std::fs::DirEntry, stack: &mut Vec<PathBuf>, count: &mut usize) {
-    let path = entry.path();
-    let Ok(file_type) = entry.file_type() else {
-        return;
-    };
-    if should_descend_taint_plan_dir(&path, file_type.is_dir()) {
-        stack.push(path);
-    } else if file_type.is_file() && is_c_family_source_path(&path) {
-        *count += 1;
-    }
-}
-
-fn should_descend_taint_plan_dir(path: &Path, is_dir: bool) -> bool {
-    is_dir && !is_skipped_taint_plan_dir(path)
-}
-
-fn is_skipped_taint_plan_dir(path: &Path) -> bool {
-    matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(".kuzushi" | ".git" | "target" | "node_modules")
-    )
-}
-
-fn is_c_family_source_path(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|ext| ext.to_str()),
-        Some("c" | "cpp" | "cc" | "cxx")
-    )
 }
 
 /// Bridge between `build_taint_iris_next_plan` and the discovery
@@ -948,7 +893,7 @@ fn phantom_taint_class_for_cwe(cwe: &str) -> &'static str {
 }
 
 #[cfg(test)]
-mod count_c_files_under_tests {
+mod partition_source_inventory_tests {
     use super::*;
 
     #[test]
@@ -972,7 +917,8 @@ mod count_c_files_under_tests {
         )
         .unwrap();
 
-        assert_eq!(count_c_files_under(temp.path()), 3);
+        let paths = collect_taint_iris_next_source_paths(temp.path(), None).unwrap();
+        assert_eq!(count_partition_sources(&paths), 3);
     }
 }
 

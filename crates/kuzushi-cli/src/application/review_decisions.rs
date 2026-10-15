@@ -2,7 +2,9 @@ use crate::application::findings::resolve_persisted_finding;
 use crate::support::require_cli_target;
 use anyhow::{Context, Result};
 use kuzushi_core::findings::{ReviewDecision, ReviewDecisionVerdict, TriageAuthor};
-use kuzushi_core::workspace::record_user_review_decision_for_finding;
+use kuzushi_core::workspace::{
+    record_user_review_decision_with_receipt, WorkspaceReviewDecisionReceipt,
+};
 use kuzushi_core::{Finding, FindingStore, WorkspaceTarget};
 use serde_json::json;
 use std::path::PathBuf;
@@ -21,8 +23,9 @@ pub(crate) fn decision_command(
     let store = FindingStore::open(workspace.findings_db_path())?;
     let finding = resolve_persisted_finding(&store, &reference, &workspace)?;
     let decision = human_review_decision(verdict, reason);
-    let decision_id = record_user_review_decision_for_finding(&workspace, &finding, &decision)?;
-    print_decision_command_result(&finding, decision_id, &decision, json_output)
+    let receipt =
+        record_user_review_decision_with_receipt(&workspace, &finding, &decision, None, None)?;
+    print_decision_command_result(&finding, &receipt, &decision, json_output)
 }
 
 fn review_decision_verdict_from_input(value: &str) -> Result<ReviewDecisionVerdict> {
@@ -55,36 +58,46 @@ fn human_review_decision(verdict: ReviewDecisionVerdict, reason: String) -> Revi
 
 fn print_decision_command_result(
     finding: &Finding,
-    decision_id: i64,
+    receipt: &WorkspaceReviewDecisionReceipt,
     decision: &ReviewDecision,
     json_output: bool,
 ) -> Result<()> {
     if json_output {
         println!(
             "{}",
-            serde_json::to_string_pretty(&decision_result_json(finding, decision_id, decision))?
+            serde_json::to_string_pretty(&decision_result_json(finding, receipt, decision))?
         );
     } else {
         println!(
-            "decision saved; will carry forward as decision #{decision_id} ({})",
+            "Decision #{} saved as {}.",
+            receipt.decision_id,
             decision.verdict.as_str()
         );
+        print_decision_source(receipt);
     }
     Ok(())
 }
 
 fn decision_result_json(
     finding: &Finding,
-    decision_id: i64,
+    receipt: &WorkspaceReviewDecisionReceipt,
     decision: &ReviewDecision,
 ) -> serde_json::Value {
     json!({
-        "decisionId": decision_id,
+        "decisionId": receipt.decision_id,
         "findingId": finding.id,
         "identityId": finding.identity_id.clone(),
         "fingerprint": finding.fingerprint.clone(),
         "verdict": decision.verdict.as_str(),
         "author": decision.author.as_str(),
         "reason": decision.rationale.clone(),
+        "sourceReceipt": receipt,
+        "currentCheckoutApplicability": "not_assessed",
     })
+}
+
+fn print_decision_source(receipt: &WorkspaceReviewDecisionReceipt) {
+    for line in receipt.source_lines() {
+        println!("{line}");
+    }
 }

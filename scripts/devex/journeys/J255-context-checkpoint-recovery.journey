@@ -1,0 +1,84 @@
+name: Recover an unfinished context copy after an owned process crash, with exact cursor and explicit discard
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_checkpoint.py @TMP_TARGET @ART @TMP_HOME seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | inventory
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Recovery source context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | mapped
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-base
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Down Down Down Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected
+keys: e
+require-live-snap: 20 EDIT CONTEXT COPY | editor
+keys: Enter C-u
+paste-file: @ART/checkpoint-text.txt
+keys: C-Home Right Right
+require-live-snap: 25 Draft saved locally | checkpointed
+ask: Does the editor show local checkpoint status separately from context acceptance and spending, while preserving multiline text and the cursor?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_checkpoint.py @TMP_TARGET @ART @TMP_HOME crash
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | restarted-study
+keys: Down Down Down Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | reinspected
+keys: e
+require-live-snap: 25 1 saved draft | recovery-choice
+expect: exact context
+resize: 160x48
+live-snap: recovery-160x48
+resize: 96x89
+live-snap: recovery-96x89
+resize: 80x24
+live-snap: recovery-80x24
+resize: 60x20
+live-snap: recovery-60x20
+resize: 40x12
+require-live-snap: 20 RECOVER CONTEXT DRAFT | recovery-40x12
+expect: Enter recover
+expect: ▸
+ask: Is the saved draft distinguishable and recoverable with visible controls across all six sizes, without silently choosing a draft or approving work?
+resize: 120x36
+keys: Enter
+require-live-snap: 25 Checkpoint α | recovered
+expect: second line 東京
+keys: Delete
+require-live-snap: 25 Chckpoint α | cursor-preserved
+require-live-snap: 25 Draft saved locally | edited-checkpoint
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_checkpoint.py @TMP_TARGET @ART @TMP_HOME edited
+keys: Escape
+require-live-snap: 20 ↑↓ Enter edit | edit-fields
+keys: d
+require-live-snap: 20 DISCARD CONTEXT DRAFT | discard-review
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | discarded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_checkpoint.py @TMP_TARGET @ART @TMP_HOME resolved
+keys: e
+require-live-snap: 20 EDIT CONTEXT COPY | no-resurrection
+expect-not: Chckpoint α
+expect-not: RECOVER CONTEXT DRAFT
+ask: Does recovery retain exact text and cursor, while explicit discard prevents resurrection and preserves the source context, global selection, observations and spending?
+keys: C-c
+require-exit: 10

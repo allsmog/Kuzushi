@@ -36,6 +36,7 @@ pub(crate) type FindingReviewSourceRead = Result<Option<FindingReviewSource>, St
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FindingReviewSource {
     pub(crate) basis: kuzushi_core::workspace::WorkspaceReviewDecisionBasis,
+    pub(crate) reviewed_source: Option<kuzushi_core::findings::ReviewSourceCapture>,
     pub(crate) decided_revision: RecordedSourceRevision,
     pub(crate) later_revision: Option<RecordedSourceRevision>,
 }
@@ -234,6 +235,7 @@ pub(crate) enum ViewHydrationKey {
     },
     FindingReviewSource {
         stable_fp: String,
+        decision_id: i64,
         decision_watermark: u64,
         observation_watermark: Option<u64>,
     },
@@ -277,6 +279,10 @@ pub(crate) enum ViewHydrationKey {
     HealthChecks {
         credential_env: String,
     },
+    ExecutableOptions {
+        requirements: Vec<kuzushi_core::modules::ExecutableRequirement>,
+        generation: u64,
+    },
     TargetProfile,
     MapArtifacts,
     CpgArtifacts,
@@ -286,6 +292,7 @@ pub(crate) enum ViewHydrationKey {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ViewHydrationValue {
+    ExecutableOptions(Vec<String>),
     FindingGroups(Result<kuzushi_core::findings::FindingGroupsPage, String>),
     FindingRelationships(Result<kuzushi_core::findings::FindingRelationshipPage, String>),
     FindingLessons(Result<kuzushi_core::findings::FindingLessonPage, String>),
@@ -524,9 +531,6 @@ impl ShellApp {
     }
 
     fn disclose_returning_workspace_drift(&mut self) {
-        if self.workspace_stale().is_some() {
-            return;
-        }
         let (current, history) = {
             let cache = self.workbench_cache().borrow();
             (
@@ -541,6 +545,11 @@ impl ShellApp {
         else {
             return;
         };
+        self.domain_mut()
+            .set_returning_source_unverified(returning_source_unverified(&current, &history));
+        if self.workspace_stale().is_some() {
+            return;
+        }
         let Some((change, message)) = returning_workspace_drift(&current, &history) else {
             return;
         };
@@ -642,10 +651,7 @@ fn returning_workspace_drift(
     current: &RunTargetGitMetadata,
     history: &[kuzushi_core::RunSummaryEntry],
 ) -> Option<(kuzushi_core::incremental_index::WorkspaceChange, String)> {
-    let prior = history.iter().find_map(|entry| match &entry.state {
-        kuzushi_core::RunSummaryEntryState::Ready(summary) => summary.target_git.as_ref(),
-        kuzushi_core::RunSummaryEntryState::Issue(_) => None,
-    })?;
+    let prior = latest_run_git(history)?;
     if prior.sha != current.sha {
         return Some((
             kuzushi_core::incremental_index::WorkspaceChange::GitHeadChanged,
@@ -656,12 +662,21 @@ fn returning_workspace_drift(
             ),
         ));
     }
-    (prior.dirty || current.dirty).then(|| {
-        (
-            kuzushi_core::incremental_index::WorkspaceChange::GitIndexChanged,
-            "worktree changes may make persisted run state stale · rerun the affected phase"
-                .to_string(),
-        )
+    None
+}
+
+fn returning_source_unverified(
+    current: &RunTargetGitMetadata,
+    history: &[kuzushi_core::RunSummaryEntry],
+) -> bool {
+    latest_run_git(history)
+        .is_some_and(|prior| prior.sha == current.sha && (prior.dirty || current.dirty))
+}
+
+fn latest_run_git(history: &[kuzushi_core::RunSummaryEntry]) -> Option<&RunTargetGitMetadata> {
+    history.iter().find_map(|entry| match &entry.state {
+        kuzushi_core::RunSummaryEntryState::Ready(summary) => summary.target_git.as_ref(),
+        kuzushi_core::RunSummaryEntryState::Issue(_) => None,
     })
 }
 

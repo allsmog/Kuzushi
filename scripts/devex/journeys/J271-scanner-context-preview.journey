@@ -1,0 +1,68 @@
+name: Inspect included scanner context, omissions and immutable lesson text before spending
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scanner_preview.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | context-picker
+keys: Down Down p
+require-live-snap: 20 SCANNER CONTEXT PREVIEW | inspection-needed
+expect: press Enter
+keys: p
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | inspected-copy
+keys: Space
+require-live-snap: 20 p Inspect scanner context | visible-preview-action
+keys: Down Down Down Down Down Down Down Down Down Down Enter
+require-live-snap: 20 first 2048 | explicit-lesson-omission
+expect-not: OMITTED_LESSON_TAIL
+ask: Does the scanner view distinguish the included threat-model digest from the complete saved document and disclose the lesson text omitted before any model work?
+resize: 160x48
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-160x48
+resize: 96x89
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-96x89
+resize: 80x24
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-80x24
+resize: 60x20
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-60x20
+resize: 40x12
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-40x12
+keys: End
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-end-40x12
+keys: PPage
+live-snap: projection-hashes-40x12
+keys: Home
+require-live-snap: 15 SCANNER CONTEXT PREVIEW | projection-home-40x12
+ask: Does the current projection remain named while reading at every size, with predictable paging and Home/End navigation?
+resize: 120x36
+keys: Tab
+require-live-snap: 20 Complete selected context document | full-document
+keys: p
+require-live-snap: 20 SCANNER CONTEXT PREVIEW | returned-projection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scanner_preview.py @TMP_TARGET @ART inspected
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | returned-study
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | restarted-study
+keys: Down Down Down Enter
+require-live-snap: 20 CHOOSE STUDY CONTEXT | restarted-context-picker
+keys: Down Down Enter
+require-live-snap: 25 CONTEXT SUMMARY | reread-copy
+keys: p
+require-live-snap: 20 first 2048 | recovered-projection
+require-shell: python3 -B @REPO/scripts/devex/fixtures/scanner_preview.py @TMP_TARGET @ART restarted
+ask: Does no-color restart inspect the same immutable lesson/context and projection hash while preserving the active context, source and zero provider or discovery work?
+keys: Escape
+keys: C-c
+require-exit: 10

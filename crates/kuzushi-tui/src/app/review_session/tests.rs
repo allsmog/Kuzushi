@@ -335,7 +335,7 @@ fn scripted_plain_open_then_decision_records_the_verdict_and_its_session() {
         100,
     );
 
-    assert!(output.contains("decision saved"), "{output}");
+    assert!(output.contains("decision #1 saved"), "{output}");
     let decisions = store.list_review_decisions(finding_id).unwrap();
     assert_eq!(decisions.len(), 1, "{output}");
     let session = store

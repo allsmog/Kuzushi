@@ -8,6 +8,7 @@ use kuzushi_core::modules::{OptionSpec, OptionType, ToolDescriptor};
 use kuzushi_core::{OptionScope, OptionTarget};
 pub(crate) use options_filter_label::*;
 pub(crate) use show_options::*;
+mod browser;
 mod edit_distance;
 mod options_filter_label;
 mod show_options;

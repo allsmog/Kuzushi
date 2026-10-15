@@ -1,0 +1,58 @@
+name: A bounded metadata proposal creates only an unreviewed relationship hypothesis and protects Review
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chain_hypotheses.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chain_hypotheses.py before @TMP_TARGET @ART
+paste-file: @ART/command.txt
+keys: Enter
+require-live-snap: 30 Unreviewed relationship hypotheses | hypothesis-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chain_hypotheses.py result @TMP_TARGET @ART
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | receipt
+expect: Unreviewed relationship hypotheses
+ask: Is this clearly an unreviewed metadata hypothesis, with bounded inputs, one request and separate source review, without changing either member verdict?
+resize: 160x48
+live-snap: receipt-160x48
+resize: 96x89
+live-snap: receipt-96x89
+resize: 80x24
+live-snap: receipt-80x24
+resize: 60x20
+live-snap: receipt-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · completed | receipt-40x12
+keys: NPage
+live-snap: receipt-page-1-40x12
+keys: NPage
+live-snap: receipt-page-2-40x12
+ask: Are the hypothesis warning, member references, uncertain spend and paging controls readable through the six-size matrix?
+resize: 120x36
+paste-file: @ART/open-hypothesis.txt
+require-live-snap: 20 kz> open | hypothesis-command
+keys: Enter
+require-live-snap: 20 FINDING · Esc then Y | independent-review
+expect: Unreviewed relationship hypothesis
+expect: unverified scanner assertion
+resize: 40x12
+require-live-snap: 20 Unreviewed relationship | review-40x12
+ask: Can the operator inspect and independently review the hypothesis at 40x12 without treating member confirmation as proof of the relationship?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | resumed
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | recovered
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chain_hypotheses.py restart @TMP_TARGET @ART
+ask: Does no-color restart retain the hypothesis, original decisions and protected Review allowance without another request or follow-up job?
+keys: C-c
+require-exit: 10

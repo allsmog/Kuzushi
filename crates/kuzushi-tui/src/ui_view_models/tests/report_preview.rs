@@ -7,6 +7,27 @@ use kuzushi_core::{
     TriageVerdict, V2Config, WorkspaceTarget,
 };
 
+#[test]
+fn report_preview_discloses_source_history_separately_from_source_count() {
+    let mut record = WorkspaceFindingExportRecord::default();
+    record.evidence.source_count = 1;
+    record.provenance.source_history = ["first", "middle", "latest"]
+        .into_iter()
+        .map(|run| kuzushi_core::findings::FindingSource {
+            tool: "owned".into(),
+            vuln_source: None,
+            source_signature: "note.md:1".into(),
+            first_scan_id: run.into(),
+            last_scan_id: run.into(),
+            first_seen_at: "unknown".into(),
+            last_seen_at: "unknown".into(),
+        })
+        .collect();
+    let row = ReportPreviewRow::from_export_record(&record);
+    assert!(row.provenance.contains("sources:1 history entries:3"));
+    assert_eq!(row.confidence, "-");
+}
+
 fn finding(rule: &str, severity: Severity, line: u32) -> Finding {
     Finding::new_tool("semgrep", rule, "src/lib.rs", line, None, severity, rule)
 }

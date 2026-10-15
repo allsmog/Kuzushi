@@ -1,0 +1,144 @@
+name: Acknowledged study and context drafts survive idle exit and explicit restart recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | context-prepared
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Common policy context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | study
+keys: Down Down Down Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | baseline-inspected
+keys: b n C-u
+type: Baseline policy
+keys: Home Right
+require-live-snap: 25 Study choices saved locally | name-checkpointed
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | first-restart
+submit: scan batch
+require-live-snap: 25 RECOVER STUDY DRAFT | name-recovery
+keys: Enter
+require-live-snap: 25 NAME CONTEXT CASE | name-stayed
+expect: Baseline policy
+keys: Delete
+require-live-snap: 20 Bseline | cursor-proof
+keys: C-End C-u
+type: Baseline policy
+keys: Enter
+require-live-snap: 20 CONTEXT CASES | baseline-named
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | leaving-cases
+keys: Escape
+submit: scan batch
+require-live-snap: 25 RECOVER STUDY DRAFT | back-keeps-cases
+expect: Baseline policy
+keys: Enter
+require-live-snap: 25 PLAN A STUDY | recovered-unprepared-cases
+keys: Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | candidate-base
+keys: e
+require-live-snap: 20 EDIT CONTEXT COPY | copy-editor
+keys: Enter C-u
+paste-file: @ART/candidate-context.txt
+keys: Escape
+require-live-snap: 20 Draft saved locally | copy-checkpointed
+keys: Escape
+require-live-snap: 20 CONTEXT SUMMARY | hidden-copy
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | hidden-copy-restart
+submit: scan batch
+require-live-snap: 25 RECOVER STUDY DRAFT | both-drafts-recovery
+resize: 160x48
+live-snap: study-160x48
+resize: 96x89
+live-snap: study-96x89
+resize: 80x24
+live-snap: study-80x24
+resize: 60x20
+live-snap: study-60x20
+resize: 40x12
+live-snap: study-40x12
+ask: Are acknowledged study choices recoverable after idle exit, with clear selection controls and no automatic jobs or spending?
+resize: 120x36
+keys: Enter
+require-live-snap: 25 PLAN A STUDY | study-restored
+keys: Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | copy-base-restored
+keys: e
+require-live-snap: 25 RECOVER CONTEXT DRAFT | copy-recovery
+keys: Enter
+require-live-snap: 25 ↑↓ Enter edit | copy-fields-restored
+keys: Enter
+require-live-snap: 25 Owner context for harmless | copy-restored
+keys: C-s
+require-live-snap: 20 REVIEW CONTEXT CHANGES | copy-review
+keys: Enter
+require-live-snap: 25 Edited copy saved | copy-saved
+keys: Enter
+require-live-snap: 25 Owner context for harmless | candidate-inspected
+keys: + n C-u
+type: Owner context
+keys: Enter Escape
+require-live-snap: 20 PLAN A STUDY | two-case-study
+expect: 2 contexts · 6 fixed jobs
+keys: Down Down Enter
+require-live-snap: 20 Total calls | calls
+type: 1
+keys: Enter Down Enter
+require-live-snap: 20 Protected review | review
+type: 1
+keys: Enter Down Down Down Down Enter
+require-live-snap: 20 CONTEXT CASES | cases
+keys: L
+require-live-snap: 35 Matrix draft ready | saved-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART draft
+ask: Does Stay return to the exact editor and cursor, while explicit copy saving and draft preparation make the two named cases recoverable without approving work?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 6 planned | unapproved-jobs
+nav-mode:
+keys: a Down Down Down Down Down Down Down Down Down Down Enter
+require-live-snap: 25 ┌ CONTEXT CASES | recovered-cases
+expect: Baseline policy
+expect: Owner context
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_case_edit.py @TMP_TARGET @ART draft
+ask: Does no-color restart retain the saved baseline, candidate and exact contexts with no queue, allowance approval, scanner work or provider request?
+keys: C-c
+require-exit: 10

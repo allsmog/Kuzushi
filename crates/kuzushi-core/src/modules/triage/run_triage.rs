@@ -1,26 +1,33 @@
 use super::*;
 
-#[cfg(test)]
-mod tests;
-
 pub(in crate::modules) fn run_triage(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let workspace = require_triage_workspace(ctx)?;
-    crate::workspace::source_snapshot::run_source_bound_tool(
+    let snapshot = crate::workspace::source_snapshot::SourceSnapshot::capture(
         ctx,
         "triage:run",
         workspace.root(),
-        || run_triage_against_source(input, ctx, runtime),
-    )
+    )?;
+    let cache_source = snapshot.hashes().0.to_string();
+    let result = snapshot.bind_result(run_triage_against_source(
+        input,
+        ctx,
+        runtime,
+        &cache_source,
+    ));
+    let result = result.map(|output| snapshot.finish(ctx, "triage:run", workspace.root(), output));
+    runtime_cache::discard_unverified_run(&cache_source, &result);
+    result
 }
 
 fn run_triage_against_source(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
+    cache_source: &str,
 ) -> Result<Value> {
     let mut run = prepare_triage_run(input, ctx)?;
     if run.findings.is_empty() {
@@ -29,7 +36,7 @@ fn run_triage_against_source(
         attach_triage_advisory_reports(&mut response, run.store, &run.input)?;
         return Ok(response);
     }
-    let execution = resolve_triage_execution(ctx, runtime, &run)?;
+    let execution = resolve_triage_execution(ctx, runtime, &run, cache_source)?;
     let completed = classify_triage_findings(&mut run, ctx, &execution)?;
     emit_triage_done(ctx, &completed.stats);
     let mut response = triage_response(
@@ -89,6 +96,7 @@ fn resolve_triage_execution<'a>(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&'a dyn AgentRuntime>,
     run: &PreparedTriageRun<'_>,
+    cache_source: &str,
 ) -> Result<TriageExecution<'a>> {
     let runtime = require_triage_runtime(runtime)?;
     let stage2_model = resolve_triage_model(ctx, runtime, &run.input)?;
@@ -104,7 +112,8 @@ fn resolve_triage_execution<'a>(
     Ok(TriageExecution {
         runtime,
         routed,
-        config: TriageExecutionConfig::new(run.workspace.root().to_path_buf(), stage2_model),
+        config: TriageExecutionConfig::new(run.workspace.root().to_path_buf(), stage2_model)
+            .with_source_snapshot(cache_source.to_string()),
     })
 }
 
@@ -566,13 +575,26 @@ fn attach_prefilter_drop_report(response: &mut Value, report: &PrefilterDropRepo
 pub(in crate::modules) struct TriageExecutionConfig {
     pub(in crate::modules) cwd: PathBuf,
     pub(in crate::modules) stage2_model: String,
+    pub(in crate::modules) source_snapshot: Option<String>,
 }
 
 impl TriageExecutionConfig {
     pub(in crate::modules) fn new(cwd: PathBuf, stage2_model: String) -> Self {
-        Self { cwd, stage2_model }
+        Self {
+            cwd,
+            stage2_model,
+            source_snapshot: None,
+        }
+    }
+
+    pub(in crate::modules) fn with_source_snapshot(mut self, source_snapshot: String) -> Self {
+        self.source_snapshot = Some(source_snapshot);
+        self
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 mod prefilter_drop_receipt_tests {

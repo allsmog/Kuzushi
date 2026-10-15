@@ -112,8 +112,7 @@ use self::workers::merge_json;
 use self::workers::parse_plan_json;
 use self::workers::parse_threat_patch_json;
 use self::workers::{
-    planner_worker, threat_regen_worker, AgentEvent, PlanEvent, ScanEvent, ThreatPatchEvent,
-    ToolEvent,
+    threat_regen_worker, AgentEvent, PlanEvent, ScanEvent, ThreatPatchEvent, ToolEvent,
 };
 use self::workspace_context::{default_context_snapshot_view, default_workspace_view};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -136,6 +135,7 @@ mod run_reference;
 mod runtime;
 mod runtime_keymap;
 mod runtime_state;
+pub(crate) mod source_review;
 pub(crate) use relationships::{
     RelationshipBulkReview, RelationshipBulkStage, RelationshipNote, RelationshipWrite,
     RelationshipsRouteState,

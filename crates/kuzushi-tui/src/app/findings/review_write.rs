@@ -13,7 +13,10 @@ enum ReviewWriteFailure {
     Commit(anyhow::Error),
 }
 
-type ReviewWriteResult = std::result::Result<i64, ReviewWriteFailure>;
+type ReviewWriteResult = std::result::Result<
+    kuzushi_core::workspace::WorkspaceReviewDecisionReceipt,
+    ReviewWriteFailure,
+>;
 
 trait ReviewDecisionWriter: std::fmt::Debug + Send + Sync {
     fn write(&self, apply: &ReviewDecisionApply) -> ReviewWriteResult;
@@ -26,7 +29,7 @@ impl ReviewDecisionWriter for LedgerReviewDecisionWriter {
     fn write(&self, apply: &ReviewDecisionApply) -> ReviewWriteResult {
         let workspace =
             workspace_for_target(apply.target.as_ref()).map_err(ReviewWriteFailure::Workspace)?;
-        kuzushi_core::workspace::record_user_review_decision_for_finding_with_session(
+        kuzushi_core::workspace::record_user_review_decision_with_receipt(
             &workspace,
             &apply.finding,
             &apply.decision,

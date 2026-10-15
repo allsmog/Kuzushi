@@ -52,8 +52,13 @@ mod tests {
                 crate::test_support::record_indexed_run(
                     root.path(),
                     "pending-metadata",
-                    "context:build",
-                    serde_json::json!({"ok":true,"data":{"snapshot":{"filesIndexed":1}}}),
+                    match phase {
+                        WorkflowPhase::Map => "threat-model:import",
+                        WorkflowPhase::Scan => "sast:scan",
+                        WorkflowPhase::Review => "triage:run",
+                        _ => unreachable!("investigation phases only"),
+                    },
+                    serde_json::json!({"ok":true,"data":{}}),
                 );
                 crate::test_support::append_typed_attempt(
                     root.path(),
@@ -87,8 +92,8 @@ mod tests {
         crate::test_support::record_indexed_run(
             root.path(),
             "pending-map",
-            "context:build",
-            serde_json::json!({"ok":true,"data":{"snapshot":{"filesIndexed":1}}}),
+            "threat-model:import",
+            serde_json::json!({"ok":true,"data":{}}),
         );
         crate::test_support::append_typed_attempt(
             root.path(),

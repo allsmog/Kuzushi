@@ -1,6 +1,15 @@
 use super::{bind, push_view_keybindings, FooterKeybinding};
 use crate::{ShellApp, ShellView};
 
+pub(super) fn budget_halt_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    vec![
+        bind("Esc", "inspect"),
+        super::interrupt_binding(app),
+        bind("c", "review cap"),
+        bind("a", "abort work"),
+    ]
+}
+
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     match app.shell_view() {
         ShellView::History => Some(history_keybindings(app)),
@@ -535,6 +544,13 @@ fn help_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 }
 
 fn tools_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if app.tools_support_owns_input() {
+        return vec![
+            bind("↑/↓", "choose tool"),
+            bind("Enter", "settings"),
+            bind("Esc", "prompt"),
+        ];
+    }
     let mut bindings = Vec::new();
     push_view_keybindings(&mut bindings, app);
     bindings.push(bind("use <id>", "focus module"));

@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use roxmltree::Node;
@@ -30,9 +31,12 @@ pub(super) fn dotnet_project_components(
     Ok(components)
 }
 
-pub(super) fn dotnet_project_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn dotnet_project_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let document =
         roxmltree::Document::parse(&text).context("sbom-scan: parse .NET project file")?;
     let source = relative_display(target, path);

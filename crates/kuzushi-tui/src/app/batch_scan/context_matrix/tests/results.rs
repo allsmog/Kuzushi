@@ -153,6 +153,71 @@ fn entering_results_discards_the_pre_run_cache_without_changing_focus_or_draft()
 }
 
 #[test]
+fn changing_a_saved_case_invalidates_the_plan_without_resetting_accounting() {
+    let (_root, mut app) = result_fixture();
+    let config = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    config.study.matrix.results = false;
+    config.study.accounting_error = Some("kept ledger failure".into());
+    let identity = config.study.investigation_id.clone();
+    assert!(config.study.plan_identity().is_some());
+    app.handle_context_matrix_key(KeyCode::Char('n'));
+    app.handle_batch_config_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.reduce_paste("Reviewed baseline");
+    app.handle_batch_config_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let config = app.router.campaign().batch_scan_config.as_ref().unwrap();
+    assert!(config.study.plan_identity().is_none());
+    assert_eq!(config.study.investigation_id, identity);
+    assert_eq!(
+        config.study.accounting_error.as_deref(),
+        Some("kept ledger failure")
+    );
+    assert_eq!(
+        (
+            config.study.max_provider_calls,
+            config.study.protected_review_calls
+        ),
+        (Some(8), Some(2))
+    );
+    assert_eq!(
+        config.study.matrix.baseline_case_id.as_deref(),
+        Some("alpha")
+    );
+    assert_eq!(config.study.matrix.planned_jobs(), 80);
+    assert_eq!(config.study.matrix.cases[0].label, "Reviewed baseline");
+}
+
+#[test]
+fn saving_an_unchanged_case_name_keeps_the_frozen_plan() {
+    let (_root, mut app) = result_fixture();
+    let config = app
+        .router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap();
+    config.study.matrix.results = false;
+    let receipt = config.study.matrix.receipt.clone();
+    app.handle_context_matrix_key(KeyCode::Char('n'));
+    app.handle_batch_config_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .study
+            .matrix
+            .receipt,
+        receipt
+    );
+}
+
+#[test]
 fn baseline_selection_confirms_the_completed_pass_and_preserves_the_case_cursor() {
     let (_root, mut app) = result_fixture();
     app.handle_matrix_result_key(KeyCode::Down);

@@ -1,0 +1,54 @@
+name: Read the exact unapproved real-model application study without starting provider work
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE KUZUSHI_AGENT_MCPS NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_application_case.py @TARGET @ART @TARGET/../home inspect
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | manual-map
+nav-mode:
+keys: Tab
+require-live-snap: 20 DATA-FLOW DIAGRAM | manual-dfd
+keys: u
+require-live-snap: 25 Map ✓ | accepted-manual-map
+paste-file: @ART/campaign-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | unapproved-passes
+expect: pass 1/3
+nav-mode:
+keys: Enter
+require-live-snap: 20 SELECTED JOB | frozen-inputs
+expect: gpt-6-luna
+expect: planned
+resize: 160x48
+require-live-snap: 15 Jobs: 3 · 3 planned | unapproved-160x48
+resize: 96x89
+require-live-snap: 15 Jobs: 3 · 3 planned | unapproved-96x89
+resize: 80x24
+require-live-snap: 15 Jobs: 3 · 3 planned | unapproved-80x24
+resize: 60x20
+require-live-snap: 15 Jobs: 3 · 3 planned | unapproved-60x20
+resize: 40x12
+require-live-snap: 15 Jobs: 3 · 3 planned | unapproved-40x12
+keys: NPage NPage
+live-snap: frozen-inputs-paged-40x12
+ask: Can the operator inspect the three fixed unstarted passes and their recorded model/context/scope, without any finding or spending approval being implied?
+resize: 120x36
+keys: q
+require-live-snap: 20 3 planned | returned-unstarted
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_application_case.py @TARGET @ART @TARGET/../home verify
+keys: C-c
+require-exit: 10
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/campaign-command.txt
+keys: Enter
+require-live-snap: 25 3 planned | recovered-unapproved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_application_case.py @TARGET @ART @TARGET/../home verify
+ask: Does no-color restart preserve the exact unapproved plan and inactive context, with no queue, approved allowance, discovery attempt or provider request?
+keys: C-c
+require-exit: 10

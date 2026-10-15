@@ -8,7 +8,7 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
 paste-file: @ART/open.txt
 keys: Enter
-require-live-snap: 25 SELECTED FINDING | source-finding
+require-live-snap: 25 F-0001 · FINDING | source-finding
 submit: lessons
 require-live-snap: 25 REUSABLE LESSONS | lessons
 keys: g

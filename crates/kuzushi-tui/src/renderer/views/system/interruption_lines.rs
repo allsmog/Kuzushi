@@ -119,7 +119,14 @@ fn budget_snapshot_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     };
     detail_wrapped(
         "budget",
-        &format!("spent ${:.4} / cap ${:.4}", halt.spent_usd, halt.limit_usd),
+        &format!(
+            "{} / cap ${:.4}",
+            crate::ui_view_models::format_runtime_cost(
+                app.session().session_cost_report(),
+                app.session().cost_accounting_error()
+            ),
+            halt.limit_usd
+        ),
         width,
     )
 }

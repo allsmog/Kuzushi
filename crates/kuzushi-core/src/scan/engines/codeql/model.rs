@@ -22,7 +22,7 @@ impl Default for CodeqlScanner {
             language: None,
             suite: None,
             build_mode: None,
-            threads: None,
+            threads: Some(1),
             ram: None,
             multi_language: false,
             command_timeout: std::time::Duration::from_millis(DEFAULT_CODEQL_SCAN_TIMEOUT_MS),

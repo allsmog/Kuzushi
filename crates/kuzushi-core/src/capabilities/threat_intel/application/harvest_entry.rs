@@ -30,10 +30,12 @@ pub(super) struct HarvestedCatalogEntry {
     pub(super) fetched_record: Value,
     pub(super) fetched_pattern: Value,
     pub(super) gate_outcome: Option<RegressionGateOutcome>,
+    pub(super) extraction_receipt: Value,
 }
 
 pub(super) fn harvest_one(
     cve: &str,
+    input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     dispatch_tool: &mut impl FnMut(
@@ -43,21 +45,23 @@ pub(super) fn harvest_one(
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
 ) -> Result<HarvestedEntry> {
-    let record = match fetch_cve_record(cve, ctx, runtime, dispatch_tool)? {
+    let record = match fetch_cve_record(cve, input, ctx, runtime, dispatch_tool)? {
         Ok(record) => record,
         Err(reason) => return Ok(HarvestedEntry::Skipped { reason }),
     };
-    let pattern = match extract_fix_pattern(cve, record.clone(), ctx, runtime, dispatch_tool)? {
-        Ok(pattern) => pattern,
-        Err(reason) => return Ok(HarvestedEntry::Skipped { reason }),
-    };
-    Ok(HarvestedEntry::Entry(catalog_entry_from_pattern(
-        cve, record, pattern,
-    )))
+    let extracted =
+        match extract_fix_pattern(cve, record.clone(), input, ctx, runtime, dispatch_tool)? {
+            Ok(pattern) => pattern,
+            Err(reason) => return Ok(HarvestedEntry::Skipped { reason }),
+        };
+    let mut entry = catalog_entry_from_pattern(cve, record, extracted["data"]["pattern"].clone());
+    entry.extraction_receipt = extracted;
+    Ok(HarvestedEntry::Entry(entry))
 }
 
 fn fetch_cve_record(
     cve: &str,
+    input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     dispatch_tool: &mut impl FnMut(
@@ -67,7 +71,13 @@ fn fetch_cve_record(
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
 ) -> Result<std::result::Result<Value, String>> {
-    let fetched = dispatch_tool("ndiff:fetch-cve", json!({"id": cve}), ctx, runtime)
+    let mut child = json!({"id":cve});
+    copy_harvest_options(
+        input,
+        &mut child,
+        &["offline", "fixtures", "maxMetadataBytes", "binary"],
+    );
+    let fetched = dispatch_tool("ndiff:fetch-cve", child, ctx, runtime)
         .with_context(|| format!("ndiff:fetch-cve {cve} failed"))?;
     if fetched.get("ok").and_then(Value::as_bool) != Some(true) {
         return Ok(Err(fetch_skip_reason(&fetched)));
@@ -87,6 +97,7 @@ fn fetch_cve_record(
 fn extract_fix_pattern(
     cve: &str,
     record: Value,
+    input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     dispatch_tool: &mut impl FnMut(
@@ -96,26 +107,48 @@ fn extract_fix_pattern(
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
 ) -> Result<std::result::Result<Value, String>> {
-    let pattern = dispatch_tool(
-        "ndiff:extract-fix-pattern",
-        json!({"record": record}),
-        ctx,
-        runtime,
-    )
-    .with_context(|| format!("ndiff:extract-fix-pattern {cve} failed"))?;
+    let child = extraction_child_input(record, input);
+    let pattern = dispatch_tool("ndiff:extract-fix-pattern", child, ctx, runtime)
+        .with_context(|| format!("ndiff:extract-fix-pattern {cve} failed"))?;
     if pattern.get("ok").and_then(Value::as_bool) != Some(true) {
         return Ok(Err(pattern_skip_reason(&pattern)));
     }
-    let Some(pattern_data) = pattern
-        .get("data")
-        .and_then(|data| data.get("pattern"))
-        .cloned()
-    else {
+    let Some(_) = pattern.get("data").and_then(|data| data.get("pattern")) else {
         return Ok(Err(
             "ndiff:extract-fix-pattern returned ok but no `data.pattern`".to_string(),
         ));
     };
-    Ok(Ok(pattern_data))
+    Ok(Ok(pattern))
+}
+
+fn extraction_child_input(record: Value, input: &Value) -> Value {
+    let mut child = json!({"record":record});
+    copy_harvest_options(
+        input,
+        &mut child,
+        &[
+            "offline",
+            "patchFixtures",
+            "maxMetadataBytes",
+            "maxPatchBytes",
+            "maxSourceBytes",
+            "maxContextBytes",
+            "thinkingLevel",
+            "maxOutputTokens",
+            "maxModelTurns",
+            "model",
+            "binary",
+        ],
+    );
+    child
+}
+
+fn copy_harvest_options(input: &Value, child: &mut Value, keys: &[&str]) {
+    for key in keys {
+        if let Some(value) = input.get(*key) {
+            child[*key] = value.clone();
+        }
+    }
 }
 
 fn fetch_skip_reason(fetched: &Value) -> String {
@@ -157,6 +190,7 @@ pub(super) fn catalog_entry_from_pattern(
         fetched_record: record,
         fetched_pattern: pattern,
         gate_outcome: None,
+        extraction_receipt: Value::Null,
         cwe,
     }
 }
@@ -297,7 +331,13 @@ fn dedup_string_vec(items: Vec<String>) -> Vec<String> {
 
 fn sanitize_entry_id(raw: &str) -> String {
     raw.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>()
         .trim_matches('-')
         .to_ascii_lowercase()

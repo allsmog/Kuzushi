@@ -28,7 +28,8 @@ fn parser_rejects_manifest_when_parent_is_replaced_after_inventory() {
     fs::rename(&nested, target.path().join("original-nested")).unwrap();
     std::os::unix::fs::symlink(outside.path(), &nested).unwrap();
 
-    let error = manifest::manifest_components(target.path(), &inventory.files[0]).unwrap_err();
+    let inputs = SbomInputs::new(target.path(), SbomScanOptions::default(), ScanCancellation::default()).unwrap();
+    let error = manifest::manifest_components(&inputs, &inventory.files[0]).unwrap_err();
 
     let detail = format!("{error:#}");
     assert!(detail.contains("refusing to follow"), "{detail}");

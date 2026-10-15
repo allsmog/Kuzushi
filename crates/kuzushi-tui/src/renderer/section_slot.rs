@@ -97,14 +97,14 @@ pub(crate) fn notice_banner_height(app: &ShellApp, area: Rect) -> u16 {
     let max_lines = notice_line_limit(
         area.height,
         notice.dismiss_on_escape,
-        crate::ui_view_models::compact_gallery_notice(app, area.height),
+        crate::ui_view_models::compact_document_notice(app, area.height),
     );
     notice_banner_line_count(app, area.width, max_lines) as u16
 }
 
-/// Compact galleries keep their document readable alongside the error badge.
-fn notice_line_limit(height: u16, captures_escape: bool, scene: bool) -> usize {
-    match (height, captures_escape, scene) {
+/// Compact documents keep their outcome readable alongside the error badge.
+fn notice_line_limit(height: u16, captures_escape: bool, compact_document: bool) -> usize {
+    match (height, captures_escape, compact_document) {
         (0..=9, _, _) | (10..=12, false, _) | (10..=12, _, true) => 1,
         _ => NOTICE_BANNER_MAX_LINES,
     }

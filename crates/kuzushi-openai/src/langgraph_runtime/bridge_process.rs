@@ -36,7 +36,15 @@ pub(crate) fn run_next_step_bridge_observed(
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     observer: Option<&ResponseTextObserver>,
 ) -> Result<NextStepBridgeResponse> {
-    run_next_step_bridge_admitted(command, request, cancellation, observer, None)
+    // Synthetic pipe/parse fixtures exercise transport, not model dispatch.
+    run_json_bridge(
+        command,
+        request,
+        "next-step bridge",
+        &[],
+        cancellation,
+        super::bridge_observation::transport_test_observation(observer),
+    )
 }
 
 pub(crate) fn run_next_step_bridge_admitted(

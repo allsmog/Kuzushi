@@ -4,6 +4,7 @@ use super::*;
 pub struct AdvisoryState {
     pub throttle: Option<ThrottleAdvisory>,
     pub budget_halt: Option<BudgetHalt>,
+    pub(crate) budget_halt_acknowledged: bool,
     /// Transient error/warning banner surfaced above the prompt so failures
     /// and dropped input are visible, not buried in the transcript log.
     pub notice: Option<Notice>,

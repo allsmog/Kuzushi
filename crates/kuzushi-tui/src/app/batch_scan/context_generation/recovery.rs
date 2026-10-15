@@ -4,8 +4,11 @@ use kuzushi_core::capabilities::campaign::load_context_study;
 impl StudyContextGeneration {
     pub(super) fn refresh_result(&mut self, target: &std::path::Path) {
         self.generated = None;
+        self.generated_preview = None;
         self.generated_scopes = None;
         self.generated_lesson = None;
+        self.generated_answer = None;
+        self.generated_proposal = None;
         self.result_error = None;
         self.rejected_available = false;
         self.rejected_output = None;
@@ -22,10 +25,25 @@ impl StudyContextGeneration {
 
     fn apply_generated_result(&mut self, result: GeneratedResult) {
         match result {
-            GeneratedResult::Context(reference) => self.generated = reference,
+            GeneratedResult::Context(output) => self.apply_generated_context(output),
             GeneratedResult::Scopes(review) => self.generated_scopes = review,
             GeneratedResult::Lesson(reference) => self.generated_lesson = reference,
+            GeneratedResult::Question(answer) => self.generated_answer = answer,
+            GeneratedResult::Proposal(proposal) => self.generated_proposal = proposal,
         }
+    }
+
+    fn apply_generated_context(
+        &mut self,
+        output: Option<kuzushi_core::capabilities::campaign::GeneratedStudyContext>,
+    ) {
+        let Some(output) = output else {
+            return;
+        };
+        self.generated = Some(output.reference.clone());
+        self.generated_preview = Some(crate::ui_view_models::context_generation::context_preview(
+            output,
+        ));
     }
 
     fn refresh_rejected_output_availability(&mut self, target: &std::path::Path) {
@@ -73,7 +91,9 @@ impl ShellApp {
             Ok(config) => {
                 self.show_study_form(config);
                 if self.context_generation().is_none_or(|generation| {
-                    !generation.is_scope_proposal() && !generation.is_lesson()
+                    !generation.is_scope_proposal()
+                        && !generation.is_lesson()
+                        && !generation.is_workflow_proposal()
                 }) {
                     self.open_study_context_picker();
                 }
@@ -147,7 +167,9 @@ fn restore_context_form(target: &std::path::Path, id: &str) -> Result<BatchScanC
 }
 
 enum GeneratedResult {
-    Context(Option<kuzushi_core::ThreatModelRef>),
+    Proposal(Option<kuzushi_core::capabilities::campaign::WorkflowProposalResult>),
+    Question(Option<kuzushi_core::capabilities::campaign::ContextQuestionAnswer>),
+    Context(Option<kuzushi_core::capabilities::campaign::GeneratedStudyContext>),
     Scopes(Option<kuzushi_core::workspace::ScanScopeReview>),
     Lesson(Option<kuzushi_core::findings::LessonRef>),
 }
@@ -157,6 +179,12 @@ fn load_generated_result(
     target: &std::path::Path,
 ) -> Result<GeneratedResult> {
     match receipt.generation_tool.as_str() {
+        "planner:propose" => receipt
+            .workflow_proposal(target)
+            .map(GeneratedResult::Proposal),
+        "threat-model:ask" => receipt
+            .question_answer(target)
+            .map(GeneratedResult::Question),
         "findings:lesson-generate" => receipt
             .generated_lesson(target)
             .map(GeneratedResult::Lesson),
@@ -164,7 +192,7 @@ fn load_generated_result(
             .generated_scopes(target)
             .map(GeneratedResult::Scopes),
         _ => receipt
-            .generated_context(target)
+            .generated_context_document(target)
             .map(GeneratedResult::Context),
     }
 }

@@ -1,10 +1,26 @@
 //! Finite case editor projection; no stores or runtime calls.
 use crate::app::BatchScanConfig;
-use crate::renderer::shared::text::wrap_text;
+use crate::renderer::shared::text::{fit_path, wrap_text};
 use kuzushi_core::capabilities::campaign::ContextCaseInput;
 use kuzushi_core::capabilities::campaign::ContextMatrixReceipt;
 
 mod results;
+
+pub(crate) fn case_name_notice(config: &BatchScanConfig) -> &str {
+    config
+        .context_case_name_edit()
+        .and_then(|edit| edit.error.as_deref())
+        .unwrap_or("Naming keeps context, baseline and spending unchanged.")
+}
+
+pub(crate) fn case_name_plain_lines(config: &BatchScanConfig, width: usize) -> Option<Vec<String>> {
+    let edit = config.context_case_name_edit()?;
+    let mut lines = vec!["NAME CONTEXT CASE".into()];
+    lines.extend(wrap_text(edit.field.text(), width.max(1)));
+    lines.extend(wrap_text(case_name_notice(config), width.max(1)));
+    lines.push("Enter save · Esc back (keeps draft)".into());
+    Some(lines)
+}
 
 pub(crate) fn matrix_result_state(
     app: &crate::app::ShellApp,
@@ -18,9 +34,15 @@ pub(crate) fn matrix_result_lines(
     width: usize,
     rows: usize,
 ) -> Vec<String> {
+    let Some(config) = app.router.campaign().batch_scan_config.as_ref() else {
+        return wrap_text(
+            "No study selected. Open a study from Campaigns to compare its cases.",
+            width.max(1),
+        );
+    };
     match matrix_result_state(app) {
         crate::app::ViewDataState::Ready(Ok(report)) => {
-            results::recorded_matrix_lines(app, &report, width, rows)
+            results::recorded_matrix_lines(config, &report, width, rows)
         }
         crate::app::ViewDataState::Ready(Err(error)) => vec![
             "Recorded results unavailable. r retries; no work starts.".into(),
@@ -44,6 +66,7 @@ pub(crate) fn context_matrix_lines(
             case,
             index == matrix.cursor,
             matrix.baseline_case_id.as_deref(),
+            width,
         ));
     }
     append_matrix_guidance(&mut lines, config, width, rows);
@@ -63,14 +86,22 @@ fn matrix_heading(config: &BatchScanConfig) -> Vec<String> {
     lines
 }
 
-fn case_line(case: &ContextCaseInput, selected: bool, baseline: Option<&str>) -> String {
+fn case_line(
+    case: &ContextCaseInput,
+    selected: bool,
+    baseline: Option<&str>,
+    width: usize,
+) -> String {
     let role = if baseline == Some(case.id.as_str()) {
         "baseline"
     } else {
         "candidate"
     };
     let marker = if selected { "▸" } else { " " };
-    format!("{marker} {role} · {} passes · {}", case.passes, case.label)
+    let suffix = format!(" · {role} · {} passes", case.passes);
+    let name_width =
+        width.saturating_sub(unicode_width::UnicodeWidthStr::width(suffix.as_str()) + 2);
+    format!("{marker} {}{suffix}", fit_path(&case.label, name_width))
 }
 
 fn append_matrix_guidance(

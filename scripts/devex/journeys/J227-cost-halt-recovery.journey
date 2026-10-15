@@ -1,0 +1,89 @@
+name: Unknown session spend remains qualified and the halt permits inspection and exit
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cost_recovery.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: logs
+paste-file: @ART/cost-request.txt
+keys: Enter
+require-live-snap: 40 COST CAP HALT | unknown-cost-halt
+expect: metering incomplete
+expect: Esc inspect/report
+expect: Spending halted · Esc to inspect
+expect-not: Tab complete
+expect-not: Ctrl+G palette
+resize: 40x12
+live-snap: halt-input-40x12
+expect: Esc inspect
+expect: c review cap
+expect: a abort work
+expect: Spending halted · Esc to inspect
+expect-not: Ctrl+G
+paste-file: @ART/cost-request.txt
+live-snap: halt-ignores-paste-40x12
+expect: Spending halted · Esc to inspect
+expect-not: kz>
+resize: 120x36
+keys: c
+require-live-snap: 20 cannot continue past the budget | cap-stays-closed
+expect-not: Esc dismiss
+keys: Escape
+keys: Escape
+submit: cost
+require-live-snap: 25 BUDGETS | cost-reader
+expect: unknown
+expect-not: >=$0.00
+expect: Spending stays halted
+expect-not: 100%
+resize: 160x48
+live-snap: cost-160x48
+resize: 96x89
+live-snap: cost-96x89
+resize: 80x24
+live-snap: cost-80x24
+resize: 60x20
+live-snap: cost-60x20
+resize: 40x12
+live-snap: cost-40x12
+keys: NPage
+live-snap: cost-page-1-40x12
+keys: NPage
+live-snap: cost-page-2-40x12
+keys: NPage
+live-snap: cost-page-3-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cost_recovery.py @TMP_TARGET @ART check-pages
+keys: Escape
+keys: G
+live-snap: cost-tail-40x12
+expect: Missing cost telemetry stays
+expect: unknown.
+keys: PPage
+live-snap: cost-return-40x12
+keys: Escape
+ask: Do unknown spend and percentages stay qualified, with readable paging and a visible spending halt at each size?
+resize: 120x36
+submit: report
+require-live-snap: 25 REPORT | finish-and-report
+expect: Spending stays halted
+paste-file: @ART/cost-request.txt
+keys: Enter
+require-live-snap: 25 runtime-backed launch blocked | spending-guard-retained
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cost_recovery.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 15
+ask: Can the operator inspect the completed work and exit without raising the cap, consuming a protected call or starting another request?
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/cost-replay.txt
+keys: Enter
+require-live-snap: 25 metering incomplete | recovered-cost-receipt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/cost_recovery.py @TMP_TARGET @ART verify
+ask: Does the saved receipt keep its unknown cost after restart while current-session totals remain separate?
+keys: C-c
+require-exit: 15

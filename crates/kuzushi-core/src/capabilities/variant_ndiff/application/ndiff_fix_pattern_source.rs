@@ -4,6 +4,9 @@ pub(crate) struct NdiffFixPatternSource {
     pub(crate) record: Option<CveRecord>,
     pub(crate) patch_text: String,
     pub(crate) patch_url: String,
+    pub(crate) source_kind: &'static str,
+    pub(crate) max_patch_bytes: usize,
+    pub(crate) max_source_bytes: usize,
 }
 
 pub(crate) enum NdiffFixPatternSourceResolution {
@@ -11,13 +14,29 @@ pub(crate) enum NdiffFixPatternSourceResolution {
     Rejected(Value),
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_ndiff_fix_pattern_source(
     input: &Value,
+) -> Result<NdiffFixPatternSourceResolution> {
+    resolve_ndiff_source(input, None)
+}
+
+pub(crate) fn resolve_ndiff_source_for_target(
+    input: &Value,
+    target: &Path,
+) -> Result<NdiffFixPatternSourceResolution> {
+    resolve_ndiff_source(input, Some(target))
+}
+
+fn resolve_ndiff_source(
+    input: &Value,
+    target: Option<&Path>,
 ) -> Result<NdiffFixPatternSourceResolution> {
     let mut source = match checked_initial_source(input) {
         Ok(source) => source,
         Err(response) => return Ok(NdiffFixPatternSourceResolution::Rejected(response)),
     };
+    load_explicit_diff_file(input, target, &mut source)?;
     let id = ndiff_fix_pattern_id(input);
     if source.patch_text.trim().is_empty() {
         if let Some(response) = resolve_missing_ndiff_patch_source(input, &id, &mut source)? {
@@ -29,14 +48,62 @@ pub(crate) fn resolve_ndiff_fix_pattern_source(
             unresolved_ndiff_patch_response(),
         ));
     }
+    anyhow::ensure!(source.patch_text.len() <= source.max_patch_bytes, "Existing diff exceeds maxPatchBytes; narrow the supplied content or approve a larger declared bound");
     Ok(NdiffFixPatternSourceResolution::Ready(source))
 }
 
+fn load_explicit_diff_file(
+    input: &Value,
+    target: Option<&Path>,
+    source: &mut NdiffFixPatternSource,
+) -> Result<()> {
+    if !source.patch_text.trim().is_empty() {
+        return Ok(());
+    }
+    let Some(path) = string_field(input, &["patchPath", "patch_path"]) else {
+        return Ok(());
+    };
+    let root = target.context("Diff file input requires an explicit workspace target")?;
+    source.patch_text =
+        crate::bounded_file::read_utf8_text_within(root, Path::new(&path), source.max_patch_bytes)
+            .context("Could not read the supplied existing diff within the selected target")?;
+    source.source_kind = "supplied-file";
+    Ok(())
+}
+
 fn checked_initial_source(input: &Value) -> std::result::Result<NdiffFixPatternSource, Value> {
+    validate_metadata_input(input).map_err(rejected_ndiff_source_input)?;
     match invalid_ndiff_record_response(input) {
         Some(response) => Err(response),
-        None => Ok(initial_ndiff_fix_pattern_source(input)),
+        None => checked_source_contents(input).map_err(rejected_ndiff_source_input),
     }
+}
+
+fn rejected_ndiff_source_input(error: anyhow::Error) -> Value {
+    crate::module_result::failed_output_result(
+        "Advisory-pattern source rejected",
+        format!("Could not use supplied diff context: {error:#}"),
+        json!({"reason":"invalid-source"}),
+    )
+}
+
+fn checked_source_contents(input: &Value) -> Result<NdiffFixPatternSource> {
+    let max_patch_bytes =
+        ndiff_query_limit(input, "maxPatchBytes", 256 * 1024, 1..=8 * 1024 * 1024)?;
+    let max_source_bytes = ndiff_query_limit(input, "maxSourceBytes", 18000, 256..=128 * 1024)?;
+    let text = input
+        .get("patchText")
+        .or_else(|| input.get("patch_text"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    anyhow::ensure!(
+        text.len() <= max_patch_bytes,
+        "Supplied diff exceeds maxPatchBytes"
+    );
+    let mut source = initial_ndiff_fix_pattern_source(input);
+    source.max_patch_bytes = max_patch_bytes;
+    source.max_source_bytes = max_source_bytes;
+    Ok(source)
 }
 
 fn resolve_missing_ndiff_patch_source(
@@ -89,6 +156,9 @@ pub(crate) fn initial_ndiff_fix_pattern_source(input: &Value) -> NdiffFixPattern
         record: None,
         patch_text: string_field(input, &["patchText", "patch_text"]).unwrap_or_default(),
         patch_url: string_field(input, &["patchUrl", "patch_url"]).unwrap_or_default(),
+        source_kind: "supplied-text",
+        max_patch_bytes: 256 * 1024,
+        max_source_bytes: 18000,
     };
     if let Some(record) = input_advisory_record(input) {
         apply_found_ndiff_advisory(&mut source, record);
@@ -196,6 +266,7 @@ fn apply_ndiff_patch_fetch_success(
         return Some(unfetched_ndiff_patch_response(&source.patch_url, input));
     };
     source.patch_text = text;
+    source.source_kind = "reference-content";
     None
 }
 
@@ -219,7 +290,11 @@ pub(crate) fn unfetched_ndiff_patch_response(patch_url: &str, input: &Value) -> 
     let output = format!(
         "Could not fetch patch content from {}{}.",
         patch_url,
-        if input.get("offline").and_then(Value::as_bool).unwrap_or(false) {
+        if input
+            .get("offline")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             " (offline mode)"
         } else {
             ""
@@ -240,15 +315,44 @@ pub(crate) fn ndiff_fix_pattern_response(
     let object = pattern
         .as_object()
         .context("ndiff:extract-fix-pattern output parse failed: expected a JSON object")?;
-    let output = ndiff_fix_pattern_output(object);
+    let receipt = ndiff_diff_source_receipt(&source);
+    let output = format!("Unaccepted advisory-pattern draft. Source claims require review before reuse.\nDiff context: {} of {} supplied bytes; {} bytes omitted.\n{}",receipt["includedBytes"],receipt["bytes"],receipt["omittedBytes"],ndiff_fix_pattern_output(object));
 
     let data = json!({
         "advisory": source.record,
         "pattern": pattern,
         "patchUrl": source.patch_url,
+        "draft": true,
+        "accepted": false,
+        "contextActivated": false,
+        "sourceReceipt": receipt,
     });
-    let mut result =
-        crate::module_result::completed_output_result("ndiff:extract-fix-pattern completed", output, data);
+    let mut result = ndiff_pattern_draft_result(output, data);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
+}
+
+fn ndiff_diff_source_receipt(source: &NdiffFixPatternSource) -> Value {
+    let included = ndiff_diff_prefix(&source.patch_text, source.max_source_bytes).len();
+    json!({"schemaVersion":1,"kind":source.source_kind,"digest":crate::run_lifecycle::sha256_content_digest(source.patch_text.as_bytes()),
+        "bytes":source.patch_text.len(),"includedBytes":included,"omittedBytes":source.patch_text.len()-included,
+        "complete":included==source.patch_text.len(),"sourceVerified":false})
+}
+
+fn ndiff_pattern_draft_result(output: String, data: Value) -> Value {
+    if data["sourceReceipt"]["complete"] == false {
+        return crate::module_result::partial_output_result(
+            "Advisory-pattern draft: unaccepted; supplied diff excerpted",
+            output,
+            vec![
+                json!({"code":"diff-excerpted","message":"The model received only the disclosed existing diff excerpt. Review the omitted material before reusing this unaccepted draft."}),
+            ],
+            data,
+        );
+    }
+    crate::module_result::completed_output_result(
+        "Advisory-pattern draft: unaccepted; source claims require review",
+        output,
+        data,
+    )
 }

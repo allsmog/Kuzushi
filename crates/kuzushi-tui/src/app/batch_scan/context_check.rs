@@ -11,13 +11,13 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ContextCheckReaderOrigin {
     scroll: usize,
-    raw: bool,
+    text_view: super::StudyContextTextView,
 }
 
 fn reader_origin(picker: &StudyContextPicker) -> ContextCheckReaderOrigin {
     ContextCheckReaderOrigin {
         scroll: picker.detail_scroll,
-        raw: picker.raw,
+        text_view: picker.text_view,
     }
 }
 
@@ -131,7 +131,7 @@ fn select_checked_revision(picker: &mut StudyContextPicker, reference: ThreatMod
     picker.selected = Some(reference);
     picker.preview = None;
     picker.detail_scroll = 0;
-    picker.raw = false;
+    picker.text_view = super::StudyContextTextView::Summary;
     picker.diagram = None;
     picker.diagram_visible = false;
     picker.map_attempt_id = None;

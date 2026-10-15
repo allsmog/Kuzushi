@@ -1,0 +1,80 @@
+name: A single recorded component remains readable without invented data flow
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/component_map.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 30 Build project context: | inventory
+submit: options threat-model:import
+submit: set path .kuzushi/component-context.json
+submit: set activate false
+submit: set label Single owned component
+submit: run threat-model:import
+require-live-snap: 30 verification verified | verified-context
+submit: map
+require-live-snap: 25 RESULT READY Map ready | awaiting-acceptance
+nav-mode:
+keys: u
+require-live-snap: 25 SYSTEM SUMMARY | accepted-summary
+expect: Declared lockfile
+expect: no data flows recorded
+require-shell: python3 -B @REPO/scripts/devex/fixtures/component_map.py @TMP_TARGET @ART accepted
+ask: Does the accepted Map show its known component and source description, with no implied runtime relationships or missing-model claim?
+resize: 160x48
+require-live-snap: 20 SYSTEM SUMMARY | summary-160x48
+resize: 96x89
+require-live-snap: 20 SYSTEM SUMMARY | summary-96x89
+resize: 80x24
+require-live-snap: 20 SYSTEM SUMMARY | summary-80x24
+resize: 60x20
+require-live-snap: 20 SYSTEM SUMMARY | summary-60x20
+resize: 40x12
+require-live-snap: 20 SYSTEM SUMMARY | summary-40x12
+keys: NPage
+require-live-snap: 20 shape | summary-shape-40x12
+keys: NPage
+require-live-snap: 20 Component map only | summary-unknown-40x12
+keys: NPage NPage
+require-live-snap: 20 Declared lockfile | summary-component-40x12
+keys: NPage
+require-live-snap: 20 purpose | summary-purpose-40x12
+keys: NPage
+require-live-snap: 20 dependency declarations | summary-purpose-complete-40x12
+ask: Can the component, its purpose and the unknown-flow notice be reached by keyboard at every size, without fabricated topology?
+resize: 120x36
+keys: Enter
+require-live-snap: 20 DATA-FLOW DIAGRAM | selected-dfd-node
+expect: Declared lockfile
+expect: Component map only
+expect: 0 flows
+keys: Enter
+require-live-snap: 20 Dependency owner review | linked-context
+keys: Enter
+require-live-snap: 20 DETAIL | dfd-back
+expect: Component map only
+require-shell: python3 -B @REPO/scripts/devex/fixtures/component_map.py @TMP_TARGET @ART alternate
+submit: map
+require-live-snap: 25 Declared lockfile | exact-map-context
+expect-not: Alternate metadata label
+require-shell: python3 -B @REPO/scripts/devex/fixtures/component_map.py @TMP_TARGET @ART isolated
+ask: Does activating another context outside this TUI preserve the accepted Map and its navigation, without a model request or finding change?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | restored-map
+expect: Declared lockfile
+expect-not: Alternate metadata label
+require-shell: python3 -B @REPO/scripts/devex/fixtures/component_map.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the accepted single-component context while leaving the alternate active context unchanged?
+keys: C-c
+require-exit: 10

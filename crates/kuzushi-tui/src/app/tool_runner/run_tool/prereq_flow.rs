@@ -147,7 +147,7 @@ impl ShellApp {
         self.log(
             "system",
             format!(
-                "{} prerequisite chain aborted after {tool_name} failed",
+                "{} prerequisite chain stopped after {tool_name}; review its outcome before starting more work",
                 chain.final_tool
             ),
         );

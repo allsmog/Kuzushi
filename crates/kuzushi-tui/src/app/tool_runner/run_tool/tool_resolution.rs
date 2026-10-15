@@ -22,21 +22,22 @@ impl ShellApp {
         self.default_tool_for_module(module)
     }
 
-    /// The primary (first non-hidden) tool of a module, e.g. `semgrep` →
-    /// `semgrep:scan`. Lets command surfaces accept a module id where a tool id
-    /// is expected, matching how operators think.
+    /// Preserve the registered primary action. An experimental primary requires
+    /// an explicit tool choice instead of selecting a different kind of work.
     pub(crate) fn default_tool_for_module(&self, module: &str) -> Option<String> {
         if module == "verify" && self.registry().resolve_tool("verify:finding").is_some() {
             return Some("verify:finding".to_string());
         }
-        if let Some(tool_name) = self
+        if let Some(primary) = self
             .registry()
             .discoverable_modules()
             .find(|entry| entry.metadata().id == module)
             .and_then(|entry| entry.tools().iter().find(|tool| !tool.hidden))
-            .map(|tool| tool.name.clone())
         {
-            return Some(tool_name);
+            return self
+                .registry()
+                .tool_is_discoverable(&primary.name)
+                .then(|| primary.name.clone());
         }
         let prefix = format!("{module}:");
         self.registry()
@@ -46,11 +47,12 @@ impl ShellApp {
     }
 
     pub(crate) fn default_tool_for_run_command(&self) -> Option<String> {
-        self.default_tool_for_focused_module().or_else(|| {
-            self.registry()
-                .resolve_tool("sast:scan")
-                .map(|_| "sast:scan".to_string())
-        })
+        if self.focused_module().is_some() {
+            return self.default_tool_for_focused_module();
+        }
+        self.registry()
+            .resolve_tool("sast:scan")
+            .map(|_| "sast:scan".to_string())
     }
 
     pub(crate) fn resolve_focused_tool_name(&self, tool_name: String) -> String {

@@ -1,4 +1,8 @@
 use super::*;
+use crate::workspace::infrastructure::{
+    InventoryDirectory, InventoryEntry, InventoryEntryKind, InventoryRoot,
+};
+use std::io::Read;
 
 const MAX_REPOSITORY_ENTRIES: usize = 100_000;
 pub(crate) const MAX_REPOSITORY_INSPECTED_BYTES: usize = 512 * 1024 * 1024;
@@ -67,18 +71,42 @@ pub(crate) fn build_repository_inventory_with_limits(
     let mut builder = InventoryBuilder::default();
     let mut budget = InventoryBudget::new(max_entries, max_inspected_bytes, on_entries);
     budget.cancel = Some(should_cancel);
-    let enumeration = if let Some(tracked) = crate::workspace::git_tracked_relative_paths(&root) {
-        walk_git_index(&root, &tracked, &mut builder, &mut budget)?;
-        "git-index"
-    } else {
-        walk_repository(&root, &root, &mut builder, &mut budget)?;
-        "filesystem"
-    };
+    let reader = InventoryRoot::new(&root)?;
+    let enumeration =
+        enumerate_repository(&root, &reader, &mut builder, &mut budget, should_cancel)?;
+    reader.verify_current_root()?;
     let inspection = budget.receipt(enumeration);
     let truncation = budget
         .truncation
         .map(|reason| InventoryTruncation { reason });
     Ok(builder.finish(root_name(&root), truncation, inspection))
+}
+
+fn enumerate_repository(
+    root: &Path,
+    reader: &InventoryRoot,
+    builder: &mut InventoryBuilder,
+    budget: &mut InventoryBudget<'_>,
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<&'static str> {
+    use crate::workspace::GitIndexEnumeration;
+    match crate::workspace::git_tracked_relative_paths(root, budget.max_entries, should_cancel)? {
+        GitIndexEnumeration::Tracked(paths) => {
+            walk_git_index(root, reader, &paths, builder, budget)?;
+            Ok("git-index")
+        }
+        GitIndexEnumeration::Unavailable => {
+            walk_repository(root, reader, root, builder, budget)?;
+            Ok("filesystem")
+        }
+        GitIndexEnumeration::Canceled => {
+            budget.canceled = true;
+            budget.mark_truncated(
+                "canceled by operator during Git path acquisition; no files inspected".into(),
+            );
+            Ok("interrupted")
+        }
+    }
 }
 
 impl<'p> InventoryBudget<'p> {
@@ -102,11 +130,15 @@ impl<'p> InventoryBudget<'p> {
 
     fn receipt(&self, enumeration: &str) -> InventoryInspection {
         InventoryInspection {
-            files: Vec::new(),            enumeration: enumeration.into(), entries: self.entries,
-            inspected_bytes: self.inspected_bytes, max_entries: self.max_entries,
+            files: Vec::new(),
+            enumeration: enumeration.into(),
+            entries: self.entries,
+            inspected_bytes: self.inspected_bytes,
+            max_entries: self.max_entries,
             max_inspected_bytes: self.max_inspected_bytes,
             max_file_inspection_bytes: MAX_FILE_INSPECTION_BYTES,
-            omitted_paths: Vec::new(), truncated_files: self.truncated_files.clone(),
+            omitted_paths: Vec::new(),
+            truncated_files: self.truncated_files.clone(),
         }
     }
 
@@ -145,25 +177,41 @@ impl<'p> InventoryBudget<'p> {
         }
     }
 
-    fn collect_dir(&mut self, read_dir: fs::ReadDir, dir: &Path) -> Result<Vec<fs::DirEntry>> {
-        let remaining = self.max_entries.saturating_sub(self.entries);
-        let mut entries = read_dir
-            .take(remaining.saturating_add(1))
-            .collect::<std::io::Result<Vec<_>>>()
-            .with_context(|| format!("Could not enumerate {}", dir.display()))?;
-        if entries.len() > remaining {
-            entries.truncate(remaining);
+    fn collect_dir(
+        &mut self,
+        mut read_dir: InventoryDirectory,
+        dir: &Path,
+    ) -> Result<Vec<InventoryEntry>> {
+        let mut entries = Vec::new();
+        while let Some(entry) = self.next_directory_entry(&mut read_dir, dir)? {
+            entries.push(entry);
+            self.count_entry();
+        }
+        Ok(entries)
+    }
+
+    fn next_directory_entry(
+        &mut self,
+        read_dir: &mut InventoryDirectory,
+        dir: &Path,
+    ) -> Result<Option<InventoryEntry>> {
+        if self.cancel_requested(dir) {
+            return Ok(None);
+        }
+        let Some(entry) = read_dir.next() else {
+            return Ok(None);
+        };
+        if self.entries_exhausted() {
             self.mark_truncated(format!(
-                "entry cap of {} reached at {}; inventory covers the walked prefix only",
+                "entry cap of {} reached at {}; inventory covers the enumerated prefix only",
                 self.max_entries,
                 dir.display()
             ));
+            return Ok(None);
         }
-        self.entries += entries.len();
-        if let Some(progress) = self.progress.as_deref_mut() {
-            progress(self.entries);
-        }
-        Ok(entries)
+        entry
+            .map(Some)
+            .with_context(|| format!("Could not enumerate {}", dir.display()))
     }
 
     /// Returns whether the file's content may still be inspected. Once the
@@ -201,6 +249,7 @@ enum DirDisposition {
 
 fn walk_git_index(
     root: &Path,
+    reader: &InventoryRoot,
     tracked: &[String],
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
@@ -213,7 +262,7 @@ fn walk_git_index(
             return Ok(());
         }
         budget.count_entry();
-        walk_tracked_file(&path, relative, builder, budget, &mut dispositions)?;
+        walk_tracked_file(reader, &path, relative, builder, budget, &mut dispositions)?;
     }
     Ok(())
 }
@@ -228,6 +277,7 @@ fn mark_enumeration_cap(budget: &mut InventoryBudget<'_>, relative: &str) {
 }
 
 fn walk_tracked_file(
+    reader: &InventoryRoot,
     path: &Path,
     relative: &str,
     builder: &mut InventoryBuilder,
@@ -237,19 +287,8 @@ fn walk_tracked_file(
     if dir_disposition(relative, builder, dispositions) != DirDisposition::Walk {
         return Ok(());
     }
-    if !regular_tracked_file(path) {
-        builder.omit_path(relative, "tracked path is a symlink, missing, or not a regular file");
-        return Ok(());
-    }
     let name = relative.rsplit('/').next().unwrap_or(relative);
-    walk_repository_file(path, relative, name, builder, budget)
-}
-
-/// Tracked entries that are not regular files on disk — symlinks (the file
-/// reader refuses to follow them) or paths deleted since the index was
-/// written — are counted but not read, matching the fs walk's dirent gate.
-fn regular_tracked_file(path: &Path) -> bool {
-    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+    walk_repository_file(reader, path, relative, name, builder, budget)
 }
 
 /// Resolves whether any ancestor directory of the tracked file `relative`
@@ -283,7 +322,9 @@ fn dir_disposition_for(
 }
 
 fn append_directory_segment(parent: &mut String, segment: &str) {
-    if !parent.is_empty() { parent.push('/'); }
+    if !parent.is_empty() {
+        parent.push('/');
+    }
     parent.push_str(segment);
 }
 
@@ -293,9 +334,16 @@ fn cached_dir_disposition(
     builder: &mut InventoryBuilder,
     dispositions: &mut BTreeMap<String, DirDisposition>,
 ) -> DirDisposition {
-    dispositions.entry(dir.to_string()).or_insert_with(|| {
-        if inherited == DirDisposition::Walk { own_dir_disposition(dir, builder) } else { inherited }
-    }).clone()
+    dispositions
+        .entry(dir.to_string())
+        .or_insert_with(|| {
+            if inherited == DirDisposition::Walk {
+                own_dir_disposition(dir, builder)
+            } else {
+                inherited
+            }
+        })
+        .clone()
 }
 
 fn own_dir_disposition(dir: &str, builder: &mut InventoryBuilder) -> DirDisposition {
@@ -313,16 +361,17 @@ fn own_dir_disposition(dir: &str, builder: &mut InventoryBuilder) -> DirDisposit
 
 fn walk_repository(
     root: &Path,
+    reader: &InventoryRoot,
     dir: &Path,
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
-    let mut pending = repository_directory_entries(dir, budget)?;
+    let mut pending = repository_directory_entries(root, reader, dir, builder, budget)?;
     while let Some(entry) = pending.pop() {
-        if budget.cancel_requested(&entry.path()) {
+        if budget.cancel_requested(&entry.path) {
             break;
         }
-        pending.extend(walk_repository_entry(root, entry, builder, budget)?);
+        pending.extend(walk_repository_entry(root, reader, entry, builder, budget)?);
     }
     Ok(())
 }
@@ -330,9 +379,12 @@ fn walk_repository(
 /// Entries are reversed for an iterative depth-first walk. No directory walk
 /// consumes the Rust call stack, and every discovered entry shares one budget.
 fn repository_directory_entries(
+    root: &Path,
+    reader: &InventoryRoot,
     dir: &Path,
+    builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
-) -> Result<Vec<fs::DirEntry>> {
+) -> Result<Vec<InventoryEntry>> {
     if budget.halted(dir) {
         if !budget.canceled {
             budget.mark_truncated(format!(
@@ -342,32 +394,43 @@ fn repository_directory_entries(
         }
         return Ok(Vec::new());
     }
-    let read_dir = fs::read_dir(dir)
-        .with_context(|| format!("Could not read repository directory {}", dir.display()))?;
+    let read_dir = match reader.read_directory(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            builder.omit_path(&repo_relative(root, dir), &format!("directory could not be opened within the repository without following symlinks: {error}"));
+            budget.mark_truncated(format!(
+                "directory unavailable or unsafe at {}; inventory excludes this boundary",
+                repo_relative(root, dir)
+            ));
+            return Ok(Vec::new());
+        }
+    };
     let mut entries = budget.collect_dir(read_dir, dir)?;
-    entries.sort_by_key(|entry| entry.path());
+    entries.sort_by_key(|entry| entry.path.clone());
     entries.reverse();
     Ok(entries)
 }
 
 fn walk_repository_entry(
     root: &Path,
-    entry: fs::DirEntry,
+    reader: &InventoryRoot,
+    entry: InventoryEntry,
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
-) -> Result<Vec<fs::DirEntry>> {
-    let path = entry.path();
-    let file_type = entry
-        .file_type()
-        .with_context(|| format!("Could not inspect repository entry {}", path.display()))?;
-    let name = entry.file_name().to_string_lossy().to_string();
+) -> Result<Vec<InventoryEntry>> {
+    let path = entry.path;
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let relative = repo_relative(root, &path);
 
-    if file_type.is_dir() {
-        return walk_repository_dir(&path, &relative, &name, builder, budget);
+    if entry.kind == InventoryEntryKind::Directory {
+        return walk_repository_dir(root, reader, &path, &relative, &name, builder, budget);
     }
-    if file_type.is_file() {
-        walk_repository_file(&path, &relative, &name, builder, budget)?;
+    if entry.kind == InventoryEntryKind::File {
+        walk_repository_file(reader, &path, &relative, &name, builder, budget)?;
     } else {
         builder.omit_path(&relative, "symlinks and non-regular files are not followed");
     }
@@ -375,12 +438,14 @@ fn walk_repository_entry(
 }
 
 fn walk_repository_dir(
+    root: &Path,
+    reader: &InventoryRoot,
     path: &Path,
     relative: &str,
     name: &str,
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
-) -> Result<Vec<fs::DirEntry>> {
+) -> Result<Vec<InventoryEntry>> {
     if ignored_dir(name) {
         builder.omit_path(relative, "ignored directory");
         return Ok(Vec::new());
@@ -389,22 +454,31 @@ fn walk_repository_dir(
         builder.add_generated_vendor_path(classification);
         return Ok(Vec::new());
     }
-    repository_directory_entries(path, budget)
+    repository_directory_entries(root, reader, path, builder, budget)
 }
 
 fn walk_repository_file(
+    reader: &InventoryRoot,
     path: &Path,
     relative: &str,
     name: &str,
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
-    builder.enumerated_files.insert(relative.to_string());
-    let generated_vendor = record_file_metadata(relative, name, builder);
-    let Some(inspectable) = approved_inspection_bytes(path, relative, budget) else {
+    let Some(file) = open_inventory_file(reader, path, relative, builder, budget) else {
         return Ok(());
     };
-    let Some(text) = read_text_prefix(path, inspectable)? else {
+    builder.enumerated_files.insert(relative.to_string());
+    let generated_vendor = record_file_metadata(relative, name, builder);
+    let Some(inspectable) = approved_inspection_bytes(&file, path, relative, budget)? else {
+        return Ok(());
+    };
+    let Some(text) = crate::bounded_file::read_source_text_prefix_from_reader(
+        file.take(inspectable as u64),
+        inspectable,
+    )
+    .with_context(|| format!("Could not inspect repository file {relative}"))?
+    else {
         return Ok(());
     };
     inspect_manifest_frameworks(relative, name, &text, builder);
@@ -415,19 +489,46 @@ fn walk_repository_file(
     Ok(())
 }
 
+fn open_inventory_file(
+    reader: &InventoryRoot,
+    path: &Path,
+    relative: &str,
+    builder: &mut InventoryBuilder,
+    budget: &mut InventoryBudget<'_>,
+) -> Option<fs::File> {
+    match reader.open_file(path) {
+        Ok(file) => Some(file),
+        Err(error) => {
+            builder.omit_path(relative, &format!("file could not be opened within the repository without following symlinks: {error}"));
+            budget.mark_truncated(format!(
+                "file unavailable or unsafe at {relative}; inventory excludes this path"
+            ));
+            None
+        }
+    }
+}
+
 /// Charges the content-inspection budget BEFORE any disk read, from file
 /// metadata: once the byte budget is exhausted the walk performs zero
 /// further reads and continues metadata-only.
-fn approved_inspection_bytes(path: &Path, relative: &str, budget: &mut InventoryBudget<'_>) -> Option<usize> {
-    let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0) as usize;
+fn approved_inspection_bytes(
+    file: &fs::File,
+    path: &Path,
+    relative: &str,
+    budget: &mut InventoryBudget<'_>,
+) -> Result<Option<usize>> {
+    let size = file
+        .metadata()
+        .with_context(|| format!("Could not inspect opened repository file {relative}"))?
+        .len() as usize;
     let inspectable = size.min(MAX_FILE_INSPECTION_BYTES);
     if size > MAX_FILE_INSPECTION_BYTES {
         budget.truncated_files.push(relative.into());
         budget.mark_truncated(format!("per-file inspection cap of {MAX_FILE_INSPECTION_BYTES} bytes reached; larger files are inspected as prefixes"));
     }
-    budget
+    Ok(budget
         .record_inspected_bytes(inspectable, path)
-        .then_some(inspectable)
+        .then_some(inspectable))
 }
 
 fn record_file_metadata(
@@ -467,15 +568,30 @@ mod coverage_limit_tests {
     fn inspection_receipt_discloses_omissions_and_per_file_prefixes() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir(temp.path().join(".kuzushi")).unwrap();
-        fs::write(temp.path().join(".kuzushi/private.rs"), "pub fn hidden() {}").unwrap();
-        fs::write(temp.path().join("large.rs"), vec![b' '; MAX_FILE_INSPECTION_BYTES + 1]).unwrap();
+        fs::write(
+            temp.path().join(".kuzushi/private.rs"),
+            "pub fn hidden() {}",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("large.rs"),
+            vec![b' '; MAX_FILE_INSPECTION_BYTES + 1],
+        )
+        .unwrap();
         let result = build_repository_inventory(temp.path()).unwrap();
-        assert!(result.truncation.unwrap().reason.contains("per-file inspection cap"));
+        assert!(result
+            .truncation
+            .unwrap()
+            .reason
+            .contains("per-file inspection cap"));
         let receipt = result.inspection.unwrap();
         assert_eq!(receipt.enumeration, "filesystem");
         assert_eq!(receipt.inspected_bytes, MAX_FILE_INSPECTION_BYTES);
         assert_eq!(receipt.truncated_files, vec!["large.rs"]);
-        assert!(receipt.omitted_paths.iter().any(|entry| entry.path == ".kuzushi"));
+        assert!(receipt
+            .omitted_paths
+            .iter()
+            .any(|entry| entry.path == ".kuzushi"));
     }
 
     #[test]
@@ -487,9 +603,9 @@ mod coverage_limit_tests {
             fs::create_dir(&nested).unwrap();
         }
         fs::write(nested.join("leaf.rs"), "pub fn leaf() {}\n").unwrap();
-        let result = build_repository_inventory_with_limits(
-            temp.path(), 300, 1024, &mut |_| {}, &|| false,
-        ).unwrap();
+        let result =
+            build_repository_inventory_with_limits(temp.path(), 300, 1024, &mut |_| {}, &|| false)
+                .unwrap();
         assert_eq!(result.source_files.len(), 1);
         assert!(result.truncation.is_none());
     }
@@ -500,7 +616,11 @@ mod coverage_limit_tests {
         let temp = tempfile::tempdir().unwrap();
         let external = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("local.rs"), "pub fn local() {}\n").unwrap();
-        fs::write(external.path().join("external.rs"), "pub fn external() {}\n").unwrap();
+        fs::write(
+            external.path().join("external.rs"),
+            "pub fn external() {}\n",
+        )
+        .unwrap();
         std::os::unix::fs::symlink(temp.path(), temp.path().join("cycle")).unwrap();
         std::os::unix::fs::symlink(external.path(), temp.path().join("outside")).unwrap();
         let result = build_repository_inventory(temp.path()).unwrap();
@@ -602,6 +722,66 @@ mod coverage_limit_tests {
         assert!(inventory.source_files.len() < 2);
     }
 
+    #[test]
+    fn canceled_acquisition_returns_an_honest_empty_partial() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("untracked.rs"), "// inert fixture\n").unwrap();
+        let inventory =
+            build_repository_inventory_with_limits(temp.path(), 100, 1024, &mut |_| {}, &|| true)
+                .unwrap();
+        assert!(inventory.source_files.is_empty());
+        assert!(inventory
+            .truncation
+            .unwrap()
+            .reason
+            .contains("during Git path acquisition"));
+        let receipt = inventory.inspection.unwrap();
+        assert_eq!(receipt.enumeration, "interrupted");
+        assert_eq!(receipt.entries, 0);
+        assert_eq!(receipt.inspected_bytes, 0);
+    }
+
+    #[test]
+    fn capped_git_acquisition_keeps_overflow_visible_to_the_receipt() {
+        let temp = tempfile::tempdir().unwrap();
+        for name in ["a.rs", "b.rs", "c.rs"] {
+            fs::write(temp.path().join(name), "// inert fixture\n").unwrap();
+        }
+        seed_git_worktree(temp.path());
+        let inventory =
+            build_repository_inventory_with_limits(temp.path(), 2, 1024, &mut |_| {}, &|| false)
+                .unwrap();
+        assert_eq!(inventory.source_files.len(), 2);
+        assert!(inventory.truncation.unwrap().reason.contains("entry cap"));
+        assert_eq!(inventory.inspection.unwrap().enumeration, "git-index");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_index_inventory_reports_unsafe_ancestors_without_reading_their_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        fs::create_dir(root.join("component")).unwrap();
+        fs::write(root.join("component/source.rs"), "fn owned() {}\n").unwrap();
+        fs::write(root.join("owned.rs"), "fn owned() {}\n").unwrap();
+        seed_git_index(root);
+        fs::rename(root.join("component"), root.join("original-component")).unwrap();
+        fs::write(external.path().join("source.rs"), "fn excluded() {}\n").unwrap();
+        std::os::unix::fs::symlink(external.path(), root.join("component")).unwrap();
+
+        let inventory = build_repository_inventory(root).unwrap();
+        assert_eq!(inventory.source_files.len(), 1);
+        assert_eq!(inventory.source_files[0].path, "owned.rs");
+        assert!(inventory.truncation.is_some());
+        let inspection = inventory.inspection.unwrap();
+        assert_eq!(inspection.files, vec!["owned.rs"]);
+        assert!(inspection
+            .omitted_paths
+            .iter()
+            .any(|entry| entry.path == "component/source.rs"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn git_index_enumeration_skips_tracked_symlinks_instead_of_failing() {
@@ -655,6 +835,112 @@ mod coverage_limit_tests {
             .iter()
             .any(|classification| classification.path == "vendor"));
         assert!(inventory.truncation.is_none());
+    }
+
+    #[test]
+    fn cancellation_interrupts_wide_directory_collection_before_the_entry_cap() {
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        for i in 0..200 {
+            fs::write(temp.path().join(format!("source-{i}.rs")), "// owned\n").unwrap();
+        }
+        let seen = std::cell::Cell::new(0);
+        let mut progress = |count| seen.set(count);
+        let cancel = || seen.get() >= 5;
+        let mut budget = InventoryBudget::new(1000, 1024, &mut progress);
+        budget.cancel = Some(&cancel);
+        let reader = InventoryRoot::new(temp.path()).unwrap();
+        let entries = budget
+            .collect_dir(reader.read_directory(temp.path()).unwrap(), temp.path())
+            .unwrap();
+        assert_eq!(entries.len(), 5);
+        assert_eq!(budget.entries, 5);
+        assert!(budget.canceled);
+        assert!(budget
+            .truncation
+            .as_ref()
+            .unwrap()
+            .contains("canceled by operator"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_replacement_during_progress_does_not_enumerate_external_names() {
+        let temp = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let external = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
+        let boundary = temp.path().join("service");
+        fs::create_dir(&boundary).unwrap();
+        fs::write(boundary.join("initial.rs"), "// initial owned source\n").unwrap();
+        fs::write(temp.path().join("owned.rs"), "// owned source\n").unwrap();
+        fs::write(external.path().join("excluded.rs"), "// excluded source\n").unwrap();
+        let mut replaced = false;
+        let mut progress = |_| {
+            if !replaced {
+                fs::rename(&boundary, temp.path().join("original-service")).unwrap();
+                std::os::unix::fs::symlink(external.path(), &boundary).unwrap();
+                replaced = true;
+            }
+        };
+        let mut budget = InventoryBudget::new(100, 1024, &mut progress);
+        let mut builder = InventoryBuilder::default();
+        let reader = InventoryRoot::new(temp.path()).unwrap();
+        walk_repository(temp.path(), &reader, temp.path(), &mut builder, &mut budget).unwrap();
+        let inspection = budget.receipt("filesystem");
+        let result = builder.finish(
+            "owned".into(),
+            budget
+                .truncation
+                .map(|reason| InventoryTruncation { reason }),
+            inspection,
+        );
+        assert!(!result
+            .inspection
+            .as_ref()
+            .unwrap()
+            .files
+            .iter()
+            .any(|path| path.contains("excluded")));
+        assert!(result
+            .source_files
+            .iter()
+            .any(|file| file.path == "owned.rs"));
+        assert!(result.truncation.is_some());
+    }
+
+    fn seed_git_index(root: &Path) {
+        for args in [vec!["init", "-q"], vec!["add", "-A"]] {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_only_inventory_excludes_unsafe_members_before_charging_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("component")).unwrap();
+        fs::write(temp.path().join("component/source.rs"), "fn initial() {}\n").unwrap();
+        fs::write(temp.path().join("owned.rs"), "fn owned() {}\n").unwrap();
+        seed_git_index(temp.path());
+        fs::remove_dir_all(temp.path().join("component")).unwrap();
+        fs::write(external.path().join("source.rs"), "fn excluded() {}\n").unwrap();
+        std::os::unix::fs::symlink(external.path(), temp.path().join("component")).unwrap();
+        let result =
+            build_repository_inventory_with_limits(temp.path(), 100, 0, &mut |_| {}, &|| false)
+                .unwrap();
+        let inspection = result.inspection.unwrap();
+        assert_eq!(inspection.files, vec!["owned.rs"]);
+        assert_eq!(inspection.inspected_bytes, 0);
+        assert!(inspection
+            .omitted_paths
+            .iter()
+            .any(|row| row.path == "component/source.rs"));
+        assert!(result.truncation.is_some());
     }
 
     fn seed_git_worktree(root: &Path) {

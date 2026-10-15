@@ -1,49 +1,40 @@
 use super::*;
 
 #[test]
-fn carlini_thinking_level_defaults_to_high_and_honors_override_keys() {
-    assert_eq!(agentic_hunter_thinking_level(&json!({})), "high");
+fn carlini_thinking_level_inherits_and_honors_override_keys() {
+    let reasoning = |value| limits::actor_reasoning(&value).unwrap();
+    assert_eq!(reasoning(json!({})), None);
     assert_eq!(
-        agentic_hunter_thinking_level(&json!({"thinkingLevel": "medium"})),
-        "medium"
+        reasoning(json!({"thinkingLevel": "medium"})),
+        Some("medium".into())
     );
     assert_eq!(
-        agentic_hunter_thinking_level(&json!({"reasoningEffort": "low"})),
-        "low"
+        reasoning(json!({"reasoningEffort": "low"})),
+        Some("low".into())
     );
+    assert_eq!(reasoning(json!({"effort": "xhigh"})), Some("xhigh".into()));
+    assert_eq!(reasoning(json!({"thinkingLevel": ""})), None);
     assert_eq!(
-        agentic_hunter_thinking_level(&json!({"effort": "xhigh"})),
-        "xhigh"
-    );
-    assert_eq!(
-        agentic_hunter_thinking_level(&json!({"thinkingLevel": ""})),
-        "high"
-    );
-    assert_eq!(
-        agentic_hunter_thinking_level(&json!({"thinkingLevel": "  high  "})),
-        "high"
+        reasoning(json!({"thinkingLevel": "  high  "})),
+        Some("high".into())
     );
 }
 
 #[test]
 fn carlini_max_output_tokens_accepts_operator_cap_aliases() {
-    assert_eq!(max_output_tokens_from_input(&json!({})), None);
-    assert_eq!(
-        max_output_tokens_from_input(&json!({"maxOutputTokens": 32000})),
-        Some(32000)
-    );
-    assert_eq!(
-        max_output_tokens_from_input(&json!({"max_output_tokens": 16000})),
-        Some(16000)
-    );
-    assert_eq!(
-        max_output_tokens_from_input(&json!({"maxTokens": 8000})),
-        Some(8000)
-    );
-    assert_eq!(
-        max_output_tokens_from_input(&json!({"maxOutputTokens": 0})),
-        None
-    );
+    let cap = |value| {
+        limits::bounded_integer(
+            &value,
+            &["maxOutputTokens", "max_output_tokens", "maxTokens"],
+            4096,
+            256..=32768,
+        )
+    };
+    assert_eq!(cap(json!({})).unwrap(), 4096);
+    assert_eq!(cap(json!({"maxOutputTokens":32000})).unwrap(), 32000);
+    assert_eq!(cap(json!({"max_output_tokens":16000})).unwrap(), 16000);
+    assert_eq!(cap(json!({"maxTokens":8000})).unwrap(), 8000);
+    assert!(cap(json!({"maxOutputTokens":0})).is_err());
 }
 
 #[test]

@@ -82,11 +82,12 @@ mod tests {
     }
 
     #[test]
-    fn rail_leads_with_engagement_and_ends_with_cost() {
+    fn targetless_rail_names_target_and_keeps_session_cost() {
         let app = ShellApp::new(V2Config::default(), None);
         let rows = rendered_rows(&app, 36, 12);
 
-        assert!(rows[0].contains("ENGAGEMENT"));
+        assert!(rows[0].contains("TARGET"));
+        assert!(!rows.iter().any(|row| row.contains("ENGAGEMENT")));
         assert!(rows.iter().any(|row| row.contains("COST")));
         assert!(rows.iter().any(|row| row.contains("no target")));
     }

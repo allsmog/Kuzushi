@@ -10,34 +10,39 @@ mod domain;
 mod git_history_mining;
 mod git_metadata;
 mod infrastructure;
+pub(crate) use infrastructure::InventoryRoot;
 pub mod inventory;
 pub(crate) mod python_surface_policy;
+pub mod report_preferences;
 pub(crate) mod rust_surface_policy;
 pub(crate) mod rust_test_source;
 pub(crate) mod source_snapshot;
 pub mod source_span;
 pub mod tool_shelf;
-pub mod report_preferences;
 
 #[cfg(test)]
 mod tests;
 
 pub use application::{
     accept_scan_scope_proposal, active_workspace_required_message, build_project_model_document,
-    changed_scan_input, create_scan_scope_proposal, discover_and_save_nested_project_scopes,
-    discover_nested_project_scopes, edit_scan_scope_proposal, export_scan_findings_sarif,
-    export_scan_findings_sarif_with_run_summary, export_workspace_findings,
-    export_workspace_findings_with_options, findings_since_filter_expression,
-    load_accepted_scan_scope_proposal, load_finding_relationships, load_investigation_report,
-    load_investigation_report_document, load_investigation_report_document_for_runs,
-    load_investigation_report_for_runs, load_nested_project_scopes, load_program_scope,
-    load_project_model_document, load_scan_scope_proposal, preview_workspace_findings_export,
-    project_model_scope_path, read_finding_review_source, record_finding_relationship_batch_review,
-    record_finding_relationship_review, record_review_session_started,
-    record_user_review_decision_for_finding, record_user_review_decision_for_finding_at_watermark,
-    record_user_review_decision_for_finding_with_session, refresh_project_model_staleness,
-    review_completion_for_findings, save_nested_project_scopes, save_project_model_document,
-    scan_scope_proposal_files, workspace_export_omitted_fields,
+    capture_review_source, capture_review_source_with_limit, changed_scan_input,
+    create_scan_scope_proposal, decide_on_review_source, discover_and_save_nested_project_scopes,
+    discover_nested_project_scopes, edit_scan_scope_proposal, execute_source_review_action,
+    export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
+    export_workspace_findings, export_workspace_findings_with_options,
+    findings_since_filter_expression, load_accepted_scan_scope_proposal,
+    load_finding_relationships, load_investigation_report, load_investigation_report_document,
+    load_investigation_report_document_for_runs, load_investigation_report_for_runs,
+    load_nested_project_scopes, load_program_scope, load_project_model_document,
+    load_scan_scope_proposal, preview_workspace_findings_export, project_model_scope_path,
+    read_captured_review_code, read_decision_reviewed_source, read_finding_review_source,
+    read_review_decision_receipt, read_review_source_capture,
+    record_finding_relationship_batch_review, record_finding_relationship_review,
+    record_review_session_started, record_user_review_decision_for_finding,
+    record_user_review_decision_for_finding_at_watermark,
+    record_user_review_decision_for_finding_with_session, record_user_review_decision_with_receipt,
+    refresh_project_model_staleness, review_completion_for_findings, save_nested_project_scopes,
+    save_project_model_document, scan_scope_proposal_files, workspace_export_omitted_fields,
     workspace_finding_export_records_with_context, workspace_finding_export_records_with_reviews,
     workspace_status_for_target, write_program_scope_scaffold, ChangedScanScope,
     ContextMatrixInvestigationReceipt, FindingRelationshipBatchReviewRequest,
@@ -49,8 +54,10 @@ pub use application::{
     WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
     WorkspaceFindingsExportPreview, WorkspaceLessonExportRecord, WorkspaceObservedSource,
     WorkspaceRemediationExportSummary, WorkspaceReviewCompletion, WorkspaceReviewDecisionBasis,
-    WorkspaceReviewSourceApplicability, WorkspaceReviewSourceComparison, WorkspaceRunExportContext,
-    WorkspaceStatus, WorkspaceVerificationExportSummary, PROJECT_MODEL_SCHEMA_VERSION,
+    WorkspaceReviewDecisionReceipt, WorkspaceReviewSourceApplicability,
+    WorkspaceReviewSourceCapture, WorkspaceReviewSourceComparison, WorkspaceRunExportContext,
+    WorkspaceStatus, WorkspaceVerificationExportSummary, MAX_REVIEW_SOURCE_BYTES,
+    PROJECT_MODEL_SCHEMA_VERSION,
 };
 pub use artifact_kb::*;
 pub use artifacts::{
@@ -92,7 +99,7 @@ pub use git_metadata::{
     resolve_target_git_commit, switch_target_revision, target_git_metadata,
     target_revision_relationship, RevisionRelationship, TargetRevisionSwitch,
 };
-pub(crate) use infrastructure::git_tracked_relative_paths;
+pub(crate) use infrastructure::{git_tracked_relative_paths, GitIndexEnumeration};
 pub use inventory::*;
 pub use source_span::*;
 pub use tool_shelf::{

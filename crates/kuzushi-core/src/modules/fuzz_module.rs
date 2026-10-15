@@ -6,6 +6,9 @@ use crate::capabilities::fuzz_engine::{
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+mod stored_results;
+pub(in crate::modules) use stored_results::{run_fuzz_import, run_fuzz_status};
+
 const DEFAULT_FUZZ_RUN_TIMEOUT_MS: u64 = 60 * 60 * 1000;
 const MAX_FUZZ_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 const WORKSPACE_INIT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -75,8 +78,8 @@ fn fuzz_author_tool() -> ToolDescriptor {
 fn fuzz_import_tool() -> ToolDescriptor {
     tool_with_options(
         "fuzz:import",
-        "Import the engine's verified crash ledger (findings-index.jsonl) into the findings \
-         store with impact-derived severity, without running the engine.",
+        "Import existing crash records from findings-index.jsonl. Verification is an external \
+         engine claim; this reader does not establish local reproduction.",
         fuzz_import_options(),
     )
     .with_policy(workspace_policy(
@@ -84,6 +87,7 @@ fn fuzz_import_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Required,
     ))
+    .without_phase_result()
 }
 
 fn fuzz_prove_tool() -> ToolDescriptor {
@@ -137,11 +141,12 @@ fn fuzz_differential_tool() -> ToolDescriptor {
 fn fuzz_status_tool() -> ToolDescriptor {
     tool_with_options(
         "fuzz:status",
-        "Probe the engine workspace: bootstrap state, targets, built fuzzers, parked \
-         workorders, and verified finding counts. Read-only, no engine invocation.",
+        "Read stored engine workspace markers and externally reported finding counts. \
+         This does not establish build validity or local reproduction.",
         fuzz_status_options(),
     )
     .with_policy(read_policy(ToolPhase::Scan, WorkspaceRequirement::Required))
+    .without_phase_result()
 }
 
 fn shared_engine_options() -> Vec<OptionSpec> {
@@ -582,16 +587,18 @@ fn fuzz_status_options() -> Vec<OptionSpec> {
         target_option(),
         opt(
             "workspaceRoot",
-            OptionType::String,
+            OptionType::Path,
             "Engine workspace to probe; may not exist yet (reported as uninitialized). \
              Defaults to the derived per-target workspace.",
         )
+        .external_read()
         .aliases(&["workspace_root"]),
         opt(
             "dataRoot",
-            OptionType::String,
+            OptionType::Path,
             "Engine state root to probe. Defaults to <workspaceRoot>/data.",
         )
+        .external_read()
         .aliases(&["data_root"])
         .advanced(),
     ]
@@ -1921,112 +1928,6 @@ fn fuzz_differential_response(
     }
 }
 
-// ---------------------------------------------------------------------------
-// fuzz:import + fuzz:status
-// ---------------------------------------------------------------------------
-
-pub(in crate::modules) fn run_fuzz_import(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    ctx.ensure_active()?;
-    let target = resolve_tool_target(input, ctx)?;
-    let workspace = ctx
-        .workspace
-        .context("fuzz:import requires an active workspace")?;
-    let data_root = match optional_string_input(input, &["dataRoot", "data_root"])? {
-        Some(value) => PathBuf::from(value),
-        None => FuzzPaths::data_root_for(&derived_workspace_root(&home_dir()?, &target)),
-    };
-    let filter = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?;
-    let request = import::FuzzImportRequest {
-        data_root: &data_root,
-        source_dir: &target,
-        target_filter: filter.as_deref(),
-        include_unverified: bool_input(input, &["includeUnverified", "include_unverified"]),
-    };
-    let summary = import::import_afe_findings(workspace, &request)?;
-    let output = format!(
-        "fuzz:import · {} imported · {} unverified skipped · {} malformed rows",
-        summary.imported, summary.skipped_unverified, summary.skipped_rows
-    );
-    Ok(crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({ "target": target.display().to_string(), "summary": summary }),
-    ))
-}
-
-pub(in crate::modules) fn run_fuzz_status(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(input, ctx)?;
-    let workspace_root = match optional_string_input(input, &["workspaceRoot", "workspace_root"])? {
-        Some(value) => PathBuf::from(value),
-        None => derived_workspace_root(&home_dir()?, &target),
-    };
-    let data_root = match optional_string_input(input, &["dataRoot", "data_root"])? {
-        Some(value) => PathBuf::from(value),
-        None => FuzzPaths::data_root_for(&workspace_root),
-    };
-    let probe = bootstrap::probe_workspace(&workspace_root);
-    let counts = index_counts(&data_root);
-    let output = fuzz_status_output(&workspace_root, &probe, counts);
-    Ok(crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({
-            "target": target.display().to_string(),
-            "workspaceRoot": workspace_root.display().to_string(),
-            "dataRoot": data_root.display().to_string(),
-            "initialized": probe.initialized,
-            "sinksPresent": probe.sinks_present,
-            "targets": probe.targets,
-            "builtTargets": probe.built.iter().collect::<Vec<_>>(),
-            "parkedWorkorders": probe.workorders,
-            "findings": counts.map(|(verified, total)| json!({
-                "verified": verified,
-                "total": total,
-            })),
-        }),
-    ))
-}
-
-fn index_counts(data_root: &Path) -> Option<(usize, usize)> {
-    let body = crate::bounded_file::read_utf8_text(
-        &data_root.join("findings-index.jsonl"),
-        64 * 1024 * 1024,
-    )
-    .ok()?;
-    let (folded, _) = crate::capabilities::fuzz_engine::index_rows::parse_and_fold(&body);
-    let verified = folded.iter().filter(|row| row.recorded.verified).count();
-    Some((verified, folded.len()))
-}
-
-fn fuzz_status_output(
-    workspace_root: &Path,
-    probe: &bootstrap::WorkspaceProbe,
-    counts: Option<(usize, usize)>,
-) -> String {
-    if !probe.initialized {
-        return format!(
-            "fuzz:status · engine workspace {} is uninitialized (fuzz:run bootstraps it)",
-            workspace_root.display()
-        );
-    }
-    let findings = counts
-        .map(|(verified, total)| format!("{verified}/{total} verified findings"))
-        .unwrap_or_else(|| "no findings index".to_string());
-    format!(
-        "fuzz:status · {} target(s), {} built, {} workorder(s) parked · {}",
-        probe.targets.len(),
-        probe.built.len(),
-        probe.workorders.len(),
-        findings,
-    )
-}
-
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, label: impl Into<String>) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step(kind, verb, label.into()).emit();
@@ -2389,24 +2290,5 @@ mod tests {
             .to_string();
 
         assert!(error.contains("TRIAGE_PROMPT"), "{error}");
-    }
-
-    #[test]
-    fn status_output_reports_uninitialized_and_initialized_workspaces() {
-        let empty = bootstrap::WorkspaceProbe::default();
-        let output = fuzz_status_output(Path::new("/ws"), &empty, None);
-        assert!(output.contains("uninitialized"), "{output}");
-
-        let probe = bootstrap::WorkspaceProbe {
-            initialized: true,
-            sinks_present: true,
-            targets: vec!["a".into(), "b".into()],
-            buildable: ["a".to_string()].into_iter().collect(),
-            built: ["a".to_string()].into_iter().collect(),
-            workorders: vec!["b".into()],
-        };
-        let output = fuzz_status_output(Path::new("/ws"), &probe, Some((2, 5)));
-        assert!(output.contains("2 target(s), 1 built, 1 workorder(s)"), "{output}");
-        assert!(output.contains("2/5 verified"), "{output}");
     }
 }

@@ -124,6 +124,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) rule: String,
     pub(crate) tool: String,
     pub(crate) source_signature: String,
+    pub(crate) source_history: Vec<String>,
     pub(crate) corroboration: String,
     pub(crate) source_count: usize,
     pub(crate) fingerprint: String,
@@ -1408,7 +1409,7 @@ fn merge_projected_finding(projected: &mut ProjectedFinding, alias: String, find
     representative.corroboration_count = merged_corroboration_count(
         previous.corroboration_count,
         next_count,
-        representative.sources.len(),
+        kuzushi_core::findings::distinct_recorded_source_count(&representative.sources),
     );
     projected.finding = representative;
 }
@@ -1970,6 +1971,7 @@ impl FindingDetailModel {
             tool: projection.tool,
             vuln_source_label: vuln_source_label(finding),
             source_signature: source_signature_label(finding),
+            source_history: super::finding_source_history::rows(&finding.sources),
             corroboration: corroboration_label(finding),
             source_count: finding_unique_source_count(finding),
             fingerprint: projection.fingerprint,
@@ -2302,9 +2304,14 @@ fn corroboration_label(finding: &Finding) -> String {
         .sources
         .iter()
         .map(|source| source.tool.as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect::<Vec<_>>()
         .join(", ");
-    format!("{} ({tools})", finding.sources.len())
+    format!(
+        "{} ({tools})",
+        kuzushi_core::findings::distinct_recorded_source_count(&finding.sources)
+    )
 }
 
 fn evidence_rows(finding: &Finding) -> Vec<FindingEvidenceRow> {

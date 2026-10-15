@@ -46,6 +46,12 @@ fn record_receipt(
         proposal_ref: receipt.scope_study.proposal_ref.clone(),
         cases: receipt.scope_study.selections.clone(),
     });
+    config.scope_context.labels = receipt
+        .scope_study
+        .cases
+        .iter()
+        .map(|case| (case.id.clone(), case.label.clone()))
+        .collect();
     config.study.scope_receipt = Some(receipt);
     config.prior_campaign_id = config
         .study

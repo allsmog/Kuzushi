@@ -13,6 +13,7 @@ pub(crate) fn campaign_module() -> BuiltinModule {
             brief::tool(),
             allowance::study_tool(),
             allowance::context_study_tool(),
+            allowance::review_study_tool(),
             allowance::context_map_tool(),
             allowance::approve_tool(),
             allowance::status_tool(),

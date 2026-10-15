@@ -51,10 +51,6 @@ pub(crate) struct FindingLedgerCounts {
     pub(crate) proof_backed: usize,
     pub(crate) remediated: usize,
     pub(crate) remediation_projection_complete: bool,
-    /// At least one unfiltered, store-backed finding names its discovery run.
-    /// This is sufficient to project a pre-attempt Scan checkpoint, but never
-    /// overrides a modern phase attempt for the same target.
-    pub(crate) durable_scan_evidence: bool,
 }
 
 impl WorkspaceStaleSummary {
@@ -173,6 +169,7 @@ pub struct DomainCache {
         BTreeMap<String, kuzushi_core::workspace::WorkspaceReviewSourceApplicability>,
     patch_lifecycles_by_reverify_run: BTreeMap<String, PatchLifecycleRecord>,
     workspace_stale: Option<WorkspaceStaleSummary>,
+    returning_source_unverified: bool,
     /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
     /// target wiring and favorite toggles — never read per frame.
     tool_shelf: ToolShelf,
@@ -221,6 +218,7 @@ impl DomainCache {
             review_source_applicabilities: BTreeMap::new(),
             patch_lifecycles_by_reverify_run: BTreeMap::new(),
             workspace_stale: None,
+            returning_source_unverified: false,
             tool_shelf: ToolShelf::default(),
         }
     }
@@ -239,6 +237,7 @@ impl DomainCache {
         self.clear_target_artifacts();
         self.clear_target_findings();
         self.workspace_stale = None;
+        self.returning_source_unverified = false;
         self.tool_shelf = ToolShelf::default();
     }
 
@@ -620,6 +619,14 @@ impl DomainCache {
 
     pub(crate) fn workspace_stale(&self) -> Option<&WorkspaceStaleSummary> {
         self.workspace_stale.as_ref()
+    }
+
+    pub(crate) fn returning_source_unverified(&self) -> bool {
+        self.returning_source_unverified
+    }
+
+    pub(crate) fn set_returning_source_unverified(&mut self, unverified: bool) {
+        self.returning_source_unverified = unverified;
     }
 
     pub(crate) fn apply_workspace_changes(&mut self, changes: &[WorkspaceChange]) {

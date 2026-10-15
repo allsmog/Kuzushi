@@ -1,19 +1,19 @@
 use super::*;
 
-const CARGO_AUDIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-
 impl ScanEngine for CargoAuditScanner {
     fn id(&self) -> &'static str {
         "cargo-audit"
     }
 
+    fn rebind_scoped_finding(&self, finding: &mut Finding, file_path: String) {
+        super::cargo_audit::rebind_audit_finding(finding, file_path);
+    }
+
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        let Some(lockfile) = cargo_audit_lockfile(target, cancellation)? else {
+        let Some(_) = cargo_audit_lockfile(target, cancellation)? else {
             return Ok(Vec::new());
         };
-        ensure_cargo_audit_available()?;
-        let output = run_cargo_audit(target, &lockfile, cancellation)?;
-        cargo_audit_findings_from_output(output)
+        super::ConfiguredCargoAuditScanner::from_tool_input(&json!({}))?.scan(target, cancellation)
     }
 }
 
@@ -25,37 +25,20 @@ fn cargo_audit_lockfile(target: &Path, cancellation: &ScanCancellation) -> Resul
     Ok(lockfile.exists().then_some(lockfile))
 }
 
-fn run_cargo_audit(
-    target: &Path,
-    lockfile: &Path,
-    cancellation: &ScanCancellation,
-) -> Result<std::process::Output> {
-    let mut command = Command::new("cargo");
-    command
-        .args(["audit", "--json"])
-        .arg("--file")
-        .arg(lockfile)
-        .current_dir(target)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    crate::bounded_subprocess::output_with_control(
-        &mut command,
-        "cargo audit",
-        Some(cancellation),
-        CARGO_AUDIT_TIMEOUT,
-    )
-    .with_context(|| "cargo-audit: failed to invoke `cargo audit`")
-}
-
-fn cargo_audit_findings_from_output(output: std::process::Output) -> Result<Vec<Finding>> {
+pub(super) fn cargo_audit_findings_from_output(
+    output: std::process::Output,
+) -> Result<Vec<Finding>> {
     // cargo-audit exits non-zero when vulnerabilities are found; that's
     // expected. Malformed or shape-invalid output is never a clean scan.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    anyhow::ensure!(
+        cargo_audit_status_is_usable(output.status.success(), output.status.code()),
+        "cargo-audit failed: {}",
+        stderr.trim()
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let findings = parse_cargo_audit_output(&stdout)?;
-    if !cargo_audit_status_is_usable(output.status.success(), output.status.code()) {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("cargo-audit failed: {}", stderr.trim());
-    }
+    let findings = parse_cargo_audit_output(&stdout)
+        .map_err(|error| anyhow::anyhow!("{error}; cargo-audit stderr: {}", stderr.trim()))?;
     anyhow::ensure!(
         output.status.success() || !findings.is_empty(),
         "cargo-audit reported vulnerabilities but emitted no usable advisory entries"
@@ -105,7 +88,7 @@ fn cargo_audit_finding(entry: &Value) -> Result<Finding> {
     let package_name = required_cargo_audit_field(package, "name")?;
     let version = required_cargo_audit_field(package, "version")?;
     let severity = severity_from_cvss(advisory.get("cvss").and_then(Value::as_str));
-    let message = format!("{id}: {package_name}@{version} — {title}");
+    let message = format!("{id}: {package_name}@{version} · {title}");
 
     // One advisory can affect several locked versions; the locked package
     // names which instance of the advisory this finding is.
@@ -150,15 +133,6 @@ mod status_tests {
 
         assert!(error.to_string().contains("cancelled"));
     }
-}
-
-fn ensure_cargo_audit_available() -> Result<()> {
-    if CargoAuditScanner::binary_available() {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "cargo-audit: `cargo audit` was not found. Install cargo-audit with `cargo install cargo-audit`, then rerun `kuzushi scan <repo> --tasks cargo-audit` or `kuzushi --target <repo> run sast:scan --input '{{\"tasks\":[\"cargo-audit\"]}}'`."
-    )
 }
 
 pub(crate) fn severity_from_cvss(cvss: Option<&str>) -> Severity {

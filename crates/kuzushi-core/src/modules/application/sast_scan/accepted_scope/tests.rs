@@ -90,6 +90,26 @@ fn prepared_scope_reference_resolves_exact_discovery_and_rejects_broader_paths()
 }
 
 #[test]
+fn dependency_hygiene_refuses_accepted_exact_membership_before_discovery() {
+    let (_root, workspace, config, reference) = fixture();
+    let error = prepared(&workspace, &config, &reference, "dep-hygiene").unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("dep-hygiene cannot honor accepted file membership"));
+    assert!(error.to_string().contains("No scan started"));
+}
+
+#[test]
+fn iac_refuses_accepted_exact_membership_before_discovery() {
+    let (_root, workspace, config, reference) = fixture();
+    let error = prepared(&workspace, &config, &reference, "iac-scan").unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("iac-scan cannot honor accepted file membership"));
+    assert!(error.to_string().contains("No scan started"));
+}
+
+#[test]
 fn exact_native_secret_scan_consumes_only_accepted_files_and_records_the_scope() {
     let (_root, workspace, config, reference) = fixture();
     let registry = ModuleRegistry::with_v2_builtins();

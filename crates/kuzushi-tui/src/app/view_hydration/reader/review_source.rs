@@ -6,6 +6,7 @@ pub(super) fn read_review_source(
 ) -> Option<ViewHydrationValue> {
     let ViewHydrationKey::FindingReviewSource {
         stable_fp,
+        decision_id,
         decision_watermark,
         observation_watermark,
     } = key
@@ -17,6 +18,7 @@ pub(super) fn read_review_source(
         stable_fp,
         *decision_watermark,
         *observation_watermark,
+        *decision_id,
     )
     .map_err(|error| error.to_string());
     Some(ViewHydrationValue::FindingReviewSource(value))
@@ -27,6 +29,7 @@ fn read_source(
     stable_fp: &str,
     decision: u64,
     observed: Option<u64>,
+    decision_id: i64,
 ) -> anyhow::Result<Option<FindingReviewSource>> {
     let workspace = kuzushi_core::WorkspaceTarget::new(target)?;
     let Some(basis) = kuzushi_core::workspace::read_finding_review_source(
@@ -41,6 +44,10 @@ fn read_source(
         .as_ref()
         .map(|later| recorded_revision(target, &later.run_id));
     Ok(Some(FindingReviewSource {
+        reviewed_source: kuzushi_core::workspace::read_decision_reviewed_source(
+            &workspace,
+            decision_id,
+        )?,
         basis,
         decided_revision,
         later_revision,

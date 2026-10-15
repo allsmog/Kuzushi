@@ -1,6 +1,23 @@
 use super::*;
 
 impl ShellApp {
+    pub(crate) fn store_edited_tool_option(
+        &mut self,
+        tool: &str,
+        spec: OptionSpec,
+        value: serde_json::Value,
+        global: bool,
+    ) -> Vec<ShellEffect> {
+        self.store_tool_option(
+            global,
+            ResolvedToolOption {
+                tool_name: tool.into(),
+                canonical_name: spec.name.clone(),
+                spec,
+            },
+            value,
+        )
+    }
     pub(crate) fn reduce_set_option(
         &mut self,
         global: bool,
@@ -44,6 +61,7 @@ impl ShellApp {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
+        self.router.options_browser_mut().notice = None;
         self.set_shell_view(ShellView::Options);
         self.log(
             prefix,
@@ -94,6 +112,7 @@ impl ShellApp {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
+        self.router.options_browser_mut().notice = None;
         self.set_shell_view(ShellView::Options);
         self.log(
             prefix,
@@ -264,6 +283,12 @@ impl ShellApp {
 fn role_model_option(name: &str) -> Option<kuzushi_core::agent_router::AgentRole> {
     let key = name.strip_prefix("MODEL_")?;
     kuzushi_core::agent_router::AgentRole::from_key(&key.to_lowercase())
+}
+
+impl ShellApp {
+    pub(crate) fn tool_option_has_global_scope(name: &str) -> bool {
+        role_model_option(name).is_some()
+    }
 }
 
 fn role_model_write_target(target: OptionTarget, is_role_model: bool) -> OptionTarget {

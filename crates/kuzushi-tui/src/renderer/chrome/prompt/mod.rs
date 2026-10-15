@@ -37,14 +37,7 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
 }
 
 fn inactive_prompt_line(app: &ShellApp, width: u16) -> Option<Line<'static>> {
-    if let Some(text) = captured_overlay_prompt(app.shell_view())
-        .or_else(|| relationship_prompt(app))
-        .or_else(|| lesson_prompt(app))
-        .or_else(|| setup_prompt(app, width))
-    {
-        return Some(disabled_prompt_line(text));
-    }
-    if let Some(text) = captured_field_prompt(app) {
+    if let Some(text) = captured_surface_prompt(app, width) {
         return Some(disabled_prompt_line(text));
     }
     if app.is_picker_view() {
@@ -52,6 +45,38 @@ fn inactive_prompt_line(app: &ShellApp, width: u16) -> Option<Line<'static>> {
             .then(|| disabled_prompt_line(picker_prompt_hint(width)));
     }
     (app.input_mode() == crate::InputMode::Navigate).then(|| navigation_prompt_line(app))
+}
+
+fn captured_surface_prompt(app: &ShellApp, width: u16) -> Option<&'static str> {
+    if app.budget_halt_owns_input() {
+        return Some("Spending halted · Esc to inspect");
+    }
+    tool_settings_prompt(app)
+        .or_else(|| captured_overlay_prompt(app.shell_view()))
+        .or_else(|| relationship_prompt(app))
+        .or_else(|| lesson_prompt(app))
+        .or_else(|| setup_prompt(app, width))
+        .or_else(|| captured_field_prompt(app))
+}
+
+fn tool_settings_prompt(app: &ShellApp) -> Option<&'static str> {
+    if app.tool_option_editor_open() {
+        return Some("Enter saves · Esc keeps draft");
+    }
+    if app.tools_support_owns_input() {
+        return Some("Esc prompt · Enter settings · ↑/↓ tool");
+    }
+    if support_options_reading(app) {
+        return Some("Esc tools · Enter edit · ↑/↓ settings");
+    }
+    None
+}
+
+fn support_options_reading(app: &ShellApp) -> bool {
+    app.shell_view() == crate::ShellView::Options
+        && app.input_mode() == crate::InputMode::Navigate
+        && app.router.options_browser().support_origin.is_some()
+        && app.router.options_browser().edit.is_none()
 }
 
 fn setup_prompt(app: &ShellApp, width: u16) -> Option<&'static str> {
@@ -197,6 +222,12 @@ fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::St
 }
 
 fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
+    if crate::ui_view_models::compact_map_reading(app, app.viewport().rows) {
+        return Line::styled(
+            crate::ui_view_models::navigation_prompt_label(app),
+            theme::disabled(),
+        );
+    }
     if crate::ui_view_models::compact_review_reading(app, app.viewport().rows) {
         return Line::from(vec![
             Span::styled("▣ REVIEW · ", theme::mode_review()),

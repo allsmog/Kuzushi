@@ -1,0 +1,95 @@
+name: Keyboard-only frozen code reading and source-qualified human verdict preserve history
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: findings
+require-live-snap: 25 FINDINGS · 1 | original-source-list
+nav-mode:
+keys: Enter
+submit: decision fp Owned public documentation example is intentional
+require-live-snap: 25 recorded observation revision-base-003 | original-human-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART advance
+submit: findings
+nav-mode:
+keys: Enter
+require-live-snap: 25 review current source | source-form-action
+keys: Y
+require-live-snap: 25 REVIEW CURRENT SOURCE | bounded-capture-terms
+expect: 16 GiB
+expect: no scan observations or provider requests
+keys: Enter
+require-live-snap: 30 READ CAPTURED SOURCE | frozen-current-code
+expect: Public documentation example
+expect: AWS_ACCESS_KEY_ID
+keys: Tab
+require-live-snap: 25 Source reference | source-receipt
+expect: 30baa1f1a56bae4cbb431ba0d453a59a8108a71b
+expect: Dirty: true
+keys: Tab
+require-live-snap: 25 AWS_ACCESS_KEY_ID | returned-code
+resize: 160x48
+live-snap: source-form-160x48
+resize: 96x89
+live-snap: source-form-96x89
+resize: 80x24
+live-snap: source-form-80x24
+resize: 60x20
+live-snap: source-form-60x20
+resize: 40x12
+live-snap: source-form-40x12
+keys: NPage
+live-snap: source-form-40x12-code
+ask: Is the code clearly frozen to the capture, with readable resource limits, source identity, controls and narrow-terminal paging?
+resize: 120x36
+keys: Enter
+require-live-snap: 25 CHOOSE SOURCE VERDICT | verdict-choices
+keys: Down Down Down Down Enter
+require-live-snap: 25 EXPLAIN SOURCE VERDICT | reason-editor
+keys: C-s
+require-live-snap: 25 Add a reason | required-reason
+paste-file: @ART/review-reason.txt
+require-live-snap: 25 explicitly deferred | multiline-review-reason
+expect-not: Add a reason
+resize: 160x48
+live-snap: source-reason-160x48
+resize: 96x89
+live-snap: source-reason-96x89
+resize: 80x24
+live-snap: source-reason-80x24
+resize: 60x20
+live-snap: source-reason-60x20
+resize: 40x12
+require-live-snap: 25 Ctrl+S review | source-reason-40x12
+resize: 120x36
+keys: C-s
+require-live-snap: 25 REVIEW SOURCE DECISION | reviewed-save
+expect: Deferred
+expect: Dirty: true
+resize: 40x12
+live-snap: source-confirm-40x12
+keys: NPage NPage NPage NPage NPage
+require-live-snap: 25 Dirty: true | source-confirm-40x12-identity
+resize: 120x36
+keys: Enter
+require-live-snap: 30 SOURCE DECISION SAVED | durable-source-decision
+expect: Decision #2 saved
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART verify
+keys: Escape
+require-live-snap: 25 Viewing Review | returned-review-origin
+ask: Does the entire source review avoid JSON entry, preserve the prior decision and raw observations, and return to Review after one explicit save?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: findings
+nav-mode:
+keys: Enter
+require-live-snap: 30 explicitly reviewed source capture | recovered-source-review
+expect: dirty
+require-shell: python3 -B @REPO/scripts/devex/fixtures/source_review_form.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10

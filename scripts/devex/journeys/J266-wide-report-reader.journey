@@ -1,0 +1,163 @@
+name: Every report format and destination remain visible over an actual completed wide study
+size: 120x36
+cwd: @TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_report.py @TARGET @ART seed
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | ready
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 24 completed | recorded-work
+submit: report
+require-live-snap: 25 9 findings · 9 reviewed | recorded-report
+resize: 160x48
+require-live-snap: 15 format json (4/6) | json-160x48
+expect: findings.json
+resize: 120x36
+require-live-snap: 15 format json (4/6) | json-120x36
+expect: findings.json
+resize: 96x89
+require-live-snap: 15 format json (4/6) | json-96x89
+expect: findings.json
+resize: 80x24
+require-live-snap: 15 format json (4/6) | json-80x24
+expect: findings.json
+resize: 60x20
+require-live-snap: 15 format json (4/6) | json-60x20
+expect: findings.json
+resize: 40x12
+require-live-snap: 15 format json (4/6) | json-40x12
+expect: findings.json
+keys: PageDown
+require-live-snap: 15 format json (4/6) | json-paged-40x12
+expect: findings.json
+keys: PageUp j
+resize: 160x48
+require-live-snap: 15 format csv (5/6) | csv-160x48
+expect: findings.csv
+resize: 120x36
+require-live-snap: 15 format csv (5/6) | csv-120x36
+expect: findings.csv
+resize: 96x89
+require-live-snap: 15 format csv (5/6) | csv-96x89
+expect: findings.csv
+resize: 80x24
+require-live-snap: 15 format csv (5/6) | csv-80x24
+expect: findings.csv
+resize: 60x20
+require-live-snap: 15 format csv (5/6) | csv-60x20
+expect: findings.csv
+resize: 40x12
+require-live-snap: 15 format csv (5/6) | csv-40x12
+expect: findings.csv
+keys: PageDown
+require-live-snap: 15 format csv (5/6) | csv-paged-40x12
+expect: findings.csv
+keys: PageUp j
+resize: 160x48
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-160x48
+expect: VULN-FINDINGS.json
+resize: 120x36
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-120x36
+expect: VULN-FINDINGS.json
+resize: 96x89
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-96x89
+expect: VULN-FINDINGS.json
+resize: 80x24
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-80x24
+expect: VULN-FINDINGS.json
+resize: 60x20
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-60x20
+expect: VULN-FINDINGS.json
+resize: 40x12
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-40x12
+expect: VULN-FINDINGS.json
+keys: PageDown
+require-live-snap: 15 format vuln-findings (6/6) | vuln-findings-paged-40x12
+expect: VULN-FINDINGS.json
+keys: PageUp k k k k k
+resize: 160x48
+require-live-snap: 15 format sarif (1/6) | sarif-160x48
+expect: report.sarif
+resize: 120x36
+require-live-snap: 15 format sarif (1/6) | sarif-120x36
+expect: report.sarif
+resize: 96x89
+require-live-snap: 15 format sarif (1/6) | sarif-96x89
+expect: report.sarif
+resize: 80x24
+require-live-snap: 15 format sarif (1/6) | sarif-80x24
+expect: report.sarif
+resize: 60x20
+require-live-snap: 15 format sarif (1/6) | sarif-60x20
+expect: report.sarif
+resize: 40x12
+require-live-snap: 15 format sarif (1/6) | sarif-40x12
+expect: report.sarif
+keys: PageDown
+require-live-snap: 15 format sarif (1/6) | sarif-paged-40x12
+expect: report.sarif
+keys: PageUp j
+resize: 160x48
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-160x48
+expect: report/
+resize: 120x36
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-120x36
+expect: report/
+resize: 96x89
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-96x89
+expect: report/
+resize: 80x24
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-80x24
+expect: report/
+resize: 60x20
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-60x20
+expect: report/
+resize: 40x12
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-40x12
+expect: report/
+keys: PageDown
+require-live-snap: 15 format markdown-bundle (2/6) | markdown-bundle-paged-40x12
+expect: report/
+keys: PageUp j
+resize: 160x48
+require-live-snap: 15 format jsonl (3/6) | jsonl-160x48
+expect: findings.jsonl
+resize: 120x36
+require-live-snap: 15 format jsonl (3/6) | jsonl-120x36
+expect: findings.jsonl
+resize: 96x89
+require-live-snap: 15 format jsonl (3/6) | jsonl-96x89
+expect: findings.jsonl
+resize: 80x24
+require-live-snap: 15 format jsonl (3/6) | jsonl-80x24
+expect: findings.jsonl
+resize: 60x20
+require-live-snap: 15 format jsonl (3/6) | jsonl-60x20
+expect: findings.jsonl
+resize: 40x12
+require-live-snap: 15 format jsonl (3/6) | jsonl-40x12
+expect: findings.jsonl
+keys: PageDown
+require-live-snap: 15 format jsonl (3/6) | jsonl-paged-40x12
+expect: findings.jsonl
+keys: PageUp j
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_report.py @TARGET @ART read
+ask: Can the operator see each selected format and its destination throughout paging and resize, without the large study hiding these controls?
+keys: C-c
+require-exit: 10
+env: HOME=@TARGET/../home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 work finished | recovered-work
+submit: report
+require-live-snap: 25 format json (4/6) | recovered-report
+expect: findings.json
+require-shell: python3 -B @REPO/scripts/devex/fixtures/wide_report.py @TARGET @ART restarted
+ask: Does no-color restart retain the saved JSON choice and destination, with identical 24-job history, nine decisions and no new scan or model request?
+keys: C-c
+require-exit: 10

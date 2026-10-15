@@ -82,7 +82,10 @@ fn managed_database_rejects_missing_provenance() {
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("trusted provenance"), "{error}");
+    assert!(
+        error.starts_with("CodeQL database has no trusted provenance"),
+        "{error}"
+    );
 }
 
 #[test]

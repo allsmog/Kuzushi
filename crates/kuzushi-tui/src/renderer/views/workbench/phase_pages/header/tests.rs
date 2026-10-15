@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn header_cost_retains_unavailable_and_estimated_receipt_states() {
+    use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
+    let mut header = scan_header(None);
+    for report in [
+        RuntimeCostReport::UNAVAILABLE,
+        RuntimeCostReport::INCOMPLETE_ZERO,
+    ] {
+        header.cost = report;
+        let cost = cost_atom(&header).unwrap();
+        assert!(cost.text.contains("unknown"));
+        assert!(!cost.text.contains("$0.00"));
+        assert_eq!(cost.compact.as_deref(), Some("cost unknown"));
+    }
+    header.cost = RuntimeCostReport::INCOMPLETE_ZERO
+        .with_unmetered_estimate(Some(RuntimeCost::from_usd(0.4, "owned estimate").unwrap()));
+    let cost = cost_atom(&header).unwrap();
+    assert_eq!(cost.text, "cost ~$0.40 (estimated)");
+    assert_eq!(cost.compact.as_deref(), Some("cost ~$0.40"));
+}
+
+#[test]
+fn exact_zero_and_accounting_errors_remain_distinct() {
+    let mut header = scan_header(None);
+    assert!(cost_atom(&header).is_none());
+    header.cost_invalid = true;
+    assert_eq!(cost_atom(&header).unwrap().text, "cost accounting error");
+}
+
+#[test]
+fn narrow_identity_keeps_unknown_spend_before_optional_idle_chrome() {
+    let mut header = scan_header(None);
+    header.cost = kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO;
+    let text = identity_line(&header, 40).to_string();
+    assert!(text.contains("Viewing Scan"), "{text}");
+    assert!(text.contains("cost unknown"), "{text}");
+    assert!(!text.contains("$0.00"), "{text}");
+}
+#[test]
 fn compact_review_header_keeps_identity_and_stale_revision_warning() {
     let mut header = scan_header(None);
     header.phase = kuzushi_core::WorkflowPhase::Review;
@@ -28,17 +66,38 @@ fn scan_receipt_stays_compact_and_discloses_details_without_crowding_out_evidenc
     let rows = result_card_render_rows(
         &card,
         120,
-        scan_result_header_budget(kuzushi_core::WorkflowPhase::Scan, 30),
+        phase_result_header_budget(kuzushi_core::WorkflowPhase::Scan, 30),
     );
     assert_eq!(rows.len(), 1);
     assert!(rows[0].line.to_string().contains("replay"));
     assert_eq!(rows[0].disclosed_keys, card.semantic_keys);
     assert_eq!(
-        scan_result_header_budget(kuzushi_core::WorkflowPhase::Scan, 1),
+        phase_result_header_budget(kuzushi_core::WorkflowPhase::Scan, 1),
         1
     );
     assert_eq!(
-        scan_result_header_budget(kuzushi_core::WorkflowPhase::Map, 30),
+        phase_result_header_budget(kuzushi_core::WorkflowPhase::Map, 30),
+        30
+    );
+}
+
+#[test]
+fn short_review_result_preserves_finding_space_and_all_evidence_keys() {
+    let card = keyed_result_card();
+    for available in [1, 3, 6, 11, 15] {
+        let budget = phase_result_header_budget(kuzushi_core::WorkflowPhase::Review, available);
+        let rows = result_card_render_rows(&card, 60, budget);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].disclosed_keys, card.semantic_keys);
+        assert!(rows[0].line.to_string().contains("RESULT"));
+        assert!(rows[0].line.to_string().contains("replay"));
+    }
+    assert_eq!(
+        phase_result_header_budget(kuzushi_core::WorkflowPhase::Review, 16),
+        16
+    );
+    assert_eq!(
+        phase_result_header_budget(kuzushi_core::WorkflowPhase::Review, 30),
         30
     );
 }
@@ -65,8 +124,9 @@ fn scan_header(
         model: "unconfigured".to_string(),
         threat_model: None,
         module: "all modules".to_string(),
-        cost_usd: 0.0,
-        cost_complete: true,
+        cost: kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::ZERO,
+        ),
         cost_invalid: false,
         budget_usd: None,
         liveness: crate::ui_view_models::WorkLiveness::Idle,
@@ -129,8 +189,9 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
         model: "configured".to_string(),
         threat_model: None,
         module: "all modules".to_string(),
-        cost_usd: 0.0,
-        cost_complete: true,
+        cost: kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::ZERO,
+        ),
         cost_invalid: false,
         budget_usd: None,
         liveness: crate::ui_view_models::WorkLiveness::Idle,

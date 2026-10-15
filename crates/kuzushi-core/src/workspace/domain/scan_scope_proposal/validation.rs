@@ -92,7 +92,8 @@ fn validate_dependencies(scope: &ProposedScanScope, ids: &BTreeSet<&str>) -> Res
         anyhow::ensure!(dependency != &scope.id, "a scope cannot depend on itself");
         anyhow::ensure!(
             ids.contains(dependency.as_str()),
-            "unknown shared dependency {dependency}"
+            "scope {} references unknown scope id {dependency}; sharedDependencies must name ids declared in scopes or sharedScope",
+            scope.id
         );
     }
     Ok(())

@@ -72,7 +72,7 @@ fn resolve_read_watermark(workspace: &WorkspaceTarget, read_watermark: Option<u6
     }
 }
 
-fn review_decision_write(
+pub(super) fn review_decision_write(
     finding: &Finding,
     decision: &ReviewDecision,
     finding_id: i64,

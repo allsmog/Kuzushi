@@ -40,6 +40,7 @@ impl ShellApp {
         deck.read_scroll = 0;
         deck.excluded.clear();
         deck.detail = true;
+        deck.job_detail = false;
         deck.sync_selected_batch_workers();
         self.restore_dispatcher_failure_notice();
     }
@@ -110,15 +111,8 @@ impl ShellApp {
         match action {
             ViewHotkeyAction::CampaignCursorPrevious => self.move_visible_campaign_cursor(-1),
             ViewHotkeyAction::CampaignCursorNext => self.move_visible_campaign_cursor(1),
-            ViewHotkeyAction::CampaignOpenDetail => self.campaign_deck_edit(|deck| {
-                deck.detail = deck.selected_campaign().is_some();
-                deck.read_scroll = 0;
-                deck.sync_selected_batch_workers();
-            }),
-            ViewHotkeyAction::CampaignBackToList => self.campaign_deck_edit(|deck| {
-                deck.detail = false;
-                deck.read_scroll = 0;
-            }),
+            ViewHotkeyAction::CampaignOpenDetail => self.inspect_campaign_selection(),
+            ViewHotkeyAction::CampaignBackToList => self.back_from_campaign_detail(),
             ViewHotkeyAction::CampaignToggleExclude => self.toggle_campaign_exclusion(),
             ViewHotkeyAction::CampaignCycleWorkers => self.cycle_campaign_workers(),
             ViewHotkeyAction::CampaignLaunch => {
@@ -146,9 +140,36 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    fn inspect_campaign_selection(&mut self) -> InputUpdate {
+        self.campaign_deck_edit(|deck| {
+            deck.job_detail = deck.detail && deck.selected_job().is_some();
+            deck.detail = deck.selected_campaign().is_some();
+            deck.read_scroll = 0;
+            deck.sync_selected_batch_workers();
+        })
+    }
+
+    fn back_from_campaign_detail(&mut self) -> InputUpdate {
+        let deck = self.router.campaign_mut();
+        if deck.job_detail {
+            deck.job_detail = false;
+            deck.read_scroll = 0;
+            if let Some(offset) = crate::renderer::campaign_selection_scroll(self) {
+                self.router.campaign_mut().read_scroll = offset;
+            }
+        } else {
+            deck.detail = false;
+            deck.read_scroll = 0;
+        }
+        InputUpdate::handled()
+    }
+
     fn move_visible_campaign_cursor(&mut self, delta: i64) -> InputUpdate {
         let update = self.campaign_deck_edit(|deck| {
             deck.move_cursor(delta);
+            if deck.job_detail {
+                deck.read_scroll = 0;
+            }
             deck.sync_selected_batch_workers();
         });
         self.restore_dispatcher_failure_notice();
@@ -242,10 +263,7 @@ impl ShellApp {
     }
 
     fn campaign_launch_spec(&mut self) -> Option<(std::path::PathBuf, String, Vec<String>)> {
-        let Some(target) = self.target_path_buf().cloned() else {
-            self.router.campaign_mut().notice = Some("launch requires a target".to_string());
-            return None;
-        };
+        let target = self.campaign_launch_target()?;
         let deck = self.router.campaign();
         let Some(campaign) = deck.selected_campaign() else {
             self.router.campaign_mut().notice = Some("no campaign selected".to_string());
@@ -269,6 +287,33 @@ impl ShellApp {
             campaign_process_args(batch, &campaign_id, &target, workers, &included, total_jobs);
         append_fixed_resume(&mut args, campaign);
         Some((target, campaign_id, args))
+    }
+
+    fn campaign_launch_target(&mut self) -> Option<std::path::PathBuf> {
+        let Some(target) = self.target_path_buf().cloned() else {
+            self.router.campaign_mut().notice = Some("launch requires a target".into());
+            return None;
+        };
+        if self.selected_fixed_study_has_ended() {
+            self.router.campaign_mut().notice = Some(
+                "This fixed plan has ended. Further work requires a new approved plan.".into(),
+            );
+            return None;
+        }
+        Some(target)
+    }
+
+    pub(super) fn selected_fixed_study_has_ended(&self) -> bool {
+        self.router
+            .campaign()
+            .selected_campaign()
+            .filter(|campaign| super::batch_scan::is_fixed_study_snapshot(campaign))
+            .is_some_and(|campaign| {
+                !campaign
+                    .jobs
+                    .iter()
+                    .any(|job| matches!(job.state.as_str(), "planned" | "running" | "parked"))
+            })
     }
 
     /// Request Stop through the held child's original campaign. Keep its
@@ -338,16 +383,12 @@ impl ShellApp {
 }
 
 fn append_fixed_resume(args: &mut Vec<String>, campaign: &CampaignSnapshot) {
+    // The batch controller validates its frozen plan and resumes eligible jobs itself.
+    if is_scan_batch_snapshot(campaign) {
+        return;
+    }
     let paused = campaign.jobs.iter().any(|job| job.state == "parked");
-    if paused
-        && matches!(
-            campaign.kind.as_deref(),
-            Some(
-                kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND
-                    | kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND
-            )
-        )
-    {
+    if paused && super::batch_scan::is_fixed_study_snapshot(campaign) {
         args.push("--resume".into());
     }
 }
@@ -596,17 +637,88 @@ mod tests {
         let (_root, mut app) = deck_app();
         app.open_campaign_view(Some("camp1".into()));
         let mut campaign = app.router.campaign().selected_campaign().unwrap().clone();
-        campaign.kind = Some(kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND.into());
         campaign.jobs[1].state = "parked".into();
         let before = campaign.jobs.clone();
-        let mut args = vec!["campaign".into(), "run".into(), "camp1".into()];
-        append_fixed_resume(&mut args, &campaign);
-        assert!(args.contains(&"--resume".into()));
-        assert_eq!(campaign.jobs, before);
+        for kind in [
+            kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND,
+            kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND,
+            kuzushi_core::capabilities::campaign::REVIEW_STUDY_KIND,
+            "context-study",
+        ] {
+            campaign.kind = Some(kind.into());
+            let mut args = vec!["campaign".into(), "run".into(), "camp1".into()];
+            append_fixed_resume(&mut args, &campaign);
+            assert!(args.contains(&"--resume".into()), "{kind}");
+            assert_eq!(campaign.jobs, before);
+        }
         campaign.kind = None;
         let mut legacy = vec!["campaign".into(), "run".into(), "camp1".into()];
         append_fixed_resume(&mut legacy, &campaign);
         assert!(!legacy.contains(&"--resume".into()));
+    }
+
+    #[test]
+    fn paused_scan_batch_launch_uses_its_controller_without_a_resume_flag() {
+        let (_root, mut app) = deck_app();
+        app.open_campaign_view(Some("camp1".into()));
+        let campaign = &mut app.router.campaign_mut().campaigns[0];
+        campaign.kind = Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND.into());
+        campaign.jobs[1].state = "parked".into();
+        let before = campaign.jobs.clone();
+        let (target, id, args) = app.campaign_launch_spec().unwrap();
+        assert_eq!(args, batch_controller_args(&id, &target));
+        assert!(!args.contains(&"--resume".into()));
+        assert_eq!(app.router.campaign().campaigns[0].jobs, before);
+    }
+
+    #[test]
+    fn settled_fixed_studies_refuse_launch_without_changing_consumed_jobs() {
+        let (_root, mut app) = deck_app();
+        app.open_campaign_view(Some("camp1".into()));
+        for kind in [
+            kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND,
+            kuzushi_core::capabilities::campaign::CONTEXT_MATRIX_KIND,
+            kuzushi_core::capabilities::campaign::SCOPE_STUDY_KIND,
+            kuzushi_core::capabilities::campaign::REVIEW_STUDY_KIND,
+            "context-study",
+        ] {
+            for state in ["completed", "failed"] {
+                let campaign = &mut app.router.campaign_mut().campaigns[0];
+                campaign.kind = Some(kind.into());
+                for job in &mut campaign.jobs {
+                    job.state = state.into();
+                    job.attempts = 1;
+                }
+                let before = campaign.jobs.clone();
+                assert!(app.campaign_launch_spec().is_none(), "{kind}/{state}");
+                let binding = app
+                    .view_keybindings_for_view(ShellView::Campaign)
+                    .into_iter()
+                    .find(|binding| binding.action == ViewHotkeyAction::CampaignLaunch)
+                    .unwrap();
+                assert_eq!(binding.label, "new plan required");
+                assert_eq!(app.router.campaign().campaigns[0].jobs, before);
+                assert!(app
+                    .router
+                    .campaign()
+                    .notice
+                    .as_deref()
+                    .unwrap()
+                    .contains("new approved plan"));
+            }
+            for state in ["planned", "running", "parked"] {
+                app.router.campaign_mut().campaigns[0].jobs[0].state = state.into();
+                assert!(app.campaign_launch_spec().is_some(), "{kind}/{state}");
+            }
+        }
+        app.router.campaign_mut().campaigns[0].kind = None;
+        for job in &mut app.router.campaign_mut().campaigns[0].jobs {
+            job.state = "completed".into();
+        }
+        assert!(
+            app.campaign_launch_spec().is_some(),
+            "legacy behavior is preserved"
+        );
     }
 
     #[test]

@@ -1,0 +1,57 @@
+name: APK observations retain input identity, partial code errors and preparation limits
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/android_pipeline.py seed @TMP_TARGET @ART
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+paste-file: @ART/scan.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | apk-write-consent
+keys: y
+require-live-snap: 30 Partial APK observations | produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/android_pipeline.py scan @TMP_TARGET @ART
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | partial-receipt
+expect: Archive digest
+ask: Does the APK receipt distinguish archive identity, derived-source claims and per-stage outcomes without claiming complete coverage or a Scan checkpoint?
+resize: 160x48
+live-snap: apk-160x48
+resize: 96x89
+live-snap: apk-96x89
+resize: 80x24
+live-snap: apk-80x24
+resize: 60x20
+live-snap: apk-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | apk-40x12
+keys: NPage NPage
+live-snap: apk-paged-40x12
+ask: Are partial authority, input provenance, stage errors and paging understandable at all six terminal sizes?
+resize: 120x36
+paste-file: @ART/missing.txt
+keys: Enter
+require-live-snap: 20 absent-unzip | missing-dependency
+paste-file: @ART/deadline.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | deadline-consent
+keys: y
+require-live-snap: 30 subprocess deadline | deadline-result
+require-shell: python3 -B @REPO/scripts/devex/fixtures/android_pipeline.py failure @TMP_TARGET @ART
+ask: Does a stopped preparation explain the failure and retain previous derived output and finding decisions, with a useful next action?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | resumed
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-receipt
+require-shell: python3 -B @REPO/scripts/devex/fixtures/android_pipeline.py restart @TMP_TARGET @ART
+ask: Does no-color restart retain the exact partial result and original human decision without starting decompilers, accepting context or advancing the phase?
+keys: C-c
+require-exit: 10

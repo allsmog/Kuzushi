@@ -1,5 +1,6 @@
 use super::bounded_fs as fs;
 use super::edge_readers::dependency_edges_for_path;
+use super::SbomInputs;
 use super::*;
 use anyhow::Context;
 use serde_json::Value;
@@ -12,7 +13,7 @@ const NPM_LOCK_DEPENDENCY_FIELDS: &[&str] = &[
 ];
 
 pub(super) fn collect_dependency_edges(
-    target: &Path,
+    target: &SbomInputs,
     files: &[PathBuf],
 ) -> Result<Vec<SbomDependencyEdge>> {
     let mut edges = Vec::new();
@@ -48,9 +49,12 @@ pub(super) fn is_pnpm_lock(path: &Path) -> bool {
         .is_some_and(|name| name == "pnpm-lock.yaml")
 }
 
-pub(super) fn package_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn package_lock_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse package lock")?;
     let source = relative_display(target, path);
     let mut edges = package_lock_v2_edges(&value, &source);
@@ -76,9 +80,12 @@ fn package_lock_v1_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge>
         .unwrap_or_default()
 }
 
-pub(super) fn cargo_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn cargo_lock_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Cargo.lock")?;
     let source = relative_display(target, path);
     Ok(value
@@ -117,9 +124,9 @@ fn cargo_dependency_name(raw: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(super) fn go_sum_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn go_sum_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()

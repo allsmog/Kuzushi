@@ -39,6 +39,40 @@ fn snapshot(root: &Path) -> Value {
 }
 
 #[test]
+fn damaged_git_index_preserves_context_and_scope_artifacts() {
+    let root = fixture();
+    for args in [vec!["init", "--quiet"], vec!["add", "."]] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(root.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    dispatch(root.path(), "context:build", json!({"enrichment":false})).unwrap();
+    dispatch(root.path(), "pack:suggest-shards", json!({})).unwrap();
+    let paths = [
+        kuzushi_core::context::context_snapshot_path(root.path()),
+        root.path()
+            .join(".kuzushi/v3/reports/suggested-shards.toml"),
+    ];
+    let prior = paths.each_ref().map(|path| std::fs::read(path).unwrap());
+    std::fs::write(
+        root.path().join(".git/index"),
+        "owned invalid index fixture",
+    )
+    .unwrap();
+    for tool in ["context:build", "pack:suggest-shards"] {
+        let error = dispatch(root.path(), tool, json!({})).unwrap_err();
+        assert!(format!("{error:#}").contains("filesystem fallback was not used"));
+        assert_eq!(
+            paths.each_ref().map(|path| std::fs::read(path).unwrap()),
+            prior
+        );
+    }
+}
+
+#[test]
 fn real_context_reuses_inventory_membership_and_discloses_the_exact_sample() {
     let root = fixture();
     let result = dispatch(
@@ -169,4 +203,42 @@ fn git_inventory_does_not_silently_expand_to_untracked_source() {
     );
     assert_eq!(receipt.enumerated_files, 2);
     assert!(root.path().join("alpha/deep/file.py").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn refused_ancestor_link_keeps_prior_context_and_shard_draft() {
+    let root = fixture();
+    for args in [
+        vec!["init", "--quiet"],
+        vec!["add", "root.rs", "zeta/file.rs"],
+    ] {
+        assert!(std::process::Command::new("git")
+            .args(args)
+            .current_dir(root.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    dispatch(root.path(), "context:build", json!({"enrichment":false})).unwrap();
+    let context_path = kuzushi_core::context::context_snapshot_path(root.path());
+    let context_before = std::fs::read(&context_path).unwrap();
+    let result = dispatch(root.path(), "pack:suggest-shards", json!({})).unwrap();
+    let draft_path = Path::new(result["data"]["draftPath"].as_str().unwrap());
+    let draft_before = std::fs::read(draft_path).unwrap();
+    let excluded = tempfile::tempdir().unwrap();
+    std::fs::write(
+        excluded.path().join("file.rs"),
+        "// Owned excluded text; never executed.\n",
+    )
+    .unwrap();
+    std::fs::rename(root.path().join("zeta"), root.path().join("original-zeta")).unwrap();
+    std::os::unix::fs::symlink(excluded.path(), root.path().join("zeta")).unwrap();
+
+    for tool in ["context:build", "pack:suggest-shards"] {
+        let error = dispatch(root.path(), tool, json!({})).unwrap_err();
+        assert!(format!("{error:#}").contains("symlink"), "{error:#}");
+        assert_eq!(std::fs::read(&context_path).unwrap(), context_before);
+        assert_eq!(std::fs::read(draft_path).unwrap(), draft_before);
+    }
 }

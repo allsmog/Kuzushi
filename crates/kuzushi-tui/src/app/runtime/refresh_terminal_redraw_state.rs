@@ -174,7 +174,7 @@ impl RedrawPriority {
 
 pub(crate) fn draw_terminal_if_needed(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    app: &ShellApp,
+    app: &mut ShellApp,
     state: &mut TerminalLoopState,
 ) -> Result<()> {
     if !should_draw_frame(
@@ -187,11 +187,100 @@ pub(crate) fn draw_terminal_if_needed(
         // `terminal_shell_step` guarantees it paints within the interval.
         return Ok(());
     }
-    terminal.draw(|frame| render_app(frame, app))?;
+    terminal.draw(|frame| render_measured_terminal_frame(frame, app))?;
     state.last_draw = Some(Instant::now());
     state.needs_redraw = false;
     state.redraw_priority = RedrawPriority::Background;
     Ok(())
+}
+
+fn render_measured_terminal_frame(frame: &mut ratatui::Frame<'_>, app: &mut ShellApp) {
+    let area = frame.area();
+    app.set_viewport(TerminalViewport::new(area.width, area.height));
+    render_app(frame, app);
+}
+
+#[cfg(test)]
+mod measured_frame_tests {
+    use super::*;
+    use crate::ui_view_models::PhaseSurfaceId;
+    use ratatui::backend::TestBackend;
+
+    fn fixture() -> (tempfile::TempDir, ShellApp) {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(root.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Review));
+        app.router
+            .workbench_mut()
+            .set_focus(PhaseSurfaceId::ReviewDetail);
+        app.set_findings(vec![kuzushi_core::Finding::new_tool(
+            "native",
+            "owned",
+            "note.txt",
+            1,
+            Some(1),
+            kuzushi_core::Severity::Low,
+            "Owned inert fixture",
+        )]);
+        app.set_viewport(TerminalViewport::new(120, 36));
+        (root, app)
+    }
+
+    #[test]
+    fn frame_size_preserves_the_draft_cursor_focus_and_scroll() {
+        let (_root, mut app) = fixture();
+        app.set_input("unsent\noperator draft");
+        app.set_cursor(3);
+        app.router
+            .workbench_mut()
+            .scroll_mut()
+            .set(PhaseSurfaceId::ReviewDetail, 5);
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        terminal
+            .draw(|frame| render_measured_terminal_frame(frame, &mut app))
+            .unwrap();
+        assert_eq!(app.viewport(), TerminalViewport::new(40, 12));
+        assert_eq!(app.input(), "unsent\noperator draft");
+        assert_eq!(app.cursor(), 3);
+        assert_eq!(
+            app.router
+                .workbench()
+                .scroll()
+                .get(PhaseSurfaceId::ReviewDetail),
+            5
+        );
+        assert_eq!(
+            app.router.workbench().focus_for(WorkbenchPage::Review),
+            PhaseSurfaceId::ReviewDetail
+        );
+    }
+
+    #[test]
+    fn a_measured_resize_updates_review_paging_without_a_resize_event() {
+        let (_root, mut app) = fixture();
+        app.set_input_mode(InputMode::Navigate);
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+        terminal
+            .draw(|frame| render_measured_terminal_frame(frame, &mut app))
+            .unwrap();
+        let page = crate::renderer::workbench_scroll_page_rows(&app).unwrap();
+        assert_eq!(page, 6);
+        app.reduce_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::PageDown,
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert_eq!(
+            app.router
+                .workbench()
+                .scroll()
+                .get(PhaseSurfaceId::ReviewDetail),
+            page as u16
+        );
+    }
 }
 
 pub(crate) fn should_draw_frame(

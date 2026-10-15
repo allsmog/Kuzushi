@@ -49,12 +49,13 @@ use super::uv_lock::{is_uv_lock, uv_lock_edges};
 use super::vcpkg_json::{is_vcpkg_json, vcpkg_edges};
 use super::yarn_lock::{is_yarn_lock, yarn_lock_edges};
 use super::SbomDependencyEdge;
+use super::SbomInputs;
 use anyhow::Result;
 use std::path::Path;
 
 type EdgeReader = (
     fn(&Path) -> bool,
-    fn(&Path, &Path) -> Result<Vec<SbomDependencyEdge>>,
+    fn(&SbomInputs, &Path) -> Result<Vec<SbomDependencyEdge>>,
 );
 
 const EDGE_READERS: &[EdgeReader] = &[
@@ -118,7 +119,7 @@ fn is_requirements_path(path: &Path) -> bool {
 }
 
 pub(super) fn dependency_edges_for_path(
-    target: &Path,
+    target: &SbomInputs,
     path: &Path,
 ) -> Result<Vec<SbomDependencyEdge>> {
     for (matches, read) in EDGE_READERS {

@@ -1,0 +1,55 @@
+name: Guided Review prepares finite work before credentials or model execution
+size: 120x36
+cwd: @TMP_TARGET
+require-env: KUZUSHI_REVIEW_TEST_BIN
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_study.py @TMP_TARGET @ART pending @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: plan review
+require-live-snap: 30 Triage findings | review-picker
+keys: Space
+live-snap: selected-triage
+keys: Enter
+require-live-snap: 30 PLAN FINDING REVIEW | bounded-review
+expect-not: Credentials
+ask: Does selecting triage lead to workload review without starting model work or changing the selected model?
+resize: 160x48
+live-snap: guided-review-160x48
+resize: 96x89
+live-snap: guided-review-96x89
+resize: 80x24
+live-snap: guided-review-80x24
+resize: 60x20
+live-snap: guided-review-60x20
+resize: 40x12
+live-snap: guided-review-40x12
+resize: 120x36
+keys: c
+keys: Enter
+require-live-snap: 30 Frozen observations: 1 | prepared-review
+expect: deep
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_study.py @TMP_TARGET @ART guided
+keys: Escape
+require-live-snap: 10 Triage findings | returned-origin
+expect-not: PLAN FINDING REVIEW
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | preserved-selection-exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: plan review
+require-live-snap: 30 Triage findings | restarted-picker
+keys: Space
+keys: Enter
+require-live-snap: 30 PLAN FINDING REVIEW | restarted-guided-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_study.py @TMP_TARGET @ART guided
+keys: Escape
+require-live-snap: 10 Triage findings | restarted-returned-origin
+expect-not: PLAN FINDING REVIEW
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | restarted-selection-exit
+keys: y
+require-exit: 10

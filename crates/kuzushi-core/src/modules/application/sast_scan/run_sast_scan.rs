@@ -1255,6 +1255,7 @@ fn sast_scan_result(mut parts: SastScanResultParts<'_>) -> Result<Value> {
         &parts.reports.native_inspections,
         &mut parts.lines,
     );
+    append_partial_coverage_lines(parts.reports, &mut parts.lines);
     let output = sast_terminal_output(&parts.lines, partial);
     let summary = output
         .lines()
@@ -1267,6 +1268,17 @@ fn sast_scan_result(mut parts: SastScanResultParts<'_>) -> Result<Value> {
     let mut result = sast_scan_result_envelope(summary, output, warnings, data, partial);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
+}
+
+fn append_partial_coverage_lines(reports: &SastPipelineReports, lines: &mut Vec<String>) {
+    for (engine, outcome) in &reports.engine_outcomes {
+        if *outcome != ScanEngineStageOutcome::Partial {
+            continue;
+        }
+        let detail = scan_report_engine_detail(reports, engine, *outcome)
+            .unwrap_or_else(|| "Coverage details unavailable; review the saved run.".into());
+        lines.push(format!("  Partial {engine}: {detail}"));
+    }
 }
 
 fn sast_terminal_output(lines: &[String], partial: bool) -> String {
@@ -1569,6 +1581,28 @@ mod scan_result_outcome_tests {
     use super::*;
     use crate::{tool_result_status, ToolResultStatus};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn partial_output_explains_the_outcome_when_no_native_receipt_exists() {
+        let reports = reports_with_outcomes(&[("agentic", ScanEngineStageOutcome::Partial)]);
+        let mut lines = Vec::new();
+        append_partial_coverage_lines(&reports, &mut lines);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("Partial agentic:"));
+        assert!(lines[0].contains("partial"));
+    }
+
+    #[test]
+    fn complete_skipped_and_failed_engines_are_not_labeled_partial() {
+        let reports = reports_with_outcomes(&[
+            ("complete", ScanEngineStageOutcome::Complete),
+            ("skipped", ScanEngineStageOutcome::Skipped),
+            ("failed", ScanEngineStageOutcome::Failed),
+        ]);
+        let mut lines = Vec::new();
+        append_partial_coverage_lines(&reports, &mut lines);
+        assert!(lines.is_empty());
+    }
 
     #[test]
     fn partial_scan_output_never_calls_its_terminal_result_completed() {

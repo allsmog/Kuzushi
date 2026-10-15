@@ -282,7 +282,7 @@ fn evidence_summary(finding: &Finding) -> WorkspaceEvidenceExportSummary {
         model_generated_reasoning_present: counts.model_generated_reasoning_count > 0,
         model_generated_reasoning_count: counts.model_generated_reasoning_count,
         derived_source_present: derived_source_present(finding),
-        source_count: finding.sources.len(),
+        source_count: crate::findings::distinct_recorded_source_count(&finding.sources),
         raw_http_blob_present: counts.observed_capture_count > 0,
         evidence_confidence_max: evidence_confidence_max(finding),
     }
@@ -337,7 +337,8 @@ fn evidence_state(finding: &Finding, counts: &EvidenceOriginCounts) -> &'static 
     evidence_state_label(
         counts.observed_count > 0,
         counts.model_generated_reasoning_count > 0,
-        finding.corroboration_count > 1 || finding.sources.len() > 1,
+        finding.corroboration_count > 1
+            || crate::findings::distinct_recorded_source_count(&finding.sources) > 1,
         derived_source_present(finding),
     )
 }
@@ -384,6 +385,7 @@ fn provenance_summary(
         source_signature: finding.source_signature.clone(),
         corroboration_count: finding.corroboration_count,
         run_id: finding.scan_id.clone(),
+        source_history: finding.sources.clone(),
         run_status: run_context.and_then(|context| context.status.clone()),
         kuzushi_version: run_context.and_then(|context| context.kuzushi_version.clone()),
         model: run_context.and_then(|context| context.model.clone()),

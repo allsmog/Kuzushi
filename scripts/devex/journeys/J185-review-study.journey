@@ -1,0 +1,90 @@
+name: Exact Review workload and deliberate allowance approval
+size: 120x36
+cwd: @TMP_TARGET
+require-env: KUZUSHI_REVIEW_TEST_BIN
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_study.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: campaign owned-review
+require-live-snap: 30 owned-review | review-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN FINDING REVIEW | exact-review-plan
+expect: standard
+ask: Does the form distinguish exact observations, selected strategy, omitted context and unknown charges from permission to start work?
+resize: 160x48
+live-snap: review-160x48
+resize: 96x89
+live-snap: review-96x89
+resize: 80x24
+live-snap: review-80x24
+resize: 60x20
+live-snap: review-60x20
+resize: 40x12
+live-snap: review-40x12
+keys: NPage
+live-snap: review-page-1
+keys: NPage
+live-snap: review-page-2
+keys: NPage
+live-snap: review-page-3
+keys: NPage
+live-snap: review-page-4
+keys: NPage
+live-snap: review-page-5
+keys: Tab
+live-snap: exact-options
+keys: NPage
+live-snap: options-page-1
+keys: NPage
+live-snap: options-page-2
+keys: NPage
+live-snap: options-page-3
+keys: NPage
+live-snap: options-page-4
+keys: NPage
+live-snap: options-page-5
+keys: NPage
+live-snap: options-page-6
+keys: NPage
+live-snap: options-page-7
+keys: NPage
+live-snap: options-page-8
+ask: Are all actions visible at compact sizes, with readable workload, context, options and explicit call limits before approval?
+resize: 120x36
+keys: Tab
+keys: t
+require-live-snap: 20 Total calls | total-editor
+keys: 4 Enter
+keys: r
+require-live-snap: 20 Protected review | protected-editor
+keys: 2 Enter
+keys: Enter
+require-live-snap: 25 Total provider calls: 4 | review-approval
+keys: NPage
+keys: NPage
+keys: NPage
+keys: y
+require-live-snap: 25 Approval saved | approved-review
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_study.py @TMP_TARGET @ART approved
+ask: Does approval preserve one fixed job without starting it or spending, while showing the exact model and shared total/protected limits?
+keys: Enter
+require-live-snap: 25 Review plan approved | approved-jobs
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: campaign owned-review
+require-live-snap: 25 owned-review | restarted-campaign
+nav-mode:
+keys: a
+require-live-snap: 25 PLAN FINDING REVIEW | restarted-plan
+expect: 4
+require-shell: python3 -B @REPO/scripts/devex/fixtures/review_study.py @TMP_TARGET @ART restarted
+keys: Escape
+require-live-snap: 25 owned-review | restarted-back
+expect-not: PLAN FINDING REVIEW
+keys: C-c
+require-exit: 10

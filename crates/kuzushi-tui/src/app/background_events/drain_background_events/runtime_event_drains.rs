@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 #[cfg(test)]
 mod context_map_result_tests;
+#[cfg(test)]
+mod input_return_tests;
 mod phase_result_destination;
 #[cfg(test)]
 mod planner_result_tests;
@@ -52,6 +54,8 @@ impl ShellApp {
             | self.apply_review_decision_write_result()
             | self.apply_view_hydration_results()
             | self.apply_answer_recovery()
+            | self.drain_context_checkpoints()
+            | self.drain_study_checkpoints()
             | self.apply_project_scope_discovery_results()
             | self.apply_target_candidate_discovery_results()
             | self.drain_idle_steer_queue()
@@ -281,13 +285,13 @@ impl ShellApp {
     }
 
     fn completed_reader_input_mode(&self, origin: InputMode) -> InputMode {
-        if !self.prove_detail_owns_controls() {
-            return origin;
+        if !self.input().is_empty() {
+            return InputMode::Prompt;
         }
-        if self.input().is_empty() {
+        if self.prove_detail_owns_controls() {
             InputMode::Navigate
         } else {
-            InputMode::Prompt
+            origin
         }
     }
 
@@ -484,10 +488,14 @@ impl ShellApp {
 
     fn run_focus_sequence_is_settled(&self) -> bool {
         !self.has_running_work()
-            && !self.engagement.has_pending_chain()
-            && !self.engagement.has_pending_prereq_prompt()
-            && self.engagement.planning_queues_empty()
+            && !self.run_focus_continuation_pending()
             && self.steer_queue().len() == 0
+    }
+
+    fn run_focus_continuation_pending(&self) -> bool {
+        self.engagement.has_pending_chain()
+            || self.engagement.has_pending_prereq_prompt()
+            || (!self.engagement.planning_paused() && !self.engagement.planning_queues_empty())
     }
 
     fn apply_current_job_event(&mut self, event: ShellEvent) -> Vec<ShellEffect> {
@@ -656,6 +664,7 @@ impl ShellApp {
                 | ToolEvent::Refused { .. }
                 | ToolEvent::ObservedFinished { .. }
                 | ToolEvent::ObservedFailed { .. }
+                | ToolEvent::ObservedRefused { .. }
                 | ToolEvent::AuthenticationFailed { .. },
             ) => !self.scan().is_some_and(|scan| scan.running),
             ShellEvent::Agent(_) | ShellEvent::Plan(_) | ShellEvent::Threat(_) => {
@@ -912,10 +921,22 @@ fn operator_question_completion_detail(outcome: OperatorQuestionOutcome) -> &'st
 }
 
 fn run_receipt_notice(receipt: &RunFocusReceipt, answer_acknowledgement: Option<&str>) -> String {
-    let summary = format!("run receipt · {}", receipt.summary());
+    let summary = run_result_notice(receipt);
     answer_acknowledgement.map_or(summary.clone(), |acknowledgement| {
         format!("{summary} · {acknowledgement}")
     })
+}
+
+fn run_result_notice(receipt: &RunFocusReceipt) -> String {
+    let summary = format!("run receipt · {}", receipt.summary());
+    match receipt.result_summaries.as_slice() {
+        [result] if result.status == receipt.outcome => format!(
+            "{}: {} · {summary}",
+            kuzushi_core::modules::tool_display_name(&result.tool),
+            result.summary,
+        ),
+        _ => summary,
+    }
 }
 
 #[cfg(test)]
@@ -1441,7 +1462,7 @@ fn run_focus_event_outcome(event: &ShellEvent) -> String {
                 kuzushi_core::ToolResultStatus::Failed => "failed",
             }
         }
-        ShellEvent::Tool(ToolEvent::Refused { .. }) => "refused",
+        ShellEvent::Tool(ToolEvent::Refused { .. } | ToolEvent::ObservedRefused { .. }) => "blocked",
         ShellEvent::Scan(ScanEvent::Failed { .. })
         | ShellEvent::Tool(ToolEvent::Failed { .. })
         | ShellEvent::Tool(ToolEvent::ObservedFailed { .. })

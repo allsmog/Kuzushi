@@ -291,6 +291,10 @@ fn dispatch_result(result: ToolDispatchResult, name: &str) -> Result<Value> {
 }
 
 fn register_workspace_catalog_modules(registry: &mut ModuleRegistry) {
+    registry.register(
+        crate::modules::planner_module::module()
+            .with_executor(crate::modules::planner_module::execute),
+    );
     registry.register(workspace_module().with_executor(execute_context_workspace_tool));
     registry.register(coverage_module().with_executor(execute_context_workspace_tool));
     registry.register(worklist_module().with_executor(execute_context_workspace_tool));

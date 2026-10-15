@@ -43,7 +43,9 @@ fn catalog_cursor_delta(code: KeyCode, page_rows: usize) -> Option<i32> {
 fn catalog_picker_action(action: ViewHotkeyAction) -> bool {
     matches!(
         action,
-        ViewHotkeyAction::CatalogActivate | ViewHotkeyAction::CatalogToggleExpert
+        ViewHotkeyAction::CatalogActivate
+            | ViewHotkeyAction::CatalogToggleExpert
+            | ViewHotkeyAction::CatalogRefreshDependencies
     )
 }
 
@@ -57,6 +59,44 @@ mod tests {
         app.set_shell_view(ShellView::Catalog);
         app.set_input_mode(InputMode::Prompt);
         app
+    }
+
+    #[test]
+    fn dependency_refresh_preserves_selection_and_belongs_to_the_empty_picker() {
+        let mut app = catalog_app();
+        app.move_catalog_cursor(1);
+        let selected = app.catalog_cursor_module_id();
+        let before = app
+            .workbench_cache()
+            .borrow()
+            .executable_options_key(Vec::new());
+        assert!(
+            app.reduce_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+                .handled
+        );
+        assert_ne!(
+            app.workbench_cache()
+                .borrow()
+                .executable_options_key(Vec::new()),
+            before
+        );
+        assert_eq!(app.catalog_cursor_module_id(), selected);
+        app.set_input("unfinished");
+        let before = app
+            .workbench_cache()
+            .borrow()
+            .executable_options_key(Vec::new());
+        assert!(
+            app.reduce_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+                .handled
+        );
+        assert_eq!(app.input(), "unfinishedr");
+        assert_eq!(
+            app.workbench_cache()
+                .borrow()
+                .executable_options_key(Vec::new()),
+            before
+        );
     }
 
     #[test]

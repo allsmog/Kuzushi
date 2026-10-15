@@ -24,6 +24,9 @@ impl ShellApp {
                 super::context_matrix::check_matrix_approval(target, id)
             }
             Some("context-study") => check_context_approval(target, id),
+            Some(kuzushi_core::capabilities::campaign::REVIEW_STUDY_KIND) => {
+                super::review_study::recovery::check_review_approval(target, id)
+            }
             Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND) => {
                 check_scan_approval(target, id)
             }
@@ -52,7 +55,19 @@ impl ShellApp {
         else {
             return Ok(());
         };
-        allowance.require_call_capacity(kuzushi_core::allowance::InvestigationWork::Discovery)
+        let category = self
+            .router
+            .campaign()
+            .selected_campaign()
+            .filter(|campaign| {
+                campaign.kind.as_deref()
+                    == Some(kuzushi_core::capabilities::campaign::REVIEW_STUDY_KIND)
+            })
+            .map_or(
+                kuzushi_core::allowance::InvestigationWork::Discovery,
+                |_| kuzushi_core::allowance::InvestigationWork::Review,
+            );
+        allowance.require_call_capacity(category)
     }
 
     /// Updates only the matching draft. Background completion never navigates.
@@ -61,6 +76,7 @@ impl ShellApp {
             "campaign:brief" => return self.cache_brief_result(data),
             "campaign:allowance" => return self.cache_study_allowance_read(data),
             "campaign:context-study" => return self.cache_context_generation_result(tool, data),
+            "campaign:review-study" => return self.cache_review_study_result(data),
             "campaign:context-map" => return self.cache_context_map_result(data),
             "campaign:study" => self.cache_study_receipt(data),
             "campaign:approve-allowance" => self.cache_study_approval(data),
@@ -69,6 +85,7 @@ impl ShellApp {
             "threat-model:verify" => return self.cache_context_check_result(data),
             _ => return false,
         }
+        self.checkpoint_study_choices();
         true
     }
 
@@ -154,21 +171,24 @@ impl ShellApp {
         else {
             return;
         };
-        if self
-            .router
-            .campaign()
-            .selected_campaign()
-            .is_some_and(|campaign| campaign.kind.as_deref() == Some("context-study"))
-        {
-            self.restore_context_generation(&target, &id);
-            return;
-        }
         let kind = self
             .router
             .campaign()
             .selected_campaign()
-            .and_then(|campaign| campaign.kind.as_deref());
-        let restored = restore_named_study(&target, &id, kind);
+            .and_then(|campaign| campaign.kind.clone());
+        self.restore_study_editor(&target, &id, kind.as_deref());
+    }
+
+    fn restore_study_editor(&mut self, target: &std::path::Path, id: &str, kind: Option<&str>) {
+        if kind == Some("context-study") {
+            self.restore_context_generation(target, id);
+            return;
+        }
+        if kind == Some(kuzushi_core::capabilities::campaign::REVIEW_STUDY_KIND) {
+            self.restore_review_study(target, id);
+            return;
+        }
+        let restored = restore_named_study(target, id, kind);
         match restored {
             Ok(config) => {
                 self.show_study_form(config);

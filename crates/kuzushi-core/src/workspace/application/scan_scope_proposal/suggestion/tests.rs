@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 const MODEL: &str = "openai-codex:gpt-5.5";
 
 mod accounting;
+mod dependencies;
 
 struct Fixture {
     root: tempfile::TempDir,

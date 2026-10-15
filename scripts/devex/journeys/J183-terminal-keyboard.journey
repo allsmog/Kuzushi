@@ -1,0 +1,78 @@
+name: Coalesced Escape/navigation and literal paste remain distinct
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/terminal_keyboard.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: workbench
+require-live-snap: 20 describe what to map | ready
+type: held α
+require-live-snap: 20 held α | held
+keys: Escape End
+require-live-snap: 20 describe what to map | escape-end
+expect-not: [4~
+require-shell: python3 -B @REPO/scripts/devex/fixtures/terminal_keyboard.py @TMP_TARGET @ART escape-end
+type: repeated α
+require-live-snap: 20 repeated α | before-repeated-escape
+keys: Escape Escape
+require-live-snap: 20 NAVIGATE | repeated-escape
+keys: Escape
+require-live-snap: 20 describe what to map | repeated-return
+type: [4~
+require-live-snap: 20 › [4~ | typed-literal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/terminal_keyboard.py @TMP_TARGET @ART typed-literal
+keys: Escape
+require-live-snap: 20 describe what to map | clear-literal
+paste-file: @ART/literal-paste.txt
+require-live-snap: 20 inspect paste | pasted
+expect: Esc dismiss
+keys: Escape
+require-live-snap: 20 Esc clear | paste-notice-cleared
+keys: C-y
+require-live-snap: 20 [4~ literal | literal-inspection
+expect: first α
+expect: last β
+require-shell: python3 -B @REPO/scripts/devex/fixtures/terminal_keyboard.py @TMP_TARGET @ART literal-inspection
+ask: Is the End sequence absent after batched Escape/End while the same literal text remains intact when typed or pasted?
+keys: Escape
+require-live-snap: 20 inspect paste | inspection-return
+type: ud
+require-live-snap: 20 chars⟫ud | appended
+resize: 160x48
+require-live-snap: 20 chars⟫ud | draft-160x48
+resize: 96x89
+require-live-snap: 20 chars⟫ud | draft-96x89
+resize: 80x24
+require-live-snap: 20 chars⟫ud | draft-80x24
+resize: 60x20
+require-live-snap: 20 chars⟫ud | draft-60x20
+resize: 40x12
+require-live-snap: 20 chars⟫ud | draft-40x12
+keys: C-y
+require-live-snap: 20 [4~ literal | compact-inspection
+expect: Esc cancel
+ask: Do the final dependency changes preserve the six-size paste controls, appended draft and compact inspection?
+keys: Escape
+require-live-snap: 20 chars⟫ud | compact-return
+keys: Escape
+require-live-snap: 20 describe what to map | compact-clear
+resize: 120x36
+type: quit
+require-live-snap: 20 › quit | quit
+keys: Enter
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: workbench
+require-live-snap: 20 describe what to map | no-color-ready
+type: held β
+require-live-snap: 20 held β | no-color-held
+keys: Escape End
+require-live-snap: 20 describe what to map | no-color-escape-end
+expect-not: [4~
+ask: Does no-color restart retain normal input and avoid the coalesced sequence corruption without starting investigation work?
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/terminal_keyboard.py @TMP_TARGET @ART no-color-escape-end

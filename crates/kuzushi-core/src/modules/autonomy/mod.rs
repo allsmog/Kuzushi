@@ -14,7 +14,10 @@
 mod tool_phase;
 mod workflow_phase;
 
-pub use tool_phase::{classify, classify_descriptor, tool_mutates, tool_phase, ToolClassification};
+pub use tool_phase::{
+    classify, classify_descriptor, tool_has_phase_result, tool_mutates, tool_phase,
+    ToolClassification,
+};
 pub use workflow_phase::WorkflowPhase;
 
 use crate::config::GuidedPhase;

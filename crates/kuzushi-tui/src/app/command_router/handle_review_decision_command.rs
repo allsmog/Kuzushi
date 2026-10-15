@@ -345,8 +345,8 @@ impl ShellApp {
         self.router.workbench_mut().review_mut().session_decided += 1;
         let decided = self.router.workbench().review().session_decided;
         let message = format!(
-                "decision saved; will carry forward as decision #{decision_id} ({} for {label}) · {decided} decided this session",
-                verdict.as_str()
+            "decision #{decision_id} saved ({} for {label}) · {decided} decided this session",
+            verdict.as_str()
         );
         if self.viewport().columns < 60 {
             self.log("review", message);

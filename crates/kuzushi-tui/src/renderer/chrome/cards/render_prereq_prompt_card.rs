@@ -38,7 +38,7 @@ fn prereq_prompt_rows(
     if max_rows < PREREQ_MIN_ROWS || width == 0 {
         return Vec::new();
     }
-    let actions = prereq_action_rows(width, max_rows > PREREQ_MIN_ROWS);
+    let actions = prereq_control_rows(prompt, width, max_rows > PREREQ_MIN_ROWS);
     let fixed_rows = PREREQ_HEADER_ROWS + actions.len();
     let context_budget = max_rows.saturating_sub(fixed_rows);
     let context = prereq_context_rows(prompt, width, context_budget);
@@ -239,6 +239,20 @@ fn prereq_field_line(label: &str, value: &str, width: usize, value_style: Style)
     ])
 }
 
+fn prereq_control_rows(
+    prompt: &PrereqPromptModel,
+    width: usize,
+    expanded: bool,
+) -> Vec<Line<'static>> {
+    if prompt.input_blocked {
+        return vec![Line::from(Span::styled(
+            fit("  Finish or clear the command draft", width),
+            theme::muted(),
+        ))];
+    }
+    prereq_action_rows(width, expanded)
+}
+
 fn prereq_action_rows(width: usize, expanded: bool) -> Vec<Line<'static>> {
     if !expanded {
         return vec![compact_prereq_action_line(width)];
@@ -364,8 +378,25 @@ mod tests {
     }
 
     #[test]
+    fn held_draft_keeps_prerequisite_choice_keys_out_of_the_card() {
+        let mut prompt = prompt_with_step();
+        prompt.input_blocked = true;
+        for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+            let rows = prereq_prompt_rows(&prompt, width, height);
+            let text = row_texts(&rows).join("\n");
+            assert!(text.contains("Finish or clear"), "{text}");
+            assert!(
+                !text.contains("a approve") && !text.contains("r reuse"),
+                "{text}"
+            );
+            assert_rows_fit(&rows, width);
+        }
+    }
+
+    #[test]
     fn empty_plan_has_honest_context_and_keeps_actions() {
         let prompt = PrereqPromptModel {
+            input_blocked: false,
             final_tool: "final-tool:run".to_string(),
             recommended_action: "approve".to_string(),
             steps: Vec::new(),
@@ -435,6 +466,7 @@ mod tests {
 
     fn prompt_with_step() -> PrereqPromptModel {
         PrereqPromptModel {
+            input_blocked: false,
             final_tool: "final-tool:run-with-options".to_string(),
             recommended_action: "approve".to_string(),
             steps: vec![PrereqPromptStepModel {

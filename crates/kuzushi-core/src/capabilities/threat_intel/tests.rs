@@ -488,7 +488,7 @@ authorization: Default::default(),
     )
     .unwrap();
 
-    assert_eq!(result["status"], json!("completed"));
+    assert_eq!(result["status"], json!("partial"));
     assert_eq!(result["data"]["summary"]["totalCves"], 2);
     assert_eq!(result["data"]["summary"]["harvested"], 1);
     assert_eq!(result["data"]["summary"]["skipped"], 1);

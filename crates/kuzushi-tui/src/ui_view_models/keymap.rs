@@ -202,16 +202,32 @@ fn active_view_keymap_section(app: &ShellApp) -> KeymapSection {
     let mut seen = BTreeSet::new();
     let mut rows = Vec::new();
     rows.extend(
-        app.view_keybindings_for_view(origin)
+        origin_view_bindings(app, origin)
             .into_iter()
-            .filter(|binding| seen.insert((binding.hint.clone(), binding.label.clone())))
-            .map(|binding| KeymapBindingRow::new(binding.hint, binding.label)),
+            .filter(|binding| seen.insert((binding.key.clone(), binding.label.clone())))
+            .map(|binding| KeymapBindingRow::new(binding.key, binding.label)),
     );
     rows.extend([
         KeymapBindingRow::new("back", "leave the originating screen"),
         KeymapBindingRow::new("/keys", "open this complete control map"),
     ]);
     KeymapSection::new(format!("VIEW · {origin:?}"), "navigation controls", rows)
+}
+
+fn origin_view_bindings(
+    app: &ShellApp,
+    origin: crate::ShellView,
+) -> Vec<super::keybindings::FooterKeybinding> {
+    if origin == crate::ShellView::Options {
+        return super::keybindings::options_browser_keybindings(app);
+    }
+    app.view_keybindings_for_view(origin)
+        .into_iter()
+        .map(|binding| super::keybindings::FooterKeybinding {
+            key: binding.hint,
+            label: binding.label,
+        })
+        .collect()
 }
 
 fn section(name: &str, blurb: &str, rows: &[(&str, &str)]) -> KeymapSection {
@@ -337,5 +353,40 @@ mod tests {
                 prompt_module: "keys".to_string(),
             },
         }
+    }
+    #[test]
+    fn options_keymap_matches_selection_and_the_open_field_editor() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.show_options(
+            Some("context:build".into()),
+            crate::app::OptionsFilter::Advanced,
+        );
+        app.router.options_browser_mut().selected = Some("enrichment".into());
+        app.set_shell_view(crate::ShellView::Keymap);
+        let rows = &keymap_model(&app).sections[0].rows;
+        assert!(rows
+            .iter()
+            .any(|row| row.keys == "Enter" && row.action == "edit"));
+        assert!(rows
+            .iter()
+            .any(|row| row.keys == "↑/↓ j/k" && row.action == "option"));
+        assert!(rows
+            .iter()
+            .any(|row| row.keys == "PgUp/Dn" && row.action == "details"));
+        assert!(rows.iter().any(|row| row.keys == "s/a/m"));
+        assert!(!rows.iter().any(|row| row.action == "scroll"));
+        app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.tool_option_editor_open());
+        app.set_shell_view(crate::ShellView::Keymap);
+        let rows = &keymap_model(&app).sections[0].rows;
+        assert!(rows
+            .iter()
+            .any(|row| row.keys == "Enter/Ctrl+S" && row.action == "save session"));
+        assert!(rows
+            .iter()
+            .any(|row| row.keys == "Esc" && row.action == "keep draft"));
+        assert!(!app.has_running_work());
     }
 }

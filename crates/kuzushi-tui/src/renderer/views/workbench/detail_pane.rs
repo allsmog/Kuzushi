@@ -332,6 +332,9 @@ fn push_provenance_section(
     push_detail_kv(lines, "vuln source", &detail.vuln_source_label, budget);
     push_detail_kv(lines, "source signature", &detail.source_signature, budget);
     push_detail_kv(lines, "corroboration", &detail.corroboration, budget);
+    for observation in &detail.source_history {
+        push_detail_kv(lines, "source history", observation, budget);
+    }
     push_detail_kv(lines, "identity", &detail.identity_label, budget);
     push_detail_kv(
         lines,

@@ -7,6 +7,7 @@ mod context_results;
 mod controls;
 mod engine_inputs;
 mod prepared_settings;
+pub(crate) mod recovery;
 mod resources;
 mod source_details;
 pub(crate) use context_results::{context_result_jobs, context_result_lines};
@@ -33,6 +34,12 @@ pub(crate) fn study_projection(app: &crate::ShellApp) -> Option<BatchScanConfig>
         config.notice = Some(format!(
             "ATTENTION: {}\nEsc dismisses this message and returns to your draft.",
             message
+        ));
+    }
+    if let Some(note) = app.study_checkpoint_note() {
+        config.notice = Some(format!(
+            "{}\n{note}",
+            config.notice.as_deref().unwrap_or("")
         ));
     }
     Some(config)
@@ -254,10 +261,73 @@ fn row_description(config: &BatchScanConfig) -> Vec<String> {
 }
 
 fn discovery_pass_lines(config: &BatchScanConfig) -> Vec<String> {
+    if let Some(draft) = &config.study.scope_draft {
+        return vec![format!("Selected boundaries: {} · {} fixed discovery jobs · {} worker(s)", draft.cases.len(), draft.job_count(), config.effective_workers),
+            "Each boundary repeats its own frozen source, context and scan options. Sibling contexts may differ. No automatic subdivision or extra passes are approved.".into(),
+            "Repetition does not prove correctness. Editing prepares a new immutable plan.".into()];
+    }
     if !config.study.matrix.cases.is_empty() {
         return vec![format!("{} passes is the default for newly added context cases. Existing cases keep their own repetitions; p in Context cases edits the selected case. Approval covers the sum of all case jobs.", config.trials)];
     }
     vec![format!("{} fresh discovery passes with identical source, context and scan options. Repetition does not prove correctness. Editing prepares a new immutable plan.", config.trials)]
+}
+
+pub(crate) fn study_workload_summary(config: &BatchScanConfig) -> String {
+    if let Some(draft) = &config.study.scope_draft {
+        return format!(
+            "{} scopes · {} fixed jobs · {} worker(s)",
+            draft.cases.len(),
+            draft.job_count(),
+            config.effective_workers
+        );
+    }
+    if !config.study.matrix.cases.is_empty() {
+        return format!(
+            "{} contexts · {} fixed jobs · {} worker(s)",
+            config.study.matrix.cases.len(),
+            config.study.matrix.planned_jobs(),
+            config.effective_workers
+        );
+    }
+    format!(
+        "{} passes · {} worker(s)",
+        config.trials, config.effective_workers
+    )
+}
+
+#[cfg(test)]
+mod scoped_workload_tests {
+    use super::*;
+    use kuzushi_core::capabilities::campaign::{ScopeStudyCaseInput, ScopeStudyDraft};
+
+    #[test]
+    fn study_scope_workload_counts_all_selected_case_passes() {
+        let mut config = BatchScanConfig::load(std::path::Path::new("/owned-fixture"), None);
+        config.study.scope_draft = Some(ScopeStudyDraft {
+            proposal_ref: kuzushi_core::workspace::ScanScopeProposalRef {
+                proposal_id: "owned".into(),
+                revision: 1,
+                record_hash: "a".repeat(64),
+            },
+            cases: [("service", 2), ("root", 4)]
+                .into_iter()
+                .map(|(id, passes)| ScopeStudyCaseInput {
+                    scope_id: id.into(),
+                    passes,
+                    threat_model_ref: None,
+                })
+                .collect(),
+        });
+        assert_eq!(
+            study_workload_summary(&config),
+            "2 scopes · 6 fixed jobs · 1 worker(s)"
+        );
+        let text = discovery_pass_lines(&config).join("\n");
+        assert!(
+            text.contains("6 fixed discovery jobs") && text.contains("Sibling contexts may differ")
+        );
+        assert!(!text.contains("3 fresh discovery passes"));
+    }
 }
 
 fn context_experiment_lines(config: &BatchScanConfig) -> Vec<String> {
@@ -393,7 +463,8 @@ fn scope_study_description(config: &BatchScanConfig) -> Option<Vec<String>> {
         );
         lines.push(format!(
             "{}: {} passes · context {context}",
-            case.scope_id, case.passes
+            super::scope_context::case_label(config, &case.scope_id),
+            case.passes
         ));
     }
     if let Some(receipt) = &config.study.scope_receipt {

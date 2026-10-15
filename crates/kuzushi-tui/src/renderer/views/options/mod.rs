@@ -1,8 +1,12 @@
 use super::*;
+mod browser;
 pub(in crate::renderer) use super::*;
 use crate::ui_view_models::{
     options_model, sast_tasks_model, OptionsBody, OptionsSummaryRow, OptionsTable, OptionsTableRow,
     SastTasksModel,
+};
+pub(crate) use browser::{
+    option_detail_page_bounds, option_error_page_bounds, render_options_browser,
 };
 
 const OPTION_ALIASES_COLUMN: usize = 5;

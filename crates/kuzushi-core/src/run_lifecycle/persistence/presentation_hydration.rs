@@ -40,14 +40,17 @@ pub(super) fn load_presentation_hydration(
 }
 
 fn result_status_matches(status: RunItemStatus, result: &str) -> bool {
-    match status {
-        RunItemStatus::Completed => result == "completed",
-        RunItemStatus::Partial => result == "partial",
-        RunItemStatus::Skipped => result == "skipped",
-        RunItemStatus::Blocked | RunItemStatus::Failed => result == "failed",
-        RunItemStatus::Canceled | RunItemStatus::Interrupted => result == "failed",
-        RunItemStatus::Pending | RunItemStatus::Running => false,
+    if result == "failed" {
+        // Older receipts used one failed envelope for these terminal outcomes.
+        return matches!(
+            status,
+            RunItemStatus::Blocked
+                | RunItemStatus::Failed
+                | RunItemStatus::Canceled
+                | RunItemStatus::Interrupted
+        );
     }
+    status.is_terminal() && status.label() == result
 }
 
 #[cfg(test)]
@@ -56,10 +59,37 @@ mod tests {
 
     #[test]
     fn terminal_status_matching_is_exhaustive() {
-        assert!(result_status_matches(RunItemStatus::Completed, "completed"));
-        assert!(result_status_matches(RunItemStatus::Interrupted, "failed"));
-        assert!(result_status_matches(RunItemStatus::Blocked, "failed"));
-        assert!(!result_status_matches(RunItemStatus::Partial, "completed"));
-        assert!(!result_status_matches(RunItemStatus::Running, "completed"));
+        let cases: &[(RunItemStatus, &[&str])] = &[
+            (RunItemStatus::Pending, &[]),
+            (RunItemStatus::Running, &[]),
+            (RunItemStatus::Completed, &["completed"]),
+            (RunItemStatus::Partial, &["partial"]),
+            (RunItemStatus::Skipped, &["skipped"]),
+            (RunItemStatus::Blocked, &["blocked", "failed"]),
+            (RunItemStatus::Failed, &["failed"]),
+            (RunItemStatus::Canceled, &["canceled", "failed"]),
+            (RunItemStatus::Interrupted, &["interrupted", "failed"]),
+        ];
+        for (status, accepted) in cases {
+            for result in [
+                "pending",
+                "running",
+                "completed",
+                "partial",
+                "skipped",
+                "blocked",
+                "failed",
+                "canceled",
+                "interrupted",
+                "unknown",
+                "",
+            ] {
+                assert_eq!(
+                    result_status_matches(*status, result),
+                    accepted.contains(&result),
+                    "{status:?}: {result}"
+                );
+            }
+        }
     }
 }

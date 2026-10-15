@@ -189,6 +189,10 @@ impl ShellApp {
     }
 
     fn apply_configured_model_reasoning(&mut self) {
+        if let Some(level) = self.config().runtime.thinking_level.clone() {
+            self.set_session_thinking_level(Some(level));
+            return;
+        }
         let choice = self
             .config()
             .model
@@ -204,6 +208,31 @@ impl ShellApp {
 #[cfg(test)]
 mod initial_context_tests {
     use super::*;
+
+    #[test]
+    fn explicit_configured_reasoning_wins_over_catalog_suggestions() {
+        for level in ["low", "medium", "high"] {
+            let mut config = V2Config::default();
+            config.model = Some("openai-codex:gpt-5.5".into());
+            config.runtime.thinking_level = Some(level.into());
+            let mut app = ShellApp::new(config, None);
+            assert_eq!(app.session_thinking_level(), Some(level));
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(
+                root.path().join("main.rs"),
+                "// Inert owned source. Never executed.\n",
+            )
+            .unwrap();
+            app.set_target(Some(root.path().to_owned()));
+            app.plan_workflow_proposal("Inspect owned context", None)
+                .unwrap();
+            assert_eq!(
+                app.context_generation().unwrap().context_input["thinkingLevel"],
+                level
+            );
+            assert!(!app.has_running_work());
+        }
+    }
 
     #[test]
     fn model_catalog_suggestions_do_not_change_configured_reasoning_at_startup() {

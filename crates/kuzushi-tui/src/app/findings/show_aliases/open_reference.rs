@@ -41,7 +41,7 @@ impl ShellApp {
     }
 
     fn page_anchor_for_explicit_open(&self, open: &OpenFindingFinalize) -> Option<String> {
-        if !self.explicit_open_can_load_page() {
+        if !self.explicit_open_can_load_page() || open.reference.trim().starts_with("generation:") {
             return None;
         }
         let OpenFindingOutcome::Found(finding) = &open.outcome else {

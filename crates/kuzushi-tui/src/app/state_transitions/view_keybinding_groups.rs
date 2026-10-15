@@ -116,6 +116,12 @@ pub(super) fn catalog_keybindings(expanded: bool) -> Vec<ViewKeybinding> {
             },
             ViewHotkeyAction::CatalogToggleExpert,
         ),
+        bind_char(
+            'r',
+            "r",
+            "recheck dependencies",
+            ViewHotkeyAction::CatalogRefreshDependencies,
+        ),
     ]
 }
 
@@ -248,7 +254,7 @@ fn review_ledger_filter_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
     let mut bindings = vec![bind(
         HotkeyTrigger::ControlChar('f'),
         "Ctrl+F",
-        "filter ledger",
+        "filter",
         ViewHotkeyAction::WorkbenchReviewLedgerFilter,
     )];
     bindings.extend(review_context_reader_keybindings());
@@ -336,7 +342,7 @@ fn workbench_layout_keybindings(
                 | crate::ui_view_models::SurfaceInteraction::Scrollable
         )
     ) {
-        bindings.extend(workbench_movement_keybindings(interaction));
+        bindings.extend(workbench_movement_keybindings(interaction, page));
     }
     bindings.extend(workbench_page_keybindings());
     if !plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
@@ -351,7 +357,8 @@ fn workbench_layout_keybindings(
 }
 
 fn review_comparison_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
-    app.review_observation_run_pair()
+    let mut bindings: Vec<_> = app
+        .review_observation_run_pair()
         .map(|_| {
             bind_char(
                 'v',
@@ -361,7 +368,18 @@ fn review_comparison_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
             )
         })
         .into_iter()
-        .collect()
+        .collect();
+    if crate::ui_view_models::active_workbench_page(app) == WorkbenchPage::Review
+        && crate::ui_view_models::visible_finding_at_cursor(app).is_some()
+    {
+        bindings.push(bind_char(
+            'Y',
+            "Y",
+            "review current source",
+            ViewHotkeyAction::WorkbenchReviewCurrentSource,
+        ));
+    }
+    bindings
 }
 
 fn guided_workbench_bindings(
@@ -377,6 +395,7 @@ fn guided_workbench_bindings(
                     | crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
                     | crate::ui_view_models::PhaseSurfaceId::ProveResult
                     | crate::ui_view_models::PhaseSurfaceId::ProveTrace
+                    | crate::ui_view_models::PhaseSurfaceId::ReviewTrace
             )
     }) {
         return None;
@@ -385,7 +404,8 @@ fn guided_workbench_bindings(
     if app.guided_scan_question_is_open() {
         return Some(Vec::new());
     }
-    let mut bindings = workbench_page_keybindings();
+    let mut bindings = review_comparison_keybindings(app);
+    bindings.extend(workbench_page_keybindings());
     bindings.extend(focused_detail_paging(plan));
     bindings.extend(workbench_secondary_action_keybindings(
         page,
@@ -428,6 +448,7 @@ fn workbench_open_keybindings(
                     | crate::ui_view_models::PhaseSurfaceId::ReviewQueue
                     | crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
                     | crate::ui_view_models::PhaseSurfaceId::ProveTrace
+                    | crate::ui_view_models::PhaseSurfaceId::ReviewTrace
             )
     });
     if !can_open {
@@ -485,6 +506,7 @@ fn workbench_next_pane_keybindings() -> [ViewKeybinding; 1] {
 
 fn workbench_movement_keybindings(
     interaction: Option<crate::ui_view_models::SurfaceInteraction>,
+    page: WorkbenchPage,
 ) -> Vec<ViewKeybinding> {
     let mut bindings = vec![
         bind_char(
@@ -511,13 +533,32 @@ fn workbench_movement_keybindings(
             "move",
             ViewHotkeyAction::WorkbenchScrollPrev,
         ),
-        bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
-        bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
+        workbench_first_keybinding(page),
+        workbench_last_keybinding(page),
     ];
     if interaction == Some(crate::ui_view_models::SurfaceInteraction::Scrollable) {
         bindings.extend(workbench_detail_paging());
     }
     bindings
+}
+
+fn workbench_last_keybinding(page: WorkbenchPage) -> ViewKeybinding {
+    if page == WorkbenchPage::Review {
+        return bind(
+            HotkeyTrigger::End,
+            "End",
+            "last",
+            ViewHotkeyAction::WorkbenchScrollLast,
+        );
+    }
+    bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast)
+}
+
+fn workbench_first_keybinding(page: WorkbenchPage) -> ViewKeybinding {
+    if page == WorkbenchPage::Review {
+        return bind_char('g', "g", "first", ViewHotkeyAction::WorkbenchScrollFirst);
+    }
+    bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst)
 }
 
 fn workbench_detail_paging() -> [ViewKeybinding; 2] {
@@ -626,8 +667,14 @@ fn workbench_page_action_keybindings(page: WorkbenchPage, backlog: bool) -> Vec<
 /// cannot record a decision by a stray keypress.
 fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
     let mut bindings = vec![
+        bind_char('t', "t", "trace", ViewHotkeyAction::WorkbenchTraceView),
         bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
-        bind_char('C', "C", "chains", ViewHotkeyAction::WorkbenchChainFold),
+        bind_char(
+            'C',
+            "C",
+            "chains (Labs)",
+            ViewHotkeyAction::WorkbenchChainFold,
+        ),
         bind_char(
             'i',
             "i",

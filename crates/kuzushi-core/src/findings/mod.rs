@@ -1,11 +1,14 @@
 pub use application::scan_reassessment_block;
 mod application;
 mod domain;
+pub use domain::distinct_recorded_source_count;
+pub(crate) use domain::merge_ordered_source_histories;
 pub(crate) use domain::FINDING_LESSON_SUBJECT;
 pub(crate) use domain::{validate_relationship_selection, FINDING_RELATIONSHIP_BATCH_SUBJECT};
 pub use domain::{
     FindingLesson, LessonContent, LessonGeneration, LessonOrigin, LessonRef, LessonState,
 };
+pub use domain::{ReviewCapturedFile, ReviewCapturedFileState, ReviewSourceCapture};
 pub use persistence::FindingLessonPage;
 pub mod import;
 pub mod ingest_contract;
@@ -50,8 +53,8 @@ pub use application::{
     IdentityFoldPolicy, IdentityPolicyApprovalStatus, IdentityPolicyDefaults, RefutationCohortFact,
     RefutationCohortKey, RefutationPopulation, RefutationPopulationStats, ReviewDecisionConflict,
     ReviewedRefutationCohort, ReviewedRefutationPrior, ReviewedRefutationReport,
-    ScanComparisonClass, ScanFindingSignature, ScanRunComparison, ScanUncertainMatch,
-    IDENTITY_AUDIT_APPROVAL_DIR, IDENTITY_AUDIT_APPROVAL_SCHEMA_VERSION,
+    ScanComparisonClass, ScanFindingSignature, ScanObservationPresence, ScanRunComparison,
+    ScanUncertainMatch, IDENTITY_AUDIT_APPROVAL_DIR, IDENTITY_AUDIT_APPROVAL_SCHEMA_VERSION,
     IDENTITY_AUDIT_EVIDENCE_SCHEMA_VERSION,
 };
 pub(crate) use application::{

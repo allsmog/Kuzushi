@@ -167,6 +167,10 @@ jobs:
         if: runner.os == 'Linux'
         run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
       - run: cargo test --workspace --locked
+      - name: Pinned terminal dependency contracts
+        run: |
+          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target
+          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib kuzushi_parser_tests --features use-dev-tty --locked --target-dir target
 
   platform-runtime:
     name: platform-runtime (${{ matrix.os }})
@@ -208,6 +212,11 @@ jobs:
         run: |
           cargo test -p kuzushi-tui --lib terminal --locked
           cargo test -p kuzushi-tui --lib editor_state:: --locked
+      - name: Unix terminal dependency contracts
+        if: ${{ needs.quality-gauntlet.outputs.platform-terminal == 'true' && runner.os != 'Windows' }}
+        run: |
+          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib --locked --target-dir target
+          cargo test --manifest-path third-party/crossterm/Cargo.toml --lib kuzushi_parser_tests --features use-dev-tty --locked --target-dir target
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         if: ${{ needs.quality-gauntlet.outputs.platform-launcher == 'true' }}
         with:

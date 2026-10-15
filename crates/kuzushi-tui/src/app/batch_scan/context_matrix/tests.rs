@@ -4,7 +4,9 @@ use crossterm::event::{KeyEvent, KeyModifiers};
 use kuzushi_core::V2Config;
 
 mod allowance;
+mod editing;
 mod results;
+mod unsaved;
 
 fn fixture() -> (tempfile::TempDir, ShellApp) {
     let root = tempfile::tempdir().unwrap();
@@ -27,13 +29,13 @@ fn fixture() -> (tempfile::TempDir, ShellApp) {
             id: "alpha".into(),
             label: "Alpha".into(),
             passes: 3,
-            threat_model_ref: json!({"modelId":"alpha"}),
+            threat_model_ref: reference("a"),
         },
         ContextCaseInput {
             id: "beta".into(),
             label: "Beta".into(),
             passes: 3,
-            threat_model_ref: json!({"modelId":"beta"}),
+            threat_model_ref: reference("b"),
         },
     ];
     config.study.matrix.baseline_case_id = Some("alpha".into());
@@ -41,6 +43,12 @@ fn fixture() -> (tempfile::TempDir, ShellApp) {
     config.study.protected_review_calls = Some(2);
     app.open_context_matrix();
     (root, app)
+}
+
+fn reference(digit: &str) -> serde_json::Value {
+    json!({"modelId":format!("tm_{}",digit.repeat(32)),
+        "revisionId":format!("tmr_{}",digit.repeat(32)),
+        "sha256":format!("sha256:{}",digit.repeat(64))})
 }
 
 #[test]
@@ -88,7 +96,15 @@ fn selected_case_and_all_controls_are_visible_at_the_existing_viewport_sizes() {
             .draw(|frame| crate::renderer::render_app(frame, &app))
             .unwrap();
         let screen = format!("{:?}", terminal.backend().buffer());
-        for text in ["CONTEXT CASES", "Beta", "p passes", "L next", "Esc back"] {
+        for text in [
+            "CONTEXT CASES",
+            "Beta",
+            "Enter inspect",
+            "n rename",
+            "p passes",
+            "L next",
+            "Esc back",
+        ] {
             assert!(screen.contains(text), "{width}x{height}: {text}: {screen}");
         }
     }

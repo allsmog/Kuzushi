@@ -1,0 +1,88 @@
+name: Frozen plan summary and Map-to-Scan navigation preserve the operator choices
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: plan map
+require-live-snap: 25 Gather repo context | original-map-picker
+keys: Up Space
+live-snap: map-selection
+keys: Right
+require-live-snap: 20 PLAN A STUDY | picker-scan-study
+keys: Escape
+require-live-snap: 20 Gather repo context | preserved-map-picker
+expect: RUN      Attach reference files
+submit: workbench
+submit: plan scan
+require-live-snap: 25 PLAN A STUDY | bounded-discovery
+expect: Discovery passes
+expect: Workers
+expect-not: Credentials
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART verify
+keys: Down Down Enter
+require-live-snap: 20 CHOOSE DISCOVERY ENGINES | engine-choice
+keys: Down Down Down Down Down Down Down Down Down Space
+require-live-snap: 20 [x] agentic | selected-engine
+keys: a
+require-live-snap: 20 Engine choices updated | applied-engine
+keys: Down Enter
+require-live-snap: 20 Omit threat-model context | explicit-context-choice
+keys: a
+require-live-snap: 20 Context selected for this study | explicit-omission
+keys: L
+require-live-snap: 30 Draft ready | frozen-discovery
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART prepared
+keys: Down Down Enter
+require-live-snap: 15 Total calls | total-calls-editor
+type: 5
+keys: Enter
+keys: Down Enter
+require-live-snap: 15 Protected review | protected-review-editor
+type: 2
+keys: Enter
+keys: L
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | unapproved-allowance
+expect: Repository: repository
+expect: Scan: 3 passes
+expect: 1 worker(s)
+expect: Engines: agentic
+expect: Scope: whole repository
+expect: Threat context: explicitly omitted
+resize: 160x48
+live-snap: scan-plan-160x48
+resize: 96x89
+live-snap: scan-plan-96x89
+resize: 80x24
+live-snap: scan-plan-80x24
+resize: 60x20
+live-snap: scan-plan-60x20
+resize: 40x12
+require-live-snap: 20 REVIEW PLAN | scan-plan-40x12
+keys: NPage NPage NPage
+live-snap: scan-plan-40x12-details
+keys: End
+require-live-snap: 20 y approve | scan-plan-40x12-last-terms
+ask: Does approval lead with the frozen repository, scope, engines, context and worker workload, keep every spending term reachable, and preserve the Map selection through the finite Scan detour?
+resize: 120x36
+keys: Escape
+require-live-snap: 10 PLAN A STUDY | cancelled-allowance
+expect-not: Preparing the selected action
+keys: Escape
+require-live-snap: 10 Viewing Map | returned-origin
+expect-not: PLAN A STUDY
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | retained-map-choice-exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: plan scan
+require-live-snap: 25 PLAN A STUDY | restarted-plan
+expect-not: Credentials
+require-shell: python3 -B @REPO/scripts/devex/fixtures/guided_scan.py @TMP_TARGET @ART prepared
+keys: Escape
+keys: C-c
+require-exit: 10

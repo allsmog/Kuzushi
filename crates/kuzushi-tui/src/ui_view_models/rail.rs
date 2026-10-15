@@ -163,7 +163,7 @@ fn findings_section(app: &ShellApp, width: usize) -> Option<RailSection> {
 fn cost_section(app: &ShellApp) -> RailSection {
     let session = app.session();
     let mut rows = match session.session_budget_usd() {
-        Some(budget) if budget > 0.0 => budget_rows(budget_spend(app), budget),
+        Some(budget) if budget > 0.0 => session_budget_rows(app, budget),
         _ => vec![
             Line::styled(unbudgeted_spend_label(app), theme::muted()),
             Line::styled("session dollar cap unset".to_string(), theme::subtle()),
@@ -176,6 +176,16 @@ fn cost_section(app: &ShellApp) -> RailSection {
         title: "SESSION COST",
         rows,
     }
+}
+
+fn session_budget_rows(app: &ShellApp, budget: f64) -> Vec<Line<'static>> {
+    if let Some(error) = app.session().cost_accounting_error() {
+        return unknown_budget_rows(
+            super::format_runtime_cost(app.session().session_cost_report(), Some(error)),
+            budget,
+        );
+    }
+    budget_rows(budget_spend(app), budget)
 }
 
 /// A metered session reads `$X spent`; anything else keeps the shared
@@ -230,12 +240,21 @@ impl BudgetSpend {
         match self {
             Self::Metered(_) => format!("{percent}% of budget"),
             Self::Estimated(_) => format!("~{percent}% · estimated"),
-            Self::LowerBound(_) => format!(">={percent}% · calls unmetered"),
+            Self::LowerBound(_) => "budget share unknown · calls unmetered".to_string(),
         }
     }
 }
 
 fn budget_rows(spend: BudgetSpend, budget: f64) -> Vec<Line<'static>> {
+    if matches!(spend, BudgetSpend::LowerBound(0.0)) {
+        return unknown_budget_rows(
+            super::format_runtime_cost(
+                kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+                None,
+            ),
+            budget,
+        );
+    }
     let (bound, observed) = spend.bound_and_usd();
     let percent = ((observed / budget) * 100.0).round() as u64;
     let share = spend.share(percent);
@@ -246,10 +265,20 @@ fn budget_rows(spend: BudgetSpend, budget: f64) -> Vec<Line<'static>> {
     };
     vec![
         Line::styled(
-            format!("{bound}${observed:.2} of ${budget:.2}"),
+            format!(
+                "{bound}{} of ${budget:.2}",
+                super::format_session_cost(observed)
+            ),
             theme::muted(),
         ),
         Line::styled(share, style),
+    ]
+}
+
+fn unknown_budget_rows(label: String, budget: f64) -> Vec<Line<'static>> {
+    vec![
+        Line::styled(format!("{label} · cap ${budget:.2}"), theme::warn()),
+        Line::styled("budget share unknown", theme::warn()),
     ]
 }
 
@@ -343,14 +372,17 @@ mod tests {
         let sections = rail_sections(&app, 40);
         let cost = sections.last().unwrap();
 
-        assert_eq!(cost.rows[0].to_string(), ">=$0.00 (metering incomplete)");
+        assert_eq!(cost.rows[0].to_string(), "unknown (metering incomplete)");
     }
 
     #[test]
-    fn a_budget_share_over_unmetered_calls_is_a_lower_bound() {
+    fn incomplete_budget_shares_stay_unknown_while_priced_values_keep_their_qualifier() {
         let unmetered = budget_rows(BudgetSpend::LowerBound(1.0), 10.0);
         assert_eq!(unmetered[0].to_string(), ">=$1.00 of $10.00");
-        assert_eq!(unmetered[1].to_string(), ">=10% · calls unmetered");
+        assert_eq!(
+            unmetered[1].to_string(),
+            "budget share unknown · calls unmetered"
+        );
         let metered = budget_rows(BudgetSpend::Metered(1.0), 10.0);
         assert_eq!(metered[0].to_string(), "$1.00 of $10.00");
         assert_eq!(metered[1].to_string(), "10% of budget");
@@ -360,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn an_estimated_session_is_labelled_and_enforces_its_budget() {
+    fn an_estimated_session_keeps_its_label_separate_from_unknown_spend() {
         use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
         let estimate = RuntimeCost::from_usd(0.5, "cost").unwrap();
         let report = RuntimeCostReport::INCOMPLETE_ZERO.with_unmetered_estimate(Some(estimate));
@@ -370,7 +402,7 @@ mod tests {
         );
         assert_eq!(
             crate::ui_view_models::format_runtime_cost(RuntimeCostReport::INCOMPLETE_ZERO, None),
-            ">=$0.00 (metering incomplete)"
+            "unknown (metering incomplete)"
         );
     }
 

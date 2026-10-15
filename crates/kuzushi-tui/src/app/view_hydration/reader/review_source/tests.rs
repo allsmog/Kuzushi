@@ -78,9 +78,16 @@ fn seed(target: &Path) -> (Finding, ViewHydrationKey) {
         .unwrap()
         .unwrap();
     let stable_fp = kuzushi_core::findings::finding_observation_identity(&current).to_owned();
+    let decision_id = store
+        .list_review_decisions(current.id.unwrap())
+        .unwrap()
+        .last()
+        .unwrap()
+        .id;
     (
         current,
         ViewHydrationKey::FindingReviewSource {
+            decision_id,
             stable_fp,
             decision_watermark: watermark,
             observation_watermark: None,

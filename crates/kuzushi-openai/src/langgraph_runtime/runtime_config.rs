@@ -73,6 +73,13 @@ impl BridgeRetryPolicy {
 }
 
 impl LangGraphRuntime {
+    /// Admit model work separately from credential readiness. Reserves no calls.
+    pub fn preflight_model_work_blocking(&self, model: &str) -> Result<()> {
+        self.validated_model_credential(model)?;
+        super::bridge_observation::require_model_allowance(self.allowance.as_ref())?
+            .validate_model(model)
+    }
+
     pub fn from_config(config: &V2Config, source_root: impl AsRef<Path>) -> Result<Self> {
         Self::from_runtime_config(&config.runtime, source_root)
     }

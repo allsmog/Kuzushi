@@ -1,0 +1,98 @@
+name: Compact paste controls, single Map paging, and direct terminal input
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_input.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+keys: Down Down Down Down Down Down Down
+require-live-snap: 15 Commit this Map plan | start-map
+keys: Enter
+paste-file: @ART/multiline.txt
+require-live-snap: 30 RESULT READY | map-draft
+type: ud
+require-live-snap: 20 chars⟫ud | map-edited
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART map-edited
+keys: C-y
+require-live-snap: 20 first owned α | appended-paste-inspection
+expect: second owned β
+keys: Escape
+require-live-snap: 20 chars⟫ud | inspection-return
+resize: 160x48
+require-live-snap: 20 chars⟫ud | draft-160x48
+resize: 96x89
+require-live-snap: 20 chars⟫ud | draft-96x89
+resize: 80x24
+require-live-snap: 20 chars⟫ud | draft-80x24
+resize: 60x20
+require-live-snap: 20 chars⟫ud | draft-60x20
+resize: 40x12
+require-live-snap: 20 chars⟫ud | compact-controls
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_input.py @TMP_TARGET @ART compact-controls
+ask: Are paste inspection, clear, undo and interrupt readable at 40x12, with the appended draft still editable after the inspector closes?
+keys: C-y
+require-live-snap: 20 first owned α | compact-inspection
+expect: Esc cancel
+expect: Ctrl+_ undo after close
+keys: Escape
+require-live-snap: 20 chars⟫ud | compact-return
+resize: 120x36
+keys: Escape
+require-live-snap: 20 describe what to map | cleared
+keys: C-_
+require-live-snap: 20 chars⟫ud | restored
+keys: Escape
+nav-mode:
+keys: u
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART map-selected
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-live-snap: 30 r reuse cached | scan-prerequisite
+keys: r
+paste-file: @ART/scan-draft.txt
+require-live-snap: 30 operator α | scan-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/completion_input.py @TMP_TARGET @ART scan-draft
+require-live-snap: 30 ○ idle | single-paging
+expect-count-at-most: 1 PgUp/PgDn
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_input.py @TMP_TARGET @ART single-paging
+ask: Does the resting Map name paging once after the actual scan completion, while the unsent draft retains its cursor and input ownership?
+keys: Escape
+require-live-snap: 20 describe what to map | input-cleared
+type: terminal α
+require-live-snap: 20 terminal α | before-escape-end
+keys: Escape End
+wait: 1
+live-snap: coalesced-escape-end
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_input.py @TMP_TARGET @ART coalesced-escape-end
+ask: Does the capture show an End escape-sequence fragment entering the composer when Escape and End arrive in one batch? Preserve any defect as open terminal-parser evidence.
+keys: C-u
+require-live-snap: 20 describe what to map | before-quit
+type: quit
+require-live-snap: 20 › quit | typed-quit
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_input.py @TMP_TARGET @ART typed-quit
+keys: Enter
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: open F-0001
+require-live-snap: 30 owned-example | restarted-source
+expect: signal-only
+paste-file: @ART/multiline.txt
+resize: 40x12
+require-live-snap: 20 inspect paste | no-color-controls
+expect: Ctrl+_
+expect: undo
+ask: Are the compact paste controls readable without color after restart, with the existing policy observation retained?
+keys: C-c
+require-live-snap: 20 y/Y exit n/N/Esc stay | quit-confirmation
+expect: command draft
+keys: n
+require-live-snap: 20 inspect paste | quit-canceled
+keys: Escape
+require-live-snap: 20 describe what to review | restart-draft-cleared
+keys: C-c
+require-exit: 10
+require-shell: python3 -B @REPO/scripts/devex/fixtures/compact_input.py @TMP_TARGET @ART state

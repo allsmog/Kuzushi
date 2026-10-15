@@ -1,17 +1,16 @@
 //! Scan-to-scan comparison over the durable observation history.
 //!
-//! Classifies every finding observed by two runs into an honest lifecycle
-//! bucket. The load-bearing rule mirrors the re-scan reconciler: a finding is
-//! only `Resolved` when the compare run **provably re-examined** it — the run
-//! completed, the finding's engine is deterministic and actually ran, and the
-//! recorded scan scope covers the finding's file. Anything short of that proof
-//! is `NotRescanned` with the specific blocker, so a narrowed re-scan can
-//! never masquerade as a fix.
+//! Legacy classes remain available for compatibility. Recorded observation
+//! presence uses explicit coverage receipts and never establishes a fix.
+//! A narrowed, partial or unrecorded scan cannot prove that an absent finding
+//! was reassessed. Comparisons do not change finding decisions.
 
 use super::super::persistence::{finding_stable_fp, FindingStore};
 use crate::findings::Finding;
 use anyhow::Result;
 use std::collections::BTreeMap;
+mod observation_presence;
+pub use observation_presence::ScanObservationPresence;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanComparisonClass {
@@ -21,10 +20,10 @@ pub enum ScanComparisonClass {
     Reopened,
     /// Observed by both runs.
     Persisting,
-    /// Observed by the base run only, and the compare run provably covered it.
+    /// Legacy deterministic-absence class, retained for compatibility.
+    /// Use `observation_presence` for receipt-backed coverage; this is no fix verdict.
     Resolved,
-    /// Observed by the base run only, but the compare run cannot honestly
-    /// retire it — the reason names the missing proof.
+    /// Legacy absence class whose deterministic coverage proof is missing.
     NotRescanned,
 }
 

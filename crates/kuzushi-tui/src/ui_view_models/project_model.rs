@@ -221,7 +221,7 @@ fn inventory_row(context: &super::ContextSnapshotModel) -> ProjectModelRow {
 }
 
 fn threat_model_row(threat: &super::ThreatSummaryReview) -> ProjectModelRow {
-    let present = threat.status == "current persisted model";
+    let present = threat.document_available;
     ProjectModelRow {
         section: "threat model",
         origin: if present {
@@ -258,11 +258,7 @@ fn dfd_row(dfd: &super::DfdModel) -> ProjectModelRow {
         } else {
             ProjectModelOrigin::Missing
         },
-        state: if dfd.empty_hint.is_none() {
-            "present"
-        } else {
-            "missing"
-        },
+        state: dfd_state(dfd),
         summary: dfd.empty_hint.clone().unwrap_or_else(|| {
             format!(
                 "{} nodes · {} flows · zones {}",
@@ -273,6 +269,16 @@ fn dfd_row(dfd: &super::DfdModel) -> ProjectModelRow {
         }),
         action: "workbench",
     }
+}
+
+fn dfd_state(dfd: &super::DfdModel) -> &'static str {
+    if dfd.empty_hint.is_some() {
+        return "missing";
+    }
+    if dfd.flows.is_empty() {
+        return "components only";
+    }
+    "present"
 }
 
 fn review_surface_row(findings: &super::FindingsModel) -> ProjectModelRow {

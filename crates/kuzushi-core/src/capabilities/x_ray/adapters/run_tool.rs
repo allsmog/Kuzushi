@@ -5,16 +5,16 @@ pub(crate) fn run_x_ray(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     let runtime = runtime.context(
-        "x-ray:run requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
+        "x-ray:run requires the selected agent runtime. Review runtime and model configuration before starting generation.",
     )?;
     let input = parse_run_input(&input, ctx)?;
     let parent_step = emit_x_ray_start(ctx, &input);
     emit_x_ray_progress(ctx, parent_step, "prompt · build repository x-ray request");
     let prompt = build_x_ray_prompt(&input);
     let _agent_scope = begin_x_ray_agent_scope(ctx, parent_step);
-    // The x-ray prompt embeds the whole inventory it reasons over, so an
-    // unchanged repository replays the understanding pass for free.
+    // The shared cache decides whether a prior structured response can be reused.
     let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
     let content = crate::structured_output::query_cached_structured_json_with_cost(
         cache.as_ref(),
@@ -25,6 +25,7 @@ pub(crate) fn run_x_ray(
     )?
     .costed;
     drop(_agent_scope);
+    ctx.ensure_active()?;
     let cost = content.cost_report()?;
     finish_x_ray_run(&input, ctx, parent_step, content.value, cost)
 }
@@ -36,6 +37,10 @@ fn x_ray_agent_request(input: &XRayRunInput, prompt: String) -> AgentQueryReques
         input.system_prompt.clone(),
         prompt,
     );
+    let request = match input.effort.as_deref() {
+        Some(effort) => request.with_thinking_level(effort),
+        None => request,
+    };
     let Some(stop_usd) = input.max_budget_usd else {
         return request;
     };
@@ -74,7 +79,7 @@ fn finish_x_ray_run(
     let data = read_x_ray_report_artifacts(
         &input.target,
         Some(&input.repo_name),
-        "LangGraph",
+        "agent-runtime",
         cost.observed_usd(),
     )?;
     let mut data = data;
@@ -86,7 +91,9 @@ fn finish_x_ray_run(
     emit_x_ray_done(ctx);
     let mut data_json = json!(data);
     data_json["kbContext"] = json!(&input.kb_context);
-    x_ray_response(render_x_ray_run_summary(&data), data_json, &data, cost)
+    let mut output = x_ray_response(render_x_ray_run_summary(&data), data_json, &data, cost)?;
+    output["warnings"] = json!(["Experimental report generation. Source coverage and report claims are unverified. These reports do not accept Map or establish finding decisions."]);
+    Ok(output)
 }
 
 fn emit_x_ray_start(

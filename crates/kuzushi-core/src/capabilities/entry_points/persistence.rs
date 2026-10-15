@@ -24,7 +24,10 @@ pub(super) fn read_context_snapshot(target: &Path) -> Result<Option<ContextSnaps
     Ok(Some(ContextSnapshotDocument { value, identity }))
 }
 
-pub(super) fn context_snapshot_identity(value: &Value, raw: &str) -> Result<ContextSnapshotIdentity> {
+pub(super) fn context_snapshot_identity(
+    value: &Value,
+    raw: &str,
+) -> Result<ContextSnapshotIdentity> {
     context_snapshot_identity_with_sha(value, crate::options::prompt_content_sha256(raw))
 }
 
@@ -82,9 +85,18 @@ pub(super) fn read_entry_point_catalog(target: &Path) -> Result<Option<EntryPoin
         .map(Some)
 }
 
+#[cfg(test)]
 pub(super) fn write_entry_point_catalog(
     target: &Path,
     catalog: &EntryPointCatalog,
+) -> Result<PathBuf> {
+    write_entry_point_catalog_after_validation(target, catalog, || Ok(()))
+}
+
+pub(super) fn write_entry_point_catalog_after_validation(
+    target: &Path,
+    catalog: &EntryPointCatalog,
+    validate_before_publish: impl FnOnce() -> Result<()>,
 ) -> Result<PathBuf> {
     let body = serde_json::to_vec_pretty(catalog).context("serializing entry-points artifact")?;
     anyhow::ensure!(
@@ -93,6 +105,7 @@ pub(super) fn write_entry_point_catalog(
         body.len(),
         MAX_ENTRY_POINTS_BYTES
     );
+    validate_before_publish()?;
     crate::workspace::write_workspace_state_file(
         target,
         Path::new(crate::workspace::KUZUSHI_STATE_DIR).join(ENTRY_POINTS_FILE),

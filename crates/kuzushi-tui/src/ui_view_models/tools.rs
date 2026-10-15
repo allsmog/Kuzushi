@@ -8,6 +8,23 @@ pub(crate) struct ToolsModel {
     pub(crate) visible_count: usize,
     pub(crate) total_count: usize,
     pub(crate) filter: Option<String>,
+    pub(crate) omitted_support: Vec<OmittedToolSupport>,
+    pub(crate) selected_support: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OmittedToolSupport {
+    pub(crate) tool: String,
+    pub(crate) support: &'static str,
+}
+
+impl ToolsModel {
+    pub(crate) fn selected_support_index(&self, selected: Option<&str>) -> usize {
+        self.omitted_support
+            .iter()
+            .position(|tool| Some(tool.tool.as_str()) == selected)
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +70,43 @@ pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
         visible_count,
         total_count: app.registry().discoverable_tools_with_modules().count(),
         filter: filter.map(str::to_string),
+        omitted_support: omitted_support(app, query.as_ref(), shelf),
+        selected_support: app.router.tools().selected_support().map(str::to_string),
     }
+}
+
+fn omitted_support(
+    app: &ShellApp,
+    query: Option<&ToolQuery>,
+    shelf: &ToolShelf,
+) -> Vec<OmittedToolSupport> {
+    let Some(query) = query else {
+        return Vec::new();
+    };
+    let mut omitted = app
+        .registry()
+        .catalog_tools_with_modules()
+        .filter(|(module, tool)| query.matches(module.metadata(), tool, shelf))
+        .filter_map(|(module, tool)| omitted_tool_support(tool, module.maturity()))
+        .collect::<Vec<_>>();
+    omitted.sort_by(|left, right| left.tool.cmp(&right.tool));
+    omitted
+}
+
+fn omitted_tool_support(
+    tool: &ToolDescriptor,
+    maturity: kuzushi_core::modules::ModuleMaturity,
+) -> Option<OmittedToolSupport> {
+    use kuzushi_core::modules::ModuleMaturity;
+    let support = match tool.effective_maturity(maturity) {
+        ModuleMaturity::Core => return None,
+        ModuleMaturity::Labs => "Experimental",
+        ModuleMaturity::Compatibility => "Compatibility",
+    };
+    Some(OmittedToolSupport {
+        tool: tool.name.clone(),
+        support,
+    })
 }
 
 fn scored_tools<'a>(

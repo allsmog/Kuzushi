@@ -49,7 +49,9 @@ def verify(root, evidence, stage):
         assert record["origin"]["finding"]["findingId"] == json.loads((root / ".kuzushi/lesson-fixture.json").read_text())["findingId"]
         assert record["origin"]["decision"]["decision"]["author"] == "human"
         assert record["content"]["text"] == (evidence / "text.txt").read_text()
-    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+    # SQLite may need WAL sidecars for reads. SQL writes remain prohibited.
+    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=rw", uri=True) as db:
+        db.execute("PRAGMA query_only=ON")
         assert db.execute("select count(*) from finding_observations").fetchone()[0] == 1
         assert db.execute("select count(*) from review_decisions").fetchone()[0] == 1
         assert db.execute("select count(*) from rekey_edges").fetchone()[0] == 0

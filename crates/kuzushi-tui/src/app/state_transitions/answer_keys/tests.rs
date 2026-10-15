@@ -83,7 +83,7 @@ fn answers_model_refusal_is_visible_and_keeps_the_question_for_retry() {
 }
 
 #[test]
-fn answers_submission_emits_ask_only_and_does_not_execute_it() {
+fn answers_submission_without_accepted_context_keeps_draft_and_starts_no_work() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = app();
     app.set_target(Some(temp.path().to_path_buf()));
@@ -92,10 +92,14 @@ fn answers_submission_emits_ask_only_and_does_not_execute_it() {
     app.open_answers();
     app.reduce_paste("Explain this API");
     let update = key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
-    assert!(matches!(
-        update.effects.as_slice(),
-        [ShellEffect::DispatchAgent(_)]
-    ));
+    assert!(update.effects.is_empty());
+    assert!(app
+        .agent_chat()
+        .unwrap()
+        .error
+        .as_deref()
+        .unwrap()
+        .contains("Accept a current Map"));
     assert_eq!(app.router.answers().draft.text(), "Explain this API");
     assert_eq!(app.input(), "unfinished shell command");
     assert!(

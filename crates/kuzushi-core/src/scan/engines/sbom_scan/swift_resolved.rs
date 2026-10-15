@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -10,9 +11,12 @@ pub(super) fn is_swift_resolved(path: &Path) -> bool {
         .is_some_and(|name| name == "Package.resolved")
 }
 
-pub(super) fn swift_resolved_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn swift_resolved_edges(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse Package.resolved")?;
     let source = relative_display(target, path);
     Ok(value
@@ -29,9 +33,12 @@ pub(super) fn swift_resolved_edges(target: &Path, path: &Path) -> Result<Vec<Sbo
         .collect())
 }
 
-pub(super) fn swift_resolved_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn swift_resolved_components(
+    target: &SbomInputs,
+    path: &Path,
+) -> Result<Vec<SbomComponent>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse Package.resolved")?;
     let source = relative_display(target, path);
     Ok(value

@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn help_overlay_paste_restores_origin_cursor_and_explicit_submission() {
+    for overlay in [ShellView::Help, ShellView::Keymap] {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Campaign);
+        app.set_input("hep");
+        app.move_cursor_left();
+        app.push_nav_history(ShellView::Campaign);
+        app.set_shell_view(overlay);
+
+        let update = app.reduce_paste("l");
+
+        assert!(update.handled);
+        assert!(update.effects.is_empty());
+        assert_eq!(app.shell_view(), ShellView::Campaign);
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        assert_eq!(app.input(), "help");
+        assert_eq!(app.cursor(), 3);
+        app.reduce_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(app.cursor(), 0);
+        app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.input().is_empty());
+        assert_eq!(app.shell_view(), ShellView::Help);
+    }
+}
+
+#[test]
+fn help_overlay_multiline_paste_preserves_draft_without_dispatching() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_shell_view(ShellView::Campaign);
+    app.set_input("draft:");
+    app.push_nav_history(ShellView::Campaign);
+    app.set_shell_view(ShellView::Help);
+
+    let update = app.reduce_paste("first\r\nsecond");
+
+    assert!(update.effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    assert_eq!(app.editor().expanded_input(), "draft:first\nsecond");
+    assert!(app.editor().paste_inspection().is_none());
+}
+
+#[test]
 fn paste_normalisation_preserves_cr_only_terminal_line_breaks() {
     assert_eq!(
         normalise_paste_text("alpha\rbeta\r\ngamma"),

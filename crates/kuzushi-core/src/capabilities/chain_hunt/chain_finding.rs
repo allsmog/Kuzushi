@@ -61,7 +61,8 @@ pub(super) fn model_chain_identity(chain: &ModelChain) -> String {
 }
 
 fn model_chain_message(chain: &ModelChain, id: &str) -> String {
-    let mut lines = vec![format!("Attack chain {id}: {}", chain.title), String::new()];
+    let mut lines = vec![format!("Unreviewed relationship hypothesis {id}: {}", chain.title),
+        "Finding metadata does not verify this relationship or its source revision. Independent source review is required.".to_string(),String::new()];
     lines.push("Components:".to_string());
     for member in &chain.members {
         lines.push(format!(
@@ -70,7 +71,7 @@ fn model_chain_message(chain: &ModelChain, id: &str) -> String {
         ));
     }
     lines.push(String::new());
-    lines.push("Attack path:".to_string());
+    lines.push("Source-analysis questions (legacy attack path):".to_string());
     for (index, step) in chain.attack_path.iter().enumerate() {
         lines.push(format!("{}. {}", index + 1, step));
     }
@@ -121,7 +122,12 @@ mod tests {
     #[test]
     fn valid_chain_maps_to_a_stable_open_finding() {
         let a = confirmed("fp-a", "Unauthenticated parser", Severity::High, "svc/a.c");
-        let b = confirmed("fp-b", "Heap write primitive", Severity::Critical, "svc/b.c");
+        let b = confirmed(
+            "fp-b",
+            "Heap write primitive",
+            Severity::Critical,
+            "svc/b.c",
+        );
         let by_fp: BTreeMap<&str, &Finding> = [("fp-a", &a), ("fp-b", &b)].into_iter().collect();
         let output = json!({"chains": [
             {"title": "Parser to heap write", "members": ["fp-a", "fp-b"],

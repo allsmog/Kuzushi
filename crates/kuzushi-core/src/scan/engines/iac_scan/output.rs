@@ -8,7 +8,7 @@ impl IacScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        crate::scan::completed_scan_tool_json(
+        let mut output = crate::scan::completed_scan_tool_json(
             self.output(),
             serde_json::json!({
                 "count": self.findings.len(),
@@ -16,10 +16,15 @@ impl IacScanReport {
                 "filesScanned": self.files_scanned,
                 "filesSkipped": self.files_skipped,
                 "coverageGaps": self.coverage_gaps,
+                "inspection": Some(&self.inspection).filter(|receipt| !receipt.is_unavailable()),
                 "target": self.target,
                 "kind": self.kind,
             }),
-        )
+        );
+        if !self.coverage_gaps.is_empty() {
+            output["status"] = serde_json::json!("partial");
+        }
+        output
     }
 }
 
@@ -35,7 +40,29 @@ fn iac_header_lines(report: &IacScanReport) -> Vec<String> {
         format!("  Files skipped: {}", report.files_skipped),
     ];
     lines.extend(report.coverage_gaps.disclosure_lines());
+    lines.extend(iac_inspection_lines(&report.inspection));
     lines
+}
+
+fn iac_inspection_lines(inspection: &IacInspection) -> Vec<String> {
+    if inspection.is_unavailable() {
+        return vec!["  Inspection accounting unavailable for this historical report".into()];
+    }
+    vec![
+        format!(
+            "  Inspection: {} / {} entries; {} / {} bytes read; depth <= {}",
+            inspection.entries_visited,
+            inspection.max_entries,
+            inspection.bytes_read,
+            inspection.max_total_bytes,
+            inspection.max_depth
+        ),
+        format!(
+            "  Excluded: {} symlinks; {} dependency, build or state directories",
+            inspection.symlinks_excluded, inspection.directories_excluded
+        ),
+        "  Source authentication performs separate IO beyond these inspection limits.".into(),
+    ]
 }
 
 fn append_iac_top_findings(lines: &mut Vec<String>, findings: &[IacScanFinding]) {
@@ -86,6 +113,17 @@ pub struct IacScanFinding {
 }
 
 impl IacScanFinding {
+    pub(crate) fn rebase_path(&mut self, prefix: &Path) {
+        self.file_path = prefix
+            .join(&self.file_path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let discriminator = self
+            .locator
+            .clone()
+            .unwrap_or_else(|| format!("line:{}", self.start_line));
+        self.fingerprint = iac_fingerprint(&self.rule_id, &self.file_path, &discriminator);
+    }
     pub(crate) fn new(
         target: &Path,
         absolute_path: &Path,
@@ -145,5 +183,19 @@ impl IacScanFinding {
 }
 
 fn iac_fingerprint(rule_id: &str, file_path: &str, discriminator: &str) -> String {
-    crate::identity::discriminated_fingerprint_for_tool("iac-scan", rule_id, file_path, discriminator)
+    crate::identity::discriminated_fingerprint_for_tool(
+        "iac-scan",
+        rule_id,
+        file_path,
+        discriminator,
+    )
+}
+
+pub(super) fn rebind_core_finding(finding: &mut Finding, file_path: String) {
+    finding.file_path = file_path;
+    let discriminator = finding
+        .symbol_locator
+        .clone()
+        .unwrap_or_else(|| format!("line:{}", finding.start_line));
+    finding.fingerprint = iac_fingerprint(&finding.rule_id, &finding.file_path, &discriminator);
 }

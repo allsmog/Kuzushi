@@ -166,6 +166,27 @@ pub fn threat_model_has_concrete_dfd(document: &Value) -> bool {
     facts.flows > 0 || facts.concrete_nodes > 1
 }
 
+/// Display availability is separate from the Map completion threshold.
+/// A named component can be useful without establishing any data flows.
+pub fn threat_model_has_recorded_component(document: &Value) -> bool {
+    document
+        .pointer("/dfd/nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(is_recorded_component)
+}
+
+fn is_recorded_component(node: &Value) -> bool {
+    has_named_field(node, "id") && has_named_field(node, "name") && !is_scope_placeholder(node)
+}
+
+fn has_named_field(node: &Value, field: &str) -> bool {
+    node.get(field)
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
 pub fn threat_model_is_scope_placeholder_only(document: &Value) -> bool {
     let total_nodes = array_len(document.pointer("/dfd/nodes"));
     let facts = threat_model_facts(document);

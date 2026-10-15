@@ -12,6 +12,7 @@ mod input;
 mod origin;
 pub use generation::scope_proposal_study_input;
 pub use origin::ScopeStudyOriginV1;
+pub use recovery::{ContextQuestionAnswer, GeneratedStudyContext, WorkflowProposalResult};
 mod diagnosis;
 mod map_result;
 mod preparation;

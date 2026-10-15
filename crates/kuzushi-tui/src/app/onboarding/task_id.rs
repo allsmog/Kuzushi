@@ -171,7 +171,7 @@ impl PlanningTaskId {
             HuntUseAfterFree => "Use-after-free hunt (C/C++)",
             TriageFindings => "Triage findings",
             DedupeFindings => "Dedupe findings corpus",
-            HuntChains => "Hunt attack chains",
+            HuntChains => "Propose finding relationships",
             VerifyFindings => "Verify findings",
             PatchFindings => "Patch findings",
             BuildReport => "Build report",

@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 const MAX_SESSION_FILE_BYTES: usize = 512 * 1024 * 1024;
 
-pub(super) fn validate_session_id(session_id: &str) -> Result<()> {
+pub(in crate::session_transcript) fn validate_session_id(session_id: &str) -> Result<()> {
     let parsed = Uuid::parse_str(session_id).context("session id must be a UUID")?;
     anyhow::ensure!(
         parsed.to_string() == session_id.to_ascii_lowercase(),

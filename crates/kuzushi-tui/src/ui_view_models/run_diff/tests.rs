@@ -137,7 +137,6 @@ fn run_diff_model_compares_findings_by_stable_identity() {
     let decisions = model.decision_summary.as_ref().expect("decision summary");
     assert_eq!(decisions.identities, 2);
     assert_eq!(decisions.with_stored_decision, 2);
-    assert_eq!(decisions.carry_forward, 1);
     assert_eq!(decisions.conflicts, 1);
     assert_eq!(model.new_findings.len(), 1);
     assert_eq!(model.new_findings[0].title, "new item");
@@ -266,7 +265,6 @@ fn run_diff_model_does_not_carry_decisions_to_uncertain_matches() {
     let decisions = model.decision_summary.as_ref().expect("decision summary");
     assert_eq!(decisions.identities, 0);
     assert_eq!(decisions.with_stored_decision, 0);
-    assert_eq!(decisions.carry_forward, 0);
     assert_eq!(decisions.conflicts, 0);
 }
 

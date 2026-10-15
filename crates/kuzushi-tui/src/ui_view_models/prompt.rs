@@ -43,6 +43,9 @@ fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
 }
 
 fn prompt_placeholder(app: &ShellApp, mode: Option<WorkbenchPage>) -> Option<String> {
+    if let Some(hint) = result_prompt_placeholder(app) {
+        return Some(hint);
+    }
     if app.prove_detail_owns_controls() {
         return app.input().is_empty().then(|| {
             format!(
@@ -68,13 +71,24 @@ fn prompt_placeholder(app: &ShellApp, mode: Option<WorkbenchPage>) -> Option<Str
     })
 }
 
+fn result_prompt_placeholder(app: &ShellApp) -> Option<String> {
+    if !app.phase_result_is_open() || !app.input().is_empty() {
+        return None;
+    }
+    Some(
+        super::keybindings::prompt_editor_escape_label(app)
+            .map(|label| format!("Esc {label}"))
+            .unwrap_or_else(|| super::phase_cockpit::prompt_result_control_hint(app)),
+    )
+}
+
 pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
     (app.shell_view() == ShellView::Workbench).then(|| super::active_workbench_page(app))
 }
 
 pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
-    if super::compact_review_reading(app, app.viewport().rows) {
-        return compact_review_prompt_label(app);
+    if let Some(label) = compact_navigation_prompt_label(app) {
+        return label;
     }
     if app.prove_detail_owns_controls() {
         return prove_detail_prompt_label(app);
@@ -96,6 +110,21 @@ pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
         text.push_str(" prompt");
     }
     text
+}
+
+fn compact_navigation_prompt_label(app: &ShellApp) -> Option<String> {
+    if super::compact_map_reading(app, app.viewport().rows) {
+        return Some(compact_map_prompt_label(app).into());
+    }
+    super::compact_review_reading(app, app.viewport().rows)
+        .then(|| compact_review_prompt_label(app))
+}
+
+fn compact_map_prompt_label(app: &ShellApp) -> &'static str {
+    if app.current_map_viz_page() == crate::scene3d::VizPage::Summary {
+        return "PgUp/PgDn read · Enter DFD · Esc prompt";
+    }
+    "j/k select · Enter context · Esc prompt"
 }
 
 fn compact_review_prompt_label(app: &ShellApp) -> String {

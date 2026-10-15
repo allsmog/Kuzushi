@@ -152,13 +152,23 @@ fn update_terminal_picker_demo_command_returns_effect_without_executing_it() {
 }
 
 #[test]
-fn update_terminal_pending_plan_accept_returns_effect_without_executing_it() {
+fn update_terminal_pending_question_plan_opens_budgeted_form_without_work() {
     let target = tempfile::tempdir().expect("agent target");
+    crate::test_support::record_imported_test_map(target.path(), "accepted-map");
+    let completed = crate::test_support::append_typed_attempt(
+        target.path(),
+        kuzushi_core::WorkflowPhase::Map,
+        "accepted-map",
+        kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Completed,
+    );
+    crate::test_support::select_typed_attempt(target.path(), &completed);
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-5.5".to_string());
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(target.path().to_path_buf()));
     app.session_mut().mark_session_api_key_ready("openai");
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
     app.set_pending_plan(PlanProposal {
         goal: "g".to_string(),
         summary: "s".to_string(),
@@ -178,11 +188,14 @@ fn update_terminal_pending_plan_accept_returns_effect_without_executing_it() {
 
     assert!(result.changed);
     assert!(!app.engagement.has_pending_plan());
-    assert!(result
-        .effects
-        .iter()
-        .any(|effect| matches!(effect, ShellEffect::DispatchAgent(_))));
-    assert!(!app.jobs().is_running(JobKind::Agent));
+    assert!(result.effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Campaign);
+    let generation = app.context_generation().expect("question plan");
+    assert!(generation.is_question());
+    assert_eq!(generation.context_input["question"], "inspect authz drift");
+    assert!(generation.context_input["threatModelRef"].is_object());
+    assert!(generation.receipt.is_none());
+    assert!(!app.has_running_work());
 }
 
 #[test]

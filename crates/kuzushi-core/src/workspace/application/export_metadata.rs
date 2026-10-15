@@ -9,6 +9,7 @@ pub(in crate::workspace::application) fn workspace_export_metadata_value(
     let mut metadata = json!({
         "format": format.as_str(),
         "projection": "WorkspaceFindingExportRecord",
+        "currentCheckoutApplicability": "not_assessed",
         "kuzushiVersion": env!("CARGO_PKG_VERSION"),
         "completeness": options.completeness.as_str(),
         "includedCount": included_count,
@@ -87,6 +88,7 @@ const CSV_OMITTED: &[&str] = &[
     "verification.sourceIdentity",
     "verification.reproducer",
     "provenance.runtimePlatform",
+    "provenance.sourceHistory",
     "references",
     "message",
     "relationships",
@@ -145,6 +147,28 @@ pub fn workspace_export_omitted_fields(format: WorkspaceExportFormat) -> Vec<&'s
 #[cfg(test)]
 mod source_basis_tests {
     use super::*;
+
+    #[test]
+    fn export_metadata_keeps_current_checkout_assessment_separate_from_recorded_history() {
+        for campaign in [None, Some("recorded-study".to_owned())] {
+            for format in [
+                WorkspaceExportFormat::Json,
+                WorkspaceExportFormat::Jsonl,
+                WorkspaceExportFormat::Sarif,
+                WorkspaceExportFormat::MarkdownBundle,
+            ] {
+                let options =
+                    WorkspaceExportOptions::new(Some(format)).with_campaign(campaign.clone());
+                let metadata = workspace_export_metadata_value(format, &options, 1, 1);
+                assert_eq!(metadata["currentCheckoutApplicability"], "not_assessed");
+                assert_eq!(metadata["includedCount"], 1);
+                assert_eq!(
+                    metadata["omittedFields"],
+                    json!(workspace_export_omitted_fields(format))
+                );
+            }
+        }
+    }
 
     #[test]
     fn unchanged_row_formats_disclose_the_omitted_source_basis() {

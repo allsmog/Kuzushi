@@ -17,6 +17,10 @@ impl<'a> RuntimeHandle<'a> {
 
 #[async_trait]
 impl<'a> AgentRuntime for RuntimeHandle<'a> {
+    fn allowance_binding(&self) -> Option<&crate::allowance::AllowanceBinding> {
+        self.inner().allowance_binding()
+    }
+
     fn authorize_tool_policy_blocking(
         &self,
         authorization: &crate::runtime::AgentToolPolicyAuthorization,
@@ -33,6 +37,13 @@ impl<'a> AgentRuntime for RuntimeHandle<'a> {
 
     fn preflight_model_blocking(&self, model: &str) -> Result<()> {
         self.inner().preflight_model_blocking(model)
+    }
+
+    fn triage_semantic_cache_identity(
+        &self,
+        request: &TriageRequest,
+    ) -> Option<crate::identity::Blake3Hash> {
+        self.inner().triage_semantic_cache_identity(request)
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {

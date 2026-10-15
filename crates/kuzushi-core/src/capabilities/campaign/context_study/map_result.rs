@@ -48,6 +48,10 @@ pub fn execute_context_map(input: &Value, ctx: &ToolExecutionContext<'_>) -> Res
 
 fn ensure_map_generation(tool: &str) -> Result<()> {
     anyhow::ensure!(
+        !matches!(tool, generation::QUESTION_TOOL | generation::PLANNER_TOOL),
+        "Question answers and workflow proposals are guidance and cannot complete Map"
+    );
+    anyhow::ensure!(
         tool != generation::LESSON_TOOL,
         "Lesson drafts are reviewed as lessons and cannot complete Map"
     );
@@ -193,6 +197,7 @@ mod tests {
     fn context_drafts_keep_their_own_review_contracts() {
         assert!(ensure_map_generation(TOOL).is_ok());
         assert!(ensure_map_generation(generation::LESSON_TOOL).is_err());
+        assert!(ensure_map_generation(generation::PLANNER_TOOL).is_err());
         let error = ensure_map_generation(generation::REGENERATE_TOOL).unwrap_err();
         assert!(error.to_string().contains("Check the exact revision"));
     }

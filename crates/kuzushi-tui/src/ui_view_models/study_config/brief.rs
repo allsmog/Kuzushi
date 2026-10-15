@@ -20,6 +20,19 @@ pub(crate) fn controls(mode: BriefMode, narrow: bool) -> &'static str {
     }
 }
 
+pub(crate) fn notice_lines(editor: &BriefEditor, checkpoint: Option<&str>) -> Vec<String> {
+    let lines: Vec<_> = [editor.notice.as_deref(), checkpoint]
+        .into_iter()
+        .flatten()
+        .map(str::to_owned)
+        .collect();
+    if lines.is_empty() {
+        vec!["Goal and priorities · no work approval".into()]
+    } else {
+        lines
+    }
+}
+
 pub(crate) fn reading_lines(editor: &BriefEditor, width: usize) -> Vec<String> {
     let mut lines = vec![format!("Shown revision: {}", editor.loaded.as_ref().map_or("not saved".into(), |brief| brief.reference.revision.to_string())),
         "Operator intent guides planning and priorities. Source evidence decides findings. No model context, work or allowance changes.".into()];
@@ -59,6 +72,7 @@ pub(crate) fn selected_lines(config: &BatchScanConfig) -> Vec<String> {
 
 pub(crate) fn plain_lines(editor: &BriefEditor, width: usize) -> Vec<String> {
     let mut lines = vec![title(editor.mode).into()];
+    lines.extend(notice_lines(editor, None));
     lines.extend(reading_lines(editor, width));
     lines.push(controls(editor.mode, width < 44).into());
     lines

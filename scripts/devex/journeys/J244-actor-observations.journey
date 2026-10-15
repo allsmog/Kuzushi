@@ -1,0 +1,55 @@
+name: A bounded actor query inherits reasoning, preserves Review and reports partial coverage
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/actor_observations.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+require-shell: python3 -B @REPO/scripts/devex/fixtures/actor_observations.py before @TMP_TARGET @ART
+paste-file: @ART/command.txt
+keys: Enter
+require-live-snap: 20 PREREQUISITE PLAN | prerequisite-review
+expect: context:build
+keys: a
+require-live-snap: 30 Actor-guided observations: 0 findings | observations-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/actor_observations.py result @TMP_TARGET @ART
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | partial-receipt
+expect: partial coverage, independent review required
+ask: Does the receipt clearly distinguish bounded actor context and partial coverage from a clean Scan, with one request and the selected medium reasoning?
+resize: 160x48
+live-snap: receipt-160x48
+resize: 96x89
+live-snap: receipt-96x89
+resize: 80x24
+live-snap: receipt-80x24
+resize: 60x20
+live-snap: receipt-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | receipt-40x12
+keys: NPage
+live-snap: partial-page-1-40x12
+keys: NPage
+live-snap: partial-page-2-40x12
+ask: Are the partial warning, selected context, uncertain spend and paging controls understandable through the six-size matrix?
+resize: 120x36
+submit: findings
+require-live-snap: 20 Viewing Review | existing-review
+expect: Labeled greeting observation
+ask: Does the empty actor response preserve the existing human decision and avoid implying that the finding was fixed or resolved?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | resumed
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered
+require-shell: python3 -B @REPO/scripts/devex/fixtures/actor_observations.py restart @TMP_TARGET @ART
+ask: Does no-color restart retain the partial receipt, original decision and protected Review without another request or follow-up job?
+keys: C-c
+require-exit: 10

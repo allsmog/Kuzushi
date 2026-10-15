@@ -79,7 +79,10 @@ fn osv_response(package: &OsvPackageQuery, fixtures: Option<&Value>) -> Result<V
 }
 
 fn fixture_response(fixtures: &Value, package: &str) -> Result<Value> {
-    let rows = fixtures.get(package).cloned().unwrap_or_else(|| json!([]));
+    let rows = fixtures
+        .get(package)
+        .context("No supplied OSV response for this package; live fallback is disabled")?
+        .clone();
     if rows.is_array() {
         return Ok(json!({"vulns": rows}));
     }
@@ -215,6 +218,18 @@ mod tests {
         let report =
             query_osv_candidates(&packages, 3, 3, Some(&json!({"express": {"bad": true}})));
         assert_eq!(report.failed_packages, vec!["express"]);
+        assert!(report.candidates.is_empty());
+    }
+
+    #[test]
+    fn missing_supplied_responses_fail_without_an_online_fallback() {
+        let package = OsvPackageQuery {
+            ecosystem: "npm".into(),
+            name: "owned-lib".into(),
+            version: None,
+        };
+        let report = query_osv_candidates(&[package], 1, 1, Some(&json!({})));
+        assert_eq!(report.failed_packages, vec!["owned-lib"]);
         assert!(report.candidates.is_empty());
     }
 }

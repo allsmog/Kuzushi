@@ -56,6 +56,7 @@ impl ShellApp {
         self.router.default_scroll_mut().set(origin.scroll);
         if origin.model != self.config().model {
             self.refresh_context_generation_model();
+            self.refresh_review_study_model();
         }
         true
     }

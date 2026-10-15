@@ -4,6 +4,12 @@ use kuzushi_core::capabilities::threat_model::MAX_CONTEXT_EDIT_BYTES;
 
 impl ShellApp {
     pub(crate) fn handle_context_edit_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let update = self.apply_context_edit_key(key)?;
+        self.checkpoint_context_draft();
+        Some(update)
+    }
+
+    fn apply_context_edit_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         let mode = self.context_edit_draft()?.mode;
         if let Some(update) = self.context_edit_primary_key(key, mode) {
             return Some(update);
@@ -30,7 +36,10 @@ impl ShellApp {
     }
 
     fn context_edit_back(&mut self, mode: ContextEditMode) {
-        if matches!(mode, ContextEditMode::Fields | ContextEditMode::Saving) {
+        if matches!(
+            mode,
+            ContextEditMode::Fields | ContextEditMode::Saving | ContextEditMode::Recovery
+        ) {
             self.close_context_editor();
             return;
         }
@@ -40,6 +49,9 @@ impl ShellApp {
     }
 
     fn context_edit_mode_key(&mut self, key: KeyEvent, mode: ContextEditMode) -> InputUpdate {
+        if mode == ContextEditMode::Recovery {
+            return self.context_recovery_input(key);
+        }
         if mode == ContextEditMode::Writing {
             return self.context_text_key(key);
         }
@@ -47,6 +59,13 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         self.context_reading_key(key, mode)
+    }
+
+    fn context_recovery_input(&mut self, key: KeyEvent) -> InputUpdate {
+        if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) {
+            self.handle_context_recovery_key(key.code);
+        }
+        InputUpdate::handled()
     }
 
     fn context_reading_key(&mut self, key: KeyEvent, mode: ContextEditMode) -> InputUpdate {
@@ -65,6 +84,7 @@ impl ShellApp {
     fn context_discard_key(&mut self, code: KeyCode) -> InputUpdate {
         if code == KeyCode::Enter {
             let key = self.context_edit_selection_key().unwrap();
+            self.resolve_context_checkpoint(&key);
             self.runtime_state.context_edit_drafts.remove(&key);
             self.close_context_editor();
         }
@@ -176,6 +196,7 @@ impl ShellApp {
             self.context_edit_draft_mut().unwrap().notice =
                 Some("Enter a text field before pasting. Your draft is unchanged.".into());
         }
+        self.checkpoint_context_draft();
         true
     }
 }

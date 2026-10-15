@@ -25,7 +25,10 @@ pub(in crate::modules) use taint_iris_next_hunt_input::*;
 mod agentic_settings;
 mod findings_count;
 mod from_tasks;
+#[cfg(test)]
+mod iac_settings_tests;
 mod native_inspections;
+pub(in crate::modules) use native_inspections::append_inspection_lines;
 mod optional_positive_count;
 mod prompt_overrides;
 mod reconcile_completed_scan;
@@ -36,6 +39,8 @@ mod scan_threat_model_lease;
 mod scope_guard;
 #[cfg(test)]
 mod secret_settings_tests;
+#[cfg(test)]
+mod semgrep_settings_tests;
 pub(in crate::modules) use scope_guard::{bind_sast_scope_input, requested_scope_contracts};
 #[cfg(test)]
 mod context_tests;

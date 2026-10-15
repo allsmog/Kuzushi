@@ -2,6 +2,10 @@ use super::*;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+const TARGET_CATALOG_MAX_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(test)]
+mod import_resource_tests;
+
 /// Path where a target-specific catalog is persisted, if generated.
 pub(crate) fn taint_iris_next_target_catalog_path(repo_root: &Path) -> PathBuf {
     taint_iris_next_target_catalog_artifact_path(repo_root)
@@ -14,8 +18,23 @@ pub(crate) fn load_taint_iris_next_target_catalog(
     repo_root: &Path,
 ) -> Option<Vec<TaintIrisNextRankedCatalogEntry>> {
     let path = taint_iris_next_target_catalog_path(repo_root);
-    let raw = crate::bounded_file::read_utf8_text_within(repo_root, &path, 8 * 1024 * 1024).ok()?;
+    let raw =
+        crate::bounded_file::read_utf8_text_within(repo_root, &path, TARGET_CATALOG_MAX_BYTES)
+            .ok()?;
     parse_target_catalog_payload(&raw).ok()
+}
+
+pub(super) fn load_target_catalog_for_merge(
+    target: &Path,
+) -> Result<Option<Vec<TaintIrisNextRankedCatalogEntry>>> {
+    let path = taint_iris_next_target_catalog_path(target);
+    let raw =
+        match crate::bounded_file::read_utf8_text_within(target, &path, TARGET_CATALOG_MAX_BYTES) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+    Ok(Some(parse_target_catalog_payload(&raw)?))
 }
 
 /// Result of running the `taint-iris-next:catalog` tool. Persists the
@@ -557,6 +576,11 @@ pub(in crate::capabilities::taint_iris_next) fn persist_target_catalog(
     let payload = serde_json::json!({ "catalog": entries });
     let pretty = serde_json::to_string_pretty(&payload)
         .context("could not serialize target catalog to JSON")?;
+    anyhow::ensure!(
+        pretty.len() <= TARGET_CATALOG_MAX_BYTES,
+        "Target catalog exceeds the {}-byte reader limit; prior catalog was not replaced",
+        TARGET_CATALOG_MAX_BYTES
+    );
     let intended_path = taint_iris_next_target_catalog_path(target);
     let relative = intended_path
         .strip_prefix(target)

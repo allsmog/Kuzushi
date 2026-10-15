@@ -100,6 +100,7 @@ impl ShellEvent {
                 | ToolEvent::Refused { .. }
                 | ToolEvent::ObservedFinished { .. }
                 | ToolEvent::ObservedFailed { .. }
+                | ToolEvent::ObservedRefused { .. }
                 | ToolEvent::AuthenticationFailed { .. },
             ) => true,
             Self::Agent(AgentEvent::Answered { .. } | AgentEvent::Failed { .. }) => true,

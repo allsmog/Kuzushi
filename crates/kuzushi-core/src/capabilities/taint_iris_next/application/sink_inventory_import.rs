@@ -6,6 +6,7 @@ use std::path::PathBuf;
 /// Upper bound on the inventory file so a mispointed path (a corpus
 /// tarball, a database) fails fast instead of being slurped into memory.
 const SINK_INVENTORY_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const SINK_INVENTORY_MAX_ROWS: usize = 100_000;
 /// Cap distinct callee signals per catalog entry; beyond this the
 /// signals stop discriminating and only slow the discovery sweep.
 const SINK_SIGNALS_PER_ENTRY: usize = 64;
@@ -85,20 +86,33 @@ impl TaintIrisNextSinkImportReport {
     pub(crate) fn to_tool_json(&self) -> Value {
         json!({
             "ok": true,
+            "status": if self.skipped_lines == 0 { "completed" } else { "partial" },
+            "warnings": sink_import_warnings(self.skipped_lines),
             "output": render_sink_import_summary(self),
             "data": serde_json::to_value(self).unwrap_or(Value::Null),
         })
     }
 }
 
+fn sink_import_warnings(skipped: usize) -> Vec<String> {
+    if skipped == 0 {
+        return Vec::new();
+    }
+    vec![format!(
+        "Skipped {skipped} unusable inventory lines. Complete import is not claimed."
+    )]
+}
+
 fn render_sink_import_summary(report: &TaintIrisNextSinkImportReport) -> String {
     let mut lines = vec![
-        format!("taint-iris-next:import-sinks — {}", report.status),
+        format!("taint-iris-next:import-sinks: {}", report.status),
         format!("inventory: {}", report.sinks_path),
         format!(
             "rows: {} imported, {} lines skipped",
             report.imported_rows, report.skipped_lines
         ),
+        "Catalog metadata only. No discovery ran; source and scope freshness are not assessed."
+            .to_string(),
         format!("catalog: {}", report.catalog_path),
         format!(
             "entries: {}{}",
@@ -110,6 +124,7 @@ fn render_sink_import_summary(report: &TaintIrisNextSinkImportReport) -> String 
             }
         ),
     ];
+    lines.extend(sink_import_warnings(report.skipped_lines));
     for entry in &report.entries {
         lines.push(format!(
             "- {}: {} [{}] {} sink signals",
@@ -130,26 +145,27 @@ pub(crate) fn run_taint_iris_next_sink_import_report(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<TaintIrisNextSinkImportReport> {
+    let canceled = || ctx.is_cancelled();
+    ensure_import_active(&canceled)?;
     let target = resolve_tool_target(input, ctx)?;
     let sinks_path = required_sink_inventory_path(input)?;
     let raw = read_sink_inventory(&sinks_path)?;
-    let (rows, skipped_lines) = parse_sink_inventory_rows(&raw);
-    if rows.is_empty() {
-        anyhow::bail!(
-            "no usable sink rows in {} ({} lines skipped) — expected JSONL rows with a \
-             `callee` (alias `symbol`/`function`/`sink`) and optional `tag`/`cwe`/`language`",
-            sinks_path.display(),
-            skipped_lines
-        );
-    }
+    let (rows, skipped_lines) = parse_sink_inventory_rows(&raw, &canceled)?;
+    require_usable_rows(&rows, &sinks_path, skipped_lines)?;
     let imported_rows = rows.len();
     let languages = imported_entry_languages(input, &rows);
     let imported = build_imported_entries(&rows, &languages, &sinks_path);
-    let (entries, merged_existing) = merge_with_target_catalog(input, &target, imported);
+    let (entries, merged_existing) = merge_with_target_catalog(input, &target, imported)?;
+    ensure_import_active(&canceled)?;
     persist_target_catalog(&target, &entries)?;
     Ok(TaintIrisNextSinkImportReport {
         target: target.display().to_string(),
-        status: "imported".to_string(),
+        status: if skipped_lines == 0 {
+            "imported"
+        } else {
+            "partial"
+        }
+        .to_string(),
         catalog_path: taint_iris_next_target_catalog_path(&target)
             .display()
             .to_string(),
@@ -161,12 +177,26 @@ pub(crate) fn run_taint_iris_next_sink_import_report(
     })
 }
 
+fn ensure_import_active(canceled: &dyn Fn() -> bool) -> Result<()> {
+    anyhow::ensure!(
+        !canceled(),
+        "Sink inventory import canceled; prior catalog was not replaced"
+    );
+    Ok(())
+}
+
+fn require_usable_rows(rows: &[SinkInventoryRow], path: &Path, skipped: usize) -> Result<()> {
+    anyhow::ensure!(!rows.is_empty(),
+        "no usable sink rows in {} ({} lines skipped): expected JSONL rows with a callee and optional tag/cwe/language",
+        path.display(), skipped);
+    Ok(())
+}
+
 fn required_sink_inventory_path(input: &Value) -> Result<PathBuf> {
     let raw = input
         .get("sinksPath")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
             anyhow::anyhow!("taint-iris-next:import-sinks requires a `sinksPath` JSONL file")
         })?;
@@ -174,40 +204,41 @@ fn required_sink_inventory_path(input: &Value) -> Result<PathBuf> {
 }
 
 fn read_sink_inventory(path: &Path) -> Result<String> {
-    let metadata = std::fs::metadata(path)
-        .with_context(|| format!("sink inventory not readable: {}", path.display()))?;
-    if !metadata.is_file() {
-        anyhow::bail!("sink inventory is not a regular file: {}", path.display());
-    }
-    if metadata.len() == 0 {
-        anyhow::bail!("sink inventory is empty: {}", path.display());
-    }
-    if metadata.len() > SINK_INVENTORY_MAX_BYTES {
-        anyhow::bail!(
-            "sink inventory {} is {} bytes; the import cap is {} bytes",
-            path.display(),
-            metadata.len(),
-            SINK_INVENTORY_MAX_BYTES
-        );
-    }
-    std::fs::read_to_string(path)
-        .with_context(|| format!("could not read sink inventory {}", path.display()))
+    let text = crate::bounded_file::read_utf8_text(path, SINK_INVENTORY_MAX_BYTES as usize)
+        .with_context(|| format!("could not read bounded sink inventory {}", path.display()))?;
+    anyhow::ensure!(
+        !text.is_empty(),
+        "sink inventory is empty: {}",
+        path.display()
+    );
+    Ok(text)
 }
 
-fn parse_sink_inventory_rows(raw: &str) -> (Vec<SinkInventoryRow>, usize) {
+fn parse_sink_inventory_rows(
+    raw: &str,
+    canceled: &dyn Fn() -> bool,
+) -> Result<(Vec<SinkInventoryRow>, usize)> {
     let mut rows = Vec::new();
     let mut skipped = 0usize;
+    let mut records = 0usize;
     for line in raw.lines() {
+        ensure_import_active(canceled)?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
+        records += 1;
+        anyhow::ensure!(
+            records <= SINK_INVENTORY_MAX_ROWS,
+            "Sink inventory exceeds {} nonempty lines; prior catalog was not replaced",
+            SINK_INVENTORY_MAX_ROWS
+        );
         match serde_json::from_str::<SinkInventoryRow>(trimmed) {
             Ok(row) if !row.callee.trim().is_empty() => rows.push(row),
             _ => skipped += 1,
         }
     }
-    (rows, skipped)
+    Ok((rows, skipped))
 }
 
 /// Languages stamped on imported entries: an explicit `languages`
@@ -360,15 +391,17 @@ fn merge_with_target_catalog(
     input: &Value,
     target: &Path,
     imported: Vec<TaintIrisNextRankedCatalogEntry>,
-) -> (Vec<TaintIrisNextRankedCatalogEntry>, bool) {
+) -> Result<(Vec<TaintIrisNextRankedCatalogEntry>, bool)> {
     let merge = input.get("merge").and_then(Value::as_bool).unwrap_or(true);
     if !merge {
-        return (imported, false);
+        return Ok((imported, false));
     }
-    match load_taint_iris_next_target_catalog(target) {
+    let existing = super::dynamic_catalog::load_target_catalog_for_merge(target)
+        .context("Saved catalog cannot be merged. Inspect it or explicitly choose merge=false to replace it. Prior catalog was not changed.")?;
+    Ok(match existing {
         Some(existing) => (merge_catalog_entries(existing, imported), true),
         None => (imported, false),
-    }
+    })
 }
 
 fn merge_catalog_entries(
@@ -443,9 +476,25 @@ mod tests {
             "{\"tag\":\"exec-L0\"}\n",
             "{\"tag\":\"mem\",\"callee\":\"memcpy\"}\n",
         );
-        let (rows, skipped) = parse_sink_inventory_rows(raw);
+        let (rows, skipped) = parse_sink_inventory_rows(raw, &|| false).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(skipped, 2, "bad json + missing callee are both skipped");
+    }
+
+    #[test]
+    fn parsing_checks_cancellation_between_inventory_lines() {
+        let probes = std::cell::Cell::new(0);
+        let canceled = || {
+            let count = probes.get();
+            probes.set(count + 1);
+            count > 0
+        };
+        let result = parse_sink_inventory_rows(
+            "{\"callee\":\"OwnedAlpha\"}\n{\"callee\":\"OwnedBeta\"}\n",
+            &canceled,
+        );
+        assert!(result.unwrap_err().to_string().contains("canceled"));
+        assert_eq!(probes.get(), 2);
     }
 
     #[test]

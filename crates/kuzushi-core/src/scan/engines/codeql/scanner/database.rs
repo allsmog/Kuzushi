@@ -19,55 +19,29 @@ impl CodeqlScanner {
                 )
             })?;
         let language = managed_database_language(self.language.as_deref(), &database)?;
-        let db_path = database.path().to_path_buf();
         Ok(CodeqlDatabase {
-            db_path,
             language,
-            managed: Some(database),
+            managed: database,
         })
     }
 
     pub(crate) fn configured_codeql_database(
         &self,
         target: &Path,
-        binary: &str,
-        cancel: &ScanCancellation,
+        _binary: &str,
+        _cancel: &ScanCancellation,
         configured_db_path: &str,
     ) -> Result<CodeqlDatabase> {
         let db_path = resolve_repo_path(target, configured_db_path);
-        if !is_codeql_database_dir(&db_path) {
-            anyhow::bail!(
-                "Configured CodeQL database path is not valid: {}",
-                db_path.display()
-            );
-        }
+        let database = crate::codeql_repository_execution::resolve_managed_codeql_database_at(
+            target, &db_path,
+        )?;
+        let language = managed_database_language(self.language.as_deref(), &database)?;
         Ok(CodeqlDatabase {
-            language: self.configured_codeql_language(target, binary, cancel, &db_path)?,
-            db_path,
-            managed: None,
+            language,
+            managed: database,
         })
     }
-
-    pub(crate) fn configured_codeql_language(
-        &self,
-        target: &Path,
-        binary: &str,
-        cancel: &ScanCancellation,
-        db_path: &Path,
-    ) -> Result<String> {
-        if let Some(language) = self.language.clone() {
-            return Ok(language);
-        }
-        detect_language_from_database(binary, db_path, cancel)?
-            .or_else(|| detect_codeql_language_from_heuristics(target))
-            .with_context(|| {
-                format!(
-                    "codeql: could not determine the language for configured database {}; pass an explicit language",
-                    db_path.display()
-                )
-            })
-    }
-
 }
 
 fn managed_database_language(
@@ -120,7 +94,11 @@ mod tests {
         initialize_repository(temp.path());
         let db = crate::workspace::workspace_codeql_db_path(temp.path());
         fs::create_dir_all(&db).unwrap();
-        fs::write(db.join("codeql-database.yml"), "primaryLanguage: javascript\n").unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
         fs::create_dir(db.join("db-javascript")).unwrap();
         crate::codeql_repository_execution::write_test_codeql_database_provenance(
             &db,
@@ -142,8 +120,68 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(resolved.db_path, db);
+        assert_eq!(resolved.managed.path(), db);
         assert!(!marker.exists());
+    }
+
+    #[test]
+    fn configured_raw_database_cannot_bypass_source_authentication() {
+        let root = tempdir().unwrap();
+        let db = root.path().join(".kuzushi/raw-db");
+        fs::create_dir_all(db.join("db-javascript")).unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
+        let scanner = CodeqlScanner {
+            db_path: Some(db.display().to_string()),
+            language: Some("javascript".into()),
+            ..Default::default()
+        };
+        let error = scanner
+            .ensure_database(root.path(), "unused", &ScanCancellation::default())
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("codeql:create-db"));
+    }
+
+    #[test]
+    fn explicit_managed_path_authenticates_language_and_dirty_source() {
+        let root = tempdir().unwrap();
+        initialize_repository(root.path());
+        let db = crate::workspace::workspace_codeql_db_path(root.path());
+        fs::create_dir_all(db.join("db-javascript")).unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &db,
+            root.path(),
+            "javascript",
+        );
+        let scanner = CodeqlScanner {
+            db_path: Some(db.display().to_string()),
+            ..Default::default()
+        };
+        let resolved = scanner
+            .ensure_database(root.path(), "unused", &ScanCancellation::default())
+            .unwrap();
+        assert_eq!(resolved.language, "javascript");
+        assert_eq!(resolved.managed.path(), db.canonicalize().unwrap());
+        drop(resolved);
+        let wrong_language = CodeqlScanner {
+            language: Some("python".into()),
+            ..scanner.clone()
+        };
+        assert!(wrong_language
+            .ensure_database(root.path(), "unused", &ScanCancellation::default())
+            .is_err());
+        fs::write(root.path().join("tracked.js"), "changed owned text\n").unwrap();
+        assert!(scanner
+            .ensure_database(root.path(), "unused", &ScanCancellation::default())
+            .is_err());
     }
 
     fn initialize_repository(root: &Path) {

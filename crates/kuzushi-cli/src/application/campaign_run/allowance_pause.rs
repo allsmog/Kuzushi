@@ -1,8 +1,6 @@
 //! Pause finite model work before consuming another job attempt.
 use super::*;
-use kuzushi_core::allowance::{
-    AllowanceError, AllowanceReferenceV1, AllowanceSnapshot, InvestigationWork,
-};
+use kuzushi_core::allowance::{AllowanceError, AllowanceReferenceV1, AllowanceSnapshot};
 use kuzushi_core::{SpendLimiter, WorkspaceTarget};
 
 pub(super) fn stop_reason(
@@ -19,7 +17,7 @@ pub(super) fn stop_reason(
     }
     let reference = job_reference(&input)?;
     let snapshot = campaign_allowance(target, campaign, &reference)?;
-    snapshot_stop(&snapshot, &reference)
+    snapshot_stop(&snapshot, &reference, &job.tool)
 }
 
 fn job_reference(input: &Value) -> Result<AllowanceReferenceV1> {
@@ -51,13 +49,12 @@ fn campaign_allowance(
 fn snapshot_stop(
     snapshot: &AllowanceSnapshot,
     reference: &AllowanceReferenceV1,
+    tool: &str,
 ) -> Result<Option<&'static str>> {
     if reference.revision != snapshot.revision {
         return Ok(Some("allowance-revised"));
     }
-    // Finite campaign work currently supports Context and Discovery, both
-    // protected from consuming the review allocation.
-    match snapshot.require_call_capacity(InvestigationWork::Discovery) {
+    match snapshot.require_work_call_capacity(&reference.work_id, tool) {
         Ok(()) => Ok(None),
         Err(error)
             if matches!(

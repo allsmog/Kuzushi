@@ -2404,7 +2404,7 @@ OUT
     }
 
     #[test]
-    fn dispatches_cargo_audit_scan_without_lockfile() {
+    fn cargo_audit_without_lockfile_reports_a_failed_prerequisite() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -2423,20 +2423,16 @@ OUT
             .execute_tool("cargo-audit:scan", json!({}), &ctx)
             .unwrap();
 
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_completed_result_envelope(&result, "cargo-audit:");
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
         assert_eq!(
-            result.pointer("/data/count").and_then(Value::as_u64),
-            Some(0)
+            crate::tool_result_status(&result),
+            crate::ToolResultStatus::Failed
         );
-        assert!(result
-            .pointer("/data/coreFindings")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty));
-        assert!(result
-            .pointer("/data/persisted/runId")
-            .and_then(Value::as_str)
-            .is_some());
+        assert!(result["output"]
+            .as_str()
+            .unwrap()
+            .contains("regular Cargo.lock"));
+        assert!(result.pointer("/data/persisted/runId").is_none());
         assert!(store.list_findings(10).unwrap().is_empty());
     }
 
@@ -4665,7 +4661,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_completed_result_envelope(&result, "codeql:");
+        assert_eq!(result["status"], "partial");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -4944,7 +4940,10 @@ OUT
         write_run_summary(workspace.root(), &source).unwrap();
 
         let registry = ModuleRegistry::with_v2_builtins();
-        let config = V2Config { autonomy: autonomy::AutonomyPosture::Review, ..V2Config::default() };
+        let config = V2Config {
+            autonomy: autonomy::AutonomyPosture::Review,
+            ..V2Config::default()
+        };
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -4954,9 +4953,16 @@ OUT
             authorization: Default::default(),
         };
         let prepared = registry
-            .prepare_dispatch_input("report:build", json!({"runId": "run-report-source"}), &ctx, None)
+            .prepare_dispatch_input(
+                "report:build",
+                json!({"runId": "run-report-source"}),
+                &ctx,
+                None,
+            )
             .unwrap();
-        let result = registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None).unwrap();
+        let result = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+            .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(

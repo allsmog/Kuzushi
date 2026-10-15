@@ -11,6 +11,8 @@ struct QuitLayout {
     expanded: bool,
 }
 
+const MIN_DISCLOSURE_ROWS: usize = 8;
+
 pub(crate) fn quit_disclosure_viewport(app: &ShellApp) -> QuitDisclosureViewport {
     let terminal = app.viewport();
     let full = Rect::new(0, 0, terminal.columns, terminal.rows);
@@ -44,7 +46,7 @@ pub(crate) fn render_compact_quit(frame: &mut Frame<'_>, app: &ShellApp) -> bool
 
 fn quit_layout(app: &ShellApp, full: Rect) -> QuitLayout {
     let body = ordinary_body(app, full);
-    let expanded = visible_rows(&quit_confirm_model(app), body) < 3;
+    let expanded = visible_rows(&quit_confirm_model(app), body) < MIN_DISCLOSURE_ROWS;
     QuitLayout {
         body: if expanded {
             quit_block().inner(full)

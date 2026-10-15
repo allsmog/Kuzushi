@@ -42,12 +42,25 @@ pub fn run_ndiff_hunt_variants(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     emit_ndiff_hunt_step(ctx, "tool", "ndiff:hunt-variants start", None);
     let prepared = match prepare_ndiff_hunt(&input, ctx, runtime)? {
         Some(prepared) => prepared,
         None => return Ok(missing_ndiff_hunt_pattern_response()),
     };
-    let raw = query_ndiff_hunt_json(&prepared)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "ndiff:hunt-variants",
+        &prepared.target,
+        || execute_ndiff_hunt(&prepared, ctx),
+    )
+}
+
+fn execute_ndiff_hunt(
+    prepared: &NdiffHuntRun<'_>,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let raw = query_ndiff_hunt_json(prepared)?;
     let cost = raw.cost_report()?;
     let repo_name = repo_name(&prepared.target);
     let findings = normalize_ndiff_findings(
@@ -57,14 +70,15 @@ pub fn run_ndiff_hunt_variants(
         &prepared.pattern,
         prepared.max_findings,
     )?;
+    ctx.ensure_active()?;
     let persisted = persist_findings(&prepared.target, &findings, ctx)?;
-    emit_ndiff_hunt_step(ctx, "done", "ndiff:hunt-variants complete", Some(findings.len()));
-    Ok(ndiff_hunt_response(
-        &prepared,
-        findings,
-        persisted,
-        cost,
-    ))
+    emit_ndiff_hunt_step(
+        ctx,
+        "done",
+        "ndiff:hunt-variants complete",
+        Some(findings.len()),
+    );
+    Ok(ndiff_hunt_response(prepared, findings, persisted, cost))
 }
 
 struct NdiffHuntRun<'a> {
@@ -73,7 +87,9 @@ struct NdiffHuntRun<'a> {
     runtime: &'a dyn AgentRuntime,
     model: String,
     max_findings: usize,
-    thinking_level: String,
+    thinking_level: Option<String>,
+    max_output_tokens: u32,
+    max_model_turns: u32,
     include_vendored: bool,
     advisory_id: String,
 }
@@ -86,14 +102,22 @@ fn prepare_ndiff_hunt<'a>(
     let Some(pattern) = input.get("pattern").and_then(Value::as_object) else {
         return Ok(None);
     };
+    validate_ndiff_pattern(pattern)?;
     let target = checked_ndiff_hunt_target(input, ctx)?;
     Ok(Some(NdiffHuntRun {
         pattern: pattern.clone(),
         target,
         runtime: require_runtime("ndiff:hunt-variants", runtime)?,
         model: require_model("ndiff:hunt-variants", input, ctx)?,
-        max_findings: positive_usize_input(input, "maxFindings", 15, 100),
-        thinking_level: agentic_hunter_thinking_level(input),
+        max_findings: ndiff_query_limit(input, "maxFindings", 15, 1..=100)?,
+        thinking_level: optional_variant_reasoning(input),
+        max_output_tokens: u32::try_from(ndiff_query_limit(
+            input,
+            "maxOutputTokens",
+            4096,
+            256..=32768,
+        )?)?,
+        max_model_turns: u32::try_from(ndiff_query_limit(input, "maxModelTurns", 4, 1..=16)?)?,
         include_vendored: ndiff_hunt_include_vendored(input),
         advisory_id: ndiff_hunt_advisory_id(input),
     }))
@@ -137,8 +161,7 @@ fn ndiff_hunt_advisory_id(input: &Value) -> String {
 }
 
 fn query_ndiff_hunt_json(run: &NdiffHuntRun<'_>) -> Result<CostedStructuredJson<Value>> {
-    let prompt =
-        build_ndiff_hunt_prompt(&run.pattern, &run.advisory_id, run.include_vendored);
+    let prompt = build_ndiff_hunt_prompt(&run.pattern, &run.advisory_id, run.include_vendored);
     query_required_structured_json_with_cost(
         run.runtime,
         ndiff_hunt_request(run, prompt)?,
@@ -147,19 +170,24 @@ fn query_ndiff_hunt_json(run: &NdiffHuntRun<'_>) -> Result<CostedStructuredJson<
             "NdiffVariantFindings",
             findings_schema(),
         ),
-        require_json_object,
+        validate_variant_observations,
     )
 }
 
 fn ndiff_hunt_request(run: &NdiffHuntRun<'_>, prompt: String) -> Result<AgentQueryRequest> {
-    Ok(AgentQueryRequest::new(
+    let request = AgentQueryRequest::new(
         run.model.clone(),
         run.target.clone(),
         NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
     )
     .with_tool_policy(try_whitebox_static_policy_for_target(&run.target)?)
-    .with_thinking_level(run.thinking_level.clone()))
+    .with_max_output_tokens(run.max_output_tokens)
+    .with_max_model_turns(Some(run.max_model_turns));
+    Ok(match &run.thinking_level {
+        Some(level) => request.with_thinking_level(level),
+        None => request,
+    })
 }
 
 fn ndiff_hunt_response(
@@ -176,7 +204,7 @@ fn ndiff_hunt_response(
         cost,
     );
     let summary = format!(
-        "ndiff:hunt-variants completed with {} finding{}",
+        "Advisory-guided observations: {} finding{}; partial coverage, independent review required.",
         findings.len(),
         if findings.len() == 1 { "" } else { "s" }
     );
@@ -185,8 +213,19 @@ fn ndiff_hunt_response(
         "pattern": run.pattern,
         "findings": findings,
         "persisted": persisted,
+        "coverage": {"complete":false},
+        "observationsVerified": false,
+        "candidateLocationsVerified": false,
+        "patternAccepted": false,
     });
-    let mut result = crate::module_result::completed_output_result(summary, output, data);
+    let mut result = crate::module_result::partial_output_result(
+        summary,
+        output,
+        vec![
+            json!({"code":"partial-advisory-observations","message":"Advisory and source-location claims require independent review. Pattern and vendor guidance do not establish enforced discovery scope or complete coverage. An empty response does not resolve existing findings."}),
+        ],
+        data,
+    );
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }

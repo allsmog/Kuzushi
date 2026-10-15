@@ -1,0 +1,62 @@
+name: Catalog distinguishes missing executables and rechecks without running scanners
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_dependencies.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+keys: Down Down Down Down Down Down Down
+keys: Enter
+require-live-snap: 30 RESULT READY | mapped
+nav-mode:
+keys: u
+submit: use semgrep
+submit: options semgrep:scan
+paste-file: @ART/binary-command.txt
+keys: Enter
+submit: modules
+keys: e
+keys: Down Down Down
+require-live-snap: 25 DEPENDENCY MISSING | missing-executable
+expect: set binary
+expect: r recheck
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_dependencies.py @TMP_TARGET @ART present
+keys: r
+require-live-snap: 25 REVIEW INPUTS · options semgrep:scan | present-only
+ask: Does executable presence remain a preparation hint, with no scanner launched and no claim that the engine has been functionally validated?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_dependencies.py @TMP_TARGET @ART missing
+keys: r
+require-live-snap: 25 DEPENDENCY MISSING | rechecked-missing
+resize: 160x48
+live-snap: dependencies-160x48
+resize: 96x89
+live-snap: dependencies-96x89
+resize: 80x24
+live-snap: dependencies-80x24
+resize: 60x20
+live-snap: dependencies-60x20
+resize: 40x12
+live-snap: dependencies-40x12
+ask: Is the selected engine's missing dependency and recovery readable at all sizes while the picker retains its selection and input controls?
+resize: 120x36
+keys: Enter
+require-live-snap: 20 run semgrep:scan | command-loaded
+type: r
+require-live-snap: 20 run semgrep:scanr | draft-owned
+keys: Escape
+require-live-snap: 20 DEPENDENCY MISSING | draft-cleared
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_dependencies.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: modules
+keys: e
+keys: Down Down Down
+require-live-snap: 25 DEPENDENCY MISSING | no-color-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/catalog_dependencies.py @TMP_TARGET @ART verify
+keys: C-c
+require-exit: 10

@@ -7,7 +7,7 @@ impl CodeqlScanner {
         args: &[String],
         cwd: Option<&Path>,
         cancel: &ScanCancellation,
-    ) -> Result<ProcessOutput> {
+    ) -> Result<()> {
         let output = self.run_codeql_raw_output(binary, args, cwd, cancel)?;
         validate_codeql_command_output(binary, args, output)
     }
@@ -59,13 +59,11 @@ fn validate_codeql_command_output(
     binary: &str,
     args: &[String],
     output: std::process::Output,
-) -> Result<ProcessOutput> {
+) -> Result<()> {
     if !output.status.success() {
         anyhow::bail!("{}", codeql_exit_error(binary, args, &output));
     }
-    Ok(ProcessOutput {
-        stdout: output.stdout,
-    })
+    Ok(())
 }
 
 fn codeql_exit_error(binary: &str, args: &[String], output: &std::process::Output) -> String {

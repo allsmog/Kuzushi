@@ -35,3 +35,6 @@ native/         export-ignore
 target/         export-ignore
 node_modules/   export-ignore
 coverage/       export-ignore
+# Preserve authenticated upstream bytes and its Markdown line endings.
+third-party/crossterm/** -text whitespace=cr-at-eol
+third-party/crossterm/**/*.md -text whitespace=cr-at-eol,-blank-at-eol

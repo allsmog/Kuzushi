@@ -204,7 +204,19 @@ fn setup_recovery_inspects_exact_generated_revision_and_preserves_allowance_and_
             .model_ref,
         active
     );
-    reopen_setup(&mut app);
+    app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .draft_recovery,
+        super::super::super::StudyDraftRecovery::Discard
+    );
+    app.reduce_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    app.review_model_backed_map(&[crate::app::PlanningTaskId::BuildThreatModel]);
     assert_eq!(
         app.context_generation().unwrap().generated.as_ref(),
         Some(&generated)
@@ -309,6 +321,129 @@ fn recovered_result_and_missing_output_keep_controls_and_plain_evidence_at_every
     assert!(plain.contains("replacement draft needs separate approval"));
 }
 
+#[test]
+fn recovered_context_result_shows_its_authenticated_document_before_plan_details() {
+    let (root, mut app, receipt) = setup_fixture();
+    let original = app.router.campaign().batch_scan_config.clone().unwrap();
+    let reference = commit(
+        root.path(),
+        "Owned result overview",
+        Some("context-run"),
+        false,
+    );
+    completed(root.path(), &receipt, "context-run");
+    reopen_setup(&mut app);
+    let lines = crate::ui_view_models::context_generation::generation_lines(&app, 116);
+    assert!(
+        lines
+            .iter()
+            .take(8)
+            .any(|line| line.contains("Owned result overview")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|line| line.contains("Components: 1")));
+    assert!(!lines.iter().any(|line| line.contains("Plan digest:")));
+    assert_eq!(
+        app.context_generation().unwrap().generated.as_ref(),
+        Some(&reference)
+    );
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .study,
+        original.study
+    );
+    assert_eq!(app.input(), "unfinished\noperator note");
+    assert_eq!(app.cursor(), 4);
+    assert!(load_active_threat_model(root.path()).unwrap().is_none());
+    assert!(!app.has_running_work());
+}
+
+#[test]
+fn result_plan_and_options_keep_separate_scroll_positions_without_work_or_edits() {
+    let (root, mut app, receipt) = setup_fixture();
+    commit(
+        root.path(),
+        "Owned result overview",
+        Some("context-run"),
+        false,
+    );
+    completed(root.path(), &receipt, "context-run");
+    reopen_setup(&mut app);
+    let study = app
+        .router
+        .campaign()
+        .batch_scan_config
+        .as_ref()
+        .unwrap()
+        .study
+        .clone();
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .context_generation
+        .as_mut()
+        .unwrap()
+        .scroll = 5;
+    assert!(app
+        .handle_context_generation_key(KeyCode::Char('p'))
+        .effects
+        .is_empty());
+    let text = crate::ui_view_models::context_generation::generation_lines(&app, 116).join("\n");
+    assert!(text.contains("FROZEN GENERATION PLAN") && text.contains("Plan digest:"));
+    assert_eq!(app.context_generation().unwrap().scroll, 0);
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .context_generation
+        .as_mut()
+        .unwrap()
+        .scroll = 3;
+    assert!(app
+        .handle_context_generation_key(KeyCode::Tab)
+        .effects
+        .is_empty());
+    assert!(app.context_generation().unwrap().show_options);
+    app.router
+        .campaign_mut()
+        .batch_scan_config
+        .as_mut()
+        .unwrap()
+        .context_generation
+        .as_mut()
+        .unwrap()
+        .scroll = 7;
+    app.handle_context_generation_key(KeyCode::Tab);
+    assert_eq!(app.context_generation().unwrap().scroll, 3);
+    app.handle_context_generation_key(KeyCode::Char('p'));
+    assert_eq!(app.context_generation().unwrap().scroll, 5);
+    app.handle_context_generation_key(KeyCode::Tab);
+    assert_eq!(app.context_generation().unwrap().scroll, 7);
+    app.handle_context_generation_key(KeyCode::Char('p'));
+    assert!(app.context_generation().unwrap().show_plan);
+    assert!(!app.context_generation().unwrap().show_options);
+    assert_eq!(app.context_generation().unwrap().scroll, 3);
+    assert_eq!(
+        app.router
+            .campaign()
+            .batch_scan_config
+            .as_ref()
+            .unwrap()
+            .study,
+        study
+    );
+    assert_eq!(app.input(), "unfinished\noperator note");
+    assert_eq!(app.cursor(), 4);
+    assert!(!app.has_running_work());
+}
+
 fn assert_result_viewports(app: &mut ShellApp, action: &str) {
     for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
         app.reduce_resize(width, height);
@@ -324,5 +459,9 @@ fn assert_result_viewports(app: &mut ShellApp, action: &str) {
             "{screen}"
         );
         assert!(!screen.contains("GENERATE STUDY CONTEXT"), "{screen}");
+        assert!(screen.contains("p plan"), "{screen}");
+        if app.context_generation().unwrap().result_error.is_some() {
+            assert!(screen.contains("Enter outcome"), "{screen}");
+        }
     }
 }

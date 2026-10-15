@@ -15,18 +15,13 @@ pub(in crate::modules) fn run_trace_expand(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let workspace = ctx
-        .workspace
-        .context(crate::workspace::active_workspace_required_message(
-            "trace:expand",
-        ))?;
-    let store = ctx
-        .findings_store
-        .context("trace:expand requires a findings store for the active workspace")?;
+    ctx.ensure_active()?;
+    let (workspace, store) = trace_handles(ctx)?;
     let runtime = runtime.context("trace:expand requires an agent runtime")?;
 
     let request = trace_expansion_request_from_input(&input)?;
-    let Some(finding) = store.get_finding_by_operator_reference(&request.finding_fingerprint)? else {
+    let Some(finding) = store.get_finding_by_operator_reference(&request.finding_fingerprint)?
+    else {
         return Ok(serde_json::json!({
             "ok": false,
             "output": format!(
@@ -44,11 +39,26 @@ pub(in crate::modules) fn run_trace_expand(
         || {
             let outcome =
                 run_trace_expansion(runtime, &model, workspace.root(), &finding, &request)?;
+            ctx.ensure_active()?;
             let evidence_store = StaticEvidenceStore::open(workspace)?;
             let receipt = append_trace_expansion_evidence(&evidence_store, &outcome.result)?;
             trace_expansion_output(&outcome, &receipt)
         },
     )
+}
+
+fn trace_handles<'a>(
+    ctx: &'a ToolExecutionContext<'_>,
+) -> Result<(&'a crate::WorkspaceTarget, &'a crate::FindingStore)> {
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "trace:expand",
+        ))?;
+    let store = ctx
+        .findings_store
+        .context("trace:expand requires a findings store for the active workspace")?;
+    Ok((workspace, store))
 }
 
 fn trace_expansion_output(
@@ -61,13 +71,23 @@ fn trace_expansion_output(
     data["tool"] = Value::from("trace:expand");
     data["nodesAppended"] = Value::from(receipt.node_ids.len());
     data["edgesAppended"] = Value::from(receipt.edge_ids.len());
+    data["sourceReferencesVerified"] = Value::Bool(false);
+    data["dataflowVerified"] = Value::Bool(false);
+    data["coverage"] = serde_json::json!({"complete":false});
     let summary = format!(
-        "Trace expansion completed: {} steps, {} open questions, {} evidence notes.",
+        "Unverified source-flow claims: {} steps, {} open questions, {} notes.",
         result.steps.len(),
         result.open_questions.len(),
         result.evidence_deltas.len()
     );
-    let mut output = serde_json::json!({"ok": true, "summary": summary, "data": data});
+    let mut output = crate::module_result::partial_output_result(
+        summary.clone(),
+        summary,
+        vec![
+            serde_json::json!({"code":"unverified-source-flow","message":"Recorded source claims require independent review. Source references and complete discovery coverage are not verified."}),
+        ],
+        data,
+    );
     crate::module_result::apply_runtime_cost_report(&mut output, expansion_cost(outcome)?);
     Ok(output)
 }

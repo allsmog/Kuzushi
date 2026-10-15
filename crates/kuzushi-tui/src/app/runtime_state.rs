@@ -11,6 +11,10 @@ mod dispatcher;
 
 #[derive(Debug, Default)]
 pub(crate) struct RuntimeState {
+    pub(crate) source_review_forms:
+        std::collections::BTreeMap<(PathBuf, i64), super::source_review::SourceReviewForm>,
+    pub(crate) source_review_visible: Option<(PathBuf, i64)>,
+    pub(crate) source_review_worker: Option<super::source_review::SourceReviewWorker>,
     pub(crate) brief_drafts:
         std::collections::BTreeMap<std::path::PathBuf, super::batch_scan::BriefEditor>,
     pub(crate) lesson_write: Option<super::lessons::LessonWrite>,
@@ -45,6 +49,8 @@ pub(crate) struct RuntimeState {
     pub(crate) review_write: super::ReviewWriteState,
     pub(crate) context_edit_drafts:
         std::collections::BTreeMap<(PathBuf, String), super::ContextEditDraft>,
+    pub(crate) context_checkpoints: super::batch_scan::ContextCheckpointRuntime,
+    pub(crate) study_checkpoints: super::batch_scan::StudyCheckpointRuntime,
 }
 
 #[derive(Debug, Clone)]

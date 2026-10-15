@@ -35,6 +35,7 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
         threat_model_revise_tool(),
         threat_model_lesson_tool(),
         threat_model_regenerate_tool(),
+        threat_model_question_tool(),
         threat_model_models_tool(),
         threat_model_activate_tool(),
         threat_model_revisions_tool(),
@@ -51,6 +52,19 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
         ))
         .without_phase_result(),
     ]
+}
+
+fn threat_model_question_tool() -> ToolDescriptor {
+    tool_with_options("threat-model:ask", "Answer one question about an exact accepted context. No tools, discovery, context edits or finding verdicts.", vec![
+        target_option(), opt("threatModelRef", OptionType::Json, "Required exact immutable context revision. Question jobs cannot omit context or change the active revision.").required().advanced().aliases(&["threat_model_ref"]),
+        opt("question", OptionType::String, "Question text, 1 to 8192 UTF-8 bytes. Multiline text is preserved.").required(),
+        opt("operatorContext", OptionType::String, "Optional captured screen, failure or conversation notes, at most 64 KiB. These are operator context, not additional source evidence.").default(json!("")).advanced(),
+        opt("maxContextBytes", OptionType::Int, "Maximum serialized context bytes. Oversized context is refused before a request; context is never silently omitted.").integer_range(1024,262144).default(json!(65536)),
+        opt("maxOutputTokens", OptionType::Int, "Requested output tokens. The OAuth adapter may not enforce this ceiling; provider-request limits still apply.").integer_range(256,8192).default(json!(2048)),
+        opt("thinkingLevel", OptionType::Enum, "Reasoning effort; omit to inherit the selected runtime.").choices(&["low","medium","high","xhigh"]),
+        model_option(),
+        opt("allowanceRef", OptionType::Json, "Approved investigation revision and question work item; every request and retry requires a reservation.").required(),
+    ]).with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Always, FindingStoreRequirement::Optional)).without_phase_result()
 }
 
 fn threat_model_revise_tool() -> ToolDescriptor {
@@ -617,7 +631,7 @@ fn x_ray_run_tool(policy: ToolPolicy, alias: bool) -> ToolDescriptor {
     } else {
         tool_with_options(
             "x-ray:run",
-            "Analyze repository structure, entry points, invariants, and attack surface; persist the report artifact.",
+            "Experimental architecture report generation. Source coverage and report claims are unverified; use threat-model:build for accepted Map context.",
             x_ray_options(),
         )
     };
@@ -630,6 +644,9 @@ fn x_ray_run_tool(policy: ToolPolicy, alias: bool) -> ToolDescriptor {
             crate::capabilities::x_ray::x_ray_system_prompt(),
         ))
         .with_policy(policy)
+        .with_discovery_maturity(ModuleMaturity::Labs)
+        .with_allowance_category(AllowanceCategory::Context)
+        .without_phase_result()
 }
 
 fn x_ray_options() -> Vec<OptionSpec> {
@@ -664,10 +681,10 @@ pub(crate) fn dep_hygiene_module() -> BuiltinModule {
         "dep-hygiene",
         "Dependency Hygiene",
         ModuleKind::Defense,
-        "Check dependency manifests for stale, vulnerable, or policy-risky packages.",
+        "Inspect dependency version constraints for policy signals that require owner review.",
         tools_with_policy(workspace_policy(ToolPhase::Scan, RuntimeRequirement::Never, FindingStoreRequirement::Required), vec![tool_with_options(
             "dep-hygiene:check",
-            "Inspect dependency manifests for stale versions, known-vulnerability signals, and supply-chain policy risks.",
+            "Inspect dependency version-policy signals in a bounded manifest inventory. Includes nested manifests, excludes repository state, dependencies and build output, and retains incomplete inspection. Results require owner review. No model calls.",
             vec![target_option()],
         )]),
         vec![dag("dep-hygiene:check", "findings", &["context:build"])],

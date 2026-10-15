@@ -1,0 +1,99 @@
+name: One approved context question through native accounting and answer recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_question.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: workbench
+require-live-snap: 25 acknowledge the partial Map | pending-context
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-context
+keys: Escape
+paste-file: @ART/question-command.txt
+keys: Enter
+require-live-snap: 25 ASK ABOUT CONTEXT | question-plan
+expect: One question job
+keys: G
+require-live-snap: 20 Ctrl+S use text | question-editor
+keys: End
+paste-file: @ART/question-edit.txt
+require-live-snap: 20 Keep uncertainty explicit | edited-question
+keys: C-s
+require-live-snap: 20 ASK ABOUT CONTEXT | saved-question
+keys: t
+require-live-snap: 20 Total calls | calls
+keys: C-a
+type: 2
+keys: Enter r
+require-live-snap: 20 Protected review | review-reserve
+keys: C-a
+type: 1
+keys: Enter Enter
+require-live-snap: 25 Plan digest | frozen-question
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_question.py @TMP_TARGET @ART draft
+keys: Enter
+require-live-snap: 25 REVIEW PLAN & ALLOWANCE | approval
+expect: Frozen question
+keys: End
+require-live-snap: 20 y approve | approval-tail
+keys: y
+require-live-snap: 25 Open approved question job | approved
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | question-jobs
+keys: L
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_question.py @TMP_TARGET @ART completed
+keys: r a
+require-live-snap: 25 Read question answer | completed-question
+expect: 1 committed / 2 total
+expect: 1 protected review
+keys: Enter
+require-live-snap: 25 CONTEXT ANSWER | answer
+expect: Labeled synthetic answer
+ask: Does approval freeze one question, context and model with separate spending consent and start, retaining a protected Review request?
+resize: 160x48
+require-live-snap: 25 CONTEXT ANSWER | answer-160x48
+resize: 96x89
+require-live-snap: 25 CONTEXT ANSWER | answer-96x89
+resize: 80x24
+require-live-snap: 25 CONTEXT ANSWER | answer-80x24
+resize: 60x20
+require-live-snap: 25 CONTEXT ANSWER | answer-60x20
+resize: 40x12
+require-live-snap: 25 CONTEXT ANSWER | answer-40x12
+keys: NPage NPage
+live-snap: answer-page-40x12
+keys: NPage
+require-live-snap: 20 Model: | answer-receipt-40x12
+ask: Can the operator read the answer and its context, source and model through compact paging without an implied finding verdict or new work?
+resize: 120x36
+keys: Escape
+require-live-snap: 20 ASK ABOUT CONTEXT | answer-back-plan
+keys: Escape
+require-live-snap: 20 a context result | answer-back-jobs
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | question-exit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 25 a context result | recovered-jobs
+nav-mode:
+keys: a
+require-live-snap: 25 Read question answer | recovered-plan
+keys: Enter
+require-live-snap: 25 CONTEXT ANSWER | recovered-answer
+require-shell: python3 -B @REPO/scripts/devex/fixtures/context_question.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recover the same completed question and accounting without another request, while keeping context unchanged?
+keys: Escape
+require-live-snap: 20 ASK ABOUT CONTEXT | recovered-back-plan
+keys: Escape
+require-live-snap: 20 a context result | recovered-back-jobs
+keys: C-c
+require-exit: 10

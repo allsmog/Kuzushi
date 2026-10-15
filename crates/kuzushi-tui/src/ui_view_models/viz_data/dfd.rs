@@ -127,13 +127,8 @@ pub(crate) fn dfd_model_from_doc(
     let Some(doc) = doc else {
         return empty_dfd("no threat model yet — run `threat-model:build` to populate");
     };
-    if kuzushi_core::workflow_attempts::threat_model_is_scope_placeholder_only(doc) {
-        return empty_dfd(scope_placeholder_hint(target));
-    }
-    if !kuzushi_core::workflow_attempts::threat_model_has_concrete_dfd(doc) {
-        return empty_dfd(
-            "threat model has no concrete topology yet — add design evidence and rebuild",
-        );
+    if let Some(hint) = unavailable_topology_hint(doc, target) {
+        return empty_dfd(hint);
     }
     let nodes = parse_nodes(doc);
     if nodes.is_empty() {
@@ -160,7 +155,24 @@ pub(crate) fn dfd_model_from_doc(
     }
 }
 
+fn unavailable_topology_hint(
+    doc: &serde_json::Value,
+    target: Option<&std::path::Path>,
+) -> Option<String> {
+    if kuzushi_core::workflow_attempts::threat_model_is_scope_placeholder_only(doc) {
+        return Some(scope_placeholder_hint(target));
+    }
+    let available = kuzushi_core::workflow_attempts::threat_model_has_concrete_dfd(doc)
+        || kuzushi_core::workflow_attempts::threat_model_has_recorded_component(doc);
+    (!available).then(|| "No recorded components or data flows. Add source or design context before mapping relationships.".into())
+}
+
 impl DfdModel {
+    pub(crate) fn topology_notice(&self) -> Option<&'static str> {
+        (!self.nodes.is_empty() && self.flows.is_empty()).then_some(
+            "Component map only. No data flows are recorded; relationships remain unknown.",
+        )
+    }
     pub(crate) fn evidence_notice(&self) -> Option<&'static str> {
         self.review_only.then_some(
             "Partial deterministic Map. Artifact review only; no model or empirical verification.",
@@ -533,6 +545,32 @@ fn dfd_kind(raw: &str) -> DfdKind {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_named_component_without_flows_remains_visible_without_fabricated_relationships() {
+        let document = serde_json::json!({"systemContext":"Owned dependency metadata; no runtime behavior is established.","dfd":{"nodes":[{"id":"lock","name":"Declared lockfile","type":"data-store","trustZone":"repository","description":"Cargo.lock declares dependency versions.","purpose":"Supports owner review."}],"flows":[],"trustBoundaries":[]},"threats":[]});
+        let model = super::dfd_model_from_doc(Some(&document), None);
+        assert!(model.empty_hint.is_none());
+        assert_eq!(model.nodes.len(), 1);
+        assert_eq!(model.nodes[0].name, "Declared lockfile");
+        assert!(model.flows.is_empty());
+        assert!(model
+            .topology_notice()
+            .unwrap()
+            .contains("relationships remain unknown"));
+        assert_eq!(super::dfd_selectable_count(&model), 1);
+        let overview = super::dfd_overview(&model);
+        assert!(overview.executive_summary.contains("no runtime behavior"));
+        assert_eq!(super::dfd_overview_component_count(&overview), 1);
+        assert!(overview.zone_flows.is_empty());
+    }
+
+    #[test]
+    fn synthetic_scope_node_with_a_stored_claim_does_not_become_a_component_map() {
+        let document = serde_json::json!({"dfd":{"nodes":[{"id":"app","name":"Application","description":"Repository application boundary"}],"flows":[]},"threats":[{"title":"Unassessed claim"}]});
+        let model = super::dfd_model_from_doc(Some(&document), None);
+        assert!(model.empty_hint.is_some());
+        assert!(model.nodes.is_empty());
+    }
     #[test]
     fn deterministic_map_retains_a_read_only_evidence_notice_with_its_real_topology() {
         let document = serde_json::json!({"degradation":{"mode":"deterministic-no-runtime"},"dfd":{"nodes":[{"id":"N1","name":"Health service","type":"process","trustZone":"internal"},{"id":"N2","name":"HTTP client","type":"external_entity","trustZone":"external"}],"flows":[{"id":"F1","from":"N2","to":"N1","data":"health requests"}],"trustBoundaries":[]}});

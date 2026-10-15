@@ -1,0 +1,51 @@
+name: Experimental advisory metadata does not complete Review or start default work
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chains_module.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: findings
+require-live-snap: 25 FINDINGS | metadata-findings
+nav-mode:
+keys: C
+submit: logs
+require-live-snap: 20 Finding-chain composition is experimental | experimental-shortcut
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chains_module.py @TMP_TARGET @ART before
+ask: Does the shortcut explain experimental readiness and preserve ordinary findings without composing or starting work?
+paste-file: @ART/run-command.txt
+keys: Enter
+require-live-snap: 25 candidate chain(s) | explicit-advisory-run
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chains_module.py @TMP_TARGET @ART after
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | advisory-receipt
+ask: Does an explicit small metadata fold remain an advisory receipt with its original finding references, while the human ledger and investigation accounting stay unchanged?
+resize: 160x48
+live-snap: advisory-160x48
+resize: 96x89
+live-snap: advisory-96x89
+resize: 80x24
+live-snap: advisory-80x24
+resize: 60x20
+live-snap: advisory-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · completed | advisory-40x12
+keys: NPage NPage
+live-snap: advisory-detail-40x12
+ask: Can the recorded advisory outcome and details be read by paging at each size without changing verdicts, model or work?
+resize: 120x36
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/replay-command.txt
+keys: Enter
+require-live-snap: 20 Outcome · completed | recovered-advisory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/chains_module.py @TMP_TARGET @ART restart
+ask: Does no-color restart retain the same advisory receipt and human decisions without a provider request or fresh Review completion?
+keys: C-c
+require-exit: 10

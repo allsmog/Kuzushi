@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn ready_map_controls_do_not_leak_into_other_compact_phase_readers() {
+    use crate::ui_view_models::{compact_map_reading, navigation_prompt_label};
+    let target = tempfile::tempdir().unwrap();
+    seed_ready_map_target(target.path(), "owned-map");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
+    app.set_workbench_page(WorkbenchPage::Map);
+    app.set_input_mode(InputMode::Navigate);
+    app.set_viewport(crate::TerminalViewport::new(40, 12));
+    assert!(crate::ui_view_models::ready_map_gallery_is_primary(&app));
+    assert!(compact_map_reading(&app, 12));
+    assert!(navigation_prompt_label(&app).contains("Enter DFD"));
+    for page in [WorkbenchPage::Scan, WorkbenchPage::Review] {
+        app.router.workbench_mut().set_page(Some(page));
+        assert!(!compact_map_reading(&app, 12));
+        assert!(!navigation_prompt_label(&app).contains("Enter DFD"));
+    }
+    assert_eq!(navigation_prompt_label(&app), "NAVIGATE · Esc prompt");
+    assert!(!app.has_running_work());
+}
+
+#[test]
 fn review_to_report_and_escape_preserve_the_complete_reading_state() {
     for cycle in [KeyCode::BackTab, KeyCode::Tab] {
         let (_target, mut app) = app_with_findings_and_full_phase_access(2);
@@ -68,10 +92,12 @@ fn completing_review_goes_to_report_without_a_proof_or_patch_queue() {
 fn compatibility_attempts_do_not_redirect_the_guided_destination() {
     let (target, mut app) = app_with_findings_and_full_phase_access(2);
     for phase in [WorkflowPhase::Prove, WorkflowPhase::Fix] {
+        // Retained history from an unavailable tool is still readable. Context
+        // indexing is supporting evidence and cannot stand in for a phase result.
         crate::test_support::record_indexed_run(
             target.path(),
             phase.word(),
-            "context:build",
+            "retained-history:fixture",
             serde_json::json!({"ok": false, "status": "failed", "data": {}}),
         );
         crate::test_support::append_typed_attempt(
@@ -105,6 +131,8 @@ fn compatibility_attempts_do_not_redirect_the_guided_destination() {
         .engagement
         .unresolved_phase_attempt(WorkflowPhase::Fix)
         .is_some());
+    assert!(!app.has_running_work());
+    assert!(app.advisory().pending_retry.is_none());
 }
 
 #[test]

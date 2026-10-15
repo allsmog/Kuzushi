@@ -1,0 +1,74 @@
+name: Scoped configuration signals retain bounded inspection gaps through Review, Report and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_inspection.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: setg ui.auto_open_viz false
+paste-file: @ART/direct-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 coverage is incomplete | partial-inspection
+expect: Dockerfile.oversized
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_inspection.py @TMP_TARGET @ART partial
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | inspection-reader
+resize: 160x48
+live-snap: inspection-160x48
+resize: 96x89
+live-snap: inspection-96x89
+resize: 80x24
+live-snap: inspection-80x24
+resize: 60x20
+live-snap: inspection-60x20
+resize: 40x12
+keys: End
+live-snap: inspection-40x12-tail
+keys: PPage
+live-snap: inspection-40x12-page-1
+keys: PPage
+live-snap: inspection-40x12-page-2
+keys: PPage
+live-snap: inspection-40x12-page-3
+keys: PPage
+live-snap: inspection-40x12-page-4
+ask: Are actual inspection limits, exclusions, skipped file and partial coverage reachable at all six sizes with no verified-vulnerability or complete-repository claim?
+keys: q
+resize: 120x36
+keys: Escape C-u
+paste-file: @ART/scan-command.txt
+keys: Enter
+require-live-snap: 20 cached via context:build | cached-context-choice
+keys: r
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 30 content bytes read | shared-scan-inspection
+expect: Dockerfile.oversized
+expect-not: prerequisite chain aborted after sast:scan failed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_inspection.py @TMP_TARGET @ART scanned
+submit: open F-0001
+require-live-snap: 25 signal-only | policy-finding
+expect: selected/Dockerfile
+submit: decision deferred Owned image policy requires owner review
+require-live-snap: 25 Owned image policy | deferred
+submit: report
+require-live-snap: 25 1 reviewed · 0 confirmed | report
+keys: s j j j Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_inspection.py @TMP_TARGET @ART exported
+ask: Does one consolidated policy signal retain the selected path, source SHA, scripted deferral and incomplete inspection through Report without discovering the excluded parent file?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: open F-0001
+require-live-snap: 30 Owned image policy | restarted-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/iac_inspection.py @TMP_TARGET @ART restarted
+keys: C-c
+require-exit: 10

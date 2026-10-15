@@ -645,6 +645,37 @@ Shell `help`/`modules`/`tools` (backed by `catalog:modules` and
 how a verb resolves and `config:show` dumps effective configuration.
 `module-recommender:recommend` suggests engines for the active target.
 
+**Context revisions**: `threat-model:revise` saves an edited draft revision;
+`threat-model:regenerate` prepares selected model-assisted changes and requires
+an approved allowance. `threat-model:reuse-lessons` imports reviewed guidance
+into a context draft. Inspect and accept the result before future jobs use it.
+These actions preserve prior revisions and do not establish a finding verdict.
+
+**Context questions**: `threat-model:ask` answers one question using an exact
+context revision and optional captured operator notes. It requires an approved
+fixed question job and shared allowance. `campaign:context-study` with
+`generationTool=threat-model:ask` prepares that job without a model request.
+In the shell, `ask` opens its question and allowance review after a current Map
+is accepted. `G` edits the question before freezing, approval and start remain
+separate actions, and the saved answer changes neither context nor findings.
+
+**Finding review**: `findings:groups` reads consolidated observations and their
+independent recurrence. `findings:relationships` lists duplicate, related and
+uncertain links; `findings:relationship` records a reversible decision with a
+reason, and `findings:relationship-batch` applies an operator-reviewed batch.
+`findings:review-source` captures source and binds a human decision to that exact
+revision. Grouping and a missed later observation never establish that a finding
+was fixed. Review's group, relationship and source readers expose these same
+shared operations; see [the detailed contracts](modules.md).
+
+**Reviewed lessons**: `findings:lessons` reads reusable guidance;
+`findings:lesson-save` saves a manual draft, `findings:lesson-generate` proposes
+one bounded model-assisted draft from a human-confirmed observation, and
+`findings:lesson-review` records acceptance, rejection or retirement with a
+reason. Generation requires an approved allowance. Acceptance and future context
+reuse are separate decisions, and historical guidance does not prove a fix at a
+different source revision.
+
 **Scan umbrella & pipeline** — `sast:scan` orchestrates scanners then
 triage/verify; `agentic-sast:scan` is the model-backed deep pass — its
 hunt prompt folds in a digest of the persisted threat model
@@ -732,9 +763,13 @@ sub-module with no manifests of its own reads the enclosing workspace root's
 `go.mod`, `MODULE.bazel`/`WORKSPACE`, and `*.bzl` rules, no higher than the git
 root, and an empty inventory is reported `partial`), `threat-intel:research` (explicit external action: bounded OSV package
 queries followed directly by catalog harvest, with no hand-authored CVE JSON),
-`threat-intel:harvest`, `threat-intel:apply`, `threat-intel:list`; lead generation
-`threat-leads:build` + `threat-leads:read`; system X-ray `x-ray:run`,
-`x-ray:read` (and the `x-ray:x-ray` alias verb); attack-surface
+`threat-intel:harvest`, experimental `threat-intel:apply` (default catalog preview
+needs no model, starts no hunts and cannot complete Map; exact live dispatch
+remains outside accepted scope studies), `threat-intel:list`; lead generation
+`threat-leads:build` + `threat-leads:read`; experimental system X-ray `x-ray:run`
+(and hidden `x-ray:x-ray`), requiring separate target-write authorization and
+Context allowance. These reports do not accept Map. The supported `x-ray:read`
+reader presents historical report claims as unassessed; attack-surface
 extraction `entry-points:extract`.
 
 In a ready Map, use Tab with an empty composer to reach Entry points.

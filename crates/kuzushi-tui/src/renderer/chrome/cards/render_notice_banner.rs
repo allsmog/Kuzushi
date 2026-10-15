@@ -45,6 +45,9 @@ fn notice_banner_lines(app: &ShellApp, width: u16, max_lines: usize) -> Vec<Line
 }
 
 fn complete_notice_route(app: &ShellApp) -> String {
+    if app.budget_halt_owns_input() {
+        return "Esc inspect".to_string();
+    }
     let keys = app
         .ui()
         .keymap_binding_labels("global", "command_palette", &["Ctrl+G"]);
@@ -152,6 +155,27 @@ mod tests {
     }
 
     #[test]
+    fn halted_notice_hints_follow_the_same_input_owner_as_the_footer() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = app_with_error(&"accounting unavailable ".repeat(20));
+        app.set_shell_view(crate::ShellView::Logs);
+        app.session_mut().set_session_budget_usd(Some(1.0));
+        app.record_cost_report(kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+        for width in [40, 60, 80, 96, 120, 160] {
+            let text = rendered_text(&notice_banner_lines(&app, width, 1));
+            assert!(text.contains("Esc inspect"), "{text}");
+            assert!(
+                !text.contains("Esc dismiss") && !text.contains("Ctrl+G"),
+                "{text}"
+            );
+        }
+        app.reduce_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let text = rendered_text(&notice_banner_lines(&app, 120, 1));
+        assert!(text.contains("Esc dismiss"));
+        assert!(text.contains("Ctrl+G"));
+    }
+
+    #[test]
     fn short_error_stays_on_one_line_with_dismiss_hint() {
         let app = app_with_error("semgrep missing");
         let lines = notice_banner_lines(&app, 120, NOTICE_BANNER_MAX_LINES);
@@ -165,13 +189,13 @@ mod tests {
     #[test]
     fn successful_review_receipt_uses_done_chip() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_success_notice("review", "decision saved; will carry forward");
+        app.set_success_notice("review", "Saved #1 for the recorded observation");
 
         let lines = notice_banner_lines(&app, 110, NOTICE_BANNER_MAX_LINES);
         let text = rendered_text(&lines);
 
         assert!(text.contains("DONE"));
-        assert!(text.contains("review · decision saved; will carry forward"));
+        assert!(text.contains("review · Saved #1 for the recorded observation"));
         assert!(!text.contains("Esc dismiss"));
     }
 

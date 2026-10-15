@@ -23,13 +23,27 @@ fn cost_cap_halt_model_formats_spend_against_limit() {
         spent_usd: 1.5,
     };
 
-    let model = CostCapHaltModel::from_halt(&halt);
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.session_mut().set_session_cost_usd_for_test(1.5);
+    app.advisory_mut().budget_halt = Some(halt);
+    let model = cost_cap_halt_model(&app).unwrap();
 
-    assert_eq!(
-        model.header,
-        "■ COST CAP HALT · spent $1.5000 / cap $1.0000"
-    );
-    assert_eq!(model.compact, "COST CAP: c=review cap · a=abort");
+    assert_eq!(model.header, "■ COST CAP HALT · $1.50 / cap $1.0000");
+    assert!(model.compact.contains("Esc inspect"));
+}
+
+#[test]
+fn halt_card_yields_to_budget_editing_and_exit_without_clearing_the_guard() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.session_mut().set_session_budget_usd(Some(1.0));
+    app.record_cost(2.0);
+    app.set_shell_view(crate::ShellView::Setup);
+    app.router.setup_mut().begin_budget_edit(Some(1.0));
+    assert!(cost_cap_halt_model(&app).is_none());
+    assert!(app.is_budget_halted());
+    app.set_shell_view(crate::ShellView::QuitConfirm);
+    assert!(cost_cap_halt_model(&app).is_none());
+    assert!(app.is_budget_halted());
 }
 
 #[test]

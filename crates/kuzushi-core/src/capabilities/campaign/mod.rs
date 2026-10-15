@@ -64,10 +64,16 @@ pub use study_resources::{
     load_scan_resource_evidence, ScanResourceEvidence, StudyResourceProjection,
 };
 mod context_study;
+mod review_study;
+pub use review_study::{
+    execute_review_study, load_review_study, load_review_study_allowance, ReviewObservationSource,
+    ReviewStudyReceipt, REVIEW_STUDY_KIND,
+};
 mod scope_allowance;
 pub use context_study::{
     execute_context_map, execute_context_study, load_context_study, scope_proposal_study_input,
-    ContextPreparationJob, ContextStudyReceipt, RejectedContextOutput, ScopeStudyOriginV1,
+    ContextPreparationJob, ContextQuestionAnswer, ContextStudyReceipt, GeneratedStudyContext,
+    RejectedContextOutput, ScopeStudyOriginV1, WorkflowProposalResult,
 };
 pub use scope_allowance::load_scope_proposal_allowance;
 pub use study_receipt::{

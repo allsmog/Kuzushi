@@ -1,0 +1,77 @@
+name: Nested manifest policy signals retain inspection gaps through Review, Report and restart
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_hygiene.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+submit: setg ui.auto_open_viz false
+submit: run dep-hygiene:check {}
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 25 Incomplete inspection | nested-partial
+expect: second/package.json
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_hygiene.py @TMP_TARGET @ART partial
+nav-mode:
+keys: z
+require-live-snap: 20 READ TRANSCRIPT | inspection-reader
+resize: 160x48
+live-snap: inspection-160x48
+resize: 96x89
+live-snap: inspection-96x89
+resize: 80x24
+live-snap: inspection-80x24
+resize: 60x20
+live-snap: inspection-60x20
+resize: 40x12
+keys: End
+live-snap: inspection-40x12-tail
+keys: PPage
+live-snap: inspection-40x12-page-1
+keys: PPage
+live-snap: inspection-40x12-page-2
+keys: PPage
+live-snap: inspection-40x12-page-3
+keys: PPage
+live-snap: inspection-40x12-page-4
+keys: PPage
+live-snap: inspection-40x12-page-5
+ask: Are actual inspected/discovered counts, limits, exclusions and invalid nested manifest reachable at all six sizes without implying known vulnerability verification or full coverage?
+keys: q
+resize: 120x36
+keys: Escape C-u
+paste-file: @ART/scan-command.txt
+keys: Enter
+wait: 0.5
+submit: logs
+keys: End
+require-live-snap: 30 Partial dep-hygiene: | shared-scan-partial
+expect: second/package.json
+expect-not: prerequisite chain aborted after sast:scan failed
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_hygiene.py @TMP_TARGET @ART scanned
+submit: open F-0001
+require-live-snap: 25 signal-only | first-policy-finding
+submit: decision deferred Owned manifest policy requires owner review
+require-live-snap: 25 Owned manifest policy | first-deferred
+submit: open F-0002
+require-live-snap: 25 signal-only | second-policy-finding
+submit: decision deferred Owned manifest policy requires owner review
+require-live-snap: 25 Owned manifest policy | second-deferred
+submit: report
+require-live-snap: 25 Enter export | report
+keys: s j j j Enter
+require-live-snap: 25 EXPORTED | exported
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_hygiene.py @TMP_TARGET @ART exported
+ask: Do real nested and root observations retain their paths, signal-only status and scripted deferrals in the report while SAST preserves the invalid manifest gap?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+submit: open F-0001
+require-live-snap: 30 Owned manifest policy | restarted-decision
+require-shell: python3 -B @REPO/scripts/devex/fixtures/dependency_hygiene.py @TMP_TARGET @ART restarted
+ask: Does no-color restart retain both source-qualified policy findings, deferrals and partial inspection receipts without another scan, provider request or package installation?
+keys: C-c
+require-exit: 10

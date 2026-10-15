@@ -1,0 +1,81 @@
+name: One approved workflow proposal, held drafts, explicit actions and durable recovery
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/workflow_proposal.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: /plan Inspect this owned repository.
+require-live-snap: 25 WORKFLOW PROPOSAL PLAN | proposal-draft
+expect: one proposal job
+expect: openai-codex:gpt-5.5
+keys: G End
+paste-file: @ART/goal-edit.txt
+require-live-snap: 20 Keep uncertainty explicit | goal-editor
+keys: Escape Escape
+require-live-snap: 20 Proposal draft kept | draft-held
+type: /plan
+live-snap: resume-command-draft
+keys: Enter
+require-live-snap: 20 WORKFLOW PROPOSAL PLAN | restored-draft
+keys: G
+require-live-snap: 20 Keep uncertainty explicit | restored-goal
+keys: C-s
+require-live-snap: 20 WORKFLOW PROPOSAL PLAN | saved-goal
+keys: t C-a
+type: 2
+keys: Enter r C-a
+type: 1
+keys: Enter Enter
+require-live-snap: 25 Plan digest | frozen-proposal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/workflow_proposal.py @TMP_TARGET @ART draft
+ask: Does this proposal clearly show the selected model, fixed work, shared allowance and protected Review capacity before a request?
+keys: Enter End
+require-live-snap: 25 y approve | approval
+keys: y
+require-live-snap: 25 Open approved proposal job | approved-proposal
+keys: Enter
+require-live-snap: 25 L starts the approved jobs | proposal-jobs
+keys: L
+require-shell: python3 -B @REPO/scripts/devex/fixtures/workflow_proposal.py @TMP_TARGET @ART completed
+keys: r a
+require-live-snap: 25 Labeled workflow proposal | proposal-result
+expect: Inspect workflow proposal
+resize: 160x48
+live-snap: proposal-result-160x48
+resize: 96x89
+live-snap: proposal-result-96x89
+resize: 80x24
+live-snap: proposal-result-80x24
+resize: 60x20
+live-snap: proposal-result-60x20
+resize: 40x12
+live-snap: proposal-result-40x12
+keys: NPage
+live-snap: proposal-result-paged-40x12
+ask: Is the proposal readable across terminal sizes, with uncertainty and controls visible and no action applied automatically?
+resize: 120x36
+keys: Home Enter
+require-live-snap: 20 PLAN · goal | action-review
+expect: Inspect context coverage
+keys: n
+require-shell: python3 -B @REPO/scripts/devex/fixtures/workflow_proposal.py @TMP_TARGET @ART discarded
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/resume-command.txt
+keys: Enter
+require-live-snap: 20 1 completed | restarted-jobs
+nav-mode:
+keys: a
+require-live-snap: 20 Labeled workflow proposal | restarted-proposal
+require-shell: python3 -B @REPO/scripts/devex/fixtures/workflow_proposal.py @TMP_TARGET @ART restarted
+ask: Does the original proposal and spending receipt remain available after restart without another request or implied action approval?
+keys: Escape
+require-live-snap: 20 a context result | returned-to-jobs
+keys: C-c
+require-exit: 10

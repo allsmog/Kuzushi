@@ -1,0 +1,123 @@
+name: Restore unprepared study cases, baseline, passes and partial name cursor after an owned crash
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_checkpoint.py @TMP_TARGET @ART @TMP_HOME seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | context-prepared
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Common policy context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | context-imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | fresh-study
+keys: Down Down Down Enter
+require-live-snap: 25 CHOOSE STUDY CONTEXT | common-picker
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | common-inspection
+keys: b
+require-live-snap: 25 CONTEXT CASES | baseline-case
+keys: n C-u
+type: Baseline policy
+keys: Enter
+require-live-snap: 20 CONTEXT CASES | named-baseline
+keys: p C-u
+type: 2
+keys: Enter
+require-live-snap: 20 2 passes | baseline-two-passes
+keys: Enter
+require-live-snap: 25 CONTEXT SUMMARY | selected-baseline-inspection
+keys: Escape
+require-live-snap: 20 CONTEXT CASES | inspection-return
+keys: a Enter
+require-live-snap: 25 CONTEXT SUMMARY | candidate-base
+keys: e
+require-live-snap: 20 EDIT CONTEXT COPY | copy-editor
+require-live-snap: 20 ↑↓ Enter edit | copy-fields-ready
+keys: Enter C-u
+paste-file: @ART/candidate-context.txt
+keys: C-s
+require-live-snap: 20 REVIEW CONTEXT CHANGES | candidate-diff
+keys: Enter
+require-live-snap: 25 Edited copy saved | inactive-copy
+keys: Enter
+require-live-snap: 25 Owner context for harmless | candidate-inspection
+keys: +
+require-live-snap: 20 2 cases | candidate-case
+keys: n C-u
+type: Owner draft α
+keys: Home Right Right
+require-live-snap: 25 Study choices saved locally | checkpointed-study
+ask: Does the field show local durability while leaving the case label, finite plan and spending approval uncommitted?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_checkpoint.py @TMP_TARGET @ART @TMP_HOME crash
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scan batch
+require-live-snap: 25 RECOVER STUDY DRAFT | saved-study
+expect: 2 cases
+expect: 5 passes
+resize: 160x48
+live-snap: recovery-160x48
+resize: 96x89
+live-snap: recovery-96x89
+resize: 80x24
+live-snap: recovery-80x24
+resize: 60x20
+live-snap: recovery-60x20
+resize: 40x12
+require-live-snap: 20 RECOVER STUDY DRAFT | recovery-40x12
+expect: ▸
+expect: Enter restore
+expect: Esc back
+ask: Can an operator choose a saved study at every size, with visible controls and no implicit restoration or approval?
+resize: 120x36
+keys: Enter
+require-live-snap: 25 NAME CONTEXT CASE | recovered-name
+expect: Owner draft α
+keys: Delete
+require-live-snap: 25 Ower draft α | exact-cursor
+require-live-snap: 25 Study choices saved locally | recovered-checkpoint
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_checkpoint.py @TMP_TARGET @ART @TMP_HOME edited
+keys: Enter
+require-live-snap: 20 CONTEXT CASES | recovered-cases
+expect: Baseline policy
+expect: Ower draft α
+expect: 5 fixed jobs
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | recovered-form
+keys: Down Down Enter
+type: 1
+keys: Enter Down Enter
+type: 1
+keys: Enter Down Down Down Down Enter
+require-live-snap: 20 CONTEXT CASES | finite-cases
+keys: L
+require-live-snap: 35 Matrix draft ready | fresh-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_checkpoint.py @TMP_TARGET @ART @TMP_HOME prepared
+ask: Are the original context references, baseline, unequal pass counts and investigation retained, while a fresh plan still requires explicit allowance approval?
+keys: C-c
+require-exit: 10

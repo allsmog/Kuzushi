@@ -52,7 +52,10 @@ fn inspected_summary_and_raw_readers_keep_old_goal_and_disclose_unavailable_guid
     );
     let read = inspect(&app, root.path(), &selected);
     app.cache_tool_snapshot("threat-model:read", &read);
-    for raw in [false, true] {
+    for view in [
+        crate::app::StudyContextTextView::Summary,
+        crate::app::StudyContextTextView::Document,
+    ] {
         app.router
             .campaign_mut()
             .batch_scan_config
@@ -61,7 +64,7 @@ fn inspected_summary_and_raw_readers_keep_old_goal_and_disclose_unavailable_guid
             .context_picker
             .as_mut()
             .unwrap()
-            .raw = raw;
+            .text_view = view;
         let lines = context_detail_lines(&app, 120).join("\n");
         assert!(lines.contains("Original priorities"));
         assert!(lines.contains("東京 owner questions."));

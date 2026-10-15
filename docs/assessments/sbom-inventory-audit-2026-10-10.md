@@ -1,5 +1,11 @@
 # Dependency inventory and its Components consumer
 
+October 14 follow-up: [shared input allowance and capture](sbom-source-budget-2026-10-14.md)
+adds an aggregate byte ceiling, reuses captured inputs across parser stages and
+tests cancellation between read chunks. The older limitations below describe
+the October 10 checkpoint; authenticated source revisions and concurrent run
+ordering remain open.
+
 The real dependency inventory produced declared and resolved components, edges,
 CycloneDX and SPDX, but its descriptor assigned Scan phase completion to an
 inventory-only result. Its shell consumer had a separate defect: repairing a

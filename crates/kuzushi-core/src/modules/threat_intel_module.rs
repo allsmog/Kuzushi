@@ -3,6 +3,8 @@ use std::collections::{BTreeSet, VecDeque};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod inventory_coverage;
+
 const MAX_THREAT_INTEL_INPUT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_THREAT_INTEL_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
@@ -44,8 +46,16 @@ fn threat_intel_tools() -> Vec<ToolDescriptor> {
 fn threat_intel_research_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-intel:research",
-        "Discover target-local packages, send a bounded set of package/version queries to the OSV API, persist CVE candidates, and harvest those IDs into a detector catalog. Invoking this external-action tool explicitly authorizes network access to OSV and advisory/patch sources.",
-        vec![
+        "Experimental bounded advisory lookup and unaccepted catalog drafting. The approved action may query OSV and extract at most maxCves patterns, each with a possible repair. Learning allowance and external authorization are required. Inventory, live retrieval and useful detectors remain unqualified; no Map completion or hunts.",
+        threat_intel_research_options(),
+    )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .with_allowance_category(AllowanceCategory::Learning)
+    .without_phase_result()
+}
+
+fn threat_intel_research_options() -> Vec<OptionSpec> {
+    let mut options = vec![
             target_option(),
             opt(
                 "maxPackages",
@@ -67,20 +77,22 @@ fn threat_intel_research_tool() -> ToolDescriptor {
                 OptionType::Int,
                 "Maximum unique CVE/advisory IDs passed to harvest.",
             )
-            .integer_range(1, 100)
-            .default(json!(20)),
+            .integer_range(1, 32)
+            .default(json!(8)),
             threat_intel_output_path_option(),
             threat_intel_regression_gate_option(),
             threat_intel_accept_rejected_option(),
             model_option(),
-        ],
-    )
+            opt("osvFixtures", OptionType::Json, "Supplied package-name-to-OSV-response metadata. A missing response is a failed lookup, never a live fallback.").aliases(&["osv_fixtures"]).advanced(),
+        ];
+    extend_threat_intel_draft_options(&mut options);
+    options
 }
 
 fn threat_intel_discover_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-intel:discover",
-        "Deterministic dependency inventory (npm/cargo/pip/go/Bazel) written to .kuzushi threat-intel candidates; it does NOT research CVEs — feed the candidates into threat-intel:harvest for that.",
+        "Experimental offline dependency candidates with incomplete manifest coverage. Use sbom-scan:scan for dependency inventory. Produces no vulnerability findings or Map completion.",
         vec![target_option()],
     )
     .with_policy(workspace_policy(
@@ -88,12 +100,14 @@ fn threat_intel_discover_tool() -> ToolDescriptor {
         RuntimeRequirement::Never,
         FindingStoreRequirement::Optional,
     ))
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
 }
 
 fn threat_intel_list_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-intel:list",
-        "List the entries declared in a threat-intel catalog TOML.",
+        "Read entries declared in a threat-intel catalog TOML. Reading a catalog produces no findings or Map completion.",
         vec![threat_intel_catalog_path_option()],
     )
     .with_policy(tool_policy(
@@ -103,6 +117,7 @@ fn threat_intel_list_tool() -> ToolDescriptor {
         WorkspaceRequirement::Required,
         FindingStoreRequirement::Optional,
     ))
+    .without_phase_result()
 }
 
 fn threat_intel_apply_tool() -> ToolDescriptor {
@@ -117,21 +132,23 @@ fn threat_intel_apply_tool() -> ToolDescriptor {
     ];
     tool_with_options(
         "threat-intel:apply",
-        "Plan or dispatch catalog entries to their native hunt modules.",
+        "Experimental catalog preview. The default dry run reads metadata without a model or starting hunts. Live dispatch is a legacy opt-in path outside accepted scope studies. Does not complete Map.",
         options,
     )
     .with_policy(workspace_policy(
         ToolPhase::Map,
-        RuntimeRequirement::Always,
+        RuntimeRequirement::InputAware,
         FindingStoreRequirement::Optional,
     ))
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .without_phase_result()
 }
 
 fn threat_intel_catalog_path_option() -> OptionSpec {
     opt(
         "catalogPath",
         OptionType::Path,
-        "Catalog TOML under the active target's .kuzushi/catalogs directory.",
+        "Catalog TOML inside the active target. Defaults to the first .toml file under .kuzushi/catalogs; reading it does not approve execution.",
     )
     .workspace_read()
 }
@@ -139,7 +156,16 @@ fn threat_intel_catalog_path_option() -> OptionSpec {
 fn threat_intel_harvest_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-intel:harvest",
-        "Build a catalog TOML from CVE IDs and extracted fix patterns.",
+        "Experimental unaccepted catalog draft from a finite explicit advisory list. Learning allowance and external-action authorization are required. Source claims, live retrieval and useful detectors remain unqualified; this action does not complete Map or start hunts.",
+        threat_intel_harvest_options(),
+    )
+    .with_discovery_maturity(ModuleMaturity::Labs)
+    .with_allowance_category(AllowanceCategory::Learning)
+    .without_phase_result()
+}
+
+fn threat_intel_harvest_options() -> Vec<OptionSpec> {
+    let mut options =
         vec![
             opt(
                 "cves",
@@ -147,12 +173,24 @@ fn threat_intel_harvest_tool() -> ToolDescriptor {
                 "Comma-separated CVE IDs to harvest.",
             )
             .required(),
+            opt("maxCves", OptionType::Int, "Maximum unique advisory IDs in this explicit draft action. More than 32 supplied rows is rejected before work.").integer_range(1,32).default(json!(8)),
             threat_intel_output_path_option(),
             threat_intel_regression_gate_option(),
             threat_intel_accept_rejected_option(),
             model_option(),
-        ],
-    )
+        ];
+    extend_threat_intel_draft_options(&mut options);
+    options
+}
+
+fn extend_threat_intel_draft_options(options: &mut Vec<OptionSpec>) {
+    options.extend(
+        super::pipeline_module::ndiff_extract_source_options()
+            .into_iter()
+            .filter(|option| option.name != "id"),
+    );
+    options.extend(super::pipeline_module::ndiff_extract_limits());
+    options.push(super::pipeline_module::inherited_variant_reasoning_option());
 }
 
 fn threat_intel_output_path_option() -> OptionSpec {
@@ -208,6 +246,9 @@ pub(in crate::modules) fn run_threat_intel_research(
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
+    crate::capabilities::variant_ndiff::validate_metadata_input(input)?;
+    let supplied_osv = checked_research_osv_fixtures(input)?;
     let target = resolve_tool_target(input, ctx)?;
     emit_research_start(ctx, &target);
     let snapshot = load_context_snapshot_for_discover(&target)?;
@@ -217,9 +258,10 @@ pub(in crate::modules) fn run_threat_intel_research(
     let report = crate::capabilities::threat_intel::query_osv_candidates(
         &osv_packages,
         input_limit(input, "maxCvesPerPackage", 3),
-        input_limit(input, "maxCves", 20),
-        None,
+        input_limit(input, "maxCves", 8),
+        supplied_osv.as_ref(),
     );
+    ctx.ensure_active()?;
     let output_path = write_researched_candidates_json(&target, &technologies, &packages, &report)?;
     let harvest = harvest_researched_candidates(input, ctx, runtime, dispatch_tool, &report)?;
     emit_research_done(ctx, packages.len(), &report);
@@ -230,6 +272,18 @@ pub(in crate::modules) fn run_threat_intel_research(
         &report,
         harvest,
     ))
+}
+
+fn checked_research_osv_fixtures(input: &Value) -> Result<Option<Value>> {
+    if let Some(value) = input.get("osvFixtures") {
+        anyhow::ensure!(value.is_object(), "osvFixtures must be an object");
+        return Ok(Some(value.clone()));
+    }
+    Ok(input
+        .get("offline")
+        .and_then(Value::as_bool)
+        .filter(|value| *value)
+        .map(|_| json!({})))
 }
 
 fn input_limit(input: &Value, key: &str, default: usize) -> usize {
@@ -323,8 +377,7 @@ fn harvest_researched_candidates(
         "regressionGate": input.get("regressionGate").and_then(Value::as_bool).unwrap_or(true),
         "acceptRejected": input.get("acceptRejected").and_then(Value::as_bool).unwrap_or(false),
     });
-    copy_research_harvest_option(input, &mut harvest_input, "outputPath");
-    copy_research_harvest_option(input, &mut harvest_input, "model");
+    copy_research_draft_options(input, &mut harvest_input);
     crate::capabilities::threat_intel::harvest_threat_intel_catalog(
         &harvest_input,
         ctx,
@@ -332,6 +385,27 @@ fn harvest_researched_candidates(
         dispatch_tool,
     )
     .map(Some)
+}
+
+fn copy_research_draft_options(input: &Value, harvest_input: &mut Value) {
+    for key in [
+        "maxCves",
+        "outputPath",
+        "model",
+        "offline",
+        "fixtures",
+        "patchFixtures",
+        "binary",
+        "maxMetadataBytes",
+        "maxPatchBytes",
+        "maxSourceBytes",
+        "maxContextBytes",
+        "thinkingLevel",
+        "maxOutputTokens",
+        "maxModelTurns",
+    ] {
+        copy_research_harvest_option(input, harvest_input, key);
+    }
 }
 
 fn copy_research_harvest_option(input: &Value, output: &mut Value, key: &str) {
@@ -442,8 +516,10 @@ fn is_bazel_workspace_root(directory: &Path) -> bool {
 /// Root manifests plus top-level `*.bzl` macro files such as `deps.bzl`,
 /// where `go_repository` rules are commonly declared.
 fn bazel_root_manifest_paths(root: &Path) -> Vec<std::path::PathBuf> {
-    let mut paths: BTreeSet<std::path::PathBuf> =
-        BAZEL_WORKSPACE_MARKERS.iter().map(|marker| root.join(marker)).collect();
+    let mut paths: BTreeSet<std::path::PathBuf> = BAZEL_WORKSPACE_MARKERS
+        .iter()
+        .map(|marker| root.join(marker))
+        .collect();
     if let Ok(children) = std::fs::read_dir(root) {
         paths.extend(
             children
@@ -758,6 +834,7 @@ fn write_candidates_json(
             "technologies": technologies,
             "packages": packages,
             "cves": [],
+            "coverage": inventory_coverage::candidate_coverage(),
             "note": "Offline candidate set. Populate `cves` from OSV / NVD / vendor advisories \
                       and feed into `threat-intel:harvest`.",
         }),
@@ -829,22 +906,36 @@ fn research_response(
         candidates_path.display(),
     );
     let artifacts = research_artifacts(candidates_path, harvest.as_ref());
-    let mut result = crate::module_result::completed_output_result(
-        output.clone(),
+    let mut result = crate::module_result::partial_output_result(
+        format!("Unaccepted advisory research: {} candidates, {} lookup failures; incomplete source coverage",report.candidates.len(),report.failed_packages.len()),
         output,
-        json!({
-            "target": target.display().to_string(),
-            "candidatesPath": candidates_path.display().to_string(),
-            "packageCount": packages.len(),
-            "queriedPackages": report.queried_packages,
-            "failedPackages": report.failed_packages,
-            "cveCount": report.candidates.len(),
-            "cves": report.candidates.iter().map(|candidate| candidate.id.clone()).collect::<Vec<_>>(),
-            "harvest": harvest,
-        }),
+        vec![json!({"code":"unverified-advisory-research","message":"Dependency and advisory candidates have incomplete coverage and unverified source claims. Catalog drafts remain unaccepted. No repository findings, Map completion or hunts are established."})],
+        research_data(target, candidates_path, packages, report, harvest),
     );
     result["artifacts"] = json!(artifacts);
     result
+}
+
+fn research_data(
+    target: &Path,
+    candidates_path: &Path,
+    packages: &[Value],
+    report: &crate::capabilities::threat_intel::OsvQueryReport,
+    harvest: Option<Value>,
+) -> Value {
+    json!({
+        "target": target.display().to_string(),
+        "candidatesPath": candidates_path.display().to_string(),
+        "packageCount": packages.len(),
+        "queriedPackages": report.queried_packages,
+        "failedPackages": report.failed_packages,
+        "cveCount": report.candidates.len(),
+        "cves": report.candidates.iter().map(|candidate| candidate.id.clone()).collect::<Vec<_>>(),
+        "harvest": harvest,
+        "coverage": inventory_coverage::candidate_coverage(),
+        "sourceVerified":false,
+        "accepted":false,
+    })
 }
 
 fn research_artifacts(candidates_path: &Path, harvest: Option<&Value>) -> Vec<Value> {
@@ -869,14 +960,15 @@ fn discover_response(
     packages: &[Value],
 ) -> Value {
     let output = format!(
-        "threat-intel:discover detected {} technolog{} and {} package{}\n  Output: {}",
+        "threat-intel:discover retained {} technolog{} and {} package candidate{}\n{}\n  Output: {}",
         technologies.len(),
         if technologies.len() == 1 { "y" } else { "ies" },
         packages.len(),
         if packages.len() == 1 { "" } else { "s" },
+        inventory_coverage::candidate_warning(packages.is_empty()),
         path.display()
     );
-    let result = crate::module_result::completed_output_result(
+    let mut result = crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({
@@ -884,21 +976,11 @@ fn discover_response(
             "outputPath": path.display().to_string(),
             "technologies": technologies,
             "packageCount": packages.len(),
+            "coverage": inventory_coverage::candidate_coverage(),
         }),
     );
-    disclose_empty_package_inventory(result, packages.is_empty())
-}
-
-/// Zero packages is not a clean inventory: no supported manifest was found
-/// here or at an enclosing Bazel workspace root, so CVE harvest has nothing
-/// to work from. Say so instead of reporting `completed`.
-fn disclose_empty_package_inventory(mut result: Value, empty: bool) -> Value {
-    if empty {
-        result["status"] = json!("partial");
-        result["warnings"] = json!([
-            "no dependency manifest found (package.json, Cargo.toml, requirements, go.mod, MODULE.bazel/WORKSPACE, or *.bzl at an enclosing Bazel root); the CVE inventory is empty"
-        ]);
-    }
+    result["status"] = json!("partial");
+    result["warnings"] = json!([inventory_coverage::candidate_warning(packages.is_empty())]);
     result
 }
 
@@ -1064,7 +1146,11 @@ go_mod_download(
         .unwrap();
         let target = root.path().join("services/gateway");
         std::fs::create_dir_all(&target).unwrap();
-        std::fs::write(target.join("BUILD.bazel"), "go_library(name = \"gateway\")\n").unwrap();
+        std::fs::write(
+            target.join("BUILD.bazel"),
+            "go_library(name = \"gateway\")\n",
+        )
+        .unwrap();
 
         let packages = collect_packages(&target).unwrap();
 
@@ -1097,9 +1183,9 @@ go_mod_download(
         assert!(result["warnings"][0]
             .as_str()
             .unwrap()
-            .contains("no dependency manifest"));
+            .contains("No package candidates extracted"));
         let found = discover_response(Path::new("/t"), Path::new("/t/c.json"), &[], &[json!({})]);
-        assert_eq!(found["status"], "completed");
+        assert_eq!(found["status"], "partial");
     }
 
     fn write_bazel_package_fixture(target: &Path) {

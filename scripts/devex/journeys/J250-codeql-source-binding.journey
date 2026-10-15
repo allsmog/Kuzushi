@@ -1,0 +1,73 @@
+name: Source-bound database preparation and partial CodeQL observations refuse raw and stale inputs
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/codeql_modules.py seed @TMP_TARGET @ART
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: help
+require-live-snap: 20 HELP | help-open
+paste-file: @ART/create.txt
+require-live-snap: 20 timeoutMs | create-draft-tail
+keys: Home
+require-live-snap: 20 run codeql:create-db | create-draft
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | execution-consent
+keys: y
+require-live-snap: 40 built a rust database | database-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/codeql_modules.py create @TMP_TARGET @ART
+paste-file: @ART/create-replay.txt
+keys: Enter
+require-live-snap: 20 Source commit | database-receipt
+ask: Does preparation disclose repository-execution consent, exact source commit and scope without claiming a completed Map or finding verdict?
+paste-file: @ART/scan.txt
+keys: Enter
+require-live-snap: 30 codeql: 1 finding | observations-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/codeql_modules.py scan @TMP_TARGET @ART
+paste-file: @ART/scan-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | query-receipt
+expect: independent review
+resize: 160x48
+live-snap: query-160x48
+resize: 96x89
+live-snap: query-96x89
+resize: 80x24
+live-snap: query-80x24
+resize: 60x20
+live-snap: query-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | query-40x12
+keys: NPage NPage
+live-snap: query-paged-40x12
+ask: Are query authority, scope limits, finding evidence and paging understandable at all six sizes?
+resize: 120x36
+paste-file: @ART/raw.txt
+keys: Enter
+require-live-snap: 30 no trusted provenance | raw-database-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/codeql_modules.py dirty @TMP_TARGET @ART
+paste-file: @ART/scan.txt
+keys: Enter
+require-live-snap: 30 clean | dirty-source-refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/codeql_modules.py refused @TMP_TARGET @ART
+ask: Do raw-database and changed-source refusals give actionable explanations while preserving earlier observations without claiming they were fixed?
+keys: C-c
+require-live-snap: 20 CONFIRM SESSION EXIT | exit-confirmation
+expect: no active work
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | resumed
+expect-not: Map ✓
+expect-not: Scan ✓
+paste-file: @ART/scan-replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-query
+require-shell: python3 -B @REPO/scripts/devex/fixtures/codeql_modules.py restart @TMP_TARGET @ART
+ask: Does no-color restart preserve the exact historical query receipt and source limitations without starting builds or changing finding verdicts?
+keys: C-c
+require-exit: 10

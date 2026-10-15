@@ -3,7 +3,6 @@ mod tests {
     use super::super::*;
     use crate::config::V2Config;
     use crate::findings::{FindingStore, TriageOutcome};
-    use crate::modules::ModuleRegistry;
     use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
     use std::sync::Mutex;
@@ -22,6 +21,14 @@ mod tests {
     }
 
     impl AgentRuntime for MockRuntime {
+        fn with_allowance_binding(
+            &self,
+            binding: crate::allowance::AllowanceBinding,
+        ) -> Result<Box<dyn AgentRuntime + '_>> {
+            Ok(super::super::registry_dispatch_fixture::bind_owned_runtime(
+                self, binding,
+            ))
+        }
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             let system = request.system_prompt.clone();
             self.queries.lock().unwrap().push(request);
@@ -472,18 +479,12 @@ mod tests {
             cancellation: None,
             authorization: Default::default(),
         };
-        let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
-
-        // The stable alias `kuzushi findings` prints resolves like a fingerprint.
-        let lift = registry
-            .execute_tool_with_runtime(
-                "variant:lift-pattern",
-                json!({"fingerprint": "F-0001"}),
-                &ctx,
-                Some(&runtime),
-            )
-            .unwrap();
+        let (lift, hunt) = super::super::registry_dispatch_fixture::approved_lift_and_hunt(
+            &ctx,
+            &runtime,
+            &fingerprint,
+        );
         assert_eq!(lift.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             lift.pointer("/status").and_then(Value::as_str),
@@ -494,18 +495,10 @@ mod tests {
             Some("child_process.exec")
         );
 
-        let hunt = registry
-            .execute_tool_with_runtime(
-                "variant:hunt",
-                json!({"fingerprint": fingerprint, "maxFindings": 5}),
-                &ctx,
-                Some(&runtime),
-            )
-            .unwrap();
         assert_eq!(hunt.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             hunt.pointer("/status").and_then(Value::as_str),
-            Some("completed")
+            Some("partial")
         );
         assert_eq!(
             hunt.pointer("/data/variants")
@@ -699,21 +692,11 @@ mod tests {
             cancellation: None,
             authorization: Default::default(),
         };
-        let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
-
-        let prepared = registry
-            .prepare_dispatch_input(
-                "ndiff:extract-fix-pattern",
-                json!({"patchText": "--- a/parser.c\n+++ b/parser.c\n+if (len > cap) return -1;\n"}),
-                &ctx,
-                None,
-            )
-            .unwrap()
-            .authorize_explicit_headless();
-        let extract = registry
-            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
-            .unwrap();
+        let extract = super::super::registry_dispatch_fixture::approved_advisory_extraction(
+            &ctx,
+            &runtime,
+        );
         assert_eq!(extract.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             extract.pointer("/status").and_then(Value::as_str),
@@ -721,18 +704,15 @@ mod tests {
         );
         let pattern = extract.pointer("/data/pattern").cloned().unwrap();
 
-        let hunt = registry
-            .execute_tool_with_runtime(
-                "ndiff:hunt-variants",
-                json!({"pattern": pattern, "advisoryId": "CVE-2024-1234"}),
-                &ctx,
-                Some(&runtime),
-            )
-            .unwrap();
+        let hunt = super::super::registry_dispatch_fixture::approved_advisory_hunt(
+            &ctx,
+            &runtime,
+            pattern,
+        );
         assert_eq!(hunt.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             hunt.pointer("/status").and_then(Value::as_str),
-            Some("completed")
+            Some("partial")
         );
         assert_eq!(
             hunt.pointer("/data/findings")

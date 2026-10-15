@@ -419,17 +419,21 @@ mod tests {
     }
 
     #[test]
-    fn command_submit_non_press_does_not_confirm_the_new_planning_picker() {
-        for (command, phase) in [("/map", WorkflowPhase::Map), ("/scan", WorkflowPhase::Scan)] {
+    fn command_submit_non_press_does_not_confirm_the_new_plan() {
+        for (command, phase, view) in [
+            ("/map", WorkflowPhase::Map, ShellView::PlanningPicker),
+            ("/scan", WorkflowPhase::Scan, ShellView::Campaign),
+        ] {
             for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
-                assert_command_submit_non_press_stays_in_picker(command, phase, kind);
+                assert_command_submit_non_press_stays_in_plan(command, phase, view, kind);
             }
         }
     }
 
-    fn assert_command_submit_non_press_stays_in_picker(
+    fn assert_command_submit_non_press_stays_in_plan(
         command: &str,
         phase: WorkflowPhase,
+        view: ShellView,
         kind: KeyEventKind,
     ) {
         let target = tempfile::tempdir().expect("temp target");
@@ -462,7 +466,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(outcome.received_count, 3, "{command} {kind:?}");
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), view, "{command} {kind:?}");
         assert_eq!(app.engagement.current_phase(), Some(phase));
         assert!(!app.has_running_work(), "{command} {kind:?}");
     }

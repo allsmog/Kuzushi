@@ -1,5 +1,6 @@
 use super::bounded_fs as fs;
 use super::toml_manifest::toml_version;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -24,9 +25,9 @@ pub(super) fn pipfile_components(
         .collect())
 }
 
-pub(super) fn pipfile_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+pub(super) fn pipfile_edges(target: &SbomInputs, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Pipfile")?;
     let source = relative_display(target, path);
     Ok(PIPFILE_SCOPES

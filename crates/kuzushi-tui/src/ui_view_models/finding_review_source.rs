@@ -37,6 +37,7 @@ pub(crate) fn hydration_key(app: &ShellApp, finding: &Finding) -> Option<ViewHyd
     let record = selected_decision_record(finding, app.review_decisions(), effective.as_ref())?;
     let decision_watermark = record.provenance.as_ref()?.read_watermark?;
     Some(ViewHydrationKey::FindingReviewSource {
+        decision_id: record.id,
         stable_fp: kuzushi_core::findings::finding_observation_identity(finding).to_owned(),
         decision_watermark,
         observation_watermark: app.domain().findings_read_watermark(),
@@ -71,6 +72,11 @@ fn notice(text: &str, warning: bool) -> FindingReviewSourceModel {
 }
 
 fn recorded_source_model(source: &FindingReviewSource) -> FindingReviewSourceModel {
+    if let Some(capture) = &source.reviewed_source {
+        let mut model = captured_source_model(capture, &source.basis.run_id);
+        append_later_source(&mut model, source);
+        return model;
+    }
     let (text, warning) = comparison_notice(source);
     let mut model = notice(text, warning);
     model
@@ -86,6 +92,40 @@ fn recorded_source_model(source: &FindingReviewSource) -> FindingReviewSourceMod
         .provenance
         .push(format!("Decision snapshot: {}", source.basis.snapshot_hash));
     append_later_source(&mut model, source);
+    model
+}
+
+fn captured_source_model(
+    capture: &kuzushi_core::findings::ReviewSourceCapture,
+    observed_run: &str,
+) -> FindingReviewSourceModel {
+    let mut model = notice("Human decision records an explicitly reviewed source capture. This reader does not recheck the current checkout or establish a fix.", true);
+    model.rows.push(format!(
+        "Source captured: {}",
+        super::recorded_timestamp_label(&capture.captured_at)
+    ));
+    model
+        .rows
+        .push(format!("Prior observation: {observed_run}"));
+    model.rows.extend(revision_rows(
+        "Reviewed",
+        &capture
+            .source_git
+            .clone()
+            .map(RecordedSourceRevision::Known)
+            .unwrap_or(RecordedSourceRevision::NotRecorded),
+    ));
+    model
+        .provenance
+        .push(format!("Reviewed snapshot: {}", capture.snapshot_hash));
+    model
+        .provenance
+        .push(format!("Reviewed content: {}", capture.tree_hash));
+    if let Some(git) = &capture.source_git {
+        model
+            .provenance
+            .push(format!("Reviewed full commit: {}", git.sha));
+    }
     model
 }
 

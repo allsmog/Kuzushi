@@ -23,6 +23,9 @@ fn enumeration_line(enumeration: ContextEnumeration) -> &'static str {
         ContextEnumeration::Filesystem => {
             "Enumeration: bounded filesystem inventory. Ignored and generated paths can be omitted."
         }
+        ContextEnumeration::Interrupted => {
+            "Enumeration: canceled during Git path acquisition. No source files were inspected."
+        }
     }
 }
 

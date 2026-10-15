@@ -72,7 +72,7 @@ fn render_scope_panels(frame: &mut Frame<'_>, state: &ScopeReviewState, area: Re
         .take(layout.list.height as usize)
         .map(|(index, text)| {
             Line::styled(
-                fit(
+                crate::renderer::shared::text::fit_scope_row(
                     &format!("{} {text}", if index == cursor { "▸" } else { " " }),
                     layout.list.width as usize,
                 ),

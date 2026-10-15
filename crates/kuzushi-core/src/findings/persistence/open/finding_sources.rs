@@ -20,12 +20,7 @@ pub(super) fn merged_finding_sources(
     earlier: &[FindingSource],
     later: &[FindingSource],
 ) -> Vec<FindingSource> {
-    let mut merged = Vec::new();
-    for source in earlier.iter().chain(later).cloned() {
-        merge_finding_source(&mut merged, source);
-    }
-    sort_finding_sources(&mut merged);
-    merged
+    crate::findings::merge_ordered_source_histories(earlier, later)
 }
 
 fn finding_source_signature(finding: &Finding) -> String {

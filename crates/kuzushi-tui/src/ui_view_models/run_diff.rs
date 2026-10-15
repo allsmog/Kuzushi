@@ -77,7 +77,6 @@ pub(crate) struct RunDiffUncertainMatchRow {
 pub(crate) struct RunDiffDecisionSummary {
     pub(crate) identities: usize,
     pub(crate) with_stored_decision: usize,
-    pub(crate) carry_forward: usize,
     pub(crate) conflicts: usize,
 }
 
@@ -211,10 +210,8 @@ fn is_identity_key(key: &str) -> bool {
 impl RunDiffDecisionSummary {
     fn add_stored_decision(&mut self, stored: ReviewDecisionVerdict, state: &RunDiffFindingState) {
         self.with_stored_decision += 1;
-        match snapshot_review_verdict(state) {
-            Some(snapshot) if snapshot != stored => self.conflicts += 1,
-            Some(_) => {}
-            None => self.carry_forward += 1,
+        if snapshot_review_verdict(state).is_some_and(|snapshot| snapshot != stored) {
+            self.conflicts += 1;
         }
     }
 }

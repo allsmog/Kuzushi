@@ -937,7 +937,7 @@ impl ShellApp {
         self.workbench_cache()
             .borrow_mut()
             .invalidate_map_artifacts();
-        if self.try_open_phase_picker(phase) {
+        if self.try_open_guided_phase_planner(phase) {
             self.clear_guided_scan();
         }
     }

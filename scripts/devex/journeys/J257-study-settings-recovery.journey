@@ -1,0 +1,107 @@
+name: Recover ordinary settings and multiline goal without replacing a newer accepted revision
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR SEMGREP_APP_TOKEN SEMGREP_AGENT_TOKEN
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 SEMGREP_ENABLE_VERSION_CHECK=0
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings_checkpoint.py @TMP_TARGET @ART @TMP_HOME seed
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | context-prepared
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-context.json
+submit: set activate false
+submit: set label Common policy context
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | context-imported
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
+submit: use sast
+submit: options sast:scan
+submit: set taskMode manual
+submit: set tasks semgrep
+paste-file: @ART/rule-setting.txt
+keys: Enter
+submit: set semgrepTimeoutMs 60000
+submit: scan batch
+require-live-snap: 25 PLAN A STUDY | fresh-study
+keys: Enter C-u
+type: 2
+keys: Enter
+require-live-snap: 20 2 fresh discovery passes | two-passes
+keys: Down Down Down Down Down Enter
+type: 5
+keys: Enter Down Enter
+type: 2
+keys: Enter
+require-live-snap: 25 Study choices saved locally | settings-checkpoint
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings_checkpoint.py @TMP_TARGET @ART @TMP_HOME base
+keys: Up Up Enter
+require-live-snap: 25 Shown revision: 1 | goal-base
+keys: e C-u
+paste-file: @ART/settings-goal.txt
+keys: C-Home Right Right
+require-live-snap: 25 Study choices saved locally | goal-checkpoint
+ask: Does the ordinary study retain its pass and call choices while distinguishing local goal storage from an accepted revision and work approval?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings_checkpoint.py @TMP_TARGET @ART @TMP_HOME crash
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1 SEMGREP_ENABLE_VERSION_CHECK=0
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restart
+submit: scan batch
+require-live-snap: 25 RECOVER STUDY DRAFT | ordinary-recovery
+expect: Whole repository
+expect: 2 passes
+expect-not: 0 cases
+resize: 160x48
+live-snap: recovery-160x48
+resize: 96x89
+live-snap: recovery-96x89
+resize: 80x24
+live-snap: recovery-80x24
+resize: 60x20
+live-snap: recovery-60x20
+resize: 40x12
+require-live-snap: 20 Goal draft: Goal α | recovery-40x12
+expect: Enter restore
+expect: Esc back
+ask: Does the saved ordinary study have a clear scope, pass count, goal preview and explicit restore controls at all six sizes?
+resize: 120x36
+keys: Enter
+require-live-snap: 25 WRITE INVESTIGATION BRIEF | restored-editor
+expect: Goal α
+keys: Delete
+require-live-snap: 25 Gol α | cursor-retained
+require-live-snap: 25 Study choices saved locally | edited-checkpoint
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings_checkpoint.py @TMP_TARGET @ART @TMP_HOME recovered
+keys: C-s
+require-live-snap: 25 REVIEW BRIEF REVISION | review-old-base
+expect: Baseline accepted operator intent
+keys: Enter
+require-live-snap: 25 Brief stopped: | stale-save-refused
+expect: revision
+expect: Study choices saved locally
+keys: r
+require-live-snap: 25 Shown revision: 2 | current-base
+expect: Gol α
+keys: C-s
+require-live-snap: 25 Another accepted operator goal | fresh-base-review
+keys: Enter
+require-live-snap: 25 Shown revision: 3 | saved-revision
+keys: Escape
+require-live-snap: 25 PLAN A STUDY | recovered-settings
+expect: 2 passes
+keys: L
+require-live-snap: 35 Draft ready | fresh-plan
+require-shell: python3 -B @REPO/scripts/devex/fixtures/study_settings_checkpoint.py @TMP_TARGET @ART @TMP_HOME prepared
+ask: Does recovery preserve the original investigation and raw goal, refuse a stale save, and require an explicitly reviewed new revision and a fresh approved plan before jobs start?
+keys: C-c
+require-exit: 10

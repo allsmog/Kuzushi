@@ -2,6 +2,7 @@ use super::context_generation::StudyContextGeneration;
 use crate::app::ShellApp;
 use anyhow::Context;
 use serde_json::{json, Value};
+mod entry;
 mod guidance;
 #[cfg(test)]
 mod tests;

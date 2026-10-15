@@ -2082,34 +2082,76 @@ function threatModelDefaultOutputDirFailures(root) {
     deterministicInputFile,
     "threat-model default output dir",
   );
-  const readFailures = [toolContract, buildInput, deterministicInput].filter(Array.isArray).flat();
+  const outputPaths = readRequiredSource(
+    root,
+    "crates/kuzushi-core/src/capabilities/threat_model/adapters/output_paths.rs",
+    "threat-model default output dir",
+  );
+  const readFailures = [toolContract, buildInput, deterministicInput, outputPaths]
+    .filter(Array.isArray)
+    .flat();
   if (readFailures.length > 0) return readFailures;
-  return threatModelDefaultOutputDirChecks(toolContract, buildInput, deterministicInput);
+  return threatModelDefaultOutputDirChecks(
+    toolContract,
+    buildInput,
+    deterministicInput,
+    outputPaths,
+  );
 }
 
-function threatModelDefaultOutputDirChecks(toolContract, buildInput, deterministicInput) {
-  const productionSources = [toolContract, buildInput, deterministicInput]
+export function threatModelDefaultOutputDirChecks(
+  toolContract,
+  buildInput,
+  deterministicInput,
+  outputPaths,
+) {
+  const productionSources = [toolContract, buildInput, deterministicInput, outputPaths]
     .map((source) => source.split("#[cfg(test)]")[0])
     .join("\n");
+  const requirements = threatModelOutputRequirements(
+    toolContract,
+    buildInput,
+    deterministicInput,
+    outputPaths,
+  );
+  const failures = requirements
+    .filter(([source, token]) => !source.includes(token))
+    .map(([, , message]) => `threat-model ${message}`);
+  if (productionSources.includes(".kuzushi/v3/runs/{run_id}")) {
+    failures.push("threat-model default output dir must not hardcode .kuzushi/v3/runs");
+  }
+  return failures;
+}
+
+function threatModelOutputRequirements(toolContract, buildInput, deterministicInput, outputPaths) {
   return [
-    toolContract.includes(
+    [
+      toolContract,
       "pub(crate) fn default_output_dir(self, target: &Path, run_id: &str) -> String",
-    )
-      ? null
-      : "threat-model default output dir must live on BuildFlavor",
-    toolContract.includes("crate::run_artifacts::run_dir(target, run_id)")
-      ? null
-      : "threat-model default output dir must use run_dir",
-    buildInput.includes("flavor.default_output_dir(&target, &run_id)")
-      ? null
-      : "threat-model model-backed input must use default_output_dir",
-    deterministicInput.includes("flavor.default_output_dir(&target, &run_id)")
-      ? null
-      : "threat-model deterministic input must use default_output_dir",
-    productionSources.includes(".kuzushi/v3/runs/{run_id}")
-      ? "threat-model default output dir must not hardcode .kuzushi/v3/runs"
-      : null,
-  ].filter(Boolean);
+      "default output dir must live on BuildFlavor",
+    ],
+    [
+      toolContract,
+      "crate::run_artifacts::run_dir(target, run_id)",
+      "default output dir must use run_dir",
+    ],
+    [
+      buildInput,
+      "resolve_build_output_dir(input, ctx, flavor, &target)",
+      "model-backed input must use the shared output resolver",
+    ],
+    [
+      deterministicInput,
+      "resolve_build_output_dir(input, ctx, flavor, &target)",
+      "deterministic input must use the shared output resolver",
+    ],
+    [outputPaths, "ctx.run_id()", "output resolver must retain the producing run identity"],
+    [
+      outputPaths,
+      "flavor.default_output_dir(target, &run_id)",
+      "output resolver must use default_output_dir",
+    ],
+  ];
 }
 
 function readRequiredSource(root, file, label) {

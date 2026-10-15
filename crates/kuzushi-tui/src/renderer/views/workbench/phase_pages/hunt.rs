@@ -11,6 +11,16 @@ pub(super) fn render(
     model: &ReviewPhaseModel,
     state: PhaseRenderState,
 ) {
+    if let Some(trace) = &model.trace {
+        super::confirm::trace::render_surface(
+            frame,
+            area,
+            trace,
+            state,
+            PhaseSurfaceId::ReviewTrace,
+        );
+        return;
+    }
     if let Some(pane) = state.surface {
         render_review_pane(frame, area, model, state, pane);
         return;
@@ -31,6 +41,9 @@ pub(super) fn render(
 }
 
 pub(super) fn plain_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if let Some(trace) = &model.trace {
+        return super::confirm::trace::lines(trace);
+    }
     let mut lines = divider_lines("FINDINGS", review_lines(model, width, u16::MAX), width);
     lines.extend(divider_lines(
         "SELECTED FINDING",

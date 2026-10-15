@@ -23,7 +23,6 @@ use self::{
 use crate::capabilities::systems_hunt::execute_systems_hunt_tool;
 use crate::capabilities::uaf_hunt::execute_uaf_hunt_tool;
 use crate::carlini_threat_hunt::run_carlini_threat_hunt;
-use crate::dep_hygiene::check_dependency_hygiene;
 use crate::findings::FindingListFilter;
 use crate::modules::application::sast_scan::run_sast_scan_with_registry;
 #[allow(unused_imports)]
@@ -47,11 +46,39 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 #[cfg(test)]
 mod coverage_contract_tests;
+#[cfg(test)]
+mod cpg_contract_tests;
+#[cfg(test)]
+mod dependency_hygiene_contract_tests;
 mod dispatch_catalog_tool;
 mod dispatch_plugin_prompt_tool;
+mod executable_requirements;
+#[cfg(test)]
+mod findings_chains_contract_tests;
+#[cfg(test)]
+mod iac_contract_tests;
+#[cfg(test)]
+mod recon_import_contract_tests;
+pub use executable_requirements::{missing_executable_requirements, ExecutableRequirement};
+#[cfg(test)]
+mod actor_discovery_contract_tests;
+#[cfg(test)]
+mod advisory_catalog_contract_tests;
+#[cfg(test)]
+mod android_pipeline_contract_tests;
+#[cfg(test)]
+mod chain_hunt_contract_tests;
+#[cfg(test)]
+mod external_recon_contract_tests;
 #[cfg(test)]
 mod map_source_identity_tests;
 mod module_registry;
+#[cfg(test)]
+mod ndiff_metadata_contract_tests;
+#[cfg(test)]
+mod ndiff_observation_contract_tests;
+#[cfg(test)]
+mod ndiff_pattern_contract_tests;
 #[cfg(test)]
 mod operational_contract_tests;
 #[cfg(test)]
@@ -60,5 +87,21 @@ mod run_taint_iris_tool;
 #[cfg(test)]
 mod scan_scope_proposal_tests;
 #[cfg(test)]
+mod sink_import_contract_tests;
+#[cfg(test)]
+mod taint_candidate_contract_tests;
+#[cfg(test)]
+mod taint_planning_contract_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod threat_intel_inventory_contract_tests;
+#[cfg(test)]
+mod threat_intel_preview_contract_tests;
+#[cfg(test)]
+mod triage_contract_tests;
+#[cfg(test)]
+mod variant_draft_contract_tests;
+#[cfg(test)]
+mod variant_hunt_contract_tests;
 pub use module_registry::ModuleRegistry;

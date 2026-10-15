@@ -4,6 +4,7 @@ use kuzushi_core::RunTargetGitMetadata;
 
 fn source(comparison: WorkspaceReviewSourceComparison) -> FindingReviewSource {
     FindingReviewSource {
+        reviewed_source: None,
         basis: WorkspaceReviewDecisionBasis {
             run_id: "fixture-a".into(),
             snapshot_hash: "snapshot-a".into(),
@@ -22,6 +23,41 @@ fn source(comparison: WorkspaceReviewSourceComparison) -> FindingReviewSource {
         decided_revision: revision('1', "main"),
         later_revision: Some(revision('1', "main")),
     }
+}
+
+#[test]
+fn explicit_capture_is_distinct_from_the_observation_and_never_claims_a_fix() {
+    let mut value = source(WorkspaceReviewSourceComparison::SameCitedSource);
+    value.reviewed_source = Some(kuzushi_core::findings::ReviewSourceCapture {
+        cited_file: None,
+        schema_version: 1,
+        target_identity: "owned".into(),
+        finding_id: 1,
+        stable_fp: "owned".into(),
+        read_watermark: 2,
+        snapshot_hash: "captured-snapshot".into(),
+        tree_hash: "captured-content".into(),
+        source_git: Some(RunTargetGitMetadata {
+            sha: "2".repeat(40),
+            branch: Some("main".into()),
+            dirty: true,
+        }),
+        captured_at: "1790260983".into(),
+    });
+    let model = recorded_source_model(&value);
+    assert!(model
+        .notice
+        .contains("does not recheck the current checkout or establish a fix"));
+    assert!(model.rows.iter().any(|row| row.contains("dirty")));
+    assert!(model
+        .rows
+        .iter()
+        .any(|row| row.contains("Prior observation: fixture-a")));
+    assert!(model
+        .provenance
+        .iter()
+        .any(|row| row.contains("captured-content")));
+    assert!(model.rows.iter().any(|row| row.contains("2026-09-24")));
 }
 
 fn revision(digit: char, branch: &str) -> RecordedSourceRevision {

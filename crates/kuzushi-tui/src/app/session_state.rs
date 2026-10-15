@@ -214,6 +214,7 @@ impl SessionState {
         self.session_cost
     }
 
+    #[cfg(test)]
     pub(crate) fn last_tool_cost_usd(&self) -> Option<f64> {
         self.last_tool_cost
             .and_then(RuntimeCostReport::observed_usd_if_available)

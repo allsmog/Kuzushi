@@ -58,6 +58,9 @@ pub(super) fn approve_work(
         );
         return Ok(None);
     };
+    if let Some(plan) = super::review_study::approve_review_work(id, input, ctx)? {
+        return Ok(Some(plan));
+    }
     if let Some(plan) = super::context_study::approve_context_work(id, input, ctx)? {
         return Ok(Some(plan));
     }

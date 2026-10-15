@@ -4,6 +4,8 @@ use kuzushi_core::run_artifacts::{
 };
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod completion_timing_tests;
 mod result_receipt;
 mod trace_receipt;
 use result_receipt::rendered_tool_result;
@@ -124,6 +126,15 @@ impl ShellApp {
                 error,
                 completion,
             } => self.apply_observed_failed_tool_event(state, tool_name, error, completion),
+            ToolEvent::ObservedRefused {
+                tool_name,
+                error,
+                completion,
+            } => self.apply_refused_tool_event(
+                with_tool_completion(state, completion),
+                tool_name,
+                error,
+            ),
             ToolEvent::AuthenticationFailed {
                 tool_name,
                 error,
@@ -232,6 +243,7 @@ impl ShellApp {
     ) -> Vec<ShellEffect> {
         let message = failure_like_result_message(&result);
         self.cache_lesson_planning_failure(&tool_name, &message);
+        self.cache_review_planning_failure(&tool_name, &message);
         if let Some(reason) = state.abort_reason {
             return self.apply_aborted_tool_event(state, tool_name, message, reason);
         }
@@ -456,7 +468,10 @@ impl ShellApp {
     /// one, otherwise the whole session (single-tool runs).
     fn completed_tool_secs(&self, tool_name: &str) -> Option<u64> {
         let session = self.activity()?;
-        let row_secs = session.tasks.get(tool_name).and_then(|row| {
+        let task_id = session
+            .task_id_for_bound_tool(tool_name)
+            .unwrap_or_else(|| tool_name.to_string());
+        let row_secs = session.tasks.get(&task_id).and_then(|row| {
             let started = row.started_at?;
             let completed = row.completed_at?;
             Some(completed.saturating_duration_since(started).as_secs())
@@ -471,6 +486,7 @@ impl ShellApp {
         error: String,
     ) -> Vec<ShellEffect> {
         self.cache_lesson_planning_failure(&tool_name, &error);
+        self.cache_review_planning_failure(&tool_name, &error);
         if let Some(reason) = state.abort_reason {
             return self.apply_aborted_tool_event(state, tool_name, error, reason);
         }
@@ -616,8 +632,8 @@ impl ShellApp {
             session.mark_task_blocked(&tool_name, &error);
             session.mark_terminal();
         }
-        self.set_refused_activity(tool_name.clone(), "blocked by autonomy posture");
-        self.set_warn_notice("autonomy", error.clone());
+        self.set_refused_activity(tool_name.clone(), "blocked before execution");
+        self.set_warn_notice("run", error.clone());
         self.abort_pending_chain(&tool_name);
         if self.engagement.running_tool_is(&tool_name) {
             self.engagement.pause_planning_queue();
@@ -1530,5 +1546,58 @@ mod tests {
             present_run(&read).terminal_status,
             Some(RunItemStatus::Blocked)
         );
+    }
+
+    #[test]
+    fn observed_admission_refusal_stays_blocked_through_shell_persistence() {
+        use crate::admission_event_tests::{dispatch, RuntimeMustNotRun};
+        use kuzushi_core::run_lifecycle::RunItemStatus;
+
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "event-fixture";
+        let record = ToolRunRecord::new(target.path(), run_id, "tool", "context:build");
+        try_record_tool_run_started_with_reproducibility(
+            record,
+            &serde_json::json!({"enrichment":true}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let outcome = dispatch(
+            target.path(),
+            "context:build",
+            serde_json::json!({"enrichment":true}),
+            Some(&RuntimeMustNotRun),
+        );
+        let error = outcome.execution.unwrap_err();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(target.path().to_path_buf()));
+        app.set_activity(Some(ActivitySession::new(run_id)));
+        app.set_active_tool_run_id_for_test(run_id);
+        app.set_running_tool_for_test("context:build");
+        let effects = app.apply_tool_event(ToolEvent::ObservedRefused {
+            tool_name: "context:build".into(),
+            error: error.to_string(),
+            completion: outcome.completion,
+        });
+        assert_eq!(
+            app.activity().unwrap().tasks["context:build"].state,
+            DagTaskState::Blocked
+        );
+        crate::app::EffectRuntime::execute(&mut app, effects);
+        assert_eq!(
+            load_run_summary(target.path(), run_id).unwrap().status,
+            "blocked"
+        );
+        let read = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id).unwrap();
+        assert_eq!(
+            read.projection.terminal.as_ref().map(|item| item.status),
+            Some(RunItemStatus::Blocked)
+        );
+        assert!(!target
+            .path()
+            .join(".kuzushi/context-snapshot.json")
+            .exists());
     }
 }

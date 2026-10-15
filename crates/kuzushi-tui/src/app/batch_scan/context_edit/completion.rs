@@ -23,6 +23,7 @@ impl ShellApp {
         if draft.reference != source || draft.mode != ContextEditMode::Saving {
             return;
         }
+        self.resolve_context_checkpoint(&key);
         self.runtime_state.context_edit_drafts.remove(&key);
         if self.target() != Some(target.as_path()) {
             return;
@@ -59,7 +60,7 @@ impl ShellApp {
             picker.diagram_visible = false;
             picker.map_attempt_id = None;
             picker.detail_scroll = 0;
-            picker.raw = false;
+            picker.text_view = crate::app::StudyContextTextView::Summary;
         });
         true
     }

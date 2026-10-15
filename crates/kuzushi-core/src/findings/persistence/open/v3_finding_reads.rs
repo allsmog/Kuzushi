@@ -81,7 +81,7 @@ const LATEST_FINDING_PROJECTION_SQL: &str = concat!(
     latest_observation_ranking_cte!(),
     r#", merged_sources as (
     select observations.stable_key,
-           json_group_array(json(source.value)) as sources_json
+           json_group_array(json(source.value) order by observations.created_seq asc, source.key asc) as sources_json
       from observations
       join json_each(observations.finding_json, '$.sources') as source
      group by observations.stable_key
@@ -383,6 +383,54 @@ fn severity_rank(severity: Severity) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merged_source_history_follows_ledger_order_with_equal_timestamps_and_reversed_run_names() {
+        for reverse in [false, true] {
+            let store = FindingStore::open_in_memory().unwrap();
+            store
+                .conn
+                .pragma_update(None, "reverse_unordered_selects", reverse)
+                .unwrap();
+            let mut finding = Finding::new_tool(
+                "owned",
+                "repeat",
+                "note.md",
+                1,
+                None,
+                Severity::Low,
+                "Repeated inert observation",
+            );
+            finding.created_at = "1000".into();
+            for run in ["run-z", "run-m", "run-a"] {
+                store
+                    .record_run_started(run, Path::new("."), "running")
+                    .unwrap();
+                store.insert_finding(run, &finding).unwrap();
+                store.record_run_finished(run, "completed", 1).unwrap();
+            }
+            let projected = store.list_all_findings().unwrap();
+            assert_eq!(projected.len(), 1);
+            assert_eq!(projected[0].sources.len(), 1);
+            assert_eq!(projected[0].sources[0].first_scan_id, "run-z");
+            assert_eq!(projected[0].sources[0].last_scan_id, "run-a");
+            assert_eq!(projected[0].sources[0].first_seen_at, "1000");
+            assert_eq!(projected[0].sources[0].last_seen_at, "1000");
+            for run in ["run-z", "run-m", "run-a"] {
+                let raw: String = store
+                    .conn
+                    .query_row(
+                        "select finding_json from finding_observations where run_id=?1",
+                        [run],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let raw: Finding = serde_json::from_str(&raw).unwrap();
+                assert_eq!(raw.sources[0].first_scan_id, run);
+                assert_eq!(raw.sources[0].last_scan_id, run);
+            }
+        }
+    }
 
     /// The per-insert point lookups must be index searches, not full-table
     /// json_extract scans (the measured ~40 ms/row import cost).

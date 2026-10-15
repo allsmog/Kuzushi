@@ -1,17 +1,4 @@
 use super::*;
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
-
-const TRIAGE_RUNTIME_CACHE_CAPACITY: usize = 4096;
-
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
-struct TriageRuntimeCacheKey {
-    model: String,
-    cwd: String,
-    fingerprint: String,
-    prompt_hash: String,
-}
-
 #[derive(Clone)]
 pub(in crate::modules) struct TriageRuntimeOutcome {
     pub(in crate::modules) outcome: TriageOutcome,
@@ -21,38 +8,6 @@ pub(in crate::modules) struct TriageRuntimeOutcome {
     /// for the standard single-shot path and for inherited duplicates.
     pub(in crate::modules) evidence: Vec<crate::capabilities::deep_auditor::EvidenceCitation>,
 }
-
-#[derive(Default)]
-struct TriageRuntimeCache {
-    entries: BTreeMap<TriageRuntimeCacheKey, TriageOutcome>,
-    order: VecDeque<TriageRuntimeCacheKey>,
-}
-
-impl TriageRuntimeCache {
-    fn get(&self, key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
-        self.entries.get(key).cloned()
-    }
-
-    fn insert(&mut self, key: TriageRuntimeCacheKey, outcome: TriageOutcome) {
-        if !self.entries.contains_key(&key) {
-            self.order.push_back(key.clone());
-        }
-        self.entries.insert(key, outcome);
-        self.evict_oldest();
-    }
-
-    fn evict_oldest(&mut self) {
-        while self.entries.len() > TRIAGE_RUNTIME_CACHE_CAPACITY {
-            if let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
-            } else {
-                break;
-            }
-        }
-    }
-}
-
-static TRIAGE_RUNTIME_CACHE: OnceLock<Mutex<TriageRuntimeCache>> = OnceLock::new();
 
 pub(in crate::modules) fn triage_cost_cap_reached(
     cost_cap_usd: Option<f64>,
@@ -75,19 +30,21 @@ pub(in crate::modules) fn call_triage_runtime(
         finding: finding.clone(),
         prompt_template: triage_prompt_with_grounding(input, finding),
     };
-    let key = triage_runtime_cache_key(&request);
-    if !input.retriage {
-        if let Some(outcome) = cached_triage_outcome(&key) {
-            return Ok(TriageRuntimeOutcome {
-                outcome,
-                cached: true,
-                failed_vote_summaries: Vec::new(),
-                evidence: Vec::new(),
-            });
-        }
+    let key = runtime_cache::key(
+        &request,
+        config.source_snapshot.as_deref(),
+        runtime.triage_semantic_cache_identity(&request),
+    )?;
+    if let Some(outcome) = runtime_cache::reusable_outcome(key.as_ref(), input.retriage) {
+        return Ok(TriageRuntimeOutcome {
+            outcome,
+            cached: true,
+            failed_vote_summaries: Vec::new(),
+            evidence: Vec::new(),
+        });
     }
     let outcome = crate::runtime::triage_finding_blocking_checked(runtime, request)?;
-    cache_triage_outcome(key, outcome.clone());
+    runtime_cache::remember(key, outcome.clone());
     Ok(TriageRuntimeOutcome {
         outcome,
         cached: false,
@@ -157,53 +114,6 @@ pub(in crate::modules) fn reviewed_refutation_prompt_note(
         .map(crate::findings::ReviewedRefutationPrior::prompt_note)
 }
 
-fn cached_triage_outcome(key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
-    let cache = TRIAGE_RUNTIME_CACHE.get_or_init(|| Mutex::new(TriageRuntimeCache::default()));
-    let guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
-    guard.get(key)
-}
-
-fn cache_triage_outcome(key: TriageRuntimeCacheKey, outcome: TriageOutcome) {
-    let cache = TRIAGE_RUNTIME_CACHE.get_or_init(|| Mutex::new(TriageRuntimeCache::default()));
-    let mut guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
-    guard.insert(key, outcome);
-}
-
-fn triage_runtime_cache_key(request: &TriageRequest) -> TriageRuntimeCacheKey {
-    TriageRuntimeCacheKey {
-        model: request.model.clone(),
-        cwd: request.cwd.display().to_string(),
-        fingerprint: request.finding.fingerprint.clone(),
-        prompt_hash: triage_runtime_prompt_hash(request),
-    }
-}
-
-fn triage_runtime_prompt_hash(request: &TriageRequest) -> String {
-    stable_triage_prompt_hash(&[
-        request.prompt_template.as_deref().unwrap_or(""),
-        &request.finding.fingerprint,
-        &request.finding.title,
-        &request.finding.file_path,
-    ])
-}
-
-fn stable_triage_prompt_hash(parts: &[&str]) -> String {
-    let mut hash = 0xcbf29ce484222325u64;
-    for part in parts {
-        hash = fnv1a_update(hash, part.as_bytes());
-        hash = fnv1a_update(hash, &[0xff]);
-    }
-    format!("fnv1a64:{hash:016x}")
-}
-
-fn fnv1a_update(mut hash: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
 pub(in crate::modules) fn persist_triage_outcome(
     store: &FindingStore,
     stats: &mut TriageRunStats,
@@ -225,12 +135,12 @@ pub(in crate::modules) fn persist_triage_outcome(
         Ok(updated) if updated > 0 => {
             crate::capabilities::deep_auditor::record_evidence(store, finding_id, &evidence)?;
             if cached {
-                stats.record_cached_outcome(finding, outcome);
+                stats.record_cached_outcome(finding, outcome)?;
             } else {
                 stats.record_persisted_outcome(finding, outcome)?;
             }
         }
-        Ok(_) => stats.record_persistence_error(&finding, &outcome, cached)?,
+        Ok(_) => stats.record_policy_kept_outcome(finding, outcome, cached)?,
         Err(error) => {
             record_triage_persistence_diagnostic(&finding, &error);
             stats.record_persistence_error(&finding, &outcome, cached)?;
@@ -271,9 +181,11 @@ pub(in crate::modules) fn propagate_duplicate_outcome(
     };
     match record_triage_for_policy(store, &finding, &inherited, reconcile) {
         Ok(updated) if updated > 0 => {
-            stats.record_duplicate_outcome(finding, inherited, representative_fingerprint);
+            stats.record_duplicate_outcome(finding, inherited, representative_fingerprint, true);
         }
-        Ok(_) => stats.record_duplicate_persistence_error(&finding, representative_fingerprint),
+        Ok(_) => {
+            stats.record_duplicate_outcome(finding, inherited, representative_fingerprint, false);
+        }
         Err(error) => {
             record_triage_persistence_diagnostic(&finding, &error);
             stats.record_duplicate_persistence_error(&finding, representative_fingerprint);
@@ -300,6 +212,7 @@ fn record_triage_for_policy(
 
 pub(in crate::modules) fn high_confidence_false_positive(result: &Value) -> bool {
     result.get("verdict").and_then(Value::as_str) == Some("false_positive")
+        && result.get("decisionApplied").and_then(Value::as_bool) != Some(false)
         && result
             .get("confidence")
             .and_then(Value::as_f64)
@@ -384,6 +297,7 @@ fn triage_response_data(
         "failed": stats.failed,
         "voteFailures": stats.vote_failures,
         "persistenceFailures": stats.persistence_failures,
+        "unappliedOpinions": stats.unapplied_opinions,
         "errorSummaries": stats.error_summaries,
         "failures": stats.failure_details,
         "failureDetailsOmitted": stats.failure_details_omitted,
@@ -426,6 +340,7 @@ fn apply_triage_budget_fields(data: &mut Value, input: &TriageRunInput, stats: &
 
 fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> Vec<String> {
     let mut warnings = triage_failure_warnings(stats);
+    warnings.extend(unapplied_opinion_notice(stats.unapplied_opinions));
     if stats.cost_cap_hit {
         warnings.push(cost_cap_warning(stats));
     }
@@ -447,13 +362,21 @@ fn unresolved_spend_warning(cost: crate::runtime::RuntimeCostReport) -> Option<S
     }
     Some(match cost.estimated_total_usd() {
         Some(estimate) => format!(
-            "Provider reported no charge; spend is estimated at ~${estimate:.4} from token usage and list prices."
+            "Provider cost is unavailable; spend is estimated at ~${estimate:.4} from token usage and list prices."
         ),
-        None => format!(
-            "Provider spend is unresolved; observed subtotal is ${:.4}.",
-            cost.observed_usd()
-        ),
+        None => unresolved_spend_description(cost.observed_usd()),
     })
+}
+
+fn unresolved_spend_description(observed: f64) -> String {
+    if observed == 0.0 {
+        return "Provider cost is unknown; no charge has been recorded.".to_string();
+    }
+    format!("Provider spend is unresolved; observed subtotal is ${observed:.4}.")
+}
+
+pub(in crate::modules) fn unapplied_opinion_notice(count: usize) -> Option<String> {
+    (count > 0).then(|| format!("{count} model opinion(s) retained without applying a review decision. Existing decisions remain authoritative."))
 }
 
 fn triage_failure_warnings(stats: &TriageRunStats) -> Vec<String> {

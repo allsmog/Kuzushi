@@ -15,18 +15,12 @@ pub(crate) fn find_option_spec<'a>(tool: &'a ToolDescriptor, name: &str) -> Opti
 }
 
 pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
-    let raw = raw.trim();
-    let value = raw_value_for_core_coercion(spec, raw)?;
-    kuzushi_core::modules::coerce_option_value(spec, value)
-}
-
-fn raw_value_for_core_coercion(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
     if spec.option_type == OptionType::Json {
         anyhow::bail!(
             "this setting comes from its workflow and cannot be edited here; use the owning workflow or a file option"
         );
     }
-    Ok(serde_json::Value::String(raw.to_string()))
+    kuzushi_core::modules::coerce_option_text(spec, raw)
 }
 
 pub(crate) fn option_is_operator_editable(spec: &OptionSpec) -> bool {

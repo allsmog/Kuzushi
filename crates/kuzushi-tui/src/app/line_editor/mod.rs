@@ -20,6 +20,7 @@ use crate::commands::shell_command_specs;
 use kuzushi_core::SUPPORTED_ATTACHMENT_MODULES;
 use std::collections::BTreeSet;
 use std::fs;
+mod option_setting_completion;
 mod primary_completion_values;
 #[cfg(test)]
 mod tests;

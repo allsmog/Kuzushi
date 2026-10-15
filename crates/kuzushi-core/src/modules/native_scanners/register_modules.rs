@@ -1,5 +1,7 @@
 use super::*;
 
+#[cfg(test)]
+use super::cargo_audit_module::cargo_audit_output;
 use crate::modules::registry::ToolExecutor;
 
 pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry, executor: ToolExecutor) {
@@ -48,18 +50,25 @@ pub(in crate::modules) fn run_semgrep_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    let scanner = SemgrepScanner::from_tool_input(&input)?;
+    let scanner = crate::scan::ConfiguredSemgrepScanner::from_tool_input(&input)?;
     if let Err(error) = scanner.preflight() {
         return Ok(failed_tool_output("semgrep:scan", &target, error));
     }
-    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "semgrep:scan", &target, || {
-        run_started_semgrep_scan(&target, &scanner, &input, ctx)
-    })
+    let result = crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "semgrep:scan",
+        &target,
+        || run_started_semgrep_scan(&target, &scanner, &input, ctx),
+    )?;
+    Ok(with_inspection_receipts(
+        result,
+        scanner.inspection_receipts(),
+    ))
 }
 
 fn run_started_semgrep_scan(
     target: &Path,
-    scanner: &SemgrepScanner,
+    scanner: &crate::scan::ConfiguredSemgrepScanner,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
@@ -155,8 +164,9 @@ fn persist_and_report_codeql_scan(
     let ScanEngineOutput {
         findings,
         codeql_sarif_documents,
-        scan_errors,
+        mut scan_errors,
     } = output;
+    scan_errors.push("CodeQL query observations require independent review; selected queries do not establish complete repository coverage or finding validity".into());
     emit_scan_coverage_gaps(ctx, "codeql", &scan_errors);
     let persisted = persist_codeql_findings(
         target,
@@ -175,7 +185,7 @@ fn persist_and_report_codeql_scan(
     )
 }
 
-fn emit_scan_start(ctx: &ToolExecutionContext<'_>, scanner: &str, target: &Path) {
+pub(super) fn emit_scan_start(ctx: &ToolExecutionContext<'_>, scanner: &str, target: &Path) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -187,7 +197,7 @@ fn emit_scan_start(ctx: &ToolExecutionContext<'_>, scanner: &str, target: &Path)
     }
 }
 
-fn emit_scan_done(ctx: &ToolExecutionContext<'_>, scanner: &str, findings: usize) {
+pub(super) fn emit_scan_done(ctx: &ToolExecutionContext<'_>, scanner: &str, findings: usize) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -204,18 +214,33 @@ pub(in crate::modules) fn run_iac_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "iac-scan:scan", &target, || {
+        run_started_iac_scan(&target, &input, ctx)
+    })
+}
+
+fn run_started_iac_scan(
+    target: &Path,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
     emit_scan_start(ctx, "iac-scan", &target);
     let options = IacScanOptions::from_tool_input(&input)?;
-    let report = match ctx.with_cancellation(|cancel| scan_iac(&target, &options, cancel)) {
+    let mut report = match ctx.with_cancellation(|cancel| scan_iac(&target, &options, cancel)) {
         Ok(report) => report,
         Err(error) => return Ok(failed_tool_output("iac-scan:scan", &target, error)),
     };
+    rebase_iac_report(&mut report, target, ctx)?;
     let findings = report
         .findings
         .iter()
         .map(|finding| finding.to_core_finding())
         .collect::<Vec<_>>();
-    let persisted = persist_iac_findings(&target, &findings, ctx)?;
+    let persisted = persist_iac_findings_with_coverage(
+        &findings,
+        ctx,
+        &report.coverage_gaps.scan_error_lines(),
+    )?;
     emit_scan_done(ctx, "iac-scan", findings.len());
     let mut output = report.to_tool_json();
     output["data"]["coreFindings"] = json!(findings);
@@ -225,20 +250,21 @@ pub(in crate::modules) fn run_iac_scan(
     Ok(output)
 }
 
-pub(in crate::modules) fn run_cargo_audit_scan(
-    input: Value,
+fn rebase_iac_report(
+    report: &mut crate::iac_scan::IacScanReport,
+    target: &Path,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    emit_scan_start(ctx, "cargo-audit", &target);
-    let scanner = CargoAuditScanner;
-    let findings = match ctx.with_cancellation(|cancel| scanner.scan(&target, cancel)) {
-        Ok(findings) => findings,
-        Err(error) => return Ok(failed_tool_output("cargo-audit:scan", &target, error)),
+) -> Result<()> {
+    let Some(workspace) = ctx.workspace else {
+        return Ok(());
     };
-    let persisted = persist_iac_findings(&target, &findings, ctx)?;
-    emit_scan_done(ctx, "cargo-audit", findings.len());
-    Ok(cargo_audit_output(&target, findings, persisted))
+    let prefix = target
+        .strip_prefix(workspace.root())
+        .context("IaC discovery target must stay inside its workspace")?;
+    for finding in &mut report.findings {
+        finding.rebase_path(prefix);
+    }
+    Ok(())
 }
 
 pub(in crate::modules) fn run_govulncheck_scan(
@@ -275,28 +301,7 @@ fn govulncheck_output(target: &Path, findings: Vec<Finding>, persisted: Option<V
 
 fn govulncheck_summary(target: &Path, count: usize) -> String {
     format!(
-        "govulncheck: {count} reachable vulnerability finding{} under {}",
-        if count == 1 { "" } else { "s" },
-        target.display()
-    )
-}
-
-fn cargo_audit_output(target: &Path, findings: Vec<Finding>, persisted: Option<Value>) -> Value {
-    crate::scan::completed_scan_tool_json(
-        cargo_audit_summary(target, findings.len()),
-        json!({
-            "target": target.display().to_string(),
-            "count": findings.len(),
-            "coreFindings": findings,
-            "findings": findings,
-            "persisted": persisted,
-        }),
-    )
-}
-
-fn cargo_audit_summary(target: &Path, count: usize) -> String {
-    format!(
-        "cargo-audit: {count} advisory finding{} under {}",
+        "govulncheck: {count} advisory signal{} under {}; source loading, network and coverage remain experimental",
         if count == 1 { "" } else { "s" },
         target.display()
     )
@@ -306,17 +311,7 @@ pub(in crate::modules) fn run_sbom_scan(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let target = resolve_tool_target(&input, ctx)?;
-    emit_scan_start(ctx, "sbom-scan", &target);
-    let report = match ctx.with_cancellation(|cancel| scan_sbom(&target, cancel)) {
-        Ok(report) => report,
-        Err(error) => {
-            let detail = anyhow::anyhow!("{error:#}");
-            return Ok(failed_tool_output("sbom-scan:scan", &target, detail));
-        }
-    };
-    emit_scan_done(ctx, "sbom-scan", report.components.len());
-    Ok(report.to_tool_json())
+    super::sbom::execute(input, ctx)
 }
 
 pub(in crate::modules) fn run_license_scan(
@@ -325,19 +320,31 @@ pub(in crate::modules) fn run_license_scan(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let options = license_scan_options_from_input(&input)?;
-    crate::workspace::source_snapshot::run_source_bound_tool(ctx, "license-scan:scan", &target, || {
-        run_started_license_scan(&target, options, ctx)
-    })
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "license-scan:scan",
+        &target,
+        || run_started_license_scan(&target, options, ctx),
+    )
 }
 
-fn run_started_license_scan(target: &Path, options: LicenseScanOptions, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+fn run_started_license_scan(
+    target: &Path,
+    options: LicenseScanOptions,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
     emit_scan_start(ctx, "license-scan", target);
-    let report = match ctx
-        .with_cancellation(|cancel| scan_licenses_with_options(target, cancel, options))
-    {
-        Ok(report) => report,
-        Err(error) => return Ok(failed_tool_output("license-scan:scan", target, anyhow::anyhow!("{error:#}"))),
-    };
+    let report =
+        match ctx.with_cancellation(|cancel| scan_licenses_with_options(target, cancel, options)) {
+            Ok(report) => report,
+            Err(error) => {
+                return Ok(failed_tool_output(
+                    "license-scan:scan",
+                    target,
+                    anyhow::anyhow!("{error:#}"),
+                ))
+            }
+        };
     let findings = report
         .findings
         .iter()

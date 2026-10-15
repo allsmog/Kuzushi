@@ -1,0 +1,53 @@
+name: Git index cache writes preserve Map while actual staged source stays visibly stale
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/index_freshness.py @TMP_TARGET @ART seed @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET/repository
+submit: setup
+require-live-snap: 30 SETUP · READY THE MAP RUN | setup
+keys: Down Down Down Down Down Down Down
+keys: Enter
+require-live-snap: 30 RESULT READY | actual-map
+nav-mode:
+keys: u
+submit: modules
+type: operator source draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/index_freshness.py @TMP_TARGET @ART cache
+wait: 3
+live-snap: cache-write-settled
+expect: operator source draft
+expect-not: workspace:stale
+ask: Does a proven cache-only index rewrite keep the same Map, selected surface and unsent draft without a stale-inventory alarm or new work?
+require-shell: python3 -B @REPO/scripts/devex/fixtures/index_freshness.py @TMP_TARGET @ART stage
+require-live-snap: 25 workspace:stale inventory | real-index-change
+expect: operator source draft
+keys: Escape
+resize: 160x48
+require-live-snap: 20 workspace:stale inventory | stale-source-160x48
+resize: 96x89
+require-live-snap: 20 workspace:stale inventory | stale-source-96x89
+resize: 80x24
+require-live-snap: 20 workspace:stale inventory | stale-source-80x24
+resize: 60x20
+require-live-snap: 20 ⚠ stale | stale-source-60x20
+resize: 40x12
+require-live-snap: 20 ⚠ stale | stale-source-40x12
+ask: Is the real source change visible without advancing the journey, accepting new context or taking over input at the tested terminal sizes?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/index_freshness.py @TMP_TARGET @ART screens
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET/repository
+submit: map
+wait: 2
+live-snap: stale-map-restart
+require-shell: python3 -B @REPO/scripts/devex/fixtures/index_freshness.py @TMP_TARGET @ART verify
+keys: Escape
+keys: C-c
+require-live-snap: 10 y/Y exit | protected-plan-exit
+keys: y
+require-exit: 10

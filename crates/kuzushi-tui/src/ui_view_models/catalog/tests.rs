@@ -2,6 +2,54 @@ use super::*;
 use kuzushi_core::{Finding, Severity, V2Config};
 use std::path::PathBuf;
 
+fn semgrep_readiness_app() -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(PathBuf::from(".")));
+    app
+}
+
+fn semgrep_readiness(app: &ShellApp) -> readiness::CatalogReadiness {
+    readiness::action_readiness(app, SCAN_EXPERT_ACTIONS[0])
+}
+
+#[test]
+fn catalog_dependency_results_bind_to_canonical_options_and_never_claim_execution_readiness() {
+    use crate::app::{ViewHydrationResult, ViewHydrationValue};
+    use kuzushi_core::{OptionScope, OptionTarget};
+    let mut app = semgrep_readiness_app();
+    let selected = semgrep_readiness(&app);
+    assert_eq!(selected.label, "CHECKING DEPENDENCIES");
+    let key = app
+        .workbench_cache()
+        .borrow()
+        .executable_options_key(selected.executables);
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: PathBuf::from("."),
+            key: key.clone(),
+            value: ViewHydrationValue::ExecutableOptions(vec!["binary".into()]),
+        });
+    assert_eq!(semgrep_readiness(&app).label, "DEPENDENCY MISSING");
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(ViewHydrationResult {
+            target: PathBuf::from("."),
+            key,
+            value: ViewHydrationValue::ExecutableOptions(Vec::new()),
+        });
+    assert_eq!(semgrep_readiness(&app).label, "REVIEW INPUTS");
+    app.option_store_mut().set_value(
+        OptionScope::Session,
+        OptionTarget::Tool("semgrep:scan".into()),
+        "binary",
+        serde_json::json!("/missing/changed"),
+    );
+    let selected = semgrep_readiness(&app);
+    assert_eq!(selected.label, "CHECKING DEPENDENCIES");
+    assert_eq!(selected.executables[0].command, "/missing/changed");
+}
+
 #[test]
 fn catalog_collapsed_model_steers_context_then_findings() {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -334,7 +382,7 @@ fn expert_toggle_keeps_default_surface_small_and_reveals_engines() {
 #[test]
 fn registered_internal_or_labs_tools_are_not_guided_capability_actions() {
     let app = ShellApp::new(V2Config::default(), None);
-    for tool in ["fuzz:status", "carlini-threat-hunt:run"] {
+    for tool in ["fuzz:status", "carlini-threat-hunt:run", "x-ray:run"] {
         assert!(app.registry().resolve_tool(tool).is_some());
         let spec = CapabilityActionSpec {
             id: "fixture",

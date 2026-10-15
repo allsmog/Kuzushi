@@ -266,6 +266,40 @@ fn status_footer_shows_workspace_stale_chip_from_watcher_changes() {
         stale.strongest_plan(),
         ReindexPlan::FileFactsAndLocalAttackSurface
     );
+    assert!(model
+        .compact_left_segments
+        .iter()
+        .any(|segment| segment.contains("⚠ stale")));
+}
+
+#[test]
+fn dirty_history_requests_source_check_without_inventing_inventory_changes() {
+    let (_root, mut app) = setup_fixture();
+    app.domain_mut().set_returning_source_unverified(true);
+    let model = status_footer_model(&app);
+    assert!(model.left_segments.contains(&"history:check source".into()));
+    assert!(model
+        .compact_left_segments
+        .iter()
+        .any(|s| s.contains("source check")));
+    assert!(app.workspace_stale().is_none());
+    assert!(app.workspace_pending_changes().is_empty());
+
+    app.apply_workspace_changes(&[WorkspaceChange::GitIndexChanged]);
+    let model = status_footer_model(&app);
+    assert!(model
+        .left_segments
+        .contains(&"workspace:stale inventory".into()));
+    assert!(!model.left_segments.contains(&"history:check source".into()));
+    assert!(model
+        .compact_left_segments
+        .iter()
+        .any(|s| s.contains("⚠ stale")));
+    let next_root = tempfile::tempdir().unwrap();
+    let next = kuzushi_core::WorkspaceTarget::new(next_root.path()).unwrap();
+    app.domain_mut().reset_for_target(&next);
+    assert!(!app.domain().returning_source_unverified());
+    assert!(app.workspace_stale().is_none());
 }
 
 #[test]

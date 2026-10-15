@@ -121,12 +121,14 @@ impl ShellApp {
         if state.abort_requested {
             return self.apply_aborted_agent_failure(error, audit, state);
         }
-        self.set_error_notice("ask", message);
-        self.set_agent_terminal_activity(
-            state.auxiliary_read_only,
-            LiveActivityPhase::Refused,
-            &safe_error,
-        );
+        let phase = if audit.refused_before_provider_request() {
+            self.set_warn_notice("ask", message);
+            LiveActivityPhase::Refused
+        } else {
+            self.set_error_notice("ask", message);
+            LiveActivityPhase::Failed
+        };
+        self.set_agent_terminal_activity(state.auxiliary_read_only, phase, &safe_error);
         self.agent_failure_record(safe_error, audit, state)
     }
 
@@ -180,6 +182,7 @@ impl ShellApp {
         match phase {
             LiveActivityPhase::Completed => self.set_completed_activity("agent", detail),
             LiveActivityPhase::Refused => self.set_refused_activity_state("agent", detail),
+            LiveActivityPhase::Failed => self.set_failed_activity("agent", detail),
             _ => {}
         }
     }
@@ -224,12 +227,17 @@ impl ShellApp {
         let Some(run_id) = state.run_id else {
             return Vec::new();
         };
+        let outcome = if audit.refused_before_provider_request() {
+            AgentRunOutcome::Blocked { reason: error }
+        } else {
+            AgentRunOutcome::Failed { error }
+        };
         vec![ShellEffect::RecordAgentRun(AgentRunRecord {
             target: state.artifact_target,
             run_id,
             latency_ms: state.latency_ms,
             audit,
-            outcome: AgentRunOutcome::Failed { error },
+            outcome,
             auxiliary_read_only: state.auxiliary_read_only,
         })]
     }
@@ -261,6 +269,12 @@ impl ShellApp {
                 record_agent_trace_success(&record, *answer_chars)
             }
             AgentRunOutcome::Failed { error } => record_agent_trace_failure(&record, error),
+            AgentRunOutcome::Blocked { reason } => record_agent_run_blocked(
+                record.target.as_deref(),
+                &record.run_id,
+                reason,
+                &record.audit,
+            ),
             AgentRunOutcome::Canceled { reason } => record_agent_trace_canceled(&record, reason),
         };
         if let Err(error) = persistence {

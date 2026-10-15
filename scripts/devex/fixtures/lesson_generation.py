@@ -62,7 +62,8 @@ def verify(root, evidence, stage):
     assert allowance["allowance"]["committedCalls"] == 1
     assert allowance["allowance"]["limits"]["protectedReviewCalls"] == 1
     assert allowance["dollarCeilingEnforced"] is False
-    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=rw", uri=True) as db:
+        db.execute("PRAGMA query_only=ON")
         assert db.execute("select count(*) from finding_observations").fetchone()[0] == 1
         assert db.execute("select count(*) from review_decisions").fetchone()[0] == 1
     assert hashlib.sha256((root / "hello.txt").read_bytes()).hexdigest() == (evidence / "source-before.sha256").read_text()

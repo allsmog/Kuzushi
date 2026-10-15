@@ -136,7 +136,7 @@ impl ShellApp {
             None => self.default_tool_for_run_command().or_else(|| {
                 self.log(
                     "error",
-                    "run needs a tool, focused module, or loaded sast:scan. Next: modules or run <tool>",
+                    "Choose an exact tool with run <module:action>. Inspect the focused module's tools and support labels before starting work.",
                 );
                 None
             })?,

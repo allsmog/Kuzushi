@@ -115,7 +115,7 @@ impl<'a> PhaseReceiptBuilder<'a> {
         if self.status == RunItemStatus::Blocked {
             return Ok(inspect_continuation(
                 self.final_run()?,
-                "inspect the policy refusal, adjust the autonomy posture or input, then retry",
+                "inspect why work was blocked, address the stated requirement, then retry",
             ));
         }
         let remediation = self.terminal_remediation();
@@ -370,10 +370,8 @@ fn map_rebuild_reason(
                 "rebuild the current-revision map context after inspecting the partial evidence"
                     .to_string()
             }
-            _ => {
-                "rebuild the current-revision map context after inspecting the failure evidence"
-                    .to_string()
-            }
+            _ => "rebuild the current-revision map context after inspecting the failure evidence"
+                .to_string(),
         },
         |found| {
             format!(

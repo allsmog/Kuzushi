@@ -53,6 +53,16 @@ fn project_model_origin_labels_are_stable() {
 }
 
 #[test]
+fn a_component_only_diagram_is_present_and_does_not_claim_data_flows() {
+    let document = serde_json::json!({"dfd":{"nodes":[{"id":"metadata","name":"Declared metadata","type":"data-store"}],"flows":[]}});
+    let model = crate::ui_view_models::viz_data::dfd_model_from_doc(Some(&document), None);
+    let row = dfd_row(&model);
+    assert_eq!(row.origin, ProjectModelOrigin::Local);
+    assert_eq!(row.state, "components only");
+    assert!(row.summary.contains("1 nodes · 0 flows"));
+}
+
+#[test]
 fn project_model_aggregates_context_threat_dfd_and_findings() {
     let temp = tempfile::tempdir().unwrap();
     crate::test_support::write_current_context_snapshot(

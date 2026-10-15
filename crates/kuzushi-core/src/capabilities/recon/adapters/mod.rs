@@ -6,7 +6,10 @@ mod subdomain;
 mod tool;
 
 pub(crate) use http_fingerprint::{HttpFingerprintInput, ReconHttpFingerprinter};
-pub(crate) use input::{optional_string, optional_u64, required_path, required_string};
+pub(crate) use input::{
+    checked_recon_domain, checked_recon_ports, optional_string, recon_timeout, required_path,
+    required_string,
+};
 pub(crate) use nmap::{NmapInput, ReconNmapScanner};
 pub(crate) use process::run_subprocess;
 pub(crate) use subdomain::{ReconSubdomainEnumerator, SubdomainInput};
@@ -16,8 +19,8 @@ use crate::capabilities::recon::application::{
     run_recon_http_fingerprint, run_recon_nmap, run_recon_subdomain,
 };
 use crate::capabilities::recon::domain::{
-    parse_crtsh_subdomains, parse_http_fingerprint, parse_nmap_grepable,
-    parse_wayback_subdomains, plural, HttpFingerprint, NmapParseResult, ReconReport,
+    parse_crtsh_subdomains, parse_http_fingerprint, parse_nmap_grepable, parse_wayback_subdomains,
+    plural, HttpFingerprint, NmapParseResult, ReconReport,
 };
 use crate::modules::ToolExecutionContext;
 use crate::scan::ScanCancellation;

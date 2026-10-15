@@ -1,6 +1,38 @@
 use super::*;
 
 impl SastTaskSelection {
+    pub(in crate::modules) fn configure_cargo_audit(&mut self, input: &Value) -> Result<()> {
+        let options = crate::modules::native_scanners::cargo_audit_settings(input);
+        let selected = self
+            .scanners
+            .iter()
+            .any(|scanner| scanner.id() == "cargo-audit");
+        anyhow::ensure!(options.as_object().unwrap().is_empty() || selected, "Cargo audit options require the cargo-audit task. Clear them or select that task explicitly.");
+        for scanner in &mut self.scanners {
+            if scanner.id() == "cargo-audit" {
+                *scanner = Box::new(
+                    crate::dep_hygiene::ConfiguredCargoAuditScanner::from_tool_input(&options)?,
+                );
+            }
+        }
+        Ok(())
+    }
+    pub(in crate::modules) fn configure_iac_scan(&mut self, input: &Value) -> Result<()> {
+        let settings = iac_scan_settings(input);
+        let selected = self
+            .scanners
+            .iter()
+            .any(|scanner| scanner.id() == "iac-scan");
+        anyhow::ensure!(settings.as_object().unwrap().is_empty() || selected, "IaC inspection options require the iac-scan task. Clear them or select that task explicitly.");
+        for scanner in &mut self.scanners {
+            if scanner.id() == "iac-scan" {
+                *scanner = Box::new(crate::iac_scan::ConfiguredIacScanScanner::new(
+                    crate::iac_scan::IacScanOptions::from_tool_input(&settings)?,
+                ));
+            }
+        }
+        Ok(())
+    }
     pub(in crate::modules) fn configure_secret_scan(&mut self, input: &Value) -> Result<()> {
         let settings = secret_scan_settings(input);
         let selected = self
@@ -19,17 +51,20 @@ impl SastTaskSelection {
         Ok(())
     }
     pub(in crate::modules) fn configure_semgrep(&mut self, input: &Value) -> Result<()> {
-        if input.get("semgrepConfig").is_none() && input.get("semgrepBinary").is_none() {
-            return Ok(());
-        }
+        let options = semgrep_settings(input);
+        let selected = self
+            .scanners
+            .iter()
+            .any(|scanner| scanner.id() == "semgrep");
+        anyhow::ensure!(
+            options.as_object().unwrap().is_empty() || selected,
+            "Semgrep options require the semgrep task. Clear them or select that task explicitly."
+        );
         for scanner in &mut self.scanners {
             if scanner.id() == "semgrep" {
-                let options = json!({
-                    "config": input.get("semgrepConfig").cloned().unwrap_or(Value::Null),
-                    "binary": input.get("semgrepBinary").cloned().unwrap_or(Value::Null),
-                });
-                let options = semgrep_non_null_options(options);
-                *scanner = Box::new(crate::scan::SemgrepScanner::from_tool_input(&options)?);
+                *scanner = Box::new(crate::scan::ConfiguredSemgrepScanner::from_tool_input(
+                    &options,
+                )?);
             }
         }
         Ok(())
@@ -106,7 +141,7 @@ impl SastTaskSelection {
         options: &SastScanOptions,
         ctx: &ToolExecutionContext<'_>,
     ) -> Result<Option<NativeScanReport>> {
-        self.ensure_explicit_native_prerequisites(workspace)?;
+        self.ensure_explicit_native_prerequisites(workspace, options)?;
         if self.scanners.is_empty() {
             Ok(None)
         } else {
@@ -136,16 +171,20 @@ impl SastTaskSelection {
     fn ensure_explicit_native_prerequisites(
         &self,
         workspace: &crate::workspace::WorkspaceTarget,
+        options: &SastScanOptions,
     ) -> Result<()> {
-        if self.explicit_native_selection
-            && self.engine_ids.contains(&"cargo-audit")
-            && !workspace.root().join("Cargo.lock").is_file()
-        {
+        if self.root_lockfile_required(options) && !workspace.root().join("Cargo.lock").is_file() {
             anyhow::bail!(
                 "cargo-audit was explicitly requested, but the target has no Cargo.lock. Run `cargo generate-lockfile` in the target, then rerun the scan"
             );
         }
         Ok(())
+    }
+
+    fn root_lockfile_required(&self, options: &SastScanOptions) -> bool {
+        self.explicit_native_selection
+            && self.engine_ids.contains(&"cargo-audit")
+            && options.run.paths.is_empty()
     }
 }
 
@@ -164,11 +203,33 @@ fn secret_scan_settings(input: &Value) -> Value {
     Value::Object(settings)
 }
 
-fn semgrep_non_null_options(mut input: Value) -> Value {
-    if let Some(options) = input.as_object_mut() {
-        options.retain(|_, value| !value.is_null());
+fn iac_scan_settings(input: &Value) -> Value {
+    let mut settings = serde_json::Map::new();
+    for (parent, child) in [
+        ("iacScanMaxFileBytes", "maxFileBytes"),
+        ("iacScanMaxEntries", "maxEntries"),
+        ("iacScanMaxTotalBytes", "maxTotalBytes"),
+    ] {
+        if let Some(value) = input.get(parent) {
+            settings.insert(child.into(), value.clone());
+        }
     }
-    input
+    Value::Object(settings)
+}
+
+fn semgrep_settings(input: &Value) -> Value {
+    let mut settings = serde_json::Map::new();
+    for (parent, child) in [
+        ("semgrepConfig", "config"),
+        ("semgrepBinary", "binary"),
+        ("semgrepJobs", "jobs"),
+        ("semgrepTimeoutMs", "timeoutMs"),
+    ] {
+        if let Some(value) = input.get(parent).filter(|value| !value.is_null()) {
+            settings.insert(child.into(), value.clone());
+        }
+    }
+    Value::Object(settings)
 }
 
 pub(in crate::modules) fn selected_native_scanners(

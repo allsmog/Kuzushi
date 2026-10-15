@@ -1,0 +1,56 @@
+name: A bounded advisory draft stays unaccepted and requires a separate explicit search
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_pattern.py seed @TMP_TARGET @ART @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_pattern.py before @TMP_TARGET @ART
+paste-file: @ART/command.txt
+keys: Enter
+require-live-snap: 20 descriptor-declared effect | draft-consent
+keys: y
+require-live-snap: 30 Advisory-pattern draft: unaccepted | draft-produced
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_pattern.py draft @TMP_TARGET @ART
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | draft-receipt
+expect: supplied diff excerpted
+ask: Does the draft receipt distinguish supplied context and omitted bytes from verified source, a confirmed finding or accepted future context?
+resize: 160x48
+live-snap: draft-160x48
+resize: 96x89
+live-snap: draft-96x89
+resize: 80x24
+live-snap: draft-80x24
+resize: 60x20
+live-snap: draft-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · partial | draft-40x12
+keys: NPage
+live-snap: draft-paged-40x12
+ask: Are unaccepted status, omitted source, unknown cost and paging readable through the six-size matrix without exposing a patching action?
+resize: 120x36
+paste-file: @ART/search.txt
+keys: Enter
+require-live-snap: 30 Advisory-guided observations: 0 findings | explicit-search
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_pattern.py search @TMP_TARGET @ART
+submit: findings
+require-live-snap: 20 Viewing Review | existing-review
+expect: Labeled greeting observation
+ask: Does the separately requested search preserve human truth and protected Review, with no automatic job or accepted lesson?
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 REVIEW || KUZUSHI | resumed
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · partial | recovered-draft
+require-shell: python3 -B @REPO/scripts/devex/fixtures/advisory_pattern.py restart @TMP_TARGET @ART
+ask: Does no-color restart retain the exact draft, omitted-byte receipt, decisions and allowance without another provider request?
+keys: C-c
+require-exit: 10

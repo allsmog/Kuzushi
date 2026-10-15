@@ -1,0 +1,56 @@
+name: Taint candidate discovery is experimental and missing model selection starts no analysis
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR KUZUSHI_SKIP_ONBOARDING
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_candidate.py @TMP_TARGET @ART prepare @TMP_HOME
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | ready
+submit: setg ui.auto_open_activity false
+submit: use taint-iris-next
+submit: run .
+submit: logs
+require-live-snap: 20 Choose an exact tool | explicit-choice
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_candidate.py @TMP_TARGET @ART before
+paste-file: @ART/command.txt
+keys: Enter
+submit: logs
+require-live-snap: 25 requires an explicit model | missing-model
+expect-not: Investigation allowance refused
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_candidate.py @TMP_TARGET @ART failed
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · blocked | blocked-receipt
+expect-not: Investigation allowance refused
+ask: Is this clearly discovery work, with an honest model-selection failure and no Review or Scan completion claimed?
+resize: 160x48
+live-snap: failure-160x48
+resize: 96x89
+live-snap: failure-96x89
+resize: 80x24
+live-snap: failure-80x24
+resize: 60x20
+live-snap: failure-60x20
+resize: 40x12
+require-live-snap: 20 Outcome · blocked | failure-40x12
+keys: NPage
+live-snap: failure-detail-40x12
+ask: Are failed outcome, the selected-action name and model recovery readable through paging at each size without hidden work or a fallback?
+resize: 120x36
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | quit
+keys: y
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 READY THE MAP RUN | restart-setup
+paste-file: @ART/replay.txt
+keys: Enter
+require-live-snap: 20 Outcome · blocked | recovered
+require-shell: python3 -B @REPO/scripts/devex/fixtures/taint_candidate.py @TMP_TARGET @ART restart
+ask: Does no-color restart preserve the failure and fresh Setup without another request, a substituted model or new phase progress?
+keys: C-c
+require-live-snap: 10 CONFIRM SESSION EXIT | restart-quit
+keys: y
+require-exit: 10

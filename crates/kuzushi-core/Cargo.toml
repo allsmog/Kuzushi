@@ -108,6 +108,9 @@ windows-sys = { version = "0.61", features = [
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 wat = "1.0"
 
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
 [[bench]]
 name = "sbom_inventory"
 harness = false

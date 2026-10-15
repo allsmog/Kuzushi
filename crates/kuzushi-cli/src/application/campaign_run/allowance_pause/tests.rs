@@ -1,7 +1,7 @@
 use super::*;
 use kuzushi_core::allowance::{
     AllowanceApprovalV1, AllowanceCall, AllowanceLimits, ApprovedWorkItem, ApprovedWorkPlanV1,
-    WorkAttempt,
+    InvestigationWork, WorkAttempt,
 };
 use serde_json::json;
 
@@ -215,4 +215,36 @@ async fn specific_revision_releases_parked_work_with_its_original_attempt_limit(
         (snapshot.committed_calls, snapshot.unresolved_calls),
         (1, 1)
     );
+}
+
+#[tokio::test]
+async fn approved_review_can_dispatch_using_its_protected_capacity() {
+    let mut fixture = Fixture::new(true);
+    let input = json!({"model":"openai-codex:gpt-5.5", "strategy":"standard"});
+    fixture.approval.expected_revision = 1;
+    let work = &mut fixture.approval.work_plan.as_mut().unwrap().jobs[0];
+    work.work_id = "pause:review-one".into();
+    work.tool = "triage:run".into();
+    work.input_sha256 = kuzushi_core::capabilities::campaign::work_input_digest(&input).unwrap();
+    fixture.ledger.approve_allowance(&fixture.approval).unwrap();
+    let mut bound = input;
+    bound["allowanceRef"] = json!({"schemaVersion":1,"investigationId":"bounded","revision":2,"workId":"pause:review-one"});
+    fixture.job.job_id = "review-one".into();
+    fixture.job.tool = "triage:run".into();
+    fixture.job.input_json = bound.to_string();
+    assert!(fixture
+        .dispatcher()
+        .next_job_for_dispatch()
+        .unwrap()
+        .is_some());
+    let snapshot = fixture.ledger.allowance_snapshot("bounded").unwrap();
+    assert_eq!(
+        (
+            snapshot.committed_calls,
+            snapshot.protected_review_remaining()
+        ),
+        (1, 1)
+    );
+    fixture.job.tool = "threat-model:build".into();
+    assert!(stop_reason(fixture.root.path(), "pause", &fixture.job).is_err());
 }

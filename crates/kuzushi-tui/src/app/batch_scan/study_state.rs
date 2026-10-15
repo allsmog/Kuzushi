@@ -6,6 +6,7 @@ pub(crate) struct StudyDraftState {
     pub(crate) investigation_id: String,
     pub(crate) campaign_id: Option<String>,
     pub(crate) receipt: Option<StudyPlanReceipt>,
+    pub(crate) review_receipt: Option<kuzushi_core::capabilities::campaign::ReviewStudyReceipt>,
     pub(crate) matrix: super::context_matrix::StudyContextMatrix,
     pub(crate) scope_draft: Option<kuzushi_core::capabilities::campaign::ScopeStudyDraft>,
     pub(crate) scope_receipt: Option<kuzushi_core::capabilities::campaign::ScopeStudyReceipt>,
@@ -29,6 +30,7 @@ impl Default for StudyDraftState {
             investigation_id: kuzushi_core::new_run_id("investigation"),
             campaign_id: None,
             receipt: None,
+            review_receipt: None,
             matrix: Default::default(),
             scope_draft: None,
             scope_receipt: None,
@@ -97,6 +99,7 @@ impl StudyDraftState {
     pub(crate) fn invalidate_plan(&mut self) {
         self.campaign_id = None;
         self.receipt = None;
+        self.review_receipt = None;
         self.matrix.receipt = None;
         self.scope_receipt = None;
         self.context_experiment = None;
@@ -121,6 +124,9 @@ impl StudyDraftState {
 
 impl StudyDraftState {
     pub(crate) fn plan_identity(&self) -> Option<(&str, &str, usize)> {
+        if let Some(receipt) = &self.review_receipt {
+            return Some((&receipt.campaign_id, &receipt.plan_sha256, 1));
+        }
         if let Some(receipt) = &self.scope_receipt {
             return Some((
                 &receipt.campaign_id,

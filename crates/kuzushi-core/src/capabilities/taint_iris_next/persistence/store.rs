@@ -5,6 +5,7 @@ pub(in crate::capabilities::taint_iris_next) fn persist_taint_iris_next_findings
     findings: &[Finding],
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<TaintIrisNextPersistedRun>> {
+    ensure_taint_discovery_active(ctx)?;
     let (Some(workspace), Some(store)) = (ctx.workspace, ctx.findings_store) else {
         return Ok(None);
     };
@@ -21,3 +22,6 @@ pub(in crate::capabilities::taint_iris_next) fn persist_taint_iris_next_findings
         findings_db: workspace.findings_db_path().display().to_string(),
     }))
 }
+
+#[cfg(test)]
+mod tests;

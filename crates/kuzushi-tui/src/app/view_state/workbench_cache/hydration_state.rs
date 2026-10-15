@@ -181,6 +181,9 @@ impl WorkbenchCache {
 
     fn status_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
+            ViewHydrationKey::ExecutableOptions { .. } => self
+                .cached_executable_options(target, key)
+                .is_not_requested(),
             ViewHydrationKey::HealthChecks { credential_env } => self
                 .cached_health_checks(Some(target), credential_env)
                 .is_not_requested(),
@@ -606,6 +609,15 @@ impl WorkbenchCache {
         );
     }
 
+    fn store_health_checks(&mut self, credential_env: String, state: ViewHealthChecks) {
+        insert_bounded(
+            &mut self.health_checks,
+            credential_env,
+            state,
+            MAX_STATUS_CACHE_ENTRIES,
+        );
+    }
+
     fn apply_status_hydration(
         &mut self,
         target: PathBuf,
@@ -614,16 +626,15 @@ impl WorkbenchCache {
     ) {
         match (key, value) {
             (
+                key @ ViewHydrationKey::ExecutableOptions { .. },
+                ViewHydrationValue::ExecutableOptions(missing),
+            ) => {
+                self.store_executable_options(target, key, missing);
+            }
+            (
                 ViewHydrationKey::HealthChecks { credential_env },
                 ViewHydrationValue::HealthChecks(state),
-            ) => {
-                insert_bounded(
-                    &mut self.health_checks,
-                    credential_env,
-                    state,
-                    MAX_STATUS_CACHE_ENTRIES,
-                );
-            }
+            ) => self.store_health_checks(credential_env, state),
             (ViewHydrationKey::MapArtifacts, ViewHydrationValue::MapArtifacts(built)) => {
                 self.map_artifacts.store(target, built);
             }
@@ -705,7 +716,8 @@ fn artifact_hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | Key::PathState { .. }
         | Key::DirectoryListing { .. }
         | Key::PromptOverrideHash { .. } => HydrationGroup::Workspace,
-        Key::HealthChecks { .. }
+        Key::ExecutableOptions { .. }
+        | Key::HealthChecks { .. }
         | Key::TargetProfile
         | Key::MapArtifacts
         | Key::CpgArtifacts

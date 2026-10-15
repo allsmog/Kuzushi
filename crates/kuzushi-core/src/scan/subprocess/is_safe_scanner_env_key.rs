@@ -37,8 +37,3 @@ pub(in crate::scan) fn is_credential_env_key(upper_key: &str) -> bool {
             .iter()
             .any(|fragment| upper_key.contains(fragment))
 }
-
-#[derive(Debug)]
-pub(in crate::scan) struct ProcessOutput {
-    pub(in crate::scan) stdout: Vec<u8>,
-}

@@ -57,6 +57,26 @@ fn comparison_preserves_complete_multiline_text_and_coverage_disclosure() {
 }
 
 #[test]
+fn malformed_comparison_is_disclosed_without_claiming_unchanged_text() {
+    for data in [
+        Value::Null,
+        serde_json::json!([]),
+        serde_json::json!("invalid"),
+        serde_json::json!(7),
+    ] {
+        let mut state = ContextHistoryState::new("/owned".into(), ShellView::Home);
+        state.begin(ContextHistoryRequest::Compare {
+            baseline: reference('1'),
+            candidate: reference('2'),
+        });
+        state.data = Some(std::sync::Arc::new(data));
+        let lines = history_detail_lines(&state, &empty_catalog("ready".into()), 40).join(" ");
+        assert!(lines.contains("Comparison result is invalid"), "{lines}");
+        assert!(!lines.contains("No editable text differs"), "{lines}");
+    }
+}
+
+#[test]
 fn inspection_keeps_the_captured_label_while_manifest_refresh_is_pending() {
     let mut state = ContextHistoryState::new("/owned".into(), ShellView::Home);
     state.selected = Some(reference('1'));

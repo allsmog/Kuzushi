@@ -44,3 +44,17 @@ fn unknown_legacy_inspection_has_a_rebuild_action_and_no_invented_counts() {
     assert!(text.contains("unknown") && text.contains("Rebuild context"));
     assert!(!text.contains("0 /"));
 }
+
+#[test]
+fn interrupted_enumeration_never_claims_a_filesystem_fallback() {
+    let mut value = receipt(ContextEnumeration::Interrupted);
+    value.entries = 0;
+    value.inspected_bytes = 0;
+    value.enumerated_files = 0;
+    value.sampled_files = 0;
+    let text = inspection_lines(Some(&value)).join("\n");
+    assert!(text.contains("canceled during Git path acquisition"));
+    assert!(text.contains("No source files were inspected"));
+    assert!(text.contains("Inventory: partial"));
+    assert!(!text.contains("bounded filesystem inventory"));
+}

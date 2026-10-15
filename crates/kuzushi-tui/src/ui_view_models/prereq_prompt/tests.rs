@@ -1,6 +1,18 @@
 use super::*;
 use crate::{PrereqPlanAction, PrereqPlanStep};
 
+#[test]
+fn plain_prerequisite_plan_preserves_the_held_draft_control_limit() {
+    let model = PlainPrereqPlanModel::from_prompt_model(PrereqPromptModel {
+        input_blocked: true,
+        final_tool: "sast:scan".into(),
+        recommended_action: "reuse".into(),
+        steps: Vec::new(),
+    });
+    assert!(model.rows.iter().any(|row| row.contains("Finish or clear")));
+    assert!(!model.rows.iter().any(|row| row.starts_with("actions:")));
+}
+
 fn context_snapshot_fixture_path() -> std::path::PathBuf {
     kuzushi_core::context_snapshot_path("")
 }

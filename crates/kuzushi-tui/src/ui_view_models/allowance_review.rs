@@ -1,5 +1,18 @@
 use crate::renderer::shared::text::wrap_text;
 use crate::{ConfirmKind, PendingConfirm, ShellApp};
+mod work_summary;
+
+pub(crate) struct AllowanceWorkSummary {
+    pub(crate) overview: Vec<String>,
+    pub(crate) details: Vec<String>,
+}
+
+pub(crate) fn allowance_work_summary(
+    app: &ShellApp,
+    input: &serde_json::Value,
+) -> Option<AllowanceWorkSummary> {
+    work_summary::summary(app.router.campaign().batch_scan_config.as_ref()?, input)
+}
 
 /// The same wrapped document and page extent drive rendering and approval.
 pub(crate) struct AllowanceReviewModel {
@@ -61,15 +74,14 @@ fn review_title(kind: ConfirmKind) -> Option<&'static str> {
 }
 
 fn document(confirm: &PendingConfirm) -> Vec<String> {
-    let mut lines = vec![confirm.target.clone(), String::new()];
-    lines.extend(
-        confirm
-            .rationale
-            .as_deref()
-            .unwrap_or("Terms unavailable")
-            .lines()
-            .map(str::to_owned),
-    );
+    let mut lines = confirm
+        .rationale
+        .as_deref()
+        .unwrap_or("Terms unavailable")
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    lines.extend([String::new(), format!("Investigation: {}", confirm.target)]);
     lines
 }
 

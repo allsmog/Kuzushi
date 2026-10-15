@@ -98,16 +98,7 @@ fn activity_cost_label(session: &ActivitySession) -> String {
         Err(_) => "cost accounting error".to_string(),
         Ok(cost) if cost.is_unavailable() => "cost not recorded".to_string(),
         Ok(cost) if cost.is_complete() => format!("cost ${:.4}", cost.observed_usd()),
-        Ok(cost) => incomplete_cost_label(cost),
-    }
-}
-
-/// Unmetered spend shows its labelled token estimate when every call was
-/// priced; otherwise only the observed floor is claimed.
-fn incomplete_cost_label(cost: kuzushi_core::runtime::RuntimeCostReport) -> String {
-    match cost.estimated_total_usd().filter(|_| cost.is_estimated()) {
-        Some(estimate) => format!("cost ~${estimate:.4} estimated"),
-        None => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
+        Ok(cost) => format!("cost {}", super::format_runtime_cost(cost, None)),
     }
 }
 
@@ -489,7 +480,9 @@ mod tests {
 
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
-        assert!(model.detailed_title.contains("cost >=$0.0000 (incomplete)"));
+        assert!(model
+            .detailed_title
+            .contains("cost unknown (metering incomplete)"));
     }
 
     #[test]
@@ -503,7 +496,7 @@ mod tests {
 
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
-        assert!(model.detailed_title.contains("cost ~$0.4500 estimated"));
+        assert!(model.detailed_title.contains("cost ~$0.45 (estimated)"));
     }
 
     #[test]

@@ -35,6 +35,15 @@ impl FieldEditor {
         self.buffer.cursor()
     }
 
+    pub(crate) fn restore_cursor(&mut self, cursor: usize) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            cursor <= self.text().chars().count(),
+            "Saved cursor is outside this field"
+        );
+        self.buffer.set_cursor(cursor);
+        Ok(())
+    }
+
     pub(crate) fn insert(&mut self, text: &str) {
         self.buffer.insert_str_at_cursor(text);
     }

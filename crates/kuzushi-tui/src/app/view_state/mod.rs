@@ -1,6 +1,7 @@
 use super::*;
 pub(crate) use super::*;
 pub(crate) use routes::AnswerFocus;
+pub(crate) use routes::ToolOptionEdit;
 
 use self::PendingConfirm;
 pub(crate) use activity::*;

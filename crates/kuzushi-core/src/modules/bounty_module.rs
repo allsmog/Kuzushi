@@ -1,9 +1,7 @@
 use super::*;
 
-/// Bug-bounty workflow surface (M2 §2.3). Two tools: import HAR and
-/// import Burp Suite XML, both of which materialise into the findings
-/// table with `http-request` evidence so the rest of the triage/verify
-/// pipeline can see them.
+/// Recorded HAR and Burp request evidence for operator inspection. Imports
+/// preserve external observations without claiming local scan coverage.
 pub(crate) fn bounty_module() -> BuiltinModule {
     builtin_module(
         "bounty",
@@ -32,7 +30,7 @@ pub(crate) fn bounty_module() -> BuiltinModule {
                     .required()],
             ),
             ],
-        ),
+        ).into_iter().map(ToolDescriptor::without_phase_result).collect(),
         vec![],
     )
 }

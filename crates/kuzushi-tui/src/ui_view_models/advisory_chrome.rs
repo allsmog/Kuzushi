@@ -1,4 +1,4 @@
-use crate::{BudgetHalt, Notice, NoticeSeverity, ShellApp, ThrottleAdvisory};
+use crate::{Notice, NoticeSeverity, ShellApp, ThrottleAdvisory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThrottleBannerModel {
@@ -36,6 +36,7 @@ impl NoticeBannerModel {
 pub(crate) struct CostCapHaltModel {
     pub(crate) header: String,
     pub(crate) compact: &'static str,
+    pub(crate) actions: &'static str,
 }
 
 pub(crate) fn throttle_banner_model(app: &ShellApp) -> Option<ThrottleBannerModel> {
@@ -46,10 +47,34 @@ pub(crate) fn throttle_banner_model(app: &ShellApp) -> Option<ThrottleBannerMode
 }
 
 pub(crate) fn cost_cap_halt_model(app: &ShellApp) -> Option<CostCapHaltModel> {
-    app.advisory()
-        .budget_halt
-        .as_ref()
-        .map(CostCapHaltModel::from_halt)
+    if app.budget_editor_open() || app.shell_view() == crate::ShellView::QuitConfirm {
+        return None;
+    }
+    let halt = app.advisory().budget_halt.as_ref()?;
+    let spent = super::format_runtime_cost(
+        app.session().session_cost_report(),
+        app.session().cost_accounting_error(),
+    );
+    let (compact, actions) = budget_halt_actions(app.advisory().budget_halt_acknowledged);
+    Some(CostCapHaltModel {
+        header: format!("■ COST CAP HALT · {spent} / cap ${:.4}", halt.limit_usd),
+        compact,
+        actions,
+    })
+}
+
+fn budget_halt_actions(acknowledged: bool) -> (&'static str, &'static str) {
+    if acknowledged {
+        (
+            "SPENDING HALTED · cost / report",
+            "Spending stays halted. Type cost or report to inspect.",
+        )
+    } else {
+        (
+            "COST CAP · Esc inspect · c cap · a abort",
+            "Esc inspect/report   c review cap   a abort work",
+        )
+    }
 }
 
 impl ThrottleBannerModel {
@@ -57,18 +82,6 @@ impl ThrottleBannerModel {
         Self {
             source: throttle.source.clone(),
             message: throttle.message.clone(),
-        }
-    }
-}
-
-impl CostCapHaltModel {
-    fn from_halt(halt: &BudgetHalt) -> Self {
-        Self {
-            header: format!(
-                "■ COST CAP HALT · spent ${:.4} / cap ${:.4}",
-                halt.spent_usd, halt.limit_usd
-            ),
-            compact: "COST CAP: c=review cap · a=abort",
         }
     }
 }

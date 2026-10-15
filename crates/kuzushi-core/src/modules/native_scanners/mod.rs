@@ -4,17 +4,14 @@ use self::{
     binary_option, builtin_module, dag, model_option, opt, resolve_tool_target, target_option,
     tool_with_options,
 };
-use crate::dep_hygiene::CargoAuditScanner;
 use crate::findings::{persist_tool_findings, Finding, GenericPersistedRun, StaticProofState};
 use crate::iac_scan::{scan_iac, IacScanOptions};
 use crate::license_scan::{scan_licenses_with_options, LicenseScanOptions};
 use crate::runtime::AgentRuntime;
-use crate::sbom_scan::scan_sbom;
 use crate::scan::{
     index_grounded_codeql_sarif_documents_as_static_evidence, scan_exploit_chains_with_runtime,
-    CodeqlPersistedRun,
-    CodeqlScanReport, CodeqlScanner, ExploitChainReport, ExploitChainScanner, GovulncheckScanner,
-    ScanEngine, ScanEngineOutput, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
+    CodeqlPersistedRun, CodeqlScanReport, CodeqlScanner, ExploitChainReport, ExploitChainScanner,
+    GovulncheckScanner, ScanEngine, ScanEngineOutput, SemgrepPersistedRun, SemgrepScanReport,
 };
 use crate::whitebox_static::{
     mark_whitebox_static_findings, whitebox_static_profile_requested,
@@ -45,6 +42,7 @@ use std::path::{Path, PathBuf};
 mod android_apk_code_scan;
 mod android_apk_fileprovider;
 mod android_apk_hybrid_detect;
+mod android_apk_input_receipt;
 mod android_apk_manifest_parser;
 mod android_apk_manifest_parser_state;
 mod android_apk_manifest_scan;
@@ -58,12 +56,20 @@ mod android_apk_sast_handoff;
 mod android_apk_scan;
 mod android_apk_taint_sources;
 mod android_apk_toolchain;
+mod cargo_audit_module;
 mod exploit_chain_output;
 mod persist_semgrep_findings;
 mod register_modules;
 mod run_android_apk;
 mod semgrep_module;
+mod sbom;
+use cargo_audit_module::run_cargo_audit_scan;
+pub(in crate::modules) use cargo_audit_module::{
+    cargo_audit_options, cargo_audit_settings, cargo_audit_study_options,
+};
+mod inspection_output;
 use exploit_chain_output::exploit_chain_output;
+use inspection_output::with_inspection_receipts;
 pub(in crate::modules) use register_modules::{execute_tool, register_modules};
 
 fn validated_android_workspace_path(

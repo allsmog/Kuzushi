@@ -9,6 +9,8 @@ pub mod runtime;
 
 mod messages;
 #[cfg(test)]
+mod test_bridge;
+#[cfg(test)]
 mod tests;
 mod triage_prompt;
 

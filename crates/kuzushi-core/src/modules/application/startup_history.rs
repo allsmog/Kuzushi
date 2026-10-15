@@ -36,7 +36,9 @@ impl ModuleRegistry {
             .tool
             .as_deref()
             .and_then(|tool| self.resolve_tool(tool))
-            .is_none_or(|descriptor| descriptor.phase != ToolPhase::Operate)
+            .is_none_or(|descriptor| {
+                descriptor.phase_result && descriptor.phase != ToolPhase::Operate
+            })
     }
 }
 

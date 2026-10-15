@@ -3,6 +3,7 @@ mod actions;
 pub(crate) use actions::{merge_destinations, selected_filter, selected_scope, SCOPE_ACTIONS};
 mod forms;
 mod keys;
+mod new_scope;
 mod state;
 mod study;
 mod suggestion;

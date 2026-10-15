@@ -5,6 +5,8 @@ use notify::{
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use std::path::{Component, Path, PathBuf};
+mod index_changes;
+use index_changes::IndexChangeGuard;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchScope {
@@ -43,10 +45,12 @@ impl LiveWorkspaceWatcher {
     ) -> Result<Self> {
         let scope = workspace_watch_scope(root);
         let classifier_root = scope.root.clone();
+        let mut index_changes = IndexChangeGuard::capture(&classifier_root);
         let mut watcher = RecommendedWatcher::new(
             move |event| {
-                let (changes, state_artifact_paths) =
+                let (mut changes, state_artifact_paths) =
                     classify_notify_result_with_state(&classifier_root, event);
+                index_changes.filter(&classifier_root, &mut changes);
                 if !changes.is_empty() || !state_artifact_paths.is_empty() {
                     sink(changes, state_artifact_paths);
                 }
@@ -134,8 +138,7 @@ fn classify_existing_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
     if should_ignore_path(&relative) {
         return None;
     }
-    manifest_or_lockfile_change(&relative)
-        .or(Some(WorkspaceChange::FileChanged(relative)))
+    manifest_or_lockfile_change(&relative).or(Some(WorkspaceChange::FileChanged(relative)))
 }
 
 fn classify_deleted_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
@@ -146,12 +149,14 @@ fn classify_deleted_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
     if should_ignore_path(&relative) {
         return None;
     }
-    manifest_or_lockfile_change(&relative)
-        .or(Some(WorkspaceChange::FileDeleted(relative)))
+    manifest_or_lockfile_change(&relative).or(Some(WorkspaceChange::FileDeleted(relative)))
 }
 
 fn classify_moved_path(root: &Path, from: &Path, to: &Path) -> Vec<WorkspaceChange> {
-    let relative = (watch_relative_path(root, from), watch_relative_path(root, to));
+    let relative = (
+        watch_relative_path(root, from),
+        watch_relative_path(root, to),
+    );
     let mut changes = moved_special_changes(&relative);
     changes.extend(classify_moved_source_changes(root, relative));
     coalesce_changes(changes)
@@ -162,16 +167,26 @@ fn classify_moved_source_changes(
     relative: (Option<PathBuf>, Option<PathBuf>),
 ) -> Vec<WorkspaceChange> {
     match relative {
-        (Some(from), Some(to)) if should_ignore_path(&from) && should_ignore_path(&to) => Vec::new(),
+        (Some(from), Some(to)) if should_ignore_path(&from) && should_ignore_path(&to) => {
+            Vec::new()
+        }
         (Some(from), Some(to)) if should_ignore_path(&from) => {
-            classify_existing_path(root, &root.join(to)).into_iter().collect()
+            classify_existing_path(root, &root.join(to))
+                .into_iter()
+                .collect()
         }
         (Some(from), Some(to)) if should_ignore_path(&to) => {
-            classify_deleted_path(root, &root.join(from)).into_iter().collect()
+            classify_deleted_path(root, &root.join(from))
+                .into_iter()
+                .collect()
         }
         (Some(from), Some(to)) => classify_visible_move(from, to),
-        (None, Some(to)) => classify_existing_path(root, &root.join(to)).into_iter().collect(),
-        (Some(from), None) => classify_deleted_path(root, &root.join(from)).into_iter().collect(),
+        (None, Some(to)) => classify_existing_path(root, &root.join(to))
+            .into_iter()
+            .collect(),
+        (Some(from), None) => classify_deleted_path(root, &root.join(from))
+            .into_iter()
+            .collect(),
         (None, None) => Vec::new(),
     }
 }
@@ -373,10 +388,7 @@ fn notify_event_to_watch_events(event: Event) -> Vec<WatchEvent> {
     }
 }
 
-fn paths_to_events(
-    paths: Vec<PathBuf>,
-    event: impl Fn(PathBuf) -> WatchEvent,
-) -> Vec<WatchEvent> {
+fn paths_to_events(paths: Vec<PathBuf>, event: impl Fn(PathBuf) -> WatchEvent) -> Vec<WatchEvent> {
     paths.into_iter().map(event).collect()
 }
 
@@ -435,7 +447,10 @@ mod tests {
             attrs: Default::default(),
         };
         let (_, state) = classify_notify_event_with_state(root, sentinel);
-        assert_eq!(state, vec![PathBuf::from(".kuzushi/v3/runs/run-1/done.json")]);
+        assert_eq!(
+            state,
+            vec![PathBuf::from(".kuzushi/v3/runs/run-1/done.json")]
+        );
 
         let queue = Event {
             kind: EventKind::Modify(ModifyKind::Any),

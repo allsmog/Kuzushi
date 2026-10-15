@@ -26,6 +26,7 @@ impl ShellApp {
         let mut input = super::launch::preview_scan_input(self)?;
         input.as_object_mut().unwrap().remove("scanScopeRef");
         let mut config = BatchScanConfig::load_for_new_study(&target, None);
+        config.scope_context.labels = self.scope_study_labels(&draft);
         config.study.scope_draft = Some(draft);
         let scoped = super::scope_study::picker_input(&config, input.clone());
         restore_scope_allowance(&mut config, &scoped)?;
@@ -34,6 +35,27 @@ impl ShellApp {
         self.show_study_form(config);
         self.refresh_batch_worker_resolution();
         Ok(())
+    }
+
+    fn scope_study_labels(
+        &self,
+        draft: &kuzushi_core::capabilities::campaign::ScopeStudyDraft,
+    ) -> std::collections::BTreeMap<String, String> {
+        let Some(review) = self
+            .scope_review()
+            .and_then(|state| state.review.as_deref())
+            .filter(|review| review.reference == draft.proposal_ref)
+        else {
+            return Default::default();
+        };
+        review
+            .record
+            .draft
+            .scopes
+            .iter()
+            .chain(review.record.draft.shared_scope.iter())
+            .map(|scope| (scope.id.clone(), scope.name.clone()))
+            .collect()
     }
 
     pub(crate) fn open_selected_scope_study(
@@ -69,6 +91,7 @@ impl ShellApp {
         self.refresh_campaign_deck();
         self.show_study_form(BatchScanConfig::load_for_new_study(&target, prior_run_id));
         self.refresh_batch_worker_resolution();
+        self.start_study_draft_recovery();
         self.log("batch", "scan-batch configurator");
     }
 
@@ -165,23 +188,70 @@ impl ShellApp {
     }
 
     pub(super) fn close_batch_config(&mut self) -> InputUpdate {
+        self.checkpoint_study_choices();
+        if self.keep_model_study_choices() || self.keep_uncheckpointed_study_choices() {
+            return InputUpdate::handled();
+        }
+        self.finish_closing_study()
+    }
+
+    pub(in crate::app::batch_scan) fn finish_closing_study(&mut self) -> InputUpdate {
         let origin = self
             .router
             .campaign_mut()
             .batch_scan_config
             .take()
             .and_then(|config| config.origin);
-        if let Some(origin) = origin {
-            self.set_shell_view(origin.view);
-            self.set_input_mode(origin.mode);
-            *self.router.workbench_mut() = origin.workbench;
-            if let Some(scope) = self.router.scope_review_mut().as_mut() {
-                scope.open = origin.scope_review;
-            }
-        } else {
-            self.open_campaign_view(None);
-        }
+        self.restore_study_navigation(origin);
         InputUpdate::handled()
+    }
+
+    fn restore_study_navigation(&mut self, origin: Option<super::config::StudyNavigationOrigin>) {
+        let Some(origin) = origin else {
+            self.open_campaign_view(None);
+            return;
+        };
+        self.set_shell_view(origin.view);
+        self.set_input_mode(origin.mode);
+        *self.router.workbench_mut() = origin.workbench;
+        match origin.phase {
+            Some(phase) => self.engagement.set_phase(phase),
+            None => self.engagement.clear_phase(),
+        }
+        if let Some(scope) = self.router.scope_review_mut().as_mut() {
+            scope.open = origin.scope_review;
+        }
+    }
+
+    fn keep_uncheckpointed_study_choices(&mut self) -> bool {
+        if self.study_choices_checkpointed() {
+            return false;
+        }
+        let Some(config) = self.router.campaign().batch_scan_config.as_ref() else {
+            return false;
+        };
+        if config.draft_recovery != super::StudyDraftRecovery::None
+            || !self.study_choices_not_checkpointed()
+        {
+            return false;
+        }
+        self.keep_pending_study_choices()
+    }
+
+    fn keep_pending_study_choices(&mut self) -> bool {
+        let config = self
+            .router
+            .campaign_mut()
+            .batch_scan_config
+            .as_mut()
+            .unwrap();
+        if !config.study.matrix.has_unsaved_changes() {
+            config.draft_recovery = super::StudyDraftRecovery::Discard;
+            return true;
+        }
+        config.study.matrix.open = true;
+        config.notice = Some("These context cases are not saved yet. L prepares a recoverable draft; c clears them before Back.".into());
+        true
     }
 
     pub(super) fn show_study_form(&mut self, mut config: BatchScanConfig) {
@@ -190,11 +260,14 @@ impl ShellApp {
             mode: self.input_mode(),
             workbench: self.router.workbench().clone(),
             scope_review: self.scope_review_is_visible(),
+            phase: self.engagement.current_phase(),
         });
+        self.clear_notice();
         if let Some(scope) = self.router.scope_review_mut().as_mut() {
             scope.open = false;
         }
         self.router.campaign_mut().batch_scan_config = Some(config);
+        self.initialize_study_checkpoint_baseline();
         self.set_shell_view(ShellView::Campaign);
         self.set_input_mode(crate::app::InputMode::Navigate);
     }

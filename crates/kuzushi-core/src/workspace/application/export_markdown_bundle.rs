@@ -148,7 +148,7 @@ fn build_manifest_entry(
     let file = files_by_alias
         .get(record.alias.as_str())
         .with_context(|| format!("missing markdown file for {}", record.alias))?;
-    Ok(json!({
+    let mut entry = json!({
         "alias": record.alias,
         "fingerprint": record.fingerprint,
         "severity": record.severity,
@@ -159,26 +159,34 @@ fn build_manifest_entry(
         "startLine": record.location.start_line,
         "reviewDecision": record.review_decision,
         "reviewDecisionBasis": record.review_decision_basis,
+        "reviewedSource": record.reviewed_source,
         "relationships": record.relationships,
         "observationGap": record.observation_gap,
         "observationNote": record.observation_note,
         "reviewDecisionConflict": record.review_decision_conflict,
         "lifecycleStatus": record.lifecycle_status,
-        "evidenceState": record.evidence.state,
-        "observedEvidencePresent": record.evidence.observed_evidence_present,
-        "observedCodeEvidenceCount": record.evidence.observed_code_count,
-        "observedCaptureEvidenceCount": record.evidence.observed_capture_count,
-        "observedOtherEvidenceCount": record.evidence.observed_other_count,
-        "modelGeneratedReasoningPresent": record.evidence.model_generated_reasoning_present,
-        "modelGeneratedReasoningCount": record.evidence.model_generated_reasoning_count,
-        "derivedSourcePresent": record.evidence.derived_source_present,
         "automatedReasoningPresent": record.analysis.automated_reasoning_present,
         "runId": record.provenance.run_id,
+        "sourceHistory": record.provenance.source_history,
         "runStatus": record.provenance.run_status,
         "model": record.provenance.model,
         "path": file.path,
         "sha256": file.sha256,
-    }))
+    });
+    append_manifest_evidence(&mut entry, record);
+    Ok(entry)
+}
+
+fn append_manifest_evidence(entry: &mut serde_json::Value, record: &WorkspaceFindingExportRecord) {
+    entry["evidenceState"] = json!(record.evidence.state);
+    entry["observedEvidencePresent"] = json!(record.evidence.observed_evidence_present);
+    entry["observedCodeEvidenceCount"] = json!(record.evidence.observed_code_count);
+    entry["observedCaptureEvidenceCount"] = json!(record.evidence.observed_capture_count);
+    entry["observedOtherEvidenceCount"] = json!(record.evidence.observed_other_count);
+    entry["modelGeneratedReasoningPresent"] =
+        json!(record.evidence.model_generated_reasoning_present);
+    entry["modelGeneratedReasoningCount"] = json!(record.evidence.model_generated_reasoning_count);
+    entry["derivedSourcePresent"] = json!(record.evidence.derived_source_present);
 }
 
 fn bundle_files_manifest(

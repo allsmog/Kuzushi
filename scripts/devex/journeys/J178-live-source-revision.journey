@@ -1,0 +1,84 @@
+name: Read a completed live investigation after an actual commit change without rescanning
+size: 120x36
+cwd: @TARGET
+env-unset: NODE_OPTIONS KUZUSHI_LANGGRAPH_BRIDGE ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL NO_COLOR
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-wrapper-flow:
+launch: --target @TARGET
+require-live-snap: 30 KUZUSHI | changed-checkout
+submit: findings
+require-live-snap: 30 Viewing Review | historical-review
+require-live-snap: 30 FINDINGS · 1 | settled-historical-list
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned public documentation example | original-decision
+resize: 160x48
+live-snap: revision-review-160x48
+resize: 96x89
+live-snap: revision-review-96x89
+resize: 80x24
+live-snap: revision-review-80x24
+resize: 60x20
+live-snap: revision-review-60x20
+resize: 40x12
+live-snap: revision-review-40x12
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: original-detail-page-10
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: original-detail-page-20
+keys: NPage NPage NPage NPage NPage NPage NPage NPage NPage NPage
+live-snap: original-detail-tail
+ask: Does Review preserve the original false-positive decision and source SHA while clearly disclosing that the changed checkout has not been reassessed?
+resize: 120x36
+submit: report
+require-live-snap: 30 Scope: study live-owned-scans-20261010 | historical-report
+expect: earlier source
+expect: 4 committed / 11 calls
+expect: 2 protected review remaining
+resize: 160x48
+live-snap: revision-report-160x48
+resize: 96x89
+live-snap: revision-report-96x89
+resize: 80x24
+live-snap: revision-report-80x24
+resize: 60x20
+live-snap: revision-report-60x20
+resize: 40x12
+keys: Home
+live-snap: compact-report-start
+expect: Earlier source · reassess checkout
+keys: NPage
+live-snap: compact-report-page-1
+keys: NPage
+live-snap: compact-report-page-2
+keys: NPage
+live-snap: compact-report-page-3
+keys: End
+live-snap: compact-report-tail
+expect: Earlier source · reassess checkout
+ask: Can an operator read the original study source, current-source limitation, frozen context and unchanged allowance at every size without inferring a fix?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_source_revision.py @TARGET @ART reading
+keys: C-c
+require-exit: 10
+env: HOME=/private/tmp/kuzushi-live-owned-investigation-20261010/home KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TARGET
+submit: findings
+require-live-snap: 30 FINDINGS · 1 | recovered-historical-review
+nav-mode:
+keys: Enter
+require-live-snap: 25 Owned public documentation example | recovered-original-decision
+resize: 40x12
+live-snap: recovered-compact-review
+resize: 120x36
+submit: report
+require-live-snap: 30 Scope: study live-owned-scans-20261010 | recovered-historical-report
+expect: earlier source
+resize: 40x12
+live-snap: recovered-compact-report
+expect: Earlier source · reassess checkout
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/live_source_revision.py @TARGET @ART recovered
+ask: Does no-color restart keep the earlier source and decision visible with exactly four requests, six work attempts and three observations?
+keys: C-c
+require-exit: 10

@@ -416,11 +416,17 @@ fn explicit_pin_outside_a_component_keeps_the_displayed_identity() {
     }));
     let effects = app.open_finding_effects(&alias);
     EffectRuntime::execute(&mut app, effects);
-    let detail = crate::ui_view_models::phase_cockpit_model(&app)
-        .unwrap()
-        .selected_finding_detail()
-        .unwrap()
-        .clone();
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&app),
+        WorkbenchPage::Review
+    );
+    let detail = crate::ui_view_models::phase_cockpit_model_for_phase(
+        &app,
+        kuzushi_core::WorkflowPhase::Review,
+    )
+    .selected_finding_detail()
+    .unwrap()
+    .clone();
     assert_eq!(detail.fingerprint, finding.fingerprint);
     assert_eq!(detail.alias.as_deref(), Some(alias.as_str()));
 }

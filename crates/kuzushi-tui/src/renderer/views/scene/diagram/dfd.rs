@@ -1051,6 +1051,8 @@ fn draw_flow(buf: &mut Buffer, area: Rect, a: &Anchor, b: &Anchor, color: Color)
 }
 
 #[cfg(test)]
+mod component_map_tests;
+#[cfg(test)]
 mod flow_direction_tests;
 
 fn selected_detail_content(
@@ -1132,11 +1134,22 @@ fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> D
         width,
     );
     append_linked_context_detail(&mut lines, model, &node.key, width);
+    append_component_topology_notice(&mut lines, model, width);
     append_detail_lines(&mut lines, "type", kind_label(node.kind), width);
     append_detail_lines(&mut lines, "zone", &node.zone, width);
     DetailContent {
         kind: "node",
         lines,
+    }
+}
+
+fn append_component_topology_notice(
+    lines: &mut Vec<Line<'static>>,
+    model: &DfdModel,
+    width: usize,
+) {
+    if let Some(notice) = model.topology_notice() {
+        append_detail_lines(lines, "flows", notice, width);
     }
 }
 

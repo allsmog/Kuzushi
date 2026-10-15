@@ -21,14 +21,14 @@ pub(crate) struct DigestedPrefix {
 /// Binary-looking files return `Ok(None)`; text is decoded lossily to preserve
 /// the existing inventory behavior for imperfect source encodings.
 pub(crate) fn read_source_text_prefix(path: &Path, max_bytes: usize) -> io::Result<Option<String>> {
-    read_source_text_prefix_from_file(open_regular_file(path)?, max_bytes)
+    read_source_text_prefix_from_reader(open_regular_file(path)?, max_bytes)
 }
 
-fn read_source_text_prefix_from_file(
-    file: fs::File,
+pub(crate) fn read_source_text_prefix_from_reader(
+    reader: impl Read,
     max_bytes: usize,
 ) -> io::Result<Option<String>> {
-    let prefix = read_open_file_prefix(file, max_bytes.max(BINARY_SNIFF_BYTES))?;
+    let prefix = read_open_file_prefix(reader, max_bytes.max(BINARY_SNIFF_BYTES))?;
     if prefix
         .bytes
         .iter()
@@ -108,7 +108,7 @@ pub(crate) fn read_source_text_prefix_within(
     path: &Path,
     max_bytes: usize,
 ) -> io::Result<Option<String>> {
-    read_source_text_prefix_from_file(open_regular_file_within(root, path)?, max_bytes)
+    read_source_text_prefix_from_reader(open_regular_file_within(root, path)?, max_bytes)
 }
 
 pub(crate) fn read_regular_bytes_within(
@@ -147,12 +147,12 @@ fn read_file_prefix(path: &Path, max_bytes: usize) -> io::Result<FilePrefix> {
     read_open_file_prefix(open_regular_file(path)?, max_bytes)
 }
 
-fn read_open_file_prefix(file: fs::File, max_bytes: usize) -> io::Result<FilePrefix> {
+fn read_open_file_prefix(reader: impl Read, max_bytes: usize) -> io::Result<FilePrefix> {
     let read_limit = max_bytes
         .checked_add(1)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "read limit is too large"))?;
     let mut bytes = Vec::with_capacity(read_limit.min(64 * 1024));
-    file.take(read_limit as u64).read_to_end(&mut bytes)?;
+    reader.take(read_limit as u64).read_to_end(&mut bytes)?;
     let truncated = bytes.len() > max_bytes;
     bytes.truncate(max_bytes);
     Ok(FilePrefix { bytes, truncated })
@@ -252,7 +252,11 @@ pub(crate) fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<f
 }
 
 #[cfg(any(unix, windows))]
-fn relative_path_within(root: &Path, canonical_root: &Path, path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn relative_path_within(
+    root: &Path,
+    canonical_root: &Path,
+    path: &Path,
+) -> io::Result<PathBuf> {
     let relative = if path.is_absolute() {
         path.strip_prefix(root)
             .or_else(|_| path.strip_prefix(canonical_root))
@@ -308,7 +312,7 @@ fn open_directory_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(unix)]
-fn open_absolute_directory_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_absolute_directory_no_follow(path: &Path) -> io::Result<fs::File> {
     if !path.is_absolute() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -323,7 +327,10 @@ fn open_absolute_directory_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(unix)]
-fn open_directory_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result<fs::File> {
+pub(crate) fn open_directory_at(
+    directory: &fs::File,
+    name: &std::ffi::OsStr,
+) -> io::Result<fs::File> {
     open_at(
         directory,
         name,
@@ -332,11 +339,14 @@ fn open_directory_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result
 }
 
 #[cfg(unix)]
-fn open_regular_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result<fs::File> {
+pub(crate) fn open_regular_at(
+    directory: &fs::File,
+    name: &std::ffi::OsStr,
+) -> io::Result<fs::File> {
     let file = open_at(
         directory,
         name,
-        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
     )?;
     if file.metadata()?.is_file() {
         return Ok(file);

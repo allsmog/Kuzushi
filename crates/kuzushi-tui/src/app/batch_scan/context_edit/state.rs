@@ -7,6 +7,7 @@ use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ContextEditMode {
+    Recovery,
     Fields,
     Writing,
     Review,
@@ -45,6 +46,20 @@ pub(crate) struct ContextEditDraft {
     pub scroll: usize,
     pub mode: ContextEditMode,
     pub notice: Option<String>,
+    pub recovery: ContextDraftRecovery,
+    pub checkpoint_origins: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) enum ContextDraftRecovery {
+    #[default]
+    None,
+    Loading,
+    Choices {
+        drafts: Vec<kuzushi_core::session_transcript::RecoveredContextDraft>,
+        cursor: usize,
+    },
+    Failed(String),
 }
 
 impl ContextEditDraft {
@@ -72,6 +87,8 @@ impl ContextEditDraft {
             scroll: 0,
             mode: ContextEditMode::Fields,
             notice: None,
+            recovery: Default::default(),
+            checkpoint_origins: Vec::new(),
         }
     }
 

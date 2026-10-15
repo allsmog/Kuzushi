@@ -41,6 +41,7 @@ pub(crate) use command_palette_lines::{command_palette_lines, render_command_pal
 pub(crate) use config_lines::config_lines;
 pub(crate) use cost_lines::cost_budget_bar;
 pub(crate) use cost_lines::cost_lines;
+pub(crate) use cost_lines::{cost_max_scroll, cost_page_rows};
 pub(crate) use health_lines::health_lines;
 pub(crate) use interruption_lines::interruption_lines;
 pub(crate) use overlay_lines::{

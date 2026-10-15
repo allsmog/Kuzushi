@@ -2,24 +2,32 @@ use super::domain::EntryPointRecord;
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
-pub(super) fn collect_entry_points(snapshot: &Value) -> Result<Vec<EntryPointRecord>> {
+pub(super) fn collect_entry_points_cancellable(
+    snapshot: &Value,
+    canceled: &dyn Fn() -> bool,
+) -> Result<Vec<EntryPointRecord>> {
+    super::cancellation::ensure_active(canceled)?;
     let rows = attack_surface_rows(snapshot)?;
+    rows.iter()
+        .map(|row| collect_entry_point(row, canceled))
+        .filter_map(Result::transpose)
+        .collect()
+}
+
+fn collect_entry_point(
+    row: &Value,
+    canceled: &dyn Fn() -> bool,
+) -> Result<Option<EntryPointRecord>> {
+    super::cancellation::ensure_active(canceled)?;
     anyhow::ensure!(
-        !rows
-            .iter()
-            .any(crate::workspace::rust_surface_policy::is_legacy_rust_row),
+        !crate::workspace::rust_surface_policy::is_legacy_rust_row(row),
         crate::workspace::rust_surface_policy::REBUILD_RUST_SURFACES
     );
     anyhow::ensure!(
-        !rows
-            .iter()
-            .any(crate::workspace::python_surface_policy::is_legacy_python_http_row),
+        !crate::workspace::python_surface_policy::is_legacy_python_http_row(row),
         crate::workspace::python_surface_policy::REBUILD_PYTHON_SURFACES
     );
-    rows.iter()
-        .map(normalize_entry_point)
-        .filter_map(Result::transpose)
-        .collect()
+    normalize_entry_point(row)
 }
 
 fn attack_surface_rows(snapshot: &Value) -> Result<&Vec<Value>> {

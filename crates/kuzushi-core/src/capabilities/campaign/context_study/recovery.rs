@@ -2,6 +2,18 @@ use super::*;
 use crate::capabilities::threat_model::{
     load_exact_threat_model, load_threat_model_manifest, ThreatModelRef,
 };
+mod proposal;
+mod question;
+mod scope_failure;
+pub use proposal::WorkflowProposalResult;
+pub use question::ContextQuestionAnswer;
+
+/// The authenticated output of one completed context job, without activation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GeneratedStudyContext {
+    pub reference: ThreatModelRef,
+    pub document: Value,
+}
 
 impl ContextStudyReceipt {
     pub fn generated_lesson(&self, root: &Path) -> Result<Option<crate::findings::LessonRef>> {
@@ -23,6 +35,12 @@ impl ContextStudyReceipt {
 
     /// Only an exact revision committed by this completed campaign job is a result.
     pub fn generated_context(&self, root: &Path) -> Result<Option<ThreatModelRef>> {
+        Ok(self
+            .generated_context_document(root)?
+            .map(|output| output.reference))
+    }
+
+    pub fn generated_context_document(&self, root: &Path) -> Result<Option<GeneratedStudyContext>> {
         anyhow::ensure!(
             matches!(
                 self.generation_tool.as_str(),
@@ -47,7 +65,10 @@ impl ContextStudyReceipt {
         let reference = matches.remove(0);
         let document = load_exact_threat_model(root, &reference)?;
         validate_generated_origin(self, &run, &document)?;
-        Ok(Some(reference))
+        Ok(Some(GeneratedStudyContext {
+            reference,
+            document,
+        }))
     }
 
     pub fn generated_scopes(
@@ -68,7 +89,9 @@ impl ContextStudyReceipt {
             job.tool.as_deref() == Some(generation::SCOPE_TOOL),
             "scope generation job tool changed"
         );
-        if !context_job_completed(job)? {
+        if !context_job_completed(job)
+            .map_err(|error| scope_failure::explain(root, self, job, error))?
+        {
             return Ok(None);
         }
         let run = job

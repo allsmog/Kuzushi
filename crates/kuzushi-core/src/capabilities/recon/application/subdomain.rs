@@ -15,6 +15,7 @@ pub(crate) fn run_recon_subdomain(
 
     let enumerator = ReconSubdomainEnumerator::from_input(&options);
     let subdomains = enumerator.enumerate(cancel)?;
+    require_recon_active(cancel)?;
     let persisted = persist_subdomain_results(workspace, &options, &subdomains)?;
     emit_subdomain_trace(
         ctx,
@@ -71,12 +72,14 @@ fn record_subdomain_hosts(
             workspace_id,
             subdomain,
             Some(subdomain),
-            "alive",
+            "unknown",
             json!({
                 "discoveredBy": "recon:subdomain",
                 "discoveredAt": now_isoish(),
                 "domain": options.domain,
                 "source": options.source.as_str(),
+                "observationKind": "historical_name",
+                "livenessTested": false,
             }),
         )?);
     }

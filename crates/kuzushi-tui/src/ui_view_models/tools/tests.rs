@@ -2,6 +2,30 @@ use super::*;
 use kuzushi_core::V2Config;
 
 #[test]
+fn tools_model_support_matches_are_distinct_from_unknown_tools() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router
+        .tools_mut()
+        .open(Some("module:govulncheck".into()));
+    let model = tools_model(&app);
+    assert_eq!(model.visible_count, 0);
+    assert_eq!(model.omitted_support.len(), 1);
+    assert_eq!(model.omitted_support[0].support, "Experimental");
+    assert_eq!(model.omitted_support[0].tool, "govulncheck:scan");
+    app.router.tools_mut().open(Some("module:campaign".into()));
+    assert!(tools_model(&app)
+        .omitted_support
+        .iter()
+        .any(|tool| tool.support == "Compatibility"));
+    app.router
+        .tools_mut()
+        .open(Some("module:unknown-owned-tool".into()));
+    assert!(tools_model(&app).omitted_support.is_empty());
+    app.router.tools_mut().open(None);
+    assert!(tools_model(&app).omitted_support.is_empty());
+}
+
+#[test]
 fn tools_model_lists_registry_tools() {
     let app = ShellApp::new(V2Config::default(), None);
 

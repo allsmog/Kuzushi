@@ -30,12 +30,7 @@ fn prepare(target: &Path) -> (kuzushi_core::WorkspaceTarget, i64) {
         store.record_run_started(run, target, "completed").unwrap();
         latest_id = store.insert_finding(run, &finding).unwrap();
     }
-    crate::test_support::record_indexed_run(
-        target,
-        "map-parent",
-        "context:build",
-        serde_json::json!({"ok":true,"data":{}}),
-    );
+    crate::test_support::record_imported_test_map(target, "map-parent");
     select(target, WorkflowPhase::Map, "map-parent");
     crate::test_support::record_indexed_run(
         target,

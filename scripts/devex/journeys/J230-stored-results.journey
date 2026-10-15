@@ -1,0 +1,62 @@
+name: Stored external results disclose partial history without completing a Scan
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/stored_results.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 30 records marked verified by the external engine | partial-status
+paste-file: @ART/import-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 30 fuzz:import · 1 imported | partial-import
+require-shell: python3 -B @REPO/scripts/devex/fixtures/stored_results.py @TMP_TARGET @ART imported
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | partial-receipt
+keys: Escape
+resize: 160x48
+live-snap: partial-160x48
+resize: 96x89
+live-snap: partial-96x89
+resize: 80x24
+live-snap: partial-80x24
+resize: 60x20
+live-snap: partial-60x20
+resize: 40x12
+live-snap: partial-40x12
+expect: partial
+keys: NPage
+live-snap: partial-page-40x12
+keys: NPage
+live-snap: partial-page-two-40x12
+ask: Does the stored-result receipt make the partial outcome and external verification authority clear without implying a new Scan?
+resize: 120x36
+require-shell: python3 -B @REPO/scripts/devex/fixtures/stored_results.py @TMP_TARGET @ART invalidate
+paste-file: @ART/status-command.txt
+keys: Enter
+submit: logs
+require-live-snap: 30 Could not read stored findings index | invalid-index
+require-shell: python3 -B @REPO/scripts/devex/fixtures/stored_results.py @TMP_TARGET @ART failed
+paste-file: @ART/failed-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · failed | failure-receipt
+expect: Recorded error
+keys: C-c
+require-exit: 15
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+paste-file: @ART/partial-replay.txt
+keys: Enter
+require-live-snap: 25 Outcome · partial | historical-partial
+require-shell: python3 -B @REPO/scripts/devex/fixtures/stored_results.py @TMP_TARGET @ART restarted
+ask: Does restart retain the original partial receipt separately from the later failed read?
+keys: C-c
+require-exit: 15

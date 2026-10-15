@@ -91,16 +91,32 @@ impl ScanEngine for DepHygieneScanner {
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        if cancellation.is_cancelled() {
-            anyhow::bail!("dep-hygiene scan cancelled");
-        }
-
-        let report = check_dependency_hygiene(target)?;
-        Ok(report
+        let inspection = inspect_dependency_hygiene(target, cancellation)?;
+        inspection.ensure_complete()?;
+        Ok(inspection
+            .report
             .findings
             .iter()
-            .map(|finding| finding.to_core_finding(Path::new(&report.target)))
+            .map(|finding| finding.to_core_finding(Path::new(&inspection.report.target)))
             .collect())
+    }
+
+    fn scan_artifacts(
+        &self,
+        target: &Path,
+        cancellation: &ScanCancellation,
+    ) -> Result<crate::scan::ScanEngineOutput> {
+        let inspection = inspect_dependency_hygiene(target, cancellation)?;
+        Ok(crate::scan::ScanEngineOutput {
+            findings: inspection
+                .report
+                .findings
+                .iter()
+                .map(|finding| finding.to_core_finding(Path::new(&inspection.report.target)))
+                .collect(),
+            codeql_sarif_documents: Vec::new(),
+            scan_errors: inspection.receipt.gaps,
+        })
     }
 }
 

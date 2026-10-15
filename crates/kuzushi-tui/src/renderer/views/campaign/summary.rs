@@ -44,15 +44,15 @@ fn summary_fields(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -> [St
         .map(|pid| dispatcher_label(pid, deck.dispatcher_stop_requested))
         .unwrap_or_else(|| "no deck-launched dispatcher".into());
     [
-        format!(
-            "{} job(s) · {}",
-            campaign.jobs.len(),
-            states_label(campaign)
-        ),
+        job_count_label(campaign),
         campaign_worker_label(deck, campaign),
         campaign_spend_label(campaign),
         dispatcher,
     ]
+}
+
+pub(super) fn job_count_label(campaign: &CampaignSnapshot) -> String {
+    format!("Jobs: {} · {}", campaign.jobs.len(), states_label(campaign))
 }
 
 fn append_operational_detail(

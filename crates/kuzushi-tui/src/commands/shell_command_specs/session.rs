@@ -83,7 +83,7 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         command: "plan <english>",
         aliases: &["/plan <english>"],
         category: ShellCommandCategory::Session,
-        description: "Haiku natural-language planner; review then /yes or /no",
+        description: "Prepare a budgeted workflow proposal; /plan reopens a kept draft",
     },
     ShellCommandSpec {
         command: "yes",

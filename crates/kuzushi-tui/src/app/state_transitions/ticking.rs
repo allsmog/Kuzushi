@@ -17,6 +17,7 @@ impl ShellApp {
         changed |= self.poll_campaign_completion();
         changed |= self.poll_relationship_write();
         changed |= self.poll_lesson_write();
+        changed |= self.poll_source_review();
         changed
     }
 
@@ -119,6 +120,9 @@ impl ShellApp {
     }
 
     pub fn has_running_work(&self) -> bool {
+        if self.runtime_state.source_review_worker.is_some() {
+            return true;
+        }
         let scan_running = self.scan().is_some_and(|scan| scan.running);
         let tool_running = self.tool_is_running();
         let agent_running = self.agent_chat().is_some_and(|agent| agent.running);

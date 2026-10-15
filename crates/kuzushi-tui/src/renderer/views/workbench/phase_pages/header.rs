@@ -30,7 +30,7 @@ pub(in crate::renderer::views) fn phase_header_lines(
     }
     let trailing = command_hint_lines(header, hints, width);
     let card_rows = height.saturating_sub(lines.len() + trailing.len() + 3);
-    let card_rows = scan_result_header_budget(header.phase, card_rows);
+    let card_rows = phase_result_header_budget(header.phase, card_rows);
     lines.extend(result_card_lines(
         header.result_card.as_ref(),
         width,
@@ -40,11 +40,15 @@ pub(in crate::renderer::views) fn phase_header_lines(
     lines
 }
 
-fn scan_result_header_budget(phase: kuzushi_core::WorkflowPhase, rows: usize) -> usize {
-    if phase == kuzushi_core::WorkflowPhase::Scan {
-        return rows.min(3);
+fn phase_result_header_budget(phase: kuzushi_core::WorkflowPhase, rows: usize) -> usize {
+    use kuzushi_core::WorkflowPhase;
+    match phase {
+        WorkflowPhase::Scan => rows.min(3),
+        // Wrapped receipt identifiers and recovery text must not consume the
+        // findings area. The full card remains available through Open.
+        WorkflowPhase::Review if rows < 16 => rows.min(3),
+        _ => rows,
     }
-    rows
 }
 
 fn context_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
@@ -477,10 +481,14 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
         ),
     ];
     atoms.extend(reality_atom(header));
+    let mut cost = cost_atom(header);
+    if header.cost_invalid || !header.cost.is_complete() {
+        atoms.extend(cost.take());
+    }
     atoms.push(atom(format!("target {}", header.target), theme::label()));
     let (live_text, live_style) = live_atom(header.liveness);
     atoms.push(atom(live_text, live_style));
-    atoms.extend(cost_atom(header));
+    atoms.extend(cost);
     atoms.push(atom(header.context.clone(), context_style(&header.context)));
     atoms.push(atom(format!("model {}", header.model), theme::muted()));
     atoms.extend(
@@ -511,13 +519,39 @@ fn cost_atom(header: &EngagementHeaderModel) -> Option<IdentityAtom> {
     if header.cost_invalid {
         return Some(atom("cost accounting error".to_string(), theme::danger()));
     }
-    if !header.cost_complete {
-        return Some(atom(
-            format!("cost >=${:.2} incomplete", header.cost_usd),
-            theme::warn(),
-        ));
+    if !header.cost.is_complete() {
+        return Some(unmetered_cost_atom(header.cost));
     }
-    (header.cost_usd > 0.0).then(|| atom(format!("cost ${:.2}", header.cost_usd), theme::primary()))
+    (header.cost.observed_usd() > 0.0).then(|| {
+        atom(
+            format!(
+                "cost {}",
+                crate::ui_view_models::format_runtime_cost(header.cost, None)
+            ),
+            theme::primary(),
+        )
+    })
+}
+
+fn unmetered_cost_atom(cost: kuzushi_core::runtime::RuntimeCostReport) -> IdentityAtom {
+    let text = if cost.is_unavailable() {
+        "cost unknown (not recorded)".to_string()
+    } else {
+        format!(
+            "cost {}",
+            crate::ui_view_models::format_runtime_cost(cost, None)
+        )
+    };
+    let compact = cost
+        .estimated_total_usd()
+        .filter(|_| cost.is_estimated())
+        .map(|usd| format!("cost ~{}", crate::ui_view_models::format_session_cost(usd)))
+        .unwrap_or_else(|| "cost unknown".to_string());
+    IdentityAtom {
+        text,
+        compact: Some(compact),
+        style: theme::warn(),
+    }
 }
 
 fn mode_style(phase: kuzushi_core::WorkflowPhase) -> ratatui::style::Style {

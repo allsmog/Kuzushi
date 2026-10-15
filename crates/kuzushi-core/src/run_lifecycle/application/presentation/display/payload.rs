@@ -1,5 +1,6 @@
 use super::super::*;
 use super::health::cost_label;
+use super::result::result_lines;
 
 pub(super) fn display_lines(payload: &RunPresentationPayloadV1) -> Vec<String> {
     match payload {
@@ -122,7 +123,11 @@ fn model_call_lines(value: &ModelCallPresentationV1) -> Vec<String> {
     }
     append_model_failure(&mut line, value.failure.as_ref());
     let mut lines = vec![line];
-    if let Some(detail) = value.failure.as_ref().and_then(|failure| failure.detail.as_deref()) {
+    if let Some(detail) = value
+        .failure
+        .as_ref()
+        .and_then(|failure| failure.detail.as_deref())
+    {
         lines.push(format!("  detail: {detail}"));
     }
     lines
@@ -139,63 +144,6 @@ fn append_model_failure(
     if let Some(status) = failure.http_status {
         line.push_str(&format!(" · http={status}"));
     }
-}
-
-fn result_lines(value: &ResultSummaryPresentationV1) -> Vec<String> {
-    // Keep the friendly name for scanability and the registry key for the
-    // operator who wants to repeat this exact capability from the shell.
-    let mut lines = vec![format!(
-        "Result · {} ({}) · {} · {}",
-        crate::modules::tool_display_name(value.tool.as_str()),
-        value.tool,
-        value.status,
-        value.summary
-    )];
-    // Single-line tool outputs are routinely the summary restated; echoing
-    // that line as a preview row directly under the heading is pure noise.
-    let summary_text = value.summary.as_str().trim();
-    lines.extend(
-        value
-            .output_lines
-            .iter()
-            .filter(|line| line.as_str().trim() != summary_text)
-            .map(|line| format!("  | {line}")),
-    );
-    // The output preview frequently already ends with the operator-facing
-    // warning/error text; repeating it verbatim reads as a rendering bug.
-    let previewed = value
-        .output_lines
-        .iter()
-        .map(|line| line.as_str().trim())
-        .collect::<std::collections::BTreeSet<_>>();
-    lines.extend(
-        value
-            .warnings
-            .iter()
-            .filter(|message| !previewed.contains(message.as_str().trim()))
-            .map(|message| format!("  ⚠ {message}")),
-    );
-    lines.extend(
-        value
-            .errors
-            .iter()
-            .filter(|message| !previewed.contains(message.as_str().trim()))
-            .map(|message| format!("  ✗ {message}")),
-    );
-    append_result_artifacts(&mut lines, &value.artifacts);
-    lines
-}
-
-fn append_result_artifacts(lines: &mut Vec<String>, artifacts: &[ResultArtifactPresentationV1]) {
-    if artifacts.is_empty() {
-        return;
-    }
-    let labels = artifacts
-        .iter()
-        .map(|artifact| format!("{}={}", artifact.label, artifact.path))
-        .collect::<Vec<_>>()
-        .join(", ");
-    lines.push(format!("  artifacts: {labels}"));
 }
 
 fn question_lines(value: &QuestionPresentationV1) -> Vec<String> {

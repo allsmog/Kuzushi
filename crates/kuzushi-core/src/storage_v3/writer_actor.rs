@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 
 mod commands;
 mod dispatch;
-mod lifecycle;
 mod lessons;
+mod lifecycle;
 mod relationships;
+mod source_review;
 mod staleness;
 #[cfg(test)]
 mod test_hooks;

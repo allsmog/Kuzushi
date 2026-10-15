@@ -1,0 +1,133 @@
+name: Dependency input limits fail honestly and recover with explicit declared allowance
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY KUZUSHI_MODEL KUZUSHI_LANGGRAPH_BRIDGE NODE_OPTIONS NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_budget.py @TMP_TARGET @ART prepare
+require-wrapper-flow:
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: logs
+require-live-snap: 20 LOGS | inventory-origin
+submit: run sbom-scan:scan {"maxTotalBytes":2}
+require-live-snap: 30 maxTotalBytes 2 | refused-input
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_budget.py @TMP_TARGET @ART failed
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | gallery
+keys: Tab
+require-live-snap: 20 Component inventory failed | failed-components
+expect: options sbom-scan:scan
+expect-not: owned-library
+resize: 40x12
+live-snap: failed-40x12
+keys: NPage
+live-snap: failure-recovery-page-1-40x12
+keys: NPage
+live-snap: failure-recovery-page-2-40x12
+keys: NPage
+live-snap: failure-recovery-page-3-40x12
+keys: NPage
+live-snap: failure-recovery-page-4-40x12
+keys: NPage
+live-snap: failure-recovery-page-5-40x12
+keys: NPage
+live-snap: failure-recovery-page-6-40x12
+keys: NPage
+live-snap: failure-recovery-page-7-40x12
+keys: NPage
+live-snap: failure-recovery-page-8-40x12
+keys: NPage
+live-snap: failure-recovery-page-9-40x12
+keys: NPage
+live-snap: failure-recovery-page-10-40x12
+keys: NPage
+live-snap: failure-recovery-page-11-40x12
+keys: NPage
+live-snap: failure-recovery-page-12-40x12
+keys: NPage
+live-snap: failure-recovery-page-13-40x12
+keys: NPage
+live-snap: failure-recovery-page-14-40x12
+keys: NPage
+live-snap: failure-recovery-page-15-40x12
+keys: NPage
+live-snap: failure-recovery-page-16-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_budget.py @TMP_TARGET @ART failure-pages
+ask: Does the refused input show its real byte limit and a usable recovery path without retaining current package claims?
+resize: 120x36
+keys: Escape
+submit: options sbom-scan:scan
+require-live-snap: 20 Max total bytes | declared-option
+keys: Down
+require-live-snap: 20 maxTotalBytes | declared-limit
+live-snap: allowance-options
+keys: Escape
+submit: logs
+require-live-snap: 20 LOGS | recovery-origin
+paste-file: @ART/recovery-command.txt
+keys: Enter
+require-live-snap: 30 sbom-scan: 2 components | completed-inventory
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_budget.py @TMP_TARGET @ART completed
+submit: scene
+require-live-snap: 20 COMPONENT STACK | recovered-components
+expect: owned-library
+expect: declared ^1.0
+expect: 1.2.3
+expect: Source freshness is unverified
+expect-not: Map ✓
+expect-not: Scan ✓
+resize: 160x48
+live-snap: recovered-160x48
+resize: 96x89
+live-snap: recovered-96x89
+resize: 80x24
+live-snap: recovered-80x24
+resize: 60x20
+live-snap: recovered-60x20
+resize: 40x12
+live-snap: recovered-40x12
+keys: NPage
+live-snap: recovered-details-page-1-40x12
+keys: NPage
+live-snap: recovered-details-page-2-40x12
+keys: NPage
+live-snap: recovered-details-page-3-40x12
+keys: NPage
+live-snap: recovered-details-page-4-40x12
+keys: NPage
+live-snap: recovered-details-page-5-40x12
+keys: NPage
+live-snap: recovered-details-page-6-40x12
+keys: NPage
+live-snap: recovered-details-page-7-40x12
+keys: NPage
+live-snap: recovered-details-page-8-40x12
+keys: NPage
+live-snap: recovered-details-page-9-40x12
+keys: NPage
+live-snap: recovered-details-page-10-40x12
+keys: NPage
+live-snap: recovered-details-page-11-40x12
+keys: NPage
+live-snap: recovered-details-page-12-40x12
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_budget.py @TMP_TARGET @ART component-pages
+ask: Are dependency versions and their freshness limit readable across the viewport matrix after a separately requested bounded rerun?
+resize: 120x36
+keys: Escape
+keys: C-c
+require-exit: 10
+env: HOME=@TMP_HOME KUZUSHI_SKIP_ONBOARDING=1 KUZUSHI_REDUCED_MOTION=1 NO_COLOR=1
+launch: --target @TMP_TARGET
+require-live-snap: 30 KUZUSHI | restarted
+submit: scene
+require-live-snap: 20 KUZUSHI VIZ | restarted-gallery
+keys: Tab
+require-live-snap: 20 declared ^1.0 | restarted-components
+expect: 1.2.3
+expect-not: Map ✓
+expect-not: Scan ✓
+require-shell: python3 -B @REPO/scripts/devex/fixtures/sbom_budget.py @TMP_TARGET @ART restarted
+ask: Does no-color restart recollect components while retaining both run receipts without model calls, source execution, discovery jobs or invented workflow progress?
+keys: C-c
+require-exit: 10

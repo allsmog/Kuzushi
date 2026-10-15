@@ -1,4 +1,5 @@
 use super::bounded_fs as fs;
+use super::SbomInputs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -10,11 +11,11 @@ pub(super) fn is_cartfile_resolved(path: &Path) -> bool {
 }
 
 pub(super) fn cartfile_resolved_edges(
-    target: &Path,
+    target: &SbomInputs,
     path: &Path,
 ) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()
@@ -28,11 +29,11 @@ pub(super) fn cartfile_resolved_edges(
 }
 
 pub(super) fn cartfile_resolved_components(
-    target: &Path,
+    target: &SbomInputs,
     path: &Path,
 ) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()

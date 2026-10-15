@@ -85,7 +85,17 @@ fn unfinished_context_has_no_result_but_completed_missing_output_is_an_error() {
     let reference = commit(root.path(), "expected-run");
     assert_eq!(
         receipt.generated_context(root.path()).unwrap(),
-        Some(reference)
+        Some(reference.clone())
+    );
+    let output = receipt
+        .generated_context_document(root.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.reference, reference);
+    assert_eq!(
+        output.document,
+        crate::capabilities::threat_model::load_exact_threat_model(root.path(), &reference)
+            .unwrap()
     );
     commit(root.path(), "expected-run");
     assert_error(&receipt, root.path(), "ambiguous immutable revisions");

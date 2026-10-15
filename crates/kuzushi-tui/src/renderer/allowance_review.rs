@@ -30,11 +30,21 @@ pub(super) fn render_allowance_review(frame: &mut Frame<'_>, app: &ShellApp) -> 
         .iter()
         .skip(model.offset)
         .take(model.page_rows)
-        .map(|line| Line::styled(line.clone(), theme::primary()))
+        .map(|line| review_line(line))
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(lines), body);
     render_review_controls(frame, area, &model);
     true
+}
+
+fn review_line(line: &str) -> Line<'static> {
+    let style = match line {
+        "SPENDING LIMITS" | "CURRENT ACCOUNTING" | "RESOURCE ESTIMATE" | "PLAN DETAILS" => {
+            theme::heading()
+        }
+        _ => theme::primary(),
+    };
+    Line::styled(line.to_owned(), style)
 }
 
 fn review_block(model: &AllowanceReviewModel) -> Block<'static> {

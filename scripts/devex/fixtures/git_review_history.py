@@ -145,6 +145,20 @@ def gap(root, evidence):
         for name in ["config.env", "main.rs", "README.md", "revision-note.txt"]})
 
 
+def verify_captured_history(evidence):
+    paths = sorted(evidence.glob("*-decision-page-*.txt"))
+    assert len(paths) == 10, "All ten bounded compact reading pages must be captured"
+    text = "\n".join(path.read_text() for path in paths)
+    state = load(evidence / "state.json")
+    required = ["Decision commit:", "Later commit:", "clean", "dirty", "Reassess"]
+    required.extend(run["git"]["sha"][:12] for run in (state["runs"][0], state["runs"][-1]))
+    for value in required:
+        assert value in text, "Compact source-history pages did not expose " + value
+    save(evidence / "captured-history-check.json", {"pages": len(paths),
+        "decisionSourceVisible": True, "laterSourceVisible": True,
+        "cleanAndDirtyVisible": True, "operatorApproved": False})
+
+
 def verify(root, evidence, stage):
     state = load(evidence / "state.json")
     assert len(state["runs"]) == 4 and [run["findings"] for run in state["runs"]] == [1,1,1,0]
@@ -153,7 +167,11 @@ def verify(root, evidence, stage):
     source = {name:hashlib.sha256((root / name).read_bytes()).hexdigest()
         for name in ["config.env", "main.rs", "README.md", "revision-note.txt"]}
     assert source == load(evidence / "source-final.json")
-    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+    # Allow SQLite to open WAL sidecars while prohibiting SQL writes. Immutable
+    # reads could miss recent observations and must not be used for a live ledger.
+    with sqlite3.connect((root / ".kuzushi/v3/index.sqlite3").as_uri() + "?mode=rw", uri=True) as db:
+        db.execute("PRAGMA query_only=ON")
+        assert db.execute("PRAGMA query_only").fetchone()[0] == 1
         assert db.execute("select count(*) from finding_observations").fetchone()[0] == 3
         assert db.execute("select count(*) from review_decisions").fetchone()[0] == 2
         tables = {row[0] for row in db.execute("select name from sqlite_master where type='table'")}
@@ -168,5 +186,7 @@ def verify(root, evidence, stage):
 root, evidence, stage = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), sys.argv[3]
 if stage in ["seed", "committed", "dirty", "gap"]:
     {"seed":seed,"committed":committed,"dirty":dirty,"gap":gap}[stage](root, evidence)
+elif stage == "captured-history":
+    verify_captured_history(evidence)
 else:
     verify(root, evidence, stage)

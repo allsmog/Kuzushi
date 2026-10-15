@@ -3,6 +3,8 @@ mod application;
 mod domain;
 
 #[cfg(test)]
+mod execution_contract_tests;
+#[cfg(test)]
 mod reader_contract_tests;
 #[cfg(test)]
 mod tests;

@@ -125,37 +125,9 @@ pub(crate) const TARGET_MANIFESTS: [ManifestKind; 26] = [
 ];
 
 pub fn check_dependency_hygiene(target: &Path) -> Result<DepHygieneReport> {
-    let target = canonical_directory(target)?;
-    let mut findings = Vec::new();
-
-    for manifest in TARGET_MANIFESTS {
-        let manifest_path = target.join(manifest.file_name());
-        if !manifest_path.exists() {
-            continue;
-        }
-        let raw = crate::bounded_file::read_utf8_text_within(
-            &target,
-            &manifest_path,
-            16 * 1024 * 1024,
-        )
-        .with_context(|| format!("dep-hygiene: failed to read {}", manifest_path.display()))?;
-        findings.extend(analyze_manifest(manifest, &manifest_path, &raw));
-    }
-    findings.extend(check_dotnet_projects(&target)?);
-    findings.extend(check_gradle_builds(&target)?);
-    findings.extend(check_extension_files(&target, "opam", analyze_opam_file)?);
-    findings.extend(check_extension_files(
-        &target,
-        "nimble",
-        analyze_nimble_file,
-    )?);
-    findings.extend(check_extension_files(&target, "cabal", analyze_cabal_file)?);
-
-    Ok(DepHygieneReport {
-        target: target.display().to_string(),
-        count: findings.len(),
-        findings,
-    })
+    let inspection = inspect_dependency_hygiene(target, &ScanCancellation::default())?;
+    inspection.ensure_complete()?;
+    Ok(inspection.report)
 }
 
 pub fn analyze_manifest(
@@ -210,71 +182,4 @@ fn analyze_extended_manifest(
         ManifestKind::GoMod => analyze_go_mod(file_path, raw),
         _ => unreachable!("core manifest routed to extended analyzer"),
     }
-}
-
-fn check_dotnet_projects(target: &Path) -> Result<Vec<DepHygieneFinding>> {
-    let mut findings = Vec::new();
-    for entry in fs::read_dir(target)
-        .with_context(|| format!("dep-hygiene: failed to read {}", target.display()))?
-    {
-        let path = entry?.path();
-        if !is_dotnet_project(&path) {
-            continue;
-        }
-        let raw = crate::bounded_file::read_utf8_text_within(target, &path, 16 * 1024 * 1024)
-            .with_context(|| format!("dep-hygiene: failed to read {}", path.display()))?;
-        findings.extend(analyze_dotnet_project(&path, &raw));
-    }
-    Ok(findings)
-}
-
-fn is_dotnet_project(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "csproj" | "fsproj" | "vbproj"
-            )
-        })
-}
-
-fn check_gradle_builds(target: &Path) -> Result<Vec<DepHygieneFinding>> {
-    let mut findings = Vec::new();
-    for name in ["build.gradle", "build.gradle.kts"] {
-        let path = target.join(name);
-        if !path.exists() {
-            continue;
-        }
-        let raw = crate::bounded_file::read_utf8_text_within(target, &path, 16 * 1024 * 1024)
-            .with_context(|| format!("dep-hygiene: failed to read {}", path.display()))?;
-        findings.extend(analyze_gradle_build(&path, &raw));
-    }
-    Ok(findings)
-}
-
-fn check_extension_files(
-    target: &Path,
-    extension: &str,
-    analyze: fn(&Path, &str) -> Vec<DepHygieneFinding>,
-) -> Result<Vec<DepHygieneFinding>> {
-    let mut findings = Vec::new();
-    for entry in fs::read_dir(target)
-        .with_context(|| format!("dep-hygiene: failed to read {}", target.display()))?
-    {
-        let path = entry?.path();
-        if !has_extension(&path, extension) {
-            continue;
-        }
-        let raw = crate::bounded_file::read_utf8_text_within(target, &path, 16 * 1024 * 1024)
-            .with_context(|| format!("dep-hygiene: failed to read {}", path.display()))?;
-        findings.extend(analyze(&path, &raw));
-    }
-    Ok(findings)
-}
-
-fn has_extension(path: &Path, expected: &str) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension == expected)
 }

@@ -81,6 +81,7 @@ fn render_shell_app(frame: &mut Frame<'_>, app: &ShellApp) {
 
 fn render_priority_overlay(frame: &mut Frame<'_>, app: &ShellApp) -> bool {
     render_compact_quit(frame, app)
+        || super::source_review::render(frame, app)
         || super::allowance_review::render_allowance_review(frame, app)
         || super::scope_review::render_scope_review(frame, app)
         || super::study_config::render_study_config(frame, app)
@@ -235,7 +236,7 @@ fn main_view_layout(
 fn line_view_height(view: ShellView, line_count: usize, max_view_height: u16) -> u16 {
     if matches!(
         view,
-        crate::ShellView::PlanningPicker | crate::ShellView::Setup
+        crate::ShellView::PlanningPicker | crate::ShellView::Setup | crate::ShellView::Options
     ) {
         return max_view_height;
     }
@@ -254,16 +255,21 @@ fn render_primary_view(
         PrimaryRenderMode::Scene => render_scene_view(frame, area, app),
         PrimaryRenderMode::Activity => render_activity_view(frame, area, app),
         PrimaryRenderMode::Workbench => render_workbench_view(frame, area, app),
-        PrimaryRenderMode::Lines => render_line_view(frame, area, view, view_lines),
+        PrimaryRenderMode::Lines => render_line_view(frame, area, app, view, view_lines),
     }
 }
 
 fn render_line_view(
     frame: &mut Frame<'_>,
     area: Rect,
-    _view: ShellView,
+    app: &ShellApp,
+    view: ShellView,
     view_lines: Vec<Line<'static>>,
 ) {
+    if view == ShellView::Options && app.options_screen_snapshot().is_none() {
+        render_options_browser(frame, area, app);
+        return;
+    }
     render_lines(frame, area, view_lines);
 }
 
@@ -327,8 +333,27 @@ fn answer_prompt_height(app: &ShellApp, area: Rect) -> Option<u16> {
 fn view_supplies_own_input_surface(app: &ShellApp) -> bool {
     matches!(
         (app.shell_view(), app.input_mode()),
-        (ShellView::Activity, crate::InputMode::Navigate) | (ShellView::Keymap, _)
+        (ShellView::Activity, crate::InputMode::Navigate)
+            | (ShellView::Keymap, _)
+            | (ShellView::Report, _)
     )
+}
+
+#[cfg(test)]
+mod report_input_surface_tests {
+    use super::*;
+
+    #[test]
+    fn report_reader_and_path_editor_do_not_duplicate_their_own_controls_in_a_composer() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Report);
+        for editing in [false, true] {
+            app.router.report_mut().set_editing_path(editing);
+            for (width, height) in [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)] {
+                assert_eq!(prompt_height(&app, Rect::new(0, 0, width, height)), 0);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

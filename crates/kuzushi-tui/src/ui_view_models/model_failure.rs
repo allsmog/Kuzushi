@@ -8,6 +8,9 @@ pub(crate) fn model_failure_text(
 ) -> String {
     let failure = audit.failure_metadata(error);
     let mut lines = vec![audit.failure_summary(error)];
+    if audit.refused_before_provider_request() {
+        lines.push("No provider request started. Your question remains editable.".into());
+    }
     let next = recovery_step(failure.error_class, failure.detail.as_deref());
     // Canonical client/model details add a repair step beyond the class guidance.
     // Legacy auth detail contains a CLI login command that is shell-only now.

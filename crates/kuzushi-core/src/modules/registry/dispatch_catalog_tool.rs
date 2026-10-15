@@ -64,15 +64,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         name if name.starts_with("fleet:") => dispatch_fleet_tool(name, input),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "workspace:import-findings" => Some(workspace_import_findings_tool(input, ctx)),
-        "campaign:plan"
-        | "campaign:status"
-        | "campaign:coverage"
-        | "campaign:approve-allowance"
-        | "campaign:brief"
-        | "campaign:allowance"
-        | "campaign:study"
-        | "campaign:context-study"
-        | "campaign:context-map" => dispatch_campaign_tool(name, input, ctx),
+        name if name.starts_with("campaign:") => dispatch_campaign_tool(name, input, ctx),
         "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
@@ -143,6 +135,7 @@ fn dispatch_campaign_tool(
         "campaign:brief" => Some(campaign::execute_brief(input, ctx)),
         "campaign:study" => Some(campaign::execute_study_plan(input, ctx)),
         "campaign:context-study" => Some(campaign::execute_context_study(input, ctx)),
+        "campaign:review-study" => Some(campaign::execute_review_study(input, ctx)),
         "campaign:context-map" => Some(campaign::execute_context_map(input, ctx)),
         "campaign:allowance" => Some(campaign::execute_allowance_status(input, ctx)),
         _ => None,
@@ -161,6 +154,7 @@ fn dispatch_finding_ledger_tool(
         }
         "findings:groups" => Some(super::super::findings_groups::execute(input, ctx)),
         "findings:dismiss" => Some(dismiss_finding_tool(input, ctx)),
+        "findings:review-source" => Some(super::super::findings_source_review::execute(input, ctx)),
         "findings:relationships" | "findings:relationship" | "findings:relationship-batch" => Some(
             super::super::findings_relationships::execute_finding_relationship_tool(
                 name, input, ctx,
@@ -302,8 +296,7 @@ fn bounty_import_path(input: &Value, tool: &str) -> Result<std::path::PathBuf> {
     let raw = input
         .get("path")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| anyhow::anyhow!("{tool} requires path=<file>"))?;
     Ok(std::path::PathBuf::from(raw))
 }
@@ -507,6 +500,18 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
+    crate::workspace::source_snapshot::run_source_bound_tool(
+        ctx,
+        "dep-hygiene:check",
+        &target,
+        || run_dep_hygiene_inspection(ctx, &target),
+    )
+}
+
+fn run_dep_hygiene_inspection(
+    ctx: &ToolExecutionContext<'_>,
+    target: &std::path::Path,
+) -> Result<Value> {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -516,16 +521,20 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
             )
             .emit();
     }
-    let report = match check_dependency_hygiene(&target) {
+    let inspection = match ctx.with_cancellation(|cancel| {
+        crate::scan::engines::dep_hygiene::inspect_dependency_hygiene(target, cancel)
+    }) {
         Ok(report) => report,
         Err(error) => return Ok(failed_tool_output("dep-hygiene:check", &target, error)),
     };
-    let store_result = store_dep_hygiene_findings(&report, ctx)?;
+    let store_result = store_dep_hygiene_findings(&inspection.report, ctx)?;
     if let Some(trace) = ctx.trace {
-        let _ = trace.step("done", "check", "dep-hygiene complete").emit();
+        let _ = trace
+            .step("done", "check", "dep-hygiene inspection finished")
+            .emit();
     }
     Ok(output_with_core_findings(
-        report.to_tool_json(),
+        inspection.to_tool_json(),
         store_result,
     ))
 }
