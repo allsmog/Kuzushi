@@ -1,5 +1,16 @@
 # TUI DevEx Audit Journeys
 
+## J282: Actual application Review, uncertainty and restart
+
+Read the completed, separately approved Review on the retained owned application
+fixture. Start no work. Inspect its single consumed job at six terminal sizes,
+then the original Scan's three-pass recurrence and automatic needs-review
+opinion. Preserve unknown charges, three observations, zero human decisions and
+the exact reduced allowance through export and no-color restart. Helpers must
+assert unchanged source/context/configuration and exactly four requests before
+and after reading. Judge opinion authority and unresolved evidence separately
+from request execution. Unused protected capacity is not another approved job.
+
 ## J280: Visible Setup recovery through Report
 
 Use an owned two-file public-example fixture and a manual context document.

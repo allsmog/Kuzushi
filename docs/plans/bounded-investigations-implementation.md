@@ -1,5 +1,13 @@
 # Bounded investigations implementation
 
+The [application Review checkpoint](../assessments/live-application-review-2026-10-15.md)
+completes the separately approved single job using one new request. It preserves
+three observations and an automatic `needs_review` opinion through native export
+and restart. J282 records 27 machine passes, zero failures and four pending
+human judgments. Twelve cumulative experiment requests are used. The model's
+insufficient-source-excerpt rationale leaves source-grounded Review preparation
+and useful finding validation open; unused capacity grants no further work.
+
 The [visible Setup recovery checkpoint](../assessments/guided-investigation-2026-10-15.md)
 keeps a Map launch refusal readable and retryable without dropping the selected
 plan. J280 completes manual context acceptance, three local passes, human FP
