@@ -21,8 +21,7 @@ wait-for: 30 findings / 1 crit
 wait: 2
 submit: open refused-split-fixture
 wait-for: 15 Order identifier crosses trust boundary
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 12 Viewing Prove | prove-refused
 # The Prove proof pane is narrow at 120 cols, so the ⚠ refusal disclosure shows
 # but its tail may be width-clipped; assert the visible refusal facts here and

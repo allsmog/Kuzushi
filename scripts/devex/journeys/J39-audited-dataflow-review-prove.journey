@@ -33,8 +33,7 @@ expect: falsifying evidence
 expect: guard
 ask: Section ordering — AUDITED DATAFLOW sits after EVIDENCE; is the guard row visibly a FALSIFIER (labelled `falsifying evidence · …`), not just another evidence line? The rows read `deep auditor (cpg-rs path)` because the witnesses were mined off a cpg path.
 ask: Deferred-promotion guard — the finding's proof chip/rung is UNCHANGED by the presence of dataflow evidence (tool availability must never move a rung this release).
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 15 Viewing Prove | prove-dataflow
 expect: F-0004
 expect: AUDITED DATAFLOW

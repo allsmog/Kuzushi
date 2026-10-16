@@ -26,9 +26,9 @@ wait-for: 30 findings / 1 crit
 wait: 2
 submit: workbench
 wait: 2
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 10 Viewing Prove | 1-prove
+nav-mode:
 keys: v
 wait-live-snap: 10 INVESTIGATE | 2-card-unset
 expect: MODEL LADDER
@@ -54,9 +54,9 @@ submit: setg escalationModel openai:gpt-strong
 wait: 1
 submit: workbench
 wait: 2
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 10 Viewing Prove | prove-set
+nav-mode:
 keys: v
 wait-live-snap: 10 INVESTIGATE | 3-card-set
 expect: MODEL LADDER
