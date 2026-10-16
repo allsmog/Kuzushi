@@ -27,6 +27,11 @@ pub(crate) enum ShellEffect {
     ContinuePastBudget,
     FinalizeJob(JobKind),
     BuildContext(ContextBuild),
+    /// Vestigial launch queue entry: `ask` now opens an approved study through
+    /// `plan_context_question`, so nothing queues a direct agent dispatch. The
+    /// executor arm still calls `dispatch_agent`, which the agent tests cover
+    /// directly, so retiring that launch path belongs to a separate change.
+    #[expect(dead_code, reason = "ask launches through the approved study path")]
     DispatchAgent(AgentDispatch),
     DispatchNextPlanningTask(PlanningTaskDispatch),
     PrepareRunTool(RunToolPreparation),
@@ -91,9 +96,17 @@ pub(crate) enum ShellEffect {
     ShowWorkspaceStatus,
     ReparseKnowledgeBaseSource(KnowledgeBaseSource),
     StartOfflineDemoFixtureScan,
+    /// Vestigial launch queue entry: `reduce_planner_start` and
+    /// `reduce_phase_intent` call `prepare_bounded_workflow_proposal` inline, so
+    /// `dispatch_planner` is only reachable through this unused effect.
+    #[expect(dead_code, reason = "planning proposes a reviewed study inline")]
     StartPlanner(PlannerStart),
     PrepareScan(ScanStartPreparation),
     StartScan(ScanStartRequest),
+    /// Vestigial launch queue entry: `ThreatWorkerStart` is built only under
+    /// `cfg(test)` since the context-regeneration entry replaced the direct
+    /// threat worker launch.
+    #[expect(dead_code, reason = "threat regeneration replaced the worker launch")]
     StartThreat(ThreatWorkerStart),
     SwitchTargetRevision(TargetRevisionSwitch),
     WaitForAbortCleanup,
