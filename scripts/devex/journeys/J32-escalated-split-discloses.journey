@@ -21,8 +21,7 @@ wait-for: 30 findings / 1 crit
 wait: 2
 submit: open escalated-split-fixture
 wait-for: 15 Template input reaches renderer
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 12 Viewing Prove | prove-escalated
 # The Prove proof pane is narrow at 120 cols, so the ⚖ split disclosure shows
 # but its `resolved by <model>` tail is width-clipped; assert the visible split

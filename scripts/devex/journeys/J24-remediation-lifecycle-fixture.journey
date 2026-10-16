@@ -36,8 +36,7 @@ snap: patch-refusal-unconfirmed
 ask: Refusal — does patch:finding on an untriaged finding state WHY it refuses (triage first) instead of failing opaquely?
 # The remediation lifecycle summary distinguishes the four states (plus the
 # durable defer path) — audited while the triptych owns the page.
-nav-mode:
-keys: 5
+submit: fix
 wait-live-snap: 10 Viewing Fix | fix-lifecycle
 expect: patch drafted
 expect: applied
@@ -62,12 +61,12 @@ expect: patch:finding
 keys: y
 wait-for: 30 run receipt
 wait: 1
-nav-mode:
-keys: 5
+submit: fix
 wait-live-snap: 10 Viewing Fix | patch-refusal-no-runtime
 expect: patch:finding requires
 # Discard the refused attempt (evidence stays on disk) so the remediation
 # triptych is visible again for the lifecycle-state audit below.
+nav-mode:
 keys: d
 wait: 1
 # Defer-with-reason is a durable PEER outcome, reachable without a runtime.
@@ -77,8 +76,7 @@ snap: proof-deferred
 expect: proof deferred for F-0001
 # The deferral is durable: the prove surface reports it as a recorded peer
 # outcome, not a dismissed prompt.
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 10 Viewing Prove | prove-after-defer
 # Machine-checked, not asked: the deferral must be disclosed on Prove, with
 # its author and the operator's own reason. It reads the same whether a

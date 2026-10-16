@@ -49,13 +49,11 @@ keys: 3
 wait-live-snap: 15 Viewing Review || Review is locked | review-initial
 ask: Review — if findings exist, do they surface with honest run/revision provenance; otherwise, does the shell explicitly explain why Review is locked?
 keys: Escape
-nav-mode:
-keys: 4
+submit: prove
 wait-live-snap: 15 Viewing Prove || Prove is locked | prove-initial
 ask: Prove — if a confirmed finding exists, is its verification state honest; otherwise, does the shell explicitly explain why Prove is locked without fabricating proof?
 keys: Escape
-nav-mode:
-keys: 5
+submit: fix
 wait-live-snap: 15 Viewing Fix || Fix is locked | fix-initial
 ask: Fix — if proof or patch records exist, is remediation limited to planning/diff-preview with explicit application authorization; otherwise, does the shell explicitly explain why Fix is locked?
 keys: Escape

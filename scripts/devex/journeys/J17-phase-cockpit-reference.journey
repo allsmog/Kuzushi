@@ -12,7 +12,9 @@
 # intact and retypes it if corrupted).
 # Numeric page keys are printable view hotkeys, so this journey converges
 # Navigate mode (nav-mode: polls the footer markers; F2 is retired) before
-# selecting Map, Scan, Review, Prove, and Fix.
+# selecting Map, Scan, and Review. The Workbench binds a digit only for those
+# three pages; Prove and Fix are compatibility readers reached by their phase
+# verbs, so this journey submits `prove` and `fix` instead of 4 and 5.
 name: Canonical five-phase cockpit reference
 size: 120x36
 cwd: @TMP_TARGET
@@ -51,7 +53,7 @@ expect: F-0001
 expect: SQL injection reaches query
 expect: runtime_verified
 ask: Review — is the queue confidence-first, is exactly one selected identity obvious, and do actions visibly target that finding?
-keys: 4
+submit: prove
 wait-live-snap: 10 Viewing Prove | 4-prove
 expect: STATUS / NEXT
 expect: SQL injection reaches query
@@ -60,7 +62,7 @@ expect: PROOF · REPLAY
 expect: replay verify-phase
 expect: verify F-0001
 ask: Prove — do identity, STATUS, and NEXT precede evidence, with replay offered only for the persisted verification run?
-keys: 5
+submit: fix
 # Remediation truth hydrates async — wait on the loaded lifecycle state
 # ("Staged for approval", seeded by the fixture), not merely the page chrome.
 wait-live-snap: 15 Staged for approval | 5-fix
