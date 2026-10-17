@@ -2784,6 +2784,11 @@ mod tests {
 
     /// The ping runs through the strict bridge runner, so a bridge that exits
     /// nonzero is a failure even when it printed a success document.
+    ///
+    /// The fake bridge is a `/bin/sh` script, so both helpers below are
+    /// `#[cfg(unix)]`; the test carries the same gate or the whole crate's
+    /// `--all-targets` check stops compiling on Windows.
+    #[cfg(unix)]
     #[test]
     fn run_auth_ping_bridge_round_trips_json_over_stdio() {
         let temp = tempfile::tempdir().unwrap();
