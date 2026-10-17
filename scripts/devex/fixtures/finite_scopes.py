@@ -40,8 +40,33 @@ def selected_plan(root, evidence):
     assert plan["workers"] == 1 and plan["jobCount"] == 6 and len(plan["jobs"]) == 6
     assert {entry["id"] for entry in plan["scopeStudy"]["cases"]} == {"app", "other"}
     assert plan["scopeStudy"]["unplannedScopeIds"] == ["integration"]
+    common = plan["scopeStudy"]["inheritedThreatModelRef"]
+    assert isinstance(common, dict)
+    cases = {case["id"]: case for case in plan["scopeStudy"]["cases"]}
+    assert cases["app"]["baseInput"]["threatModelRef"] != common
+    assert cases["other"]["baseInput"]["threatModelRef"] == common
+    manifest = json.loads((root / ".kuzushi/threat-models/manifest.json").read_text())
+    assert manifest.get("active") is None
     (evidence / "campaign-command.txt").write_text("campaign " + plan["campaignId"])
     return plan
+
+
+def prepare_map_context(root):
+    document = {
+        "version": "1", "methodology": "stride", "title": "Owned scope study context",
+        "systemContext": "Two independent components live in app and other. Both read shared/context.rs as context. The shared integration boundary is not selected for discovery. These files contain inert comments; no deployed application or vulnerability is established.",
+        "dfd": {"nodes": [
+            {"id": name, "name": label, "type": "data-store", "trustZone": "repository",
+             "description": path + " supplies owned inert source text.",
+             "purpose": "Provides source evidence for a bounded investigation."}
+            for name, label, path in [("app", "App source", "app/reader.rs"),
+                                      ("other", "Other source", "other/reader.rs"),
+                                      ("shared", "Shared source", "shared/context.rs")]],
+            "flows": [], "trustBoundaries": []},
+        "threats": [], "summary": {},
+        "openQuestions": ["Which owner policy should classify the supplied comments?"],
+    }
+    (root / ".kuzushi/manual-scope-context.json").write_text(json.dumps(document, indent=2) + "\n")
 
 
 def verify(root, evidence, stage):
@@ -57,6 +82,7 @@ def verify(root, evidence, stage):
     calls = [json.loads(row) for row in calls_path.read_text().splitlines()]
     assert len(calls) == 6 and len({row["bridgePid"] for row in calls}) == 6
     assert sorted(row["scope"] for row in calls) == ["app"] * 3 + ["other"] * 3
+    assert all(row["localContext"] == (row["scope"] == "app") for row in calls)
     report = read_native(root, evidence, "scope-occurrence", ["findings", "batch", plan["campaignId"], "--json"])
     for boundary in report["cases"]:
         work = boundary["occurrence"]
@@ -70,15 +96,42 @@ def verify(root, evidence, stage):
         approval = json.loads(db.execute("select approval_json from investigation_allowance_revisions order by revision desc limit 1").fetchone()[0])
         assert approval["limits"] == {"maxProviderCalls": 8, "protectedReviewCalls": 2}
         assert len(approval["workPlan"]["jobs"]) == 6
+    if stage in {"exported", "restarted"}:
+        verify_review_export(root, evidence, plan, stage)
     (evidence / "finite-scopes-verified.json").write_text(json.dumps({"fixedJobs": 6, "workers": 1,
         "scopes": 2, "passesPerScope": 3, "unplanned": ["integration"], "committedCalls": 6,
         "protectedReviewCalls": 2, "freshSessions": 6, "liveRequests": 0, "sourceExecuted": False}, indent=2))
+
+
+def verify_review_export(root, evidence, plan, stage):
+    path = root / ".kuzushi/reports/findings.json"
+    saved = evidence / "scoped-export-before-restart.json"
+    payload = path.read_bytes()
+    if stage == "restarted":
+        assert payload == saved.read_bytes(), "Restart must not rewrite the saved report"
+    report = json.loads(payload)
+    assert report["count"] == 2
+    assert all(row["reviewDecision"] == "rejected_false_positive" for row in report["findings"])
+    assert {row["location"]["file"] for row in report["findings"]} == {"app/reader.rs", "other/reader.rs"}
+    receipt = report["metadata"]["investigation"]
+    assert receipt["campaignId"] == plan["campaignId"]
+    assert receipt["observationCount"] == 6
+    assert receipt["reviewedCount"] == 2 and receipt["confirmedCount"] == 0
+    assert receipt["unplannedScopeIds"] == ["integration"]
+    for case in plan["scopeStudy"]["cases"]:
+        assert receipt["scope"][case["id"]]["scanScopeRef"] == case["baseInput"]["scanScopeRef"]
+    accounting = receipt["allowance"]["currentInvestigation"]
+    assert accounting["committedCalls"] == 6 and accounting["unresolvedCalls"] == 0
+    assert accounting["limits"] == {"maxProviderCalls": 8, "protectedReviewCalls": 2}
+    if stage == "exported":
+        saved.write_bytes(payload)
 
 
 if __name__ == "__main__":
     root, evidence = [Path(value).resolve() for value in sys.argv[1:3]]
     if sys.argv[3] == "seed":
         prepare(root, evidence, Path(sys.argv[4]).resolve())
+        prepare_map_context(root)
     else:
         verify(root, evidence, sys.argv[3])
         if sys.argv[3] == "restarted":

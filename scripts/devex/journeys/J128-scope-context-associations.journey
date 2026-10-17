@@ -19,7 +19,9 @@ ask: Does the boundary list distinguish inherited, overridden and omitted contex
 keys: Down Enter Up Enter
 require-live-snap: 25 CONTEXT SUMMARY | exact-alpha
 expect: Alpha
-keys: e Enter C-u
+keys: e
+require-live-snap: 20 ↑↓ Enter edit | context-editor-ready
+keys: Enter C-u
 type: Owned boundary context
 keys: C-s
 require-live-snap: 20 REVIEW CONTEXT CHANGES | edit-review
@@ -53,7 +55,7 @@ live-snap: context-page-40x12
 resize: 120x36
 keys: Escape
 require-live-snap: 20 PLAN A STUDY | budget-draft
-keys: Down Enter
+keys: Down Down Enter
 require-live-snap: 20 Enter save · Esc cancel | total-call-editor
 type: 8
 keys: Enter Down Enter
@@ -67,7 +69,7 @@ expect: 6 fixed jobs
 keys: y
 require-live-snap: 30 Approval saved | approved
 require-shell: python3 -B @REPO/scripts/devex/fixtures/scope_context.py @TMP_TARGET @ART approved
-keys: Up Up Enter
+keys: Up Up Up Enter
 require-live-snap: 20 SCOPE CONTEXT | frozen-context
 keys: Up
 require-live-snap: 20 Context actually frozen for scans | frozen-app

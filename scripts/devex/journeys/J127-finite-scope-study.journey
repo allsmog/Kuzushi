@@ -6,6 +6,23 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
 require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART seed @TMP_HOME
 launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | ready
+submit: setg ui.auto_open_activity false
+submit: setg ui.auto_open_viz false
+submit: logs
+submit: run context:build {"enrichment":false}
+require-live-snap: 35 Build project context: | source-context
+submit: use threat-model
+submit: options threat-model:import
+submit: set path .kuzushi/manual-scope-context.json
+submit: set activate false
+submit: set label Owned scope study source
+submit: run threat-model:import
+require-live-snap: 35 threat-model:import saved | map-context
+submit: map
+require-live-snap: 25 SYSTEM SUMMARY | map-result
+nav-mode:
+keys: u
+require-live-snap: 25 Map ✓ | accepted-map
 submit: scopes
 require-live-snap: 30 ACCEPTED SCOPES | accepted-scopes
 keys: Space Down Space
@@ -23,18 +40,41 @@ require-live-snap: 20 Engine choices updated | selected-engine
 keys: Down
 require-live-snap: 20 Selected boundaries: 2 | selected-workload
 expect: 6 fixed discovery jobs
-keys: Down Enter
+keys: Enter
+require-live-snap: 20 SCOPE CONTEXT | boundary-context
+keys: Down Enter Enter
+require-live-snap: 25 CONTEXT SUMMARY | common-context-preview
+keys: e
+require-live-snap: 20 ↑↓ Enter edit | context-editor-ready
+keys: Enter C-u
+type: APP_ONLY_CONTEXT_BOUNDARY. This owned App context is source guidance, not a finding verdict. Shared files provide context only.
+keys: C-s
+require-live-snap: 20 REVIEW CONTEXT CHANGES | context-copy-review
+keys: Enter
+require-live-snap: 30 Edited copy saved | inactive-context-copy
+keys: Enter
+require-live-snap: 25 APP_ONLY_CONTEXT_BOUNDARY | edited-context-preview
+keys: a
+require-live-snap: 20 Context selected for app | boundary-context-selected
+expect: app · exact override
+expect: other · inherits common
+ask: Can the operator inspect and select an inactive local context for App while Other inherits the accepted common revision, without changing global context or starting work?
+keys: Escape
+require-live-snap: 20 PLAN A STUDY | scoped-context-draft
+keys: Down Down Enter
 type: 8
 keys: Enter Down Enter
 type: 2
 keys: Enter L
 require-live-snap: 30 Scope draft ready | frozen-plan
 require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART draft
-keys: L End
-require-live-snap: 30 y approve | exact-approval
+keys: L Home
+require-live-snap: 30 REVIEW PLAN & ALLOWANCE | exact-allowance
 expect: 6 fixed jobs
 expect: Total provider calls: 8
 expect: Protected review calls: 2
+keys: End
+require-live-snap: 30 y approve | exact-approval
 ask: Does approval show all six finite jobs and the shared allowance before any request, without approving sibling or follow-up work?
 keys: y
 require-live-snap: 30 Approval saved | approved
@@ -47,9 +87,10 @@ keys: r
 require-live-snap: 30 6 completed | completed
 keys: Escape
 submit: workbench
-require-live-snap: 30 RESULT READY | scan-result
+require-live-snap: 30 Viewing Scan | scan-result
 nav-mode:
-keys: u
+keys: n
+require-live-snap: 30 Viewing Review | accepted-scan
 keys: Escape
 paste-file: @ART/open-app.txt
 keys: Enter
@@ -63,22 +104,29 @@ submit: dismiss false_positive Owned workflow fixture; no defect claimed
 require-live-snap: 30 rejected_false_positive | other-decision
 submit: report
 require-live-snap: 30 Scope study: | scope-report
+expect: Scope study: 2 boundaries · 1 unplanned
 expect: 6 committed / 8 calls
 expect: 2 protected review remaining
 expect: 3 completed / 3 planned
 expect: Unplanned boundaries: integration
 ask: Does the report retain separate three-pass scope denominators, shared spending and the unplanned boundary, with no complete coverage claim?
-keys: p
+keys: j j j
+require-live-snap: 20 format json (4/6) | json-format
+keys: Enter End
+require-live-snap: 30 json · 2 finding(s) | scoped-export
+require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART exported
+keys: p Home
 resize: 160x48
-live-snap: report-160x48
+require-live-snap: 25 format json (4/6) · all | report-160x48
+expect: Study id:
 resize: 96x89
-live-snap: report-96x89
+require-live-snap: 25 format json (4/6) · all | report-96x89
 resize: 80x24
-live-snap: report-80x24
+require-live-snap: 25 format json (4/6) · all | report-80x24
 resize: 60x20
-live-snap: report-60x20
+require-live-snap: 25 format json (4/6) · all | report-60x20
 resize: 40x12
-live-snap: report-40x12
+require-live-snap: 25 format json (4/6) · all | report-40x12
 keys: NPage
 live-snap: report-page-1-40x12
 keys: NPage
@@ -116,6 +164,7 @@ launch: --target @TMP_TARGET
 require-live-snap: 30 KUZUSHI | restarted
 submit: report
 require-live-snap: 30 Scope study: | recovered-report
+expect: Scope study: 2 boundaries · 1 unplanned
 expect: 6 committed / 8 calls
 require-shell: python3 -B @REPO/scripts/devex/fixtures/finite_scopes.py @TMP_TARGET @ART restarted
 ask: Does restart preserve the selected scope study, decisions, fixed workload and accounting without starting another model request?

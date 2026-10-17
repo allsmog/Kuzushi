@@ -76,14 +76,22 @@ def verify(root, evidence, stage):
 def verify_narrow_provenance(evidence, before, plan):
     paths = sorted(evidence.glob("*-recovered*40x12.txt"))
     assert len(paths) >= 19
-    body = "".join(line.strip().strip("│").strip()
-                   for path in paths for line in path.read_text().splitlines()[6:9])
+    body = "".join(narrow_detail_text(path.read_text()) for path in paths)
     compact = "".join(body.split())
     source = plan["scopeStudy"]["cases"][0]["equivalence"]["components"]["targetGit"]
     for item in ["Context actually frozen for scans:", before["active"]["revisionId"],
                  before["active"]["sha256"], "Source SHA:", source["sha"],
                  "changed from commit", "Source identity:", "Scope reference:"]:
         assert "".join(item.split()) in compact, "Narrow paging hid " + item
+
+
+def narrow_detail_text(text):
+    lines = text.splitlines()
+    control = next(i for i, line in enumerate(lines)
+                   if "↑↓ Enter choose" in line and "PgUp/Dn" in line)
+    assert control >= 3, "Narrow context reader has no detail viewport"
+    return "".join(line.strip().strip("│").strip()
+                   for line in lines[control - 3:control])
 
 
 if __name__ == "__main__":

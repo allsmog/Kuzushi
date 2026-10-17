@@ -10,6 +10,16 @@ mod map_digest;
 
 #[cfg(test)]
 mod context_binding_tests;
+#[cfg(test)]
+mod overview_tests;
+
+pub(crate) fn select_threat_digest_overview(document: &Value) -> Option<&str> {
+    ["systemContext", "system_context"]
+        .into_iter()
+        .filter_map(|key| document.get(key).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|text| !text.is_empty())
+}
 
 /// Prompt enrichment resolved once per run: the persisted threat-model
 /// digest plus the MCP servers the tool policy actually attached, so the

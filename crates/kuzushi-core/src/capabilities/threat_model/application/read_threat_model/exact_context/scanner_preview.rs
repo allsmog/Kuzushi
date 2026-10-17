@@ -1,4 +1,4 @@
-//! Read-only projection of the existing execution renderer, without prompt changes.
+//! Exact scanner projection with bounded omission receipts.
 use crate::capabilities::agentic_sast::{
     MAX_DIGEST_ENTRIES, MAX_DIGEST_FIELD_CHARS, MAX_DIGEST_LESSONS, MAX_DIGEST_LESSON_FIELD_CHARS,
     MAX_DIGEST_THREATS,

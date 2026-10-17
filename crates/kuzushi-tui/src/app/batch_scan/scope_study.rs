@@ -32,12 +32,7 @@ fn record_receipt(
     receipt: anyhow::Result<ScopeStudyReceipt>,
 ) -> anyhow::Result<()> {
     let receipt = receipt?;
-    let mut input = receipt.scope_study.first()?.base_input.clone();
-    input
-        .as_object_mut()
-        .ok_or_else(|| anyhow::anyhow!("Scope input is malformed"))?
-        .remove("scanScopeRef");
-    input["threatModelRef"] = receipt.scope_study.inherited_threat_model_ref.clone();
+    let input = receipt.draft_scan_input()?;
     config.trials = receipt.scope_study.first()?.passes;
     config.requested_workers = receipt.requested_workers;
     config.apply_worker_resolution(receipt.workers, receipt.worker_limitation.clone());

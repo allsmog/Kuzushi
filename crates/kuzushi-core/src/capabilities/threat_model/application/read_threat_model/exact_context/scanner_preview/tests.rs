@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn preview_is_the_existing_execution_digest_with_an_exact_hash() {
-    let document = json!({"systemContext":"Full document only", "threats":[{"title":"Owned source review","severity":"low"}],"dfd":{"nodes":[{"id":"owned","name":"Owned application"}]}});
+    let document = json!({"systemContext":"Owned operator overview", "threats":[{"title":"Owned source review","severity":"low"}],"dfd":{"nodes":[{"id":"owned","name":"Owned application"}]}});
     let preview = build(&document);
     assert_eq!(preview["schemaVersion"], 1);
     let expected =
@@ -12,7 +12,7 @@ fn preview_is_the_existing_execution_digest_with_an_exact_hash() {
         preview["sha256"],
         crate::options::prompt_content_sha256(&expected)
     );
-    assert!(!expected.contains("Full document only"));
+    assert!(expected.contains("Owned operator overview"));
 }
 
 #[test]
@@ -34,10 +34,31 @@ fn item_and_unicode_lesson_omissions_are_disclosed_without_rewriting_the_digest(
 
 #[test]
 fn an_empty_digest_is_explicit_and_never_filled_from_unselected_fields() {
-    let preview = build(&json!({"systemContext":"Saved context without digest sections"}));
+    let preview = build(&json!({"title":"Saved metadata without digest sections"}));
     assert!(preview["text"].is_null());
     assert!(preview["sha256"].is_null());
     assert_eq!(preview["omissions"], json!([]));
+}
+
+#[test]
+fn overview_projection_is_bounded_and_its_unicode_omission_is_exact() {
+    let original = json!({"systemContext":format!("{}OMITTED_TAIL", "界".repeat(200))});
+    let preview = build(&original);
+    let text = preview["text"].as_str().unwrap();
+    assert!(text.contains("System overview:"));
+    assert!(text.contains(&"界".repeat(200)));
+    assert!(!text.contains("OMITTED_TAIL"));
+    assert!(preview["omissions"]
+        .to_string()
+        .contains("System overview: first 200 of 212 characters; 12 omitted."));
+    assert_eq!(
+        preview["sha256"],
+        crate::options::prompt_content_sha256(text)
+    );
+    assert!(original["systemContext"]
+        .as_str()
+        .unwrap()
+        .ends_with("OMITTED_TAIL"));
 }
 
 #[test]

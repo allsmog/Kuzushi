@@ -1941,8 +1941,11 @@ Changed source blocks selection as current coverage and retains the observations
 for historical inspection. Accepting the result is an explicit shell action.
 Campaign refresh reloads this phase history without selecting it or taking focus.
 
-Agentic scan context includes bounded Map architecture, data flows, trust
-boundaries and open questions even when no threats were proposed. Each section
+Agentic scan context includes the selected system overview, bounded Map
+architecture, data flows, trust boundaries and open questions even when no
+threats were proposed. The overview selects nonempty string `systemContext`,
+then the legacy string `system_context`, and uses the existing 200-character
+Unicode limit. The scanner preview names the exact omitted count. Each section
 uses at most twelve elements and caps textual fields at 200 characters; omitted
 elements and truncated fields are disclosed in the supplied digest. The exact
 accepted revision remains the input authority. These derived claims remain
@@ -2276,7 +2279,11 @@ Exact `threat-model:read` results add `data.scannerContextPreview`, with
 `schemaVersion: 1`, a projection kind, rendered text/hash, limits and omissions.
 The text hash identifies that digest, not a complete prompt or source snapshot.
 An unavailable or malformed preview produces reread guidance in the TUI.
-Context documents, references, accepted plans and execution prompts are unchanged.
+Context documents, references and accepted plans are unchanged. New projections
+include the selected bounded system overview. Existing frozen projections retain
+their exact recorded text, including historical omissions; renderer updates do
+not change approved jobs. Prepare and approve a replacement plan to use a fresh
+projection of the selected revision.
 The omission list names truncated ordinary fields and open questions using the
 same string trimming, array joining and fallback selection as execution. It
 also reports the flattened pattern limit and groups matching pattern-code cuts
@@ -3093,6 +3100,12 @@ approval while retaining investigation accounting. The prepared browser shows
 the context actually frozen per boundary, source identity and membership.
 Back retains the boundary cursor and reading position; plain output uses the
 same projection. Context matrices require a separate finite study.
+
+Reconstructing editable scope-study settings restores the recorded common
+context. A boundary override's frozen scanner text is retained only when its
+exact context reference matches that common selection. Changed context is frozen
+again during preparation of the replacement plan. Earlier immutable cases and
+their approvals remain unchanged; the replacement still needs its own approval.
 
 The boundary context picker offers `g` to draft one file-group context job.
 `campaign:context-study` passes its exact `scanScopeRef` and optional

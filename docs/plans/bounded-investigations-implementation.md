@@ -1,12 +1,30 @@
 # Bounded investigations implementation
 
+The [scoped investigation qualification](../assessments/scoped-investigation-context-2026-10-17.md)
+covers explicit Map and Scan selection, isolated local context, six fixed jobs,
+human triage, export and restart. New projections include the bounded system
+overview; existing frozen bytes remain authoritative. All 293 focused Rust checks,
+the workspace build, Clippy and all ten repository gates pass. Final J127 has 59
+machine passes, zero
+failures and six pending human UX judgments. Transport is intercepted, with no
+new live requests. All nine broad milestones remain open.
+
+The [boundary context replan repair](../assessments/scope-context-replanning-2026-10-17.md)
+restores common settings without retaining another revision's frozen scanner
+text. Sixteen focused checks and the workspace build pass. J128 has 40 machine
+passes, zero failures and 50 capture pairs through inactive editing, revised
+preparation and no-color restart. Twelve terminal-cell replays were inspected;
+four human judgments and all nine broad milestones remain open. Neither plan
+starts jobs or provider work. This qualifies replanning without executing jobs.
+
 Report retains a labeled previous read during refresh, requires current data
 for export, and keeps repeated metadata in `p details`. Its
 [qualification](../assessments/report-reader-2026-10-17.md) has 212 focused passes,
 a workspace build, ten passing gates and J121 with 170 machine passes, zero
 failures and 108 capture pairs. Twelve final terminal-cell replays were
 inspected; eighteen human judgments remain open. All broad milestones stay
-open. Publication stays a draft on main, with no new live model request.
+open. That Report checkpoint was published before this context follow-up,
+with no new live model request.
 
 The [viewed-context repair](../assessments/screen-context-2026-10-17.md) separates
 the viewed page and run group from the next phase and hidden finding selection.

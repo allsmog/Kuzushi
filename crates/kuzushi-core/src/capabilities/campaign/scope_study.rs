@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 mod domain;
+mod draft;
 mod planning;
 mod validation;
 pub use domain::{ScopeStudyCaseInput, ScopeStudyDraft};

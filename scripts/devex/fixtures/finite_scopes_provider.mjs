@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodedThreatContext } from "./untrusted_context.mjs";
 
 const evidence = dirname(fileURLToPath(import.meta.url));
 const log = join(evidence, "finite-scope-calls.jsonl");
@@ -24,6 +25,8 @@ globalThis.fetch = async (url, init) => {
   assert.ok(input.includes(`OWNED ${scope.toUpperCase()}`));
   assert.ok(!input.includes(`OWNED ${scope === "app" ? "OTHER" : "APP"}`));
   assert.ok(input.includes("OWNED SHARED"));
+  const localContext = decodedThreatContext(body).includes("APP_ONLY_CONTEXT_BOUNDARY");
+  assert.equal(localContext, scope === "app", "Only App receives its exact local context");
   const findings = [`${scope}/reader.rs`, "shared/context.rs"].map((filePath) => ({
     ruleId: "labeled-finite-scope",
     title: `Labeled ${scope} observation`,
@@ -38,6 +41,7 @@ globalThis.fetch = async (url, init) => {
       bridgePid: process.pid,
       scope,
       model: body.model,
+      localContext,
       liveRequests: 0,
       sourceExecuted: false,
     })}\n`,

@@ -1,21 +1,47 @@
 use super::*;
 
-pub(super) fn sections(document: &Value) -> [(&'static str, Vec<String>); 4] {
+pub(super) fn sections(document: &Value) -> [(&'static str, Vec<String>); 5] {
     [
-        ("Architecture components", lines(document.pointer("/dfd/nodes"), node_line)),
-        ("Data flows", lines(document.pointer("/dfd/flows"), flow_line)),
-        ("Trust boundaries", lines(document.pointer("/dfd/trustBoundaries"), boundary_line)),
-        ("Open context questions", lines(document.get("openQuestions"), question_line)),
+        ("System overview", overview_lines(document)),
+        (
+            "Architecture components",
+            lines(document.pointer("/dfd/nodes"), node_line),
+        ),
+        (
+            "Data flows",
+            lines(document.pointer("/dfd/flows"), flow_line),
+        ),
+        (
+            "Trust boundaries",
+            lines(document.pointer("/dfd/trustBoundaries"), boundary_line),
+        ),
+        (
+            "Open context questions",
+            lines(document.get("openQuestions"), question_line),
+        ),
     ]
+}
+
+fn overview_lines(document: &Value) -> Vec<String> {
+    select_threat_digest_overview(document)
+        .map(|text| vec![format!("- {}", cap(text))])
+        .unwrap_or_default()
 }
 
 fn lines(value: Option<&Value>, render: fn(&Value) -> Option<String>) -> Vec<String> {
     let Some(items) = value.and_then(Value::as_array) else {
         return Vec::new();
     };
-    let mut lines = items.iter().take(MAX_DIGEST_ENTRIES).filter_map(render).collect::<Vec<_>>();
+    let mut lines = items
+        .iter()
+        .take(MAX_DIGEST_ENTRIES)
+        .filter_map(render)
+        .collect::<Vec<_>>();
     if items.len() > MAX_DIGEST_ENTRIES {
-        lines.push(format!("- {} additional elements omitted from scan context", items.len() - MAX_DIGEST_ENTRIES));
+        lines.push(format!(
+            "- {} additional elements omitted from scan context",
+            items.len() - MAX_DIGEST_ENTRIES
+        ));
     }
     lines
 }

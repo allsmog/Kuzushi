@@ -1,6 +1,7 @@
 //! Names only fields the execution renderer selects, without changing its text.
 use crate::capabilities::agentic_sast::{
-    select_threat_digest_field, MAX_DIGEST_ENTRIES, MAX_DIGEST_FIELD_CHARS, MAX_DIGEST_THREATS,
+    select_threat_digest_field, select_threat_digest_overview, MAX_DIGEST_ENTRIES,
+    MAX_DIGEST_FIELD_CHARS, MAX_DIGEST_THREATS,
 };
 use serde_json::Value;
 
@@ -64,6 +65,10 @@ const SECTIONS: &[Section] = &[
 
 pub(super) fn collect(document: &Value) -> Vec<String> {
     let mut notices = Vec::new();
+    notices.extend(
+        select_threat_digest_overview(document)
+            .and_then(|text| character_notice("System overview", text)),
+    );
     for section in SECTIONS {
         for (index, item) in items(document.pointer(section.pointer), section.limit).enumerate() {
             notices.extend(item_notices(section, index, item));

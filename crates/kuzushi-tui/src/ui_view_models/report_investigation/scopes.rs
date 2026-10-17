@@ -7,8 +7,7 @@ pub(super) fn lines(
     current: bool,
 ) -> Vec<String> {
     let mut lines = vec![format!(
-        "Scope study: {} · {} boundaries · {} unplanned",
-        receipt.campaign_id,
+        "Scope study: {} boundaries · {} unplanned",
         receipt.cases.len(),
         receipt.unplanned_scope_ids.len()
     )];
@@ -26,6 +25,7 @@ pub(super) fn lines(
         receipt.unplanned_scope_ids.join(", ")
     ));
     if details {
+        lines.push(format!("Study id: {}", receipt.campaign_id));
         lines.extend(boundary_detail_lines(receipt));
         lines.push(format!("Plan digest: {}", receipt.plan_sha256));
         lines.extend(receipt.limitations.iter().cloned());

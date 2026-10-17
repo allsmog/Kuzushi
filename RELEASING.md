@@ -1,5 +1,17 @@
 # Releasing Kuzushi
 
+- Newly prepared scanner context includes the selected system overview, capped
+  at 200 Unicode characters with exact truncation notices in its preview.
+  Existing frozen projections and approved jobs retain their recorded bytes.
+  Prepare and approve a replacement plan to include the overview in future work.
+  Artifact formats are unchanged. See [qualification](docs/assessments/scoped-investigation-context-2026-10-17.md).
+
+- Scope-study receipt reconstruction preserves a frozen scanner projection only
+  when its context reference matches the restored common selection. Changing an
+  override back to inheritance can prepare a new plan without changing prior
+  jobs, approvals or accounting. Artifact formats are unchanged; no migration is
+  required. See [qualification](docs/assessments/scope-context-replanning-2026-10-17.md).
+
 Report retains a labeled previous read during refresh, requires current data
 for export, and keeps repeated metadata in `p details`. Its
 [qualification](docs/assessments/report-reader-2026-10-17.md) has 212 focused passes,
